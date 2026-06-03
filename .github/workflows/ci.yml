@@ -1,0 +1,69 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+    inputs:
+      substrate_ref:
+        description: "fkst-substrate ref to build fkst-framework from"
+        default: dev
+        required: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fkst-packages
+        uses: actions/checkout@v4
+
+      # fkst-framework is built from the sibling engine repo. It is public, so no
+      # token is needed. Default to its dev branch; override via workflow_dispatch.
+      - name: Checkout fkst-substrate
+        uses: actions/checkout@v4
+        with:
+          repository: ChronoAIProject/fkst-substrate
+          ref: ${{ github.event.inputs.substrate_ref || 'dev' }}
+          path: fkst-substrate
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fkst-substrate
+
+      - name: Build fkst-framework
+        working-directory: fkst-substrate
+        run: cargo build -p fkst-framework
+
+      - name: Run package unit tests
+        env:
+          BIN: ${{ github.workspace }}/fkst-substrate/target/debug/fkst-framework
+        run: |
+          set -euo pipefail
+          test -x "$BIN"
+          for pkg in packages/*/; do
+            pkg="${pkg%/}"
+            if find "$pkg" -name '*_test.lua' -print -quit | grep -q .; then
+              echo "== test $pkg =="
+              "$BIN" test --project-root "$pkg" --package-root "$pkg"
+            else
+              echo "== skip $pkg (no *_test.lua) =="
+            fi
+          done
+
+      # NOTE: packages/github-proxy/tests/integration.sh is intentionally NOT run
+      # here yet. It currently fails at "git ledger commit failed", a substrate-side
+      # exec_sync bug unrelated to these packages. Re-add it as a separate, initially
+      # non-blocking job once the substrate fix lands.
