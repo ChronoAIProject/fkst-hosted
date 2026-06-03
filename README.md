@@ -6,7 +6,7 @@
 
 - `departments/<department>/main.lua`
 - `raisers/<raiser>.lua`
-- `fkst/` 下可被 Lua `require` 的模块
+- 包内共享库直接放 package-root（如 `core.lua`），按 `require("core")` 引用；只做包内共享，不跨包 `require`
 - `tests/*_test.lua` 或 `departments/*/*_test.lua`
 
 加载示例：
@@ -34,6 +34,8 @@ set -a; . ./.env; set +a   # 载入本机 BIN 等配置
 ```
 
 本库不做 manifest、root-list、override DSL 或多包组合语言。引擎一次加载一个 `--package-root`，再叠加 host root，图由固定的 `departments/` 和 `raisers/` 目录扫描得到。
+
+共享代码只在包内共享：共享库放 package-root（如 `core.lua`），被本包的 `departments/`、`raisers/` 按 `require("core")` 引用。不跨包 `require`——跨包引用会引入版本耦合，正是上面拒绝的多包组合。多个包都需要的通用、稳定能力应进引擎 SDK（像 `json.decode`），否则各包自带一份；宁可重复，不可耦合。
 
 ## github-proxy
 

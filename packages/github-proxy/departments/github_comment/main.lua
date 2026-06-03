@@ -1,4 +1,4 @@
-local core = require("fkst.github_proxy.core")
+local core = require("core")
 
 local M = {}
 
