@@ -13,6 +13,12 @@ local function temp_body_file(payload)
   return "/tmp/fkst-github-proxy-comment-" .. safe .. ".md"
 end
 
+local function lock_name(repo, issue_number, dedup_key)
+  local safe_repo = tostring(repo):gsub("[^%w._-]", "_")
+  local safe_key = tostring(dedup_key):gsub("[^%w._-]", "_")
+  return "github-proxy-comment-" .. safe_repo .. "-" .. tostring(issue_number) .. "-" .. safe_key
+end
+
 function pipeline(event)
   local payload = event.payload or {}
   local repo = core.read_env("FKST_GITHUB_REPO")
@@ -30,23 +36,25 @@ function pipeline(event)
     return
   end
 
-  local view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
-  if view.exit_code ~= 0 then
-    log.warn("github-proxy: gh issue view failed: " .. tostring(view.stderr))
-    return
-  end
-  if core.has_marker(view.stdout, payload.dedup_key) then
-    log.info("github-proxy: comment marker already present")
-    return
-  end
+  with_lock(lock_name(repo, payload.issue_number, payload.dedup_key), function()
+    local view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
+    if view.exit_code ~= 0 then
+      log.warn("github-proxy: gh issue view failed: " .. tostring(view.stderr))
+      return
+    end
+    if core.has_marker(view.stdout, payload.dedup_key) then
+      log.info("github-proxy: comment marker already present")
+      return
+    end
 
-  local body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
-  local path = temp_body_file(payload)
-  file.write(path, body)
-  local comment = exec_sync({ cmd = core.gh_issue_comment_cmd(repo, payload.issue_number, path), timeout = 30 })
-  if comment.exit_code ~= 0 then
-    log.warn("github-proxy: gh issue comment failed: " .. tostring(comment.stderr))
-  end
+    local body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
+    local path = temp_body_file(payload)
+    file.write(path, body)
+    local comment = exec_sync({ cmd = core.gh_issue_comment_cmd(repo, payload.issue_number, path), timeout = 30 })
+    if comment.exit_code ~= 0 then
+      log.warn("github-proxy: gh issue comment failed: " .. tostring(comment.stderr))
+    end
+  end)
 end
 
 return M

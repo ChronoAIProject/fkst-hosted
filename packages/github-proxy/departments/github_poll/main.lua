@@ -25,8 +25,9 @@ function pipeline(_event)
   for _, issue in ipairs(issues) do
     local key = core.issue_dedup_key(repo, issue.number, issue.updated_at)
     local seen = core.seen_grep(key)
+    local seen_grep = core.grep_escape(seen)
     with_lock("github-proxy-ledger", function()
-      if git_log_count(seen, "1970-01-01") == 0 then
+      if git_log_count(seen_grep, "1970-01-01") == 0 then
         -- At-least-once: if the process crashes after raise and before the empty
         -- commit, the next tick raises again. Downstream consumers must dedup by
         -- payload.dedup_key.
@@ -41,7 +42,10 @@ function pipeline(_event)
           dedup_key = key,
           source = "gh",
         })
-        local commit = exec_sync({ cmd = core.git_empty_commit_cmd(seen), timeout = 30 })
+        local commit = exec_sync({
+          cmd = core.git_ledger_commit_cmd(seen, core.ledger_path(key)),
+          timeout = 30,
+        })
         if commit.exit_code ~= 0 then
           log.warn("github-proxy: git ledger commit failed: " .. tostring(commit.stderr))
         end

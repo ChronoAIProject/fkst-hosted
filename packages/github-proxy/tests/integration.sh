@@ -30,7 +30,11 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "list" ]]; then
 fi
 
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
-  printf '{"comments":[{"body":"existing comment"}]}\n'
+  printf '{"comments":[{"body":"existing comment\n'
+  if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/comments" ]]; then
+    cat "$FAKE_GH_STATE/comments"
+  fi
+  printf '"}]}\n'
   exit 0
 fi
 
@@ -48,6 +52,10 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "comment" ]]; then
     cat "$body_file"
     printf 'BODY_END\n'
   } >> "$LOG"
+  if [[ -n "${FAKE_GH_STATE:-}" ]]; then
+    mkdir -p "$FAKE_GH_STATE"
+    cat "$body_file" >> "$FAKE_GH_STATE/comments"
+  fi
   exit 0
 fi
 
@@ -58,8 +66,12 @@ chmod +x "$FAKEBIN/gh"
 
 export PATH="$FAKEBIN:$PATH"
 export FAKE_GH_LOG="$TMP/gh.log"
+export FAKE_GH_STATE="$TMP/gh-state"
 export FKST_GITHUB_REPO="owner/x"
 export FKST_RUNTIME_ROOT="$RUNTIME"
+
+echo x > "$HOST/biz.txt"
+git -C "$HOST" add biz.txt
 
 poll_event='{"queue":"github_poll_tick","payload":{}}'
 poll_out="$TMP/poll.out"
@@ -90,6 +102,14 @@ assert payload["dedup_key"] == "owner/x#42@2026-06-03T01:02:03Z", payload
 PY
 
 git -C "$HOST" log --oneline --grep='github-proxy:seen:issue:owner/x#42@2026-06-03T01:02:03Z' | grep -q .
+seen_commit="$(git -C "$HOST" log --format=%H --grep='github-proxy:seen:issue:owner/x#42@2026-06-03T01:02:03Z' -n 1)"
+git -C "$HOST" show --stat --oneline "$seen_commit" > "$TMP/seen-stat.txt"
+if grep -q 'biz.txt' "$TMP/seen-stat.txt"; then
+  echo "ledger commit included staged host file" >&2
+  cat "$TMP/seen-stat.txt" >&2
+  exit 1
+fi
+git -C "$HOST" diff --cached --name-only | grep -qx 'biz.txt'
 
 poll_again="$TMP/poll-again.out"
 (
@@ -124,6 +144,8 @@ if grep -Fq 'ARGS: [issue] [comment]' "$FAKE_GH_LOG"; then
 fi
 
 : > "$FAKE_GH_LOG"
+rm -rf "$FAKE_GH_STATE"
+mkdir -p "$FAKE_GH_STATE"
 export FKST_GITHUB_WRITE=1
 write_out="$TMP/write.out"
 (
@@ -133,9 +155,22 @@ write_out="$TMP/write.out"
     --package-root "$PKG_ROOT" \
     --event "$comment_event"
 ) >"$write_out" 2>&1
+(
+  cd "$HOST"
+  "$BIN" run "$PKG_ROOT/departments/github_comment/main.lua" \
+    --project-root "$HOST" \
+    --package-root "$PKG_ROOT" \
+    --event "$comment_event"
+) >>"$write_out" 2>&1
 
 grep -Fq 'ARGS: [issue] [comment]' "$FAKE_GH_LOG"
 grep -q '<!-- fkst:github-proxy:comment:reply-42 -->' "$FAKE_GH_LOG"
+comment_calls="$(grep -Fc 'ARGS: [issue] [comment]' "$FAKE_GH_LOG")"
+if [[ "$comment_calls" != "1" ]]; then
+  echo "expected one gh issue comment call, got $comment_calls" >&2
+  cat "$FAKE_GH_LOG" >&2
+  exit 1
+fi
 if grep -q 'github.com' "$FAKE_GH_LOG"; then
   echo "fake gh log unexpectedly references github.com" >&2
   cat "$FAKE_GH_LOG" >&2

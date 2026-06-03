@@ -39,6 +39,50 @@ function M.seen_grep(key)
   return "github-proxy:seen:issue:" .. tostring(key)
 end
 
+local regex_meta = {
+  ["."] = true,
+  ["*"] = true,
+  ["["] = true,
+  ["]"] = true,
+  ["^"] = true,
+  ["$"] = true,
+  ["\\"] = true,
+  ["+"] = true,
+  ["?"] = true,
+  ["("] = true,
+  [")"] = true,
+  ["{"] = true,
+  ["}"] = true,
+  ["|"] = true,
+}
+
+function M.grep_escape(value)
+  local out = {}
+  local text = tostring(value)
+  for i = 1, #text do
+    local ch = text:sub(i, i)
+    if regex_meta[ch] then
+      table.insert(out, "\\" .. ch)
+    else
+      table.insert(out, ch)
+    end
+  end
+  return table.concat(out)
+end
+
+local function hex_encode(value)
+  local out = {}
+  local text = tostring(value)
+  for i = 1, #text do
+    table.insert(out, string.format("%02x", text:byte(i)))
+  end
+  return table.concat(out)
+end
+
+function M.ledger_path(key)
+  return ".fkst-github-proxy-ledger/seen-" .. hex_encode(key)
+end
+
 function M.comment_marker(dedup_key)
   return "<!-- fkst:github-proxy:comment:" .. tostring(dedup_key) .. " -->"
 end
@@ -220,8 +264,13 @@ function M.gh_issue_comment_cmd(repo, issue_number, body_file)
     .. " --body-file " .. shell_single_quote(body_file)
 end
 
-function M.git_empty_commit_cmd(message)
-  return "git commit --allow-empty -m " .. shell_single_quote(message)
+function M.git_ledger_commit_cmd(message, ledger_path)
+  return "mkdir -p .fkst-github-proxy-ledger"
+    .. " && printf '%s\\n' " .. shell_single_quote(message)
+    .. " > " .. shell_single_quote(ledger_path)
+    .. " && git add -- " .. shell_single_quote(ledger_path)
+    .. " && git commit -m " .. shell_single_quote(message)
+    .. " -- " .. shell_single_quote(ledger_path)
 end
 
 return M

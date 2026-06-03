@@ -35,7 +35,7 @@ BIN=/Users/auric/fkst-substrate/target/debug/fkst-framework
 
 - 入站：`raisers/github_poll.lua` 每 5 分钟产生 `github_poll_tick`；`departments/github_poll/main.lua` 调用 host PATH 上的 `gh issue list`，把 GitHub issue 转成 `github_issue_seen`。
 - 出站：`departments/github_comment/main.lua` 消费 host 注入的 `github_issue_comment_request`，默认 dry-run；只有 `FKST_GITHUB_WRITE=1` 时才会调用 `gh issue comment` 写回 GitHub。
-- 去重：入站用 host git commit ledger，commit message 为 `github-proxy:seen:issue:<repo>#<number>@<updated_at>`。如果 raise 后、commit 前崩溃，下次 tick 会再次 raise；下游应按 `dedup_key` 幂等。
+- 去重：入站用 host git commit ledger，commit message 为 `github-proxy:seen:issue:<repo>#<number>@<updated_at>`。ledger commit 会写入 host repo 历史，作为 host fact；它只提交 `.fkst-github-proxy-ledger/` 专用路径，避免卷入 host 已 staged 的业务改动。如果 raise 后、commit 前崩溃，下次 tick 会再次 raise；下游应按 `dedup_key` 幂等。
 - 注释幂等：写回评论时在 body 末尾附加 HTML marker，写前先读取现有 comments 并检查 marker。
 
 配置由 host 提供：
