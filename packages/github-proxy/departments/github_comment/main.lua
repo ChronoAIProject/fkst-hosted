@@ -1,0 +1,52 @@
+local core = require("fkst.github_proxy.core")
+
+local M = {}
+
+M.spec = {
+  consumes = { "github_issue_comment_request" },
+  stall_window = "30s",
+}
+
+local function temp_body_file(payload)
+  local key = tostring(payload.dedup_key or payload.issue_number or now())
+  local safe = key:gsub("[^%w._-]", "_")
+  return "/tmp/fkst-github-proxy-comment-" .. safe .. ".md"
+end
+
+function pipeline(event)
+  local payload = event.payload or {}
+  local repo = core.read_env("FKST_GITHUB_REPO")
+  if repo == nil then
+    log.warn("github-proxy: FKST_GITHUB_REPO missing; skipping comment")
+    return
+  end
+  if payload.issue_number == nil or payload.body == nil or payload.dedup_key == nil then
+    log.warn("github-proxy: comment request missing issue_number, body, or dedup_key")
+    return
+  end
+
+  if core.read_env("FKST_GITHUB_WRITE") ~= "1" then
+    log.info("github-proxy dry-run: would comment on " .. repo .. "#" .. tostring(payload.issue_number))
+    return
+  end
+
+  local view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
+  if view.exit_code ~= 0 then
+    log.warn("github-proxy: gh issue view failed: " .. tostring(view.stderr))
+    return
+  end
+  if core.has_marker(view.stdout, payload.dedup_key) then
+    log.info("github-proxy: comment marker already present")
+    return
+  end
+
+  local body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
+  local path = temp_body_file(payload)
+  file.write(path, body)
+  local comment = exec_sync({ cmd = core.gh_issue_comment_cmd(repo, payload.issue_number, path), timeout = 30 })
+  if comment.exit_code ~= 0 then
+    log.warn("github-proxy: gh issue comment failed: " .. tostring(comment.stderr))
+  end
+end
+
+return M
