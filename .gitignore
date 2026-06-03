@@ -1,0 +1,2 @@
+# Local, machine-specific config. Tracked template lives in env.example.
+.env

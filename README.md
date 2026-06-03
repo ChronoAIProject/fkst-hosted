@@ -18,10 +18,16 @@ fkst-framework run <department-main.lua> \
   --event '<event-json>'
 ```
 
-常用测试命令：
+本机配置（`fkst-framework` 二进制路径等）放在库根的 `.env`（已 gitignore）。首次使用先从 `env.example` 复制并填好本机路径：
 
 ```sh
-BIN=/Users/auric/fkst-substrate/target/debug/fkst-framework
+cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
+```
+
+集成测试 `packages/github-proxy/tests/integration.sh` 会自动加载库根 `.env`。常用测试命令（从库根运行）：
+
+```sh
+set -a; . ./.env; set +a   # 载入本机 BIN 等配置
 "$BIN" test \
   --project-root "$PWD/packages/github-proxy" \
   --package-root "$PWD/packages/github-proxy"

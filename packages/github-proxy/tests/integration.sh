@@ -1,8 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN="${BIN:-/Users/auric/fkst-substrate/target/debug/fkst-framework}"
 PKG_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$PKG_ROOT/../.." && pwd)"
+
+# Local config (BIN=path to fkst-framework, etc.) lives in a gitignored .env at
+# the repo root. Copy env.example to .env and fill it in. An explicit BIN in the
+# environment overrides .env.
+if [[ -z "${BIN:-}" && -f "$REPO_ROOT/.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$REPO_ROOT/.env"
+  set +a
+fi
+
+if [[ -z "${BIN:-}" ]]; then
+  echo "BIN is not set. Create the repo-root .env from env.example and set BIN=/path/to/fkst-framework:" >&2
+  echo "  cp \"$REPO_ROOT/env.example\" \"$REPO_ROOT/.env\"" >&2
+  exit 1
+fi
+if [[ ! -x "$BIN" ]]; then
+  echo "fkst-framework binary not found or not executable: $BIN" >&2
+  echo "Check BIN in $REPO_ROOT/.env (see env.example)." >&2
+  exit 1
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
