@@ -37,6 +37,14 @@ set -a; . ./.env; set +a   # 载入本机 BIN 等配置
 
 共享代码只在包内共享：共享库放 package-root（如 `core.lua`），被本包的 `departments/`、`raisers/` 按 `require("core")` 引用。不跨包 `require`——跨包引用会引入版本耦合，正是上面拒绝的多包组合。多个包都需要的通用、稳定能力应进引擎 SDK（像 `json.decode`），否则各包自带一份；宁可重复，不可耦合。
 
+## 测试约定
+
+- unit：`tests/*_test.lua` 测纯函数/逻辑，用 `fkst.test` 的 `eq` / `is_true` / `raises` / `is_nil`。
+- integration：`tests/*_test.lua` 用 `fkst.test.run_department(path, event, opts)` 测 department 端到端行为：注入事件、断言 raise，并用 `opts.env` / `path_prepend` 提供 `FKST_RUNTIME_ROOT` / 假命令。
+- 图布线与静态声明（raisers / 队列匹配）由 `fkst-framework conformance` 校验，不为静态声明写单测。
+- CI 对每个包跑 `fkst-framework test`（+ conformance）。
+- 新包清单：有逻辑就写 unit，有运行时行为就写 integration，布线靠 conformance。
+
 ## github-proxy
 
 `packages/github-proxy/` 是首个官方公司：GitHub ↔ fkst 事件桥，首切只覆盖 issue。

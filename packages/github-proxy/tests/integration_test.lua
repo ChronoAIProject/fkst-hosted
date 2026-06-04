@@ -25,6 +25,10 @@ printf ' [%s]' "$@" >> "$LOG"
 printf '\n' >> "$LOG"
 
 if [[ "${1:-}" == "issue" && "${2:-}" == "list" ]]; then
+  if [[ -n "${FAKE_GH_ISSUE_LIST_EXIT:-}" ]]; then
+    printf 'forced issue list failure\n' >&2
+    exit "$FAKE_GH_ISSUE_LIST_EXIT"
+  fi
   printf '[{"number":42,"title":"Bridge issue","url":"https://github.example/owner/x/issues/42","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN"}]\n'
   exit 0
 fi
@@ -140,6 +144,52 @@ return {
       local second = t.run_department("departments/github_poll/main.lua", event, opts)
       t.eq(second.exit_code, 0)
       t.eq(#second.raises, 0)
+    end)
+    cleanup(ctx)
+    if not ok then
+      error(err)
+    end
+  end,
+
+  test_inbound_poll_no_raise_when_issue_list_fails = function()
+    local ctx = setup()
+    local ok, err = pcall(function()
+      local env = base_env(ctx)
+      env.FAKE_GH_ISSUE_LIST_EXIT = "2"
+
+      local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, {
+        cwd = ctx.tmp,
+        env = env,
+        path_prepend = ctx.fakebin,
+      })
+
+      t.eq(result.exit_code, 0)
+      t.eq(#result.raises, 0)
+      t.eq(file.read(ctx.gh_log):find("ARGS: [issue] [list]", 1, true) ~= nil, true)
+    end)
+    cleanup(ctx)
+    if not ok then
+      error(err)
+    end
+  end,
+
+  test_inbound_poll_no_raise_without_repo_env = function()
+    local ctx = setup()
+    local ok, err = pcall(function()
+      local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, {
+        cwd = ctx.tmp,
+        env = {
+          FKST_GITHUB_REPO = "",
+          FKST_RUNTIME_ROOT = ctx.runtime,
+          FAKE_GH_LOG = ctx.gh_log,
+          FAKE_GH_STATE = ctx.gh_state,
+        },
+        path_prepend = ctx.fakebin,
+      })
+
+      t.eq(result.exit_code, 0)
+      t.eq(#result.raises, 0)
+      t.eq(file.read(ctx.gh_log):find("ARGS: [issue] [list]", 1, true), nil)
     end)
     cleanup(ctx)
     if not ok then

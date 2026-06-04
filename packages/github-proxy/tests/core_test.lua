@@ -38,6 +38,17 @@ return {
     t.eq(issues[1].state, "OPEN")
   end,
 
+  test_parse_issue_list_empty_array = function()
+    local issues = core.parse_issue_list("[]")
+    t.eq(#issues, 0)
+  end,
+
+  test_parse_issue_list_accepts_updated_at = function()
+    local issues = core.parse_issue_list('[{"number":8,"title":"Snake case","url":"https://example.test/8","updated_at":"2026-06-03T04:05:06Z","state":"OPEN"}]')
+    t.eq(#issues, 1)
+    t.eq(issues[1].updated_at, "2026-06-03T04:05:06Z")
+  end,
+
   test_gh_commands_are_quoted = function()
     t.eq(
       core.gh_issue_list_cmd("owner/repo"),
