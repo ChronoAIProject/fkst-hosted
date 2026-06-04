@@ -24,14 +24,18 @@ fkst-framework run <department-main.lua> \
 cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
 ```
 
-常用测试命令（从库根运行）：
+通用脚本 `scripts/integration.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.env` 的 `BIN=` > PATH > 同级 `../fkst-substrate`）：
 
 ```sh
-set -a; . ./.env; set +a   # 载入本机 BIN 等配置
-"$BIN" test \
-  --project-root "$PWD/packages/github-proxy" \
-  --package-root "$PWD/packages/github-proxy"
+scripts/integration.sh test                 # 跑所有包的 *_test.lua（test 模式，等价 CI）
+scripts/integration.sh test github-proxy    # 只跑某个包
+
+# 通用一次性跑某部门：解码 RAISED 事件 + dump <RT> 树。包特定配置走 env。
+# github-proxy 的只读入站 dogfood（拿真 gh 打真仓，不写 GitHub）：
+FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/integration.sh run github-proxy github_poll
 ```
+
+`run` 用临时（或复用已设的）`FKST_RUNTIME_ROOT`、绝不设 `FKST_GITHUB_WRITE`，所以只读 dogfood 保持只读；同一 `FKST_RUNTIME_ROOT` 连跑两次可看去重。脚本对任何 `packages/<pkg>/departments/<dept>` 通用，不写死 github-proxy。
 
 本库不做 manifest、root-list、override DSL 或多包组合语言。引擎一次加载一个 `--package-root`，再叠加 host root，图由固定的 `departments/` 和 `raisers/` 目录扫描得到。
 
