@@ -24,18 +24,27 @@ fkst-framework run <department-main.lua> \
 cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
 ```
 
-通用脚本 `scripts/integration.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.env` 的 `BIN=` > PATH > 同级 `../fkst-substrate`）：
+通用脚本 `scripts/run.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.env` 的 `BIN=` > PATH > 同级 `../fkst-substrate`）：
 
 ```sh
-scripts/integration.sh test                 # 跑所有包的 *_test.lua（test 模式，等价 CI）
-scripts/integration.sh test github-proxy    # 只跑某个包
+scripts/run.sh test                 # self-test，然后对所有包跑 conformance + test；等价 CI
+scripts/run.sh test github-proxy    # 只跑某个包的 conformance + test
 
 # 通用一次性跑某部门：解码 RAISED 事件 + dump <RT> 树。包特定配置走 env。
 # github-proxy 的只读入站 dogfood（拿真 gh 打真仓，不写 GitHub）：
-FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/integration.sh run github-proxy github_poll
+FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/run.sh run github-proxy github_poll
+
+# 真实前台事件循环：脚本创建临时 FKST_RUNTIME_ROOT 和独立 FKST_DURABLE_ROOT。
+# 可用 FKST_PROJECT_ROOT 覆盖默认 project-root（packages/<pkg>）。
+FKST_GITHUB_REPO=owner/repo scripts/run.sh supervise github-proxy
+
+# 仅本地显式构建引擎；test/run/supervise 不会自动 build。
+scripts/run.sh build
 ```
 
 `run` 用临时（或复用已设的）`FKST_RUNTIME_ROOT`、绝不设 `FKST_GITHUB_WRITE`，所以只读 dogfood 保持只读；同一 `FKST_RUNTIME_ROOT` 连跑两次可看去重。脚本对任何 `packages/<pkg>/departments/<dept>` 通用，不写死 github-proxy。
+
+`supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并设置彼此不同的临时 `FKST_RUNTIME_ROOT` / `FKST_DURABLE_ROOT`。
 
 本库不做 manifest、root-list、override DSL 或多包组合语言。引擎一次加载一个 `--package-root`，再叠加 host root，图由固定的 `departments/` 和 `raisers/` 目录扫描得到。
 
@@ -46,7 +55,7 @@ FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/integration.sh run githu
 - unit：`tests/*_test.lua` 测纯函数/逻辑，用 `fkst.test` 的 `eq` / `is_true` / `raises` / `is_nil`。
 - integration：`tests/*_test.lua` 用 `fkst.test.run_department(path, event, opts)` 测 department 端到端行为：注入事件、断言 raise，并用 `opts.env` / `path_prepend` 提供 `FKST_RUNTIME_ROOT` / 假命令。
 - 图布线与静态声明（raisers / 队列匹配）由 `fkst-framework conformance` 校验，不为静态声明写单测。
-- CI 对每个包跑 `fkst-framework test`（+ conformance）。
+- CI 调 `scripts/run.sh test`，与本地标准测试走同一路径：先跑一次 `fkst-framework --self-test`，再对每个包跑 `fkst-framework conformance` 和 `fkst-framework test`。
 - 新包清单：有逻辑就写 unit，有运行时行为就写 integration，布线靠 conformance。
 
 ## github-proxy
@@ -72,7 +81,5 @@ FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/integration.sh run githu
 本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试把 fake `gh` 放到 PATH 前面，并由 `fkst-framework test` 自动运行：
 
 ```sh
-"$BIN" test \
-  --project-root "$PWD/packages/github-proxy" \
-  --package-root "$PWD/packages/github-proxy"
+scripts/run.sh test github-proxy
 ```

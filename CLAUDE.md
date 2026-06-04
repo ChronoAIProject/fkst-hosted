@@ -29,10 +29,12 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 ## 构建 / 测试 / dogfood
 
-- **引擎二进制**：本仓不含引擎。`cp env.example .env` 填 `BIN=<fkst-substrate>/target/debug/fkst-framework`。`tests/integration.sh` 按 `BIN` 覆盖 > PATH > 同级 `../fkst-substrate` 解析。
-- **跑包测试**：`"$BIN" test --project-root packages/<pkg> --package-root packages/<pkg>`（test 模式：`*_test.lua` 单测 + `fkst.test.run_department` 集成测，**不经 router**，故 test 模式不强制 source_ref）。
-- **dogfood / 真跑一次部门**：`"$BIN" run packages/<pkg>/departments/<dept>/main.lua --project-root <repo> --package-root packages/<pkg> --event '{"queue":"<tick>","payload":{}}'`。**坑：`run` 必须带 `--package-root`**（顶层 usage 串漏了它）。需 `FKST_RUNTIME_ROOT`（scratch）；可靠/`supervise` 还要 `FKST_DURABLE_ROOT`。`raise` 的输出是 stdout 上 `RAISED: <base64(JSON 数组)>`。
-- **CI**：`.github/workflows/ci.yml` 从 `fkst-substrate@dev` 构建 fkst-framework，再跑各 `packages/*/` 的 `*_test.lua`。改包后 push `dev`/`main` 触发。
+- **引擎二进制**：本仓不含引擎。`cp env.example .env` 填 `BIN=<fkst-substrate>/target/debug/fkst-framework`。`scripts/run.sh` 按 `BIN` 覆盖 > `.env` > PATH > 同级 `../fkst-substrate` 解析；CI 中 `BIN` 不可执行会直接报错，脚本不会自动 build。
+- **标准测试**：`scripts/run.sh test [pkg]` 是本地和 CI 的单一入口：先跑一次 `"$BIN" --self-test`（脚本按需给临时 `FKST_RUNTIME_ROOT`），再对每个包跑 `"$BIN" conformance --project-root packages/<pkg> --package-root packages/<pkg>` 和 `"$BIN" test --project-root packages/<pkg> --package-root packages/<pkg>`。test 模式含 `*_test.lua` 单测 + `fkst.test.run_department` 集成测，**不经 router**，故 test 模式不强制 source_ref。
+- **dogfood / 真跑一次部门**：`scripts/run.sh run <pkg> <dept> [event-json]` 一次性调用 `fkst-framework run`，解码 stdout 上的 `RAISED: <base64(JSON 数组)>` 并 dump `<RT>`。脚本用临时（或复用已设的）`FKST_RUNTIME_ROOT`，**绝不设置 `FKST_GITHUB_WRITE`**。
+- **真实 supervise**：`scripts/run.sh supervise <pkg>` 是薄封装真实事件循环，创建临时 `FKST_RUNTIME_ROOT` 和独立临时 `FKST_DURABLE_ROOT`，默认 `--project-root packages/<pkg>`（可用 `FKST_PROJECT_ROOT` 覆盖），并显式传 `--package-root packages/<pkg>` 与 `--framework-bin "$BIN"`。前台运行，`Ctrl-C` 退出；不搭 host harness、不模拟事件、不注入 fake `gh`。
+- **本地 build**：`scripts/run.sh build` 定位 `$FKST_SUBSTRATE`、`/Users/auric/fkst-substrate` 或同级 `../fkst-substrate`，确认在 `dev` 后执行 `git pull && cargo build -p fkst-framework`。`test/run/supervise` 不会自动 build。
+- **CI**：`.github/workflows/ci.yml` 从 `fkst-substrate@dev` 构建 fkst-framework，然后调用 `scripts/run.sh test`。改包后 push `dev`/`main` 触发。
 
 ## 纪律（沿用 fkst-substrate）
 

@@ -47,18 +47,9 @@ jobs:
         working-directory: fkst-substrate
         run: cargo build -p fkst-framework
 
-      - name: Run package unit tests
+      - name: Run package tests
         env:
           BIN: ${{ github.workspace }}/fkst-substrate/target/debug/fkst-framework
         run: |
-          set -euo pipefail
           test -x "$BIN"
-          for pkg in packages/*/; do
-            pkg="${pkg%/}"
-            if find "$pkg" -name '*_test.lua' -print -quit | grep -q .; then
-              echo "== test $pkg =="
-              "$BIN" test --project-root "$pkg" --package-root "$pkg"
-            else
-              echo "== skip $pkg (no *_test.lua) =="
-            fi
-          done
+          scripts/run.sh test
