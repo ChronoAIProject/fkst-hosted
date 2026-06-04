@@ -44,6 +44,10 @@ function pipeline(_event)
               updated_at = entity.updated_at,
               dedup_key = dedup_key,
               source = "gh",
+              -- Durable-delivery: stable pointer so a reliable consumer can
+              -- re-derive the current entity (also required by the engine when
+              -- this event is routed to a reliable subscription).
+              source_ref = core.entity_source_ref(repo, entity_type.type, entity.number),
             })
             cache_set(key, entity.updated_at)
           end

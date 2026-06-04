@@ -49,6 +49,17 @@ function M.issue_dedup_key(repo, number, updated_at)
   return M.entity_dedup_key(repo, "issue", number, updated_at)
 end
 
+-- Stable source pointer for the durable-delivery engine: a reliable consumer
+-- re-derives the current entity from this ref (e.g. `gh issue view`) instead of
+-- trusting a possibly-stale payload. ref is the entity identity WITHOUT the
+-- version (updated_at lives in dedup_key / the payload).
+function M.entity_source_ref(repo, entity_type, number)
+  return {
+    kind = "external",
+    ref = tostring(repo) .. "#" .. tostring(entity_type) .. "/" .. tostring(number),
+  }
+end
+
 function M.comment_marker(dedup_key)
   return "<!-- fkst:github-proxy:comment:" .. tostring(dedup_key) .. " -->"
 end

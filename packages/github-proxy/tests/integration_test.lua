@@ -155,6 +155,8 @@ return {
       t.eq(first.raises[1].payload.title, "Bridge issue")
       t.eq(first.raises[1].payload.updated_at, "2026-06-03T01:02:03Z")
       t.eq(first.raises[1].payload.dedup_key, "owner/x#issue#42@2026-06-03T01:02:03Z")
+      t.eq(first.raises[1].payload.source_ref.kind, "external")
+      t.eq(first.raises[1].payload.source_ref.ref, "owner/x#issue/42")
       t.eq(first.raises[2].queue, "github_entity_changed")
       t.eq(first.raises[2].payload.type, "pr")
       t.eq(first.raises[2].payload.repo, "owner/x")
@@ -164,6 +166,8 @@ return {
       t.eq(first.raises[2].payload.state, "OPEN")
       t.eq(first.raises[2].payload.updated_at, "2026-06-03T02:03:04Z")
       t.eq(first.raises[2].payload.dedup_key, "owner/x#pr#7@2026-06-03T02:03:04Z")
+      t.eq(first.raises[2].payload.source_ref.kind, "external")
+      t.eq(first.raises[2].payload.source_ref.ref, "owner/x#pr/7")
       t.is_nil(first.raises[3])
 
       local second = t.run_department("departments/github_poll/main.lua", event, opts)
