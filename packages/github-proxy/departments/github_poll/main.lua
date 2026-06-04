@@ -14,6 +14,11 @@ function pipeline(_event)
     log.warn("github-proxy: FKST_GITHUB_REPO missing; skipping poll")
     return
   end
+  local runtime_root = core.read_env("FKST_RUNTIME_ROOT")
+  if runtime_root == nil then
+    log.warn("github-proxy: FKST_RUNTIME_ROOT missing; skipping poll")
+    return
+  end
 
   local result = exec_sync({ cmd = core.gh_issue_list_cmd(repo), timeout = 30 })
   if result.exit_code ~= 0 then
@@ -24,12 +29,12 @@ function pipeline(_event)
   local issues = core.parse_issue_list(result.stdout)
   for _, issue in ipairs(issues) do
     local key = core.issue_dedup_key(repo, issue.number, issue.updated_at)
-    local seen = core.seen_grep(key)
-    local seen_grep = core.grep_escape(seen)
+    local marker = core.seen_marker_path(runtime_root, key)
+    local marker_dir = marker:match("^(.*)/[^/]*$")
     with_lock("github-proxy-ledger", function()
-      if git_log_count(seen_grep, "1970-01-01") == 0 then
+      if not file.exists(marker) then
         -- At-least-once: if the process crashes after raise and before the empty
-        -- commit, the next tick raises again. Downstream consumers must dedup by
+        -- marker write, the next tick raises again. Downstream consumers must dedup by
         -- payload.dedup_key.
         raise("github_issue_seen", {
           schema = "github-proxy.v1",
@@ -42,13 +47,12 @@ function pipeline(_event)
           dedup_key = key,
           source = "gh",
         })
-        local commit = exec_sync({
-          cmd = core.git_ledger_commit_cmd(seen, core.ledger_path(key)),
-          timeout = 30,
-        })
-        if commit.exit_code ~= 0 then
-          log.warn("github-proxy: git ledger commit failed: " .. tostring(commit.stderr))
+        local mkdir = exec_sync({ cmd = core.mkdir_p_cmd(marker_dir), timeout = 30 })
+        if mkdir.exit_code ~= 0 then
+          log.warn("github-proxy: seen marker mkdir failed: " .. tostring(mkdir.stderr))
+          return
         end
+        file.write(marker, key .. "\n")
       end
     end)
   end

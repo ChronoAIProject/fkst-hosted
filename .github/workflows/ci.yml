@@ -62,8 +62,3 @@ jobs:
               echo "== skip $pkg (no *_test.lua) =="
             fi
           done
-
-      # NOTE: packages/github-proxy/tests/integration.sh is intentionally NOT run
-      # here yet. It currently fails at "git ledger commit failed", a substrate-side
-      # exec_sync bug unrelated to these packages. Re-add it as a separate, initially
-      # non-blocking job once the substrate fix lands.

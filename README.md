@@ -24,7 +24,7 @@ fkst-framework run <department-main.lua> \
 cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
 ```
 
-集成测试 `packages/github-proxy/tests/integration.sh` 会自动加载库根 `.env`。常用测试命令（从库根运行）：
+常用测试命令（从库根运行）：
 
 ```sh
 set -a; . ./.env; set +a   # 载入本机 BIN 等配置
@@ -43,17 +43,20 @@ set -a; . ./.env; set +a   # 载入本机 BIN 等配置
 
 - 入站：`raisers/github_poll.lua` 每 5 分钟产生 `github_poll_tick`；`departments/github_poll/main.lua` 调用 host PATH 上的 `gh issue list`，把 GitHub issue 转成 `github_issue_seen`。
 - 出站：`departments/github_comment/main.lua` 消费 host 注入的 `github_issue_comment_request`，默认 dry-run；只有 `FKST_GITHUB_WRITE=1` 时才会调用 `gh issue comment` 写回 GitHub。
-- 去重：入站用 host git commit ledger，commit message 为 `github-proxy:seen:issue:<repo>#<number>@<updated_at>`。ledger commit 会写入 host repo 历史，作为 host fact；它只提交 `.fkst-github-proxy-ledger/` 专用路径，避免卷入 host 已 staged 的业务改动。如果 raise 后、commit 前崩溃，下次 tick 会再次 raise；下游应按 `dedup_key` 幂等。
+- 去重：入站用 `FKST_RUNTIME_ROOT/github-proxy/seen/` 下的 marker 文件，并由 `with_lock` 串行保护。`FKST_RUNTIME_ROOT` 由 host 提供；缺失时 fail-closed，不 poll GitHub。如果 raise 后、marker 写入前崩溃，下次 tick 会再次 raise；下游应按 `dedup_key` 幂等。
 - 注释幂等：写回评论时在 body 末尾附加 HTML marker，写前先读取现有 comments 并检查 marker。
 
 配置由 host 提供：
 
 - `FKST_GITHUB_REPO=owner/repo` 必填；缺失时 fail-closed。
+- `FKST_RUNTIME_ROOT=/path/to/runtime` 必填；缺失时入站 poll fail-closed。
 - `FKST_GITHUB_WRITE=1` 可选；未设置时只 dry-run，不调用 mutate GitHub 的 `gh` 命令。
 - `gh` auth、PATH、权限和 repo 当前 git 工作区都是 host 责任。
 
-本包不会自动 supervise，也不会在测试中打真 GitHub。集成测试把 fake `gh` 放到 PATH 前面：
+本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试把 fake `gh` 放到 PATH 前面，并由 `fkst-framework test` 自动运行：
 
 ```sh
-bash packages/github-proxy/tests/integration.sh
+"$BIN" test \
+  --project-root "$PWD/packages/github-proxy" \
+  --package-root "$PWD/packages/github-proxy"
 ```

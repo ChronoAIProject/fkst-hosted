@@ -19,20 +19,17 @@ return {
   test_dedup_and_seen_key = function()
     local key = core.issue_dedup_key("owner/repo", 12, "2026-06-03T01:02:03Z")
     t.eq(key, "owner/repo#12@2026-06-03T01:02:03Z")
-    t.eq(core.seen_grep(key), "github-proxy:seen:issue:owner/repo#12@2026-06-03T01:02:03Z")
   end,
 
-  test_grep_escape_escapes_regex_metacharacters = function()
-    local key = core.issue_dedup_key("owner/repo.js", 12, "2026-06-03T01:02:03Z")
+  test_seen_marker_path = function()
     t.eq(
-      core.grep_escape(core.seen_grep(key)),
-      "github-proxy:seen:issue:owner/repo\\.js#12@2026-06-03T01:02:03Z"
+      core.seen_marker_path("/tmp/fkst-runtime", "owner/x#42@2026-06-03T01:02:03Z"),
+      "/tmp/fkst-runtime/github-proxy/seen/6f776e65722f7823343240323032362d30362d30335430313a30323a30335a"
     )
   end,
 
-  test_grep_escape_dot_repo_does_not_match_other_key = function()
-    local exact = core.grep_escape(core.seen_grep("owner/repo.js#12@x"))
-    t.eq(("github-proxy:seen:issue:owner/repoXjs#12@x"):match(exact), nil)
+  test_mkdir_p_cmd = function()
+    t.eq(core.mkdir_p_cmd("/tmp/body's"), "mkdir -p '/tmp/body'\\''s'")
   end,
 
   test_comment_marker = function()
@@ -64,15 +61,6 @@ return {
     t.eq(
       core.gh_issue_comment_cmd("owner/repo", 3, "/tmp/body's.md"),
       "gh issue comment '3' --repo 'owner/repo' --body-file '/tmp/body'\\''s.md'"
-    )
-    t.eq(
-      core.git_ledger_commit_cmd("github-proxy:seen:issue:owner/repo#3@x", ".fkst-github-proxy-ledger/seen-abc"),
-      "mkdir -p .fkst-github-proxy-ledger"
-        .. " && printf '%s\\n' 'github-proxy:seen:issue:owner/repo#3@x'"
-        .. " > '.fkst-github-proxy-ledger/seen-abc'"
-        .. " && git add -- '.fkst-github-proxy-ledger/seen-abc'"
-        .. " && git commit -m 'github-proxy:seen:issue:owner/repo#3@x'"
-        .. " -- '.fkst-github-proxy-ledger/seen-abc'"
     )
   end,
 }
