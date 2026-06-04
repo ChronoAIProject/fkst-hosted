@@ -119,7 +119,7 @@ local function count_fixed(text, needle)
 end
 
 return {
-  test_inbound_poll_raises_once_then_marker_dedups = function()
+  test_inbound_poll_raises_once_then_dedups = function()
     local ctx = setup()
     local ok, err = pcall(function()
       local event = { queue = "github_poll_tick", payload = {} }

@@ -16,20 +16,9 @@ return {
     t.is_nil(value)
   end,
 
-  test_dedup_and_seen_key = function()
+  test_dedup_key = function()
     local key = core.issue_dedup_key("owner/repo", 12, "2026-06-03T01:02:03Z")
     t.eq(key, "owner/repo#12@2026-06-03T01:02:03Z")
-  end,
-
-  test_seen_marker_path = function()
-    t.eq(
-      core.seen_marker_path("/tmp/fkst-runtime", "owner/x#42@2026-06-03T01:02:03Z"),
-      "/tmp/fkst-runtime/github-proxy/seen/6f776e65722f7823343240323032362d30362d30335430313a30323a30335a"
-    )
-  end,
-
-  test_mkdir_p_cmd = function()
-    t.eq(core.mkdir_p_cmd("/tmp/body's"), "mkdir -p '/tmp/body'\\''s'")
   end,
 
   test_comment_marker = function()

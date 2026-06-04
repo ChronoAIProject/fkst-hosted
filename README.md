@@ -43,13 +43,13 @@ set -a; . ./.env; set +a   # 载入本机 BIN 等配置
 
 - 入站：`raisers/github_poll.lua` 每 5 分钟产生 `github_poll_tick`；`departments/github_poll/main.lua` 调用 host PATH 上的 `gh issue list`，把 GitHub issue 转成 `github_issue_seen`。
 - 出站：`departments/github_comment/main.lua` 消费 host 注入的 `github_issue_comment_request`，默认 dry-run；只有 `FKST_GITHUB_WRITE=1` 时才会调用 `gh issue comment` 写回 GitHub。
-- 去重：入站用 `FKST_RUNTIME_ROOT/github-proxy/seen/` 下的 marker 文件，并由 `with_lock` 串行保护。`FKST_RUNTIME_ROOT` 由 host 提供；缺失时 fail-closed，不 poll GitHub。如果 raise 后、marker 写入前崩溃，下次 tick 会再次 raise；下游应按 `dedup_key` 幂等。
+- 去重：入站用引擎的 `once(key, fn)` 原语；引擎在 `FKST_RUNTIME_ROOT` 下管理 marker 和 lock，并且只在 callback 成功后标记。`FKST_RUNTIME_ROOT` 由 host 提供且为必填；缺失时引擎 fail-closed。如果 raise 过程中崩溃，下次 tick 会再次 raise；下游应按 `dedup_key` 幂等。
 - 注释幂等：写回评论时在 body 末尾附加 HTML marker，写前先读取现有 comments 并检查 marker。
 
 配置由 host 提供：
 
 - `FKST_GITHUB_REPO=owner/repo` 必填；缺失时 fail-closed。
-- `FKST_RUNTIME_ROOT=/path/to/runtime` 必填；缺失时入站 poll fail-closed。
+- `FKST_RUNTIME_ROOT=/path/to/runtime` 必填；引擎用它管理 `once` 的 marks/locks，缺失时入站 poll fail-closed。
 - `FKST_GITHUB_WRITE=1` 可选；未设置时只 dry-run，不调用 mutate GitHub 的 `gh` 命令。
 - `gh` auth、PATH、权限和 repo 当前 git 工作区都是 host 责任。
 

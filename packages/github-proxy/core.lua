@@ -3,7 +3,6 @@ local M = {}
 local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_WRITE = true,
-  FKST_RUNTIME_ROOT = true,
 }
 
 local function shell_single_quote(value)
@@ -34,19 +33,6 @@ end
 
 function M.issue_dedup_key(repo, number, updated_at)
   return tostring(repo) .. "#" .. tostring(number) .. "@" .. tostring(updated_at)
-end
-
-local function hex_encode(value)
-  local out = {}
-  local text = tostring(value)
-  for i = 1, #text do
-    table.insert(out, string.format("%02x", text:byte(i)))
-  end
-  return table.concat(out)
-end
-
-function M.seen_marker_path(runtime_root, key)
-  return tostring(runtime_root) .. "/github-proxy/seen/" .. hex_encode(key)
 end
 
 function M.comment_marker(dedup_key)
@@ -90,10 +76,6 @@ function M.gh_issue_comment_cmd(repo, issue_number, body_file)
   return "gh issue comment " .. shell_single_quote(issue_number)
     .. " --repo " .. shell_single_quote(repo)
     .. " --body-file " .. shell_single_quote(body_file)
-end
-
-function M.mkdir_p_cmd(dir)
-  return "mkdir -p " .. shell_single_quote(dir)
 end
 
 return M
