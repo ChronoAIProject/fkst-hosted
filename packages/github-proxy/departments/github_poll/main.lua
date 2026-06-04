@@ -4,8 +4,13 @@ local M = {}
 
 M.spec = {
   consumes = { "github_poll_tick" },
-  produces = { "github_issue_seen" },
+  produces = { "github_entity_changed" },
   stall_window = "30s",
+}
+
+local entity_types = {
+  { type = "issue", cmd = core.gh_issue_list_cmd },
+  { type = "pr", cmd = core.gh_pr_list_cmd },
 }
 
 function pipeline(_event)
@@ -15,31 +20,36 @@ function pipeline(_event)
     return
   end
 
-  local result = exec_sync({ cmd = core.gh_issue_list_cmd(repo), timeout = 30 })
-  if result.exit_code ~= 0 then
-    log.warn("github-proxy: gh issue list failed: " .. tostring(result.stderr))
-    return
-  end
-
-  local issues = core.parse_issue_list(result.stdout)
-  for _, issue in ipairs(issues) do
-    local key = core.issue_dedup_key(repo, issue.number, issue.updated_at)
-    once("github-proxy:seen:issue:" .. key, function()
-      -- At-least-once: once marks only after the callback succeeds. If the
-      -- process crashes during raise, the next tick raises again. Downstream
-      -- consumers must dedup by payload.dedup_key.
-      raise("github_issue_seen", {
-        schema = "github-proxy.v1",
-        repo = repo,
-        issue_number = issue.number,
-        title = issue.title,
-        url = issue.url,
-        updated_at = issue.updated_at,
-        state = issue.state,
-        dedup_key = key,
-        source = "gh",
-      })
-    end)
+  for _, entity_type in ipairs(entity_types) do
+    local result = exec_sync({ cmd = entity_type.cmd(repo), timeout = 30 })
+    if result.exit_code ~= 0 then
+      log.warn("github-proxy: gh " .. entity_type.type .. " list failed: " .. tostring(result.stderr))
+    else
+      local entities = core.parse_entity_list(result.stdout)
+      for _, entity in ipairs(entities) do
+        local key = core.entity_cache_key(repo, entity_type.type, entity.number)
+        with_lock(key, function()
+          if cache_get(key) ~= entity.updated_at then
+            local dedup_key = core.entity_dedup_key(repo, entity_type.type, entity.number, entity.updated_at)
+            -- At-least-once: raise before cache_set. If this process crashes
+            -- before the write, the next tick raises the same dedup_key again.
+            raise("github_entity_changed", {
+              schema = "github-proxy.v1",
+              type = entity_type.type,
+              repo = repo,
+              number = entity.number,
+              title = entity.title,
+              url = entity.url,
+              state = entity.state,
+              updated_at = entity.updated_at,
+              dedup_key = dedup_key,
+              source = "gh",
+            })
+            cache_set(key, entity.updated_at)
+          end
+        end)
+      end
+    end
   end
 end
 

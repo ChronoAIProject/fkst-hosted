@@ -29,7 +29,20 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "list" ]]; then
     printf 'forced issue list failure\n' >&2
     exit "$FAKE_GH_ISSUE_LIST_EXIT"
   fi
-  printf '[{"number":42,"title":"Bridge issue","url":"https://github.example/owner/x/issues/42","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN"}]\n'
+  updated_at="${FAKE_GH_ISSUE_UPDATED_AT:-2026-06-03T01:02:03Z}"
+  state="${FAKE_GH_ISSUE_STATE:-OPEN}"
+  printf '[{"number":42,"title":"Bridge issue","url":"https://github.example/owner/x/issues/42","updatedAt":"%s","state":"%s"}]\n' "$updated_at" "$state"
+  exit 0
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
+  if [[ -n "${FAKE_GH_PR_LIST_EXIT:-}" ]]; then
+    printf 'forced pr list failure\n' >&2
+    exit "$FAKE_GH_PR_LIST_EXIT"
+  fi
+  updated_at="${FAKE_GH_PR_UPDATED_AT:-2026-06-03T02:03:04Z}"
+  state="${FAKE_GH_PR_STATE:-OPEN}"
+  printf '[{"number":7,"title":"Bridge PR","url":"https://github.example/owner/x/pull/7","updatedAt":"%s","state":"%s"}]\n' "$updated_at" "$state"
   exit 0
 fi
 
@@ -123,7 +136,7 @@ local function count_fixed(text, needle)
 end
 
 return {
-  test_inbound_poll_raises_once_then_dedups = function()
+  test_inbound_poll_raises_issue_and_pr_then_cache_hit = function()
     local ctx = setup()
     local ok, err = pcall(function()
       local event = { queue = "github_poll_tick", payload = {} }
@@ -135,11 +148,23 @@ return {
 
       local first = t.run_department("departments/github_poll/main.lua", event, opts)
       t.eq(first.exit_code, 0)
-      t.eq(first.raises[1].queue, "github_issue_seen")
+      t.eq(first.raises[1].queue, "github_entity_changed")
+      t.eq(first.raises[1].payload.type, "issue")
       t.eq(first.raises[1].payload.repo, "owner/x")
-      t.eq(first.raises[1].payload.issue_number, 42)
-      t.eq(first.raises[1].payload.dedup_key, "owner/x#42@2026-06-03T01:02:03Z")
-      t.is_nil(first.raises[2])
+      t.eq(first.raises[1].payload.number, 42)
+      t.eq(first.raises[1].payload.title, "Bridge issue")
+      t.eq(first.raises[1].payload.updated_at, "2026-06-03T01:02:03Z")
+      t.eq(first.raises[1].payload.dedup_key, "owner/x#issue#42@2026-06-03T01:02:03Z")
+      t.eq(first.raises[2].queue, "github_entity_changed")
+      t.eq(first.raises[2].payload.type, "pr")
+      t.eq(first.raises[2].payload.repo, "owner/x")
+      t.eq(first.raises[2].payload.number, 7)
+      t.eq(first.raises[2].payload.title, "Bridge PR")
+      t.eq(first.raises[2].payload.url, "https://github.example/owner/x/pull/7")
+      t.eq(first.raises[2].payload.state, "OPEN")
+      t.eq(first.raises[2].payload.updated_at, "2026-06-03T02:03:04Z")
+      t.eq(first.raises[2].payload.dedup_key, "owner/x#pr#7@2026-06-03T02:03:04Z")
+      t.is_nil(first.raises[3])
 
       local second = t.run_department("departments/github_poll/main.lua", event, opts)
       t.eq(second.exit_code, 0)
@@ -151,7 +176,75 @@ return {
     end
   end,
 
-  test_inbound_poll_no_raise_when_issue_list_fails = function()
+  test_inbound_poll_re_raises_when_updated_at_changes = function()
+    local ctx = setup()
+    local ok, err = pcall(function()
+      local event = { queue = "github_poll_tick", payload = {} }
+      local env = base_env(ctx)
+      local opts = {
+        cwd = ctx.tmp,
+        env = env,
+        path_prepend = ctx.fakebin,
+      }
+
+      local first = t.run_department("departments/github_poll/main.lua", event, opts)
+      t.eq(first.exit_code, 0)
+      t.eq(#first.raises, 2)
+
+      env.FAKE_GH_ISSUE_UPDATED_AT = "2026-06-04T05:06:07Z"
+      env.FAKE_GH_PR_UPDATED_AT = "2026-06-04T06:07:08Z"
+      local changed = t.run_department("departments/github_poll/main.lua", event, opts)
+      t.eq(changed.exit_code, 0)
+      t.eq(#changed.raises, 2)
+      t.eq(changed.raises[1].payload.type, "issue")
+      t.eq(changed.raises[1].payload.updated_at, "2026-06-04T05:06:07Z")
+      t.eq(changed.raises[1].payload.dedup_key, "owner/x#issue#42@2026-06-04T05:06:07Z")
+      t.eq(changed.raises[2].payload.type, "pr")
+      t.eq(changed.raises[2].payload.updated_at, "2026-06-04T06:07:08Z")
+      t.eq(changed.raises[2].payload.dedup_key, "owner/x#pr#7@2026-06-04T06:07:08Z")
+    end)
+    cleanup(ctx)
+    if not ok then
+      error(err)
+    end
+  end,
+
+  test_inbound_poll_re_raises_closed_lifecycle_state_when_updated_at_changes = function()
+    local ctx = setup()
+    local ok, err = pcall(function()
+      local event = { queue = "github_poll_tick", payload = {} }
+      local env = base_env(ctx)
+      local opts = {
+        cwd = ctx.tmp,
+        env = env,
+        path_prepend = ctx.fakebin,
+      }
+
+      local first = t.run_department("departments/github_poll/main.lua", event, opts)
+      t.eq(first.exit_code, 0)
+      t.eq(#first.raises, 2)
+      t.eq(first.raises[1].payload.type, "issue")
+      t.eq(first.raises[1].payload.state, "OPEN")
+
+      env.FAKE_GH_ISSUE_UPDATED_AT = "2026-06-04T09:10:11Z"
+      env.FAKE_GH_ISSUE_STATE = "CLOSED"
+      local closed = t.run_department("departments/github_poll/main.lua", event, opts)
+      t.eq(closed.exit_code, 0)
+      t.eq(#closed.raises, 1)
+      t.eq(closed.raises[1].queue, "github_entity_changed")
+      t.eq(closed.raises[1].payload.type, "issue")
+      t.eq(closed.raises[1].payload.number, 42)
+      t.eq(closed.raises[1].payload.updated_at, "2026-06-04T09:10:11Z")
+      t.eq(closed.raises[1].payload.state, "CLOSED")
+      t.eq(closed.raises[1].payload.dedup_key, "owner/x#issue#42@2026-06-04T09:10:11Z")
+    end)
+    cleanup(ctx)
+    if not ok then
+      error(err)
+    end
+  end,
+
+  test_inbound_poll_continues_when_issue_list_fails = function()
     local ctx = setup()
     local ok, err = pcall(function()
       local env = base_env(ctx)
@@ -164,8 +257,36 @@ return {
       })
 
       t.eq(result.exit_code, 0)
-      t.eq(#result.raises, 0)
+      t.eq(#result.raises, 1)
+      t.eq(result.raises[1].queue, "github_entity_changed")
+      t.eq(result.raises[1].payload.type, "pr")
       t.eq(file.read(ctx.gh_log):find("ARGS: [issue] [list]", 1, true) ~= nil, true)
+      t.eq(file.read(ctx.gh_log):find("ARGS: [pr] [list]", 1, true) ~= nil, true)
+    end)
+    cleanup(ctx)
+    if not ok then
+      error(err)
+    end
+  end,
+
+  test_inbound_poll_continues_when_pr_list_fails = function()
+    local ctx = setup()
+    local ok, err = pcall(function()
+      local env = base_env(ctx)
+      env.FAKE_GH_PR_LIST_EXIT = "2"
+
+      local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, {
+        cwd = ctx.tmp,
+        env = env,
+        path_prepend = ctx.fakebin,
+      })
+
+      t.eq(result.exit_code, 0)
+      t.eq(#result.raises, 1)
+      t.eq(result.raises[1].queue, "github_entity_changed")
+      t.eq(result.raises[1].payload.type, "issue")
+      t.eq(file.read(ctx.gh_log):find("ARGS: [issue] [list]", 1, true) ~= nil, true)
+      t.eq(file.read(ctx.gh_log):find("ARGS: [pr] [list]", 1, true) ~= nil, true)
     end)
     cleanup(ctx)
     if not ok then
@@ -190,6 +311,7 @@ return {
       t.eq(result.exit_code, 0)
       t.eq(#result.raises, 0)
       t.eq(file.read(ctx.gh_log):find("ARGS: [issue] [list]", 1, true), nil)
+      t.eq(file.read(ctx.gh_log):find("ARGS: [pr] [list]", 1, true), nil)
     end)
     cleanup(ctx)
     if not ok then

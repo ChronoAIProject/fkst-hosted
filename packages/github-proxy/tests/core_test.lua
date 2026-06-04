@@ -16,9 +16,15 @@ return {
     t.is_nil(value)
   end,
 
-  test_dedup_key = function()
-    local key = core.issue_dedup_key("owner/repo", 12, "2026-06-03T01:02:03Z")
-    t.eq(key, "owner/repo#12@2026-06-03T01:02:03Z")
+  test_entity_cache_key = function()
+    local key = core.entity_cache_key("owner/repo", "issue", 12)
+    t.eq(key, "github-proxy/issue/owner/repo/12")
+  end,
+
+  test_entity_dedup_key = function()
+    local key = core.entity_dedup_key("owner/repo", "pr", 12, "2026-06-03T01:02:03Z")
+    t.eq(key, "owner/repo#pr#12@2026-06-03T01:02:03Z")
+    t.eq(core.issue_dedup_key("owner/repo", 12, "2026-06-03T01:02:03Z"), "owner/repo#issue#12@2026-06-03T01:02:03Z")
   end,
 
   test_comment_marker = function()
@@ -29,30 +35,35 @@ return {
     t.eq(core.has_marker("hello", key), false)
   end,
 
-  test_parse_issue_list = function()
-    local issues = core.parse_issue_list('[{"number":7,"title":"Fix \\"x\\"","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN"}]')
-    t.eq(#issues, 1)
-    t.eq(issues[1].number, 7)
-    t.eq(issues[1].title, 'Fix "x"')
-    t.eq(issues[1].updated_at, "2026-06-03T00:00:00Z")
-    t.eq(issues[1].state, "OPEN")
+  test_parse_entity_list = function()
+    local entities = core.parse_entity_list('[{"number":7,"title":"Fix \\"x\\"","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN"}]')
+    t.eq(#entities, 1)
+    t.eq(entities[1].number, 7)
+    t.eq(entities[1].title, 'Fix "x"')
+    t.eq(entities[1].updated_at, "2026-06-03T00:00:00Z")
+    t.eq(entities[1].state, "OPEN")
   end,
 
-  test_parse_issue_list_empty_array = function()
-    local issues = core.parse_issue_list("[]")
-    t.eq(#issues, 0)
+  test_parse_entity_list_empty_array = function()
+    local entities = core.parse_entity_list("[]")
+    t.eq(#entities, 0)
   end,
 
-  test_parse_issue_list_accepts_updated_at = function()
-    local issues = core.parse_issue_list('[{"number":8,"title":"Snake case","url":"https://example.test/8","updated_at":"2026-06-03T04:05:06Z","state":"OPEN"}]')
-    t.eq(#issues, 1)
-    t.eq(issues[1].updated_at, "2026-06-03T04:05:06Z")
+  test_parse_entity_list_accepts_updated_at = function()
+    local entities = core.parse_entity_list('[{"number":8,"title":"Snake case","url":"https://example.test/8","updated_at":"2026-06-03T04:05:06Z","state":"OPEN"}]')
+    t.eq(#entities, 1)
+    t.eq(entities[1].updated_at, "2026-06-03T04:05:06Z")
+    t.eq(core.parse_issue_list("[]")[1], nil)
   end,
 
   test_gh_commands_are_quoted = function()
     t.eq(
       core.gh_issue_list_cmd("owner/repo"),
-      "gh issue list --repo 'owner/repo' --json number,title,updatedAt,url,state"
+      "gh issue list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state"
+    )
+    t.eq(
+      core.gh_pr_list_cmd("owner/repo"),
+      "gh pr list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state"
     )
     t.eq(
       core.gh_issue_view_comments_cmd("owner/repo", 3),

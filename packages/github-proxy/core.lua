@@ -31,8 +31,22 @@ function M.read_env(name, exec)
   return out.stdout
 end
 
+function M.entity_cache_key(repo, entity_type, number)
+  return "github-proxy/" .. tostring(entity_type) .. "/" .. tostring(repo) .. "/" .. tostring(number)
+end
+
+function M.entity_dedup_key(repo, entity_type, number, updated_at)
+  return tostring(repo)
+    .. "#"
+    .. tostring(entity_type)
+    .. "#"
+    .. tostring(number)
+    .. "@"
+    .. tostring(updated_at)
+end
+
 function M.issue_dedup_key(repo, number, updated_at)
-  return tostring(repo) .. "#" .. tostring(number) .. "@" .. tostring(updated_at)
+  return M.entity_dedup_key(repo, "issue", number, updated_at)
 end
 
 function M.comment_marker(dedup_key)
@@ -47,11 +61,11 @@ function M.has_marker(comments_text, dedup_key)
 end
 
 -- Decodes gh --json output via the engine-provided json.decode; requires a json-capable substrate runtime.
-function M.parse_issue_list(gh_json_stdout)
+function M.parse_entity_list(gh_json_stdout)
   local decoded = json.decode(gh_json_stdout or "[]")
-  local issues = {}
+  local entities = {}
   for _, item in ipairs(decoded) do
-    table.insert(issues, {
+    table.insert(entities, {
       number = item.number,
       title = item.title,
       url = item.url,
@@ -59,11 +73,19 @@ function M.parse_issue_list(gh_json_stdout)
       state = item.state,
     })
   end
-  return issues
+  return entities
+end
+
+function M.parse_issue_list(gh_json_stdout)
+  return M.parse_entity_list(gh_json_stdout)
 end
 
 function M.gh_issue_list_cmd(repo)
-  return "gh issue list --repo " .. shell_single_quote(repo) .. " --json number,title,updatedAt,url,state"
+  return "gh issue list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state"
+end
+
+function M.gh_pr_list_cmd(repo)
+  return "gh pr list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state"
 end
 
 function M.gh_issue_view_comments_cmd(repo, issue_number)
