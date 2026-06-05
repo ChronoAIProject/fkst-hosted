@@ -54,10 +54,46 @@ return {
     t.is_true(prompt:find("Title: Adopt consensus package", 1, true) ~= nil)
     t.is_true(prompt:find("Create a small flat package", 1, true) ~= nil)
     t.is_true(prompt:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(prompt:find("The package must stay silent unless all angles agree.", 1, true) ~= nil)
     t.is_true(prompt:find("VERDICT", 1, true) ~= nil)
     t.is_true(prompt:find("REPLY", 1, true) ~= nil)
+    t.is_nil(prompt:find("{{", 1, true))
     -- the instruction lines must NOT themselves parse as a verdict/reply
     t.is_nil(core.parse_angle_output(prompt))
+  end,
+
+  test_render_template_missing_var_fails_closed = function()
+    local ok = pcall(core.render_template, "Hello {{name}} from {{place}}.", { name = "consensus" })
+    local exact_ok = pcall(core.render_template, "{{missing}}", {})
+
+    t.eq(ok, false)
+    t.eq(exact_ok, false)
+  end,
+
+  test_render_template_is_single_pass = function()
+    t.eq(core.render_template("{{a}}", { a = "{{b}}", b = "ignored" }), "{{b}}")
+  end,
+
+  test_render_template_ignores_extra_vars = function()
+    t.eq(core.render_template("{{a}}", { a = "x", unused = "y" }), "x")
+  end,
+
+  test_build_angle_prompt_without_context_has_no_empty_context_block = function()
+    local input = proposal()
+    input.context = nil
+    local prompt = core.build_angle_prompt(input, "minimal")
+
+    t.is_nil(prompt:find("{{", 1, true))
+    t.is_nil(prompt:find("Context:", 1, true))
+    t.is_nil(core.parse_angle_output(prompt))
+  end,
+
+  test_parse_angle_output_accepts_real_answer_after_rendered_prompt_echo = function()
+    local prompt = core.build_angle_prompt(proposal(), "minimal")
+    local parsed = core.parse_angle_output(prompt .. "\nVERDICT: approve\nREPLY: ok")
+
+    t.eq(parsed.verdict, "approve")
+    t.eq(parsed.reply, "ok")
   end,
 
   test_parse_angle_output_accepts_valid_output = function()

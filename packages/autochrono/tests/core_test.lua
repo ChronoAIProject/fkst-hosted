@@ -128,6 +128,34 @@ return {
     t.eq(core.validate_proposal(mapping.build_proposal(issue())), true)
   end,
 
+  test_render_template_missing_var_fails_closed = function()
+    local ok = pcall(core.render_template, "Issue {{issue_number}} in {{repo}}", { repo = "owner/repo" })
+    local exact_ok = pcall(core.render_template, "{{missing}}", {})
+
+    t.eq(ok, false)
+    t.eq(exact_ok, false)
+  end,
+
+  test_render_template_is_single_pass = function()
+    t.eq(core.render_template("{{a}}", { a = "{{b}}", b = "ignored" }), "{{b}}")
+  end,
+
+  test_render_template_ignores_extra_vars = function()
+    t.eq(core.render_template("{{a}}", { a = "x", unused = "y" }), "x")
+  end,
+
+  test_build_proposal_body_renders_issue_fields = function()
+    local mapping = require("departments.propose.mapping")
+    local payload = mapping.build_proposal(issue())
+
+    t.is_true(payload.body:find("Repository: owner/repo", 1, true) ~= nil)
+    t.is_true(payload.body:find("Number: 42", 1, true) ~= nil)
+    t.is_true(payload.body:find("Title: Bridge issue", 1, true) ~= nil)
+    t.is_true(payload.body:find("URL: https://github.example/owner/repo/issues/42", 1, true) ~= nil)
+    t.is_true(payload.body:find("Updated at: 2026-06-03T01:02:03Z", 1, true) ~= nil)
+    t.is_nil(payload.body:find("{{", 1, true))
+  end,
+
   test_build_proposal_throws_for_oversized_issue_title = function()
     local mapping = require("departments.propose.mapping")
     local ok = pcall(mapping.build_proposal, issue({ title = string.rep("x", 241) }))

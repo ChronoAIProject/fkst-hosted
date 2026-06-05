@@ -192,6 +192,23 @@ function M.require_issue_fields(issue)
   }
 end
 
+function M.render_template(template, vars)
+  if type(template) ~= "string" then
+    error("autochrono: template must be a string")
+  end
+  if type(vars) ~= "table" then
+    error("autochrono: template vars must be a table")
+  end
+
+  return (template:gsub("{{([%w_]+)}}", function(name)
+    local value = vars[name]
+    if value == nil then
+      error("autochrono: missing template var " .. name)
+    end
+    return tostring(value)
+  end))
+end
+
 function M.bounded_text(value, limit)
   local text = tostring(value or "")
   if #text <= limit then

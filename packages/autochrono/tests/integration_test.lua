@@ -93,7 +93,12 @@ return {
     t.eq(payload.proposal_id:find("@", 1, true), nil)
     t.eq(payload.source_ref.kind, "external")
     t.eq(payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(payload.body:find("Repository: owner/repo", 1, true) ~= nil)
+    t.is_true(payload.body:find("Number: 42", 1, true) ~= nil)
     t.is_true(payload.body:find("Title: Bridge issue", 1, true) ~= nil)
+    t.is_true(payload.body:find("URL: https://github.example/owner/repo/issues/42", 1, true) ~= nil)
+    t.is_true(payload.body:find("Updated at: 2026-06-03T01:02:03Z", 1, true) ~= nil)
+    t.is_nil(payload.body:find("{{", 1, true))
     t.eq(#codex_calls(), 0)
   end,
 

@@ -8,21 +8,15 @@ end
 
 local function proposal_body(issue)
   local fields = core.require_issue_fields(issue)
-  return core.bounded_text(table.concat({
-    "Draft a concise GitHub issue reply for the fkst autochrono package.",
-    "",
-    "Use a calm maintainer voice.",
-    "Do not claim work has been completed.",
-    "Do not include markdown headings.",
-    "Keep the reply under 120 words.",
-    "",
-    "Issue:",
-    "Repository: " .. tostring(fields.repo),
-    "Number: " .. tostring(fields.issue_number),
-    "Title: " .. tostring(fields.title),
-    "URL: " .. tostring(fields.url),
-    "Updated at: " .. tostring(fields.updated_at),
-  }, "\n"), core.max_body_len())
+  local prompt = require("prompts.proposal")
+  local rendered = core.render_template(prompt.template, {
+    repo = fields.repo,
+    issue_number = fields.issue_number,
+    title = fields.title,
+    url = fields.url,
+    updated_at = fields.updated_at,
+  })
+  return core.bounded_text(rendered, core.max_body_len())
 end
 
 function M.build_proposal(issue)

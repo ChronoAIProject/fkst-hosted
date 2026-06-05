@@ -13,12 +13,6 @@ local max_body_len = 12000
 local max_context_len = 8000
 local max_reply_len = 2000
 
-local angle_bias = {
-  minimal = "Bias: minimal. Prefer the smallest viable decision, reject unnecessary scope, and approve only when the proposal is clear and low-risk.",
-  structural = "Bias: structural. Judge whether the proposal preserves clean boundaries, reliable data flow, and maintainable contracts.",
-  delete = "Bias: delete. Prefer removing scope, indirection, or brittle behavior unless the proposal proves the added surface is necessary.",
-}
-
 local function trim(value)
   return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
@@ -107,6 +101,23 @@ function M.angles(proposal)
   return normalized_angles(proposal)
 end
 
+function M.render_template(template, vars)
+  if type(template) ~= "string" then
+    error("consensus: template must be a string")
+  end
+  if type(vars) ~= "table" then
+    error("consensus: template vars must be a table")
+  end
+
+  return (template:gsub("{{([%w_]+)}}", function(name)
+    local value = vars[name]
+    if value == nil then
+      error("consensus: missing template var " .. name)
+    end
+    return tostring(value)
+  end))
+end
+
 -- Keyed by dedup_key (which versions the proposal), not proposal_id, so an updated
 -- proposal re-derives consensus instead of being silently skipped.
 function M.reached_cache_key(dedup_key)
@@ -127,27 +138,19 @@ function M.build_angle_prompt(proposal, angle)
   -- Instruction lines deliberately do NOT begin with "VERDICT:" / "REPLY:" so that a
   -- model echoing the prompt cannot produce lines the strict parser would mistake for
   -- the real answer.
-  local lines = {
-    "Judge this proposal from one consensus angle.",
-    angle_bias[angle] or ("Bias: " .. tostring(angle) .. ". Judge from this named perspective."),
-    "",
-    "Respond with exactly two lines and no other text.",
-    "Line one: the token VERDICT then a colon then one word - approve, reject, or abstain.",
-    "Line two: the token REPLY then a colon then one concise paragraph.",
-    "",
-    "Proposal:",
-    "Angle: " .. tostring(angle),
-    "Title: " .. tostring(proposal.title),
-    "Body:",
-    tostring(proposal.body),
-  }
-
+  local prompt = require("prompts.angle")
+  local context_block = ""
   if proposal.context ~= nil and proposal.context ~= "" then
-    table.insert(lines, "Context:")
-    table.insert(lines, tostring(proposal.context))
+    context_block = "Context:\n" .. tostring(proposal.context)
   end
 
-  return table.concat(lines, "\n")
+  return M.render_template(prompt.template, {
+    bias = prompt.bias[angle] or ("Bias: " .. tostring(angle) .. ". Judge from this named perspective."),
+    angle = angle,
+    title = proposal.title,
+    body = proposal.body,
+    context_block = context_block,
+  })
 end
 
 -- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean VERDICT line
