@@ -7,7 +7,7 @@ local function nonce()
 end
 
 local function runtime_root(name)
-  return "/private/tmp/fkst-packages-test/autochrono/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
+  return "/tmp/fkst-packages-test/autochrono/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
 end
 
 local function opts(name)

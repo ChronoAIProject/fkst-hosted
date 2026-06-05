@@ -21,7 +21,7 @@ local function pr_list_json(updated_at, state)
 end
 
 local function runtime_root(name)
-  return "/private/tmp/fkst-packages-test/github-proxy/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
+  return "/tmp/fkst-packages-test/github-proxy/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
 end
 
 local function base_env(name, extra)
