@@ -36,6 +36,13 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **本地 build**：`scripts/run.sh build` 定位 `$FKST_SUBSTRATE`、`/Users/auric/fkst-substrate` 或同级 `../fkst-substrate`，确认在 `dev` 后执行 `git pull && cargo build -p fkst-framework`。`test/run/supervise` 不会自动 build。
 - **CI**：`.github/workflows/ci.yml` 从 `fkst-substrate@dev` 构建 fkst-framework，然后调用 `scripts/run.sh test`。改包后 push `dev`/`main` 触发。
 
+## Git 提交/分支规范
+
+- **语言**：提交信息、PR 标题/正文、分支说明属对外产物，用中文；分支名本身、代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。不要中英混杂凑句。
+- **分支**：集成/默认分支是 `dev`；不直接向 `dev` 提交，一律从 `dev` 切分支并开 PR。分支名用 `<type>/<kebab-topic>`，`type` 只能是 `feat|fix|docs|chore|refactor|test`。合并后删除分支，不留长期僵尸分支。
+- **提交**：一个 commit 是一个自洽逻辑改动，不混入无关改动或格式化噪声。subject 用一行中文祈使句概括做了什么，约 50 字以内，不堆叠多事；改动多于琐碎时，空行后写 body，说明为什么、影响和取舍，关键词/符号/错误分类保持可 grep。改契约就改完整，旧形态从当前态删除；不留 deprecated shim / `.old` / `_legacy`。
+- **PR / 合并**：对 `dev` 开 PR；标题中文，正文含动机、改动、测试证据（命令 + 结果）。CI 绿才合；合并用 squash，保持 `dev` 线性、一个 feature 一条 commit，subject 末尾保留 `(#PR)`。AI 生成的 PR 正文/变更说明末尾保留 `⟦AI:FKST⟧`。
+
 ## 纪律（沿用 fkst-substrate）
 
 - 源文件内部英文；对外中文。错误分类要窄（避免 `general error`）；日志/commit/event payload 可 grep。AI 生成的对外文本末尾保留 `⟦AI:FKST⟧`。
