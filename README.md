@@ -2,7 +2,7 @@
 
 这是官方 fkst 包库。库 B 只放可复用的官方脚本包，不承载 host 业务仓的状态，也不扩展引擎 surface。
 
-每个官方公司放在 `packages/<name>/`，并作为一个独立 package-root 加载。package-root 的固定结构是：
+每个官方公司放在 `packages/<name>/`。package-root 的固定结构是：
 
 - `departments/<department>/main.lua`
 - `raisers/<raiser>.lua`
@@ -18,6 +18,13 @@ fkst-framework run <department-main.lua> \
   --event '<event-json>'
 ```
 
+包库里有两类 package：
+
+- **flat 平包**：自洽、自有裸名队列、0 外部 package namespace 引用，可单根 `conformance + test`。当前 flat 包有 `github-proxy` 与 `autochrono`。
+- **composed 包**：作为一等包放在 `packages/<name>/`，用于组合/适配兄弟包，department 可引用 `<pkg>.<queue>`；必须用 `composed.deps` 声明所组合的兄弟包，并通过组合 conformance 校验。当前 composed 包是 `github-autochrono`。
+
+引擎按 package-root 目录 basename 建命名空间。flat 包内队列写裸名；composed 包的 glue 队列按 `<pkg>.<queue>` 引用兄弟包。`composed.deps` 只是本仓测试组合的最小约定，不是版本解析、部署依赖或 override manifest。
+
 本机配置（`fkst-framework` 二进制路径等）放在库根的 `.env`（已 gitignore）。首次使用先从 `env.example` 复制并填好本机路径：
 
 ```sh
@@ -27,8 +34,9 @@ cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
 通用脚本 `scripts/run.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.env` 的 `BIN=` > PATH > 同级 `../fkst-substrate`）：
 
 ```sh
-scripts/run.sh test                 # self-test，然后对所有包跑 conformance + test；等价 CI
-scripts/run.sh test github-proxy    # 只跑某个包的 conformance + test
+scripts/run.sh test                 # self-test，所有包测试；flat 跑单根 conformance，composed 跳单根 conformance；最后跑组合 conformance；等价 CI
+scripts/run.sh test github-proxy    # 只跑某个包；flat 跑 conformance + test
+scripts/run.sh test-composed        # 只跑 composed 包及其递归 deps 的组合 conformance
 
 # 通用一次性跑某部门：解码 RAISED 事件 + dump <RT> 树。包特定配置走 env。
 # github-proxy 的只读入站 dogfood（拿真 gh 打真仓，不写 GitHub）：
@@ -38,7 +46,8 @@ FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/run.sh run github-proxy 
 # 可用 FKST_PROJECT_ROOT 覆盖默认 project-root（packages/<pkg>）。
 FKST_GITHUB_REPO=owner/repo scripts/run.sh supervise github-proxy
 
-# 仅本地显式构建引擎；test/run/supervise 不会自动 build。
+# 本地 test/run/supervise 会对可溯源到 ../fkst-substrate 的 BIN 做 freshness 自动构建；
+# CI 不自动 build，FKST_NO_AUTOBUILD=1 可跳过。显式 build 仍会 git pull && cargo build。
 scripts/run.sh build
 ```
 
@@ -46,16 +55,19 @@ scripts/run.sh build
 
 `supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并设置彼此不同的临时 `FKST_RUNTIME_ROOT` / `FKST_DURABLE_ROOT`。
 
-本库不做 manifest、root-list、override DSL 或多包组合语言。引擎一次加载一个 `--package-root`，再叠加 host root，图由固定的 `departments/` 和 `raisers/` 目录扫描得到。
+本库不做版本化 manifest、root-list 或 override DSL。图由固定的 `departments/` 和 `raisers/` 目录扫描得到。flat 包可独立加载；composed 包显式承担跨包 wiring，并用 `composed.deps` 告诉测试脚本组合 conformance 需要一起加载哪些兄弟包。
 
-共享代码只在包内共享：共享库放 package-root（如 `core.lua`），被本包的 `departments/`、`raisers/` 按 `require("core")` 引用。不跨包 `require`——跨包引用会引入版本耦合，正是上面拒绝的多包组合。多个包都需要的通用、稳定能力应进引擎 SDK（像 `json.decode`），否则各包自带一份；宁可重复，不可耦合。
+共享代码只在包内共享：共享库放 package-root（如 `core.lua`），被本包的 `departments/`、`raisers/` 按 `require("core")` 引用。不跨包 `require`。跨包组合只通过事件队列契约连接；唯一同时引用 `github-proxy.*` 与 `autochrono.*` 的代码在 `packages/github-autochrono/`。多个包都需要的通用、稳定能力应进引擎 SDK（像 `json.decode`），否则各包自带一份；宁可重复，不可耦合。
 
 ## 测试约定
 
 - unit：`tests/*_test.lua` 测纯函数/逻辑，用 `fkst.test` 的 `eq` / `is_true` / `raises` / `is_nil`。
 - integration：`tests/*_test.lua` 用 `fkst.test.run_department(path, event, opts)` 测 department 端到端行为：注入事件、断言 raise，并用 `opts.env` / `path_prepend` 提供 `FKST_RUNTIME_ROOT` / 假命令。
 - 图布线与静态声明（raisers / 队列匹配）由 `fkst-framework conformance` 校验，不为静态声明写单测。
-- CI 调 `scripts/run.sh test`，与本地标准测试走同一路径：先跑一次 `fkst-framework --self-test`，再对每个包跑 `fkst-framework conformance` 和 `fkst-framework test`。
+- flat 包：`scripts/run.sh test [pkg]` 对 flat 包跑单根 `conformance + test`。
+- composed 包：`scripts/run.sh test [pkg]` 跳过单根 conformance，但仍跑该包 tests；无参全包测试收尾会跑组合 conformance。
+- 组合 conformance：`scripts/run.sh test-composed` 收集所有带 `composed.deps` 的包及其递归依赖，以仓库根为 `--project-root`、收集到的包为 `--package-root` 验证 union graph。
+- CI 调 `scripts/run.sh test`，与本地标准测试走同一路径：先跑一次 `fkst-framework --self-test`，flat 包跑 `conformance + test`，composed 包跑 test，最后跑组合 conformance。
 - 新包清单：有逻辑就写 unit，有运行时行为就写 integration，布线靠 conformance。
 
 ## github-proxy
@@ -82,4 +94,37 @@ scripts/run.sh build
 
 ```sh
 scripts/run.sh test github-proxy
+```
+
+## autochrono
+
+`packages/autochrono/` 是真正起草回复的 agent 公司。它是独立平包，只认识自有裸名队列和自有契约，不直接依赖 `github-proxy`。
+
+- `departments/reply/main.lua` 消费裸名 `issue`，只处理 open issue，调用 `spawn_codex_sync` 起草正文，产出裸名 `reply`。
+- 输入 schema 是 `autochrono.issue.v1`，输出 schema 是 `autochrono.reply.v1`。
+- `reply_dedup_key(repo, issue_number)` 稳定为 `autochrono:<repo>#issue/<number>`，不含 `updated_at`；`replied_cache_key` 是可读相对 path。
+- 防循环靠 issue-level `with_lock` + `cache_get/cache_set`；即使 runtime cache 丢失，稳定 `dedup_key` 仍会由 `github-proxy` 评论 HTML marker 做外部 durable 幂等。
+- `draft_reply(issue, spawner)` 支持注入 fake spawner，测试不调用真 `codex`。
+
+## github-autochrono
+
+`packages/github-autochrono/` 是组合 `github-proxy` + `autochrono` 的 composed 包，是本仓 CI 覆盖的一等 package。它只做适配/wiring，不承载起草业务逻辑；`autochrono` 仍是 0 外部引用、可复用的 flat 包。链路是：
+
+```text
+github-proxy.github_entity_changed
+  -> autochrono.issue
+  -> autochrono.reply
+  -> github-proxy.github_issue_comment_request
+```
+
+`github-proxy` 与 `autochrono` 互不认识；这个 composed glue 是唯一同时引用 `github-proxy.*` 与 `autochrono.*` 的层。入站 glue 只把 GitHub issue 事件转成 `autochrono.issue.v1`，出站 glue 把 `autochrono.reply.v1` 转成 GitHub 评论请求。`composed.deps` 声明它需要把 `github-proxy` 与 `autochrono` 一起加载做组合 conformance。
+
+组合 conformance 跑法：
+
+```sh
+fkst-framework conformance \
+  --project-root /Users/auric/fkst-packages \
+  --package-root /Users/auric/fkst-packages/packages/github-autochrono \
+  --package-root /Users/auric/fkst-packages/packages/github-proxy \
+  --package-root /Users/auric/fkst-packages/packages/autochrono
 ```

@@ -2,8 +2,13 @@
 # Generic dev runner for fkst packages.
 #
 #   scripts/run.sh test [package]
-#       Run fkst-framework --self-test once, then conformance + test for every
-#       package, or just one. This is the single CI and local test entrypoint.
+#       Run fkst-framework --self-test once, then conformance + test for flat
+#       packages. Composed packages skip single-package conformance and still
+#       run tests. Full test also runs composed graph conformance. This is the
+#       single CI and local test entrypoint.
+#
+#   scripts/run.sh test-composed
+#       Run only composed graph conformance for packages with composed.deps.
 #
 #   scripts/run.sh run <package> <department> [event-json]
 #       One-shot run a department against the REAL host environment via
@@ -129,13 +134,18 @@ cmd_test() {
   fi
 
   for pkg in "$ROOT"/packages/*/; do
+    [ -d "$pkg" ] || continue
     name="$(basename "$pkg")"
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
     echo "=== $name ==="
     ran=$((ran + 1))
-    if ! "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
-      fail=$((fail + 1))
-      continue
+    if [ -f "$pkg/composed.deps" ]; then
+      echo "skip single-package conformance for composed package: $name"
+    else
+      if ! "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
+        fail=$((fail + 1))
+        continue
+      fi
     fi
     if ! "$BIN" test --project-root "$pkg" --package-root "$pkg"; then
       fail=$((fail + 1))
@@ -149,10 +159,56 @@ cmd_test() {
     fi
     exit 1
   fi
+  if [ -z "$target" ]; then
+    if ! cmd_test_composed; then
+      fail=$((fail + 1))
+    fi
+  fi
   if [ "$fail" -ne 0 ]; then
     echo "FAILED: $fail failure(s) across $ran package(s)" >&2; exit 1
   fi
   echo "OK: $ran package(s)"
+}
+
+collect_composed_package() {
+  local name="$1" pkg dep
+  pkg="$ROOT/packages/$name"
+  [ -d "$pkg" ] || { echo "error: composed package dependency not found: $name" >&2; return 1; }
+  case " ${COMPOSED_SEEN[*]-} " in
+    *" $name "*) return 0 ;;
+  esac
+  COMPOSED_SEEN+=("$name")
+  if [ -f "$pkg/composed.deps" ]; then
+    while IFS= read -r dep || [ -n "$dep" ]; do
+      dep="${dep%%#*}"
+      dep="${dep#"${dep%%[![:space:]]*}"}"
+      dep="${dep%"${dep##*[![:space:]]}"}"
+      [ -n "$dep" ] || continue
+      collect_composed_package "$dep" || return 1
+    done < "$pkg/composed.deps"
+  fi
+}
+
+cmd_test_composed() {
+  local pkg name args
+  COMPOSED_SEEN=()
+  for pkg in "$ROOT"/packages/*/; do
+    [ -d "$pkg" ] || continue
+    [ -f "$pkg/composed.deps" ] || continue
+    name="$(basename "$pkg")"
+    collect_composed_package "$name" || return 1
+  done
+  if [ "${#COMPOSED_SEEN[@]}" -eq 0 ]; then
+    echo "no composed packages matched"
+    return 0
+  fi
+
+  args=()
+  for name in "${COMPOSED_SEEN[@]}"; do
+    args+=(--package-root "$ROOT/packages/$name")
+  done
+  echo "=== composed conformance ==="
+  "$BIN" conformance --project-root "$ROOT" "${args[@]}"
 }
 
 cmd_run() {
@@ -255,6 +311,7 @@ cmd_build() {
 
 case "${1:-}" in
   test) shift; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
+  test-composed) shift; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
   run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
   supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
   build) shift; cmd_build "$@" ;;

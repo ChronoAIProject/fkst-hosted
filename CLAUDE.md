@@ -8,7 +8,7 @@
 
 fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrate** 引擎上的 Lua package。引擎本身在隔壁 `fkst-substrate` 仓；**本仓只写 Lua 行为层，不碰引擎 Rust**。
 
-一个 package = `core.lua`（包内共享库）+ `departments/<dept>/main.lua`（消费/产生事件的处理器，暴露 `M.spec` 与 `pipeline(event)`）+ `raisers/<r>.lua`（cron/file_watch 触发器）+ `tests/*_test.lua`。当前包：`packages/github-proxy/`（GitHub issue/PR 入站同步 + 出站评论）。
+一个 package = `core.lua`（包内共享库）+ `departments/<dept>/main.lua`（消费/产生事件的处理器，暴露 `M.spec` 与 `pipeline(event)`）+ `raisers/<r>.lua`（cron/file_watch 触发器）+ `tests/*_test.lua`。包分两类：flat 平包必须自洽、可单根 conformance、0 外部 package namespace 引用；composed 包是一等包，负责组合/适配兄弟包，可引用 `<pkg>.<queue>`，用 `composed.deps` 声明组合 conformance 需要一起加载的兄弟包。当前 flat 包：`packages/github-proxy/`（GitHub issue/PR 入站同步 + 出站评论）和 `packages/autochrono/`（消费自有 `issue`、产出自有 `reply` 的回复起草包）。当前 composed 包：`packages/github-autochrono/`（组合 `github-proxy` + `autochrono` 的适配/wiring 包）。
 
 ## 引擎上下文（写包必须懂；权威见 fkst-substrate 的 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md`）
 
@@ -24,13 +24,14 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 ## 包结构约定
 
 - **包内共享库放 package-root**：`packages/<pkg>/core.lua`，department 内 `require("core")`。**只做包内共享**——不跨包 require、不建 `fkst/` 目录、不引包间版本管理。
+- **flat 包 vs composed 包**：flat 包必须自有契约、自有裸名队列、0 外部 package namespace 引用，并通过单根 conformance；composed 包可以引用兄弟包 namespace 做组合/适配，但必须放 `composed.deps` 声明所组合的兄弟包，并经组合 conformance 验证。`composed.deps` 是测试组合的最小约定，不是版本/依赖解析 manifest，也不是部署配置；这是本仓为了让组合 glue 成为 CI 覆盖的一等包而接受的取舍。
 - 事件带 `schema` 字段（如 `"github-proxy.v1"`）；幂等靠 `dedup_key`（+ 出站用评论里的 HTML marker 等外部 durable 源）。
 - 出站写外部（如 `gh issue comment`）会改外部状态：默认 dry-run，真写需 `FKST_GITHUB_WRITE` + 明确授权。
 
 ## 构建 / 测试 / dogfood
 
 - **引擎二进制**：本仓不含引擎。`cp env.example .env` 填 `BIN=<fkst-substrate>/target/debug/fkst-framework`。`scripts/run.sh` 按 `BIN` 覆盖 > `.env` > PATH > 同级 `../fkst-substrate` 解析；CI 中 `BIN` 不可执行会直接报错，且 CI 不自动 build。
-- **标准测试**：`scripts/run.sh test [pkg]` 是本地和 CI 的单一入口：先跑一次 `"$BIN" --self-test`（脚本按需给临时 `FKST_RUNTIME_ROOT`），再对每个包跑 `"$BIN" conformance --project-root packages/<pkg> --package-root packages/<pkg>` 和 `"$BIN" test --project-root packages/<pkg> --package-root packages/<pkg>`。test 模式含 `*_test.lua` 单测 + `fkst.test.run_department` 集成测，**不经 router**，故 test 模式不强制 source_ref。
+- **标准测试**：`scripts/run.sh test [pkg]` 是本地和 CI 的单一入口：先跑一次 `"$BIN" --self-test`（脚本按需给临时 `FKST_RUNTIME_ROOT`）。flat 包跑 `"$BIN" conformance --project-root packages/<pkg> --package-root packages/<pkg>` 和 `"$BIN" test --project-root packages/<pkg> --package-root packages/<pkg>`；composed 包跳过单根 conformance，但仍跑 `"$BIN" test --project-root packages/<pkg> --package-root packages/<pkg>`。无参全包测试收尾会按所有 `composed.deps` 递归收集 composed 包及其依赖，以仓库根为 `--project-root` 跑一次组合 conformance；`scripts/run.sh test-composed` 可单独跑这一步。test 模式含 `*_test.lua` 单测 + `fkst.test.run_department` 集成测，**不经 router**，故 test 模式不强制 source_ref。
 - **dogfood / 真跑一次部门**：`scripts/run.sh run <pkg> <dept> [event-json]` 一次性调用 `fkst-framework run`，解码 stdout 上的 `RAISED: <base64(JSON 数组)>` 并 dump `<RT>`。脚本用临时（或复用已设的）`FKST_RUNTIME_ROOT`，**绝不设置 `FKST_GITHUB_WRITE`**。
 - **真实 supervise**：`scripts/run.sh supervise <pkg>` 是薄封装真实事件循环，创建临时 `FKST_RUNTIME_ROOT` 和独立临时 `FKST_DURABLE_ROOT`，默认 `--project-root packages/<pkg>`（可用 `FKST_PROJECT_ROOT` 覆盖），并显式传 `--package-root packages/<pkg>` 与 `--framework-bin "$BIN"`。前台运行，`Ctrl-C` 退出；不搭 host harness、不模拟事件、不注入 fake `gh`。
 - **本地 build / freshness**：`test/run/supervise` 在解析 `$BIN` 后，若 `$BIN` 可溯源到 `<fkst-substrate>/target/debug/fkst-framework`，会先 `cargo build -p fkst-framework` 确保与该 checkout 当前工作树一致；不 `git pull`、CI 不自动 build、无法溯源仅 warn 跳过，`FKST_NO_AUTOBUILD=1` 可跳过。`scripts/run.sh build` 仍是显式 `git pull && cargo build` 的更新命令。
