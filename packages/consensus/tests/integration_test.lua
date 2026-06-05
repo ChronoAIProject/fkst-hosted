@@ -101,29 +101,39 @@ return {
     t.eq(#codex_calls(), 3)
   end,
 
-  test_split_verdicts_raise_no_event = function()
+  test_split_verdicts_raise_consensus_unresolved = function()
     mock_angle("approve", "Minimal angle approves.")
     mock_angle("reject", "Structural angle rejects.")
     mock_angle("approve", "Delete angle approves.")
 
     local result = run_decide(proposal(), opts("split"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_unresolved")
+    t.eq(result.raises[1].payload.schema, "consensus.consensus_unresolved.v1")
+    t.eq(result.raises[1].payload.proposal_id, "proposal-42")
+    t.eq(result.raises[1].payload.dedup_key, "consensus:proposal-42-v1")
+    t.eq(result.raises[1].payload.source_ref.kind, "proposal")
+    t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
+    t.is_nil(result.raises[1].payload.body)
+    t.is_nil(result.raises[1].payload.angle_results)
+    t.is_nil(result.raises[1].payload.decision)
     t.eq(#codex_calls(), 3)
   end,
 
-  test_abstain_raises_no_event = function()
+  test_abstain_raises_consensus_unresolved = function()
     mock_angle("approve", "Minimal angle approves.")
     mock_angle("abstain", "Structural angle abstains.")
     mock_angle("approve", "Delete angle approves.")
 
     local result = run_decide(proposal(), opts("abstain"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_unresolved")
     t.eq(#codex_calls(), 3)
   end,
 
-  test_failed_codex_call_raises_no_event = function()
+  test_failed_codex_call_raises_consensus_unresolved = function()
     mock_angle("approve", "Minimal angle approves.")
     t.mock_command("codex exec", {
       stderr = "forced failure",
@@ -133,18 +143,20 @@ return {
 
     local result = run_decide(proposal(), opts("codex-fails"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_unresolved")
     t.eq(#codex_calls(), 3)
   end,
 
-  test_unparseable_output_raises_no_event = function()
+  test_unparseable_output_raises_consensus_unresolved = function()
     t.mock_command("codex exec", { stdout = "no verdict here", exit_code = 0 })
     t.mock_command("codex exec", { stdout = "still nothing useful", exit_code = 0 })
     t.mock_command("codex exec", { stdout = "garbage output", exit_code = 0 })
 
     local result = run_decide(proposal(), opts("unparseable"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_unresolved")
     t.eq(#codex_calls(), 3)
   end,
 

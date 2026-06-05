@@ -34,13 +34,17 @@ function pipeline(event)
     local current = core.parse_issue_view_result(view.stdout)
     local label_request = core.build_result_label_request(repo, issue_number, reached)
     local has_label = core.has_label(current.labels, label_request.add_labels[1])
-    local has_thinking = core.has_label(current.labels, label_request.remove_labels[1])
-    local has_opposite = core.has_label(current.labels, label_request.remove_labels[2])
+    local has_stale_label = false
+    for _, label in ipairs(label_request.remove_labels) do
+      if core.has_label(current.labels, label) then
+        has_stale_label = true
+      end
+    end
     local has_marker = core.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key)
 
-    -- Self-heal: re-raise the label request if the target is missing OR a stale thinking/opposite
-    -- terminal label is still present (the fkst-dev:<state> labels must stay mutually exclusive).
-    if not has_label or has_thinking or has_opposite then
+    -- Self-heal: re-raise the label request if the target is missing OR any stale state label
+    -- is still present (the fkst-dev:<state> labels must stay mutually exclusive).
+    if not has_label or has_stale_label then
       raise("github-proxy.github_issue_label_request", label_request)
     end
     if not has_marker then

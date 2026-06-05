@@ -109,10 +109,10 @@ scripts/run.sh test github-proxy
 
 ## consensus
 
-`packages/consensus/` 是通用、多角度的 flat 共识引擎，不绑定 GitHub 或 autochrono。它消费抽象 `proposal`，在一个 pipeline 内启动多个 `codex exec` 角度，只有达成 approve 共识时才产出 `consensus_reached`。
+`packages/consensus/` 是通用、多角度的 flat 共识引擎，不绑定 GitHub 或 autochrono。它消费抽象 `proposal`，在一个 pipeline 内启动多个 `codex exec` 角度；全体角度一致时产出 `consensus_reached`，无法达成一致或某角度失败/不可解析时产出 bounded `consensus_unresolved`。
 
-- 输入 schema 是 `consensus.proposal.v1`，输出 schema 是 `consensus.consensus_reached.v1`。
-- department 内只消费/产生裸名队列；被 composed 包引用时，对外表现为 `consensus.proposal` 与 `consensus.consensus_reached`。
+- 输入 schema 是 `consensus.proposal.v1`，输出 schema 是 `consensus.consensus_reached.v1` 或 `consensus.consensus_unresolved.v1`。`consensus_unresolved` 只带 `schema`、`proposal_id`、`dedup_key`、`source_ref`，不带 body 或 angle 文本。
+- department 内只消费/产生裸名队列；被 composed 包引用时，对外表现为 `consensus.proposal`、`consensus.consensus_reached` 与 `consensus.consensus_unresolved`。
 - 可靠投递事件携带 `source_ref`，下游据此回源 derive 当前事实，不把 proposal payload 当跨 pipeline 真相。
 
 ## github-autochrono
@@ -143,6 +143,6 @@ fkst-framework conformance \
 
 ## github-devloop
 
-`packages/github-devloop/` 是组合 `github-proxy` + `consensus` 的 composed 包。Phase 1a 只做 decision recorder：带 `fkst-dev:enabled` 且没有 `fkst-dev:thinking|ready|blocked` 的 GitHub issue 被回源读取 body，映射成 `consensus.proposal`，并请求 `github-proxy` 加 `fkst-dev:thinking`；当 `consensus.consensus_reached` 返回 `approve` / `reject` 时，请求把 issue 改成 `fkst-dev:ready` / `fkst-dev:blocked`，并发一条带 `fkst:github-devloop:result:v1` HTML marker 的评论作为外部 durable 记录。
+`packages/github-devloop/` 是组合 `github-proxy` + `consensus` 的 composed 包。Phase 1b 覆盖 issue design consensus 的最小闭环：带 `fkst-dev:enabled` 且没有 `fkst-dev:thinking|ready|blocked|stuck` 的 GitHub issue 被回源读取 body，映射成 `consensus.proposal`，并请求 `github-proxy` 加 `fkst-dev:thinking`；当 `consensus.consensus_reached` 返回 `approve` / `reject` 时，请求把 issue 改成 `fkst-dev:ready` / `fkst-dev:blocked`，并发一条带 `fkst:github-devloop:result:v1` HTML marker 的评论作为外部 durable 记录。
 
-它不实现 no-consensus loop/stuck，不直接写 GitHub；所有 label/comment 写入都经 `github-proxy` 的 dry-run-by-default 出站队列。`github-devloop/composed.deps` 声明它需要把 `github-proxy` 与 `consensus` 一起加载做组合 conformance。
+当 `consensus.consensus_unresolved` 到达时，`departments/loop` 回源读取当前 issue label、body 与评论 marker：issue 仍处于 `fkst-dev:thinking` 且未达到预算时，重建并重新 raise `consensus.proposal`，同时请求写入 `fkst:github-devloop:loop:v1` marker；达到预算时请求设置 `fkst-dev:stuck`、移除 `fkst-dev:thinking`，并写入 `fkst:github-devloop:stuck:v1` marker。loop 计数只来自 GitHub 评论 marker，不用 `<RT>` 或 cache；所有 label/comment 写入都经 `github-proxy` 的 dry-run-by-default 出站队列。`github-devloop/composed.deps` 声明它需要把 `github-proxy` 与 `consensus` 一起加载做组合 conformance。

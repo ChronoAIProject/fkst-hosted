@@ -316,4 +316,25 @@ function M.build_reached_payload(proposal, decision, angle_results)
   }
 end
 
+function M.build_unresolved_payload(proposal)
+  if type(proposal) ~= "table" then
+    error("consensus: proposal must be a table")
+  end
+  if not has_source_ref(proposal.source_ref) then
+    error("consensus: missing source_ref")
+  end
+
+  return {
+    schema = "consensus.consensus_unresolved.v1",
+    proposal_id = proposal.proposal_id,
+    dedup_key = "consensus:" .. tostring(proposal.dedup_key),
+    -- Keep this payload bounded and source-agnostic: consumers must re-derive any
+    -- current source details from source_ref instead of trusting stale proposal text.
+    source_ref = {
+      kind = proposal.source_ref.kind,
+      ref = proposal.source_ref.ref,
+    },
+  }
+end
+
 return M

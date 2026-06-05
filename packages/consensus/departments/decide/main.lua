@@ -4,7 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "proposal" },
-  produces = { "consensus_reached" },
+  produces = { "consensus_reached", "consensus_unresolved" },
   stall_window = "2m",
 }
 
@@ -51,6 +51,7 @@ function pipeline(event)
 
     local decision = core.aggregate(angle_results)
     if decision == nil then
+      raise("consensus_unresolved", core.build_unresolved_payload(proposal))
       return
     end
 

@@ -11,11 +11,14 @@ local enabled_label = "fkst-dev:enabled"
 local thinking_label = "fkst-dev:thinking"
 local ready_label = "fkst-dev:ready"
 local blocked_label = "fkst-dev:blocked"
+local stuck_label = "fkst-dev:stuck"
+local loop_budget = 3
 
 local state_labels = {
   [thinking_label] = true,
   [ready_label] = true,
   [blocked_label] = true,
+  [stuck_label] = true,
 }
 
 local function shell_single_quote(value)
@@ -212,6 +215,14 @@ function M.result_lock_key(proposal_id)
   return "github-devloop/result/" .. M.safe_repo(repo) .. "/issue/" .. M.safe_issue(issue_number)
 end
 
+function M.loop_lock_key(proposal_id)
+  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  if repo == nil then
+    return nil
+  end
+  return "github-devloop/loop/" .. M.safe_repo(repo) .. "/issue/" .. M.safe_issue(issue_number)
+end
+
 function M.bounded_body(value)
   local text = tostring(value or "")
   if text == "" then
@@ -253,6 +264,12 @@ function M.gh_issue_view_result_cmd(repo, issue_number)
   return "gh issue view " .. shell_single_quote(issue_number)
     .. " --repo " .. shell_single_quote(repo)
     .. " --json labels,comments"
+end
+
+function M.gh_issue_view_loop_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,body,updatedAt,labels,comments,state"
 end
 
 function M.parse_issue_view_body(stdout)
@@ -299,6 +316,19 @@ function M.parse_issue_view_result(stdout)
   }
 end
 
+function M.parse_issue_view_loop(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_result(stdout)
+  return {
+    title = tostring(decoded.title or ""),
+    body = M.bounded_body(decoded.body),
+    updated_at = decoded.updatedAt or decoded.updated_at,
+    state = decoded.state,
+    labels = result.labels,
+    comments = result.comments,
+  }
+end
+
 function M.has_label(labels, expected)
   if type(labels) ~= "table" then
     return false
@@ -312,7 +342,23 @@ function M.has_label(labels, expected)
 end
 
 function M.has_terminal_label(labels)
+  return M.has_label(labels, ready_label) or M.has_label(labels, blocked_label) or M.has_label(labels, stuck_label)
+end
+
+function M.has_thinking_label(labels)
+  return M.has_label(labels, thinking_label)
+end
+
+function M.has_stuck_label(labels)
+  return M.has_label(labels, stuck_label)
+end
+
+function M.has_decision_terminal_label(labels)
   return M.has_label(labels, ready_label) or M.has_label(labels, blocked_label)
+end
+
+function M.is_loop_terminal(labels)
+  return M.has_label(labels, ready_label) or M.has_label(labels, blocked_label) or M.has_label(labels, stuck_label)
 end
 
 function M.has_result_marker(comments, proposal_id, decision, dedup_key)
@@ -330,6 +376,119 @@ function M.has_result_marker(comments, proposal_id, decision, dedup_key)
   return false
 end
 
+function M.loop_budget()
+  return loop_budget
+end
+
+function M.loop_marker(proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:loop:v1 proposal="' .. tostring(proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.stuck_marker(proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:stuck:v1 proposal="' .. tostring(proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+local function marker_records(comments, kind, proposal_id)
+  local records = {}
+  if type(comments) ~= "table" then
+    return records
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:" .. kind .. ":v1.-%-%->"
+  for _, comment in ipairs(comments) do
+    for marker in tostring(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local n = tonumber(marker:match('n="(%d+)"'))
+      local dedup_key = marker:match('dedup="([^"]*)"')
+      if marker_proposal == proposal_id and n ~= nil then
+        table.insert(records, {
+          n = n,
+          dedup_key = dedup_key,
+        })
+      end
+    end
+  end
+  return records
+end
+
+local function has_marker_round(comments, kind, proposal_id, n)
+  for _, record in ipairs(marker_records(comments, kind, proposal_id)) do
+    if record.n == n then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_loop_marker(comments, proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.loop_marker(proposal_id, n, dedup_key)
+  for _, comment in ipairs(comments) do
+    if tostring(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_loop_marker_round(comments, proposal_id, n)
+  return has_marker_round(comments, "loop", proposal_id, n)
+end
+
+function M.has_loop_marker_dedup(comments, proposal_id, dedup_key)
+  for _, record in ipairs(marker_records(comments, "loop", proposal_id)) do
+    if record.dedup_key == tostring(dedup_key) then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_stuck_marker(comments, proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.stuck_marker(proposal_id, n, dedup_key)
+  for _, comment in ipairs(comments) do
+    if tostring(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_stuck_marker_round(comments, proposal_id, n)
+  return has_marker_round(comments, "stuck", proposal_id, n)
+end
+
+function M.loop_count_from_github_markers(comments, proposal_id)
+  local max_n = 0
+  for _, record in ipairs(marker_records(comments, "loop", proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  for _, record in ipairs(marker_records(comments, "stuck", proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  return max_n
+end
+
+function M.parse_loop_round_from_dedup(dedup_key)
+  local n = tostring(dedup_key or ""):match("/loop/(%d+)$")
+  return tonumber(n) or 0
+end
+
 function M.build_proposal(issue, body)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
@@ -345,6 +504,19 @@ function M.build_proposal(issue, body)
     dedup_key = M.proposal_dedup_key(proposal_id, issue.updated_at),
     source_ref = M.normalize_source_ref(issue.source_ref),
   }
+end
+
+function M.build_loop_proposal(repo, issue_number, current, source_ref, n)
+  local issue = {
+    repo = repo,
+    number = issue_number,
+    title = current.title,
+    updated_at = current.updated_at,
+    source_ref = source_ref,
+  }
+  local proposal = M.build_proposal(issue, current.body)
+  proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
+  return proposal
 end
 
 function M.validate_proposal(proposal)
@@ -405,14 +577,14 @@ end
 
 function M.build_result_label_request(repo, issue_number, reached)
   local add_label = reached.decision == "approve" and ready_label or blocked_label
-  -- Remove BOTH thinking and the opposite terminal label so a delayed/changed decision can never
-  -- leave ready+blocked coexisting (the fkst-dev:<state> labels are mutually exclusive).
+  -- Remove stale state labels so delayed/changed decisions cannot leave mutually exclusive
+  -- fkst-dev:<state> labels coexisting.
   local opposite_label = reached.decision == "approve" and blocked_label or ready_label
   return M.build_label_request(
     repo,
     issue_number,
     { add_label },
-    { thinking_label, opposite_label },
+    { thinking_label, opposite_label, stuck_label },
     tostring(reached.proposal_id) .. "/label/" .. tostring(reached.decision),
     reached.source_ref
   )
@@ -436,6 +608,44 @@ function M.build_result_comment_request(repo, issue_number, reached)
   }
 end
 
+function M.build_loop_comment_request(repo, issue_number, unresolved, n)
+  local marker = M.loop_marker(unresolved.proposal_id, n, unresolved.dedup_key)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop no-consensus loop: " .. tostring(n) .. "\n\n" .. marker,
+    dedup_key = tostring(unresolved.proposal_id) .. "/comment/loop/" .. tostring(n)
+      .. "/" .. (tostring(unresolved.dedup_key):gsub(":", "-")),
+    source_ref = M.normalize_source_ref(unresolved.source_ref),
+  }
+end
+
+function M.build_stuck_label_request(repo, issue_number, unresolved, n)
+  return M.build_label_request(
+    repo,
+    issue_number,
+    { stuck_label },
+    { thinking_label },
+    tostring(unresolved.proposal_id) .. "/label/stuck/" .. tostring(n)
+      .. "/" .. (tostring(unresolved.dedup_key):gsub(":", "-")),
+    unresolved.source_ref
+  )
+end
+
+function M.build_stuck_comment_request(repo, issue_number, unresolved, n)
+  local marker = M.stuck_marker(unresolved.proposal_id, n, unresolved.dedup_key)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop stuck: no consensus after " .. tostring(n) .. " attempts\n\n" .. marker,
+    dedup_key = tostring(unresolved.proposal_id) .. "/comment/stuck/" .. tostring(n)
+      .. "/" .. (tostring(unresolved.dedup_key):gsub(":", "-")),
+    source_ref = M.normalize_source_ref(unresolved.source_ref),
+  }
+end
+
 function M.is_supported_issue(payload)
   return type(payload) == "table"
     and payload.schema == "github-proxy.v1"
@@ -454,6 +664,16 @@ function M.is_supported_result(payload)
     and (payload.decision == "approve" or payload.decision == "reject")
     and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
     and is_bounded_string(payload.body, max_body_len)
+    and has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_unresolved(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_unresolved.v1"
+    and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
+    and payload.body == nil
+    and payload.angle_results == nil
+    and payload.decision == nil
     and has_bounded_source_ref(payload.source_ref)
 end
 

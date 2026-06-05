@@ -43,6 +43,19 @@ local function reached(extra)
   return value
 end
 
+local function unresolved(extra)
+  local value = {
+    schema = "consensus.consensus_unresolved.v1",
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    source_ref = source_ref(),
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
 return {
   test_opt_in_detection = function()
     t.eq(core.is_opted_in({ "fkst-dev:enabled" }), true)
@@ -95,6 +108,7 @@ return {
     t.eq(label.schema, "github-proxy.label.v1")
     t.eq(label.add_labels[1], "fkst-dev:ready")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
+    t.eq(label.remove_labels[3], "fkst-dev:stuck")
     t.eq(label.issue_number, "42")
 
     local rejected = core.build_result_label_request("owner/repo", "42", reached({ decision = "reject" }))
@@ -158,5 +172,49 @@ return {
     )
     t.eq(core.has_terminal_label(result.labels), true)
     t.eq(core.has_result_marker(result.comments, proposal_id, decision, dedup_key), true)
+  end,
+
+  test_loop_markers_budget_and_requests = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local dedup_key = "consensus:github-devloop/issue/owner/repo/42/v1"
+    t.eq(core.loop_budget(), 3)
+    t.eq(
+      core.loop_marker(proposal_id, 1, dedup_key),
+      '<!-- fkst:github-devloop:loop:v1 proposal="github-devloop/issue/owner/repo/42" n="1" dedup="consensus:github-devloop/issue/owner/repo/42/v1" -->'
+    )
+    t.eq(
+      core.stuck_marker(proposal_id, 3, dedup_key),
+      '<!-- fkst:github-devloop:stuck:v1 proposal="github-devloop/issue/owner/repo/42" n="3" dedup="consensus:github-devloop/issue/owner/repo/42/v1" -->'
+    )
+
+    local comments = {
+      core.loop_marker(proposal_id, 1, dedup_key),
+      core.loop_marker(proposal_id, 2, "consensus:github-devloop/issue/owner/repo/42/v2"),
+      core.stuck_marker(proposal_id, 3, dedup_key),
+    }
+    t.eq(core.has_loop_marker(comments, proposal_id, 1, dedup_key), true)
+    t.eq(core.has_loop_marker(comments, proposal_id, 2, dedup_key), false)
+    t.eq(core.has_loop_marker_round(comments, proposal_id, 2), true)
+    t.eq(core.has_loop_marker_dedup(comments, proposal_id, "consensus:github-devloop/issue/owner/repo/42/v2"), true)
+    t.eq(core.has_stuck_marker(comments, proposal_id, 3, dedup_key), true)
+    t.eq(core.has_stuck_marker_round(comments, proposal_id, 3), true)
+    t.eq(core.loop_count_from_github_markers(comments, proposal_id), 3)
+    t.eq(core.parse_loop_round_from_dedup("consensus:github-devloop/issue/owner/repo/42/v1"), 0)
+    t.eq(core.parse_loop_round_from_dedup("consensus:github-devloop/issue/owner/repo/42/v1/loop/2"), 2)
+
+    local event = unresolved()
+    local loop_comment = core.build_loop_comment_request("owner/repo", "42", event, 1)
+    t.eq(loop_comment.schema, "github-proxy.v1")
+    t.eq(loop_comment.issue_number, "42")
+    t.is_true(loop_comment.body:find("fkst:github-devloop:loop:v1", 1, true) ~= nil)
+    t.is_true(loop_comment.dedup_key:find("/comment/loop/1/", 1, true) ~= nil)
+
+    local stuck_label = core.build_stuck_label_request("owner/repo", "42", event, 3)
+    t.eq(stuck_label.add_labels[1], "fkst-dev:stuck")
+    t.eq(stuck_label.remove_labels[1], "fkst-dev:thinking")
+
+    local stuck_comment = core.build_stuck_comment_request("owner/repo", "42", event, 3)
+    t.is_true(stuck_comment.body:find("fkst:github-devloop:stuck:v1", 1, true) ~= nil)
+    t.is_true(stuck_comment.dedup_key:find("/comment/stuck/3/", 1, true) ~= nil)
   end,
 }
