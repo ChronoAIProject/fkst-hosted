@@ -20,8 +20,8 @@ fkst-framework run <department-main.lua> \
 
 包库里有两类 package：
 
-- **flat 平包**：自洽、自有裸名队列、0 外部 package namespace 引用，可单根 `conformance + test`。当前 flat 包有 `github-proxy` 与 `autochrono`。
-- **composed 包**：作为一等包放在 `packages/<name>/`，用于组合/适配兄弟包，department 可引用 `<pkg>.<queue>`；必须用 `composed.deps` 声明所组合的兄弟包，并通过组合 conformance 校验。当前 composed 包是 `github-autochrono`。
+- **flat 平包**：自洽、自有裸名队列、0 外部 package namespace 引用，可单根 `conformance + test`。当前 flat 包有 `github-proxy` 与 `consensus`。
+- **composed 包**：作为一等包放在 `packages/<name>/`，用于组合/适配兄弟包，department 可引用 `<pkg>.<queue>`；必须用 `composed.deps` 声明所组合的兄弟包，并通过组合 conformance 校验。当前 composed 包有 `autochrono` 与 `github-autochrono`。
 
 引擎按 package-root 目录 basename 建命名空间。flat 包内队列写裸名；composed 包的 glue 队列按 `<pkg>.<queue>` 引用兄弟包。`composed.deps` 只是本仓测试组合的最小约定，不是版本解析、部署依赖或 override manifest。
 
@@ -98,26 +98,37 @@ scripts/run.sh test github-proxy
 
 ## autochrono
 
-`packages/autochrono/` 是真正起草回复的 agent 公司。它是独立平包，只认识自有裸名队列和自有契约，不直接依赖 `github-proxy`。
+`packages/autochrono/` 是组合 `consensus` 的 composed 包，负责把自有 issue 协议接到通用共识引擎。它不直接依赖 `github-proxy`，也不直接调用 `codex`；起草与多角度判断都由 `consensus` 承担。
 
-- `departments/reply/main.lua` 是薄 glue：消费裸名 `issue`，只处理 open issue，调用 `core.draft_reply`（内部 `spawn_codex_sync`）起草正文，再 `raise` `core.build_reply_request` 的结果，产出裸名 `reply`。
-- 输入 schema 是 `autochrono.issue.v1`，输出 schema 是 `autochrono.reply.v1`。
-- `reply_dedup_key(repo, issue_number)` 稳定为 `autochrono:<repo>#issue/<number>`，不含 `updated_at`；`replied_cache_key` 是可读相对 path。
-- 防循环靠 issue-level `with_lock` + `cache_get/cache_set`；即使 runtime cache 丢失，稳定 `dedup_key` 仍会由 `github-proxy` 评论 HTML marker 做外部 durable 幂等。
-- `core.draft_reply(issue)` 直接调用引擎 `spawn_codex_sync`。纯函数仍在 `core_test.lua` 覆盖，涉及 `codex exec` 的行为通过 `fkst.test.mock_command("codex exec", ...)` + `run_department` 端到端测试，不生成 fake `codex` 二进制。运行时去重持久由引擎 `with_lock` / `cache_get` / `cache_set` 承担，集成测试复用同一 `FKST_RUNTIME_ROOT` 覆盖 cache 命中。
+- `departments/propose/main.lua` 消费裸名 `issue`，只处理 open issue，把 `autochrono.issue.v1` 映射为 `consensus.proposal.v1`，raise 到 `consensus.proposal`。
+- `departments/reply/main.lua` 消费 `consensus.consensus_reached`。`decision = "approve"` 时产出裸名 `reply`；`decision = "reject"` 或 foreign proposal 静默跳过。
+- 自有输入 schema 是 `autochrono.issue.v1`，自有输出 schema 是 `autochrono.reply.v1`；跨包链路是 `autochrono.issue -> consensus.proposal -> consensus.consensus_reached -> autochrono.reply`。
+- `proposal_dedup_key(repo, issue_number, updated_at)` 按 issue update 版本化，避免同一 issue 的新内容被旧 proposal cache 吞掉；`reply_dedup_key(repo, issue_number)` 稳定为 `autochrono:<repo>#issue/<number>`，不含 `updated_at`。
+- 防循环靠 `with_lock` + `cache_get/cache_set`；即使 runtime cache 丢失，稳定 `dedup_key` 仍会由 `github-proxy` 评论 HTML marker 做外部 durable 幂等。
+- `composed.deps` 声明它需要把 `consensus` 一起加载做组合 conformance。测试保持 `autochrono` 零 `codex` 调用；涉及 `codex exec` 的 mock 留在 `consensus` 包内。
+
+## consensus
+
+`packages/consensus/` 是通用、多角度的 flat 共识引擎，不绑定 GitHub 或 autochrono。它消费抽象 `proposal`，在一个 pipeline 内启动多个 `codex exec` 角度，只有达成 approve 共识时才产出 `consensus_reached`。
+
+- 输入 schema 是 `consensus.proposal.v1`，输出 schema 是 `consensus.consensus_reached.v1`。
+- department 内只消费/产生裸名队列；被 composed 包引用时，对外表现为 `consensus.proposal` 与 `consensus.consensus_reached`。
+- 可靠投递事件携带 `source_ref`，下游据此回源 derive 当前事实，不把 proposal payload 当跨 pipeline 真相。
 
 ## github-autochrono
 
-`packages/github-autochrono/` 是组合 `github-proxy` + `autochrono` 的 composed 包，是本仓 CI 覆盖的一等 package。它只做适配/wiring，不承载起草业务逻辑；`autochrono` 仍是 0 外部引用、可复用的 flat 包。链路是：
+`packages/github-autochrono/` 是组合 `github-proxy` + `autochrono` 的 composed 包，是本仓 CI 覆盖的一等 package。它只做适配/wiring，不承载起草或共识业务逻辑；`autochrono` 再通过自己的 `composed.deps` 组合 `consensus`。链路是：
 
 ```text
 github-proxy.github_entity_changed
   -> autochrono.issue
+  -> consensus.proposal
+  -> consensus.consensus_reached
   -> autochrono.reply
   -> github-proxy.github_issue_comment_request
 ```
 
-`github-proxy` 与 `autochrono` 互不认识；这个 composed glue 是唯一同时引用 `github-proxy.*` 与 `autochrono.*` 的层。入站 glue 只把 GitHub issue 事件转成 `autochrono.issue.v1`，出站 glue 把 `autochrono.reply.v1` 转成 GitHub 评论请求。`composed.deps` 声明它需要把 `github-proxy` 与 `autochrono` 一起加载做组合 conformance。
+`github-proxy` 与 `autochrono` 互不认识；这个 composed glue 是唯一同时引用 `github-proxy.*` 与 `autochrono.*` 的层。入站 glue 只把 GitHub issue 事件转成 `autochrono.issue.v1`，出站 glue 把 `autochrono.reply.v1` 转成 GitHub 评论请求。`github-autochrono/composed.deps` 声明它需要把 `github-proxy` 与 `autochrono` 一起加载；测试脚本会递归带上 `autochrono` 依赖的 `consensus`。
 
 组合 conformance 跑法：
 
@@ -126,5 +137,6 @@ fkst-framework conformance \
   --project-root /Users/auric/fkst-packages \
   --package-root /Users/auric/fkst-packages/packages/github-autochrono \
   --package-root /Users/auric/fkst-packages/packages/github-proxy \
-  --package-root /Users/auric/fkst-packages/packages/autochrono
+  --package-root /Users/auric/fkst-packages/packages/autochrono \
+  --package-root /Users/auric/fkst-packages/packages/consensus
 ```

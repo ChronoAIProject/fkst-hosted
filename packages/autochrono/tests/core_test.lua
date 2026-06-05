@@ -13,6 +13,7 @@ local function issue(extra)
     source_ref = {
       kind = "external",
       ref = "owner/repo#issue/42",
+      extra = "ignored",
     },
     dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
   }
@@ -22,74 +23,139 @@ local function issue(extra)
   return value
 end
 
+local function without(field)
+  local value = issue()
+  value[field] = nil
+  return value
+end
+
+local function merge(base, extra)
+  local value = {}
+  for key, field in pairs(base) do
+    value[key] = field
+  end
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
 return {
+  test_proposal_id_round_trips_repo_and_issue = function()
+    local id = core.proposal_id("owner/repo", 42)
+    local repo, issue_number = core.parse_proposal_id(id)
+
+    t.eq(id, "autochrono/issue/owner/repo/42")
+    t.eq(repo, "owner/repo")
+    t.eq(issue_number, "42")
+  end,
+
+  test_parse_proposal_id_rejects_foreign_ids = function()
+    local repo, issue_number = core.parse_proposal_id("consensus/issue/owner/repo/42")
+    t.is_nil(repo)
+    t.is_nil(issue_number)
+
+    repo, issue_number = core.parse_proposal_id("autochrono/pull/owner/repo/42")
+    t.is_nil(repo)
+    t.is_nil(issue_number)
+
+    repo, issue_number = core.parse_proposal_id("autochrono/issue/42")
+    t.is_nil(repo)
+    t.is_nil(issue_number)
+  end,
+
+  test_proposal_cache_key_is_versioned_and_path_safe = function()
+    local key = core.proposal_cache_key("owner/repo", 42, "2026-06-03T01:02:03Z")
+
+    t.eq(key, "autochrono/proposed/v1/owner/repo/issue/42/updated/2026-06-03T01-02-03Z")
+    t.eq(key:find(":", 1, true), nil)
+    t.eq(key:find("@", 1, true), nil)
+    t.eq(key:find(" "), nil)
+  end,
+
+  test_sanitize_key_replaces_unsafe_characters = function()
+    t.eq(core.sanitize_key("2026-06-03T01:02:03Z"), "2026-06-03T01-02-03Z")
+    t.eq(core.sanitize_key("owner repo@example:42"), "owner-repo-example-42")
+    t.eq(core.sanitize_key("../repo"), "-/repo")
+    t.eq(core.sanitize_key(""), "empty")
+  end,
+
   test_reply_dedup_key_is_stable_across_updates = function()
     local first = core.reply_dedup_key("owner/repo", 42)
     local second = core.reply_dedup_key("owner/repo", 42)
     local after_update = core.reply_dedup_key(issue().repo, issue({ updated_at = "2026-06-04T05:06:07Z" }).issue_number)
+
     t.eq(first, "autochrono:owner/repo#issue/42")
     t.eq(first, second)
     t.eq(first, after_update)
     t.eq(first:find("2026", 1, true), nil)
   end,
 
-  test_replied_cache_key_is_readable_path = function()
-    t.eq(core.replied_cache_key("owner/repo", 42), "autochrono/replied/owner/repo/issue/42")
+  test_normalize_source_ref_drops_extra_fields = function()
+    local normalized = core.normalize_source_ref(issue().source_ref)
+
+    t.eq(normalized.kind, "external")
+    t.eq(normalized.ref, "owner/repo#issue/42")
+    t.is_nil(normalized.extra)
   end,
 
-  test_is_eligible_accepts_open_autochrono_issue = function()
+  test_is_eligible_accepts_open_complete_issue = function()
     t.eq(core.is_eligible(issue()), true)
+  end,
+
+  test_is_eligible_rejects_incomplete_or_closed_issue = function()
     t.eq(core.is_eligible(issue({ state = "CLOSED" })), false)
     t.eq(core.is_eligible(issue({ schema = "other.issue.v1" })), false)
-    t.eq(core.is_eligible({
-      schema = "autochrono.issue.v1",
-      issue_number = 42,
-      state = "OPEN",
-    }), false)
-    t.eq(core.is_eligible({
-      schema = "autochrono.issue.v1",
-      repo = "owner/repo",
-      state = "OPEN",
-    }), false)
+    t.eq(core.is_eligible(without("repo")), false)
+    t.eq(core.is_eligible(without("issue_number")), false)
+    t.eq(core.is_eligible(without("title")), false)
+    t.eq(core.is_eligible(without("url")), false)
+    t.eq(core.is_eligible(without("updated_at")), false)
+    t.eq(core.is_eligible(without("source_ref")), false)
     t.eq(core.is_eligible({}), false)
     t.eq(core.is_eligible(nil), false)
   end,
 
-  test_build_prompt_contains_issue_context = function()
-    local prompt = core.build_prompt(issue())
-    t.is_true(prompt:find("Repository: owner/repo", 1, true) ~= nil)
-    t.is_true(prompt:find("Number: 42", 1, true) ~= nil)
-    t.is_true(prompt:find("Title: Bridge issue", 1, true) ~= nil)
-    t.is_true(prompt:find("Do not claim work has been completed.", 1, true) ~= nil)
+  test_proposal_dedup_key_stays_bounded = function()
+    -- a pathological updated_at must not push dedup_key past the consensus 200-char cap
+    local key = core.proposal_dedup_key("owner/repo", 42, string.rep("x", 500))
+    t.is_true(#key <= 200)
+    t.eq(key:find("autochrono/issue/owner/repo/42/", 1, true), 1)
   end,
 
-  test_clean_draft_trims_stdout_and_rejects_empty_body = function()
-    t.eq(core.clean_draft("  Draft body. \n"), "Draft body.")
-    t.is_nil(core.clean_draft(" \n\t "))
+  test_validate_proposal_accepts_well_formed = function()
+    local mapping = require("departments.propose.mapping")
+    t.eq(core.validate_proposal(mapping.build_proposal(issue())), true)
   end,
 
-  test_build_reply_request_preserves_payload_fields = function()
-    local source_ref = {
-      kind = "external",
-      ref = "owner/repo#issue/42",
+  test_build_proposal_throws_for_oversized_issue_title = function()
+    local mapping = require("departments.propose.mapping")
+    local ok = pcall(mapping.build_proposal, issue({ title = string.rep("x", 241) }))
+
+    t.eq(ok, false)
+  end,
+
+  test_validate_proposal_rejects_contract_violations = function()
+    local mapping = require("departments.propose.mapping")
+    local ok = mapping.build_proposal(issue())
+    t.eq(core.validate_proposal(merge(ok, { dedup_key = string.rep("a", 201) })), false)  -- over 200 cap
+    t.eq(core.validate_proposal(merge(ok, { proposal_id = "autochrono/issue/owner/repo:42" })), false)  -- not path-safe
+    t.eq(core.validate_proposal(merge(ok, { proposal_id = "other/issue/owner/repo/42" })), false)  -- not parseable
+    t.eq(core.validate_proposal(merge(ok, { body = "" })), false)  -- empty body
+    t.eq(core.validate_proposal(merge(ok, { source_ref = { kind = "external" } })), false)  -- ref missing
+    t.eq(core.validate_proposal(merge(ok, { schema = "other" })), false)
+  end,
+
+  test_validate_reached_accepts_and_rejects = function()
+    local ok = {
+      proposal_id = "autochrono/issue/owner/repo/42",
+      body = "A concrete reply.",
+      source_ref = { kind = "external", ref = "owner/repo#issue/42" },
     }
-    local payload = core.build_reply_request(issue({ source_ref = source_ref }), "Draft body.")
-
-    t.eq(payload.schema, "autochrono.reply.v1")
-    t.eq(payload.repo, "owner/repo")
-    t.eq(payload.issue_number, 42)
-    t.eq(payload.body, "Draft body.")
-    t.eq(payload.dedup_key, "autochrono:owner/repo#issue/42")
-    t.is_true(payload.source_ref == source_ref)
-    t.eq(payload.source_ref.kind, "external")
-    t.eq(payload.source_ref.ref, "owner/repo#issue/42")
-  end,
-
-  test_build_reply_request_requires_source_ref = function()
-    local without_source_ref = issue()
-    without_source_ref.source_ref = nil
-    t.raises(function()
-      core.build_reply_request(without_source_ref, "Draft body.")
-    end)
+    t.eq(core.validate_reached(ok), true)
+    t.eq(core.validate_reached(merge(ok, { body = "" })), false)
+    t.eq(core.validate_reached(merge(ok, { body = string.rep("y", 12001) })), false)
+    t.eq(core.validate_reached(merge(ok, { proposal_id = "" })), false)
+    t.eq(core.validate_reached({ proposal_id = "autochrono/issue/owner/repo/42", body = "x" }), false)  -- no source_ref
   end,
 }

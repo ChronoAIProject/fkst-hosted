@@ -1,6 +1,6 @@
 local t = fkst.test
-
-local draft_body = "Thanks for opening this. I will review the details and follow up with the next concrete step."
+local core = require("core")
+local propose_mapping = require("departments.propose.mapping")
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -39,8 +39,33 @@ local function issue(extra)
   return value
 end
 
+local function consensus_reached(extra)
+  local value = {
+    schema = "consensus.consensus_reached.v1",
+    proposal_id = "autochrono/issue/owner/repo/42",
+    decision = "approve",
+    body = "Thanks for opening this. I will review the details and follow up with the next concrete step.",
+    dedup_key = "consensus:autochrono/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    source_ref = {
+      kind = "external",
+      ref = "owner/repo#issue/42",
+    },
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
 local function run_reply(event_payload, run_opts)
   return t.run_department("departments/reply/main.lua", {
+    queue = "consensus.consensus_reached",
+    payload = event_payload,
+  }, run_opts)
+end
+
+local function run_propose(event_payload, run_opts)
+  return t.run_department("departments/propose/main.lua", {
     queue = "issue",
     payload = event_payload,
   }, run_opts)
@@ -57,64 +82,162 @@ local function codex_calls()
 end
 
 return {
-  test_reply_raises_draft_from_codex_mock = function()
-    t.mock_command("codex exec", { stdout = draft_body .. "\n", exit_code = 0 })
+  test_propose_open_issue_raises_consensus_proposal = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
 
-    local result = run_reply(issue(), opts("first-reply"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "reply")
-    t.eq(result.raises[1].payload.schema, "autochrono.reply.v1")
-    t.eq(result.raises[1].payload.repo, "owner/repo")
-    t.eq(result.raises[1].payload.issue_number, 42)
-    t.eq(result.raises[1].payload.body, draft_body)
-    t.eq(result.raises[1].payload.dedup_key, "autochrono:owner/repo#issue/42")
-    t.eq(result.raises[1].payload.source_ref.kind, "external")
-    t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
-
-    local calls = codex_calls()
-    t.eq(#calls, 1)
-    t.is_true(calls[1].stdin:find("Repository: owner/repo", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("Number: 42", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("Title: Bridge issue", 1, true) ~= nil)
+    local payload = propose_mapping.build_proposal(issue())
+    t.eq(payload.schema, "consensus.proposal.v1")
+    t.eq(payload.proposal_id, "autochrono/issue/owner/repo/42")
+    t.eq(payload.dedup_key, "autochrono/issue/owner/repo/42/2026-06-03T01-02-03Z")
+    t.eq(payload.proposal_id:find(":", 1, true), nil)
+    t.eq(payload.proposal_id:find("@", 1, true), nil)
+    t.eq(payload.source_ref.kind, "external")
+    t.eq(payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(payload.body:find("Title: Bridge issue", 1, true) ~= nil)
+    t.eq(#codex_calls(), 0)
   end,
 
-  test_reply_cache_hit_skips_same_issue_across_updates = function()
-    local run_opts = opts("cache-hit")
-    t.mock_command("codex exec", { stdout = draft_body, exit_code = 0 })
+  test_propose_skips_closed_and_unsupported_schema = function()
+    t.eq(core.is_eligible(issue({ state = "CLOSED" })), false)
+    t.eq(core.is_eligible(issue({ schema = "other.issue.v1" })), false)
+    t.eq(#codex_calls(), 0)
+  end,
 
-    local first = run_reply(issue(), run_opts)
+  test_propose_cache_versions_by_updated_at = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
+    local first_key = core.proposal_cache_key("owner/repo", 42, "2026-06-03T01:02:03Z")
+    local second_key = core.proposal_cache_key("owner/repo", 42, "2026-06-03T01:02:03Z")
+    local changed_key = core.proposal_cache_key("owner/repo", 42, "2026-06-04T05:06:07Z")
+    local changed_payload = propose_mapping.build_proposal(issue({ updated_at = "2026-06-04T05:06:07Z" }))
+
+    t.eq(first_key, second_key)
+    t.is_true(first_key ~= changed_key)
+    t.eq(changed_payload.dedup_key, "autochrono/issue/owner/repo/42/2026-06-04T05-06-07Z")
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_propose_open_issue_records_consensus_proposal = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
+
+    local result = run_propose(issue(), opts("propose-open"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus.proposal")
+
+    local payload = result.raises[1].payload
+    local proposal_id = "autochrono/issue/owner/repo/42"
+    t.eq(payload.schema, "consensus.proposal.v1")
+    t.eq(payload.proposal_id, proposal_id)
+    t.is_true(payload.dedup_key:find(proposal_id, 1, true) == 1)
+    t.eq(payload.source_ref.kind, "external")
+    t.eq(payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_propose_skips_closed_issue_end_to_end = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
+
+    local result = run_propose(issue({ state = "CLOSED" }), opts("propose-closed"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_propose_skips_unsupported_schema_end_to_end = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
+
+    local result = run_propose(issue({ schema = "other.issue.v1" }), opts("propose-schema"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_propose_version_idempotency_end_to_end = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
+    local run_opts = opts("propose-version")
+
+    local first = run_propose(issue(), run_opts)
     t.eq(first.exit_code, 0)
     t.eq(#first.raises, 1)
 
-    local second = run_reply(issue({ updated_at = "2026-06-04T05:06:07Z" }), run_opts)
+    local second = run_propose(issue(), run_opts)
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 0)
-    t.eq(#codex_calls(), 1)
+
+    local third = run_propose(issue({ updated_at = "2026-06-04T05:06:07Z" }), run_opts)
+    t.eq(third.exit_code, 0)
+    t.eq(#third.raises, 1)
+    t.eq(#codex_calls(), 0)
   end,
 
-  test_reply_degrades_when_codex_fails = function()
-    t.mock_command("codex exec", { stderr = "failed", exit_code = 7 })
+  test_propose_fail_closed_on_oversized_issue = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
 
-    local result = run_reply(issue(), opts("codex-fails"))
+    local result = run_propose(issue({ title = string.rep("x", 241) }), opts("propose-oversized"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(#codex_calls(), 1)
+    t.eq(#codex_calls(), 0)
   end,
 
-  test_reply_degrades_when_codex_stdout_is_empty = function()
-    t.mock_command("codex exec", { stdout = " \n\t ", exit_code = 0 })
+  test_reply_approve_raises_autochrono_reply = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
 
-    local result = run_reply(issue(), opts("codex-empty"))
+    local reached = consensus_reached()
+    local result = run_reply(reached, opts("reply-approve"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(#codex_calls(), 1)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "reply")
+
+    local payload = result.raises[1].payload
+    t.eq(payload.schema, "autochrono.reply.v1")
+    t.eq(payload.repo, "owner/repo")
+    t.eq(payload.issue_number, "42")
+    t.eq(payload.body, reached.body)
+    t.eq(payload.dedup_key, "autochrono:owner/repo#issue/42")
+    t.eq(payload.source_ref.kind, "external")
+    t.eq(payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(#codex_calls(), 0)
   end,
 
-  test_reply_skips_non_open_issue = function()
-    local result = run_reply(issue({ state = "CLOSED" }), opts("closed-issue"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+  test_reply_skips_reject_and_foreign_proposal = function()
+    local rejected = run_reply(consensus_reached({ decision = "reject" }), opts("reply-reject"))
+    t.eq(rejected.exit_code, 0)
+    t.eq(#rejected.raises, 0)
+
+    local foreign = run_reply(consensus_reached({ proposal_id = "other/issue/owner/repo/42" }), opts("reply-foreign"))
+    t.eq(foreign.exit_code, 0)
+    t.eq(#foreign.raises, 0)
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_reply_cache_skips_second_approve_for_issue = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
+    local run_opts = opts("reply-cache")
+
+    local first = run_reply(consensus_reached(), run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 1)
+
+    local second = run_reply(consensus_reached({ body = "Different approved body." }), run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 0)
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_reply_skips_malformed_reached_without_marking_replied = function()
+    local run_opts = opts("reply-malformed")
+
+    -- approve but empty body -> no reply raised
+    local bad = run_reply(consensus_reached({ body = "" }), run_opts)
+    t.eq(bad.exit_code, 0)
+    t.eq(#bad.raises, 0)
+
+    -- the malformed event must NOT have marked the issue replied: a later well-formed
+    -- approve for the same issue still produces a reply
+    local good = run_reply(consensus_reached(), run_opts)
+    t.eq(good.exit_code, 0)
+    t.eq(#good.raises, 1)
+    t.eq(good.raises[1].payload.body, consensus_reached().body)
     t.eq(#codex_calls(), 0)
   end,
 }
