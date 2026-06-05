@@ -23,7 +23,8 @@
 #
 #   scripts/run.sh build
 #       Local-only helper: update the fkst-substrate dev checkout and build
-#       fkst-framework. test/run/supervise never build automatically.
+#       fkst-framework. test/run/supervise ensure a traceable local BIN is built
+#       from the current fkst-substrate working tree before running.
 #
 # fkst-framework binary resolution (priority): $BIN > repo .env `BIN=` > PATH >
 # sibling ../fkst-substrate/target/debug/fkst-framework.
@@ -60,8 +61,55 @@ resolve_bin() {
   export BIN
 }
 
+# Resolve a path to its physical location, following file symlinks too (portable:
+# no realpath / `readlink -f` dependency, works with macOS BSD readlink). This
+# lets a symlinked BIN (e.g. a PATH install pointing into a checkout target) be
+# traced back to its fkst-substrate checkout.
+resolve_phys_path() {
+  local p="$1" target dir
+  while [ -L "$p" ]; do
+    target="$(readlink "$p")" || break
+    case "$target" in
+      /*) p="$target" ;;
+      *)  p="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$target" ;;
+    esac
+  done
+  dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename "$p")"
+}
+
+ensure_fresh_bin() {
+  if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+    return 0
+  fi
+  if [ -n "${FKST_NO_AUTOBUILD:-}" ]; then
+    echo "warning: FKST_NO_AUTOBUILD set; skipping fkst-framework freshness build" >&2
+    return 0
+  fi
+
+  local phys substrate suffix
+  suffix="/target/debug/fkst-framework"
+  phys="$(resolve_phys_path "$BIN")" || phys="$BIN"
+
+  if [[ "$phys" == *"$suffix" ]]; then
+    substrate="${phys%"$suffix"}"
+  else
+    substrate=""
+  fi
+  if [ -z "$substrate" ] || [ ! -d "$substrate/.git" ] || [ ! -f "$substrate/Cargo.toml" ]; then
+    echo "warning: cannot trace BIN to an fkst-substrate checkout; skipping freshness build: $BIN" >&2
+    return 0
+  fi
+
+  echo "ensuring fkst-framework is built from current source: $substrate" >&2
+  if ! cargo build --manifest-path "$substrate/Cargo.toml" -p fkst-framework 1>&2; then
+    echo "error: fkst-framework freshness build failed; refusing to continue with a potentially stale BIN" >&2
+    exit 1
+  fi
+}
+
 usage() {
-  sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 cmd_test() {
@@ -206,9 +254,9 @@ cmd_build() {
 }
 
 case "${1:-}" in
-  test) shift; resolve_bin; cmd_test "$@" ;;
-  run)  shift; resolve_bin; cmd_run "$@" ;;
-  supervise) shift; resolve_bin; cmd_supervise "$@" ;;
+  test) shift; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
+  run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
+  supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
   build) shift; cmd_build "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "unknown subcommand: $1" >&2; usage; exit 1 ;;
