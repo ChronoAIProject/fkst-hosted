@@ -2,61 +2,19 @@ local t = fkst.test
 
 local draft_body = "Thanks for opening this. I will review the details and follow up with the next concrete step."
 
-local function sh_quote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+local function nonce()
+  return tostring({}):gsub("[^%w._-]", "_")
 end
 
-local function run_cmd(cmd)
-  local result = exec_sync({ cmd = cmd, timeout = 30 })
-  t.eq(result.exit_code, 0)
-  return result
+local function runtime_root(name)
+  return "/private/tmp/fkst-packages-test/autochrono/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
 end
 
-local function make_temp_dir()
-  local result = run_cmd("mktemp -d")
-  return (result.stdout:gsub("%s+$", ""))
-end
-
-local function write_fake_codex(fakebin)
-  local codex_path = fakebin .. "/codex"
-  local script = [=[#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _line; do
-  :
-done
-if [[ -n "${FAKE_CODEX_EXIT:-}" ]]; then
-  exit "$FAKE_CODEX_EXIT"
-fi
-if [[ -n "${FAKE_CODEX_EMPTY:-}" ]]; then
-  exit 0
-fi
-printf '%s\n' "${FAKE_CODEX_BODY:?}"
-]=]
-  run_cmd("printf %s " .. sh_quote(script) .. " > " .. sh_quote(codex_path))
-  run_cmd("chmod +x " .. sh_quote(codex_path))
-end
-
-local function setup()
-  local tmp = make_temp_dir()
-  local fakebin = tmp .. "/bin"
-  local runtime = tmp .. "/runtime"
-  run_cmd("mkdir -p " .. sh_quote(fakebin) .. " " .. sh_quote(runtime))
-  write_fake_codex(fakebin)
+local function opts(name)
   return {
-    tmp = tmp,
-    fakebin = fakebin,
-    runtime = runtime,
-  }
-end
-
-local function cleanup(ctx)
-  run_cmd("rm -rf " .. sh_quote(ctx.tmp))
-end
-
-local function base_env(ctx)
-  return {
-    FKST_RUNTIME_ROOT = ctx.runtime,
-    FAKE_CODEX_BODY = draft_body,
+    env = {
+      FKST_RUNTIME_ROOT = runtime_root(name),
+    },
   }
 end
 
@@ -81,82 +39,82 @@ local function issue(extra)
   return value
 end
 
-local function run_reply(event_payload, opts)
+local function run_reply(event_payload, run_opts)
   return t.run_department("departments/reply/main.lua", {
     queue = "issue",
     payload = event_payload,
-  }, opts)
+  }, run_opts)
+end
+
+local function codex_calls()
+  local calls = {}
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("codex exec", 1, true) ~= nil then
+      table.insert(calls, call)
+    end
+  end
+  return calls
 end
 
 return {
-  test_reply_raises_once_then_cache_hit_skips = function()
-    local ctx = setup()
-    local ok, err = pcall(function()
-      local opts = {
-        cwd = ctx.tmp,
-        env = base_env(ctx),
-        path_prepend = ctx.fakebin,
-      }
+  test_reply_raises_draft_from_codex_mock = function()
+    t.mock_command("codex exec", { stdout = draft_body .. "\n", exit_code = 0 })
 
-      local first = run_reply(issue(), opts)
-      t.eq(first.exit_code, 0)
-      t.eq(#first.raises, 1)
-      t.eq(first.raises[1].queue, "reply")
-      t.eq(first.raises[1].payload.schema, "autochrono.reply.v1")
-      t.eq(first.raises[1].payload.repo, "owner/repo")
-      t.eq(first.raises[1].payload.issue_number, 42)
-      t.eq(first.raises[1].payload.body, draft_body)
-      t.eq(first.raises[1].payload.dedup_key, "autochrono:owner/repo#issue/42")
-      t.eq(first.raises[1].payload.source_ref.kind, "external")
-      t.eq(first.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
+    local result = run_reply(issue(), opts("first-reply"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "reply")
+    t.eq(result.raises[1].payload.schema, "autochrono.reply.v1")
+    t.eq(result.raises[1].payload.repo, "owner/repo")
+    t.eq(result.raises[1].payload.issue_number, 42)
+    t.eq(result.raises[1].payload.body, draft_body)
+    t.eq(result.raises[1].payload.dedup_key, "autochrono:owner/repo#issue/42")
+    t.eq(result.raises[1].payload.source_ref.kind, "external")
+    t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
 
-      local second = run_reply(issue({ updated_at = "2026-06-04T05:06:07Z" }), opts)
-      t.eq(second.exit_code, 0)
-      t.eq(#second.raises, 0)
-    end)
-    cleanup(ctx)
-    if not ok then
-      error(err)
-    end
+    local calls = codex_calls()
+    t.eq(#calls, 1)
+    t.is_true(calls[1].stdin:find("Repository: owner/repo", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("Number: 42", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("Title: Bridge issue", 1, true) ~= nil)
+  end,
+
+  test_reply_cache_hit_skips_same_issue_across_updates = function()
+    local run_opts = opts("cache-hit")
+    t.mock_command("codex exec", { stdout = draft_body, exit_code = 0 })
+
+    local first = run_reply(issue(), run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 1)
+
+    local second = run_reply(issue({ updated_at = "2026-06-04T05:06:07Z" }), run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 0)
+    t.eq(#codex_calls(), 1)
   end,
 
   test_reply_degrades_when_codex_fails = function()
-    local ctx = setup()
-    local ok, err = pcall(function()
-      local env = base_env(ctx)
-      env.FAKE_CODEX_EXIT = "7"
-      local result = run_reply(issue(), {
-        cwd = ctx.tmp,
-        env = env,
-        path_prepend = ctx.fakebin,
-      })
+    t.mock_command("codex exec", { stderr = "failed", exit_code = 7 })
 
-      t.eq(result.exit_code, 0)
-      t.eq(#result.raises, 0)
-    end)
-    cleanup(ctx)
-    if not ok then
-      error(err)
-    end
+    local result = run_reply(issue(), opts("codex-fails"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(#codex_calls(), 1)
   end,
 
   test_reply_degrades_when_codex_stdout_is_empty = function()
-    local ctx = setup()
-    local ok, err = pcall(function()
-      local env = base_env(ctx)
-      env.FAKE_CODEX_EMPTY = "1"
-      local result = run_reply(issue(), {
-        cwd = ctx.tmp,
-        env = env,
-        path_prepend = ctx.fakebin,
-      })
+    t.mock_command("codex exec", { stdout = " \n\t ", exit_code = 0 })
 
-      t.eq(result.exit_code, 0)
-      t.eq(#result.raises, 0)
-    end)
-    cleanup(ctx)
-    if not ok then
-      error(err)
-    end
+    local result = run_reply(issue(), opts("codex-empty"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(#codex_calls(), 1)
+  end,
+
+  test_reply_skips_non_open_issue = function()
+    local result = run_reply(issue({ state = "CLOSED" }), opts("closed-issue"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(#codex_calls(), 0)
   end,
 }

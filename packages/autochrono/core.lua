@@ -71,11 +71,31 @@ function M.clean_draft(stdout)
   return body
 end
 
-function M.draft_reply(issue, spawner)
-  local run = spawner or function(opts)
-    return spawn_codex_sync(opts)
+function M.build_reply_request(issue, body)
+  if type(issue) ~= "table" then
+    error("autochrono: issue must be a table")
   end
-  local result = run({
+
+  local repo = require_field(issue, "repo")
+  local issue_number = require_field(issue, "issue_number")
+  local reply_body = require_field({ body = body }, "body")
+  -- source_ref is required: the reply flows to a reliable downstream that
+  -- fails closed without it, so reject early rather than emit an
+  -- unrecoverable reply request.
+  local source_ref = require_field(issue, "source_ref")
+
+  return {
+    schema = "autochrono.reply.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = reply_body,
+    dedup_key = M.reply_dedup_key(repo, issue_number),
+    source_ref = source_ref,
+  }
+end
+
+function M.draft_reply(issue)
+  local result = spawn_codex_sync({
     prompt = M.build_prompt(issue),
     stall_window = default_stall_window,
   })

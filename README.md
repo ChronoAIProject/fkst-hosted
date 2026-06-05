@@ -62,7 +62,7 @@ scripts/run.sh build
 ## 测试约定
 
 - unit：`tests/*_test.lua` 测纯函数/逻辑，用 `fkst.test` 的 `eq` / `is_true` / `raises` / `is_nil`。
-- integration：`tests/*_test.lua` 用 `fkst.test.run_department(path, event, opts)` 测 department 端到端行为：注入事件、断言 raise，并用 `opts.env` / `path_prepend` 提供 `FKST_RUNTIME_ROOT` / 假命令。
+- integration：`tests/*_test.lua` 用 `fkst.test.run_department(path, event, opts)` 测 department 端到端行为：注入事件、断言 raise，并用 `opts.env` 提供 `FKST_RUNTIME_ROOT` 等 host facts；外部 CLI 一律用引擎 test-mode `fkst.test.mock_command` / `fkst.test.command_calls` mock 和断言，不放 fake binary 到 PATH。未 mock 的外部命令会 fail-closed。
 - 图布线与静态声明（raisers / 队列匹配）由 `fkst-framework conformance` 校验，不为静态声明写单测。
 - flat 包：`scripts/run.sh test [pkg]` 对 flat 包跑单根 `conformance + test`。
 - composed 包：`scripts/run.sh test [pkg]` 跳过单根 conformance，但仍跑该包 tests；无参全包测试收尾会跑组合 conformance。
@@ -90,7 +90,7 @@ scripts/run.sh build
 - `FKST_GITHUB_WRITE=1` 可选；未设置时只 dry-run，不调用 mutate GitHub 的 `gh` 命令。
 - `gh` auth、PATH、权限和 repo 当前 git 工作区都是 host 责任。
 
-本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试把 fake `gh` 放到 PATH 前面，并由 `fkst-framework test` 自动运行：
+本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试用 `fkst.test.mock_command` mock `gh issue list` / `gh pr list` / `gh issue view` / `gh issue comment`，并用 `fkst.test.command_calls` 断言发出的命令；不生成 fake `gh` 二进制。测试由 `fkst-framework test` 自动运行：
 
 ```sh
 scripts/run.sh test github-proxy
@@ -100,11 +100,11 @@ scripts/run.sh test github-proxy
 
 `packages/autochrono/` 是真正起草回复的 agent 公司。它是独立平包，只认识自有裸名队列和自有契约，不直接依赖 `github-proxy`。
 
-- `departments/reply/main.lua` 消费裸名 `issue`，只处理 open issue，调用 `spawn_codex_sync` 起草正文，产出裸名 `reply`。
+- `departments/reply/main.lua` 是薄 glue：消费裸名 `issue`，只处理 open issue，调用 `core.draft_reply`（内部 `spawn_codex_sync`）起草正文，再 `raise` `core.build_reply_request` 的结果，产出裸名 `reply`。
 - 输入 schema 是 `autochrono.issue.v1`，输出 schema 是 `autochrono.reply.v1`。
 - `reply_dedup_key(repo, issue_number)` 稳定为 `autochrono:<repo>#issue/<number>`，不含 `updated_at`；`replied_cache_key` 是可读相对 path。
 - 防循环靠 issue-level `with_lock` + `cache_get/cache_set`；即使 runtime cache 丢失，稳定 `dedup_key` 仍会由 `github-proxy` 评论 HTML marker 做外部 durable 幂等。
-- `draft_reply(issue, spawner)` 支持注入 fake spawner，测试不调用真 `codex`。
+- `core.draft_reply(issue)` 直接调用引擎 `spawn_codex_sync`。纯函数仍在 `core_test.lua` 覆盖，涉及 `codex exec` 的行为通过 `fkst.test.mock_command("codex exec", ...)` + `run_department` 端到端测试，不生成 fake `codex` 二进制。运行时去重持久由引擎 `with_lock` / `cache_get` / `cache_set` 承担，集成测试复用同一 `FKST_RUNTIME_ROOT` 覆盖 cache 命中。
 
 ## github-autochrono
 

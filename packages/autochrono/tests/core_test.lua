@@ -26,8 +26,10 @@ return {
   test_reply_dedup_key_is_stable_across_updates = function()
     local first = core.reply_dedup_key("owner/repo", 42)
     local second = core.reply_dedup_key("owner/repo", 42)
+    local after_update = core.reply_dedup_key(issue().repo, issue({ updated_at = "2026-06-04T05:06:07Z" }).issue_number)
     t.eq(first, "autochrono:owner/repo#issue/42")
     t.eq(first, second)
+    t.eq(first, after_update)
     t.eq(first:find("2026", 1, true), nil)
   end,
 
@@ -39,7 +41,18 @@ return {
     t.eq(core.is_eligible(issue()), true)
     t.eq(core.is_eligible(issue({ state = "CLOSED" })), false)
     t.eq(core.is_eligible(issue({ schema = "other.issue.v1" })), false)
+    t.eq(core.is_eligible({
+      schema = "autochrono.issue.v1",
+      issue_number = 42,
+      state = "OPEN",
+    }), false)
+    t.eq(core.is_eligible({
+      schema = "autochrono.issue.v1",
+      repo = "owner/repo",
+      state = "OPEN",
+    }), false)
     t.eq(core.is_eligible({}), false)
+    t.eq(core.is_eligible(nil), false)
   end,
 
   test_build_prompt_contains_issue_context = function()
@@ -50,28 +63,33 @@ return {
     t.is_true(prompt:find("Do not claim work has been completed.", 1, true) ~= nil)
   end,
 
-  test_draft_reply_uses_injected_spawner_and_cleans_stdout = function()
-    local seen_prompt = nil
-    local body = core.draft_reply(issue(), function(opts)
-      seen_prompt = opts.prompt
-      t.eq(opts.stall_window, "2m")
-      return {
-        stdout = "  Thanks for opening this. I will review the details and follow up with the next concrete step.  \n",
-        stderr = "",
-        exit_code = 0,
-      }
-    end)
-
-    t.is_true(seen_prompt:find("Bridge issue", 1, true) ~= nil)
-    t.eq(body, "Thanks for opening this. I will review the details and follow up with the next concrete step.")
+  test_clean_draft_trims_stdout_and_rejects_empty_body = function()
+    t.eq(core.clean_draft("  Draft body. \n"), "Draft body.")
+    t.is_nil(core.clean_draft(" \n\t "))
   end,
 
-  test_draft_reply_degrades_on_failure_or_empty_stdout = function()
-    t.is_nil(core.draft_reply(issue(), function(_opts)
-      return { stdout = "draft", stderr = "failed", exit_code = 1 }
-    end))
-    t.is_nil(core.draft_reply(issue(), function(_opts)
-      return { stdout = "   \n", stderr = "", exit_code = 0 }
-    end))
+  test_build_reply_request_preserves_payload_fields = function()
+    local source_ref = {
+      kind = "external",
+      ref = "owner/repo#issue/42",
+    }
+    local payload = core.build_reply_request(issue({ source_ref = source_ref }), "Draft body.")
+
+    t.eq(payload.schema, "autochrono.reply.v1")
+    t.eq(payload.repo, "owner/repo")
+    t.eq(payload.issue_number, 42)
+    t.eq(payload.body, "Draft body.")
+    t.eq(payload.dedup_key, "autochrono:owner/repo#issue/42")
+    t.is_true(payload.source_ref == source_ref)
+    t.eq(payload.source_ref.kind, "external")
+    t.eq(payload.source_ref.ref, "owner/repo#issue/42")
+  end,
+
+  test_build_reply_request_requires_source_ref = function()
+    local without_source_ref = issue()
+    without_source_ref.source_ref = nil
+    t.raises(function()
+      core.build_reply_request(without_source_ref, "Draft body.")
+    end)
   end,
 }

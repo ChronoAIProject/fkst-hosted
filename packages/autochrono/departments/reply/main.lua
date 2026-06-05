@@ -19,7 +19,6 @@ function pipeline(event)
   end
 
   local key = core.replied_cache_key(issue.repo, issue.issue_number)
-  local dedup_key = core.reply_dedup_key(issue.repo, issue.issue_number)
   with_lock(key, function()
     if cache_get(key) then
       return
@@ -30,15 +29,8 @@ function pipeline(event)
       return
     end
 
-    raise("reply", {
-      schema = "autochrono.reply.v1",
-      repo = issue.repo,
-      issue_number = issue.issue_number,
-      body = body,
-      dedup_key = dedup_key,
-      source_ref = issue.source_ref,
-    })
-    cache_set(key, dedup_key)
+    raise("reply", core.build_reply_request(issue, body))
+    cache_set(key, core.reply_dedup_key(issue.repo, issue.issue_number))
   end)
 end
 
