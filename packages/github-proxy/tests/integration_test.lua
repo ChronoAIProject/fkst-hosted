@@ -1,4 +1,5 @@
 local t = fkst.test
+local core = require("core")
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -105,6 +106,11 @@ end
 
 local function count_calls(needle)
   return #calls_matching(needle)
+end
+
+local function long_dedup(suffix, total_len)
+  local prefix = "github-devloop/issue/owner/x/42/result/"
+  return prefix .. string.rep("v", total_len - #prefix - #suffix) .. suffix
 end
 
 return {
@@ -271,7 +277,7 @@ return {
     -- The mocked `gh issue comment` does not run, so assert on the body file the
     -- department actually wrote: it must carry the reply text and the HTML
     -- marker that makes the next poll's comment idempotent.
-    local written = file.read("/tmp/fkst-github-proxy-comment-reply-42.md")
+    local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
     t.is_true(written:find("fkst reply", 1, true) ~= nil)
     t.is_true(written:find("<!-- fkst:github-proxy:comment:reply-42 -->", 1, true) ~= nil)
 
@@ -288,6 +294,78 @@ return {
     t.is_true(comment_calls[1].rendered:find("gh issue comment", 1, true) ~= nil)
     t.eq(comment_calls[1].rendered:find("github.com", 1, true), nil)
     t.eq(count_calls("gh issue view"), 2)
+  end,
+
+  test_long_comment_dedup_uses_bounded_runtime_key_and_full_marker = function()
+    local dedup_v1 = long_dedup("-v1", 430)
+    local dedup_v2 = long_dedup("-v2", 430)
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/x",
+        issue_number = 42,
+        body = "long fkst reply",
+        dedup_key = dedup_v1,
+      },
+    }
+
+    t.is_true(dedup_v1 ~= dedup_v2)
+    t.is_true(#dedup_v1 > 400)
+    t.is_true(core.comment_marker(dedup_v1) ~= core.comment_marker(dedup_v2))
+
+    mock_repo_env()
+    mock_write_env("1")
+    mock_comment_view("existing comment")
+    mock_comment_write()
+    local first = t.run_department("departments/github_comment/main.lua", event, opts("comment-long-v1", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(first.exit_code, 0)
+
+    local path = "/tmp/fkst-github-proxy-comment-owner_x-issue-42.md"
+    local written_v1 = file.read(path)
+    t.is_true(written_v1:find(core.comment_marker(dedup_v1), 1, true) ~= nil)
+
+    event.payload.dedup_key = dedup_v2
+    mock_repo_env()
+    mock_write_env("1")
+    mock_comment_view("existing comment " .. core.comment_marker(dedup_v1))
+    mock_comment_write()
+    local second = t.run_department("departments/github_comment/main.lua", event, opts("comment-long-v2", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(second.exit_code, 0)
+
+    local written_v2 = file.read(path)
+    t.is_true(written_v2:find(core.comment_marker(dedup_v2), 1, true) ~= nil)
+    t.eq(count_calls("gh issue comment"), 2)
+  end,
+
+  test_near_max_comment_dedup_boundary_writes = function()
+    local dedup = long_dedup("-max", 512)
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/x",
+        issue_number = 42,
+        body = "max dedup reply",
+        dedup_key = dedup,
+      },
+    }
+
+    t.eq(#dedup, 512)
+    mock_repo_env()
+    mock_write_env("1")
+    mock_comment_view("existing comment")
+    mock_comment_write()
+    local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-long-max", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+
+    local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
+    t.is_true(written:find(core.comment_marker(dedup), 1, true) ~= nil)
+    t.eq(count_calls("gh issue comment"), 1)
   end,
 
   test_comment_request_uses_payload_repo = function()
@@ -408,5 +486,32 @@ return {
     local again = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
     t.eq(again.exit_code, 0)
     t.eq(count_calls("gh issue edit"), 2)
+  end,
+
+  test_long_label_dedup_uses_bounded_lock_key = function()
+    local event = {
+      queue = "github_issue_label_request",
+      payload = {
+        schema = "github-proxy.label.v1",
+        repo = "owner/x",
+        issue_number = 42,
+        add_labels = { "fkst-dev:ready" },
+        remove_labels = {},
+        dedup_key = long_dedup("-label", 430),
+        source_ref = {
+          kind = "external",
+          ref = "owner/x#issue/42",
+        },
+      },
+    }
+
+    t.is_true(#event.payload.dedup_key > 400)
+    mock_write_env("1")
+    mock_label_write()
+    local result = t.run_department("departments/github_issue_label/main.lua", event, opts("label-long-dedup", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue edit"), 1)
   end,
 }

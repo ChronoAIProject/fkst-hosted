@@ -7,16 +7,31 @@ M.spec = {
   stall_window = "30s",
 }
 
-local function temp_body_file(payload)
-  local key = tostring(payload.dedup_key or payload.issue_number or now())
-  local safe = key:gsub("[^%w._-]", "_")
-  return "/tmp/fkst-github-proxy-comment-" .. safe .. ".md"
+local MAX_RUNTIME_ID_LEN = 180
+
+local function safe_segment(value)
+  local safe = tostring(value or ""):gsub("[^%w._-]", "_")
+  safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
+  if safe == "" then
+    return "empty"
+  end
+  return safe
 end
 
-local function lock_name(repo, issue_number, dedup_key)
-  local safe_repo = tostring(repo):gsub("[^%w._-]", "_")
-  local safe_key = tostring(dedup_key):gsub("[^%w._-]", "_")
-  return "github-proxy-comment-" .. safe_repo .. "-" .. tostring(issue_number) .. "-" .. safe_key
+local function runtime_identity(repo, issue_number)
+  local id = "comment-" .. safe_segment(repo) .. "-issue-" .. safe_segment(issue_number)
+  if #id > MAX_RUNTIME_ID_LEN then
+    return id:sub(1, MAX_RUNTIME_ID_LEN)
+  end
+  return id
+end
+
+local function temp_body_file(repo, issue_number)
+  return "/tmp/fkst-github-proxy-" .. runtime_identity(repo, issue_number) .. ".md"
+end
+
+local function lock_name(repo, issue_number)
+  return "github-proxy/" .. runtime_identity(repo, issue_number)
 end
 
 function pipeline(event)
@@ -39,7 +54,7 @@ function pipeline(event)
     return
   end
 
-  with_lock(lock_name(repo, payload.issue_number, payload.dedup_key), function()
+  with_lock(lock_name(repo, payload.issue_number), function()
     local view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
       -- A re-derive command failure must NOT silent-ack a reliable comment request; error so
@@ -52,7 +67,7 @@ function pipeline(event)
     end
 
     local body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
-    local path = temp_body_file(payload)
+    local path = temp_body_file(repo, payload.issue_number)
     file.write(path, body)
     local comment = exec_sync({ cmd = core.gh_issue_comment_cmd(repo, payload.issue_number, path), timeout = 30 })
     if comment.exit_code ~= 0 then

@@ -16,9 +16,18 @@ local function sanitize_segment(value)
   return safe
 end
 
-local function label_lock_key(repo, issue_number, dedup_key)
-  return "github-proxy/label-lock/" .. sanitize_segment(repo) .. "/issue/"
-    .. sanitize_segment(issue_number) .. "/" .. sanitize_segment(dedup_key)
+local MAX_RUNTIME_ID_LEN = 180
+
+local function bounded_runtime_identity(repo, issue_number)
+  local id = sanitize_segment(repo) .. "/issue/" .. sanitize_segment(issue_number)
+  if #id > MAX_RUNTIME_ID_LEN then
+    return id:sub(1, MAX_RUNTIME_ID_LEN)
+  end
+  return id
+end
+
+local function label_lock_key(repo, issue_number)
+  return "github-proxy/label-lock/" .. bounded_runtime_identity(repo, issue_number)
 end
 
 local function normalize_labels(value)
@@ -62,7 +71,7 @@ function pipeline(event)
     return
   end
 
-  with_lock(label_lock_key(repo, payload.issue_number, payload.dedup_key), function()
+  with_lock(label_lock_key(repo, payload.issue_number), function()
     if core.read_env("FKST_GITHUB_WRITE") ~= "1" then
       log.info("github-proxy dry-run: would set labels on "
         .. tostring(repo) .. "#" .. tostring(payload.issue_number) .. " "

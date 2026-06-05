@@ -1,11 +1,16 @@
 local M = {}
 
 local max_key_len = 200
+local max_dedup_len = 512
 local max_title_len = 240
 local max_body_len = 12000
+local max_comments_len = 12000
+local max_meta_reason_len = 2000
 local max_repo_key_len = 100
 local max_issue_key_len = 30
 local max_update_key_len = 50
+local action_label = "⟦FKST:ACTION⟧"
+local reason_label = "⟦FKST:REASON⟧"
 
 local enabled_label = "fkst-dev:enabled"
 local thinking_label = "fkst-dev:thinking"
@@ -25,8 +30,16 @@ local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+local function trim(value)
+  return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
 local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
+end
+
+local function is_meta_action(value)
+  return value == "implement" or value == "split" or value == "block"
 end
 
 local function is_path_safe_key(value, limit)
@@ -59,7 +72,11 @@ local function has_bounded_source_ref(source_ref)
     and is_bounded_string(source_ref.ref, max_key_len)
 end
 
-function M.sanitize_key(value)
+function M.sanitize_key(value, limit)
+  local max_len = max_key_len
+  if limit ~= nil then
+    max_len = limit
+  end
   local sanitized = tostring(value or ""):gsub("[^%w%._%-%/#]", "-")
   sanitized = sanitized:gsub("/+", "/")
   sanitized = sanitized:gsub("^/+", ""):gsub("/+$", "")
@@ -69,21 +86,30 @@ function M.sanitize_key(value)
 
   local segments = {}
   for segment in sanitized:gmatch("[^/]+") do
-    if segment == "." or segment == ".." then
-      segment = "-"
+    local safe_segment = segment
+    if safe_segment == "." or safe_segment == ".." then
+      safe_segment = "-"
     end
-    table.insert(segments, segment)
+    table.insert(segments, safe_segment)
   end
 
   sanitized = table.concat(segments, "/")
-  if #sanitized > max_key_len then
-    sanitized = sanitized:sub(1, max_key_len)
+  if max_len ~= false and #sanitized > max_len then
+    sanitized = sanitized:sub(1, max_len)
     sanitized = sanitized:gsub("/+$", "")
   end
   if sanitized == "" then
     return "empty"
   end
   return sanitized
+end
+
+local function dedup_key(parts)
+  local key = M.sanitize_key(table.concat(parts, "/"), false)
+  if not is_path_safe_key(key, max_dedup_len) then
+    error("github-devloop: invalid dedup_key")
+  end
+  return key
 end
 
 function M.safe_repo(repo)
@@ -154,7 +180,7 @@ function M.is_safe_proposal_ref(proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
-  if not is_path_safe_key(dedup_key, max_key_len) then
+  if not is_path_safe_key(dedup_key, max_dedup_len) then
     return false
   end
 
@@ -169,12 +195,12 @@ function M.is_safe_consensus_result_ref(proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
-  if not is_bounded_string(dedup_key, max_key_len) then
+  if not is_bounded_string(dedup_key, max_dedup_len) then
     return false
   end
 
   local inner_dedup_key = dedup_key:match("^consensus:(.+)$") or dedup_key
-  if not is_path_safe_key(inner_dedup_key, max_key_len) then
+  if not is_path_safe_key(inner_dedup_key, max_dedup_len) then
     return false
   end
 
@@ -223,6 +249,14 @@ function M.loop_lock_key(proposal_id)
   return "github-devloop/loop/" .. M.safe_repo(repo) .. "/issue/" .. M.safe_issue(issue_number)
 end
 
+function M.meta_lock_key(proposal_id)
+  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  if repo == nil then
+    return nil
+  end
+  return "github-devloop/meta/" .. M.safe_repo(repo) .. "/issue/" .. M.safe_issue(issue_number)
+end
+
 function M.bounded_body(value)
   local text = tostring(value or "")
   if text == "" then
@@ -236,6 +270,51 @@ end
 
 function M.max_body_len()
   return max_body_len
+end
+
+function M.render_template(template, vars)
+  if type(template) ~= "string" then
+    error("github-devloop: template must be a string")
+  end
+  if type(vars) ~= "table" then
+    error("github-devloop: template vars must be a table")
+  end
+
+  return (template:gsub("{{([%w_]+)}}", function(name)
+    local value = vars[name]
+    if value == nil then
+      error("github-devloop: missing template var " .. name)
+    end
+    return tostring(value)
+  end))
+end
+
+function M.neutralize_untrusted_prompt_text(text)
+  local value = tostring(text or "")
+
+  local function neutralize_line(line)
+    if line:match("^%s*" .. action_label) ~= nil
+      or line:match("^%s*" .. reason_label) ~= nil then
+      return "> " .. line
+    end
+    return line
+  end
+
+  local output = {}
+  local start = 1
+  while true do
+    local newline = value:find("\n", start, true)
+    if newline == nil then
+      table.insert(output, neutralize_line(value:sub(start)))
+      break
+    end
+
+    table.insert(output, neutralize_line(value:sub(start, newline - 1)))
+    table.insert(output, "\n")
+    start = newline + 1
+  end
+
+  return table.concat(output)
 end
 
 function M.normalize_source_ref(source_ref)
@@ -270,6 +349,12 @@ function M.gh_issue_view_loop_cmd(repo, issue_number)
   return "gh issue view " .. shell_single_quote(issue_number)
     .. " --repo " .. shell_single_quote(repo)
     .. " --json title,body,updatedAt,labels,comments,state"
+end
+
+function M.gh_issue_view_meta_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,body,labels,comments"
 end
 
 function M.parse_issue_view_body(stdout)
@@ -324,6 +409,17 @@ function M.parse_issue_view_loop(stdout)
     body = M.bounded_body(decoded.body),
     updated_at = decoded.updatedAt or decoded.updated_at,
     state = decoded.state,
+    labels = result.labels,
+    comments = result.comments,
+  }
+end
+
+function M.parse_issue_view_meta(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_result(stdout)
+  return {
+    title = tostring(decoded.title or ""),
+    body = M.bounded_body(decoded.body),
     labels = result.labels,
     comments = result.comments,
   }
@@ -390,6 +486,16 @@ end
 function M.stuck_marker(proposal_id, n, dedup_key)
   return '<!-- fkst:github-devloop:stuck:v1 proposal="' .. tostring(proposal_id)
     .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.meta_marker(proposal_id, action, dedup_key)
+  if not is_meta_action(action) then
+    error("github-devloop: invalid meta action")
+  end
+  return '<!-- fkst:github-devloop:meta:v1 proposal="' .. tostring(proposal_id)
+    .. '" action="' .. action
     .. '" dedup="' .. tostring(dedup_key)
     .. '" -->'
 end
@@ -484,9 +590,112 @@ function M.loop_count_from_github_markers(comments, proposal_id)
   return max_n
 end
 
+function M.has_meta_marker(comments, proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:meta:v1.-%-%->"
+  for _, comment in ipairs(comments) do
+    for marker in tostring(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      if marker_proposal == proposal_id and marker_dedup == tostring(dedup_key) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function M.parse_loop_round_from_dedup(dedup_key)
   local n = tostring(dedup_key or ""):match("/loop/(%d+)$")
   return tonumber(n) or 0
+end
+
+function M.build_devloop_stuck_payload(unresolved, n)
+  return {
+    schema = "github-devloop.stuck.v1",
+    proposal_id = unresolved.proposal_id,
+    dedup_key = dedup_key({
+      tostring(unresolved.proposal_id),
+      "stuck",
+      tostring(n),
+      tostring(unresolved.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(unresolved.source_ref),
+  }
+end
+
+function M.build_meta_prompt(proposal_id, current)
+  local prompt = require("prompts.meta")
+  local comments = table.concat(current.comments or {}, "\n\n--- comment ---\n\n")
+  if #comments > max_comments_len then
+    comments = comments:sub(1, max_comments_len)
+  end
+
+  return M.render_template(prompt.template, {
+    proposal_id = M.neutralize_untrusted_prompt_text(proposal_id),
+    title = M.neutralize_untrusted_prompt_text(current.title),
+    body = M.neutralize_untrusted_prompt_text(current.body),
+    comments = M.neutralize_untrusted_prompt_text(comments),
+  })
+end
+
+function M.parse_meta_action(stdout)
+  local text = tostring(stdout or "")
+
+  local action = nil
+  local action_count = 0
+  local action_index = nil
+  local reason = nil
+  local reason_count = 0
+  local reason_index = nil
+  local index = 0
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    index = index + 1
+
+    -- Any line that STARTS with a sentinel must be a clean, well-formed line; a malformed
+    -- sentinel-start line (extra words / junk / non-whitelisted / empty) fails the whole parse
+    -- closed, so a valid pair followed by a malformed sentinel cannot be silently accepted.
+    if line:match("^%s*" .. action_label) ~= nil then
+      local token = line:match("^%s*" .. action_label .. "%s*(%a+)%s*$")
+      if token == nil or not is_meta_action(token:lower()) then
+        return nil
+      end
+      action = token:lower()
+      action_count = action_count + 1
+      action_index = index
+    end
+
+    if line:match("^%s*" .. reason_label) ~= nil then
+      local captured = line:match("^%s*" .. reason_label .. "%s*(.+)$")
+      if captured == nil or trim(captured) == "" then
+        return nil
+      end
+      reason = trim(captured)
+      reason_count = reason_count + 1
+      reason_index = index
+    end
+  end
+
+  if action_count ~= 1 or reason_count ~= 1 then
+    return nil
+  end
+  if action == nil or reason == nil then
+    return nil
+  end
+  if reason_index ~= action_index + 1 then
+    return nil
+  end
+  if not is_bounded_string(reason, max_meta_reason_len) then
+    return nil
+  end
+
+  return {
+    action = action,
+    reason = reason,
+  }
 end
 
 function M.build_proposal(issue, body)
@@ -646,6 +855,58 @@ function M.build_stuck_comment_request(repo, issue_number, unresolved, n)
   }
 end
 
+function M.build_meta_label_request(repo, issue_number, stuck, action)
+  local add_label = action == "implement" and ready_label or blocked_label
+  local remove_labels = { stuck_label, thinking_label }
+  if action == "implement" then
+    table.insert(remove_labels, blocked_label)
+  else
+    table.insert(remove_labels, ready_label)
+  end
+
+  return M.build_label_request(
+    repo,
+    issue_number,
+    { add_label },
+    remove_labels,
+    -- stuck.dedup_key already encodes proposal_id + version; do NOT also prefix proposal_id (that
+    -- double-counts it and can push the meta dedup over max_dedup_len). The version-bearing
+    -- stuck.dedup_key alone keeps it unique across attempts.
+    dedup_key({
+      "meta",
+      "label",
+      tostring(action),
+      tostring(stuck.dedup_key),
+    }),
+    stuck.source_ref
+  )
+end
+
+function M.build_meta_comment_request(repo, issue_number, stuck, action, reason)
+  local marker = M.meta_marker(stuck.proposal_id, action, stuck.dedup_key)
+  local heading = "github-devloop meta action: " .. tostring(action)
+  if action == "split" then
+    heading = "github-devloop meta action: split\n\nSuggested split:\n" .. tostring(reason)
+  else
+    heading = heading .. "\n\nReason:\n" .. tostring(reason)
+  end
+
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = heading .. "\n\n" .. marker,
+    -- stuck.dedup_key already encodes proposal_id + version; do not also prefix proposal_id.
+    dedup_key = dedup_key({
+      "meta",
+      "comment",
+      tostring(action),
+      tostring(stuck.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(stuck.source_ref),
+  }
+end
+
 function M.is_supported_issue(payload)
   return type(payload) == "table"
     and payload.schema == "github-proxy.v1"
@@ -674,6 +935,13 @@ function M.is_supported_unresolved(payload)
     and payload.body == nil
     and payload.angle_results == nil
     and payload.decision == nil
+    and has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_stuck(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.stuck.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
     and has_bounded_source_ref(payload.source_ref)
 end
 

@@ -5,6 +5,7 @@ local M = {}
 M.spec = {
   consumes = { "consensus.consensus_unresolved" },
   produces = {
+    "devloop_stuck",
     "consensus.proposal",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
@@ -57,11 +58,17 @@ function pipeline(event)
     local marker_n = core.loop_count_from_github_markers(current.comments, unresolved.proposal_id)
     local current_n = math.max(event_n, marker_n)
     if current_n >= budget then
+      local raised_stuck = false
       if not core.has_stuck_marker(current.comments, unresolved.proposal_id, budget, unresolved.dedup_key) then
         raise("github-proxy.github_issue_comment_request", core.build_stuck_comment_request(repo, issue_number, unresolved, budget))
+        raised_stuck = true
       end
       if not core.has_stuck_label(current.labels) or core.has_thinking_label(current.labels) then
         raise("github-proxy.github_issue_label_request", core.build_stuck_label_request(repo, issue_number, unresolved, budget))
+        raised_stuck = true
+      end
+      if raised_stuck then
+        raise("devloop_stuck", core.build_devloop_stuck_payload(unresolved, current_n))
       end
       return
     end
@@ -74,6 +81,7 @@ function pipeline(event)
     if next_n >= budget then
       raise("github-proxy.github_issue_comment_request", core.build_stuck_comment_request(repo, issue_number, unresolved, next_n))
       raise("github-proxy.github_issue_label_request", core.build_stuck_label_request(repo, issue_number, unresolved, next_n))
+      raise("devloop_stuck", core.build_devloop_stuck_payload(unresolved, next_n))
       return
     end
 
