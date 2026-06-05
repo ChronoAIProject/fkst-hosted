@@ -6,6 +6,7 @@ local M = {}
 M.spec = {
   consumes = { "consensus.consensus_reached" },
   produces = { "reply" },
+  fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
 }
 

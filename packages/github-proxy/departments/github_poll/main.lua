@@ -41,6 +41,7 @@ function pipeline(_event)
               title = entity.title,
               url = entity.url,
               state = entity.state,
+              labels = entity.labels,
               updated_at = entity.updated_at,
               dedup_key = dedup_key,
               source = "gh",

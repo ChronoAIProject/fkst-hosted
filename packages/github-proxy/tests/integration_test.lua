@@ -6,7 +6,7 @@ end
 
 local function issue_list_json(updated_at, state)
   return string.format(
-    '[{"number":42,"title":"Bridge issue","url":"https://github.example/owner/x/issues/42","updatedAt":"%s","state":"%s"}]\n',
+    '[{"number":42,"title":"Bridge issue","url":"https://github.example/owner/x/issues/42","updatedAt":"%s","state":"%s","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]\n',
     updated_at or "2026-06-03T01:02:03Z",
     state or "OPEN"
   )
@@ -14,7 +14,7 @@ end
 
 local function pr_list_json(updated_at, state)
   return string.format(
-    '[{"number":7,"title":"Bridge PR","url":"https://github.example/owner/x/pull/7","updatedAt":"%s","state":"%s"}]\n',
+    '[{"number":7,"title":"Bridge PR","url":"https://github.example/owner/x/pull/7","updatedAt":"%s","state":"%s","labels":[{"name":"review"}]}]\n',
     updated_at or "2026-06-03T02:03:04Z",
     state or "OPEN"
   )
@@ -77,8 +77,20 @@ local function mock_comment_view(comments)
   })
 end
 
+local function mock_comment_view_failure()
+  t.mock_command("gh issue view", {
+    stdout = "",
+    stderr = "forced comment view failure",
+    exit_code = 1,
+  })
+end
+
 local function mock_comment_write()
   t.mock_command("gh issue comment", { stdout = "", exit_code = 0 })
+end
+
+local function mock_label_write()
+  t.mock_command("gh issue edit", { stdout = "", exit_code = 0 })
 end
 
 local function calls_matching(needle)
@@ -109,6 +121,8 @@ return {
     t.eq(first.raises[1].payload.number, 42)
     t.eq(first.raises[1].payload.title, "Bridge issue")
     t.eq(first.raises[1].payload.updated_at, "2026-06-03T01:02:03Z")
+    t.eq(first.raises[1].payload.labels[1], "fkst-dev:enabled")
+    t.eq(first.raises[1].payload.labels[2], "bug")
     t.eq(first.raises[1].payload.dedup_key, "owner/x#issue#42@2026-06-03T01:02:03Z")
     t.eq(first.raises[1].payload.source_ref.kind, "external")
     t.eq(first.raises[1].payload.source_ref.ref, "owner/x#issue/42")
@@ -119,6 +133,7 @@ return {
     t.eq(first.raises[2].payload.title, "Bridge PR")
     t.eq(first.raises[2].payload.url, "https://github.example/owner/x/pull/7")
     t.eq(first.raises[2].payload.state, "OPEN")
+    t.eq(first.raises[2].payload.labels[1], "review")
     t.eq(first.raises[2].payload.updated_at, "2026-06-03T02:03:04Z")
     t.eq(first.raises[2].payload.dedup_key, "owner/x#pr#7@2026-06-03T02:03:04Z")
     t.eq(first.raises[2].payload.source_ref.kind, "external")
@@ -231,6 +246,7 @@ return {
     local event = {
       queue = "github_issue_comment_request",
       payload = {
+        repo = "owner/x",
         issue_number = 42,
         body = "fkst reply",
         dedup_key = "reply-42",
@@ -272,5 +288,125 @@ return {
     t.is_true(comment_calls[1].rendered:find("gh issue comment", 1, true) ~= nil)
     t.eq(comment_calls[1].rendered:find("github.com", 1, true), nil)
     t.eq(count_calls("gh issue view"), 2)
+  end,
+
+  test_comment_request_uses_payload_repo = function()
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/payload",
+        issue_number = 42,
+        body = "payload repo reply",
+        dedup_key = "payload-repo-reply",
+      },
+    }
+
+    mock_repo_env("owner/env")
+    mock_write_env("1")
+    mock_comment_view("existing comment")
+    mock_comment_write()
+    local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-payload-repo", {
+      FKST_GITHUB_REPO = "owner/env",
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+
+    local view_calls = calls_matching("gh issue view")
+    t.eq(#view_calls, 1)
+    t.is_true(view_calls[1].rendered:find("--repo 'owner/payload'", 1, true) ~= nil)
+    local comment_calls = calls_matching("gh issue comment")
+    t.eq(#comment_calls, 1)
+    t.is_true(comment_calls[1].rendered:find("--repo 'owner/payload'", 1, true) ~= nil)
+  end,
+
+  test_comment_real_write_failure_errors_for_retry = function()
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/x",
+        issue_number = 42,
+        body = "fkst reply",
+        dedup_key = "reply-failure",
+      },
+    }
+
+    mock_repo_env()
+    mock_write_env("1")
+    mock_comment_view("existing comment")
+    t.mock_command("gh issue comment", {
+      stdout = "",
+      stderr = "forced comment failure",
+      exit_code = 1,
+    })
+
+    local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-write-fails", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("gh issue comment"), 1)
+  end,
+
+  test_comment_real_write_view_failure_errors_for_retry = function()
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/x",
+        issue_number = 42,
+        body = "fkst reply",
+        dedup_key = "reply-view-failure",
+      },
+    }
+
+    mock_repo_env()
+    mock_write_env("1")
+    mock_comment_view_failure()
+
+    local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-view-fails", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("gh issue view"), 1)
+    t.eq(count_calls("gh issue comment"), 0)
+  end,
+
+  test_label_request_dry_run_write_and_rewrite = function()
+    local event = {
+      queue = "github_issue_label_request",
+      payload = {
+        schema = "github-proxy.label.v1",
+        repo = "owner/x",
+        issue_number = 42,
+        add_labels = { "fkst-dev:ready" },
+        remove_labels = { "fkst-dev:thinking" },
+        dedup_key = "github-devloop/issue/owner/x/42/result",
+        source_ref = {
+          kind = "external",
+          ref = "owner/x#issue/42",
+        },
+      },
+    }
+
+    mock_write_env("")
+    local dry = t.run_department("departments/github_issue_label/main.lua", event, opts("label-dry-run"))
+    t.eq(dry.exit_code, 0)
+    t.eq(count_calls("gh issue edit"), 0)
+
+    local write_opts = opts("label-write", {
+      FKST_GITHUB_WRITE = "1",
+    })
+    mock_write_env("1")
+    mock_label_write()
+    local write = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
+    t.eq(write.exit_code, 0)
+    t.eq(count_calls("gh issue edit"), 1)
+    local edit_calls = calls_matching("gh issue edit")
+    t.is_true(edit_calls[1].rendered:find("--add-label 'fkst-dev:ready'", 1, true) ~= nil)
+    t.is_true(edit_calls[1].rendered:find("--remove-label 'fkst-dev:thinking'", 1, true) ~= nil)
+
+    mock_write_env("1")
+    mock_label_write()
+    local again = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
+    t.eq(again.exit_code, 0)
+    t.eq(count_calls("gh issue edit"), 2)
   end,
 }

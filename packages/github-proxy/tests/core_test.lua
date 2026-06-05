@@ -36,12 +36,22 @@ return {
   end,
 
   test_parse_entity_list = function()
-    local entities = core.parse_entity_list('[{"number":7,"title":"Fix \\"x\\"","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN"}]')
+    local entities = core.parse_entity_list('[{"number":7,"title":"Fix \\"x\\"","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]')
     t.eq(#entities, 1)
     t.eq(entities[1].number, 7)
     t.eq(entities[1].title, 'Fix "x"')
     t.eq(entities[1].updated_at, "2026-06-03T00:00:00Z")
     t.eq(entities[1].state, "OPEN")
+    t.eq(#entities[1].labels, 2)
+    t.eq(entities[1].labels[1], "fkst-dev:enabled")
+    t.eq(entities[1].labels[2], "bug")
+  end,
+
+  test_parse_entity_list_accepts_string_labels = function()
+    local entities = core.parse_entity_list('[{"number":7,"title":"Fix","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN","labels":["one","two"]}]')
+    t.eq(#entities[1].labels, 2)
+    t.eq(entities[1].labels[1], "one")
+    t.eq(entities[1].labels[2], "two")
   end,
 
   test_parse_entity_list_empty_array = function()
@@ -59,11 +69,11 @@ return {
   test_gh_commands_are_quoted = function()
     t.eq(
       core.gh_issue_list_cmd("owner/repo"),
-      "gh issue list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state"
+      "gh issue list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state,labels"
     )
     t.eq(
       core.gh_pr_list_cmd("owner/repo"),
-      "gh pr list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state"
+      "gh pr list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state,labels"
     )
     t.eq(
       core.gh_issue_view_comments_cmd("owner/repo", 3),
@@ -72,6 +82,10 @@ return {
     t.eq(
       core.gh_issue_comment_cmd("owner/repo", 3, "/tmp/body's.md"),
       "gh issue comment '3' --repo 'owner/repo' --body-file '/tmp/body'\\''s.md'"
+    )
+    t.eq(
+      core.gh_issue_edit_labels_cmd("owner/repo", 3, { "fkst-dev:ready" }, { "fkst-dev:thinking", "needs'user" }),
+      "gh issue edit '3' --repo 'owner/repo' --add-label 'fkst-dev:ready' --remove-label 'fkst-dev:thinking' --remove-label 'needs'\\''user'"
     )
   end,
 }

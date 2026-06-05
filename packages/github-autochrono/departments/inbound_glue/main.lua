@@ -5,6 +5,7 @@ local M = {}
 M.spec = {
   consumes = { "github-proxy.github_entity_changed" },
   produces = { "autochrono.issue" },
+  fanout = { "github-proxy.github_entity_changed" },
   stall_window = "30s",
 }
 

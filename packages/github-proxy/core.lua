@@ -76,12 +76,21 @@ function M.parse_entity_list(gh_json_stdout)
   local decoded = json.decode(gh_json_stdout or "[]")
   local entities = {}
   for _, item in ipairs(decoded) do
+    local labels = {}
+    for _, label in ipairs(item.labels or {}) do
+      if type(label) == "table" and label.name ~= nil then
+        table.insert(labels, tostring(label.name))
+      elseif type(label) == "string" then
+        table.insert(labels, label)
+      end
+    end
     table.insert(entities, {
       number = item.number,
       title = item.title,
       url = item.url,
       updated_at = item.updatedAt or item.updated_at,
       state = item.state,
+      labels = labels,
     })
   end
   return entities
@@ -92,11 +101,11 @@ function M.parse_issue_list(gh_json_stdout)
 end
 
 function M.gh_issue_list_cmd(repo)
-  return "gh issue list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state"
+  return "gh issue list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state,labels"
 end
 
 function M.gh_pr_list_cmd(repo)
-  return "gh pr list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state"
+  return "gh pr list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state,labels"
 end
 
 function M.gh_issue_view_comments_cmd(repo, issue_number)
@@ -109,6 +118,18 @@ function M.gh_issue_comment_cmd(repo, issue_number, body_file)
   return "gh issue comment " .. shell_single_quote(issue_number)
     .. " --repo " .. shell_single_quote(repo)
     .. " --body-file " .. shell_single_quote(body_file)
+end
+
+function M.gh_issue_edit_labels_cmd(repo, issue_number, add_labels, remove_labels)
+  local cmd = "gh issue edit " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+  for _, label in ipairs(add_labels or {}) do
+    cmd = cmd .. " --add-label " .. shell_single_quote(label)
+  end
+  for _, label in ipairs(remove_labels or {}) do
+    cmd = cmd .. " --remove-label " .. shell_single_quote(label)
+  end
+  return cmd
 end
 
 return M

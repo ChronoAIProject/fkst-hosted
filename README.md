@@ -21,7 +21,7 @@ fkst-framework run <department-main.lua> \
 包库里有两类 package：
 
 - **flat 平包**：自洽、自有裸名队列、0 外部 package namespace 引用，可单根 `conformance + test`。当前 flat 包有 `github-proxy` 与 `consensus`。
-- **composed 包**：作为一等包放在 `packages/<name>/`，用于组合/适配兄弟包，department 可引用 `<pkg>.<queue>`；必须用 `composed.deps` 声明所组合的兄弟包，并通过组合 conformance 校验。当前 composed 包有 `autochrono` 与 `github-autochrono`。
+- **composed 包**：作为一等包放在 `packages/<name>/`，用于组合/适配兄弟包，department 可引用 `<pkg>.<queue>`；必须用 `composed.deps` 声明所组合的兄弟包，并通过组合 conformance 校验。当前 composed 包有 `autochrono`、`github-autochrono` 与 `github-devloop`。
 
 引擎按 package-root 目录 basename 建命名空间。flat 包内队列写裸名；composed 包的 glue 队列按 `<pkg>.<queue>` 引用兄弟包。`composed.deps` 只是本仓测试组合的最小约定，不是版本解析、部署依赖或 override manifest。
 
@@ -74,8 +74,8 @@ scripts/run.sh build
 
 `packages/github-proxy/` 是首个官方公司：GitHub ↔ fkst 事件桥，覆盖 issue 与 PR。
 
-- 入站：`raisers/github_poll.lua` 每 5 分钟产生 `github_poll_tick`；`departments/github_poll/main.lua` 调用 host PATH 上的 `gh issue list --state all` 和 `gh pr list --state all`，把 GitHub issue / PR 转成统一的 `github_entity_changed`，因此 close / merge 等最终状态转换也会浮出。
-- 出站：`departments/github_comment/main.lua` 消费 host 注入的 `github_issue_comment_request`，默认 dry-run；只有 `FKST_GITHUB_WRITE=1` 时才会调用 `gh issue comment` 写回 GitHub。
+- 入站：`raisers/github_poll.lua` 每 5 分钟产生 `github_poll_tick`；`departments/github_poll/main.lua` 调用 host PATH 上的 `gh issue list --state all` 和 `gh pr list --state all`，把 GitHub issue / PR 转成统一的 `github_entity_changed`，因此 close / merge 等最终状态转换也会浮出。事件包含 labels 快照，形如 `labels = {"fkst-dev:enabled", ...}`。
+- 出站：`departments/github_comment/main.lua` 消费 host 注入的 `github_issue_comment_request`；`departments/github_issue_label/main.lua` 消费 `github_issue_label_request` 并调用 `gh issue edit --add-label/--remove-label`。两者默认 dry-run；只有 `FKST_GITHUB_WRITE=1` 时才会写回 GitHub。
 - 入站缓存：每个实体用可读路径 key `github-proxy/<type>/<repo>/<num>` 读写引擎 `cache_get` / `cache_set`，例如 `github-proxy/issue/owner/repo/42`。缓存值只保存最新 `updated_at` 并覆盖写入，因此不会积累 marker。
 - 变更检测：poll 到的新 `updated_at` 与缓存不同就先 raise `github_entity_changed`，再 `cache_set`。事件包含 `schema`、`type`（`issue` 或 `pr`）、`repo`、`number`、`title`、`url`、`state`、`updated_at`、`dedup_key`、`source`，以及 `source_ref`（`{kind="external", ref="<repo>#<type>/<number>"}`）。如果 raise 后、写缓存前崩溃，下次 tick 会再次 raise 同一个 `dedup_key`；下游按 `dedup_key` 幂等。
 - 对齐 substrate 的持久投递引擎：`source_ref` 是稳定的实体指针，可靠消费者据此**回源 derive 当前实体**（如 `gh issue view`）而非信任可能过期的 payload；事件被路由到可靠订阅时引擎也要求带它。`payload` 里的实体字段是 best-effort 快照、便于轻量消费。真实运行（`fkst-framework supervise`）需配 `FKST_DURABLE_ROOT`（见 `env.example`）。
@@ -90,7 +90,7 @@ scripts/run.sh build
 - `FKST_GITHUB_WRITE=1` 可选；未设置时只 dry-run，不调用 mutate GitHub 的 `gh` 命令。
 - `gh` auth、PATH、权限和 repo 当前 git 工作区都是 host 责任。
 
-本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试用 `fkst.test.mock_command` mock `gh issue list` / `gh pr list` / `gh issue view` / `gh issue comment`，并用 `fkst.test.command_calls` 断言发出的命令；不生成 fake `gh` 二进制。测试由 `fkst-framework test` 自动运行：
+本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试用 `fkst.test.mock_command` mock `gh issue list` / `gh pr list` / `gh issue view` / `gh issue comment` / `gh issue edit`，并用 `fkst.test.command_calls` 断言发出的命令；不生成 fake `gh` 二进制。测试由 `fkst-framework test` 自动运行：
 
 ```sh
 scripts/run.sh test github-proxy
@@ -140,3 +140,9 @@ fkst-framework conformance \
   --package-root /Users/auric/fkst-packages/packages/autochrono \
   --package-root /Users/auric/fkst-packages/packages/consensus
 ```
+
+## github-devloop
+
+`packages/github-devloop/` 是组合 `github-proxy` + `consensus` 的 composed 包。Phase 1a 只做 decision recorder：带 `fkst-dev:enabled` 且没有 `fkst-dev:thinking|ready|blocked` 的 GitHub issue 被回源读取 body，映射成 `consensus.proposal`，并请求 `github-proxy` 加 `fkst-dev:thinking`；当 `consensus.consensus_reached` 返回 `approve` / `reject` 时，请求把 issue 改成 `fkst-dev:ready` / `fkst-dev:blocked`，并发一条带 `fkst:github-devloop:result:v1` HTML marker 的评论作为外部 durable 记录。
+
+它不实现 no-consensus loop/stuck，不直接写 GitHub；所有 label/comment 写入都经 `github-proxy` 的 dry-run-by-default 出站队列。`github-devloop/composed.deps` 声明它需要把 `github-proxy` 与 `consensus` 一起加载做组合 conformance。
