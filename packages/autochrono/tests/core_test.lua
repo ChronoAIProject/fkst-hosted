@@ -48,6 +48,7 @@ return {
     t.eq(id, "autochrono/issue/owner/repo/42")
     t.eq(repo, "owner/repo")
     t.eq(issue_number, "42")
+    t.eq(core.issue_ref_round_trips("owner/repo", 42), true)
   end,
 
   test_parse_proposal_id_rejects_foreign_ids = function()
@@ -101,6 +102,14 @@ return {
 
   test_is_eligible_accepts_open_complete_issue = function()
     t.eq(core.is_eligible(issue()), true)
+  end,
+
+  test_is_eligible_rejects_non_round_tripping_issue_ref = function()
+    t.eq(core.is_eligible(issue({ repo = "owner repo" })), false)
+    t.eq(core.is_eligible(issue({ repo = "owner:repo" })), false)
+    t.eq(core.is_eligible(issue({ repo = string.rep("r", 101) })), false)
+    t.eq(core.is_eligible(issue({ issue_number = "42:evil" })), false)
+    t.eq(core.is_eligible(issue({ issue_number = string.rep("7", 31) })), false)
   end,
 
   test_is_eligible_rejects_incomplete_or_closed_issue = function()
@@ -169,6 +178,7 @@ return {
     t.eq(core.validate_proposal(merge(ok, { dedup_key = string.rep("a", 201) })), false)  -- over 200 cap
     t.eq(core.validate_proposal(merge(ok, { proposal_id = "autochrono/issue/owner/repo:42" })), false)  -- not path-safe
     t.eq(core.validate_proposal(merge(ok, { proposal_id = "other/issue/owner/repo/42" })), false)  -- not parseable
+    t.eq(core.validate_proposal(merge(ok, { proposal_id = "autochrono/issue/owner/repo//42" })), false)  -- non-canonical
     t.eq(core.validate_proposal(merge(ok, { body = "" })), false)  -- empty body
     t.eq(core.validate_proposal(merge(ok, { source_ref = { kind = "external" } })), false)  -- ref missing
     t.eq(core.validate_proposal(merge(ok, { schema = "other" })), false)

@@ -3,8 +3,8 @@ return {
 {{bias}}
 
 Respond with exactly two lines and no other text.
-Line one: the token VERDICT then a colon then one word - approve, reject, or abstain.
-Line two: the token REPLY then a colon then one concise paragraph.
+Line one: the marker ⟦FKST:VERDICT⟧ followed by one word - approve, reject, or abstain.
+Line two: the marker ⟦FKST:REPLY⟧ followed by one concise paragraph.
 
 Proposal:
 Angle: {{angle}}

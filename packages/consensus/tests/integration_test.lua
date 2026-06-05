@@ -1,4 +1,6 @@
 local t = fkst.test
+local verdict_label = "⟦FKST:VERDICT⟧"
+local reply_label = "⟦FKST:REPLY⟧"
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -56,7 +58,7 @@ end
 
 local function mock_angle(verdict, reply, exit_code)
   t.mock_command("codex exec", {
-    stdout = "VERDICT: " .. verdict .. "\nREPLY: " .. reply .. "\n",
+    stdout = verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. "\n",
     stderr = "",
     exit_code = exit_code or 0,
   })

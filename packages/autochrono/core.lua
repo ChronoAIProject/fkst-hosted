@@ -128,6 +128,21 @@ function M.parse_proposal_id(id)
   return repo, issue_number
 end
 
+function M.issue_ref_round_trips(repo, issue_number)
+  local repo_text = tostring(repo)
+  local issue_number_text = tostring(issue_number)
+
+  if safe_repo(repo) ~= repo_text then
+    return false
+  end
+  if safe_issue_number(issue_number) ~= issue_number_text then
+    return false
+  end
+
+  local parsed_repo, parsed_issue_number = M.parse_proposal_id(M.proposal_id(repo, issue_number))
+  return parsed_repo == repo_text and parsed_issue_number == issue_number_text
+end
+
 function M.proposal_cache_key(repo, issue_number, updated_at)
   return "autochrono/proposed/v1/" .. safe_repo(repo)
     .. "/issue/" .. safe_issue_number(issue_number)
@@ -167,6 +182,9 @@ function M.is_eligible(issue)
     return false
   end
   if issue.repo == nil or issue.issue_number == nil then
+    return false
+  end
+  if not M.issue_ref_round_trips(issue.repo, issue.issue_number) then
     return false
   end
   if issue.title == nil or issue.url == nil or issue.updated_at == nil then
@@ -239,6 +257,9 @@ function M.validate_proposal(proposal)
   end
   local repo, issue_number = M.parse_proposal_id(proposal.proposal_id)
   if repo == nil or issue_number == nil then
+    return false
+  end
+  if proposal.proposal_id ~= M.proposal_id(repo, issue_number) then
     return false
   end
   if not is_bounded_string(proposal.title, max_title_len) then

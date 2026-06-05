@@ -12,6 +12,8 @@ local max_title_len = 240
 local max_body_len = 12000
 local max_context_len = 8000
 local max_reply_len = 2000
+local verdict_label = "⟦FKST:VERDICT⟧"
+local reply_label = "⟦FKST:REPLY⟧"
 
 local function trim(value)
   return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -45,6 +47,34 @@ local function is_path_safe_key(value)
   return true
 end
 
+local function neutralize_untrusted_prompt_text(text)
+  local value = tostring(text or "")
+
+  local function neutralize_line(line)
+    if line:match("^%s*" .. verdict_label) ~= nil
+      or line:match("^%s*" .. reply_label) ~= nil then
+      return "> " .. line
+    end
+    return line
+  end
+
+  local output = {}
+  local start = 1
+  while true do
+    local newline = value:find("\n", start, true)
+    if newline == nil then
+      table.insert(output, neutralize_line(value:sub(start)))
+      break
+    end
+
+    table.insert(output, neutralize_line(value:sub(start, newline - 1)))
+    table.insert(output, "\n")
+    start = newline + 1
+  end
+
+  return table.concat(output)
+end
+
 local function has_source_ref(value)
   return type(value) == "table"
     and is_bounded_string(value.kind, max_key_len)
@@ -58,7 +88,9 @@ local function normalized_angles(proposal)
 
   local angles = {}
   for _, angle in ipairs(proposal.angles) do
-    if not is_bounded_string(angle, max_key_len) then
+    -- angle is untrusted (event-overridable); reject multi-line / control chars so it
+    -- cannot inject a line-start sentinel into the rendered prompt.
+    if not is_bounded_string(angle, max_key_len) or angle:find("%c") ~= nil then
       return nil
     end
     table.insert(angles, angle)
@@ -131,35 +163,38 @@ function M.build_angle_prompt(proposal, angle)
   if type(proposal) ~= "table" then
     error("consensus: proposal must be a table")
   end
-  if not is_bounded_string(angle, max_key_len) then
-    error("consensus: angle must be a bounded string")
+  if not is_bounded_string(angle, max_key_len) or angle:find("%c") ~= nil then
+    error("consensus: angle must be a single-line bounded token")
   end
 
-  -- Instruction lines deliberately do NOT begin with "VERDICT:" / "REPLY:" so that a
+  -- Instruction lines deliberately do NOT begin with the sentinel labels so that a
   -- model echoing the prompt cannot produce lines the strict parser would mistake for
   -- the real answer.
   local prompt = require("prompts.angle")
   local context_block = ""
   if proposal.context ~= nil and proposal.context ~= "" then
-    context_block = "Context:\n" .. tostring(proposal.context)
+    context_block = "Context:\n" .. neutralize_untrusted_prompt_text(proposal.context)
   end
 
+  -- Belt-and-suspenders: angle is already rejected if multi-line above, but neutralize it
+  -- too before it reaches the prompt (bias fallback + the Angle: line).
+  local safe_angle = neutralize_untrusted_prompt_text(angle)
   return M.render_template(prompt.template, {
-    bias = prompt.bias[angle] or ("Bias: " .. tostring(angle) .. ". Judge from this named perspective."),
-    angle = angle,
-    title = proposal.title,
-    body = proposal.body,
+    bias = prompt.bias[angle] or ("Bias: " .. safe_angle .. ". Judge from this named perspective."),
+    angle = safe_angle,
+    title = neutralize_untrusted_prompt_text(proposal.title),
+    body = neutralize_untrusted_prompt_text(proposal.body),
     context_block = context_block,
   })
 end
 
--- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean VERDICT line
--- immediately followed by exactly one REPLY line (the prompt asks for line one = VERDICT,
--- line two = REPLY). VERDICT must be one whitelist word on its own line (rejects the prompt
--- echo "VERDICT: approve|reject|abstain", "approve/reject", "approve-ish"); REPLY must be
--- anchored at line start (rejects "NOREPLY:" / "NOT REPLY:"). A proposal body/context is
--- untrusted and may be echoed into stdout, so requiring a UNIQUE ADJACENT pair closes both
--- duplicate injection (a second clean VERDICT/REPLY) and orphan pairing (a lone echoed REPLY
+-- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean verdict line
+-- immediately followed by exactly one reply line (the prompt asks for line one = verdict,
+-- line two = reply). The verdict sentinel must be followed by one whitelist word on its
+-- own line (rejects the prompt echo "approve|reject|abstain", "approve/reject",
+-- "approve-ish"); the reply sentinel must be anchored at line start. A proposal body/context
+-- is untrusted and may be echoed into stdout, so requiring a UNIQUE ADJACENT pair closes both
+-- duplicate injection (a second clean sentinel pair) and orphan pairing (a lone echoed reply
 -- attached to a verdict that lacked its own reply). Overlong replies are NOT truncated here;
 -- aggregate() rejects them so we never raise a partial body.
 function M.parse_angle_output(stdout)
@@ -175,7 +210,7 @@ function M.parse_angle_output(stdout)
   for line in (text .. "\n"):gmatch("(.-)\n") do
     index = index + 1
 
-    local token = line:match("^%s*[Vv][Ee][Rr][Dd][Ii][Cc][Tt]%s*:%s*(%a+)%s*$")
+    local token = line:match("^%s*" .. verdict_label .. "%s*(%a+)%s*$")
     if token ~= nil then
       local lowered = token:lower()
       if lowered == "approve" or lowered == "reject" or lowered == "abstain" then
@@ -185,7 +220,7 @@ function M.parse_angle_output(stdout)
       end
     end
 
-    local captured = line:match("^%s*[Rr][Ee][Pp][Ll][Yy]%s*:%s*(.+)$")
+    local captured = line:match("^%s*" .. reply_label .. "%s*(.+)$")
     if captured ~= nil then
       captured = trim(captured)
       if captured ~= "" then

@@ -184,6 +184,19 @@ return {
     t.eq(#codex_calls(), 0)
   end,
 
+  test_propose_skips_unsafe_issue_ref_end_to_end = function()
+    t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
+
+    local unsafe = run_propose(issue({ repo = "owner:repo" }), opts("propose-unsafe-ref"))
+    t.eq(unsafe.exit_code, 0)
+    t.eq(#unsafe.raises, 0)
+
+    local oversized = run_propose(issue({ issue_number = string.rep("7", 31) }), opts("propose-oversized-ref"))
+    t.eq(oversized.exit_code, 0)
+    t.eq(#oversized.raises, 0)
+    t.eq(#codex_calls(), 0)
+  end,
+
   test_reply_approve_raises_autochrono_reply = function()
     t.mock_command("codex exec", { stdout = "should not be used", exit_code = 0 })
 
