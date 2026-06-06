@@ -29,7 +29,7 @@ issue/PR 为状态载体。本方案经 sshx thinking triplet（minimal/structur
 > observe intake 执行 `nil -> thinking`，其他 escape / re-entry 仍是目标设计。
 
 state marker = `<!-- fkst:github-devloop:state:v1 proposal="<id>" state="<S>" version="<dedup>" -->`。终态：
-`impl-failed`、`blocked`、未来 PR 段的 `merged`。`fkst-dev:<state>` label 只作为可自愈 UI hint。`needs-human`
+`impl-failed`、`blocked`、`merged`。`fkst-dev:<state>` label 只作为可自愈 UI hint。`needs-human`
 = 尚未实现的 phase 在该状态停下等人工，后续 phase 把它自动化。loop 计数走 GitHub marker（不用 `<RT>`），崩溃后重新 poll 即重导。
 
 ### ISSUE 段
@@ -71,12 +71,12 @@ state marker = `<!-- fkst:github-devloop:state:v1 proposal="<id>" state="<S>" ve
  review-meta --accept-------------> merge-ready
  review-meta --block--------------> (blocked)
 
- merge-ready --[P6] CI+mergeable OK-> merging
+ merge-ready --CI+mergeable OK + 授权-> merging
  merge-ready --CI 红/冲突----------> fixing               # 回去修，不强 merge
- merge-ready --[<P6] 停------------> needs-human
+ merge-ready --缺授权/CI pending----> merge-ready          # dry-run，不推进
 
- merging --ok---------------------> (merged) 关 issue
- merging --fail-------------------> fixing                # merge 竞态/钩子失败，回修
+merging --ok---------------------> (merged) 关 issue
+merging --fail-------------------> retry                 # merge 竞态/命令失败走可靠投递重试
 ```
 
 ### 横切 escape（任何状态，fail-closed）
@@ -111,7 +111,7 @@ autochrono proposal_id lossless。状态机核心是 consensus，先确保它稳
 **Phase 2**：stuck → meta-escalation（结构化 `ACTION: implement|split|block`；split → `gh issue create` 建链接子 issue，仅评论建议）。
 **Phase 3**：ready-CAS gates the attempt（`setup_worktree` + `spawn_codex` 实施；失败或无变更 → `impl-failed` state marker；有变更 → `implementing` state marker + branch/worktree marker；**先不开 PR**）。
 **Phase 4**：人工授权 → `gh pr create` + linkage marker；PR poll → reviewing。
-**Phase 5a**：PR diff review consensus 的 decision-only 切片：`observe_pr` 进入 `reviewing` 时产生 `devloop_reviewing`；`review_pr` 回源确认 issue canonical state 后，用独立预算保留 bounded PR diff，再附加 bounded issue context，中和为带 reviewed `head_sha` 的 `github-devloop/pr-review/.../<head_sha>` `consensus.proposal`；`review_result` 重新读取 PR trusted backpointer 和当前 head，要求当前 head 仍等于 reviewed `head_sha`，并用 issue state marker CAS 把 `approve` 写成 `merge-ready`、`reject` 写成 `fixing`，同时写 issue-versioned state marker、`review-result:v1` marker 与 set-exclusive label。不 push、不 merge；pr-review 的 `consensus_unresolved` 当前没有专门处理器，issue 保持 `reviewing`。
+**Phase 5a**：PR diff review consensus 的 decision-only 切片：`observe_pr` 进入 `reviewing` 时产生 `devloop_reviewing`；`review_pr` 回源确认 issue canonical state 后，用独立预算保留 bounded PR diff，再附加 bounded issue context，中和为带 reviewed `head_sha` 的 `github-devloop/pr-review/.../<head_sha>` `consensus.proposal`；`review_result` 重新读取 PR trusted backpointer 和当前 head，要求当前 head 仍等于 reviewed `head_sha`，并用 issue state marker CAS 把 `approve` 写成 `merge-ready`、`reject` 写成 `fixing`，同时写 issue-versioned state marker、`review-result:v1` marker、`merge-ready:v1` fact marker 与 set-exclusive label。`approve` 产生 `devloop_merge_ready`，`reject` 产生 `devloop_fixing`；不 push、不 merge。
 **Phase 5b（已实现）**：fix loop + review meta-escalation。`review_result` 的 `reject` 产生 `devloop_fixing`；`fix`
 回源确认 canonical `fixing` marker、reject review marker、open same-repo PR、trusted PR origin 与 deterministic branch/head
 都匹配后，在 deterministic branch worktree 中运行 codex 修复并提交。更新 PR 分支需要 `fkst-dev:fix-authorized`
@@ -119,8 +119,8 @@ autochrono proposal_id lossless。状态机核心是 consensus，先确保它稳
 new head；成功写新 `reviewing` marker（version = `core.next_fix_version` 生成的 new-head fix-round canonical version）并重新产生 `devloop_reviewing`。无授权或 dry-run
 不推进；无变更进入 `review-meta`。pr-review `consensus_unresolved` 由 `review_loop` 用独立 `review-loop:v1` /
 `review-meta-trigger:v1` marker 计数，预算内重审同一 head，预算耗尽进入 `review-meta`；`review_meta` 只接受
-`⟦FKST:ACTION⟧ fix|accept|block` + `⟦FKST:REASON⟧ ...`，分别推进 `fixing|merge-ready|blocked`。
-**Phase 6**：gated merge（`FKST_GITHUB_WRITE` + CI + mergeability 检查）→ merged → issue done/close。
+`⟦FKST:ACTION⟧ fix|accept|block` + `⟦FKST:REASON⟧ ...`，分别推进 `fixing|merge-ready|blocked`；`accept` 产生 `devloop_merge_ready`。
+**Phase 6（已实现）**：`merge` 消费 `devloop_merge_ready`，写前重新回源校验 canonical issue state 仍是同版本 `merge-ready` 或失败重试中的 `merging`、可信 `merge-ready:v1` fact marker、`FKST_GITHUB_WRITE=1`、人工意图 gate `fkst-dev:merge-authorized`、PR current head open / same-repo / head branch 与 reviewed `head_sha` 未变、`gh pr view --json reviews` 中至少一条 `APPROVED` review 的 commit 等于当前 head、`gh pr view --json statusCheckRollup` green、`mergeable` / `mergeStateStatus` 可合并。human merge authorization 是必需的 `fkst-dev:merge-authorized` 人工 merge-intent label + 代码级 head-bound PR approval；不信 `reviewDecision`，不依赖仓库是否开启 stale review dismissal，旧 head approval 不能授权新 head。全部满足才先由本 bot 直接写可信 `merging:v1` marker，再执行普通 `gh pr merge --merge`，不使用 admin override、不绕过 branch protection；随后写 `merged` state marker、`merged:v1` marker、set-exclusive `fkst-dev:merged`，并 `gh issue close`。若重试时 PR 仍 open / same head / not merged，会重新推导全部 gate 并再次执行 merge；若重试时 PR 已是 MERGED，只有匹配当前 PR/head 的本 bot `merging:v1` marker 已可见才允许 finalize；外部未授权 merge 不会被 devloop 自动关闭 issue 或写 terminal marker。缺 `fkst-dev:merge-authorized`、缺 current-head approval、缺写开关、CI pending 或 mergeability 未定只 dry-run 不推进；CI red 或明确不可合并写 `merge-gate:v1` marker 后回 `fixing`；merge/close 命令失败 error retry。
 
 ## 5. 关键风险 / doctrine 约束
 
@@ -132,7 +132,7 @@ new head；成功写新 `reviewing` marker（version = `core.next_fix_version` �
 - 自动 child-issue / PR / merge 有 **runaway + 权限**风险 → human-gated + dry-run + 严格 budget。
 - Phase 3 的 implement no-push/no-PR 约束目前由 prompt 表达；host-level sandbox 是后续 hardening。
 - label 可被人改 → 下次转移 set-exclusive 自愈；状态事实仍以最新 state marker 为准。
-- merge **不绕过** branch protection / CI。
+- merge **不绕过** branch protection / CI，只在 `fkst-dev:merge-authorized` 人工 merge-intent label + PR `reviews` 里存在 commit 等于 current head 的 `APPROVED` review + `FKST_GITHUB_WRITE=1` + `gh pr view --json statusCheckRollup` green + mergeable + same-repo reviewed head 未变时执行普通 `gh pr merge --merge`。
 
 ## 6. 待定（开放点）
 

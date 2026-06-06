@@ -42,6 +42,10 @@ function pipeline(event)
     local current_issue = core.parse_issue_view_review(issue_view.stdout)
     core.log_forged_markers("review_pr", reviewing.proposal_id, current_issue.comments)
     local state = core.current_state(current_issue.comments, reviewing.proposal_id)
+    if state.state ~= nil and state.state ~= "reviewing" then
+      core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-advanced-or-diverged", "issue is not currently reviewing")
+      return
+    end
     local transition = core.versioned_transition_status(state, { "reviewing" }, "reviewing", reviewing.version)
     if transition == "pending" then
       core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", core.cas_outcome(state, transition, reviewing.version), "reviewing state marker not yet visible")

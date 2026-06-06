@@ -8,6 +8,7 @@ M.spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
     "devloop_fixing",
+    "devloop_merge_ready",
   },
   fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
@@ -123,6 +124,7 @@ function pipeline(event)
       "github-proxy.github_issue_label_request",
     }
     local fix_payload = nil
+    local merge_payload = nil
     if reached.decision == "reject" then
       fix_payload = core.build_devloop_fixing_payload(origin, pr_number, {
         review_proposal_id = reached.proposal_id,
@@ -131,12 +133,22 @@ function pipeline(event)
         fix_version = issue_version,
       }, issue_source_ref)
       table.insert(raised, "devloop_fixing")
+    else
+      merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, pr_number, issue_version, {
+        review_proposal_id = reached.proposal_id,
+        review_dedup_key = reached.dedup_key,
+        reviewed_head_sha = reviewed_head_sha,
+      }, issue_source_ref)
+      table.insert(raised, "devloop_merge_ready")
     end
     core.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
     if fix_payload ~= nil then
       core.log_raise("review_result", origin.proposal_id, "devloop_fixing", fix_payload)
+    end
+    if merge_payload ~= nil then
+      core.log_raise("review_result", origin.proposal_id, "devloop_merge_ready", merge_payload)
     end
   end)
 end

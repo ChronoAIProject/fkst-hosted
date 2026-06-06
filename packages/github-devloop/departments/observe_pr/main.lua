@@ -8,6 +8,7 @@ M.spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
     "devloop_reviewing",
+    "devloop_merge_ready",
   },
   stall_window = "30s",
 }
@@ -71,6 +72,38 @@ function pipeline(event)
     local current_issue = core.parse_issue_view_reviewing(issue_view.stdout)
     core.log_forged_markers("observe_pr", origin.proposal_id, current_issue.comments)
     local state = core.current_state(current_issue.comments, origin.proposal_id)
+    if state.state == "merge-ready" or state.state == "merging" then
+      local fact = core.merge_ready_fact(current_issue.comments, origin.proposal_id, state.version, pr.number)
+      if fact ~= nil then
+        local issue_source_ref = {
+          kind = "external",
+          ref = tostring(origin.repo) .. "#issue/" .. tostring(origin.issue_number),
+        }
+        local merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, fact.pr_number, state.version, {
+          review_proposal_id = fact.review_proposal_id,
+          review_dedup_key = fact.review_dedup_key,
+          reviewed_head_sha = fact.head_sha,
+        }, issue_source_ref)
+        core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible")
+        core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
+          "devloop_merge_ready",
+        })
+        core.log_raise("observe_pr", origin.proposal_id, "devloop_merge_ready", merge_payload)
+      end
+      if not core.state_label_hint_matches(current_issue.labels, state.state) then
+        local issue_source_ref = {
+          kind = "external",
+          ref = tostring(origin.repo) .. "#issue/" .. tostring(origin.issue_number),
+        }
+        local label_request = core.build_reconcile_state_label_request(origin.repo, origin.issue_number, origin.proposal_id, state.state, state.version, issue_source_ref)
+        local add_labels, remove_labels = core.state_label_changes(state.state)
+        core.log_apply("observe_pr", origin.proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
+          "github-proxy.github_issue_label_request",
+        })
+        core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+      end
+      return
+    end
     if state.state == "reviewing" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-idempotent(already at to_state)", "reviewing marker already visible")
       local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr.number, state.version, current_pr.head_sha)

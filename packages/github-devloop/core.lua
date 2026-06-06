@@ -33,6 +33,9 @@ local pr_authorized_label = "fkst-dev:pr-authorized"
 local pr_open_label = "fkst-dev:pr-open"
 local reviewing_label = "fkst-dev:reviewing"
 local merge_ready_label = "fkst-dev:merge-ready"
+local merge_authorized_label = "fkst-dev:merge-authorized"
+local merging_label = "fkst-dev:merging"
+local merged_label = "fkst-dev:merged"
 local fixing_label = "fkst-dev:fixing"
 local review_meta_label = "fkst-dev:review-meta"
 local fix_authorized_label = "fkst-dev:fix-authorized"
@@ -48,6 +51,8 @@ local state_labels = {
   [pr_open_label] = true,
   [reviewing_label] = true,
   [merge_ready_label] = true,
+  [merging_label] = true,
+  [merged_label] = true,
   [fixing_label] = true,
   [review_meta_label] = true,
   [impl_failed_label] = true,
@@ -62,6 +67,8 @@ local label_by_state = {
   ["pr-open"] = pr_open_label,
   reviewing = reviewing_label,
   ["merge-ready"] = merge_ready_label,
+  merging = merging_label,
+  merged = merged_label,
   fixing = fixing_label,
   ["review-meta"] = review_meta_label,
   ["impl-failed"] = impl_failed_label,
@@ -82,14 +89,16 @@ local state_graph = {
   implementing = { "pr-open", "impl-failed" },
   ["pr-open"] = { "reviewing" },
   reviewing = { "merge-ready", "fixing", "review-meta" },
-  ["merge-ready"] = {},
+  ["merge-ready"] = { "merging", "fixing", "blocked" },
+  merging = { "merged", "fixing", "blocked" },
+  merged = {},
   fixing = { "reviewing", "review-meta" },
   ["review-meta"] = { "fixing", "merge-ready", "blocked" },
   ["impl-failed"] = {},
   blocked = {},
 }
 
-local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "stuck", "review-meta" }
+local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "stuck", "review-meta", "merging", "merged" }
 local state_stage_rank = {
   thinking = 100,
   stuck = 300,
@@ -98,10 +107,12 @@ local state_stage_rank = {
   ["pr-open"] = 650,
   reviewing = 675,
   ["merge-ready"] = 690,
+  merging = 695,
   fixing = 700,
   ["review-meta"] = 710,
   ["impl-failed"] = 750,
   blocked = 800,
+  merged = 900,
 }
 local trusted_bot_login = nil
 local comment_body
@@ -825,6 +836,12 @@ function M.gh_issue_view_review_meta_cmd(repo, issue_number)
     .. " --json title,body,labels,comments"
 end
 
+function M.gh_issue_view_merge_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,body,labels,comments,state"
+end
+
 function M.gh_pr_view_origin_cmd(repo, pr_number)
   return "gh pr view " .. shell_single_quote(pr_number)
     .. " --repo " .. shell_single_quote(repo)
@@ -835,6 +852,33 @@ function M.gh_pr_view_fix_cmd(repo, pr_number)
   return "gh pr view " .. shell_single_quote(pr_number)
     .. " --repo " .. shell_single_quote(repo)
     .. " --json headRefName,headRefOid,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
+end
+
+function M.gh_pr_view_merge_cmd(repo, pr_number)
+  return "gh pr view " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json headRefName,headRefOid,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup,latestReviews"
+end
+
+function M.gh_pr_merge_cmd(repo, pr_number, head_sha)
+  if tostring(head_sha or "") == "" then
+    error("github-devloop: invalid merge head sha")
+  end
+  return "gh pr merge " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --merge"
+    .. " --match-head-commit " .. shell_single_quote(head_sha)
+end
+
+function M.gh_issue_comment_cmd(repo, issue_number, body_file)
+  return "gh issue comment " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --body-file " .. shell_single_quote(body_file)
+end
+
+function M.gh_issue_close_cmd(repo, issue_number)
+  return "gh issue close " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
 end
 
 function M.gh_pr_diff_cmd(repo, pr_number)
@@ -1003,6 +1047,7 @@ function M.comments_from_json(comments_json)
       table.insert(comments, {
         body = tostring(comment.body),
         author_login = author_login,
+        created_at = comment.createdAt or comment.created_at,
       })
     elseif type(comment) == "string" then
       table.insert(comments, {
@@ -1082,6 +1127,13 @@ function M.parse_issue_view_review_meta(stdout)
   return M.parse_issue_view_meta(stdout)
 end
 
+function M.parse_issue_view_merge(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_meta(stdout)
+  result.state = decoded.state
+  return result
+end
+
 local function repository_name_with_owner(head_repository, head_repository_owner)
   if type(head_repository) == "string" then
     return head_repository
@@ -1134,6 +1186,51 @@ function M.parse_pr_view_fix(stdout)
   return M.parse_pr_view_origin(stdout)
 end
 
+local function status_rollup_entries(value)
+  if type(value) ~= "table" then
+    return {}
+  end
+  if type(value.nodes) == "table" then
+    return value.nodes
+  end
+  return value
+end
+
+local function review_entries(value)
+  if type(value) ~= "table" then
+    return {}
+  end
+  if type(value.nodes) == "table" then
+    return value.nodes
+  end
+  return value
+end
+
+local function review_commit_id(review)
+  if type(review) ~= "table" then
+    return nil
+  end
+  local commit = review.commit_id or review.commitId or review.commitOID or review.commitOid or review.commit
+  if type(commit) == "table" then
+    commit = commit.oid or commit.id
+  end
+  if is_git_sha(commit) then
+    return tostring(commit)
+  end
+  return nil
+end
+
+function M.parse_pr_view_merge(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_pr_view_origin(stdout)
+  result.mergeable = decoded.mergeable
+  result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
+  result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
+  result.merged_at = decoded.mergedAt or decoded.merged_at
+  result.latest_reviews = review_entries(decoded.latestReviews or decoded.latest_reviews)
+  return result
+end
+
 function M.parse_pr_view_head_state(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
@@ -1166,6 +1263,8 @@ function M.state_marker(proposal_id, state, version)
     and state ~= "reviewing"
     and state ~= "review-meta"
     and state ~= "merge-ready"
+    and state ~= "merging"
+    and state ~= "merged"
     and state ~= "fixing"
     and state ~= "impl-failed"
     and state ~= "blocked"
@@ -1193,6 +1292,13 @@ function comment_author_login(comment)
   return test_bot_login
 end
 
+local function comment_created_at(comment)
+  if type(comment) == "table" then
+    return comment.created_at
+  end
+  return nil
+end
+
 function is_trusted_comment(comment)
   return comment_author_login(comment) == (trusted_bot_login or test_bot_login)
 end
@@ -1216,6 +1322,10 @@ end
 
 function M.comment_author_login(comment)
   return comment_author_login(comment)
+end
+
+function M.comment_created_at(comment)
+  return comment_created_at(comment)
 end
 
 function M.trusted_bot_login()
@@ -1747,6 +1857,10 @@ function M.state_label_changes(to_state)
       table.insert(remove_labels, label)
     end
   end
+  if (to_state == "fixing" or to_state == "reviewing" or to_state == "merged")
+    and not has_value(remove_labels, merge_authorized_label) then
+    table.insert(remove_labels, merge_authorized_label)
+  end
   return { add_label }, remove_labels
 end
 
@@ -1791,6 +1905,8 @@ function M.has_terminal_label(labels)
     or M.has_label(labels, reviewing_label)
     or M.has_label(labels, review_meta_label)
     or M.has_label(labels, merge_ready_label)
+    or M.has_label(labels, merging_label)
+    or M.has_label(labels, merged_label)
     or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
@@ -1833,6 +1949,18 @@ function M.has_merge_ready_label(labels)
   return M.has_label(labels, merge_ready_label)
 end
 
+function M.has_merge_authorized_label(labels)
+  return M.has_label(labels, merge_authorized_label)
+end
+
+function M.has_merging_label(labels)
+  return M.has_label(labels, merging_label)
+end
+
+function M.has_merged_label(labels)
+  return M.has_label(labels, merged_label)
+end
+
 function M.has_fixing_label(labels)
   return M.has_label(labels, fixing_label)
 end
@@ -1856,6 +1984,8 @@ function M.has_decision_terminal_label(labels)
     or M.has_label(labels, reviewing_label)
     or M.has_label(labels, review_meta_label)
     or M.has_label(labels, merge_ready_label)
+    or M.has_label(labels, merging_label)
+    or M.has_label(labels, merged_label)
     or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
@@ -1868,6 +1998,8 @@ function M.is_loop_terminal(labels)
     or M.has_label(labels, reviewing_label)
     or M.has_label(labels, review_meta_label)
     or M.has_label(labels, merge_ready_label)
+    or M.has_label(labels, merging_label)
+    or M.has_label(labels, merged_label)
     or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
@@ -1887,6 +2019,90 @@ function M.has_result_marker(comments, proposal_id, decision, dedup_key)
     end
   end
   return false
+end
+
+local function upper_text(value)
+  return tostring(value or ""):upper()
+end
+
+local function check_entry_state(entry)
+  if type(entry) ~= "table" then
+    return nil, nil
+  end
+  return upper_text(entry.state or entry.status), upper_text(entry.conclusion)
+end
+
+local green_check_conclusions = {
+  SUCCESS = true,
+  NEUTRAL = true,
+  SKIPPED = true,
+}
+
+local green_status_states = {
+  SUCCESS = true,
+}
+
+local red_status_states = {
+  ERROR = true,
+  FAILURE = true,
+}
+
+function M.pr_rollup_green(pr)
+  local entries = type(pr) == "table" and pr.status_check_rollup or nil
+  if type(entries) ~= "table" or #entries == 0 then
+    return false, "missing-status-rollup"
+  end
+  for _, entry in ipairs(entries) do
+    local state, conclusion = check_entry_state(entry)
+    if state == "COMPLETED" then
+      if not green_check_conclusions[conclusion] then
+        return false, "rollup-red"
+      end
+    elseif conclusion == "" and green_status_states[state] then
+      -- Legacy StatusContext entries report state=SUCCESS without a conclusion.
+    elseif conclusion == "" and red_status_states[state] then
+      return false, "rollup-red"
+    else
+      return false, "rollup-pending"
+    end
+  end
+  return true, "rollup-green"
+end
+
+function M.pr_mergeable(pr)
+  if type(pr) ~= "table" then
+    return false, "missing-pr"
+  end
+  local mergeable = upper_text(pr.mergeable)
+  local merge_state = upper_text(pr.merge_state_status)
+  if mergeable == "UNKNOWN" then
+    return false, "mergeable-unknown"
+  end
+  if mergeable ~= "MERGEABLE" then
+    if mergeable == "" then
+      return false, "missing-mergeability"
+    end
+    return false, "mergeable-" .. mergeable:lower()
+  end
+  if merge_state ~= "CLEAN" then
+    if merge_state == "" then
+      return false, "missing-mergeability"
+    end
+    return false, "merge-state-" .. merge_state:lower()
+  end
+  return true, "mergeable"
+end
+
+function M.is_ci_red_reason(reason)
+  return tostring(reason or "") == "rollup-red"
+end
+
+function M.is_not_mergeable_reason(reason)
+  local text = tostring(reason or "")
+  return text == "mergeable-conflicting"
+    or text == "mergeable-false"
+    or text == "merge-state-dirty"
+    or text == "merge-state-conflicting"
 end
 
 function M.loop_budget()
@@ -1958,6 +2174,20 @@ function M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, o
     .. '" -->'
 end
 
+function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, reason)
+  if not is_positive_pr_number(pr_number) or not is_git_sha(head_sha) then
+    error("github-devloop: invalid merge-gate marker")
+  end
+  return '<!-- fkst:github-devloop:merge-gate:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" review_proposal="' .. tostring(review_proposal_id)
+    .. '" review_dedup="' .. tostring(review_dedup_key)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" reason="' .. tostring(M.sanitize_key(reason or "gate-failed", false):gsub("/", "-"))
+    .. '" -->'
+end
+
 function M.implementing_marker(proposal_id, dedup_key, branch, head_sha)
   local fields = ""
   if branch ~= nil then
@@ -2019,6 +2249,49 @@ function M.review_result_marker(review_proposal_id, issue_proposal_id, decision,
     .. '" -->'
 end
 
+function M.merge_ready_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha)
+  if not is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid merge-ready pr number")
+  end
+  if not is_git_sha(head_sha) then
+    error("github-devloop: invalid merge-ready head sha")
+  end
+  if not is_bounded_string(version, max_dedup_len)
+    or not is_bounded_string(review_proposal_id, max_key_len)
+    or not is_bounded_string(review_dedup_key, max_dedup_len) then
+    error("github-devloop: invalid merge-ready marker")
+  end
+  return '<!-- fkst:github-devloop:merge-ready:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" review_proposal="' .. tostring(review_proposal_id)
+    .. '" review_dedup="' .. tostring(review_dedup_key)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" -->'
+end
+
+function M.merged_marker(issue_proposal_id, pr_number, version, head_sha)
+  if not is_positive_pr_number(pr_number) or not is_git_sha(head_sha) then
+    error("github-devloop: invalid merged marker")
+  end
+  return '<!-- fkst:github-devloop:merged:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" -->'
+end
+
+function M.merging_marker(issue_proposal_id, pr_number, version, head_sha)
+  if not is_positive_pr_number(pr_number) or not is_git_sha(head_sha) then
+    error("github-devloop: invalid merging marker")
+  end
+  return '<!-- fkst:github-devloop:merging:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" -->'
+end
+
 function M.review_reject_fact(comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
@@ -2071,6 +2344,134 @@ function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
     end
   end
   return nil
+end
+
+function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_review_proposal = marker:match('review_proposal="([^"]+)"')
+      local marker_review_dedup = marker:match('review_dedup="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and marker_version == tostring(issue_version)
+        and is_bounded_string(marker_review_proposal, max_key_len)
+        and is_bounded_string(marker_review_dedup, max_dedup_len)
+        and is_git_sha(marker_head_sha) then
+        return {
+          review_proposal_id = marker_review_proposal,
+          review_dedup_key = marker_review_dedup,
+          reviewed_head_sha = marker_head_sha,
+          review_reason = comment_body(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_review_proposal = marker:match('review_proposal="([^"]+)"')
+      local marker_review_dedup = marker:match('review_dedup="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and (pr_number == nil or tostring(marker_pr) == tostring(pr_number))
+        and tostring(marker_version) == tostring(issue_version)
+        and is_bounded_string(marker_review_proposal, max_key_len)
+        and is_bounded_string(marker_review_dedup, max_dedup_len)
+        and is_git_sha(marker_head_sha) then
+        return {
+          proposal_id = marker_issue,
+          pr_number = tonumber(marker_pr),
+          version = marker_version,
+          review_proposal_id = marker_review_proposal,
+          review_dedup_key = marker_review_dedup,
+          head_sha = marker_head_sha,
+          comment_created_at = comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.merge_authorization_matches_fact(fact, pr)
+  if type(fact) ~= "table" or tostring(fact.head_sha or "") == "" then
+    return false
+  end
+  if type(pr) ~= "table" then
+    return false
+  end
+  if tostring(pr.head_sha or "") ~= tostring(fact.head_sha) then
+    return false
+  end
+  local approved_at_head = false
+  for _, review in ipairs(pr.latest_reviews or {}) do
+    local state = upper_text(review.state)
+    if state == "CHANGES_REQUESTED" then
+      return false
+    end
+    if state == "APPROVED" and tostring(review_commit_id(review) or "") == tostring(fact.head_sha) then
+      approved_at_head = true
+    end
+  end
+  return approved_at_head
+end
+
+function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sha)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merging:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and tostring(marker_pr) == tostring(pr_number)
+        and tostring(marker_version) == tostring(version)
+        and tostring(marker_head_sha) == tostring(head_sha)
+        and is_git_sha(marker_head_sha) then
+        return {
+          proposal_id = marker_issue,
+          pr_number = tonumber(marker_pr),
+          version = marker_version,
+          head_sha = marker_head_sha,
+          comment_created_at = comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.has_merged_marker(comments, issue_proposal_id, pr_number, version, head_sha)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker = M.merged_marker(issue_proposal_id, pr_number, version, head_sha)
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    if comment_body(comment):find(marker, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
 end
 
 function M.impl_failure_marker(proposal_id, dedup_key, reason)
@@ -2590,6 +2991,26 @@ function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issu
       tostring(unresolved.dedup_key),
     }),
     source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
+  }
+end
+
+function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, review_fact, source_ref)
+  return {
+    schema = "github-devloop.merge-ready.v1",
+    proposal_id = issue_proposal_id,
+    pr_number = pr_number,
+    version = version,
+    review_proposal_id = review_fact and review_fact.review_proposal_id,
+    review_dedup_key = review_fact and review_fact.review_dedup_key,
+    reviewed_head_sha = review_fact and review_fact.reviewed_head_sha,
+    dedup_key = dedup_key({
+      "merge-ready",
+      tostring(issue_proposal_id),
+      tostring(version),
+      tostring(pr_number),
+      tostring(review_fact and review_fact.review_dedup_key or "review"),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
   }
 end
 
@@ -3283,6 +3704,11 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
   local to_state = reached.decision == "approve" and "merge-ready" or "fixing"
   local state_marker = M.state_marker(issue_proposal_id, to_state, issue_version)
   local marker = M.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key)
+  local merge_marker = ""
+  if reached.decision == "approve" then
+    local _, pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
+    merge_marker = "\n" .. M.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
+  end
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   return {
     schema = "github-proxy.v1",
@@ -3291,13 +3717,45 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
     body = "github-devloop PR review decision: " .. tostring(reached.decision)
       .. "\n\n" .. body_text
       .. "\n\n" .. state_marker
-      .. "\n" .. marker,
+      .. "\n" .. marker
+      .. merge_marker,
     dedup_key = dedup_key({
       "review-result",
       "comment",
       tostring(issue_proposal_id),
       tostring(reached.decision),
       tostring(reached.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
+function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, source_ref)
+  local safe_reason = M.sanitize_key(reason or "gate-failed", false):gsub("/", "-")
+  local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
+  local marker = M.merge_gate_marker(
+    merge_ready.proposal_id,
+    merge_ready.pr_number,
+    fix_version,
+    merge_ready.review_proposal_id,
+    merge_ready.review_dedup_key,
+    merge_ready.reviewed_head_sha,
+    safe_reason
+  )
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop merge gate failed: " .. safe_reason
+      .. "\n\n" .. state_marker
+      .. "\n" .. marker,
+    dedup_key = dedup_key({
+      "merge",
+      "comment",
+      "fixing",
+      tostring(merge_ready.proposal_id),
+      tostring(merge_ready.version),
+      safe_reason,
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
@@ -3481,6 +3939,11 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
   local to_state = action == "fix" and "fixing" or action == "accept" and "merge-ready" or "blocked"
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   local state_version = version or review_meta.version
+  local merge_marker = ""
+  if action == "accept" then
+    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_meta.review_proposal_id)
+    merge_marker = "\n" .. M.merge_ready_marker(review_meta.proposal_id, review_meta.pr_number, state_version, review_meta.review_proposal_id, review_meta.dedup_key, reviewed_head_sha)
+  end
   return {
     schema = "github-proxy.v1",
     repo = repo,
@@ -3488,7 +3951,8 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     body = "github-devloop review-meta action: " .. tostring(action)
       .. "\n\nReason:\n" .. safe_reason
       .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
-      .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version),
+      .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version)
+      .. merge_marker,
     dedup_key = dedup_key({
       "review-meta",
       "comment",
@@ -3601,6 +4065,17 @@ function M.is_supported_review_meta(payload)
     and is_bounded_string(payload.version, max_dedup_len)
     and M.is_safe_pr_number(payload.pr_number)
     and tonumber(payload.n) ~= nil
+    and has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_merge_ready(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.merge-ready.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_number(payload.pr_number)
+    and is_bounded_string(payload.version, max_dedup_len)
+    and M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
+    and is_git_sha(payload.reviewed_head_sha)
     and has_bounded_source_ref(payload.source_ref)
 end
 

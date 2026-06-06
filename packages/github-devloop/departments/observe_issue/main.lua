@@ -8,6 +8,7 @@ M.spec = {
     "consensus.proposal",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "devloop_merge_ready",
   },
   fanout = { "github-proxy.github_entity_changed" },
   stall_window = "30s",
@@ -54,6 +55,20 @@ function pipeline(event)
           "github-proxy.github_issue_label_request",
         })
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
+      end
+      if state.state == "merge-ready" or state.state == "merging" then
+        local fact = core.merge_ready_fact(current.comments, proposal_id, state.version)
+        if fact ~= nil then
+          local merge_payload = core.build_devloop_merge_ready_payload(proposal_id, fact.pr_number, state.version, {
+            review_proposal_id = fact.review_proposal_id,
+            review_dedup_key = fact.review_dedup_key,
+            reviewed_head_sha = fact.head_sha,
+          }, issue.source_ref)
+          core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
+            "devloop_merge_ready",
+          })
+          core.log_raise("observe_issue", proposal_id, "devloop_merge_ready", merge_payload)
+        end
       end
       if state.state == "thinking" then
         return

@@ -176,7 +176,11 @@ function pipeline(event)
     if reject_fact == nil then
       meta_fix_fact = core.review_meta_fix_fact(current_issue.comments, fix.proposal_id, fix.version)
     end
+    local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
+      merge_gate_fact = core.merge_gate_fix_fact(current_issue.comments, fix.proposal_id, fix.version)
+    end
+    if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
       error("github-devloop: fix feedback marker not visible for fix; retrying")
     end
@@ -189,12 +193,20 @@ function pipeline(event)
         return
       end
       feedback_reason = reject_fact.review_reason
-    else
+    elseif meta_fix_fact ~= nil then
       if meta_fix_fact.review_dedup_key ~= fix.review_dedup_key then
         core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-meta-fact-mismatch)", "fix event does not match canonical review-meta fix marker")
         return
       end
       feedback_reason = meta_fix_fact.review_reason
+    else
+      if merge_gate_fact.review_proposal_id ~= fix.review_proposal_id
+        or merge_gate_fact.review_dedup_key ~= fix.review_dedup_key
+        or merge_gate_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
+        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
+        return
+      end
+      feedback_reason = merge_gate_fact.review_reason
     end
 
     assert_fix_write_gate(fix, current_issue.labels, repo, issue_number)
