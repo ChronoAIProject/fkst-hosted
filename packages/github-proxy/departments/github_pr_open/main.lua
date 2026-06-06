@@ -1,0 +1,301 @@
+local core = require("core")
+
+local M = {}
+
+M.spec = {
+  consumes = { "github_pr_open_request" },
+  stall_window = "2m",
+}
+
+local MAX_RUNTIME_ID_LEN = 180
+
+local function safe_segment(value)
+  local safe = tostring(value or ""):gsub("[^%w._-]", "_")
+  safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
+  if safe == "" then
+    return "empty"
+  end
+  return safe
+end
+
+local function runtime_identity(repo, branch)
+  local id = "pr-open-" .. safe_segment(repo) .. "-" .. safe_segment(branch)
+  if #id > MAX_RUNTIME_ID_LEN then
+    return id:sub(1, MAX_RUNTIME_ID_LEN)
+  end
+  return id
+end
+
+local function temp_body_file(repo, branch, kind)
+  return "/tmp/fkst-github-proxy-" .. runtime_identity(repo, branch) .. "-" .. kind .. ".md"
+end
+
+local function lock_name(repo, branch)
+  return "github-proxy/" .. runtime_identity(repo, branch)
+end
+
+local function normalize_labels(value)
+  local labels = {}
+  if type(value) ~= "table" then
+    return labels
+  end
+  for _, label in ipairs(value) do
+    if label ~= nil and tostring(label) ~= "" then
+      table.insert(labels, tostring(label))
+    end
+  end
+  return labels
+end
+
+local function render_pr_number_template(value, pr_number)
+  return tostring(value or ""):gsub("{{pr_number}}", tostring(pr_number))
+end
+
+local function verify_pr_remote_head(repo, pr_number, expected_head_sha)
+  local pr_head = exec_sync({ cmd = core.gh_pr_view_head_oid_cmd(repo, pr_number), timeout = 30 })
+  if pr_head.exit_code ~= 0 then
+    error("github-proxy: gh pr view head repository/headRefOid/state failed: " .. tostring(pr_head.stderr))
+  end
+  local remote_pr = core.parse_pr_view_head_state(pr_head.stdout, repo)
+  if remote_pr == nil then
+    error("github-proxy: gh pr view head repository/headRefOid/state did not return a valid open PR fact")
+  end
+  if tostring(remote_pr.state):lower() ~= "open" then
+    error("github-proxy: PR is not open")
+  end
+  if remote_pr.is_cross_repository ~= false or not remote_pr.is_target_repository then
+    error("github-proxy: PR head repository is not the target repository")
+  end
+  if remote_pr.head_ref_oid ~= tostring(expected_head_sha):lower() then
+    error("github-proxy: PR headRefOid does not match implementing head_sha")
+  end
+end
+
+local function guard_pr_open_write(repo, payload, bot_login)
+  if payload.proposal_id == nil
+    or payload.impl_version == nil
+    or payload.expected_state == nil
+    or payload.expected_version == nil
+    or payload.head_sha == nil then
+    log.warn("github-proxy: PR open request missing write-time guard facts")
+    return nil
+  end
+  if payload.expected_state ~= "implementing" or tostring(payload.expected_version) ~= tostring(payload.impl_version) then
+    log.warn("github-proxy: PR open request has inconsistent expected state")
+    return nil
+  end
+  if not core.is_safe_head_sha(payload.head_sha) then
+    log.warn("github-proxy: PR open request has unsafe head_sha")
+    return nil
+  end
+
+  local view = exec_sync({ cmd = core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number), timeout = 30 })
+  if view.exit_code ~= 0 then
+    error("github-proxy: gh issue view failed before PR open: " .. tostring(view.stderr))
+  end
+
+  local issue = core.parse_issue_state(view.stdout)
+  local state = core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
+  local has_pr_open_marker = core.has_devloop_pr_open_marker(issue.comments, payload.proposal_id, payload.impl_version, bot_login)
+  if has_pr_open_marker then
+    return {
+      can_advance = false,
+      pr_open_visible = true,
+      state = state,
+      labels = issue.labels,
+    }
+  end
+
+  if state.state ~= payload.expected_state or tostring(state.version or "") ~= tostring(payload.expected_version) then
+    log.warn("github-proxy: PR open skipped because current issue state is not implementing at requested version")
+    return nil
+  end
+  if not core.has_label(issue.labels, "fkst-dev:pr-authorized") then
+    log.warn("github-proxy: PR open skipped because fkst-dev:pr-authorized is no longer present")
+    return nil
+  end
+
+  local fact = core.devloop_implementing_fact(issue.comments, payload.proposal_id, payload.impl_version, bot_login)
+  if fact == nil then
+    log.warn("github-proxy: PR open skipped because implementing fact marker is not visible")
+    return nil
+  end
+  if tostring(fact.branch) ~= tostring(payload.branch) or tostring(fact.head_sha) ~= tostring(payload.head_sha) then
+    log.warn("github-proxy: PR open skipped because request does not match implementing fact marker")
+    return nil
+  end
+
+  local branch_ref = exec_sync({ cmd = core.git_show_ref_branch_cmd(payload.branch), timeout = 30 })
+  if branch_ref.exit_code ~= 0 then
+    error("github-proxy: implementing branch ref missing before PR open: " .. tostring(branch_ref.stderr))
+  end
+  local current_head = core.parse_git_show_ref_head(branch_ref.stdout, payload.branch)
+  if current_head == nil then
+    log.warn("github-proxy: PR open skipped because branch ref output is invalid")
+    return nil
+  end
+  if current_head ~= fact.head_sha then
+    log.warn("github-proxy: PR open skipped because branch head moved past implementing fact")
+    return nil
+  end
+
+  return {
+    can_advance = true,
+    pr_open_visible = false,
+    state = state,
+    labels = issue.labels,
+  }
+end
+
+local function can_apply_pr_open_labels(state, impl_version)
+  if type(state) ~= "table" then
+    return false
+  end
+  if tostring(state.version or "") ~= tostring(impl_version) then
+    return false
+  end
+  return state.state == "implementing" or state.state == "pr-open"
+end
+
+local function current_issue_state_for_label_edit(repo, payload, bot_login)
+  local view = exec_sync({ cmd = core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number), timeout = 30 })
+  if view.exit_code ~= 0 then
+    error("github-proxy: gh issue view failed before PR open label edit: " .. tostring(view.stderr))
+  end
+  local issue = core.parse_issue_state(view.stdout)
+  return core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
+end
+
+function pipeline(event)
+  local payload = event.payload or {}
+  if payload.schema ~= "github-proxy.pr-open.v1" then
+    log.warn("github-proxy: unsupported PR open request schema")
+    return
+  end
+
+  local repo = payload.repo or core.read_env("FKST_GITHUB_REPO")
+  if repo == nil or repo == "" then
+    log.warn("github-proxy: PR open request missing repo")
+    return
+  end
+  if payload.issue_number == nil or payload.dedup_key == nil then
+    log.warn("github-proxy: PR open request missing issue_number or dedup_key")
+    return
+  end
+  if not core.is_safe_branch(payload.branch) then
+    log.warn("github-proxy: PR open request has unsafe branch")
+    return
+  end
+  if payload.title == nil or payload.body == nil or payload.issue_comment_body_template == nil then
+    log.warn("github-proxy: PR open request missing title/body/comment template")
+    return
+  end
+
+  if core.read_env("FKST_GITHUB_WRITE") ~= "1" then
+    log.info("github-proxy dry-run: would push/create PR for " .. tostring(repo) .. " branch " .. tostring(payload.branch))
+    return
+  end
+  local bot_login = core.assert_trusted_bot_configured()
+
+  with_lock(lock_name(repo, payload.branch), function()
+    local guard = guard_pr_open_write(repo, payload, bot_login)
+    if guard == nil then
+      return
+    end
+
+    local existing = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch), timeout = 30 })
+    if existing.exit_code ~= 0 then
+      error("github-proxy: gh pr list --head failed: " .. tostring(existing.stderr))
+    end
+    local pr = core.parse_pr_list_for_head(existing.stdout, payload.branch)
+
+    if pr == nil then
+      if not guard.can_advance then
+        error("github-proxy: pr-open marker exists but no matching open PR was found for branch")
+      end
+
+      local push = exec_sync({ cmd = core.git_push_branch_cmd(payload.branch), timeout = 120 })
+      if push.exit_code ~= 0 then
+        error("github-proxy: git push failed: " .. tostring(push.stderr))
+      end
+
+      local pr_body_path = temp_body_file(repo, payload.branch, "pr-body")
+      file.write(pr_body_path, tostring(payload.body))
+      local created = exec_sync({ cmd = core.gh_pr_create_cmd(repo, payload.branch, payload.title, pr_body_path), timeout = 60 })
+      if created.exit_code ~= 0 then
+        error("github-proxy: gh pr create failed: " .. tostring(created.stderr))
+      end
+      pr = core.parse_pr_create(created.stdout)
+      if pr == nil then
+        local listed = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch), timeout = 30 })
+        if listed.exit_code ~= 0 then
+          error("github-proxy: gh pr list --head failed after create: " .. tostring(listed.stderr))
+        end
+        pr = core.parse_pr_list_for_head(listed.stdout, payload.branch)
+      end
+      if pr == nil then
+        error("github-proxy: gh pr create/list did not return a valid PR number")
+      end
+      verify_pr_remote_head(repo, pr.number, payload.head_sha)
+    else
+      verify_pr_remote_head(repo, pr.number, payload.head_sha)
+      log.info("github-proxy: PR for head branch already exists; reusing #" .. tostring(pr.number))
+    end
+
+    if not guard.pr_open_visible then
+      local issue_view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
+      if issue_view.exit_code ~= 0 then
+        error("github-proxy: gh issue view failed after PR open: " .. tostring(issue_view.stderr))
+      end
+      if core.has_trusted_marker(core.parse_issue_comments(issue_view.stdout), payload.dedup_key, bot_login) then
+        guard.pr_open_visible = true
+      end
+    end
+    if not guard.pr_open_visible then
+      local issue_body = render_pr_number_template(payload.issue_comment_body_template, pr.number)
+        .. "\n\n" .. core.comment_marker(payload.dedup_key)
+        .. "\n"
+      local issue_body_path = temp_body_file(repo, payload.branch, "issue-comment")
+      file.write(issue_body_path, issue_body)
+      local issue_comment = exec_sync({ cmd = core.gh_issue_comment_cmd(repo, payload.issue_number, issue_body_path), timeout = 30 })
+      if issue_comment.exit_code ~= 0 then
+        error("github-proxy: gh issue comment failed after PR open: " .. tostring(issue_comment.stderr))
+      end
+    end
+
+    local pr_view = exec_sync({ cmd = core.gh_pr_view_comments_cmd(repo, pr.number), timeout = 30 })
+    if pr_view.exit_code ~= 0 then
+      error("github-proxy: gh pr view failed after PR open: " .. tostring(pr_view.stderr))
+    end
+    if not core.has_trusted_comment_fragment(core.parse_issue_comments(pr_view.stdout), tostring(payload.body), bot_login) then
+      local pr_body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
+      local pr_body_path = temp_body_file(repo, payload.branch, "pr-comment")
+      file.write(pr_body_path, pr_body)
+      local pr_comment = exec_sync({ cmd = core.gh_pr_comment_cmd(repo, pr.number, pr_body_path), timeout = 30 })
+      if pr_comment.exit_code ~= 0 then
+        error("github-proxy: gh pr comment failed: " .. tostring(pr_comment.stderr))
+      end
+    end
+
+    local add_labels = normalize_labels(payload.issue_label_add)
+    local remove_labels = normalize_labels(payload.issue_label_remove)
+    if #add_labels > 0 or #remove_labels > 0 then
+      with_lock(core.issue_label_lock_key(repo, payload.issue_number), function()
+        local current_state = current_issue_state_for_label_edit(repo, payload, bot_login)
+        if not can_apply_pr_open_labels(current_state, payload.impl_version) or current_state.state ~= "pr-open" then
+          log.warn("github-proxy: PR open label update skipped because current issue state advanced past pr-open")
+          return
+        end
+        local label = exec_sync({
+          cmd = core.gh_issue_edit_labels_cmd(repo, payload.issue_number, add_labels, remove_labels),
+          timeout = 30,
+        })
+        if label.exit_code ~= 0 then
+          error("github-proxy: gh issue edit failed after PR open: " .. tostring(label.stderr))
+        end
+      end)
+    end
+  end)
+end
+
+return M

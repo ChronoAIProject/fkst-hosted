@@ -43,23 +43,21 @@ function pipeline(event)
     end
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
     local state = core.current_state(current.comments, proposal_id)
-    if state.state == "thinking" then
-      core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
-      if not core.has_thinking_label(current.labels)
-        or core.has_ready_label(current.labels)
-        or core.has_implementing_label(current.labels)
-        or core.has_impl_failed_label(current.labels)
-        or core.has_blocked_label(current.labels)
-        or core.has_stuck_label(current.labels) then
-        local proposal = core.build_proposal(issue, "")
-        local label_request = core.build_thinking_label_request(issue, proposal)
-        local add_labels, remove_labels = core.state_label_changes("thinking")
-        core.log_apply("observe_issue", proposal_id, "thinking", proposal.dedup_key, { add = add_labels, remove = remove_labels }, {
+    if state.state ~= nil then
+      if state.state == "thinking" then
+        core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
+      end
+      if not core.state_label_hint_matches(current.labels, state.state) then
+        local label_request = core.build_reconcile_state_label_request(issue.repo, issue.number, proposal_id, state.state, state.version, issue.source_ref)
+        local add_labels, remove_labels = core.state_label_changes(state.state)
+        core.log_apply("observe_issue", proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
           "github-proxy.github_issue_label_request",
         })
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
       end
-      return
+      if state.state == "thinking" then
+        return
+      end
     end
     local transition = core.versioned_transition_status(state, { "unmanaged" }, "thinking", issue.dedup_key)
     if transition == "stale" then

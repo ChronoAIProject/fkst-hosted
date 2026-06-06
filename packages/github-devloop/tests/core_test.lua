@@ -3,6 +3,15 @@ local t = fkst.test
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
 
+local function has_value(values, expected)
+  for _, value in ipairs(values or {}) do
+    if value == expected then
+      return true
+    end
+  end
+  return false
+end
+
 local function source_ref()
   return {
     kind = "external",
@@ -157,17 +166,33 @@ return {
     t.eq(label.add_labels[1], "fkst-dev:ready")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(label.remove_labels[2], "fkst-dev:implementing")
-    t.eq(label.remove_labels[3], "fkst-dev:impl-failed")
-    t.eq(label.remove_labels[4], "fkst-dev:blocked")
-    t.eq(label.remove_labels[5], "fkst-dev:stuck")
-    t.eq(#label.remove_labels, 5)
+    t.eq(label.remove_labels[3], "fkst-dev:pr-open")
+    t.eq(label.remove_labels[4], "fkst-dev:reviewing")
+    t.eq(label.remove_labels[5], "fkst-dev:impl-failed")
+    t.eq(#label.remove_labels, 7)
     t.eq(label.issue_number, "42")
+
+    t.eq(core.state_label_hint_matches({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "reviewing"), true)
+    t.eq(core.state_label_hint_matches({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "reviewing"), false)
+    t.eq(core.state_label_hint_matches({ "fkst-dev:enabled", "fkst-dev:reviewing", "fkst-dev:pr-open" }, "reviewing"), false)
+    local reconcile = core.build_reconcile_state_label_request(
+      "owner/repo",
+      "42",
+      proposal_id,
+      "reviewing",
+      "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      { kind = "external", ref = "owner/repo#issue/42" }
+    )
+    t.eq(reconcile.add_labels[1], "fkst-dev:reviewing")
+    t.eq(reconcile.remove_labels[1], "fkst-dev:thinking")
+    t.eq(#reconcile.remove_labels, 7)
+    t.is_true(reconcile.dedup_key:find("reconcile/label/github-devloop/issue/owner/repo/42/reviewing", 1, true) ~= nil)
 
     local rejected = core.build_result_label_request("owner/repo", "42", reached({ decision = "reject" }))
     t.eq(rejected.add_labels[1], "fkst-dev:blocked")
     t.eq(rejected.remove_labels[1], "fkst-dev:thinking")
     t.eq(rejected.remove_labels[2], "fkst-dev:ready")
-    t.eq(#rejected.remove_labels, 5)
+    t.eq(#rejected.remove_labels, 7)
 
     local completed = reached()
     local comment = core.build_result_comment_request("owner/repo", "42", completed)
@@ -458,19 +483,19 @@ return {
     t.eq(label.add_labels[1], "fkst-dev:ready")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(label.remove_labels[2], "fkst-dev:implementing")
-    t.eq(label.remove_labels[3], "fkst-dev:impl-failed")
-    t.eq(label.remove_labels[4], "fkst-dev:blocked")
-    t.eq(label.remove_labels[5], "fkst-dev:stuck")
-    t.eq(#label.remove_labels, 5)
+    t.eq(label.remove_labels[3], "fkst-dev:pr-open")
+    t.eq(label.remove_labels[4], "fkst-dev:reviewing")
+    t.eq(label.remove_labels[5], "fkst-dev:impl-failed")
+    t.eq(#label.remove_labels, 7)
 
     local split_label = core.build_meta_label_request("owner/repo", "42", stuck(), "split")
     t.eq(split_label.add_labels[1], "fkst-dev:blocked")
     t.eq(split_label.remove_labels[1], "fkst-dev:thinking")
     t.eq(split_label.remove_labels[2], "fkst-dev:ready")
     t.eq(split_label.remove_labels[3], "fkst-dev:implementing")
-    t.eq(split_label.remove_labels[4], "fkst-dev:impl-failed")
-    t.eq(split_label.remove_labels[5], "fkst-dev:stuck")
-    t.eq(#split_label.remove_labels, 5)
+    t.eq(split_label.remove_labels[4], "fkst-dev:pr-open")
+    t.eq(split_label.remove_labels[5], "fkst-dev:reviewing")
+    t.eq(#split_label.remove_labels, 7)
 
     local comment = core.build_meta_comment_request("owner/repo", "42", stuck(), "split", "Create separate parser and writer tasks.")
     t.is_true(comment.body:find("Suggested split:", 1, true) ~= nil)
@@ -497,15 +522,35 @@ return {
     t.eq(core.is_supported_ready(ready), true)
 
     t.eq(core.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
+    local deterministic_branch = core.implement_branch("owner/repo", "42", ready.dedup_key)
+    t.is_true(deterministic_branch:find("devloop/issue/owner/repo/42/", 1, true) == 1)
+    t.eq(core.is_safe_branch(deterministic_branch), true)
+    t.eq(core.is_devloop_issue_branch(deterministic_branch), true)
+    t.eq(core.is_devloop_issue_branch("devloop-owner-repo-42-01HY"), false)
+    t.eq(core.is_devloop_issue_branch("feature/unrelated"), false)
+    local worktree_path = core.implement_worktree_path("/tmp/fkst-rt", "owner/repo", "42", ready.dedup_key)
+    t.is_true(worktree_path:find("/tmp/fkst-rt/worktrees/devloop-owner-repo-42-", 1, true) == 1)
     t.eq(
       core.gh_issue_view_implement_cmd("owner/repo", 42),
       "gh issue view '42' --repo 'owner/repo' --json title,body,labels,comments"
     )
     t.eq(core.git_status_cmd("/tmp/devloop-owner-repo-42"), "git -C '/tmp/devloop-owner-repo-42' status --porcelain")
+    t.is_true(core.git_worktree_add_new_branch_cmd(worktree_path, deterministic_branch, "abc123"):find("git worktree add -b", 1, true) ~= nil)
+    t.eq(core.git_worktree_list_cmd(), "git worktree list --porcelain")
+    local list = "worktree /tmp/main\nHEAD abc123\nbranch refs/heads/dev\n\n"
+      .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+    t.eq(core.find_worktree_for_branch(list, deterministic_branch), worktree_path)
+    t.is_nil(core.find_worktree_for_branch(list, deterministic_branch .. "-other"))
 
     local marker = core.implementing_marker(ready.proposal_id, ready.dedup_key)
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)
     t.eq(core.has_implementing_marker({ marker }, ready.proposal_id, ready.dedup_key), true)
+    local branch_marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123")
+    local fact = core.implementing_fact({ branch_marker }, ready.proposal_id, ready.dedup_key)
+    t.eq(fact.branch, "devloop-owner-repo-42-01HY")
+    t.eq(fact.head_sha, "abc123")
+    t.eq(core.is_safe_branch("devloop-owner-repo-42-01HY"), true)
+    t.eq(core.is_safe_branch("../bad"), false)
 
     local failed = core.impl_failure_marker(ready.proposal_id, ready.dedup_key, "codex-failed")
     t.eq(core.has_impl_failure_marker({ failed }, ready.proposal_id, ready.dedup_key), true)
@@ -515,24 +560,25 @@ return {
     t.eq(label.add_labels[1], "fkst-dev:implementing")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(label.remove_labels[2], "fkst-dev:ready")
-    t.eq(label.remove_labels[3], "fkst-dev:impl-failed")
-    t.eq(label.remove_labels[4], "fkst-dev:blocked")
-    t.eq(label.remove_labels[5], "fkst-dev:stuck")
-    t.eq(#label.remove_labels, 5)
+    t.eq(label.remove_labels[3], "fkst-dev:pr-open")
+    t.eq(label.remove_labels[4], "fkst-dev:reviewing")
+    t.eq(label.remove_labels[5], "fkst-dev:impl-failed")
+    t.eq(#label.remove_labels, 7)
     t.is_true(#label.dedup_key <= 512)
 
-    local comment = core.build_implementing_comment_request("owner/repo", "42", ready, "/tmp/devloop-owner-repo-42")
+    local comment = core.build_implementing_comment_request("owner/repo", "42", ready, "/tmp/devloop-owner-repo-42", "devloop-owner-repo-42-01HY", "abc123")
     t.is_true(comment.body:find("Worktree: /tmp/devloop-owner-repo-42", 1, true) ~= nil)
-    t.is_true(comment.body:find(marker, 1, true) ~= nil)
+    t.is_true(comment.body:find("Branch: devloop-owner-repo-42-01HY", 1, true) ~= nil)
+    t.is_true(comment.body:find(branch_marker, 1, true) ~= nil)
 
     local failed_label = core.build_impl_failed_label_request("owner/repo", "42", ready, "no-changes")
     t.eq(failed_label.add_labels[1], "fkst-dev:impl-failed")
     t.eq(failed_label.remove_labels[1], "fkst-dev:thinking")
     t.eq(failed_label.remove_labels[2], "fkst-dev:ready")
     t.eq(failed_label.remove_labels[3], "fkst-dev:implementing")
-    t.eq(failed_label.remove_labels[4], "fkst-dev:blocked")
-    t.eq(failed_label.remove_labels[5], "fkst-dev:stuck")
-    t.eq(#failed_label.remove_labels, 5)
+    t.eq(failed_label.remove_labels[4], "fkst-dev:pr-open")
+    t.eq(failed_label.remove_labels[5], "fkst-dev:reviewing")
+    t.eq(#failed_label.remove_labels, 7)
 
     local failure_comment = core.build_impl_failure_comment_request("owner/repo", "42", ready, "no-changes", "No files changed.")
     t.is_true(failure_comment.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)
@@ -545,6 +591,34 @@ return {
     local current = core.current_state({ forged_failure.body }, ready.proposal_id)
     t.eq(current.state, "impl-failed")
     t.eq(current.version, ready.dedup_key)
+
+    local pr_request = core.build_pr_open_request("owner/repo", "42", ready.proposal_id, {
+      state = "implementing",
+      version = ready.dedup_key,
+    }, "Implement decision recorder", "devloop-owner-repo-42-01HY", "abc123")
+    t.eq(pr_request.schema, "github-proxy.pr-open.v1")
+    t.eq(pr_request.proposal_id, ready.proposal_id)
+    t.eq(pr_request.impl_version, ready.dedup_key)
+    t.eq(pr_request.branch, "devloop-owner-repo-42-01HY")
+    t.eq(pr_request.head_sha, "abc123")
+    t.eq(pr_request.expected_state, "implementing")
+    t.eq(pr_request.expected_version, ready.dedup_key)
+    t.is_true(pr_request.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
+    t.is_true(pr_request.issue_comment_body_template:find("fkst:github-devloop:pr-link:v1", 1, true) ~= nil)
+    t.eq(pr_request.issue_label_add[1], "fkst-dev:pr-open")
+    t.is_true(has_value(pr_request.issue_label_remove, "fkst-dev:pr-authorized"))
+
+    local origin = core.pr_origin_fact({
+      core.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key),
+    })
+    t.eq(origin.proposal_id, ready.proposal_id)
+    t.eq(origin.issue_number, "42")
+    t.eq(origin.branch, "devloop-owner-repo-42-01HY")
+
+    local link = core.pr_link_fact({
+      core.pr_link_marker(ready.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key),
+    }, ready.proposal_id)
+    t.eq(link.pr_number, 7)
   end,
 
   test_implement_prompt_neutralizes_untrusted_issue_text = function()

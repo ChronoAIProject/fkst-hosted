@@ -92,6 +92,49 @@ return {
       "gh pr list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state,labels"
     )
     t.eq(
+      core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY"),
+      "gh pr list --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --state open --json number,url,headRefName,state"
+    )
+    t.eq(
+      core.git_push_branch_cmd("devloop-owner-repo-42-01HY"),
+      "git push -u origin 'devloop-owner-repo-42-01HY'"
+    )
+    t.eq(
+      core.git_show_ref_branch_cmd("devloop-owner-repo-42-01HY"),
+      "git show-ref --verify refs/heads/'devloop-owner-repo-42-01HY'"
+    )
+    t.eq(
+      core.parse_git_show_ref_head("abc123 refs/heads/devloop-owner-repo-42-01HY\n", "devloop-owner-repo-42-01HY"),
+      "abc123"
+    )
+    t.eq(
+      core.parse_git_show_ref_head("abc123 refs/tags/devloop-owner-repo-42-01HY\n", "devloop-owner-repo-42-01HY"),
+      nil
+    )
+    t.eq(
+      core.gh_pr_create_cmd("owner/repo", "devloop-owner-repo-42-01HY", "Fix title", "/tmp/body.md"),
+      "gh pr create --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --title 'Fix title' --body-file '/tmp/body.md'"
+    )
+    t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","state":"OPEN"}]', "devloop-owner-repo-42-01HY").number, 7)
+    t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","state":"CLOSED"}]', "devloop-owner-repo-42-01HY"), nil)
+    t.eq(
+      core.gh_pr_view_head_oid_cmd("owner/repo", 7),
+      "gh pr view '7' --repo 'owner/repo' --json headRefOid,state,headRepository,headRepositoryOwner,isCrossRepository"
+    )
+    local same_repo_pr = core.parse_pr_view_head_state(
+      '{"headRefOid":"ABC123","state":"OPEN","headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false}',
+      "owner/repo"
+    )
+    t.eq(same_repo_pr.head_ref_oid, "abc123")
+    t.eq(same_repo_pr.state, "OPEN")
+    t.eq(same_repo_pr.head_repository, "owner/repo")
+    t.eq(same_repo_pr.is_target_repository, true)
+    t.eq(core.parse_pr_view_head_state(
+      '{"headRefOid":"ABC123","state":"OPEN","headRepository":{"nameWithOwner":"fork/repo"},"isCrossRepository":true}',
+      "owner/repo"
+    ).is_target_repository, false)
+    t.eq(core.parse_pr_create("https://example.test/pull/8\n").number, 8)
+    t.eq(
       core.gh_issue_view_comments_cmd("owner/repo", 3),
       "gh issue view '3' --repo 'owner/repo' --json comments"
     )

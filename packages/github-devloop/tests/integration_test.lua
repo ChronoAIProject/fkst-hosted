@@ -134,6 +134,20 @@ local function run_implement(payload, run_opts)
   }, run_opts)
 end
 
+local function run_open_pr(payload, run_opts)
+  return t.run_department("departments/open_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_observe_pr(payload, run_opts)
+  return t.run_department("departments/observe_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = payload,
+  }, run_opts)
+end
+
 local function json_string(value)
   return tostring(value)
     :gsub("\\", "\\\\")
@@ -157,30 +171,36 @@ end
 
 local default_marker_version = "2026-06-02T00-00-00Z"
 
-local function mock_issue_state(labels, state)
+local function mock_issue_state(labels, state, comments)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:enabled" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   local rendered_comments = {}
-  local state_marker = nil
-  for _, label in ipairs(labels or {}) do
-    if label == "fkst-dev:thinking" then
-      state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "thinking", default_marker_version)
-    elseif label == "fkst-dev:ready" then
-      state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "ready", default_marker_version)
-    elseif label == "fkst-dev:implementing" then
-      state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "implementing", default_marker_version)
-    elseif label == "fkst-dev:impl-failed" then
-      state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "impl-failed", default_marker_version)
-    elseif label == "fkst-dev:blocked" then
-      state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "blocked", default_marker_version)
-    elseif label == "fkst-dev:stuck" then
-      state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "stuck", default_marker_version)
+  if comments ~= nil then
+    for _, comment in ipairs(comments) do
+      table.insert(rendered_comments, render_comment(comment))
     end
-  end
-  if state_marker ~= nil then
-    table.insert(rendered_comments, render_comment(state_marker))
+  else
+    local state_marker = nil
+    for _, label in ipairs(labels or {}) do
+      if label == "fkst-dev:thinking" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "thinking", default_marker_version)
+      elseif label == "fkst-dev:ready" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "ready", default_marker_version)
+      elseif label == "fkst-dev:implementing" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "implementing", default_marker_version)
+      elseif label == "fkst-dev:impl-failed" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "impl-failed", default_marker_version)
+      elseif label == "fkst-dev:blocked" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "blocked", default_marker_version)
+      elseif label == "fkst-dev:stuck" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "stuck", default_marker_version)
+      end
+    end
+    if state_marker ~= nil then
+      table.insert(rendered_comments, render_comment(state_marker))
+    end
   end
   t.mock_command("--json labels,state,comments", {
     stdout = string.format('{"state":"%s","labels":[%s],"comments":[%s]}\n',
@@ -354,6 +374,81 @@ local function mock_issue_implement_raw(labels, comments, extra)
   })
 end
 
+local function mock_issue_open_pr(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:implementing", "fkst-dev:pr-authorized" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:implementing" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_reviewing(labels, comments)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:pr-open" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:pr-open" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  t.mock_command("--json labels,comments", {
+    stdout = string.format('{"labels":[%s],"comments":[%s]}\n', table.concat(rendered_labels, ","), table.concat(rendered_comments, ",")),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_pr_origin(comments, head)
+  local rendered_comments = {}
+  for _, comment in ipairs(comments or {}) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  t.mock_command("--json headRefName,comments", {
+    stdout = string.format(
+      '{"headRefName":"%s","comments":[%s]}\n',
+      json_string(head or "devloop-owner-repo-42-01HY"),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_pr_head(head, state)
+  t.mock_command("--json headRefName", {
+    stdout = string.format('{"headRefName":"%s","state":"%s"}\n', json_string(head or "devloop-owner-repo-42-01HY"), json_string(state or "OPEN")),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_branch_exists(branch, head)
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-parse --verify", {
+    stdout = (head or "abc123") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_meta_codex(action, reason, exit_code)
   local stdout = ""
   if action ~= nil then
@@ -377,7 +472,152 @@ local function mock_setup_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("rev-parse --abbrev-ref HEAD", {
+    stdout = "devloop-owner-repo-42-01HY\n",
+    stderr = "",
+    exit_code = 0,
+  })
   return path
+end
+
+local function deterministic_branch_for(event)
+  local repo, issue_number = core.parse_proposal_id(event.proposal_id)
+  return core.implement_branch(repo, issue_number, event.dedup_key)
+end
+
+local function mock_fresh_implement_worktree(path)
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 1,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add -b", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_existing_empty_implement_worktree(path)
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-list --count", {
+    stdout = "0\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_existing_empty_implement_worktree_reuse(path, branch)
+  local worktree = (path or "/tmp/fkst-packages-test/github-devloop/runtime")
+    .. "/worktrees/devloop-owner-repo-42-01HY"
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-list --count", {
+    stdout = "0\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree " .. worktree .. "\nHEAD abc123\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  return worktree
+end
+
+local function mock_existing_implement_branch(head)
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-list --count", {
+    stdout = "1\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-parse --verify refs/heads/", {
+    stdout = (head or "def456") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_git_commit(new_head, branch)
+  t.mock_command("git -C", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("commit -m", {
+    stdout = "[" .. tostring(branch or "devloop-owner-repo-42-01HY") .. " 1234567] Implement github-devloop ready state\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  if branch ~= nil then
+    t.mock_command("rev-parse --abbrev-ref HEAD", {
+      stdout = tostring(branch) .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  t.mock_command("rev-parse HEAD", {
+    stdout = (new_head or "def456") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_existing_devloop_worktree(issue_slug)
@@ -403,6 +643,22 @@ local function mock_git_status(stdout, exit_code, stderr)
     stdout = stdout or "",
     stderr = stderr or "",
     exit_code = exit_code or 0,
+  })
+end
+
+local function mock_write_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
+    stdout = value or "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_bot_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = value or "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
   })
 end
 
@@ -481,6 +737,24 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
+  test_observe_issue_reconciles_regressed_label_to_canonical_marker = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-reconcile-reviewing"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
+    t.eq(label_raise.payload.remove_labels[3], "fkst-dev:implementing")
+    t.eq(#label_raise.payload.remove_labels, 7)
+    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
   test_observe_uses_current_github_state_not_payload_state = function()
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN")
     mock_issue_body("Body from GitHub")
@@ -544,7 +818,7 @@ return {
     local ready_raise = find_raise(result.raises, "devloop_ready")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
     t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
-    t.eq(#label_raise.payload.remove_labels, 5)
+    t.eq(#label_raise.payload.remove_labels, 7)
     t.eq(label_raise.payload.issue_number, "42")
 
     t.eq(comment_raise.payload.issue_number, "42")
@@ -587,7 +861,7 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
     t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
-    t.eq(#label_raise.payload.remove_labels, 5)
+    t.eq(#label_raise.payload.remove_labels, 7)
     t.is_true(comment_raise.payload.body:find('decision="reject"', 1, true) ~= nil)
   end,
 
@@ -599,7 +873,7 @@ return {
     t.eq(#stale_ready.raises, 2)
     local label_raise = find_raise(stale_ready.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
-    t.eq(#label_raise.payload.remove_labels, 5)
+    t.eq(#label_raise.payload.remove_labels, 7)
     t.is_true(find_raise(stale_ready.raises, "github-proxy.github_issue_comment_request") ~= nil)
 
     local completed = reached({ decision = "reject" })
@@ -1069,10 +1343,12 @@ return {
 
   test_implement_ready_runs_codex_in_worktree_and_marks_implementing = function()
     local event = ready()
+    local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready", "fkst-dev:thinking" })
-    mock_setup_worktree()
+    mock_fresh_implement_worktree()
     mock_implement_codex(0, "implemented")
     mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
 
     local result = run_implement(event, opts("implement-success"))
     t.eq(result.exit_code, 0)
@@ -1080,9 +1356,11 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:implementing")
-    t.eq(#label_raise.payload.remove_labels, 5)
+    t.eq(#label_raise.payload.remove_labels, 7)
     t.is_true(comment_raise.payload.body:find("github-devloop implementation started", 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find(core.implementing_marker(event.proposal_id, event.dedup_key), 1, true) ~= nil)
+    local fact = core.implementing_fact({ comment_raise.payload.body }, event.proposal_id, event.dedup_key)
+    t.eq(fact.branch, branch)
+    t.eq(fact.head_sha, "def456")
 
     local calls = t.command_calls()
     local saw_worktree_prefix = false
@@ -1096,9 +1374,239 @@ return {
     t.eq(saw_worktree_prefix, true)
     t.eq(saw_prompt, true)
     t.eq(count_calls("--json title,body,labels,comments"), 1)
-    t.eq(count_calls("git -C"), 3)
+    t.eq(count_calls("git -C"), 5)
+    t.eq(count_calls("git worktree add -b"), 1)
     t.eq(count_calls("codex exec"), 1)
     t.eq(count_calls("status --porcelain"), 1)
+    t.eq(count_calls("add -A"), 1)
+    t.eq(count_calls("commit -m"), 1)
+  end,
+
+  test_open_pr_authorized_write_raises_pr_open_request = function()
+    local event = issue({ labels = { "fkst-dev:implementing", "fkst-dev:pr-authorized" } })
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_open_pr({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+
+    local result = run_open_pr(event, opts("open-pr-authorized-write", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local pr_raise = find_raise(result.raises, "github-proxy.github_pr_open_request")
+    t.eq(pr_raise.payload.schema, "github-proxy.pr-open.v1")
+    t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
+    t.eq(pr_raise.payload.head_sha, "abc123")
+    t.eq(pr_raise.payload.proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(pr_raise.payload.impl_version, impl_version)
+    t.eq(pr_raise.payload.expected_state, "implementing")
+    t.eq(pr_raise.payload.expected_version, impl_version)
+    t.is_true(pr_raise.payload.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
+    t.is_true(pr_raise.payload.issue_comment_body_template:find("state=\"pr-open\"", 1, true) ~= nil)
+    t.eq(pr_raise.payload.issue_label_add[1], "fkst-dev:pr-open")
+    t.eq(count_calls("--json title,labels,comments"), 1)
+    t.eq(count_calls("show-ref --verify --quiet"), 1)
+    t.eq(count_calls("rev-parse --verify"), 1)
+  end,
+
+  test_open_pr_authorized_write_does_not_raise_when_branch_head_moved = function()
+    local event = issue({ labels = { "fkst-dev:implementing", "fkst-dev:pr-authorized" } })
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_open_pr({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "def456")
+    mock_bot_env()
+    mock_write_env("1")
+
+    local result = run_open_pr(event, opts("open-pr-authorized-branch-moved", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("show-ref --verify --quiet"), 1)
+    t.eq(count_calls("rev-parse --verify"), 1)
+  end,
+
+  test_open_pr_requires_human_label_and_write_switch = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    local missing_label = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-missing-label", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(missing_label.exit_code, 0)
+    t.eq(#missing_label.raises, 0)
+
+    mock_issue_open_pr({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
+    mock_write_env("")
+    local missing_write = run_open_pr(issue({ labels = { "fkst-dev:implementing", "fkst-dev:pr-authorized" } }), opts("open-pr-missing-write"))
+    t.eq(missing_write.exit_code, 0)
+    t.eq(#missing_write.raises, 0)
+  end,
+
+  test_observe_pr_backpointer_advances_issue_to_reviewing = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+    })
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
+    })
+    mock_pr_head("devloop-owner-repo-42-01HY")
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-reviewing"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(comment_raise.payload.body:find("state=\"reviewing\"", 1, true) ~= nil)
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+  end,
+
+  test_observe_pr_reconciles_regressed_label_to_reviewing_marker = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+    })
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-reconcile-reviewing"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
+    t.eq(#label_raise.payload.remove_labels, 7)
+    t.eq(count_calls("--json labels,comments"), 1)
+  end,
+
+  test_observe_pr_retries_devloop_branch_without_visible_backpointer = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local branch = core.implement_branch("owner/repo", "42", impl_version)
+    mock_pr_origin({}, branch)
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-backpointer-pending"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,comments"), 0)
+  end,
+
+  test_observe_pr_skips_non_devloop_branch_without_visible_backpointer = function()
+    mock_pr_origin({}, "feature/unrelated")
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-backpointer-foreign"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,comments"), 0)
+  end,
+
+  test_observe_pr_closed_pr_does_not_advance_issue_to_reviewing = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+    })
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
+    })
+    mock_pr_head("devloop-owner-repo-42-01HY", "CLOSED")
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-closed"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+  end,
+
+  test_observe_pr_ignores_forged_backpointer = function()
+    mock_pr_origin({
+      {
+        body = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", "v1"),
+        author_login = "ordinary-user",
+      },
+    })
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-forged"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
   test_implement_ready_label_only_empty_comments_does_not_synthesize_marker = function()
@@ -1132,7 +1640,7 @@ return {
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", default_marker_version),
     })
-    mock_setup_worktree()
+    mock_fresh_implement_worktree()
     mock_implement_codex(7, "", "forced implementation failure")
 
     local result = run_implement(event, opts("implement-codex-failure"))
@@ -1141,7 +1649,7 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:impl-failed")
-    t.eq(#label_raise.payload.remove_labels, 5)
+    t.eq(#label_raise.payload.remove_labels, 7)
     t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: codex-failed", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("forced implementation failure", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:impl-failure:v1", 1, true) ~= nil)
@@ -1158,7 +1666,7 @@ return {
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     })
-    mock_setup_worktree()
+    mock_fresh_implement_worktree()
     mock_implement_codex(9, "", "failure detail\n" .. forged)
 
     local result = run_implement(event, opts("implement-failure-marker-injection"))
@@ -1200,21 +1708,24 @@ return {
     t.eq(count_calls("git -C"), 0)
   end,
 
-  test_implement_crash_before_marker_reruns_even_with_existing_worktree = function()
+  test_implement_crash_before_marker_reuses_existing_branch_commit = function()
     local event = ready()
+    local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready" })
-    mock_existing_devloop_worktree("owner-repo-42")
-    mock_setup_worktree()
-    mock_implement_codex(0, "implemented")
-    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_existing_implement_branch("def456")
 
-    local result = run_implement(event, opts("implement-existing-worktree-rerun"))
+    local result = run_implement(event, opts("implement-existing-branch-reuse"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find(core.implementing_marker(event.proposal_id, event.dedup_key), 1, true) ~= nil)
-    t.eq(count_calls("git worktree list"), 0)
-    t.eq(count_calls("codex exec"), 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
+    t.eq(fact.branch, branch)
+    t.eq(fact.head_sha, "def456")
+    t.eq(count_calls("git worktree add"), 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("status --porcelain"), 0)
+    t.eq(count_calls("impl-failed"), 0)
   end,
 
   test_implement_existing_worktree_for_other_issue_does_not_affect_fresh_attempt = function()
@@ -1226,22 +1737,15 @@ return {
         ref = "owner/repo#issue/4",
       },
     })
+    local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", default_marker_version),
     })
     mock_existing_devloop_worktree("owner-repo-42")
-    t.mock_command("git -C", {
-      stdout = "dev\n",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command("git -C", {
-      stdout = "",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_fresh_implement_worktree()
     mock_implement_codex()
     mock_git_status(" M packages/github-devloop/departments/implement/main.lua\n")
+    mock_git_commit("def456", branch)
 
     local result = run_implement(event, opts("implement-boundary-worktree"))
     t.eq(result.exit_code, 0)
@@ -1253,9 +1757,14 @@ return {
   test_implement_empty_git_status_marks_impl_failed_with_failure_marker = function()
     local event = ready()
     mock_issue_implement({ "fkst-dev:ready" })
-    mock_setup_worktree()
+    mock_fresh_implement_worktree()
     mock_implement_codex(0, "No files needed changes.")
     mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "0\n",
+      stderr = "",
+      exit_code = 0,
+    })
 
     local result = run_implement(event, opts("implement-no-changes"))
     t.eq(result.exit_code, 0)
@@ -1264,6 +1773,91 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("No files needed changes.", 1, true) ~= nil)
+  end,
+
+  test_implement_clean_worktree_with_branch_ahead_marks_implementing = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:ready" })
+    mock_fresh_implement_worktree()
+    mock_implement_codex(0, "Committed implementation directly.")
+    mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("rev-parse --verify refs/heads/", {
+      stdout = "def456\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-clean-ahead"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
+    t.eq(fact.branch, branch)
+    t.eq(fact.head_sha, "def456")
+    t.eq(count_calls("impl-failed"), 0)
+    t.eq(count_calls("add -A"), 0)
+    t.eq(count_calls("commit -m"), 0)
+  end,
+
+  test_implement_existing_empty_branch_still_marks_no_changes_failed = function()
+    local event = ready()
+    mock_issue_implement({ "fkst-dev:ready" })
+    mock_existing_empty_implement_worktree()
+    mock_implement_codex(0, "No files needed changes.")
+    mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "0\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-existing-empty-branch-no-changes"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:impl-failed")
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)
+    t.eq(count_calls("git worktree add"), 1)
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_implement_existing_empty_worktree_reuses_and_converges_when_codex_commits = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:ready" })
+    local worktree = mock_existing_empty_implement_worktree_reuse(nil, branch)
+    mock_implement_codex(0, "Committed implementation directly.")
+    mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("rev-parse --verify refs/heads/", {
+      stdout = "def456\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-existing-worktree-reuse"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
+    t.eq(fact.branch, branch)
+    t.eq(fact.head_sha, "def456")
+    t.is_true(comment:find(worktree, 1, true) ~= nil)
+    t.eq(count_calls("git worktree list --porcelain"), 1)
+    t.eq(count_calls("git worktree add"), 0)
+    t.eq(count_calls("codex exec"), 1)
   end,
 
   test_implement_marker_present_skips_idempotently = function()
@@ -1309,9 +1903,11 @@ return {
     t.eq(count_calls("git -C"), 0)
 
     mock_issue_implement({ "fkst-dev:ready" })
-    mock_setup_worktree("/tmp/devloop-owner-repo-42")
+    local branch = deterministic_branch_for(ready())
+    mock_fresh_implement_worktree("/tmp/fkst-packages-test/github-devloop/runtime")
     mock_implement_codex(0, "implemented")
     mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
 
     local visible = run_implement(ready(), opts("implement-ready-visible"))
     t.eq(visible.exit_code, 0)
@@ -1385,7 +1981,7 @@ return {
     t.eq(#result.raises, 3)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
-    t.eq(#label_raise.payload.remove_labels, 5)
+    t.eq(#label_raise.payload.remove_labels, 7)
 
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("github-devloop meta action: implement", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find(core.meta_marker(event.proposal_id, event.dedup_key), 1, true) ~= nil)
@@ -1516,7 +2112,7 @@ return {
     t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    t.eq(#label_raise.payload.remove_labels, 5)
+    t.eq(#label_raise.payload.remove_labels, 7)
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("Suggested split:", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("Split parser hardening from label transition behavior.", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find(core.meta_marker(event.proposal_id, event.dedup_key), 1, true) ~= nil)

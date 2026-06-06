@@ -11,6 +11,9 @@ local max_repo_key_len = 100
 local max_issue_key_len = 30
 local max_update_key_len = 50
 local max_worktree_prefix_len = 90
+local max_branch_len = 160
+local max_sha_len = 64
+local max_pr_title_len = 240
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
 local untrusted_issue_data_begin = "BEGIN UNTRUSTED ISSUE DATA"
@@ -21,6 +24,9 @@ local enabled_label = "fkst-dev:enabled"
 local thinking_label = "fkst-dev:thinking"
 local ready_label = "fkst-dev:ready"
 local implementing_label = "fkst-dev:implementing"
+local pr_authorized_label = "fkst-dev:pr-authorized"
+local pr_open_label = "fkst-dev:pr-open"
+local reviewing_label = "fkst-dev:reviewing"
 local impl_failed_label = "fkst-dev:impl-failed"
 local blocked_label = "fkst-dev:blocked"
 local stuck_label = "fkst-dev:stuck"
@@ -30,6 +36,8 @@ local state_labels = {
   [thinking_label] = true,
   [ready_label] = true,
   [implementing_label] = true,
+  [pr_open_label] = true,
+  [reviewing_label] = true,
   [impl_failed_label] = true,
   [blocked_label] = true,
   [stuck_label] = true,
@@ -39,6 +47,8 @@ local label_by_state = {
   thinking = thinking_label,
   ready = ready_label,
   implementing = implementing_label,
+  ["pr-open"] = pr_open_label,
+  reviewing = reviewing_label,
   ["impl-failed"] = impl_failed_label,
   blocked = blocked_label,
   stuck = stuck_label,
@@ -54,17 +64,21 @@ local state_graph = {
   thinking = { "ready", "blocked", "stuck" },
   stuck = { "ready", "blocked" },
   ready = { "implementing" },
-  implementing = { "impl-failed" },
+  implementing = { "pr-open", "impl-failed" },
+  ["pr-open"] = { "reviewing" },
+  reviewing = {},
   ["impl-failed"] = {},
   blocked = {},
 }
 
-local state_order = { "thinking", "ready", "implementing", "impl-failed", "blocked", "stuck" }
+local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "impl-failed", "blocked", "stuck" }
 local state_stage_rank = {
   thinking = 100,
   stuck = 300,
   ready = 500,
   implementing = 600,
+  ["pr-open"] = 650,
+  reviewing = 675,
   ["impl-failed"] = 700,
   blocked = 800,
 }
@@ -95,8 +109,29 @@ local function one_line(value)
   return tostring(value or ""):gsub("[%s]+", " ")
 end
 
+local function decimal_checksum(value)
+  local hash = 2166136261
+  local text = tostring(value or "")
+  for i = 1, #text do
+    hash = (hash * 16777619 + text:byte(i)) % 4294967291
+  end
+  return string.format("%010d", hash)
+end
+
 local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
+end
+
+local function has_value(values, expected)
+  if type(values) ~= "table" then
+    return false
+  end
+  for _, value in ipairs(values) do
+    if value == expected then
+      return true
+    end
+  end
+  return false
 end
 
 local function is_meta_action(value)
@@ -125,6 +160,42 @@ local function is_path_safe_key(value, limit)
     end
   end
   return true
+end
+
+local function is_git_ref_safe(value)
+  if not is_bounded_string(value, max_branch_len) then
+    return false
+  end
+  local text = tostring(value)
+  if text:sub(1, 1) == "-" or text:sub(1, 1) == "/" then
+    return false
+  end
+  if text:find("%.%.", 1, true) ~= nil
+    or text:find("//", 1, true) ~= nil
+    or text:find("@{", 1, true) ~= nil
+    or text:sub(-1) == "/"
+    or text:sub(-1) == "."
+    or text:sub(-5) == ".lock" then
+    return false
+  end
+  if text:find("[%s~^:?%[%]\\*]") ~= nil then
+    return false
+  end
+  for segment in text:gmatch("[^/]+") do
+    if segment == "." or segment == ".." or segment:sub(1, 1) == "." then
+      return false
+    end
+  end
+  return text:find("^[%w%._%-%/]+$") ~= nil
+end
+
+local function is_git_sha(value)
+  return is_bounded_string(value, max_sha_len) and tostring(value):find("^%x+$") ~= nil
+end
+
+local function is_positive_pr_number(value)
+  local number = tonumber(value)
+  return number ~= nil and number >= 1 and number % 1 == 0 and number <= 2147483647
 end
 
 local function has_bounded_source_ref(source_ref)
@@ -368,6 +439,45 @@ function M.safe_issue_slug(repo, issue_number)
   return slug
 end
 
+function M.implement_branch(repo, issue_number, impl_version)
+  local safe_repo = M.safe_repo(repo)
+  local safe_issue = M.safe_issue(issue_number)
+  local safe_version = M.sanitize_key(impl_version, false):gsub("[/#]", "-"):gsub("%-+", "-")
+  safe_version = safe_version:gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
+  if safe_version == "" then
+    safe_version = "version"
+  end
+
+  local prefix = "devloop/issue/" .. safe_repo .. "/" .. safe_issue .. "/"
+  local suffix = "-" .. decimal_checksum(tostring(repo) .. "#" .. tostring(issue_number) .. "#" .. tostring(impl_version))
+  local version_limit = max_branch_len - #prefix - #suffix
+  if version_limit < 12 then
+    version_limit = 12
+  end
+  if #safe_version > version_limit then
+    safe_version = safe_version:sub(1, version_limit):gsub("%-+$", ""):gsub("%.+$", "")
+  end
+  if safe_version == "" then
+    safe_version = "version"
+  end
+
+  local branch = prefix .. safe_version .. suffix
+  if not is_git_ref_safe(branch) or #branch > max_branch_len then
+    error("github-devloop: invalid deterministic implementation branch")
+  end
+  return branch
+end
+
+function M.implement_worktree_path(runtime_root, repo, issue_number, impl_version)
+  local root = trim(runtime_root)
+  if root == "" or root:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid FKST_RUNTIME_ROOT")
+  end
+  local slug = M.safe_issue_slug(repo, issue_number)
+  local suffix = decimal_checksum(tostring(repo) .. "#" .. tostring(issue_number) .. "#" .. tostring(impl_version))
+  return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
+end
+
 function M.bounded_body(value)
   local text = tostring(value or "")
   if text == "" then
@@ -503,8 +613,136 @@ function M.gh_issue_view_implement_cmd(repo, issue_number)
     .. " --json title,body,labels,comments"
 end
 
+function M.gh_issue_view_open_pr_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,labels,comments"
+end
+
+function M.gh_issue_view_reviewing_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json labels,comments"
+end
+
+function M.gh_pr_view_origin_cmd(repo, pr_number)
+  return "gh pr view " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json headRefName,comments"
+end
+
+function M.gh_pr_view_head_cmd(repo, pr_number)
+  return "gh pr view " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json headRefName,state"
+end
+
 function M.git_status_cmd(worktree)
   return "git -C " .. shell_single_quote(worktree) .. " status --porcelain"
+end
+
+function M.git_add_all_cmd(worktree)
+  return "git -C " .. shell_single_quote(worktree) .. " add -A"
+end
+
+function M.git_commit_cmd(worktree, message)
+  local bounded_message = tostring(message or "")
+  if bounded_message == "" or #bounded_message > 200 then
+    error("github-devloop: invalid git commit message")
+  end
+  return "git -C " .. shell_single_quote(worktree) .. " commit -m " .. shell_single_quote(bounded_message)
+end
+
+function M.git_current_branch_cmd(worktree)
+  return "git -C " .. shell_single_quote(worktree) .. " rev-parse --abbrev-ref HEAD"
+end
+
+function M.git_head_sha_cmd(worktree)
+  return "git -C " .. shell_single_quote(worktree) .. " rev-parse HEAD"
+end
+
+function M.git_base_head_cmd()
+  return "git rev-parse HEAD"
+end
+
+function M.git_show_ref_branch_cmd(branch)
+  return "git show-ref --verify --quiet refs/heads/" .. shell_single_quote(branch)
+end
+
+function M.git_show_ref_cmd(worktree, branch)
+  return "git -C " .. shell_single_quote(worktree) .. " show-ref --verify --quiet refs/heads/" .. shell_single_quote(branch)
+end
+
+function M.git_branch_ahead_count_cmd(base, branch)
+  if not is_git_sha(base) then
+    error("github-devloop: invalid base head")
+  end
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return "git rev-list --count " .. shell_single_quote(base) .. "..refs/heads/" .. shell_single_quote(branch)
+end
+
+function M.git_branch_head_cmd(branch)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return "git rev-parse --verify refs/heads/" .. shell_single_quote(branch)
+end
+
+function M.read_runtime_root_cmd()
+  return 'printf %s "$FKST_RUNTIME_ROOT"'
+end
+
+function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  if not is_git_sha(base) then
+    error("github-devloop: invalid base head")
+  end
+  return "mkdir -p " .. shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
+    .. " && git worktree add -b " .. shell_single_quote(branch)
+    .. " " .. shell_single_quote(worktree)
+    .. " " .. shell_single_quote(base)
+end
+
+function M.git_worktree_add_existing_branch_cmd(worktree, branch)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return "mkdir -p " .. shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
+    .. " && git worktree add " .. shell_single_quote(worktree)
+    .. " " .. shell_single_quote(branch)
+end
+
+function M.git_worktree_list_cmd()
+  return "git worktree list --porcelain"
+end
+
+function M.find_worktree_for_branch(stdout, branch)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  local wanted = "refs/heads/" .. tostring(branch)
+  local path = nil
+  for line in (tostring(stdout or "") .. "\n"):gmatch("([^\n]*)\n") do
+    if line == "" then
+      path = nil
+    else
+      local current_path = line:match("^worktree%s+(.+)$")
+      if current_path ~= nil then
+        path = current_path
+      elseif line == "branch " .. wanted and path ~= nil and path ~= "" then
+        return path
+      end
+    end
+  end
+  return nil
+end
+
+function M.git_rev_parse_branch_cmd(worktree, branch)
+  return "git -C " .. shell_single_quote(worktree) .. " rev-parse --verify refs/heads/" .. shell_single_quote(branch)
 end
 
 function M.parse_issue_view_body(stdout)
@@ -596,6 +834,36 @@ function M.parse_issue_view_implement(stdout)
   return M.parse_issue_view_meta(stdout)
 end
 
+function M.parse_issue_view_open_pr(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_result(stdout)
+  return {
+    title = tostring(decoded.title or ""),
+    labels = result.labels,
+    comments = result.comments,
+  }
+end
+
+function M.parse_issue_view_reviewing(stdout)
+  return M.parse_issue_view_result(stdout)
+end
+
+function M.parse_pr_view_origin(stdout)
+  local decoded = json.decode(stdout or "{}")
+  return {
+    head_ref_name = decoded.headRefName or decoded.head_ref_name,
+    comments = M.comments_from_json(decoded.comments),
+  }
+end
+
+function M.parse_pr_view_head_state(stdout)
+  local decoded = json.decode(stdout or "{}")
+  return {
+    head_ref_name = decoded.headRefName or decoded.head_ref_name,
+    state = decoded.state,
+  }
+end
+
 function M.has_label(labels, expected)
   if type(labels) ~= "table" then
     return false
@@ -616,6 +884,8 @@ function M.state_marker(proposal_id, state, version)
   if state ~= "thinking"
     and state ~= "ready"
     and state ~= "implementing"
+    and state ~= "pr-open"
+    and state ~= "reviewing"
     and state ~= "impl-failed"
     and state ~= "blocked"
     and state ~= "stuck" then
@@ -730,13 +1000,16 @@ function M.log_outbound(dept, proposal_id, queue, request)
     "queue=" .. tostring(queue or ""),
     "repo=" .. tostring(request and request.repo or ""),
     "issue=" .. tostring(request and request.issue_number or ""),
+    "branch=" .. tostring(request and request.branch or ""),
+    "pr=" .. tostring(request and request.pr_number or ""),
     "dedup_key=" .. tostring(request and request.dedup_key or ""),
   })
 end
 
 function M.log_raise(dept, proposal_id, queue, payload)
   if queue == "github-proxy.github_issue_label_request"
-    or queue == "github-proxy.github_issue_comment_request" then
+    or queue == "github-proxy.github_issue_comment_request"
+    or queue == "github-proxy.github_pr_open_request" then
     M.log_outbound(dept, proposal_id, queue, payload)
   end
   raise(queue, payload)
@@ -1022,6 +1295,40 @@ function M.state_label_changes(to_state)
   return { add_label }, remove_labels
 end
 
+function M.state_label_hint_matches(labels, state)
+  local expected_label = M.state_label(state)
+  if expected_label == nil then
+    return false
+  end
+
+  local has_expected = false
+  for _, label in ipairs(labels or {}) do
+    local label_text = tostring(label)
+    if label_text == expected_label then
+      has_expected = true
+    elseif state_labels[label_text] then
+      return false
+    end
+  end
+  return has_expected
+end
+
+function M.build_reconcile_state_label_request(repo, issue_number, proposal_id, state, version, source_ref)
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    state,
+    dedup_key({
+      "reconcile",
+      "label",
+      tostring(proposal_id),
+      tostring(state),
+      tostring(version or "unversioned"),
+    }),
+    source_ref
+  )
+end
+
 function M.has_terminal_label(labels)
   return M.has_label(labels, ready_label)
     or M.has_label(labels, implementing_label)
@@ -1050,6 +1357,18 @@ function M.has_implementing_label(labels)
   return M.has_label(labels, implementing_label)
 end
 
+function M.has_pr_authorized_label(labels)
+  return M.has_label(labels, pr_authorized_label)
+end
+
+function M.has_pr_open_label(labels)
+  return M.has_label(labels, pr_open_label)
+end
+
+function M.has_reviewing_label(labels)
+  return M.has_label(labels, reviewing_label)
+end
+
 function M.has_impl_failed_label(labels)
   return M.has_label(labels, impl_failed_label)
 end
@@ -1057,6 +1376,8 @@ end
 function M.has_decision_terminal_label(labels)
   return M.has_label(labels, ready_label)
     or M.has_label(labels, implementing_label)
+    or M.has_label(labels, pr_open_label)
+    or M.has_label(labels, reviewing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
 end
@@ -1064,6 +1385,8 @@ end
 function M.is_loop_terminal(labels)
   return M.has_label(labels, ready_label)
     or M.has_label(labels, implementing_label)
+    or M.has_label(labels, pr_open_label)
+    or M.has_label(labels, reviewing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
     or M.has_label(labels, stuck_label)
@@ -1108,9 +1431,53 @@ function M.meta_marker(proposal_id, dedup_key)
     .. '" -->'
 end
 
-function M.implementing_marker(proposal_id, dedup_key)
+function M.implementing_marker(proposal_id, dedup_key, branch, head_sha)
+  local fields = ""
+  if branch ~= nil then
+    fields = fields .. '" branch="' .. tostring(branch)
+  end
+  if head_sha ~= nil then
+    fields = fields .. '" head_sha="' .. tostring(head_sha)
+  end
   return '<!-- fkst:github-devloop:implementing:v1 proposal="' .. tostring(proposal_id)
     .. '" dedup="' .. tostring(dedup_key)
+    .. fields
+    .. '" -->'
+end
+
+function M.pr_link_marker(proposal_id, pr_number, branch, impl_version)
+  if not is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pr number")
+  end
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. tostring(proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" branch="' .. tostring(branch)
+    .. '" impl_version="' .. tostring(impl_version)
+    .. '" -->'
+end
+
+function M.pr_link_marker_template(proposal_id, branch, impl_version)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. tostring(proposal_id)
+    .. '" pr="{{pr_number}}"'
+    .. ' branch="' .. tostring(branch)
+    .. '" impl_version="' .. tostring(impl_version)
+    .. '" -->'
+end
+
+function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return '<!-- fkst:github-devloop:pr-origin:v1 proposal="' .. tostring(proposal_id)
+    .. '" issue="' .. tostring(issue_number)
+    .. '" branch="' .. tostring(branch)
+    .. '" impl_version="' .. tostring(impl_version)
     .. '" -->'
 end
 
@@ -1244,6 +1611,107 @@ end
 
 function M.has_implementing_marker(comments, proposal_id, dedup_key)
   return has_versioned_marker(comments, M.implementing_marker(proposal_id, dedup_key))
+end
+
+function M.is_safe_branch(branch)
+  return is_git_ref_safe(branch)
+end
+
+function M.is_devloop_issue_branch(branch)
+  return type(branch) == "string"
+    and is_git_ref_safe(branch)
+    and branch:find("^devloop/issue/[^/]+/.+/.+") ~= nil
+end
+
+function M.is_safe_head_sha(head_sha)
+  return is_git_sha(head_sha)
+end
+
+function M.is_safe_pr_number(pr_number)
+  return is_positive_pr_number(pr_number)
+end
+
+function M.implementing_fact(comments, proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:implementing:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      local marker_branch = marker:match('branch="([^"]+)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_proposal == proposal_id
+        and marker_dedup == tostring(dedup_key)
+        and is_git_ref_safe(marker_branch)
+        and is_git_sha(marker_head_sha) then
+        return {
+          proposal_id = marker_proposal,
+          dedup_key = marker_dedup,
+          branch = marker_branch,
+          head_sha = marker_head_sha,
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.pr_link_fact(comments, proposal_id)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-link:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_branch = marker:match('branch="([^"]+)"')
+      local marker_impl_version = marker:match('impl_version="([^"]*)"')
+      if marker_proposal == proposal_id
+        and is_positive_pr_number(marker_pr)
+        and is_git_ref_safe(marker_branch)
+        and is_bounded_string(marker_impl_version, max_dedup_len) then
+        return {
+          proposal_id = marker_proposal,
+          pr_number = tonumber(marker_pr),
+          branch = marker_branch,
+          impl_version = marker_impl_version,
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.pr_origin_fact(comments)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-origin:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_issue = marker:match('issue="([^"]+)"')
+      local marker_branch = marker:match('branch="([^"]+)"')
+      local marker_impl_version = marker:match('impl_version="([^"]*)"')
+      local repo, issue_number = M.parse_proposal_id(marker_proposal)
+      if repo ~= nil
+        and marker_issue == issue_number
+        and is_git_ref_safe(marker_branch)
+        and is_bounded_string(marker_impl_version, max_dedup_len) then
+        return {
+          proposal_id = marker_proposal,
+          repo = repo,
+          issue_number = issue_number,
+          branch = marker_branch,
+          impl_version = marker_impl_version,
+        }
+      end
+    end
+  end
+  return nil
 end
 
 function M.has_impl_failure_marker(comments, proposal_id, dedup_key)
@@ -1645,8 +2113,14 @@ function M.build_impl_failed_label_request(repo, issue_number, ready, reason)
   )
 end
 
-function M.build_implementing_comment_request(repo, issue_number, ready, worktree)
-  local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key)
+function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid implementing branch")
+  end
+  if not is_git_sha(head_sha) then
+    error("github-devloop: invalid implementing head_sha")
+  end
+  local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha)
   local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)
   return {
     schema = "github-proxy.v1",
@@ -1654,6 +2128,8 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
     issue_number = issue_number,
     body = "github-devloop implementation started"
       .. "\n\nWorktree: " .. tostring(worktree)
+      .. "\nBranch: " .. tostring(branch)
+      .. "\nHead: " .. tostring(head_sha)
       .. "\n\n" .. state_marker
       .. "\n" .. marker,
     dedup_key = dedup_key({
@@ -1698,6 +2174,130 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
   }
 end
 
+function M.build_pr_open_request(repo, issue_number, proposal_id, current, title, branch, head_sha)
+  if type(current) ~= "table" or current.state ~= "implementing" or not is_bounded_string(current.version, max_dedup_len) then
+    error("github-devloop: invalid implementing state for pr request")
+  end
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid pr branch")
+  end
+  if not is_git_sha(head_sha) then
+    error("github-devloop: invalid pr head_sha")
+  end
+  local bounded_title = tostring(title or "")
+  if bounded_title == "" then
+    bounded_title = "github-devloop implementation for #" .. tostring(issue_number)
+  end
+  if #bounded_title > max_pr_title_len then
+    bounded_title = bounded_title:sub(1, max_pr_title_len)
+  end
+  local body = "github-devloop implementation PR for issue #" .. tostring(issue_number)
+    .. "\n\n" .. M.pr_origin_marker(proposal_id, issue_number, branch, current.version)
+  local add_labels, remove_labels = M.state_label_changes("pr-open")
+  if not has_value(remove_labels, pr_authorized_label) then
+    table.insert(remove_labels, pr_authorized_label)
+  end
+  return {
+    schema = "github-proxy.pr-open.v1",
+    repo = repo,
+    issue_number = issue_number,
+    proposal_id = proposal_id,
+    impl_version = current.version,
+    expected_state = current.state,
+    expected_version = current.version,
+    branch = branch,
+    head_sha = head_sha,
+    title = bounded_title,
+    body = body,
+    issue_comment_body_template = "github-devloop PR opened: #{{pr_number}}"
+      .. "\n\n" .. M.state_marker(proposal_id, "pr-open", current.version)
+      .. "\n" .. M.pr_link_marker_template(proposal_id, branch, current.version),
+    issue_label_add = add_labels,
+    issue_label_remove = remove_labels,
+    dedup_key = dedup_key({
+      "open-pr",
+      tostring(proposal_id),
+      tostring(current.version),
+      tostring(branch),
+    }),
+    source_ref = {
+      kind = "external",
+      ref = tostring(repo) .. "#issue/" .. tostring(issue_number),
+    },
+  }
+end
+
+function M.build_pr_open_comment_request(repo, issue_number, proposal_id, current, pr_number, branch, source_ref)
+  local state_marker = M.state_marker(proposal_id, "pr-open", current.version)
+  local link_marker = M.pr_link_marker(proposal_id, pr_number, branch, current.version)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop PR opened: #" .. tostring(pr_number)
+      .. "\n\n" .. state_marker
+      .. "\n" .. link_marker,
+    dedup_key = dedup_key({
+      "open-pr",
+      "comment",
+      tostring(proposal_id),
+      tostring(current.version),
+      tostring(pr_number),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
+function M.build_pr_open_label_request(repo, issue_number, proposal_id, current, source_ref)
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    "pr-open",
+    dedup_key({
+      "open-pr",
+      "label",
+      tostring(proposal_id),
+      tostring(current.version),
+    }),
+    source_ref
+  )
+end
+
+function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number, source_ref)
+  local state_marker = M.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop PR is ready for review: #" .. tostring(pr_number)
+      .. "\n\n" .. state_marker,
+    dedup_key = dedup_key({
+      "observe-pr",
+      "comment",
+      tostring(origin.proposal_id),
+      tostring(origin.impl_version),
+      tostring(pr_number),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
+function M.build_reviewing_label_request(repo, issue_number, origin, pr_number, source_ref)
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    "reviewing",
+    dedup_key({
+      "observe-pr",
+      "label",
+      tostring(origin.proposal_id),
+      tostring(origin.impl_version),
+      tostring(pr_number),
+    }),
+    source_ref
+  )
+end
+
 function M.is_supported_issue(payload)
   return type(payload) == "table"
     and payload.schema == "github-proxy.v1"
@@ -1707,6 +2307,15 @@ function M.is_supported_issue(payload)
     and payload.title ~= nil
     and payload.updated_at ~= nil
     and M.issue_ref_round_trips(payload.repo, payload.number)
+    and has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_pr(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-proxy.v1"
+    and payload.type == "pr"
+    and payload.repo ~= nil
+    and M.is_safe_pr_number(payload.number)
     and has_bounded_source_ref(payload.source_ref)
 end
 
