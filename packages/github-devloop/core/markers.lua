@@ -1,0 +1,814 @@
+local S = {}
+
+function S.install(M)
+function M.loop_budget()
+  return M._loop_budget
+end
+
+function M.loop_marker(proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:loop:v1 proposal="' .. tostring(proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.stuck_marker(proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:stuck:v1 proposal="' .. tostring(proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.meta_marker(proposal_id, dedup_key)
+  return '<!-- fkst:github-devloop:meta:v1 proposal="' .. tostring(proposal_id)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.review_loop_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:review-loop:v1 proposal="' .. tostring(review_proposal_id)
+    .. '" issue_proposal="' .. tostring(issue_proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.review_meta_trigger_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:review-meta-trigger:v1 proposal="' .. tostring(review_proposal_id)
+    .. '" issue_proposal="' .. tostring(issue_proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.review_meta_marker(issue_proposal_id, dedup_key, action, version)
+  local fields = ""
+  if action ~= nil then
+    if not M._is_review_meta_action(action) then
+      error("github-devloop: invalid review-meta action")
+    end
+    fields = fields .. '" action="' .. tostring(action)
+  end
+  if version ~= nil then
+    fields = fields .. '" version="' .. tostring(version)
+  end
+  return '<!-- fkst:github-devloop:review-meta:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. fields
+    .. '" -->'
+end
+
+function M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  if not M._is_git_sha(old_head_sha) or not M._is_git_sha(new_head_sha) then
+    error("github-devloop: invalid fix head sha")
+  end
+  return '<!-- fkst:github-devloop:fix:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" review_proposal="' .. tostring(review_proposal_id)
+    .. '" review_dedup="' .. tostring(review_dedup_key)
+    .. '" old_head_sha="' .. tostring(old_head_sha)
+    .. '" new_head_sha="' .. tostring(new_head_sha)
+    .. '" -->'
+end
+
+function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, reason)
+  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid merge-gate marker")
+  end
+  return '<!-- fkst:github-devloop:merge-gate:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" review_proposal="' .. tostring(review_proposal_id)
+    .. '" review_dedup="' .. tostring(review_dedup_key)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" reason="' .. tostring(M.sanitize_key(reason or "gate-failed", false):gsub("/", "-"))
+    .. '" -->'
+end
+
+function M.implementing_marker(proposal_id, dedup_key, branch, head_sha)
+  local fields = ""
+  if branch ~= nil then
+    fields = fields .. '" branch="' .. tostring(branch)
+  end
+  if head_sha ~= nil then
+    fields = fields .. '" head_sha="' .. tostring(head_sha)
+  end
+  return '<!-- fkst:github-devloop:implementing:v1 proposal="' .. tostring(proposal_id)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. fields
+    .. '" -->'
+end
+
+function M.pr_link_marker(proposal_id, pr_number, branch, impl_version)
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pr number")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. tostring(proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" branch="' .. tostring(branch)
+    .. '" impl_version="' .. tostring(impl_version)
+    .. '" -->'
+end
+
+function M.pr_link_marker_template(proposal_id, branch, impl_version)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. tostring(proposal_id)
+    .. '" pr="{{pr_number}}"'
+    .. ' branch="' .. tostring(branch)
+    .. '" impl_version="' .. tostring(impl_version)
+    .. '" -->'
+end
+
+function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return '<!-- fkst:github-devloop:pr-origin:v1 proposal="' .. tostring(proposal_id)
+    .. '" issue="' .. tostring(issue_number)
+    .. '" branch="' .. tostring(branch)
+    .. '" impl_version="' .. tostring(impl_version)
+    .. '" -->'
+end
+
+function M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key)
+  if decision ~= "approve" and decision ~= "reject" then
+    error("github-devloop: invalid review decision")
+  end
+  return '<!-- fkst:github-devloop:review-result:v1 proposal="' .. tostring(review_proposal_id)
+    .. '" issue_proposal="' .. tostring(issue_proposal_id)
+    .. '" decision="' .. tostring(decision)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.merge_ready_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha)
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid merge-ready pr number")
+  end
+  if not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid merge-ready head sha")
+  end
+  if not M._is_bounded_string(version, M._max_dedup_len)
+    or not M._is_bounded_string(review_proposal_id, M._max_key_len)
+    or not M._is_bounded_string(review_dedup_key, M._max_dedup_len) then
+    error("github-devloop: invalid merge-ready marker")
+  end
+  return '<!-- fkst:github-devloop:merge-ready:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" review_proposal="' .. tostring(review_proposal_id)
+    .. '" review_dedup="' .. tostring(review_dedup_key)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" -->'
+end
+
+function M.merged_marker(issue_proposal_id, pr_number, version, head_sha)
+  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid merged marker")
+  end
+  return '<!-- fkst:github-devloop:merged:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" -->'
+end
+
+function M.merging_marker(issue_proposal_id, pr_number, version, head_sha)
+  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid merging marker")
+  end
+  return '<!-- fkst:github-devloop:merging:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" -->'
+end
+
+function M.review_reject_fact(comments, issue_proposal_id, issue_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local review_proposal = marker:match('proposal="([^"]+)"')
+      local marker_issue = marker:match('issue_proposal="([^"]+)"')
+      local decision = marker:match('decision="([^"]+)"')
+      local review_dedup = marker:match('dedup="([^"]*)"')
+      local _, _, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      if marker_issue == tostring(issue_proposal_id)
+        and decision == "reject"
+        and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
+        and M._is_bounded_string(review_dedup, M._max_dedup_len)
+        and M._is_git_sha(reviewed_head_sha) then
+        return {
+          review_proposal_id = review_proposal,
+          review_dedup_key = review_dedup,
+          reviewed_head_sha = reviewed_head_sha,
+          review_reason = M._comment_body(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      local action = marker:match('action="([^"]+)"')
+      local version = marker:match('version="([^"]*)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and marker_dedup ~= nil
+        and action == "fix"
+        and version == tostring(issue_version) then
+        return {
+          review_dedup_key = marker_dedup,
+          review_reason = M._comment_body(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_review_proposal = marker:match('review_proposal="([^"]+)"')
+      local marker_review_dedup = marker:match('review_dedup="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and marker_version == tostring(issue_version)
+        and M._is_bounded_string(marker_review_proposal, M._max_key_len)
+        and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
+        and M._is_git_sha(marker_head_sha) then
+        return {
+          review_proposal_id = marker_review_proposal,
+          review_dedup_key = marker_review_dedup,
+          reviewed_head_sha = marker_head_sha,
+          review_reason = M._comment_body(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_review_proposal = marker:match('review_proposal="([^"]+)"')
+      local marker_review_dedup = marker:match('review_dedup="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and (pr_number == nil or tostring(marker_pr) == tostring(pr_number))
+        and tostring(marker_version) == tostring(issue_version)
+        and M._is_bounded_string(marker_review_proposal, M._max_key_len)
+        and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
+        and M._is_git_sha(marker_head_sha) then
+        return {
+          proposal_id = marker_issue,
+          pr_number = tonumber(marker_pr),
+          version = marker_version,
+          review_proposal_id = marker_review_proposal,
+          review_dedup_key = marker_review_dedup,
+          head_sha = marker_head_sha,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.merge_authorization_matches_fact(fact, pr)
+  if type(fact) ~= "table" or tostring(fact.head_sha or "") == "" then
+    return false
+  end
+  if type(pr) ~= "table" then
+    return false
+  end
+  if tostring(pr.head_sha or "") ~= tostring(fact.head_sha) then
+    return false
+  end
+  local approved_at_head = false
+  for _, review in ipairs(pr.latest_reviews or {}) do
+    local state = M._upper_text(review.state)
+    if state == "CHANGES_REQUESTED" then
+      return false
+    end
+    if state == "APPROVED" and tostring(M._review_commit_id(review) or "") == tostring(fact.head_sha) then
+      approved_at_head = true
+    end
+  end
+  return approved_at_head
+end
+
+function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sha)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merging:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and tostring(marker_pr) == tostring(pr_number)
+        and tostring(marker_version) == tostring(version)
+        and tostring(marker_head_sha) == tostring(head_sha)
+        and M._is_git_sha(marker_head_sha) then
+        return {
+          proposal_id = marker_issue,
+          pr_number = tonumber(marker_pr),
+          version = marker_version,
+          head_sha = marker_head_sha,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.has_merged_marker(comments, issue_proposal_id, pr_number, version, head_sha)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker = M.merged_marker(issue_proposal_id, pr_number, version, head_sha)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(marker, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.impl_failure_marker(proposal_id, dedup_key, reason)
+  local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
+  return '<!-- fkst:github-devloop:impl-failure:v1 proposal="' .. tostring(proposal_id)
+    .. '" reason="' .. safe_reason
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+local function marker_records(comments, kind, proposal_id)
+  local records = {}
+  if type(comments) ~= "table" then
+    return records
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:" .. kind .. ":v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local n = tonumber(marker:match('n="(%d+)"'))
+      local dedup_key = marker:match('dedup="([^"]*)"')
+      if marker_proposal == proposal_id and n ~= nil then
+        table.insert(records, {
+          n = n,
+          dedup_key = dedup_key,
+        })
+      end
+    end
+  end
+  return records
+end
+
+local function has_marker_round(comments, kind, proposal_id, n)
+  for _, record in ipairs(marker_records(comments, kind, proposal_id)) do
+    if record.n == n then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_loop_marker(comments, proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.loop_marker(proposal_id, n, dedup_key)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_loop_marker_round(comments, proposal_id, n)
+  return has_marker_round(comments, "loop", proposal_id, n)
+end
+
+function M.has_loop_marker_dedup(comments, proposal_id, dedup_key)
+  for _, record in ipairs(marker_records(comments, "loop", proposal_id)) do
+    if record.dedup_key == tostring(dedup_key) then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_stuck_marker(comments, proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.stuck_marker(proposal_id, n, dedup_key)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_stuck_marker_round(comments, proposal_id, n)
+  return has_marker_round(comments, "stuck", proposal_id, n)
+end
+
+function M.loop_count_from_github_markers(comments, proposal_id)
+  local max_n = 0
+  for _, record in ipairs(marker_records(comments, "loop", proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  for _, record in ipairs(marker_records(comments, "stuck", proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  return max_n
+end
+
+function M.has_meta_marker(comments, proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:meta:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      if marker_proposal == proposal_id and marker_dedup == tostring(dedup_key) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_review_result_marker(comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_review_loop_marker(comments, review_proposal_id, issue_proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.review_loop_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function review_marker_records(comments, kind, review_proposal_id, issue_proposal_id)
+  local records = {}
+  if type(comments) ~= "table" then
+    return records
+  end
+
+  local safe_kind = tostring(kind):gsub("%-", "%%-")
+  local marker_pattern = "<!%-%- fkst:github%-devloop:" .. safe_kind .. ":v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_issue = marker:match('issue_proposal="([^"]+)"')
+      local n = tonumber(marker:match('n="(%d+)"'))
+      local dedup = marker:match('dedup="([^"]*)"')
+      if marker_proposal == tostring(review_proposal_id)
+        and marker_issue == tostring(issue_proposal_id)
+        and n ~= nil then
+        table.insert(records, {
+          n = n,
+          dedup_key = dedup,
+        })
+      end
+    end
+  end
+  return records
+end
+
+function M.has_review_loop_marker_round(comments, review_proposal_id, issue_proposal_id, n)
+  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
+    if record.n == n then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_review_loop_marker_dedup(comments, review_proposal_id, issue_proposal_id, dedup_key)
+  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
+    if record.dedup_key == tostring(dedup_key) then
+      return true
+    end
+  end
+  for _, record in ipairs(review_marker_records(comments, "review-meta-trigger", review_proposal_id, issue_proposal_id)) do
+    if record.dedup_key == tostring(dedup_key) then
+      return true
+    end
+  end
+  return false
+end
+
+function M.review_loop_count_from_github_markers(comments, review_proposal_id, issue_proposal_id)
+  local max_n = 0
+  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  for _, record in ipairs(review_marker_records(comments, "review-meta-trigger", review_proposal_id, issue_proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  return max_n
+end
+
+function M.has_review_meta_trigger_marker(comments, review_proposal_id, issue_proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.review_meta_trigger_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_review_meta_marker(comments, issue_proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      if marker_proposal == tostring(issue_proposal_id) and marker_dedup == tostring(dedup_key) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_fix_marker(comments, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_any_review_result_marker(comments, review_proposal_id, issue_proposal_id)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(review_proposal_id)
+        and marker:match('issue_proposal="([^"]+)"') == tostring(issue_proposal_id) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function has_versioned_marker(comments, marker)
+  if type(comments) ~= "table" then
+    return false
+  end
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(marker, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_implementing_marker(comments, proposal_id, dedup_key)
+  return has_versioned_marker(comments, M.implementing_marker(proposal_id, dedup_key))
+end
+
+function M.is_safe_branch(branch)
+  return M._is_git_ref_safe(branch)
+end
+
+function M.is_devloop_issue_branch(branch)
+  return type(branch) == "string"
+    and M._is_git_ref_safe(branch)
+    and branch:find("^devloop/issue/[^/]+/.+/.+") ~= nil
+end
+
+function M.is_safe_head_sha(head_sha)
+  return M._is_git_sha(head_sha)
+end
+
+function M.is_safe_pr_number(pr_number)
+  return M._is_positive_pr_number(pr_number)
+end
+
+function M.is_same_repo_pr_head(pr, repo)
+  if type(pr) ~= "table" then
+    return false
+  end
+  if pr.is_cross_repository == true then
+    return false
+  end
+  if pr.head_repository == nil then
+    return false
+  end
+  return tostring(pr.head_repository):lower() == tostring(repo):lower()
+end
+
+function M.implementing_fact(comments, proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:implementing:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      local marker_branch = marker:match('branch="([^"]+)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_proposal == proposal_id
+        and marker_dedup == tostring(dedup_key)
+        and M._is_git_ref_safe(marker_branch)
+        and M._is_git_sha(marker_head_sha) then
+        return {
+          proposal_id = marker_proposal,
+          dedup_key = marker_dedup,
+          branch = marker_branch,
+          head_sha = marker_head_sha,
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.pr_link_fact(comments, proposal_id)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-link:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_branch = marker:match('branch="([^"]+)"')
+      local marker_impl_version = marker:match('impl_version="([^"]*)"')
+      if marker_proposal == proposal_id
+        and M._is_positive_pr_number(marker_pr)
+        and M._is_git_ref_safe(marker_branch)
+        and M._is_bounded_string(marker_impl_version, M._max_dedup_len) then
+        return {
+          proposal_id = marker_proposal,
+          pr_number = tonumber(marker_pr),
+          branch = marker_branch,
+          impl_version = marker_impl_version,
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.pr_origin_fact(comments)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-origin:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_issue = marker:match('issue="([^"]+)"')
+      local marker_branch = marker:match('branch="([^"]+)"')
+      local marker_impl_version = marker:match('impl_version="([^"]*)"')
+      local repo, issue_number = M.parse_proposal_id(marker_proposal)
+      if repo ~= nil
+        and marker_issue == issue_number
+        and M._is_git_ref_safe(marker_branch)
+        and M._is_bounded_string(marker_impl_version, M._max_dedup_len) then
+        return {
+          proposal_id = marker_proposal,
+          repo = repo,
+          issue_number = issue_number,
+          branch = marker_branch,
+          impl_version = marker_impl_version,
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.has_impl_failure_marker(comments, proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:impl%-failure:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      if marker_proposal == proposal_id and marker_dedup == tostring(dedup_key) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)
+  return M.has_implementing_marker(comments, proposal_id, dedup_key)
+    or M.has_impl_failure_marker(comments, proposal_id, dedup_key)
+end
+
+function M.has_no_consensus_stuck_fact(comments, proposal_id, dedup_key)
+  local budget = M.loop_budget()
+  return M.has_stuck_marker(comments, proposal_id, budget, dedup_key)
+    or M.has_loop_marker_dedup(comments, proposal_id, dedup_key)
+end
+
+function M.parse_loop_round_from_dedup(dedup_key)
+  local n = tostring(dedup_key or ""):match("/loop/(%d+)$")
+  return tonumber(n) or 0
+end
+function M.result_marker(proposal_id, decision, dedup_key)
+  if decision ~= "approve" and decision ~= "reject" then
+    error("github-devloop: invalid decision")
+  end
+  return '<!-- fkst:github-devloop:result:v1 proposal="' .. tostring(proposal_id)
+    .. '" decision="' .. decision
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+end
+
+return S

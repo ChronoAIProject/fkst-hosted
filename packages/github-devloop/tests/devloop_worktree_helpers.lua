@@ -1,0 +1,258 @@
+local base = require("tests.devloop_base_helpers")
+local t = base.t
+local core = base.core
+local function mock_setup_worktree(path)
+  t.mock_command("git -C", {
+    stdout = "dev\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git -C", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-parse --abbrev-ref HEAD", {
+    stdout = "devloop-owner-repo-42-01HY\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  return path
+end
+
+local function deterministic_branch_for(event)
+  local repo, issue_number = core.parse_proposal_id(event.proposal_id)
+  return core.implement_branch(repo, issue_number, event.dedup_key)
+end
+
+local function mock_fresh_implement_worktree(path)
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 1,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add -b", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_existing_empty_implement_worktree(path)
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-list --count", {
+    stdout = "0\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_existing_empty_implement_worktree_reuse(path, branch)
+  local worktree = (path or "/tmp/fkst-packages-test/github-devloop/runtime")
+    .. "/worktrees/devloop-owner-repo-42-01HY"
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-list --count", {
+    stdout = "0\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree " .. worktree .. "\nHEAD abc123\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  return worktree
+end
+
+local function mock_existing_implement_branch(head)
+  t.mock_command("git rev-parse HEAD", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-list --count", {
+    stdout = "1\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-parse --verify refs/heads/", {
+    stdout = (head or "def456") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_git_commit(new_head, branch)
+  t.mock_command("git -C", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("commit -m", {
+    stdout = "[" .. tostring(branch or "devloop-owner-repo-42-01HY") .. " 1234567] Implement github-devloop ready state\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  if branch ~= nil then
+    t.mock_command("rev-parse --abbrev-ref HEAD", {
+      stdout = tostring(branch) .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  t.mock_command("rev-parse HEAD", {
+    stdout = (new_head or "def456") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_git_push(branch)
+  t.mock_command("git push origin", {
+    stdout = "pushed " .. tostring(branch or "branch") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_existing_devloop_worktree(issue_slug)
+  local slug = tostring(issue_slug or "owner-repo-42")
+  t.mock_command("git worktree list", {
+    stdout = "/tmp/devloop-" .. slug .. "-01HY"
+      .. " abcdef1 [devloop-" .. slug .. "-01HY]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_implement_codex(exit_code, stdout, stderr)
+  t.mock_command("codex exec", {
+    stdout = stdout or "implemented",
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
+end
+
+local function mock_git_status(stdout, exit_code, stderr)
+  t.mock_command("status --porcelain", {
+    stdout = stdout or "",
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
+end
+
+local function mock_write_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
+    stdout = value or "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_bot_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = value or "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_view_failure(json_selector, stderr)
+  t.mock_command(json_selector, {
+    stdout = "",
+    stderr = stderr or "forced issue view failure",
+    exit_code = 1,
+  })
+end
+
+local function count_calls(needle)
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find(needle, 1, true) ~= nil then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local function find_raise(raises, queue)
+  for _, raised in ipairs(raises or {}) do
+    if raised.queue == queue then
+      return raised
+    end
+  end
+  return nil
+end
+
+
+return {
+  mock_setup_worktree = mock_setup_worktree,
+  deterministic_branch_for = deterministic_branch_for,
+  mock_fresh_implement_worktree = mock_fresh_implement_worktree,
+  mock_existing_empty_implement_worktree = mock_existing_empty_implement_worktree,
+  mock_existing_empty_implement_worktree_reuse = mock_existing_empty_implement_worktree_reuse,
+  mock_existing_implement_branch = mock_existing_implement_branch,
+  mock_git_commit = mock_git_commit,
+  mock_git_push = mock_git_push,
+  mock_existing_devloop_worktree = mock_existing_devloop_worktree,
+  mock_implement_codex = mock_implement_codex,
+  mock_git_status = mock_git_status,
+  mock_write_env = mock_write_env,
+  mock_bot_env = mock_bot_env,
+  mock_issue_view_failure = mock_issue_view_failure,
+  count_calls = count_calls,
+  find_raise = find_raise,
+}

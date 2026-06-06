@@ -1,0 +1,616 @@
+local h = require("tests.devloop_helpers")
+local t = h.t
+local core = h.core
+local action_label = h.action_label
+local reason_label = h.reason_label
+local has_value = h.has_value
+local opts = h.opts
+local source_ref = h.source_ref
+local issue = h.issue
+local reached = h.reached
+local unresolved = h.unresolved
+local stuck = h.stuck
+local ready = h.ready
+local reviewing = h.reviewing
+local review_reached = h.review_reached
+local review_unresolved = h.review_unresolved
+local fixing = h.fixing
+local pr_link_marker_for_fix = h.pr_link_marker_for_fix
+local review_meta_event = h.review_meta_event
+local merge_ready = h.merge_ready
+local run_observe = h.run_observe
+local run_result = h.run_result
+local run_loop = h.run_loop
+local run_meta = h.run_meta
+local run_implement = h.run_implement
+local run_open_pr = h.run_open_pr
+local run_observe_pr = h.run_observe_pr
+local run_review_pr = h.run_review_pr
+local run_review_result = h.run_review_result
+local run_fix = h.run_fix
+local run_review_loop = h.run_review_loop
+local run_review_meta = h.run_review_meta
+local run_merge = h.run_merge
+local json_string = h.json_string
+local render_comment = h.render_comment
+local default_marker_version = h.default_marker_version
+local mock_issue_state = h.mock_issue_state
+local state_from_labels = h.state_from_labels
+local with_default_state_marker = h.with_default_state_marker
+local mock_issue_body = h.mock_issue_body
+local mock_issue_result = h.mock_issue_result
+local mock_issue_loop = h.mock_issue_loop
+local mock_issue_meta = h.mock_issue_meta
+local mock_issue_implement = h.mock_issue_implement
+local mock_issue_implement_raw = h.mock_issue_implement_raw
+local mock_issue_open_pr = h.mock_issue_open_pr
+local mock_issue_reviewing = h.mock_issue_reviewing
+local mock_issue_review = h.mock_issue_review
+local mock_issue_fix = h.mock_issue_fix
+local mock_issue_fix_for_event = h.mock_issue_fix_for_event
+local mock_issue_review_meta = h.mock_issue_review_meta
+local mock_issue_merge = h.mock_issue_merge
+local merge_comments = h.merge_comments
+local mock_pr_origin = h.mock_pr_origin
+local review_json = h.review_json
+local mock_pr_merge = h.mock_pr_merge
+local mock_pr_merge_rollup = h.mock_pr_merge_rollup
+local mock_merging_comment = h.mock_merging_comment
+local mock_pr_merge_command = h.mock_pr_merge_command
+local has_call = h.has_call
+local mock_issue_close = h.mock_issue_close
+local merge_comments_with_merging = h.merge_comments_with_merging
+local mock_pr_fix = h.mock_pr_fix
+local mock_pr_origin_sequence = h.mock_pr_origin_sequence
+local mock_pr_head = h.mock_pr_head
+local mock_pr_diff = h.mock_pr_diff
+local mock_branch_exists = h.mock_branch_exists
+local mock_meta_codex = h.mock_meta_codex
+local mock_setup_worktree = h.mock_setup_worktree
+local deterministic_branch_for = h.deterministic_branch_for
+local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
+local mock_existing_empty_implement_worktree = h.mock_existing_empty_implement_worktree
+local mock_existing_empty_implement_worktree_reuse = h.mock_existing_empty_implement_worktree_reuse
+local mock_existing_implement_branch = h.mock_existing_implement_branch
+local mock_git_commit = h.mock_git_commit
+local mock_git_push = h.mock_git_push
+local mock_existing_devloop_worktree = h.mock_existing_devloop_worktree
+local mock_implement_codex = h.mock_implement_codex
+local mock_git_status = h.mock_git_status
+local mock_write_env = h.mock_write_env
+local mock_bot_env = h.mock_bot_env
+local mock_issue_view_failure = h.mock_issue_view_failure
+local count_calls = h.count_calls
+local find_raise = h.find_raise
+
+return {
+  test_merge_ready_authorized_green_mergeable_merges_closes_and_marks_merged = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker })
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_write_env("1")
+    mock_pr_merge({ origin_marker })
+    mock_merging_comment()
+    mock_pr_merge_command()
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+    mock_issue_close()
+
+    local result = run_merge(event, opts("merge-success", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(count_calls("gh issue close"), 1)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:merged")
+    t.is_true(comment_raise.payload.body:find('state="merging"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+  end,
+
+  test_merge_legacy_status_context_success_merges = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local legacy_rollup = '[{"__typename":"StatusContext","context":"ci","state":"SUCCESS"}]'
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge_rollup({ origin_marker }, legacy_rollup)
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_write_env("1")
+    mock_pr_merge_rollup({ origin_marker }, legacy_rollup)
+    mock_merging_comment()
+    mock_pr_merge_command()
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+    mock_issue_close()
+
+    local result = run_merge(event, opts("merge-legacy-status-context", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(count_calls("gh issue close"), 1)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+  end,
+
+  test_merge_replay_after_close_failure_self_heals_when_pr_already_merged = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker })
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_write_env("1")
+    mock_pr_merge({ origin_marker })
+    mock_merging_comment()
+    mock_pr_merge_command()
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+    mock_issue_close(1, "close race")
+
+    local failed_finalize = run_merge(event, opts("merge-close-failed", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(failed_finalize.exit_code, 1)
+    t.eq(#failed_finalize.raises, 0)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(count_calls("gh issue close"), 1)
+
+    local merge_calls_before_heal = count_calls("gh pr merge")
+    local close_calls_before_heal = count_calls("gh issue close")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments_with_merging(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+    mock_write_env("1")
+    mock_issue_close()
+
+    local healed = run_merge(event, opts("merge-close-failed-self-heal", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(healed.exit_code, 0)
+    t.eq(#healed.raises, 2)
+    t.eq(count_calls("gh pr merge"), merge_calls_before_heal)
+    t.eq(count_calls("gh issue close"), close_calls_before_heal + 1)
+    local comment_raise = find_raise(healed.raises, "github-proxy.github_issue_comment_request")
+    local label_raise = find_raise(healed.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:merged")
+    t.is_true(comment_raise.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+  end,
+
+  test_merge_external_already_merged_without_bot_merging_marker_does_not_finalize = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+
+    local result = run_merge(event, opts("merge-external-merged-no-bot-marker", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+    t.eq(count_calls("gh issue comment"), 0)
+  end,
+
+  test_merge_canonical_merging_finalizes_merged_pr_without_visible_merging_fact = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local comments = merge_comments(event)
+    table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merging", "fkst-dev:merge-authorized" }, comments)
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+    mock_write_env("1")
+    mock_issue_close()
+
+    local result = run_merge(event, opts("merge-canonical-merging-finalizes-lagged-fact", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 1)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+  end,
+
+  test_merge_missing_authorization_or_write_dry_runs_without_advance = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "REVIEW_REQUIRED")
+
+    local missing_approval = run_merge(event, opts("merge-missing-current-head-approval", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(missing_approval.exit_code, 0)
+    t.eq(#missing_approval.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+
+    mock_bot_env()
+    mock_write_env("")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker })
+    local dry_run = run_merge(event, opts("merge-write-disabled"))
+    t.eq(dry_run.exit_code, 0)
+    t.eq(#dry_run.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
+
+		  test_merge_current_head_approval_without_merge_authorized_label_does_not_merge = function()
+		    local event = merge_ready()
+		    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+	    mock_bot_env()
+	    mock_write_env("1")
+	    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+	    mock_pr_merge({ origin_marker })
+
+	    local result = run_merge(event, opts("merge-current-head-approval-no-ui-label", { FKST_GITHUB_WRITE = "1" }))
+	    t.eq(result.exit_code, 0)
+	    t.eq(#result.raises, 0)
+	    t.eq(count_calls("gh pr merge"), 0)
+		    t.eq(count_calls("gh issue close"), 0)
+		  end,
+
+	  test_merge_same_head_changes_requested_latest_blocks_historical_approval = function()
+	    local event = merge_ready()
+	    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+	    local latest_changes_requested = '[{"state":"CHANGES_REQUESTED","commit":{"oid":"def456"}}]'
+	    mock_bot_env()
+	    mock_write_env("1")
+	    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+	    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "", latest_changes_requested)
+
+	    local result = run_merge(event, opts("merge-same-head-changes-requested-latest-blocks", { FKST_GITHUB_WRITE = "1" }))
+	    t.eq(result.exit_code, 0)
+	    t.eq(#result.raises, 0)
+	    t.eq(count_calls("gh pr merge"), 0)
+	    t.eq(count_calls("gh issue close"), 0)
+	  end,
+
+	  test_merge_stale_old_head_label_authorization_does_not_merge_new_head_without_current_approval = function()
+    local event = merge_ready({
+      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "feedface"),
+      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "feedface") .. "/review",
+      reviewed_head_sha = "feedface",
+    })
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "feedface", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "", "REVIEW_REQUIRED")
+
+    local result = run_merge(event, opts("merge-stale-old-head-label-current-head-unapproved", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_old_head_approved_review_does_not_authorize_current_head = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "", "APPROVED", "feedface")
+
+    local result = run_merge(event, opts("merge-old-head-review-not-authorized", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_ci_red_moves_back_to_fixing = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+
+    local result = run_merge(event, opts("merge-ci-red", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+    t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
+    t.is_true(has_value(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.remove_labels, "fkst-dev:merge-authorized"))
+  end,
+
+  test_merge_completed_non_green_rollup_moves_back_to_fixing_without_merge = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "ACTION_REQUIRED")
+
+    local action_required = run_merge(event, opts("merge-action-required-rollup", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(action_required.exit_code, 0)
+    t.eq(#action_required.raises, 3)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(action_required.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+
+    local failure = run_merge(event, opts("merge-failure-rollup", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(failure.exit_code, 0)
+    t.eq(#failure.raises, 3)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(failure.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+  end,
+
+  test_merge_write_time_rollup_red_moves_back_to_fixing_without_merge = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker })
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_write_env("1")
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+
+    local result = run_merge(event, opts("merge-rollup-red-at-write-time", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    t.eq(count_calls("gh pr merge"), 0)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
+    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-authorized"))
+    t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
+  end,
+
+  test_merge_same_second_earlier_authorization_does_not_merge_new_head = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, {
+      core.state_marker(event.proposal_id, "merge-ready", event.version),
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+      {
+        body = core.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T02:00:00Z",
+      },
+    })
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "feedface")
+
+    local result = run_merge(event, opts("merge-same-second-old-auth-new-head", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
+
+  test_merge_not_mergeable_moves_back_to_fixing = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "DIRTY")
+
+    local result = run_merge(event, opts("merge-not-mergeable", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+  end,
+
+  test_merge_unstable_merge_state_errors_for_retry_without_fixing = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
+
+    local result = run_merge(event, opts("merge-unstable-merge-state", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_unknown_mergeability_errors_for_retry_without_fixing = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "UNKNOWN", "CLEAN")
+
+    local result = run_merge(event, opts("merge-unknown-mergeability", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_head_advance_after_recheck_fails_with_match_head_commit = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker })
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_write_env("1")
+    mock_pr_merge({ origin_marker })
+    mock_merging_comment()
+    mock_pr_merge_command(1, "head commit changed")
+
+    local result = run_merge(event, opts("merge-head-advanced-after-recheck", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.is_true(has_call("--match-head-commit 'def456'"))
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_queue_result_errors_for_retry_before_merged_fact = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker })
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_write_env("1")
+    mock_pr_merge({ origin_marker })
+    mock_merging_comment()
+    mock_pr_merge_command()
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN")
+
+    local result = run_merge(event, opts("merge-queued-not-merged", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_retry_after_failed_merge_with_moved_head_goes_to_fixing = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments_with_merging(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "feedface")
+
+    local result = run_merge(event, opts("merge-failed-moved-head-self-heal", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
+    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-authorized"))
+    t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
+  end,
+
+  test_merge_queued_pr_finalizes_on_later_poll_when_bot_merging_marker_exists = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments_with_merging(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+    mock_write_env("1")
+    mock_issue_close()
+
+    local result = run_merge(event, opts("merge-queued-later-poll-merged", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 1)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+  end,
+
+  test_merge_pending_checks_errors_for_retry_without_advance = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "PENDING", "")
+
+    local result = run_merge(event, opts("merge-pending-checks", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
+
+	  test_merge_command_failure_errors_for_retry = function()
+	    local event = merge_ready()
+	    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_pr_merge({ origin_marker })
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, merge_comments(event))
+    mock_write_env("1")
+    mock_pr_merge({ origin_marker })
+    mock_merging_comment()
+    mock_pr_merge_command(1, "merge race")
+
+    local result = run_merge(event, opts("merge-command-failure", { FKST_GITHUB_WRITE = "1" }))
+	    t.eq(result.exit_code, 1)
+	    t.eq(#result.raises, 0)
+	    t.eq(count_calls("gh issue close"), 0)
+
+	    local merge_calls_after_failure = count_calls("gh pr merge")
+	    mock_bot_env()
+	    mock_write_env("1")
+	    mock_issue_merge({ "fkst-dev:merging", "fkst-dev:merge-authorized" }, merge_comments_with_merging(event))
+	    mock_pr_merge({ origin_marker })
+	    mock_issue_merge({ "fkst-dev:merging", "fkst-dev:merge-authorized" }, merge_comments_with_merging(event))
+	    mock_write_env("1")
+	    mock_pr_merge({ origin_marker })
+	    mock_pr_merge_command()
+	    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+	    mock_issue_close()
+
+	    local retry = run_merge(event, opts("merge-command-failure-retry-from-merging", { FKST_GITHUB_WRITE = "1" }))
+	    t.eq(retry.exit_code, 0)
+	    t.eq(#retry.raises, 2)
+	    t.eq(count_calls("gh pr merge"), merge_calls_after_failure + 1)
+	    t.eq(count_calls("gh issue close"), 1)
+	  end,
+
+  test_merge_stale_idempotent_forged_and_foreign_skip = function()
+    local event = merge_ready()
+    local merge_calls_before = count_calls("gh pr merge")
+    mock_bot_env()
+    mock_issue_merge({ "fkst-dev:reviewing" }, {
+      core.state_marker(event.proposal_id, "reviewing", event.version),
+    })
+    local stale = run_merge(event, opts("merge-stale"))
+    t.eq(stale.exit_code, 0)
+    t.eq(#stale.raises, 0)
+    t.eq(count_calls("gh pr merge"), merge_calls_before)
+
+    mock_bot_env()
+    mock_issue_merge({ "fkst-dev:merged" }, {
+      core.state_marker(event.proposal_id, "merged", event.version),
+      core.merged_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha),
+    })
+    local idempotent = run_merge(event, opts("merge-idempotent"))
+    t.eq(idempotent.exit_code, 0)
+    t.eq(#idempotent.raises, 0)
+    t.eq(count_calls("gh pr merge"), merge_calls_before)
+
+    local forged = core.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }, {
+      core.state_marker(event.proposal_id, "merge-ready", event.version),
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+      { body = forged, author_login = "ordinary-user" },
+    })
+    local forged_result = run_merge(event, opts("merge-forged", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(forged_result.exit_code, 1)
+    t.eq(#forged_result.raises, 0)
+    t.eq(count_calls("gh pr merge"), merge_calls_before)
+
+    local foreign = merge_ready({ proposal_id = "github-devloop/issue/owner/repo/../../42" })
+    local foreign_result = run_merge(foreign, opts("merge-foreign"))
+    t.eq(foreign_result.exit_code, 0)
+    t.eq(#foreign_result.raises, 0)
+  end,
+}

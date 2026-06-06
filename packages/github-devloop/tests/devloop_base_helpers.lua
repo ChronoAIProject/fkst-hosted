@@ -1,0 +1,742 @@
+local t = fkst.test
+local core = require("core")
+local action_label = "⟦FKST:ACTION⟧"
+local reason_label = "⟦FKST:REASON⟧"
+
+local function nonce()
+  return tostring({}):gsub("[^%w._-]", "_")
+end
+
+local function has_value(values, expected)
+  for _, value in ipairs(values or {}) do
+    if value == expected then
+      return true
+    end
+  end
+  return false
+end
+
+local function runtime_root(name)
+  return "/tmp/fkst-packages-test/github-devloop/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
+end
+
+local function opts(name, extra)
+  local result = {
+    env = {
+      FKST_RUNTIME_ROOT = runtime_root(name),
+      FKST_CANDIDATE_PREFIX = "candidate",
+      FKST_CANDIDATE_FROM_SEP = "-from-",
+    },
+  }
+  for key, value in pairs((extra and extra.env) or extra or {}) do
+    result.env[key] = value
+  end
+  return result
+end
+
+local function source_ref()
+  return {
+    kind = "external",
+    ref = "owner/repo#issue/42",
+  }
+end
+
+local function issue(extra)
+  local value = {
+    schema = "github-proxy.v1",
+    type = "issue",
+    repo = "owner/repo",
+    number = 42,
+    title = "Implement decision recorder",
+    url = "https://github.example/owner/repo/issues/42",
+    state = "OPEN",
+    updated_at = "2026-06-03T01:02:03Z",
+    labels = { "fkst-dev:enabled" },
+    dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
+    source_ref = source_ref(),
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function reached(extra)
+  local value = {
+    schema = "consensus.consensus_reached.v1",
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    decision = "approve",
+    body = "All angles approve.",
+    dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    source_ref = source_ref(),
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function unresolved(extra)
+  local value = {
+    schema = "consensus.consensus_unresolved.v1",
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    source_ref = source_ref(),
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function stuck(extra)
+  local value = core.build_devloop_stuck_payload(unresolved({
+    dedup_key = "consensus:github-devloop/issue/owner/repo/42/v1",
+  }), 3)
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function ready(extra)
+  local value = {
+    schema = "github-devloop.ready.v1",
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    dedup_key = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    source_ref = source_ref(),
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function reviewing(extra)
+  local value = {
+    schema = "github-devloop.reviewing.v1",
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    pr_number = 7,
+    version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    dedup_key = "reviewing/github-devloop/issue/owner/repo/42/ready-consensus-github-devloop-issue-owner-repo-42-2026-06-03T01-02-03Z/7",
+    source_ref = source_ref(),
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function review_reached(extra)
+  local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+  local value = {
+    schema = "consensus.consensus_reached.v1",
+    proposal_id = proposal_id,
+    decision = "approve",
+    body = "Review consensus approves the diff.",
+    dedup_key = "consensus:" .. proposal_id .. "/review",
+    source_ref = {
+      kind = "external",
+      ref = "owner/repo#pr/7",
+    },
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function review_unresolved(extra)
+  local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+  local value = {
+    schema = "consensus.consensus_unresolved.v1",
+    proposal_id = proposal_id,
+    dedup_key = "consensus:" .. proposal_id .. "/review",
+    source_ref = {
+      kind = "external",
+      ref = "owner/repo#pr/7",
+    },
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function fixing(extra)
+  local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff." })
+  local review_version = reviewing().version
+  local value = {
+    schema = "github-devloop.fixing.v1",
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    pr_number = 7,
+    version = core.fix_version_from_review_version(review_version),
+    review_proposal_id = event.proposal_id,
+    review_dedup_key = event.dedup_key,
+    reviewed_head_sha = "def456",
+    dedup_key = "fixing/github-devloop/issue/owner/repo/42/v1",
+    source_ref = source_ref(),
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function pr_link_marker_for_fix(fix, branch, impl_version)
+  return core.pr_link_marker(fix.proposal_id, fix.pr_number, branch, impl_version or fix.version)
+end
+
+local function review_meta_event(extra)
+  local unresolved_event = review_unresolved({
+    dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/2",
+  })
+  local value = core.build_devloop_review_meta_payload(unresolved_event, "github-devloop/issue/owner/repo/42", reviewing().version, 7, 3)
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function merge_ready(extra)
+  local event = review_reached()
+  local value = core.build_devloop_merge_ready_payload(
+    "github-devloop/issue/owner/repo/42",
+    7,
+    reviewing().version,
+    {
+      review_proposal_id = event.proposal_id,
+      review_dedup_key = event.dedup_key,
+      reviewed_head_sha = "def456",
+    },
+    source_ref()
+  )
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function run_observe(payload, run_opts)
+  return t.run_department("departments/observe_issue/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_result(payload, run_opts)
+  return t.run_department("departments/consensus_result/main.lua", {
+    queue = "consensus.consensus_reached",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_loop(payload, run_opts)
+  return t.run_department("departments/loop/main.lua", {
+    queue = "consensus.consensus_unresolved",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_meta(payload, run_opts)
+  return t.run_department("departments/meta/main.lua", {
+    queue = "devloop_stuck",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_implement(payload, run_opts)
+  return t.run_department("departments/implement/main.lua", {
+    queue = "devloop_ready",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_open_pr(payload, run_opts)
+  return t.run_department("departments/open_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_observe_pr(payload, run_opts)
+  return t.run_department("departments/observe_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_review_pr(payload, run_opts)
+  return t.run_department("departments/review_pr/main.lua", {
+    queue = "devloop_reviewing",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_review_result(payload, run_opts)
+  return t.run_department("departments/review_result/main.lua", {
+    queue = "consensus.consensus_reached",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_fix(payload, run_opts)
+  return t.run_department("departments/fix/main.lua", {
+    queue = "devloop_fixing",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_review_loop(payload, run_opts)
+  return t.run_department("departments/review_loop/main.lua", {
+    queue = "consensus.consensus_unresolved",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_review_meta(payload, run_opts)
+  return t.run_department("departments/review_meta/main.lua", {
+    queue = "devloop_review_meta",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_merge(payload, run_opts)
+  return t.run_department("departments/merge/main.lua", {
+    queue = "devloop_merge_ready",
+    payload = payload,
+  }, run_opts)
+end
+
+local function json_string(value)
+  return tostring(value)
+    :gsub("\\", "\\\\")
+    :gsub('"', '\\"')
+    :gsub("\n", "\\n")
+end
+
+local function render_comment(comment)
+  local body = comment
+  local author = "fkst-test-bot"
+  local created_at = "2026-06-03T01:00:00Z"
+  if type(comment) == "table" then
+    body = comment.body
+    author = comment.author_login or author
+    created_at = comment.created_at or created_at
+  end
+  return string.format(
+    '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
+    json_string(body or ""),
+    json_string(author),
+    json_string(created_at)
+  )
+end
+
+local default_marker_version = "2026-06-02T00-00-00Z"
+
+local function mock_issue_state(labels, state, comments)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:enabled" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  if comments ~= nil then
+    for _, comment in ipairs(comments) do
+      table.insert(rendered_comments, render_comment(comment))
+    end
+  else
+    local state_marker = nil
+    for _, label in ipairs(labels or {}) do
+      if label == "fkst-dev:thinking" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "thinking", default_marker_version)
+      elseif label == "fkst-dev:ready" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "ready", default_marker_version)
+      elseif label == "fkst-dev:implementing" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "implementing", default_marker_version)
+      elseif label == "fkst-dev:pr-open" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", default_marker_version)
+      elseif label == "fkst-dev:reviewing" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", default_marker_version)
+      elseif label == "fkst-dev:merge-ready" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "merge-ready", default_marker_version)
+      elseif label == "fkst-dev:fixing" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "fixing", default_marker_version)
+      elseif label == "fkst-dev:impl-failed" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "impl-failed", default_marker_version)
+      elseif label == "fkst-dev:blocked" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "blocked", default_marker_version)
+      elseif label == "fkst-dev:stuck" then
+        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "stuck", default_marker_version)
+      end
+    end
+    if state_marker ~= nil then
+      table.insert(rendered_comments, render_comment(state_marker))
+    end
+  end
+  t.mock_command("--json labels,state,comments", {
+    stdout = string.format('{"state":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(state or "OPEN"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function state_from_labels(labels)
+  for _, label in ipairs(labels or {}) do
+    if label == "fkst-dev:thinking" then
+      return "thinking"
+    end
+    if label == "fkst-dev:ready" then
+      return "ready"
+    end
+    if label == "fkst-dev:implementing" then
+      return "implementing"
+    end
+    if label == "fkst-dev:pr-open" then
+      return "pr-open"
+    end
+    if label == "fkst-dev:reviewing" then
+      return "reviewing"
+    end
+    if label == "fkst-dev:merge-ready" then
+      return "merge-ready"
+    end
+    if label == "fkst-dev:merging" then
+      return "merging"
+    end
+    if label == "fkst-dev:merged" then
+      return "merged"
+    end
+    if label == "fkst-dev:fixing" then
+      return "fixing"
+    end
+    if label == "fkst-dev:impl-failed" then
+      return "impl-failed"
+    end
+    if label == "fkst-dev:blocked" then
+      return "blocked"
+    end
+    if label == "fkst-dev:stuck" then
+      return "stuck"
+    end
+  end
+  return nil
+end
+
+local function with_default_state_marker(labels, comments)
+  local rendered = {}
+  local has_explicit_state_marker = false
+  for _, comment in ipairs(comments or {}) do
+    local body = comment
+    if type(comment) == "table" then
+      body = comment.body
+    end
+    if tostring(body or ""):find("fkst:github-devloop:state:v1", 1, true) ~= nil then
+      has_explicit_state_marker = true
+    end
+    table.insert(rendered, comment)
+  end
+  local state = state_from_labels(labels)
+  if state ~= nil and not has_explicit_state_marker then
+    table.insert(rendered, core.state_marker("github-devloop/issue/owner/repo/42", state, default_marker_version))
+  end
+  return rendered
+end
+
+local function mock_issue_body(body)
+  t.mock_command("--json body", {
+    stdout = string.format('{"body":"%s"}\n', json_string(body or "Issue body")),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_result(labels, comments)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:thinking" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  t.mock_command("--json labels,comments", {
+    stdout = string.format('{"labels":[%s],"comments":[%s]}\n', table.concat(rendered_labels, ","), table.concat(rendered_comments, ",")),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_loop(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:thinking" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,body,updatedAt,labels,comments,state", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or "Body from GitHub"),
+      json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
+      json_string(fields.state or "OPEN"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_meta(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:stuck" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:stuck" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,body,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or "Body from GitHub"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_implement(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:ready" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:ready" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,body,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or "Body from GitHub"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_implement_raw(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or {}) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(comments or {}) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,body,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or "Body from GitHub"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_open_pr(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:implementing", "fkst-dev:pr-authorized" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:implementing" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_reviewing(labels, comments)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:pr-open" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:pr-open" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  t.mock_command("--json labels,comments", {
+    stdout = string.format('{"labels":[%s],"comments":[%s]}\n', table.concat(rendered_labels, ","), table.concat(rendered_comments, ",")),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_review(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:reviewing" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:reviewing" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,body,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or "Body from GitHub"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_fix(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:fixing", "fkst-dev:fix-authorized" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:fixing" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,body,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or "Body from GitHub"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_fix_for_event(fix, labels, comments, branch, impl_version, extra)
+  local with_link = {}
+  for _, comment in ipairs(comments or {}) do
+    table.insert(with_link, comment)
+  end
+  table.insert(with_link, pr_link_marker_for_fix(fix, branch, impl_version))
+  mock_issue_fix(labels, with_link, extra)
+end
+
+local function mock_issue_review_meta(labels, comments, extra)
+  mock_issue_fix(labels or { "fkst-dev:review-meta" }, comments, extra)
+end
+
+local function mock_issue_merge(labels, comments, extra)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:merge-ready" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
+  t.mock_command("--json title,body,labels,comments,state", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or "Body from GitHub"),
+      json_string(fields.state or "OPEN"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+
+return {
+  t = t,
+  core = core,
+  action_label = action_label,
+  reason_label = reason_label,
+  has_value = has_value,
+  opts = opts,
+  source_ref = source_ref,
+  issue = issue,
+  reached = reached,
+  unresolved = unresolved,
+  stuck = stuck,
+  ready = ready,
+  reviewing = reviewing,
+  review_reached = review_reached,
+  review_unresolved = review_unresolved,
+  fixing = fixing,
+  pr_link_marker_for_fix = pr_link_marker_for_fix,
+  review_meta_event = review_meta_event,
+  merge_ready = merge_ready,
+  run_observe = run_observe,
+  run_result = run_result,
+  run_loop = run_loop,
+  run_meta = run_meta,
+  run_implement = run_implement,
+  run_open_pr = run_open_pr,
+  run_observe_pr = run_observe_pr,
+  run_review_pr = run_review_pr,
+  run_review_result = run_review_result,
+  run_fix = run_fix,
+  run_review_loop = run_review_loop,
+  run_review_meta = run_review_meta,
+  run_merge = run_merge,
+  json_string = json_string,
+  render_comment = render_comment,
+  default_marker_version = default_marker_version,
+  mock_issue_state = mock_issue_state,
+  state_from_labels = state_from_labels,
+  with_default_state_marker = with_default_state_marker,
+  mock_issue_body = mock_issue_body,
+  mock_issue_result = mock_issue_result,
+  mock_issue_loop = mock_issue_loop,
+  mock_issue_meta = mock_issue_meta,
+  mock_issue_implement = mock_issue_implement,
+  mock_issue_implement_raw = mock_issue_implement_raw,
+  mock_issue_open_pr = mock_issue_open_pr,
+  mock_issue_reviewing = mock_issue_reviewing,
+  mock_issue_review = mock_issue_review,
+  mock_issue_fix = mock_issue_fix,
+  mock_issue_fix_for_event = mock_issue_fix_for_event,
+  mock_issue_review_meta = mock_issue_review_meta,
+  mock_issue_merge = mock_issue_merge,
+}

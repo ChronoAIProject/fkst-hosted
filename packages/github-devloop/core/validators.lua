@@ -1,0 +1,150 @@
+local S = {}
+
+function S.install(M)
+function M.validate_proposal(proposal)
+  if type(proposal) ~= "table" then
+    return false
+  end
+  if proposal.schema ~= "consensus.proposal.v1" then
+    return false
+  end
+  local repo, issue_number = M.parse_proposal_id(proposal.proposal_id)
+  if repo == nil or issue_number == nil then
+    local review_repo, pr_number = M.parse_pr_review_proposal_id(proposal.proposal_id)
+    if review_repo == nil or pr_number == nil then
+      return false
+    end
+    if not M._is_path_safe_key(proposal.proposal_id, M._max_key_len) or not M._is_path_safe_key(proposal.dedup_key, M._max_dedup_len) then
+      return false
+    end
+  else
+    if not M.is_safe_proposal_ref(proposal.proposal_id, proposal.dedup_key) then
+      return false
+    end
+  end
+  if not M._is_bounded_string(proposal.title, M._max_title_len) then
+    return false
+  end
+  if not M._is_bounded_string(proposal.body, M._max_body_len) then
+    return false
+  end
+  return M._has_bounded_source_ref(proposal.source_ref)
+end
+function M.is_supported_issue(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-proxy.v1"
+    and payload.type == "issue"
+    and payload.repo ~= nil
+    and payload.number ~= nil
+    and payload.title ~= nil
+    and payload.updated_at ~= nil
+    and M.issue_ref_round_trips(payload.repo, payload.number)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_pr(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-proxy.v1"
+    and payload.type == "pr"
+    and payload.repo ~= nil
+    and M.is_safe_pr_number(payload.number)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_result(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_reached.v1"
+    and (payload.decision == "approve" or payload.decision == "reject")
+    and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
+    and M._is_bounded_string(payload.body, M._max_body_len)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_review_result(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_reached.v1"
+    and (payload.decision == "approve" or payload.decision == "reject")
+    and M.is_safe_pr_review_result_ref(payload.proposal_id, payload.dedup_key)
+    and M._is_bounded_string(payload.body, M._max_body_len)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_unresolved(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_unresolved.v1"
+    and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
+    and payload.body == nil
+    and payload.angle_results == nil
+    and payload.decision == nil
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_pr_review_unresolved(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_unresolved.v1"
+    and M.is_safe_pr_review_result_ref(payload.proposal_id, payload.dedup_key)
+    and payload.body == nil
+    and payload.angle_results == nil
+    and payload.decision == nil
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_stuck(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.stuck.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_consensus_result_ref(payload.proposal_id, payload.no_consensus_dedup_key)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_ready(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.ready.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_reviewing(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.reviewing.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_number(payload.pr_number)
+    and M._is_bounded_string(payload.version, M._max_dedup_len)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_fixing(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.fixing.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_number(payload.pr_number)
+    and M._is_bounded_string(payload.version, M._max_dedup_len)
+    and M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
+    and M._is_git_sha(payload.reviewed_head_sha)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_review_meta(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.review-meta.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
+    and M._is_bounded_string(payload.version, M._max_dedup_len)
+    and M.is_safe_pr_number(payload.pr_number)
+    and tonumber(payload.n) ~= nil
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_merge_ready(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.merge-ready.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_number(payload.pr_number)
+    and M._is_bounded_string(payload.version, M._max_dedup_len)
+    and M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
+    and M._is_git_sha(payload.reviewed_head_sha)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+end
+
+return S
