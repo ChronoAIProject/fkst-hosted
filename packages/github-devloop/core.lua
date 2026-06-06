@@ -7,15 +7,20 @@ local max_body_len = 12000
 local max_comments_len = 12000
 local max_meta_reason_len = 2000
 local max_impl_output_len = 2000
+local max_pr_diff_len = 8000
+local max_pr_issue_context_len = 3000
 local max_repo_key_len = 100
 local max_issue_key_len = 30
 local max_update_key_len = 50
+local max_version_key_len = 40
 local max_worktree_prefix_len = 90
 local max_branch_len = 160
 local max_sha_len = 64
 local max_pr_title_len = 240
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
+local verdict_label = "⟦FKST:VERDICT⟧"
+local reply_label = "⟦FKST:REPLY⟧"
 local untrusted_issue_data_begin = "BEGIN UNTRUSTED ISSUE DATA"
 local untrusted_issue_data_end = "END UNTRUSTED ISSUE DATA"
 local test_bot_login = "fkst-test-bot"
@@ -27,6 +32,8 @@ local implementing_label = "fkst-dev:implementing"
 local pr_authorized_label = "fkst-dev:pr-authorized"
 local pr_open_label = "fkst-dev:pr-open"
 local reviewing_label = "fkst-dev:reviewing"
+local merge_ready_label = "fkst-dev:merge-ready"
+local fixing_label = "fkst-dev:fixing"
 local impl_failed_label = "fkst-dev:impl-failed"
 local blocked_label = "fkst-dev:blocked"
 local stuck_label = "fkst-dev:stuck"
@@ -38,6 +45,8 @@ local state_labels = {
   [implementing_label] = true,
   [pr_open_label] = true,
   [reviewing_label] = true,
+  [merge_ready_label] = true,
+  [fixing_label] = true,
   [impl_failed_label] = true,
   [blocked_label] = true,
   [stuck_label] = true,
@@ -49,6 +58,8 @@ local label_by_state = {
   implementing = implementing_label,
   ["pr-open"] = pr_open_label,
   reviewing = reviewing_label,
+  ["merge-ready"] = merge_ready_label,
+  fixing = fixing_label,
   ["impl-failed"] = impl_failed_label,
   blocked = blocked_label,
   stuck = stuck_label,
@@ -66,12 +77,14 @@ local state_graph = {
   ready = { "implementing" },
   implementing = { "pr-open", "impl-failed" },
   ["pr-open"] = { "reviewing" },
-  reviewing = {},
+  reviewing = { "merge-ready", "fixing" },
+  ["merge-ready"] = {},
+  fixing = {},
   ["impl-failed"] = {},
   blocked = {},
 }
 
-local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "impl-failed", "blocked", "stuck" }
+local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "stuck" }
 local state_stage_rank = {
   thinking = 100,
   stuck = 300,
@@ -79,7 +92,9 @@ local state_stage_rank = {
   implementing = 600,
   ["pr-open"] = 650,
   reviewing = 675,
-  ["impl-failed"] = 700,
+  ["merge-ready"] = 690,
+  fixing = 700,
+  ["impl-failed"] = 750,
   blocked = 800,
 }
 local trusted_bot_login = nil
@@ -308,6 +323,36 @@ function M.safe_updated_at(updated_at)
   return safe
 end
 
+function M.safe_version_segment(version)
+  local safe = M.sanitize_key(version, false):gsub("[/#]", "-"):gsub("%-+", "-")
+  safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
+  if safe == "" then
+    safe = "version"
+  end
+  if #safe > max_version_key_len then
+    local suffix = "-" .. decimal_checksum(version)
+    safe = safe:sub(1, max_version_key_len - #suffix):gsub("%-+$", "") .. suffix
+  end
+  if safe == "" then
+    return "version"
+  end
+  return safe
+end
+
+function M.safe_pr_review_repo_segment(repo)
+  local safe = M.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
+  safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
+  if safe == "" then
+    safe = "repo"
+  end
+  local suffix = "-" .. decimal_checksum(repo)
+  local limit = 48
+  if #safe > limit or safe:sub(-#suffix) ~= suffix then
+    safe = safe:sub(1, limit - #suffix):gsub("%-+$", "") .. suffix
+  end
+  return safe
+end
+
 function M.is_opted_in(labels)
   if type(labels) ~= "table" then
     return false
@@ -323,6 +368,30 @@ end
 
 function M.proposal_id(repo, issue_number)
   return "github-devloop/issue/" .. M.safe_repo(repo) .. "/" .. M.safe_issue(issue_number)
+end
+
+function M.safe_head_segment(head_sha)
+  if not is_git_sha(head_sha) then
+    error("github-devloop: invalid head sha")
+  end
+  return tostring(head_sha)
+end
+
+function M.pr_review_proposal_id(repo, pr_number, version, head_sha)
+  if not is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pr number")
+  end
+  if head_sha == nil then
+    error("github-devloop: missing reviewed head sha")
+  end
+  return "github-devloop/pr-review/"
+    .. M.safe_pr_review_repo_segment(repo)
+    .. "/"
+    .. M.safe_issue(pr_number)
+    .. "/"
+    .. M.safe_version_segment(version)
+    .. "/"
+    .. M.safe_head_segment(head_sha)
 end
 
 function M.parse_proposal_id(id)
@@ -341,6 +410,56 @@ function M.parse_proposal_id(id)
     return nil
   end
   return repo, issue_number
+end
+
+function M.parse_pr_review_proposal_id(id)
+  if type(id) ~= "string" then
+    return nil
+  end
+
+  local rest = id:match("^github%-devloop/pr%-review/(.+)$")
+  if rest == nil then
+    return nil
+  end
+
+  local head_sha = rest:match("/([^/]+)$")
+  local without_head = head_sha and rest:sub(1, #rest - #head_sha - 1) or nil
+  local version = without_head and without_head:match("/([^/]+)$") or nil
+  local without_version = version and without_head:sub(1, #without_head - #version - 1) or nil
+  local pr_number = without_version and without_version:match("/([^/]+)$") or nil
+  local repo = pr_number and without_version:sub(1, #without_version - #pr_number - 1) or nil
+  if repo == nil or repo == "" or pr_number == nil or pr_number == "" or version == nil or version == "" or head_sha == nil or head_sha == "" then
+    return nil
+  end
+  if not is_positive_pr_number(pr_number) then
+    return nil
+  end
+  if not is_git_sha(head_sha) then
+    return nil
+  end
+  if not is_path_safe_key(repo, 64)
+    or M.safe_issue(pr_number) ~= pr_number
+    or M.safe_version_segment(version) ~= version
+    or M.safe_head_segment(head_sha) ~= head_sha then
+    return nil
+  end
+  return repo, pr_number, version, head_sha
+end
+
+function M.parse_pr_source_ref(source_ref)
+  if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
+    return nil
+  end
+  local ref = tostring(source_ref.ref or "")
+  local pr_number = ref:match("#pr/(%d+)$")
+  local repo = pr_number and ref:sub(1, #ref - #("#pr/" .. pr_number)) or nil
+  if repo == nil or repo == "" or not is_positive_pr_number(pr_number) then
+    return nil
+  end
+  if M.safe_repo(repo) == "" then
+    return nil
+  end
+  return repo, pr_number
 end
 
 function M.is_safe_proposal_ref(proposal_id, dedup_key)
@@ -378,6 +497,23 @@ function M.is_safe_consensus_result_ref(proposal_id, dedup_key)
   return M.issue_ref_round_trips(repo, issue_number)
 end
 
+function M.is_safe_pr_review_result_ref(proposal_id, dedup_key)
+  if not is_path_safe_key(proposal_id, max_key_len) then
+    return false
+  end
+  if not is_bounded_string(dedup_key, max_dedup_len) then
+    return false
+  end
+
+  local inner_dedup_key = dedup_key:match("^consensus:(.+)$") or dedup_key
+  if not is_path_safe_key(inner_dedup_key, max_dedup_len) then
+    return false
+  end
+
+  local repo, pr_number = M.parse_pr_review_proposal_id(proposal_id)
+  return repo ~= nil and pr_number ~= nil
+end
+
 function M.issue_ref_round_trips(repo, issue_number)
   local repo_text = tostring(repo)
   local issue_text = tostring(issue_number)
@@ -409,6 +545,14 @@ function M.transition_lock_key(proposal_id)
 end
 
 function M.result_lock_key(proposal_id)
+  return M.transition_lock_key(proposal_id)
+end
+
+function M.review_result_lock_key(issue_proposal_id)
+  return M.transition_lock_key(issue_proposal_id)
+end
+
+function M.review_lock_key(proposal_id)
   return M.transition_lock_key(proposal_id)
 end
 
@@ -489,8 +633,23 @@ function M.bounded_body(value)
   return text:sub(1, max_body_len)
 end
 
+function M.bounded_pr_diff(value)
+  local text = tostring(value or "")
+  if text == "" then
+    return "(empty PR diff)"
+  end
+  if #text <= max_pr_diff_len then
+    return text
+  end
+  return text:sub(1, max_pr_diff_len)
+end
+
 function M.max_body_len()
   return max_body_len
+end
+
+function M.max_pr_diff_len()
+  return max_pr_diff_len
 end
 
 function M.render_template(template, vars)
@@ -514,10 +673,17 @@ function M.neutralize_untrusted_prompt_text(text)
   local value = tostring(text or "")
 
   local function neutralize_line(line)
-    if line:match("^%s*" .. action_label) ~= nil
-      or line:match("^%s*" .. reason_label) ~= nil
+    local sentinel_line = line:match("^%s*[+%- ]?%s*(.+)$") or line
+    if sentinel_line:match("^%s*" .. action_label) ~= nil
+      or sentinel_line:match("^%s*" .. reason_label) ~= nil
+      or sentinel_line:match("^%s*" .. verdict_label) ~= nil
+      or sentinel_line:match("^%s*" .. reply_label) ~= nil
       or trim(line) == untrusted_issue_data_begin
-      or trim(line) == untrusted_issue_data_end then
+      or trim(line) == untrusted_issue_data_end
+      or trim(sentinel_line) == untrusted_issue_data_begin
+      or trim(sentinel_line) == untrusted_issue_data_end
+      or line:find("<!%-%- fkst:") ~= nil
+      or line:find("&lt;!%-%- fkst:") ~= nil then
       return "> " .. line
     end
     return line
@@ -625,10 +791,21 @@ function M.gh_issue_view_reviewing_cmd(repo, issue_number)
     .. " --json labels,comments"
 end
 
+function M.gh_issue_view_review_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,body,labels,comments"
+end
+
 function M.gh_pr_view_origin_cmd(repo, pr_number)
   return "gh pr view " .. shell_single_quote(pr_number)
     .. " --repo " .. shell_single_quote(repo)
-    .. " --json headRefName,comments"
+    .. " --json headRefName,headRefOid,state,comments"
+end
+
+function M.gh_pr_diff_cmd(repo, pr_number)
+  return "gh pr diff " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
 end
 
 function M.gh_pr_view_head_cmd(repo, pr_number)
@@ -848,10 +1025,16 @@ function M.parse_issue_view_reviewing(stdout)
   return M.parse_issue_view_result(stdout)
 end
 
+function M.parse_issue_view_review(stdout)
+  return M.parse_issue_view_meta(stdout)
+end
+
 function M.parse_pr_view_origin(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
+    head_sha = decoded.headRefOid or decoded.head_ref_oid,
+    state = decoded.state,
     comments = M.comments_from_json(decoded.comments),
   }
 end
@@ -886,6 +1069,8 @@ function M.state_marker(proposal_id, state, version)
     and state ~= "implementing"
     and state ~= "pr-open"
     and state ~= "reviewing"
+    and state ~= "merge-ready"
+    and state ~= "fixing"
     and state ~= "impl-failed"
     and state ~= "blocked"
     and state ~= "stuck" then
@@ -1332,6 +1517,10 @@ end
 function M.has_terminal_label(labels)
   return M.has_label(labels, ready_label)
     or M.has_label(labels, implementing_label)
+    or M.has_label(labels, pr_open_label)
+    or M.has_label(labels, reviewing_label)
+    or M.has_label(labels, merge_ready_label)
+    or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
     or M.has_label(labels, stuck_label)
@@ -1369,6 +1558,14 @@ function M.has_reviewing_label(labels)
   return M.has_label(labels, reviewing_label)
 end
 
+function M.has_merge_ready_label(labels)
+  return M.has_label(labels, merge_ready_label)
+end
+
+function M.has_fixing_label(labels)
+  return M.has_label(labels, fixing_label)
+end
+
 function M.has_impl_failed_label(labels)
   return M.has_label(labels, impl_failed_label)
 end
@@ -1378,6 +1575,8 @@ function M.has_decision_terminal_label(labels)
     or M.has_label(labels, implementing_label)
     or M.has_label(labels, pr_open_label)
     or M.has_label(labels, reviewing_label)
+    or M.has_label(labels, merge_ready_label)
+    or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
 end
@@ -1387,6 +1586,8 @@ function M.is_loop_terminal(labels)
     or M.has_label(labels, implementing_label)
     or M.has_label(labels, pr_open_label)
     or M.has_label(labels, reviewing_label)
+    or M.has_label(labels, merge_ready_label)
+    or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
     or M.has_label(labels, blocked_label)
     or M.has_label(labels, stuck_label)
@@ -1478,6 +1679,17 @@ function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version)
     .. '" issue="' .. tostring(issue_number)
     .. '" branch="' .. tostring(branch)
     .. '" impl_version="' .. tostring(impl_version)
+    .. '" -->'
+end
+
+function M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key)
+  if decision ~= "approve" and decision ~= "reject" then
+    error("github-devloop: invalid review decision")
+  end
+  return '<!-- fkst:github-devloop:review-result:v1 proposal="' .. tostring(review_proposal_id)
+    .. '" issue_proposal="' .. tostring(issue_proposal_id)
+    .. '" decision="' .. tostring(decision)
+    .. '" dedup="' .. tostring(dedup_key)
     .. '" -->'
 end
 
@@ -1590,6 +1802,35 @@ function M.has_meta_marker(comments, proposal_id, dedup_key)
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       if marker_proposal == proposal_id and marker_dedup == tostring(dedup_key) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_review_result_marker(comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key)
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    if comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_any_review_result_marker(comments, review_proposal_id, issue_proposal_id)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(review_proposal_id)
+        and marker:match('issue_proposal="([^"]+)"') == tostring(issue_proposal_id) then
         return true
       end
     end
@@ -1775,6 +2016,22 @@ function M.build_devloop_ready_payload(source)
   }
 end
 
+function M.build_devloop_reviewing_payload(origin, pr_number, source_ref)
+  return {
+    schema = "github-devloop.reviewing.v1",
+    proposal_id = origin.proposal_id,
+    pr_number = pr_number,
+    version = origin.impl_version,
+    dedup_key = dedup_key({
+      "reviewing",
+      tostring(origin.proposal_id),
+      tostring(origin.impl_version),
+      tostring(pr_number),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
 function M.build_meta_prompt(proposal_id, current)
   local prompt = require("prompts.meta")
   local comments = table.concat(M.comment_bodies(current.comments), "\n\n--- comment ---\n\n")
@@ -1885,6 +2142,58 @@ function M.build_loop_proposal(repo, issue_number, current, source_ref, n)
   return proposal
 end
 
+function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref)
+  local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
+  local title = "Review PR #" .. tostring(pr_number) .. " for issue #" .. tostring(issue_number)
+  if type(current_issue) == "table" and tostring(current_issue.title or "") ~= "" then
+    title = "Review PR #" .. tostring(pr_number) .. ": " .. tostring(current_issue.title)
+  end
+  if #title > max_title_len then
+    title = title:sub(1, max_title_len)
+  end
+
+  local issue_title = type(current_issue) == "table" and tostring(current_issue.title or "") or ""
+  if #issue_title > max_title_len then
+    issue_title = issue_title:sub(1, max_title_len)
+  end
+  local issue_body = type(current_issue) == "table" and tostring(current_issue.body or "") or "(issue context unavailable)"
+  if issue_body == "" then
+    issue_body = "(empty issue body)"
+  end
+  issue_title = M.neutralize_untrusted_prompt_text(neutralize_fkst_markers(issue_title))
+  issue_body = M.neutralize_untrusted_prompt_text(neutralize_fkst_markers(issue_body))
+  if #issue_body > max_pr_issue_context_len then
+    issue_body = issue_body:sub(1, max_pr_issue_context_len)
+  end
+  local bounded_diff = M.neutralize_untrusted_prompt_text(neutralize_fkst_markers(M.bounded_pr_diff(diff)))
+  if #bounded_diff > max_pr_diff_len then
+    bounded_diff = bounded_diff:sub(1, max_pr_diff_len)
+  end
+  local body = "Review the PR diff and decide whether it should advance to merge-ready."
+    .. "\n\n" .. untrusted_issue_data_begin
+    .. "\nIssue proposal: " .. tostring(M.proposal_id(repo, issue_number))
+    .. "\nReviewed PR head: " .. tostring(head_sha)
+    .. "\nIssue title:\n" .. issue_title
+    .. "\n\nIssue body:\n" .. issue_body
+    .. "\n\nPR diff:\n" .. bounded_diff
+    .. "\n" .. untrusted_issue_data_end
+  if #body > max_body_len then
+    error("github-devloop: PR review proposal exceeds bounded body")
+  end
+
+  return {
+    schema = "consensus.proposal.v1",
+    proposal_id = review_id,
+    title = M.neutralize_untrusted_prompt_text(title),
+    body = body,
+    dedup_key = dedup_key({
+      review_id,
+      "review",
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
 function M.validate_proposal(proposal)
   if type(proposal) ~= "table" then
     return false
@@ -1894,10 +2203,17 @@ function M.validate_proposal(proposal)
   end
   local repo, issue_number = M.parse_proposal_id(proposal.proposal_id)
   if repo == nil or issue_number == nil then
-    return false
-  end
-  if not M.is_safe_proposal_ref(proposal.proposal_id, proposal.dedup_key) then
-    return false
+    local review_repo, pr_number = M.parse_pr_review_proposal_id(proposal.proposal_id)
+    if review_repo == nil or pr_number == nil then
+      return false
+    end
+    if not is_path_safe_key(proposal.proposal_id, max_key_len) or not is_path_safe_key(proposal.dedup_key, max_dedup_len) then
+      return false
+    end
+  else
+    if not M.is_safe_proposal_ref(proposal.proposal_id, proposal.dedup_key) then
+      return false
+    end
   end
   if not is_bounded_string(proposal.title, max_title_len) then
     return false
@@ -2298,6 +2614,47 @@ function M.build_reviewing_label_request(repo, issue_number, origin, pr_number, 
   )
 end
 
+function M.build_review_result_label_request(repo, issue_number, issue_proposal_id, reached, source_ref)
+  local to_state = reached.decision == "approve" and "merge-ready" or "fixing"
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    to_state,
+    dedup_key({
+      "review-result",
+      "label",
+      tostring(issue_proposal_id),
+      tostring(reached.decision),
+      tostring(reached.dedup_key),
+    }),
+    source_ref
+  )
+end
+
+function M.build_review_result_comment_request(repo, issue_number, issue_proposal_id, issue_version, reached, source_ref)
+  local to_state = reached.decision == "approve" and "merge-ready" or "fixing"
+  local state_marker = M.state_marker(issue_proposal_id, to_state, issue_version)
+  local marker = M.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key)
+  local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop PR review decision: " .. tostring(reached.decision)
+      .. "\n\n" .. body_text
+      .. "\n\n" .. state_marker
+      .. "\n" .. marker,
+    dedup_key = dedup_key({
+      "review-result",
+      "comment",
+      tostring(issue_proposal_id),
+      tostring(reached.decision),
+      tostring(reached.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
 function M.is_supported_issue(payload)
   return type(payload) == "table"
     and payload.schema == "github-proxy.v1"
@@ -2328,6 +2685,15 @@ function M.is_supported_result(payload)
     and has_bounded_source_ref(payload.source_ref)
 end
 
+function M.is_supported_review_result(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_reached.v1"
+    and (payload.decision == "approve" or payload.decision == "reject")
+    and M.is_safe_pr_review_result_ref(payload.proposal_id, payload.dedup_key)
+    and is_bounded_string(payload.body, max_body_len)
+    and has_bounded_source_ref(payload.source_ref)
+end
+
 function M.is_supported_unresolved(payload)
   return type(payload) == "table"
     and payload.schema == "consensus.consensus_unresolved.v1"
@@ -2350,6 +2716,15 @@ function M.is_supported_ready(payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.ready.v1"
     and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_reviewing(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.reviewing.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_number(payload.pr_number)
+    and is_bounded_string(payload.version, max_dedup_len)
     and has_bounded_source_ref(payload.source_ref)
 end
 

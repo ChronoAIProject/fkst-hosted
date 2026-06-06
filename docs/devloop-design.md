@@ -111,7 +111,8 @@ autochrono proposal_id lossless。状态机核心是 consensus，先确保它稳
 **Phase 2**：stuck → meta-escalation（结构化 `ACTION: implement|split|block`；split → `gh issue create` 建链接子 issue，仅评论建议）。
 **Phase 3**：ready-CAS gates the attempt（`setup_worktree` + `spawn_codex` 实施；失败或无变更 → `impl-failed` state marker；有变更 → `implementing` state marker + branch/worktree marker；**先不开 PR**）。
 **Phase 4**：人工授权 → `gh pr create` + linkage marker；PR poll → reviewing。
-**Phase 5**：PR diff review consensus + fix loop + review meta-escalation。
+**Phase 5a**：PR diff review consensus 的 decision-only 切片：`observe_pr` 进入 `reviewing` 时产生 `devloop_reviewing`；`review_pr` 回源确认 issue canonical state 后，用独立预算保留 bounded PR diff，再附加 bounded issue context，中和为带 reviewed `head_sha` 的 `github-devloop/pr-review/.../<head_sha>` `consensus.proposal`；`review_result` 重新读取 PR trusted backpointer 和当前 head，要求当前 head 仍等于 reviewed `head_sha`，并用 issue state marker CAS 把 `approve` 写成 `merge-ready`、`reject` 写成 `fixing`，同时写 issue-versioned state marker、`review-result:v1` marker 与 set-exclusive label。不 push、不 merge；pr-review 的 `consensus_unresolved` 当前没有专门处理器，issue 保持 `reviewing`。
+**Phase 5b**：fix loop + review meta-escalation。
 **Phase 6**：gated merge（`FKST_GITHUB_WRITE` + CI + mergeability 检查）→ merged → issue done/close。
 
 ## 5. 关键风险 / doctrine 约束

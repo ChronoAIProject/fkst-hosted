@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "devloop_reviewing",
   },
   stall_window = "30s",
 }
@@ -72,6 +73,18 @@ function pipeline(event)
     local state = core.current_state(current_issue.comments, origin.proposal_id)
     if state.state == "reviewing" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-idempotent(already at to_state)", "reviewing marker already visible")
+      local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr.number, state.version, current_pr.head_sha)
+      if not core.has_any_review_result_marker(current_issue.comments, review_proposal_id, origin.proposal_id) then
+        local issue_source_ref = {
+          kind = "external",
+          ref = tostring(origin.repo) .. "#issue/" .. tostring(origin.issue_number),
+        }
+        local reviewing_payload = core.build_devloop_reviewing_payload(origin, pr.number, issue_source_ref)
+        core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
+          "devloop_reviewing",
+        })
+        core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
+      end
       if not core.state_label_hint_matches(current_issue.labels, "reviewing") then
         local issue_source_ref = {
           kind = "external",
@@ -117,13 +130,16 @@ function pipeline(event)
     }
     local comment_request = core.build_reviewing_comment_request(origin.repo, origin.issue_number, origin, pr.number, issue_source_ref)
     local label_request = core.build_reviewing_label_request(origin.repo, origin.issue_number, origin, pr.number, issue_source_ref)
+    local reviewing_payload = core.build_devloop_reviewing_payload(origin, pr.number, issue_source_ref)
     local add_labels, remove_labels = core.state_label_changes("reviewing")
     core.log_apply("observe_pr", origin.proposal_id, "reviewing", origin.impl_version, { add = add_labels, remove = remove_labels }, {
       "github-proxy.github_issue_comment_request",
       "github-proxy.github_issue_label_request",
+      "devloop_reviewing",
     })
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
   end)
 end
 

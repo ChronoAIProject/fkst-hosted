@@ -15,7 +15,9 @@ local state_stage_rank = {
   implementing = 600,
   ["pr-open"] = 650,
   reviewing = 675,
-  ["impl-failed"] = 700,
+  ["merge-ready"] = 690,
+  fixing = 700,
+  ["impl-failed"] = 750,
   blocked = 800,
 }
 
