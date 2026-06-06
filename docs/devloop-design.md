@@ -112,7 +112,14 @@ autochrono proposal_id lossless。状态机核心是 consensus，先确保它稳
 **Phase 3**：ready-CAS gates the attempt（`setup_worktree` + `spawn_codex` 实施；失败或无变更 → `impl-failed` state marker；有变更 → `implementing` state marker + branch/worktree marker；**先不开 PR**）。
 **Phase 4**：人工授权 → `gh pr create` + linkage marker；PR poll → reviewing。
 **Phase 5a**：PR diff review consensus 的 decision-only 切片：`observe_pr` 进入 `reviewing` 时产生 `devloop_reviewing`；`review_pr` 回源确认 issue canonical state 后，用独立预算保留 bounded PR diff，再附加 bounded issue context，中和为带 reviewed `head_sha` 的 `github-devloop/pr-review/.../<head_sha>` `consensus.proposal`；`review_result` 重新读取 PR trusted backpointer 和当前 head，要求当前 head 仍等于 reviewed `head_sha`，并用 issue state marker CAS 把 `approve` 写成 `merge-ready`、`reject` 写成 `fixing`，同时写 issue-versioned state marker、`review-result:v1` marker 与 set-exclusive label。不 push、不 merge；pr-review 的 `consensus_unresolved` 当前没有专门处理器，issue 保持 `reviewing`。
-**Phase 5b**：fix loop + review meta-escalation。
+**Phase 5b（已实现）**：fix loop + review meta-escalation。`review_result` 的 `reject` 产生 `devloop_fixing`；`fix`
+回源确认 canonical `fixing` marker、reject review marker、open same-repo PR、trusted PR origin 与 deterministic branch/head
+都匹配后，在 deterministic branch worktree 中运行 codex 修复并提交。更新 PR 分支需要 `fkst-dev:fix-authorized`
++ `FKST_GITHUB_WRITE=1`，写前重导 issue/PR/head，非 force `git push origin <branch>`，推送后验证 PR head 等于
+new head；成功写新 `reviewing` marker（version = `core.next_fix_version` 生成的 new-head fix-round canonical version）并重新产生 `devloop_reviewing`。无授权或 dry-run
+不推进；无变更进入 `review-meta`。pr-review `consensus_unresolved` 由 `review_loop` 用独立 `review-loop:v1` /
+`review-meta-trigger:v1` marker 计数，预算内重审同一 head，预算耗尽进入 `review-meta`；`review_meta` 只接受
+`⟦FKST:ACTION⟧ fix|accept|block` + `⟦FKST:REASON⟧ ...`，分别推进 `fixing|merge-ready|blocked`。
 **Phase 6**：gated merge（`FKST_GITHUB_WRITE` + CI + mergeability 检查）→ merged → issue done/close。
 
 ## 5. 关键风险 / doctrine 约束

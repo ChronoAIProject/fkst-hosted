@@ -34,6 +34,8 @@ local pr_open_label = "fkst-dev:pr-open"
 local reviewing_label = "fkst-dev:reviewing"
 local merge_ready_label = "fkst-dev:merge-ready"
 local fixing_label = "fkst-dev:fixing"
+local review_meta_label = "fkst-dev:review-meta"
+local fix_authorized_label = "fkst-dev:fix-authorized"
 local impl_failed_label = "fkst-dev:impl-failed"
 local blocked_label = "fkst-dev:blocked"
 local stuck_label = "fkst-dev:stuck"
@@ -47,6 +49,7 @@ local state_labels = {
   [reviewing_label] = true,
   [merge_ready_label] = true,
   [fixing_label] = true,
+  [review_meta_label] = true,
   [impl_failed_label] = true,
   [blocked_label] = true,
   [stuck_label] = true,
@@ -60,6 +63,7 @@ local label_by_state = {
   reviewing = reviewing_label,
   ["merge-ready"] = merge_ready_label,
   fixing = fixing_label,
+  ["review-meta"] = review_meta_label,
   ["impl-failed"] = impl_failed_label,
   blocked = blocked_label,
   stuck = stuck_label,
@@ -77,14 +81,15 @@ local state_graph = {
   ready = { "implementing" },
   implementing = { "pr-open", "impl-failed" },
   ["pr-open"] = { "reviewing" },
-  reviewing = { "merge-ready", "fixing" },
+  reviewing = { "merge-ready", "fixing", "review-meta" },
   ["merge-ready"] = {},
-  fixing = {},
+  fixing = { "reviewing", "review-meta" },
+  ["review-meta"] = { "fixing", "merge-ready", "blocked" },
   ["impl-failed"] = {},
   blocked = {},
 }
 
-local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "stuck" }
+local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "stuck", "review-meta" }
 local state_stage_rank = {
   thinking = 100,
   stuck = 300,
@@ -94,6 +99,7 @@ local state_stage_rank = {
   reviewing = 675,
   ["merge-ready"] = 690,
   fixing = 700,
+  ["review-meta"] = 710,
   ["impl-failed"] = 750,
   blocked = 800,
 }
@@ -151,6 +157,10 @@ end
 
 local function is_meta_action(value)
   return value == "implement" or value == "split" or value == "block"
+end
+
+local function is_review_meta_action(value)
+  return value == "fix" or value == "accept" or value == "block"
 end
 
 local function is_path_safe_key(value, limit)
@@ -797,10 +807,34 @@ function M.gh_issue_view_review_cmd(repo, issue_number)
     .. " --json title,body,labels,comments"
 end
 
+function M.gh_issue_view_fix_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,body,labels,comments"
+end
+
+function M.gh_issue_view_review_loop_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,body,labels,comments"
+end
+
+function M.gh_issue_view_review_meta_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json title,body,labels,comments"
+end
+
 function M.gh_pr_view_origin_cmd(repo, pr_number)
   return "gh pr view " .. shell_single_quote(pr_number)
     .. " --repo " .. shell_single_quote(repo)
     .. " --json headRefName,headRefOid,state,comments"
+end
+
+function M.gh_pr_view_fix_cmd(repo, pr_number)
+  return "gh pr view " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json headRefName,headRefOid,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
 end
 
 function M.gh_pr_diff_cmd(repo, pr_number)
@@ -865,6 +899,13 @@ function M.git_branch_head_cmd(branch)
     error("github-devloop: invalid branch")
   end
   return "git rev-parse --verify refs/heads/" .. shell_single_quote(branch)
+end
+
+function M.git_push_branch_cmd(branch)
+  if not is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return "git push origin " .. shell_single_quote(branch)
 end
 
 function M.read_runtime_root_cmd()
@@ -1029,14 +1070,68 @@ function M.parse_issue_view_review(stdout)
   return M.parse_issue_view_meta(stdout)
 end
 
+function M.parse_issue_view_fix(stdout)
+  return M.parse_issue_view_meta(stdout)
+end
+
+function M.parse_issue_view_review_loop(stdout)
+  return M.parse_issue_view_meta(stdout)
+end
+
+function M.parse_issue_view_review_meta(stdout)
+  return M.parse_issue_view_meta(stdout)
+end
+
+local function repository_name_with_owner(head_repository, head_repository_owner)
+  if type(head_repository) == "string" then
+    return head_repository
+  end
+  if type(head_repository) ~= "table" then
+    return nil
+  end
+  if head_repository.nameWithOwner ~= nil then
+    return tostring(head_repository.nameWithOwner)
+  end
+  if head_repository.name_with_owner ~= nil then
+    return tostring(head_repository.name_with_owner)
+  end
+  local name = head_repository.name
+  local owner = nil
+  if type(head_repository.owner) == "table" and head_repository.owner.login ~= nil then
+    owner = head_repository.owner.login
+  elseif type(head_repository_owner) == "table" and head_repository_owner.login ~= nil then
+    owner = head_repository_owner.login
+  elseif type(head_repository_owner) == "string" then
+    owner = head_repository_owner
+  end
+  if owner ~= nil and name ~= nil then
+    return tostring(owner) .. "/" .. tostring(name)
+  end
+  return nil
+end
+
 function M.parse_pr_view_origin(stdout)
   local decoded = json.decode(stdout or "{}")
+  local head_repo = repository_name_with_owner(
+    decoded.headRepository or decoded.head_repository,
+    decoded.headRepositoryOwner or decoded.head_repository_owner
+  )
+  local is_cross_repository = decoded.isCrossRepository
+  if is_cross_repository == nil then
+    is_cross_repository = decoded.is_cross_repository
+  end
   return {
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
     head_sha = decoded.headRefOid or decoded.head_ref_oid,
     state = decoded.state,
     comments = M.comments_from_json(decoded.comments),
+    head_repository = head_repo,
+    is_cross_repository = is_cross_repository,
   }
+end
+
+function M.parse_pr_view_fix(stdout)
+  return M.parse_pr_view_origin(stdout)
 end
 
 function M.parse_pr_view_head_state(stdout)
@@ -1069,6 +1164,7 @@ function M.state_marker(proposal_id, state, version)
     and state ~= "implementing"
     and state ~= "pr-open"
     and state ~= "reviewing"
+    and state ~= "review-meta"
     and state ~= "merge-ready"
     and state ~= "fixing"
     and state ~= "impl-failed"
@@ -1282,8 +1378,57 @@ function M.version_updated_at(version)
 end
 
 function M.version_loop_round(version)
-  local n = tostring(version or ""):match("/loop/(%d+)$")
+  local n = tostring(version or ""):match("[/-]loop[/-](%d+)$")
   return tonumber(n) or 0
+end
+
+function M.version_fix_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]fix[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
+function M.version_review_meta_action_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]review%-meta%-action[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
+function M.version_review_loop_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]review%-loop[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
+function M.next_fix_version(version)
+  local base = tostring(version or "")
+  local next_n = M.version_fix_round(base) + 1
+  return base .. "/fix/" .. tostring(next_n)
+end
+
+function M.fix_version_from_review_version(version)
+  return M.next_fix_version(version)
+end
+
+function M.next_review_meta_action_version(version)
+  local base = tostring(version or "")
+  local next_n = M.version_review_meta_action_round(base) + 1
+  return base .. "/review-meta-action/" .. tostring(next_n)
 end
 
 local function version_primary_key(version)
@@ -1298,6 +1443,9 @@ local function version_sort_key(version, stage_rank)
   return {
     primary = version_primary_key(version),
     loop_n = M.version_loop_round(version),
+    fix_n = M.version_fix_round(version),
+    review_loop_n = M.version_review_loop_round(version),
+    review_meta_action_n = M.version_review_meta_action_round(version),
     stage_rank = tonumber(stage_rank) or 0,
   }
 end
@@ -1307,17 +1455,102 @@ local function marker_stage_rank(marker, state)
   return explicit_rank or M.stage_rank(state)
 end
 
+local function compare_version_keys(left, right)
+  if left.primary ~= right.primary then
+    return left.primary > right.primary and 1 or -1
+  end
+  if left.loop_n ~= right.loop_n then
+    return left.loop_n > right.loop_n and 1 or -1
+  end
+  if left.fix_n ~= right.fix_n then
+    return left.fix_n > right.fix_n and 1 or -1
+  end
+  if left.review_meta_action_n ~= right.review_meta_action_n then
+    return left.review_meta_action_n > right.review_meta_action_n and 1 or -1
+  end
+  if left.review_loop_n ~= right.review_loop_n then
+    return left.review_loop_n > right.review_loop_n and 1 or -1
+  end
+  return 0
+end
+
+local function versions_equivalent(left, right)
+  if left == nil or right == nil then
+    return left == right
+  end
+  if tostring(left) == tostring(right) then
+    return true
+  end
+  return M.safe_version_segment(left) == M.safe_version_segment(right)
+end
+
+local function strip_transition_version_suffixes(version)
+  local text = tostring(version or "")
+  local previous = nil
+  while previous ~= text do
+    previous = text
+    text = text
+      :gsub("/review%-meta%-action/%d+$", "")
+      :gsub("%-review%-meta%-action%-%d+$", "")
+      :gsub("/review%-loop/%d+$", "")
+      :gsub("%-review%-loop%-%d+$", "")
+      :gsub("/fix/%d+$", "")
+      :gsub("%-fix%-%d+$", "")
+  end
+  return text
+end
+
+local function strip_latest_fix_version_suffix(version)
+  return tostring(version or "")
+    :gsub("/fix/%d+$", "")
+    :gsub("%-fix%-%d+$", "")
+end
+
+local function compare_same_base_transition_versions(incoming_version, current_version)
+  local incoming_key = version_sort_key(incoming_version, 0)
+  local current_key = version_sort_key(current_version, 0)
+  if incoming_key.loop_n ~= current_key.loop_n then
+    return incoming_key.loop_n > current_key.loop_n and 1 or -1
+  end
+  if incoming_key.fix_n ~= current_key.fix_n then
+    return incoming_key.fix_n > current_key.fix_n and 1 or -1
+  end
+  if incoming_key.review_meta_action_n ~= current_key.review_meta_action_n then
+    return incoming_key.review_meta_action_n > current_key.review_meta_action_n and 1 or -1
+  end
+  if incoming_key.review_loop_n ~= current_key.review_loop_n then
+    return incoming_key.review_loop_n > current_key.review_loop_n and 1 or -1
+  end
+  return 0
+end
+
+local function compare_transition_versions(incoming_version, current_version)
+  if incoming_version == current_version then
+    return 0
+  end
+  if incoming_version == nil then
+    return current_version == nil and 0 or -1
+  end
+  if current_version == nil then
+    return 1
+  end
+  local incoming_base = strip_transition_version_suffixes(incoming_version)
+  local current_base = strip_transition_version_suffixes(current_version)
+  if versions_equivalent(incoming_base, current_base) then
+    return compare_same_base_transition_versions(incoming_version, current_version)
+  end
+  return compare_version_keys(version_sort_key(incoming_version, 0), version_sort_key(current_version, 0))
+end
+
 local function compare_state_marker(a, b)
   if a == nil then
     return true
   end
   local a_key = version_sort_key(a.version, a.stage_rank)
   local b_key = version_sort_key(b.version, b.stage_rank)
-  if b_key.primary ~= a_key.primary then
-    return b_key.primary > a_key.primary
-  end
-  if b_key.loop_n ~= a_key.loop_n then
-    return b_key.loop_n > a_key.loop_n
+  local version_order = compare_version_keys(b_key, a_key)
+  if version_order ~= 0 then
+    return version_order > 0
   end
   if a.version == b.version
     and ((a.state == "ready" and b.state == "blocked") or (a.state == "blocked" and b.state == "ready")) then
@@ -1435,11 +1668,48 @@ function M.versioned_transition_status(current, from_states, to_state, incoming_
   if type(current) == "table"
     and current.version ~= nil
     and incoming_version ~= nil
-    and M.version_order_key(incoming_version) < M.version_order_key(current.version) then
+    and compare_transition_versions(incoming_version, current.version) < 0 then
     return "stale"
   end
   local status = M.transition_status(current, from_states, to_state)
   return status
+end
+
+function M.cyclic_transition_status(current, from_states, to_state, incoming_version, target_version)
+  local current_state = current
+  local current_version = nil
+  if type(current) == "table" then
+    current_state = current.state
+    current_version = current.version
+  end
+  if incoming_version == nil then
+    return M.transition_status(current, from_states, to_state)
+  end
+  if target_version ~= nil and current_state == to_state and versions_equivalent(current_version, target_version) then
+    return "idempotent"
+  end
+
+  local version_order = compare_transition_versions(incoming_version, current_version)
+  if version_order > 0 then
+    return "pending"
+  end
+  if version_order < 0 then
+    return "stale"
+  end
+
+  if current_state == to_state then
+    return "idempotent"
+  end
+  local normalized_current = normalize_state(current_state)
+  for _, from_state in ipairs(from_states or {}) do
+    if normalized_current == normalize_state(from_state) then
+      return "apply"
+    end
+  end
+  if M.stage_rank(to_state) > M.stage_rank(current_state) then
+    return "apply"
+  end
+  return "stale"
 end
 
 function M.cas_outcome(current, transition, incoming_version)
@@ -1456,7 +1726,7 @@ function M.cas_outcome(current, transition, incoming_version)
     if type(current) == "table"
       and current.version ~= nil
       and incoming_version ~= nil
-      and M.version_order_key(incoming_version) < M.version_order_key(current.version) then
+      and compare_transition_versions(incoming_version, current.version) < 0 then
       return "skip-stale(incoming version < current marker version)"
     end
     return "skip-advanced-or-diverged"
@@ -1519,6 +1789,7 @@ function M.has_terminal_label(labels)
     or M.has_label(labels, implementing_label)
     or M.has_label(labels, pr_open_label)
     or M.has_label(labels, reviewing_label)
+    or M.has_label(labels, review_meta_label)
     or M.has_label(labels, merge_ready_label)
     or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
@@ -1566,6 +1837,14 @@ function M.has_fixing_label(labels)
   return M.has_label(labels, fixing_label)
 end
 
+function M.has_fix_authorized_label(labels)
+  return M.has_label(labels, fix_authorized_label)
+end
+
+function M.has_review_meta_label(labels)
+  return M.has_label(labels, review_meta_label)
+end
+
 function M.has_impl_failed_label(labels)
   return M.has_label(labels, impl_failed_label)
 end
@@ -1575,6 +1854,7 @@ function M.has_decision_terminal_label(labels)
     or M.has_label(labels, implementing_label)
     or M.has_label(labels, pr_open_label)
     or M.has_label(labels, reviewing_label)
+    or M.has_label(labels, review_meta_label)
     or M.has_label(labels, merge_ready_label)
     or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
@@ -1586,6 +1866,7 @@ function M.is_loop_terminal(labels)
     or M.has_label(labels, implementing_label)
     or M.has_label(labels, pr_open_label)
     or M.has_label(labels, reviewing_label)
+    or M.has_label(labels, review_meta_label)
     or M.has_label(labels, merge_ready_label)
     or M.has_label(labels, fixing_label)
     or M.has_label(labels, impl_failed_label)
@@ -1629,6 +1910,51 @@ end
 function M.meta_marker(proposal_id, dedup_key)
   return '<!-- fkst:github-devloop:meta:v1 proposal="' .. tostring(proposal_id)
     .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.review_loop_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:review-loop:v1 proposal="' .. tostring(review_proposal_id)
+    .. '" issue_proposal="' .. tostring(issue_proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.review_meta_trigger_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  return '<!-- fkst:github-devloop:review-meta-trigger:v1 proposal="' .. tostring(review_proposal_id)
+    .. '" issue_proposal="' .. tostring(issue_proposal_id)
+    .. '" n="' .. tostring(n)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.review_meta_marker(issue_proposal_id, dedup_key, action, version)
+  local fields = ""
+  if action ~= nil then
+    if not is_review_meta_action(action) then
+      error("github-devloop: invalid review-meta action")
+    end
+    fields = fields .. '" action="' .. tostring(action)
+  end
+  if version ~= nil then
+    fields = fields .. '" version="' .. tostring(version)
+  end
+  return '<!-- fkst:github-devloop:review-meta:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. fields
+    .. '" -->'
+end
+
+function M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  if not is_git_sha(old_head_sha) or not is_git_sha(new_head_sha) then
+    error("github-devloop: invalid fix head sha")
+  end
+  return '<!-- fkst:github-devloop:fix:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" review_proposal="' .. tostring(review_proposal_id)
+    .. '" review_dedup="' .. tostring(review_dedup_key)
+    .. '" old_head_sha="' .. tostring(old_head_sha)
+    .. '" new_head_sha="' .. tostring(new_head_sha)
     .. '" -->'
 end
 
@@ -1691,6 +2017,60 @@ function M.review_result_marker(review_proposal_id, issue_proposal_id, decision,
     .. '" decision="' .. tostring(decision)
     .. '" dedup="' .. tostring(dedup_key)
     .. '" -->'
+end
+
+function M.review_reject_fact(comments, issue_proposal_id, issue_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local review_proposal = marker:match('proposal="([^"]+)"')
+      local marker_issue = marker:match('issue_proposal="([^"]+)"')
+      local decision = marker:match('decision="([^"]+)"')
+      local review_dedup = marker:match('dedup="([^"]*)"')
+      local _, _, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      if marker_issue == tostring(issue_proposal_id)
+        and decision == "reject"
+        and review_version == M.safe_version_segment(strip_latest_fix_version_suffix(issue_version))
+        and is_bounded_string(review_dedup, max_dedup_len)
+        and is_git_sha(reviewed_head_sha) then
+        return {
+          review_proposal_id = review_proposal,
+          review_dedup_key = review_dedup,
+          reviewed_head_sha = reviewed_head_sha,
+          review_reason = comment_body(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      local action = marker:match('action="([^"]+)"')
+      local version = marker:match('version="([^"]*)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and marker_dedup ~= nil
+        and action == "fix"
+        and version == tostring(issue_version) then
+        return {
+          review_dedup_key = marker_dedup,
+          review_reason = comment_body(comment),
+        }
+      end
+    end
+  end
+  return nil
 end
 
 function M.impl_failure_marker(proposal_id, dedup_key, reason)
@@ -1822,6 +2202,128 @@ function M.has_review_result_marker(comments, review_proposal_id, issue_proposal
   return false
 end
 
+function M.has_review_loop_marker(comments, review_proposal_id, issue_proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.review_loop_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    if comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function review_marker_records(comments, kind, review_proposal_id, issue_proposal_id)
+  local records = {}
+  if type(comments) ~= "table" then
+    return records
+  end
+
+  local safe_kind = tostring(kind):gsub("%-", "%%-")
+  local marker_pattern = "<!%-%- fkst:github%-devloop:" .. safe_kind .. ":v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_issue = marker:match('issue_proposal="([^"]+)"')
+      local n = tonumber(marker:match('n="(%d+)"'))
+      local dedup = marker:match('dedup="([^"]*)"')
+      if marker_proposal == tostring(review_proposal_id)
+        and marker_issue == tostring(issue_proposal_id)
+        and n ~= nil then
+        table.insert(records, {
+          n = n,
+          dedup_key = dedup,
+        })
+      end
+    end
+  end
+  return records
+end
+
+function M.has_review_loop_marker_round(comments, review_proposal_id, issue_proposal_id, n)
+  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
+    if record.n == n then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_review_loop_marker_dedup(comments, review_proposal_id, issue_proposal_id, dedup_key)
+  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
+    if record.dedup_key == tostring(dedup_key) then
+      return true
+    end
+  end
+  for _, record in ipairs(review_marker_records(comments, "review-meta-trigger", review_proposal_id, issue_proposal_id)) do
+    if record.dedup_key == tostring(dedup_key) then
+      return true
+    end
+  end
+  return false
+end
+
+function M.review_loop_count_from_github_markers(comments, review_proposal_id, issue_proposal_id)
+  local max_n = 0
+  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  for _, record in ipairs(review_marker_records(comments, "review-meta-trigger", review_proposal_id, issue_proposal_id)) do
+    if record.n > max_n then
+      max_n = record.n
+    end
+  end
+  return max_n
+end
+
+function M.has_review_meta_trigger_marker(comments, review_proposal_id, issue_proposal_id, n, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.review_meta_trigger_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    if comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.has_review_meta_marker(comments, issue_proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return false
+  end
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    for marker in comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      if marker_proposal == tostring(issue_proposal_id) and marker_dedup == tostring(dedup_key) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_fix_marker(comments, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local needle = M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  for _, comment in ipairs(trusted_marker_comments(comments)) do
+    if comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
 function M.has_any_review_result_marker(comments, review_proposal_id, issue_proposal_id)
   if type(comments) ~= "table" then
     return false
@@ -1870,6 +2372,19 @@ end
 
 function M.is_safe_pr_number(pr_number)
   return is_positive_pr_number(pr_number)
+end
+
+function M.is_same_repo_pr_head(pr, repo)
+  if type(pr) ~= "table" then
+    return false
+  end
+  if pr.is_cross_repository == true then
+    return false
+  end
+  if pr.head_repository == nil then
+    return false
+  end
+  return tostring(pr.head_repository):lower() == tostring(repo):lower()
 end
 
 function M.implementing_fact(comments, proposal_id, dedup_key)
@@ -2016,19 +2531,65 @@ function M.build_devloop_ready_payload(source)
   }
 end
 
-function M.build_devloop_reviewing_payload(origin, pr_number, source_ref)
+function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, version)
+  local review_version = version or origin.impl_version
   return {
     schema = "github-devloop.reviewing.v1",
     proposal_id = origin.proposal_id,
     pr_number = pr_number,
-    version = origin.impl_version,
+    version = review_version,
     dedup_key = dedup_key({
       "reviewing",
       tostring(origin.proposal_id),
-      tostring(origin.impl_version),
+      tostring(review_version),
       tostring(pr_number),
     }),
     source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
+function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_ref)
+  local version = origin.impl_version
+  if review_fact.fix_version ~= nil then
+    version = review_fact.fix_version
+  end
+  return {
+    schema = "github-devloop.fixing.v1",
+    proposal_id = origin.proposal_id,
+    pr_number = pr_number,
+    version = version,
+    review_proposal_id = review_fact.review_proposal_id,
+    review_dedup_key = review_fact.review_dedup_key,
+    reviewed_head_sha = review_fact.reviewed_head_sha,
+    dedup_key = dedup_key({
+      "fixing",
+      tostring(origin.proposal_id),
+      tostring(version),
+      tostring(pr_number),
+      tostring(review_fact.review_dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
+function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)
+  return {
+    schema = "github-devloop.review-meta.v1",
+    proposal_id = issue_proposal_id,
+    review_proposal_id = unresolved.proposal_id,
+    review_dedup_key = unresolved.dedup_key,
+    version = issue_version,
+    pr_number = pr_number,
+    n = n,
+    dedup_key = dedup_key({
+      "review-meta",
+      tostring(issue_proposal_id),
+      tostring(issue_version),
+      tostring(pr_number),
+      tostring(n),
+      tostring(unresolved.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
   }
 end
 
@@ -2056,6 +2617,34 @@ function M.build_implement_prompt(proposal_id, current)
   })
 end
 
+function M.build_fix_prompt(fix, current_issue, review_reason)
+  local prompt = require("prompts.fix")
+  return M.render_template(prompt.template, {
+    proposal_id = M.neutralize_untrusted_prompt_text(fix.proposal_id),
+    review_proposal_id = M.neutralize_untrusted_prompt_text(fix.review_proposal_id),
+    reviewed_head_sha = M.neutralize_untrusted_prompt_text(fix.reviewed_head_sha),
+    title = M.neutralize_untrusted_prompt_text(current_issue.title),
+    body = M.neutralize_untrusted_prompt_text(current_issue.body),
+    review_feedback = M.neutralize_untrusted_prompt_text(review_reason),
+  })
+end
+
+function M.build_review_meta_prompt(review_meta, current_issue)
+  local prompt = require("prompts.review_meta")
+  local comments = table.concat(M.comment_bodies(current_issue.comments), "\n\n--- comment ---\n\n")
+  if #comments > max_comments_len then
+    comments = comments:sub(1, max_comments_len)
+  end
+
+  return M.render_template(prompt.template, {
+    proposal_id = M.neutralize_untrusted_prompt_text(review_meta.proposal_id),
+    review_proposal_id = M.neutralize_untrusted_prompt_text(review_meta.review_proposal_id),
+    title = M.neutralize_untrusted_prompt_text(current_issue.title),
+    body = M.neutralize_untrusted_prompt_text(current_issue.body),
+    comments = M.neutralize_untrusted_prompt_text(comments),
+  })
+end
+
 function M.parse_meta_action(stdout)
   local text = tostring(stdout or "")
 
@@ -2075,6 +2664,59 @@ function M.parse_meta_action(stdout)
     if line:match("^%s*" .. action_label) ~= nil then
       local token = line:match("^%s*" .. action_label .. "%s*(%a+)%s*$")
       if token == nil or not is_meta_action(token:lower()) then
+        return nil
+      end
+      action = token:lower()
+      action_count = action_count + 1
+      action_index = index
+    end
+
+    if line:match("^%s*" .. reason_label) ~= nil then
+      local captured = line:match("^%s*" .. reason_label .. "%s*(.+)$")
+      if captured == nil or trim(captured) == "" then
+        return nil
+      end
+      reason = trim(captured)
+      reason_count = reason_count + 1
+      reason_index = index
+    end
+  end
+
+  if action_count ~= 1 or reason_count ~= 1 then
+    return nil
+  end
+  if action == nil or reason == nil then
+    return nil
+  end
+  if reason_index ~= action_index + 1 then
+    return nil
+  end
+  if not is_bounded_string(reason, max_meta_reason_len) then
+    return nil
+  end
+
+  return {
+    action = action,
+    reason = reason,
+  }
+end
+
+function M.parse_review_meta_action(stdout)
+  local text = tostring(stdout or "")
+
+  local action = nil
+  local action_count = 0
+  local action_index = nil
+  local reason = nil
+  local reason_count = 0
+  local reason_index = nil
+  local index = 0
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    index = index + 1
+
+    if line:match("^%s*" .. action_label) ~= nil then
+      local token = line:match("^%s*" .. action_label .. "%s*(%a+)%s*$")
+      if token == nil or not is_review_meta_action(token:lower()) then
         return nil
       end
       action = token:lower()
@@ -2192,6 +2834,12 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
+end
+
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref, n)
+  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref)
+  proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
+  return proposal
 end
 
 function M.validate_proposal(proposal)
@@ -2655,6 +3303,202 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
   }
 end
 
+function M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
+  local request = M.build_state_label_request(
+    repo,
+    issue_number,
+    "reviewing",
+    dedup_key({
+      "fix",
+      "label",
+      tostring(fix.proposal_id),
+      tostring(fix.review_dedup_key),
+      tostring(new_head_sha),
+    }),
+    fix.source_ref
+  )
+  if not has_value(request.remove_labels, fix_authorized_label) then
+    table.insert(request.remove_labels, fix_authorized_label)
+  end
+  return request
+end
+
+function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
+  local state_marker = M.state_marker(fix.proposal_id, "reviewing", new_version or fix.version)
+  local marker = M.fix_marker(fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop fix pushed for re-review"
+      .. "\n\nPrevious reviewed head: " .. tostring(old_head_sha)
+      .. "\nNew head: " .. tostring(new_head_sha)
+      .. "\n\n" .. state_marker
+      .. "\n" .. marker,
+    dedup_key = dedup_key({
+      "fix",
+      "comment",
+      tostring(fix.proposal_id),
+      tostring(fix.review_dedup_key),
+      tostring(new_head_sha),
+    }),
+    source_ref = M.normalize_source_ref(fix.source_ref),
+  }
+end
+
+function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
+  local request = M.build_state_label_request(
+    repo,
+    issue_number,
+    "review-meta",
+    dedup_key({
+      "fix",
+      "label",
+      "review-meta",
+      tostring(reason or "no-fix"),
+      tostring(fix.review_dedup_key),
+    }),
+    fix.source_ref
+  )
+  if not has_value(request.remove_labels, fix_authorized_label) then
+    table.insert(request.remove_labels, fix_authorized_label)
+  end
+  return request
+end
+
+function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
+  local safe_reason = M.sanitize_key(reason or "no-fix"):gsub("/", "-")
+  local text = tostring(detail or "")
+  if #text > max_impl_output_len then
+    text = text:sub(1, max_impl_output_len)
+  end
+  if text == "" then
+    text = "(no fix output)"
+  end
+  text = M.neutralize_untrusted_comment_text(text)
+  local state_marker = M.state_marker(fix.proposal_id, "review-meta", fix.version)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop fix escalated to review-meta: " .. safe_reason
+      .. "\n\n" .. text
+      .. "\n\n" .. state_marker,
+    dedup_key = dedup_key({
+      "fix",
+      "comment",
+      "review-meta",
+      safe_reason,
+      tostring(fix.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(fix.source_ref),
+  }
+end
+
+function M.build_review_loop_comment_request(repo, issue_number, unresolved, issue_proposal_id, n, source_ref)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop PR review no-consensus loop: " .. tostring(n)
+      .. "\n\n" .. M.review_loop_marker(unresolved.proposal_id, issue_proposal_id, n, unresolved.dedup_key),
+    dedup_key = dedup_key({
+      "review-loop",
+      "comment",
+      tostring(issue_proposal_id),
+      tostring(n),
+      tostring(unresolved.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
+  }
+end
+
+function M.build_review_meta_trigger_label_request(repo, issue_number, unresolved, issue_proposal_id, n, source_ref)
+  local request = M.build_state_label_request(
+    repo,
+    issue_number,
+    "review-meta",
+    dedup_key({
+      "review-loop",
+      "label",
+      "review-meta",
+      tostring(issue_proposal_id),
+      tostring(n),
+      tostring(unresolved.dedup_key),
+    }),
+    source_ref or unresolved.source_ref
+  )
+  if not has_value(request.remove_labels, fix_authorized_label) then
+    table.insert(request.remove_labels, fix_authorized_label)
+  end
+  return request
+end
+
+function M.build_review_meta_trigger_comment_request(repo, issue_number, unresolved, issue_proposal_id, issue_version, n, source_ref)
+  local state_marker = M.state_marker(issue_proposal_id, "review-meta", issue_version)
+  local marker = M.review_meta_trigger_marker(unresolved.proposal_id, issue_proposal_id, n, unresolved.dedup_key)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop PR review unresolved: escalating to review-meta after " .. tostring(n) .. " attempts"
+      .. "\n\n" .. state_marker
+      .. "\n" .. marker,
+    dedup_key = dedup_key({
+      "review-loop",
+      "comment",
+      "review-meta",
+      tostring(issue_proposal_id),
+      tostring(n),
+      tostring(unresolved.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
+  }
+end
+
+function M.build_review_meta_label_request(repo, issue_number, review_meta, action, version)
+  local to_state = action == "fix" and "fixing" or action == "accept" and "merge-ready" or "blocked"
+  local request = M.build_state_label_request(
+    repo,
+    issue_number,
+    to_state,
+    dedup_key({
+      "review-meta",
+      "label",
+      tostring(action),
+      tostring(review_meta.dedup_key),
+      tostring(version or review_meta.version),
+    }),
+    review_meta.source_ref
+  )
+  if to_state ~= "fixing" and not has_value(request.remove_labels, fix_authorized_label) then
+    table.insert(request.remove_labels, fix_authorized_label)
+  end
+  return request
+end
+
+function M.build_review_meta_comment_request(repo, issue_number, review_meta, action, reason, version)
+  local to_state = action == "fix" and "fixing" or action == "accept" and "merge-ready" or "blocked"
+  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  local state_version = version or review_meta.version
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop review-meta action: " .. tostring(action)
+      .. "\n\nReason:\n" .. safe_reason
+      .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
+      .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version),
+    dedup_key = dedup_key({
+      "review-meta",
+      "comment",
+      tostring(review_meta.dedup_key),
+      tostring(state_version),
+    }),
+    source_ref = M.normalize_source_ref(review_meta.source_ref),
+  }
+end
+
 function M.is_supported_issue(payload)
   return type(payload) == "table"
     and payload.schema == "github-proxy.v1"
@@ -2704,6 +3548,16 @@ function M.is_supported_unresolved(payload)
     and has_bounded_source_ref(payload.source_ref)
 end
 
+function M.is_supported_pr_review_unresolved(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_unresolved.v1"
+    and M.is_safe_pr_review_result_ref(payload.proposal_id, payload.dedup_key)
+    and payload.body == nil
+    and payload.angle_results == nil
+    and payload.decision == nil
+    and has_bounded_source_ref(payload.source_ref)
+end
+
 function M.is_supported_stuck(payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.stuck.v1"
@@ -2725,6 +3579,28 @@ function M.is_supported_reviewing(payload)
     and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
     and M.is_safe_pr_number(payload.pr_number)
     and is_bounded_string(payload.version, max_dedup_len)
+    and has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_fixing(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.fixing.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_number(payload.pr_number)
+    and is_bounded_string(payload.version, max_dedup_len)
+    and M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
+    and is_git_sha(payload.reviewed_head_sha)
+    and has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_review_meta(payload)
+  return type(payload) == "table"
+    and payload.schema == "github-devloop.review-meta.v1"
+    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
+    and is_bounded_string(payload.version, max_dedup_len)
+    and M.is_safe_pr_number(payload.pr_number)
+    and tonumber(payload.n) ~= nil
     and has_bounded_source_ref(payload.source_ref)
 end
 

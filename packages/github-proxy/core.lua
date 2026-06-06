@@ -17,6 +17,7 @@ local state_stage_rank = {
   reviewing = 675,
   ["merge-ready"] = 690,
   fixing = 700,
+  ["review-meta"] = 710,
   ["impl-failed"] = 750,
   blocked = 800,
 }
@@ -316,6 +317,28 @@ local function version_loop_round(version)
   return tonumber(n) or 0
 end
 
+local function version_fix_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("/fix/(%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
+local function version_review_meta_action_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("/review%-meta%-action/(%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
 local function version_order_key(version)
   local text = tostring(version or "")
   local rest = text
@@ -351,6 +374,8 @@ local function version_sort_key(version, stage_rank)
   return {
     primary = version_primary_key(version),
     loop_n = version_loop_round(version),
+    fix_n = version_fix_round(version),
+    review_meta_action_n = version_review_meta_action_round(version),
     stage_rank = tonumber(stage_rank) or 0,
   }
 end
@@ -370,6 +395,12 @@ local function compare_state_marker(current, candidate)
   end
   if candidate_key.loop_n ~= current_key.loop_n then
     return candidate_key.loop_n > current_key.loop_n
+  end
+  if candidate_key.fix_n ~= current_key.fix_n then
+    return candidate_key.fix_n > current_key.fix_n
+  end
+  if candidate_key.review_meta_action_n ~= current_key.review_meta_action_n then
+    return candidate_key.review_meta_action_n > current_key.review_meta_action_n
   end
   if candidate.version == current.version
     and ((current.state == "ready" and candidate.state == "blocked") or (current.state == "blocked" and candidate.state == "ready")) then

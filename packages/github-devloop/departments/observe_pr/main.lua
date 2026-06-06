@@ -79,7 +79,7 @@ function pipeline(event)
           kind = "external",
           ref = tostring(origin.repo) .. "#issue/" .. tostring(origin.issue_number),
         }
-        local reviewing_payload = core.build_devloop_reviewing_payload(origin, pr.number, issue_source_ref)
+        local reviewing_payload = core.build_devloop_reviewing_payload(origin, pr.number, issue_source_ref, state.version)
         core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
           "devloop_reviewing",
         })

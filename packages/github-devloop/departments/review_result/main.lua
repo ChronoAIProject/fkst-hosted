@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "devloop_fixing",
   },
   fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
@@ -63,8 +64,9 @@ function pipeline(event)
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-stale(head-advanced)", "PR head advanced since reviewed diff")
     return
   end
-  if tostring(review_version or "") ~= tostring(core.safe_version_segment(origin.impl_version)) then
-    core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version does not match PR origin implementation version")
+  local reviewed_issue_version = tostring(review_version or "")
+  if reviewed_issue_version == "" then
+    core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
     return
   end
 
@@ -88,12 +90,12 @@ function pipeline(event)
     core.log_forged_markers("review_result", origin.proposal_id, current_issue.comments)
     local state = core.current_state(current_issue.comments, origin.proposal_id)
     local to_state = reached.decision == "approve" and "merge-ready" or "fixing"
-    local transition = core.transition_status(state, { "reviewing" }, to_state)
-    if reached.decision == "reject"
-      and state.state == "merge-ready"
-      and tostring(state.version or "") == tostring(origin.impl_version) then
-      transition = "apply"
-    end
+    local current_review_version = core.safe_version_segment(state.version or "")
+    local transition = core.cyclic_transition_status({
+      state = state.state,
+      version = current_review_version,
+      stage_rank = state.stage_rank,
+    }, { "reviewing" }, to_state, reviewed_issue_version)
     if transition == "idempotent" or transition == "stale" then
       core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision cannot advance current marker")
       return
@@ -103,21 +105,39 @@ function pipeline(event)
       error("github-devloop: reviewing marker not yet visible for review result; retrying")
     end
 
-    if tostring(state.version or "") ~= tostring(origin.impl_version) then
+    if tostring(current_review_version) ~= tostring(reviewed_issue_version) then
       core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, "skip-stale(version-mismatch)", "PR origin implementation version does not match canonical issue marker")
       return
     end
 
     core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
-    local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, origin.impl_version, reached, issue_source_ref)
+    local issue_version = state.version
+    if reached.decision == "reject" then
+      issue_version = core.fix_version_from_review_version(state.version)
+    end
+    local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, reached, issue_source_ref)
     local label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, reached, issue_source_ref)
     local add_labels, remove_labels = core.state_label_changes(to_state)
-    core.log_apply("review_result", origin.proposal_id, to_state, origin.impl_version, { add = add_labels, remove = remove_labels }, {
+    local raised = {
       "github-proxy.github_issue_comment_request",
       "github-proxy.github_issue_label_request",
-    })
+    }
+    local fix_payload = nil
+    if reached.decision == "reject" then
+      fix_payload = core.build_devloop_fixing_payload(origin, pr_number, {
+        review_proposal_id = reached.proposal_id,
+        review_dedup_key = reached.dedup_key,
+        reviewed_head_sha = reviewed_head_sha,
+        fix_version = issue_version,
+      }, issue_source_ref)
+      table.insert(raised, "devloop_fixing")
+    end
+    core.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    if fix_payload ~= nil then
+      core.log_raise("review_result", origin.proposal_id, "devloop_fixing", fix_payload)
+    end
   end)
 end
 

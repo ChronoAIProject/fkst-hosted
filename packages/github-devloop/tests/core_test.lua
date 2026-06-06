@@ -163,6 +163,13 @@ return {
     local marker = core.review_result_marker(id, "github-devloop/issue/owner/repo/42", "approve", "consensus:v1")
     t.eq(core.has_review_result_marker({ marker }, id, "github-devloop/issue/owner/repo/42", "approve", "consensus:v1"), true)
     t.eq(core.has_any_review_result_marker({ marker }, id, "github-devloop/issue/owner/repo/42"), true)
+    local action_version = core.next_review_meta_action_version(version)
+    local meta_comment = "github-devloop review-meta action: fix\n\nReason:\nRun another fix pass."
+      .. "\n\n" .. core.state_marker("github-devloop/issue/owner/repo/42", "fixing", action_version)
+      .. "\n" .. core.review_meta_marker("github-devloop/issue/owner/repo/42", "meta-dedup", "fix", action_version)
+    local meta_fact = core.review_meta_fix_fact({ meta_comment }, "github-devloop/issue/owner/repo/42", action_version)
+    t.eq(meta_fact.review_dedup_key, "meta-dedup")
+    t.is_true(meta_fact.review_reason:find("Run another fix pass.", 1, true) ~= nil)
   end,
 
   test_pr_review_proposal_id_is_bounded_for_long_repo = function()
@@ -250,6 +257,27 @@ return {
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z",
     }
     t.eq(core.versioned_transition_status(ready_current, { "ready" }, "implementing", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"), "stale")
+    t.eq(core.cyclic_transition_status({ state = nil, version = nil }, { "fixing" }, "reviewing", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"), "pending")
+    t.eq(core.cyclic_transition_status({
+      state = "fixing",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    }, { "reviewing" }, "merge-ready", "ready-consensus-github-devloop-issue-owner-repo-42-2026-06-03T01-02-03Z"), "stale")
+    t.eq(core.cyclic_transition_status({
+      state = "merge-ready",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    }, { "reviewing" }, "fixing", "ready-consensus-github-devloop-issue-owner-repo-42-2026-06-03T01-02-03Z"), "apply")
+    t.eq(core.cyclic_transition_status({
+      state = "reviewing",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1",
+    }, { "fixing" }, "reviewing", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1"), "idempotent")
+    t.eq(core.cyclic_transition_status({
+      state = "reviewing",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    }, { "fixing" }, "reviewing", core.fix_version_from_review_version("ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"), "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/2"), "pending")
+    t.eq(core.cyclic_transition_status({
+      state = "reviewing",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1",
+    }, { "review-meta" }, "fixing", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"), "stale")
 
     local marker = core.result_marker(
       proposal_id,
@@ -271,7 +299,7 @@ return {
     t.eq(label.remove_labels[5], "fkst-dev:merge-ready")
     t.eq(label.remove_labels[6], "fkst-dev:fixing")
     t.eq(label.remove_labels[7], "fkst-dev:impl-failed")
-    t.eq(#label.remove_labels, 9)
+    t.eq(#label.remove_labels, 10)
     t.eq(label.issue_number, "42")
 
     t.eq(core.state_label_hint_matches({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "reviewing"), true)
@@ -287,14 +315,14 @@ return {
     )
     t.eq(reconcile.add_labels[1], "fkst-dev:reviewing")
     t.eq(reconcile.remove_labels[1], "fkst-dev:thinking")
-    t.eq(#reconcile.remove_labels, 9)
+    t.eq(#reconcile.remove_labels, 10)
     t.is_true(reconcile.dedup_key:find("reconcile/label/github-devloop/issue/owner/repo/42/reviewing", 1, true) ~= nil)
 
     local rejected = core.build_result_label_request("owner/repo", "42", reached({ decision = "reject" }))
     t.eq(rejected.add_labels[1], "fkst-dev:blocked")
     t.eq(rejected.remove_labels[1], "fkst-dev:thinking")
     t.eq(rejected.remove_labels[2], "fkst-dev:ready")
-    t.eq(#rejected.remove_labels, 9)
+    t.eq(#rejected.remove_labels, 10)
 
     local completed = reached()
     local comment = core.build_result_comment_request("owner/repo", "42", completed)
@@ -400,7 +428,74 @@ return {
 
     t.eq(core.stage_rank("fixing") > core.stage_rank("merge-ready"), true)
     t.eq(merge_ready_first.state, "fixing")
-    t.eq(fixing_first.state, "fixing")
+	  t.eq(fixing_first.state, "fixing")
+	end,
+
+  test_current_state_converges_same_version_fixing_to_review_meta = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+
+    local fixing_first = core.current_state({
+      core.state_marker(proposal_id, "fixing", version),
+      core.state_marker(proposal_id, "review-meta", version),
+    }, proposal_id)
+    local meta_first = core.current_state({
+      core.state_marker(proposal_id, "review-meta", version),
+      core.state_marker(proposal_id, "fixing", version),
+    }, proposal_id)
+
+    t.eq(core.stage_rank("review-meta") > core.stage_rank("fixing"), true)
+    t.eq(fixing_first.state, "review-meta")
+    t.eq(meta_first.state, "review-meta")
+  end,
+
+  test_successful_fix_version_orders_after_fixing_for_any_sha = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local new_version = core.next_fix_version(version)
+    local sha_like_lower_version = "0000000000000000000000000000000000000000"
+
+    local current = core.current_state({
+      core.state_marker(proposal_id, "fixing", version),
+      core.state_marker(proposal_id, "reviewing", new_version),
+      core.fix_marker(proposal_id, "github-devloop/pr-review/owner-repo-0000000000/7/v1/def456", "review", "def456", sha_like_lower_version),
+    }, proposal_id)
+
+    t.eq(core.version_fix_round(new_version), core.version_fix_round(version) + 1)
+    t.eq(current.state, "reviewing")
+    t.eq(current.version, new_version)
+  end,
+
+  test_review_meta_action_version_orders_after_review_meta_stage = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local exit_version = core.next_review_meta_action_version(version)
+
+    local current = core.current_state({
+      core.state_marker(proposal_id, "review-meta", version),
+      core.state_marker(proposal_id, "fixing", exit_version),
+    }, proposal_id)
+
+    t.eq(core.stage_rank("review-meta") > core.stage_rank("fixing"), true)
+    t.eq(core.version_review_meta_action_round(exit_version), core.version_review_meta_action_round(version) + 1)
+    t.eq(current.state, "fixing")
+    t.eq(current.version, exit_version)
+  end,
+
+  test_review_loop_round_version_orders_after_base_reviewing = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local review_loop_version = version .. "/review-loop/3"
+
+    local current = core.current_state({
+      core.state_marker(proposal_id, "reviewing", version),
+      core.state_marker(proposal_id, "review-meta", review_loop_version),
+    }, proposal_id)
+
+    t.eq(core.version_review_loop_round(review_loop_version), 3)
+    t.eq(current.state, "review-meta")
+    t.eq(current.version, review_loop_version)
+    t.eq(core.cyclic_transition_status(current, { "reviewing" }, "review-meta", version), "stale")
   end,
 
   test_current_state_uses_loop_round_before_stage_rank_for_same_updated_at = function()
@@ -608,7 +703,7 @@ return {
     t.eq(label.remove_labels[5], "fkst-dev:merge-ready")
     t.eq(label.remove_labels[6], "fkst-dev:fixing")
     t.eq(label.remove_labels[7], "fkst-dev:impl-failed")
-    t.eq(#label.remove_labels, 9)
+    t.eq(#label.remove_labels, 10)
 
     local split_label = core.build_meta_label_request("owner/repo", "42", stuck(), "split")
     t.eq(split_label.add_labels[1], "fkst-dev:blocked")
@@ -619,7 +714,7 @@ return {
     t.eq(split_label.remove_labels[5], "fkst-dev:reviewing")
     t.eq(split_label.remove_labels[6], "fkst-dev:merge-ready")
     t.eq(split_label.remove_labels[7], "fkst-dev:fixing")
-    t.eq(#split_label.remove_labels, 9)
+    t.eq(#split_label.remove_labels, 10)
 
     local comment = core.build_meta_comment_request("owner/repo", "42", stuck(), "split", "Create separate parser and writer tasks.")
     t.is_true(comment.body:find("Suggested split:", 1, true) ~= nil)
@@ -689,7 +784,7 @@ return {
     t.eq(label.remove_labels[5], "fkst-dev:merge-ready")
     t.eq(label.remove_labels[6], "fkst-dev:fixing")
     t.eq(label.remove_labels[7], "fkst-dev:impl-failed")
-    t.eq(#label.remove_labels, 9)
+    t.eq(#label.remove_labels, 10)
     t.is_true(#label.dedup_key <= 512)
 
     local comment = core.build_implementing_comment_request("owner/repo", "42", ready, "/tmp/devloop-owner-repo-42", "devloop-owner-repo-42-01HY", "abc123")
@@ -706,7 +801,7 @@ return {
     t.eq(failed_label.remove_labels[5], "fkst-dev:reviewing")
     t.eq(failed_label.remove_labels[6], "fkst-dev:merge-ready")
     t.eq(failed_label.remove_labels[7], "fkst-dev:fixing")
-    t.eq(#failed_label.remove_labels, 9)
+    t.eq(#failed_label.remove_labels, 10)
 
     local failure_comment = core.build_impl_failure_comment_request("owner/repo", "42", ready, "no-changes", "No files changed.")
     t.is_true(failure_comment.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)
@@ -810,6 +905,21 @@ return {
 	    t.is_nil(core.parse_meta_action(clean .. "\n" .. reason_label .. " orphan"))
 	    t.is_nil(core.parse_meta_action(action_label .. " split\nnot adjacent\n" .. reason_label .. " Split the task."))
 	  end,
+
+  test_review_meta_action_parser_fails_closed_like_meta_parser = function()
+    local clean = meta_answer("fix", "Run another fix pass.")
+    local parsed = core.parse_review_meta_action(clean)
+    t.eq(parsed.action, "fix")
+    t.eq(parsed.reason, "Run another fix pass.")
+
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "first") .. "\n" .. meta_answer("block", "second")))
+    t.is_nil(core.parse_review_meta_action(clean .. "\n" .. action_label .. " accept this is malformed"))
+    t.is_nil(core.parse_review_meta_action(action_label .. " accept\nnot adjacent\n" .. reason_label .. " Accept after manual review."))
+    t.is_nil(core.parse_review_meta_action(action_label .. " accept\n" .. reason_label))
+    t.is_nil(core.parse_review_meta_action(action_label .. " accept"))
+    t.is_nil(core.parse_review_meta_action(reason_label .. " orphan\n" .. meta_answer("fix", "real")))
+    t.is_nil(core.parse_review_meta_action(action_label .. " implement\n" .. reason_label .. " not whitelisted for review meta"))
+  end,
 
 	  test_stuck_and_meta_dedup_keys_keep_long_version_tail = function()
 	    local prefix = "consensus:github-devloop/issue/owner/repo/42/"
