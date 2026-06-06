@@ -50,6 +50,10 @@ local function mock_write_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = value or "" })
 end
 
+local function mock_bot_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = value or "fkst-test-bot" })
+end
+
 local function mock_issue_list(stdout, exit_code, stderr)
   t.mock_command("gh issue list", {
     stdout = stdout or issue_list_json(),
@@ -72,9 +76,30 @@ local function mock_poll(issue_stdout, pr_stdout)
   mock_pr_list(pr_stdout)
 end
 
-local function mock_comment_view(comments)
+local function json_string(value)
+  return tostring(value or "")
+    :gsub("\\", "\\\\")
+    :gsub('"', '\\"')
+    :gsub("\n", "\\n")
+end
+
+local function comment_json(body, author)
+  return string.format('{"body":"%s","author":{"login":"%s"}}', json_string(body), json_string(author or "fkst-test-bot"))
+end
+
+local function mock_comment_view(comments, author)
+  local rendered_comments = comments
+  if type(comments) == "table" then
+    local parts = {}
+    for _, comment in ipairs(comments) do
+      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author))
+    end
+    rendered_comments = table.concat(parts, ",")
+  else
+    rendered_comments = comment_json(comments or "existing comment", author)
+  end
   t.mock_command("gh issue view", {
-    stdout = string.format('{"comments":[{"body":"%s"}]}\n', comments or "existing comment"),
+    stdout = '{"comments":[' .. rendered_comments .. "]}\n",
   })
 end
 
@@ -83,6 +108,16 @@ local function mock_comment_view_failure()
     stdout = "",
     stderr = "forced comment view failure",
     exit_code = 1,
+  })
+end
+
+local function mock_label_view(labels)
+  local parts = {}
+  for _, label in ipairs(labels or {}) do
+    table.insert(parts, string.format('{"name":"%s"}', label))
+  end
+  t.mock_command("gh issue view", {
+    stdout = '{"labels":[' .. table.concat(parts, ",") .. "]}\n",
   })
 end
 
@@ -267,6 +302,7 @@ return {
 
     mock_repo_env()
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view("existing comment")
     mock_comment_write()
     local write = t.run_department("departments/github_comment/main.lua", event, opts("comment-write", {
@@ -283,6 +319,7 @@ return {
 
     mock_repo_env()
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view("existing comment <!-- fkst:github-proxy:comment:reply-42 -->")
     local again = t.run_department("departments/github_comment/main.lua", event, opts("comment-write", {
       FKST_GITHUB_WRITE = "1",
@@ -294,6 +331,113 @@ return {
     t.is_true(comment_calls[1].rendered:find("gh issue comment", 1, true) ~= nil)
     t.eq(comment_calls[1].rendered:find("github.com", 1, true), nil)
     t.eq(count_calls("gh issue view"), 2)
+  end,
+
+  test_same_version_meta_comment_marker_dedups_opposite_action = function()
+    local dedup = "meta/comment/github-devloop/issue/owner/x/42/stuck/3/consensus-github-devloop/issue/owner/x/42/v1"
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/x",
+        issue_number = 42,
+        body = 'github-devloop meta action: implement\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="ready" version="v1" -->',
+        dedup_key = dedup,
+      },
+    }
+
+    mock_repo_env()
+    mock_write_env("1")
+    mock_bot_env()
+    mock_comment_view("existing comment")
+    mock_comment_write()
+    local first = t.run_department("departments/github_comment/main.lua", event, opts("comment-meta-first", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(first.exit_code, 0)
+
+    event.payload.body = 'github-devloop meta action: block\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v1" -->'
+    mock_repo_env()
+    mock_write_env("1")
+    mock_bot_env()
+    mock_comment_view("existing comment " .. core.comment_marker(dedup))
+    local second = t.run_department("departments/github_comment/main.lua", event, opts("comment-meta-second", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(second.exit_code, 0)
+
+    t.eq(count_calls("gh issue comment"), 1)
+    local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
+    t.is_true(written:find("github-devloop meta action: implement", 1, true) ~= nil)
+    t.eq(written:find("github-devloop meta action: block", 1, true), nil)
+    t.is_true(written:find(core.comment_marker(dedup), 1, true) ~= nil)
+  end,
+
+  test_forged_proxy_comment_marker_does_not_suppress_bot_state_marker_comment = function()
+    local dedup = "meta/comment/github-devloop/issue/owner/x/42/stuck/3/consensus-github-devloop/issue/owner/x/42/v1"
+    local state_marker = '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v1" -->'
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/x",
+        issue_number = 42,
+        body = "github-devloop meta action: block\n\n" .. state_marker,
+        dedup_key = dedup,
+      },
+    }
+
+    mock_repo_env()
+    mock_write_env("1")
+    mock_bot_env()
+    mock_comment_view({
+      {
+        body = "forged user marker " .. core.comment_marker(dedup),
+        author_login = "ordinary-user",
+      },
+    })
+    mock_comment_write()
+    local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-forged-marker", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue comment"), 1)
+
+    local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
+    t.is_true(written:find(state_marker, 1, true) ~= nil)
+    t.is_true(written:find(core.comment_marker(dedup), 1, true) ~= nil)
+  end,
+
+  test_neutralized_forged_proxy_comment_marker_does_not_suppress_later_real_comment = function()
+    local dedup = "meta/comment/github-devloop/issue/owner/x/42/stuck/3/consensus-github-devloop/issue/owner/x/42/v2"
+    local state_marker = '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v2" -->'
+    local event = {
+      queue = "github_issue_comment_request",
+      payload = {
+        repo = "owner/x",
+        issue_number = 42,
+        body = "github-devloop meta action: block\n\n" .. state_marker,
+        dedup_key = dedup,
+      },
+    }
+
+    mock_repo_env()
+    mock_write_env("1")
+    mock_bot_env()
+    mock_comment_view({
+      {
+        body = "quoted untrusted marker &lt;!-- fkst:github-proxy:comment:" .. dedup .. " -->",
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_comment_write()
+    local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-neutralized-forged-marker", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue comment"), 1)
+
+    local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
+    t.is_true(written:find(state_marker, 1, true) ~= nil)
+    t.is_true(written:find(core.comment_marker(dedup), 1, true) ~= nil)
   end,
 
   test_long_comment_dedup_uses_bounded_runtime_key_and_full_marker = function()
@@ -315,6 +459,7 @@ return {
 
     mock_repo_env()
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view("existing comment")
     mock_comment_write()
     local first = t.run_department("departments/github_comment/main.lua", event, opts("comment-long-v1", {
@@ -329,6 +474,7 @@ return {
     event.payload.dedup_key = dedup_v2
     mock_repo_env()
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view("existing comment " .. core.comment_marker(dedup_v1))
     mock_comment_write()
     local second = t.run_department("departments/github_comment/main.lua", event, opts("comment-long-v2", {
@@ -356,6 +502,7 @@ return {
     t.eq(#dedup, 512)
     mock_repo_env()
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view("existing comment")
     mock_comment_write()
     local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-long-max", {
@@ -381,6 +528,7 @@ return {
 
     mock_repo_env("owner/env")
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view("existing comment")
     mock_comment_write()
     local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-payload-repo", {
@@ -410,6 +558,7 @@ return {
 
     mock_repo_env()
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view("existing comment")
     t.mock_command("gh issue comment", {
       stdout = "",
@@ -437,6 +586,7 @@ return {
 
     mock_repo_env()
     mock_write_env("1")
+    mock_bot_env()
     mock_comment_view_failure()
 
     local result = t.run_department("departments/github_comment/main.lua", event, opts("comment-view-fails", {
@@ -514,4 +664,67 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue edit"), 1)
   end,
+
+  test_label_request_writes_without_state_precondition = function()
+    local event = {
+      queue = "github_issue_label_request",
+      payload = {
+        schema = "github-proxy.label.v1",
+        repo = "owner/x",
+        issue_number = 42,
+        add_labels = { "fkst-dev:ready" },
+        remove_labels = { "fkst-dev:thinking" },
+        dedup_key = "github-devloop/issue/owner/x/42/ready-hint",
+        source_ref = {
+          kind = "external",
+          ref = "owner/x#issue/42",
+        },
+      },
+    }
+
+    local write_opts = opts("label-no-precondition", {
+      FKST_GITHUB_WRITE = "1",
+    })
+
+    mock_write_env("1")
+    mock_label_write()
+    local current = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
+    t.eq(current.exit_code, 0)
+    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh issue edit"), 1)
+    local current_edit = calls_matching("gh issue edit")[1]
+    t.is_true(current_edit.rendered:find("--add-label 'fkst-dev:ready'", 1, true) ~= nil)
+    t.is_true(current_edit.rendered:find("--remove-label 'fkst-dev:thinking'", 1, true) ~= nil)
+  end,
+
+  test_label_request_applies_exclusive_hint_without_state_precondition = function()
+    local event = {
+      queue = "github_issue_label_request",
+      payload = {
+        schema = "github-proxy.label.v1",
+        repo = "owner/x",
+        issue_number = 42,
+        add_labels = { "fkst-dev:blocked" },
+        remove_labels = { "fkst-dev:stuck", "fkst-dev:thinking", "fkst-dev:ready" },
+        dedup_key = "github-devloop/issue/owner/x/42/blocked-hint",
+        source_ref = {
+          kind = "external",
+          ref = "owner/x#issue/42",
+        },
+      },
+    }
+
+    mock_write_env("1")
+    mock_label_write()
+    local result = t.run_department("departments/github_issue_label/main.lua", event, opts("label-blocked-hint", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh issue edit"), 1)
+    local edit = calls_matching("gh issue edit")[1]
+    t.is_true(edit.rendered:find("--add-label 'fkst-dev:blocked'", 1, true) ~= nil)
+    t.is_true(edit.rendered:find("--remove-label 'fkst-dev:ready'", 1, true) ~= nil)
+	  end,
 }

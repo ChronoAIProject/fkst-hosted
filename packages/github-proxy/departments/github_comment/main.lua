@@ -53,6 +53,7 @@ function pipeline(event)
     log.info("github-proxy dry-run: would comment on " .. repo .. "#" .. tostring(payload.issue_number))
     return
   end
+  local bot_login = core.assert_trusted_bot_configured()
 
   with_lock(lock_name(repo, payload.issue_number), function()
     local view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
@@ -61,7 +62,7 @@ function pipeline(event)
       -- delivery retries (otherwise a result marker comment could be permanently lost).
       error("github-proxy: gh issue view failed: " .. tostring(view.stderr))
     end
-    if core.has_marker(view.stdout, payload.dedup_key) then
+    if core.has_trusted_marker(core.parse_issue_comments(view.stdout), payload.dedup_key, bot_login) then
       log.info("github-proxy: comment marker already present")
       return
     end

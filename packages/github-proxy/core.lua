@@ -2,8 +2,10 @@ local M = {}
 
 local allowed_env = {
   FKST_GITHUB_REPO = true,
+  FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_WRITE = true,
 }
+local trusted_bot_login = nil
 
 local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
@@ -29,6 +31,27 @@ function M.read_env(name, exec)
     return nil
   end
   return out.stdout
+end
+
+function M.configure_trusted_bot_login(login)
+  if login == nil or tostring(login) == "" then
+    trusted_bot_login = nil
+    return nil
+  end
+  trusted_bot_login = tostring(login)
+  return trusted_bot_login
+end
+
+function M.assert_trusted_bot_configured()
+  local login = M.read_env("FKST_GITHUB_BOT_LOGIN")
+  if login ~= nil then
+    M.configure_trusted_bot_login(login)
+  end
+
+  if trusted_bot_login == nil then
+    error("github-proxy: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
+  end
+  return trusted_bot_login
 end
 
 function M.entity_cache_key(repo, entity_type, number)
@@ -69,6 +92,50 @@ function M.has_marker(comments_text, dedup_key)
     return false
   end
   return tostring(comments_text):find(M.comment_marker(dedup_key), 1, true) ~= nil
+end
+
+local function comment_body(comment)
+  if type(comment) == "table" then
+    return tostring(comment.body or "")
+  end
+  return tostring(comment or "")
+end
+
+local function comment_author_login(comment)
+  if type(comment) == "table" then
+    if comment.author_login ~= nil then
+      return tostring(comment.author_login)
+    end
+    if type(comment.author) == "table" and comment.author.login ~= nil then
+      return tostring(comment.author.login)
+    end
+  end
+  return nil
+end
+
+function M.parse_issue_comments(gh_json_stdout)
+  local decoded = json.decode(gh_json_stdout or "{}")
+  local comments = {}
+  for _, comment in ipairs(decoded.comments or {}) do
+    table.insert(comments, {
+      body = comment_body(comment),
+      author_login = comment_author_login(comment),
+    })
+  end
+  return comments
+end
+
+function M.has_trusted_marker(comments, dedup_key, bot_login)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker = M.comment_marker(dedup_key)
+  for _, comment in ipairs(comments) do
+    if comment_author_login(comment) == bot_login and comment_body(comment):find(marker, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
 end
 
 -- Decodes gh --json output via the engine-provided json.decode; requires a json-capable substrate runtime.
@@ -112,6 +179,25 @@ function M.gh_issue_view_comments_cmd(repo, issue_number)
   return "gh issue view " .. shell_single_quote(issue_number)
     .. " --repo " .. shell_single_quote(repo)
     .. " --json comments"
+end
+
+function M.gh_issue_view_labels_cmd(repo, issue_number)
+  return "gh issue view " .. shell_single_quote(issue_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json labels"
+end
+
+function M.parse_issue_labels(gh_json_stdout)
+  local decoded = json.decode(gh_json_stdout or "{}")
+  local labels = {}
+  for _, label in ipairs(decoded.labels or {}) do
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(labels, tostring(label.name))
+    elseif type(label) == "string" then
+      table.insert(labels, label)
+    end
+  end
+  return labels
 end
 
 function M.gh_issue_comment_cmd(repo, issue_number, body_file)

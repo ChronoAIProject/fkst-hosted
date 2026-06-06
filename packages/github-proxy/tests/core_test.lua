@@ -4,6 +4,7 @@ local t = fkst.test
 return {
   test_env_command_whitelist = function()
     t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
+    t.eq(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), 'printf %s "$FKST_GITHUB_BOT_LOGIN"')
     t.raises(function()
       core.read_env_command("HOME")
     end)
@@ -33,6 +34,21 @@ return {
     t.eq(marker, "<!-- fkst:github-proxy:comment:owner/repo#1@x -->")
     t.is_true(core.has_marker("hello\n" .. marker .. "\n", key))
     t.eq(core.has_marker("hello", key), false)
+  end,
+
+  test_trusted_comment_marker_requires_bot_author = function()
+    local key = "owner/repo#1@x"
+    local marker = core.comment_marker(key)
+    local comments = core.parse_issue_comments(
+      '{"comments":[{"body":"'
+        .. marker
+        .. '","author":{"login":"ordinary-user"}},{"body":"'
+        .. marker
+        .. '","author":{"login":"fkst-test-bot"}}]}'
+    )
+
+    t.eq(core.has_trusted_marker(comments, key, "other-bot"), false)
+    t.eq(core.has_trusted_marker(comments, key, "fkst-test-bot"), true)
   end,
 
   test_parse_entity_list = function()
