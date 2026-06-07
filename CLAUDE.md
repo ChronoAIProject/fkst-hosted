@@ -71,6 +71,8 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - 单个源代码文件不得超过 1000 行（范围含生产源码、测试源码、脚本源码，.lua/.sh/.py/.rs 等），硬上限、不设豁免；先删死码/重复代码，再按稳定职责拆成包内子模块或多个 `*_test.lua`；不得用无职责边界的碎片化、空转发文件或 compat/legacy/shim 壳凑行数。
 - 不留 deprecated shim / compat layer / `.old` / `_legacy`；改契约就改完整，旧形态从当前态删除。文档描述当前态，历史留 git。
 - **不要历史兼容性，不兼容历史遗留逻辑**。系统只有当前态一种形态：改行为就全量切换，不为向后兼容保留双模式、opt-in 开关、manual/legacy fallback 分支或旧路径并存。需要可关的运行姿态时，用 host 环境事实（如 `FKST_GITHUB_WRITE` 的 dry-run vs real）表达，而不是在代码里留"新逻辑 + 旧逻辑"的分叉。删就删干净，包括随之失效的常量、helper、测试与文档。
+- **集成分支拓扑是 github-devloop 的运行姿态，不是可随手改的临时设置**：autonomous 改动先进**集成分支**（`FKST_DEVLOOP_INTEGRATION_BRANCH`）缓冲、再经 rollup PR 受控回 `dev`；`dev` 受保护，autonomous 改动**不直接合进 dev**。运行中**不得擅自切 topology（如 integration→单分支 dev）、不得擅自删/改远程分支**——这些是用户的架构决策，不是助手能定的。删任何远程分支前必须先查谁依赖它（in-flight PR 的 base、tracking 分支）；GitHub 删 base 分支会自动关闭其全部 open PR。
+- **hotfix 就只修那个 bug，不顺手改架构/换运行方式/做破坏性操作**。dogfood/运行中遇到**设计层问题**（如 sync↔rollup ping-pong）按「遇问题提 issue」处理 + 停下确认，**绝不擅自换方案绕过**（尤其不能用"切到 dev 直合"绕过用户刻意设的缓冲/门控）。不可逆/破坏性远程操作（删分支、关 PR、force push、改默认分支）一律先确认，即使 `/goal` 等机制在催"继续"。
 - **引擎 Rust 改动属 fkst-substrate 仓**，不在本仓做；本仓只写/改 Lua package + 测试 + 包文档。引擎需要的新能力（新 SDK 原语等）先在 fkst-substrate 提 PR。
 - 跨文档定位：引擎事实以 fkst-substrate 的 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md` 为准；本仓 `README.md` 说明包约定与命令。
 
