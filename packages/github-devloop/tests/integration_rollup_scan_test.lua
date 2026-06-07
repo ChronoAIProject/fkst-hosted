@@ -47,6 +47,14 @@ local function mock_ahead(count)
   })
 end
 
+local function mock_content_diff(has_diff)
+  t.mock_command("git diff --quiet refs/remotes/origin/'dev'...refs/remotes/origin/'integration/dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = has_diff and 1 or 0,
+  })
+end
+
 local function mock_pr_list(pr)
   local stdout = "[]\n"
   if pr ~= nil then
@@ -90,6 +98,7 @@ return {
     mock_env("1")
     mock_fetches()
     mock_ahead(3)
+    mock_content_diff(true)
     mock_pr_list(nil)
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
     mock_pr_list({ number = 9 })
@@ -101,10 +110,23 @@ return {
     t.is_true(h.has_call("--base 'dev'"))
   end,
 
+  test_rollup_scan_ahead_without_content_diff_skips_pr = function()
+    mock_env("1")
+    mock_fetches()
+    mock_ahead(1)
+    mock_content_diff(false)
+    local result = run_scan(opts("rollup-empty-diff", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(h.count_calls("gh pr list"), 0)
+    t.eq(h.count_calls("gh pr create"), 0)
+  end,
+
   test_rollup_scan_existing_pr_never_duplicates_create = function()
     mock_env("1")
     mock_fetches()
     mock_ahead(2)
+    mock_content_diff(true)
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-existing", { FKST_GITHUB_WRITE = "1" }))
@@ -116,6 +138,7 @@ return {
     mock_env("1", "manual")
     mock_fetches()
     mock_ahead(2)
+    mock_content_diff(true)
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-manual", { FKST_GITHUB_WRITE = "1", FKST_DEVLOOP_ROLLUP_MERGE = "manual" }))
@@ -127,6 +150,7 @@ return {
     mock_env("1", "auto")
     mock_fetches()
     mock_ahead(2)
+    mock_content_diff(true)
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-auto", { FKST_GITHUB_WRITE = "1" }))
@@ -147,6 +171,7 @@ return {
     mock_env("")
     mock_fetches()
     mock_ahead(2)
+    mock_content_diff(true)
     mock_pr_list(nil)
     local result = run_scan()
     t.eq(result.exit_code, 0)

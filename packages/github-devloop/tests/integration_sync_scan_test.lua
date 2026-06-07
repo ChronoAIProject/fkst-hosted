@@ -51,6 +51,13 @@ local function mock_worktree_merge(exit_code, unmerged_stdout)
   t.mock_command("git worktree remove --force", { stdout = "", stderr = "", exit_code = 0 })
 end
 
+local function mock_worktree_fast_forward()
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-rt", stderr = "", exit_code = 0 })
+  t.mock_command("git worktree add --detach", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("merge --ff-only", { stdout = "Updating bbbb2222..aaaa1111\nFast-forward\n", stderr = "", exit_code = 0 })
+  t.mock_command("git worktree remove --force", { stdout = "", stderr = "", exit_code = 0 })
+end
+
 local function count_calls(needle)
   return h.count_calls(needle)
 end
@@ -83,6 +90,7 @@ return {
     mock_env("1")
     mock_fetch_and_heads("aaaa1111", "bbbb2222")
     t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
+    t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
     mock_worktree_merge(0)
     t.mock_command("commit -F", { stdout = "[detached cccc3333] Sync dev into integration/dev\n", stderr = "", exit_code = 0 })
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "1", stderr = "", exit_code = 0 })
@@ -104,9 +112,35 @@ return {
     t.eq(has_call('result="clean"'), false)
   end,
 
+  test_sync_scan_integration_ancestor_fast_forwards_without_merge_commit = function()
+    mock_env("1")
+    mock_fetch_and_heads("aaaa1111", "bbbb2222")
+    t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
+    t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 0 })
+    mock_worktree_fast_forward()
+    t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "1", stderr = "", exit_code = 0 })
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
+    t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "1", stderr = "", exit_code = 0 })
+    t.mock_command("git fetch 'origin' 'integration/dev'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("refs/remotes/'origin'/'integration/dev'^{commit}", { stdout = "bbbb2222\n", stderr = "", exit_code = 0 })
+    t.mock_command("rev-parse HEAD", { stdout = "aaaa1111\n", stderr = "", exit_code = 0 })
+    t.mock_command("push origin HEAD:refs/heads/", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("git fetch 'origin' 'integration/dev'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("refs/remotes/'origin'/'integration/dev'^{commit}", { stdout = "aaaa1111\n", stderr = "", exit_code = 0 })
+
+    local result = run_scan(opts("sync-fast-forward-real", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("merge --ff-only"), 1)
+    t.eq(count_calls("merge --no-ff --no-commit"), 0)
+    t.eq(count_calls("commit -F"), 0)
+    t.eq(count_calls("push origin HEAD:refs/heads/"), 1)
+  end,
+
   test_sync_scan_dry_run_clean_merge_never_pushes = function()
     mock_env("")
     mock_fetch_and_heads("aaaa1111", "bbbb2222")
+    t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
     t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
     mock_worktree_merge(0)
     t.mock_command("commit -F", { stdout = "[detached cccc3333] Sync dev into integration/dev\n", stderr = "", exit_code = 0 })
@@ -121,6 +155,7 @@ return {
   test_sync_scan_conflict_raises_sync_conflict = function()
     mock_env("")
     mock_fetch_and_heads("aaaa1111", "bbbb2222")
+    t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
     t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
     mock_worktree_merge(1, "100644 abc 1\tcore.lua\n")
 
