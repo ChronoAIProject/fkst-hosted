@@ -8,12 +8,14 @@ M.spec = {
   stall_window = "2m",
 }
 
-local function run_angle(proposal, angle)
-  local result = spawn_codex_sync({
+local function spawn_angle(proposal, angle)
+  return spawn_codex({
     prompt = core.build_angle_prompt(proposal, angle),
     stall_window = M.spec.stall_window,
   })
+end
 
+local function angle_result(angle, result)
   local parsed = nil
   if type(result) == "table" and result.exit_code == 0 then
     parsed = core.parse_angle_output(result.stdout)
@@ -44,9 +46,15 @@ function pipeline(event)
     end
 
     local angle_results = {}
-    -- Future optimization: use spawn_codex plus await_all to parallelize angles.
-    for _, angle in ipairs(core.angles(proposal)) do
-      table.insert(angle_results, run_angle(proposal, angle))
+    local handles = {}
+    local angles = core.angles(proposal)
+    for _, angle in ipairs(angles) do
+      table.insert(handles, spawn_angle(proposal, angle))
+    end
+
+    local results = await_all(handles)
+    for index, angle in ipairs(angles) do
+      table.insert(angle_results, angle_result(angle, results[index]))
     end
 
     local decision = core.aggregate(angle_results)
