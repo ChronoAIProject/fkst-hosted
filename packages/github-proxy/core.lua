@@ -16,10 +16,12 @@ local state_stage_rank = {
   ["pr-open"] = 650,
   reviewing = 675,
   ["merge-ready"] = 690,
+  merging = 695,
   fixing = 700,
   ["review-meta"] = 710,
   ["impl-failed"] = 750,
   blocked = 800,
+  merged = 900,
 }
 
 local function shell_single_quote(value)
