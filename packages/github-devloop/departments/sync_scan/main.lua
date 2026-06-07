@@ -145,6 +145,14 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   core.log_apply("sync_scan", "branch-sync", "synced", upstream_sha, {}, {})
 end
 
+local function fast_forward_sync(repo, upstream, integration, upstream_sha, integration_sha)
+  local runtime = runtime_root()
+  with_temp_worktree(runtime, repo, upstream, integration, integration_sha, function(worktree)
+    run_git(core.git_fast_forward_cmd(worktree, upstream_sha), 120, "git branch sync fast-forward")
+    push_if_real(repo, upstream, integration, upstream_sha, integration_sha, worktree)
+  end)
+end
+
 function pipeline(event)
   core.log_entry("sync_scan", event, "branch-sync", event and event.queue or "")
   local branches = core.branch_config()
@@ -164,6 +172,10 @@ function pipeline(event)
 
     if is_ancestor(upstream_sha, integration_sha) then
       core.log_cas_decision("sync_scan", "branch-sync", { state = "synced", version = integration_sha }, "tick", "sync", "skip-idempotent(upstream-ancestor)", "upstream head is already contained in integration")
+      return
+    end
+    if is_ancestor(integration_sha, upstream_sha) then
+      fast_forward_sync(repo, branches.upstream, branches.integration, upstream_sha, integration_sha)
       return
     end
 

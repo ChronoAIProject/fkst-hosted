@@ -55,6 +55,19 @@ function M.git_merge_no_ff_cmd(worktree, sha)
     .. M._shell_single_quote(require_safe_sha("merge sha", sha))
 end
 
+function M.git_fast_forward_cmd(worktree, sha)
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " merge --ff-only "
+    .. M._shell_single_quote(require_safe_sha("fast-forward sha", sha))
+end
+
+function M.git_remote_content_diff_quiet_cmd(upstream, integration)
+  return "git diff --quiet refs/remotes/origin/"
+    .. M._shell_single_quote(require_safe_branch("upstream branch", upstream))
+    .. "...refs/remotes/origin/"
+    .. M._shell_single_quote(require_safe_branch("integration branch", integration))
+end
+
 function M.git_push_branch_update_cmd(branch)
   return "git push origin HEAD:refs/heads/" .. M._shell_single_quote(require_safe_branch("push branch", branch))
 end

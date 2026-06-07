@@ -53,6 +53,17 @@ local function ahead_count(upstream, integration)
   return count
 end
 
+local function has_content_diff(upstream, integration)
+  local result = exec_sync({ cmd = core.git_remote_content_diff_quiet_cmd(upstream, integration), timeout = 30 })
+  if result.exit_code == 0 then
+    return false
+  end
+  if result.exit_code == 1 then
+    return true
+  end
+  error("github-devloop: git rollup content diff failed: " .. tostring(result.stderr))
+end
+
 local function list_open_pr(repo, integration, upstream)
   local listed = run_cmd(core.gh_pr_list_head_base_cmd(repo, integration, upstream), 30, "gh rollup PR list")
   local prs = core.parse_pr_list_head_base(listed.stdout)
@@ -94,6 +105,10 @@ function pipeline(event)
     local ahead = ahead_count(branches.upstream, branches.integration)
     if ahead == 0 then
       core.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(not-ahead)", "integration is not ahead of upstream")
+      return
+    end
+    if not has_content_diff(branches.upstream, branches.integration) then
+      core.log_cas_decision("rollup_scan", "rollup", { state = "empty-diff", version = branches.integration }, "tick", "rollup", "skip-idempotent(empty-diff)", "integration has no content diff from upstream")
       return
     end
 
