@@ -194,7 +194,7 @@ return {
     t.eq(count_calls("gh issue comment"), 0)
   end,
 
-	  test_merge_canonical_merging_finalizes_merged_pr_without_visible_merging_fact = function()
+  test_merge_canonical_merging_without_visible_merging_fact_does_not_finalize = function()
     local event = merge_ready()
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
     local comments = merge_comments(event)
@@ -203,17 +203,34 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merging" }, comments)
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
-    mock_write_env("1")
-    mock_issue_close()
 
-    local result = run_merge(event, opts("merge-canonical-merging-finalizes-lagged-fact", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_merge(event, opts("merge-canonical-merging-no-fact", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr merge"), 0)
-    t.eq(count_calls("gh issue close"), 1)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
-	    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
-	  end,
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_forged_merging_fact_does_not_finalize = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local comments = merge_comments(event)
+    table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
+    table.insert(comments, {
+      body = core.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha),
+      author_login = "ordinary-user",
+    })
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merging" }, comments)
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+
+    local result = run_merge(event, opts("merge-forged-merging-fact", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
 
   test_merge_self_heal_finalizes_without_label = function()
     local event = merge_ready()

@@ -53,6 +53,37 @@ function M.comments_from_json(comments_json)
   return comments
 end
 
+local function label_names(labels_json)
+  local labels = {}
+  for _, label in ipairs(labels_json or {}) do
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(labels, tostring(label.name))
+    elseif type(label) == "string" then
+      table.insert(labels, label)
+    end
+  end
+  return labels
+end
+
+function M.parse_issue_list_intake(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local issues = {}
+  if type(decoded) ~= "table" then
+    return issues
+  end
+  for _, issue in ipairs(decoded) do
+    if type(issue) == "table" then
+      table.insert(issues, {
+        number = issue.number,
+        title = tostring(issue.title or ""),
+        updated_at = issue.updatedAt or issue.updated_at,
+        labels = label_names(issue.labels),
+      })
+    end
+  end
+  return issues
+end
+
 function M.parse_issue_view_result(stdout)
   local decoded = json.decode(stdout or "{}")
   local state = M.issue_state_from_json(decoded)
@@ -74,6 +105,14 @@ function M.parse_issue_view_loop(stdout)
     labels = result.labels,
     comments = result.comments,
   }
+end
+
+function M.parse_issue_view_intake_scan(stdout)
+  return M.parse_issue_view_state(stdout)
+end
+
+function M.parse_issue_view_intake_judge(stdout)
+  return M.parse_issue_view_loop(stdout)
 end
 
 function M.parse_issue_view_meta(stdout)

@@ -117,6 +117,48 @@ function M.build_stuck_comment_request(repo, issue_number, unresolved, n)
   }
 end
 
+function M.build_intake_decision_comment_request(repo, issue_number, candidate, decision, reason)
+  local marker = M.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key)
+  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  if safe_reason == "" then
+    safe_reason = "(no reason provided)"
+  end
+  if #safe_reason > M._max_meta_reason_len then
+    safe_reason = safe_reason:sub(1, M._max_meta_reason_len)
+  end
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop intake decision: " .. tostring(decision)
+      .. "\n\nReason:\n" .. safe_reason
+      .. "\n\n" .. marker,
+    dedup_key = M._dedup_key({
+      "intake",
+      "comment",
+      tostring(candidate.proposal_id),
+      tostring(candidate.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(candidate.source_ref),
+  }
+end
+
+function M.build_intake_enabled_label_request(repo, issue_number, candidate)
+  return M.build_label_request(
+    repo,
+    issue_number,
+    { M._enabled_label },
+    {},
+    M._dedup_key({
+      "intake",
+      "label",
+      tostring(candidate.proposal_id),
+      tostring(candidate.dedup_key),
+    }),
+    candidate.source_ref
+  )
+end
+
 function M.build_meta_label_request(repo, issue_number, stuck, action)
   local to_state = action == "implement" and "ready" or "blocked"
 

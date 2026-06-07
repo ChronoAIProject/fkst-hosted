@@ -20,6 +20,7 @@ local max_branch_len = 160
 local max_sha_len = 64
 local max_pr_title_len = 240
 local action_label = "⟦FKST:ACTION⟧"
+local intake_label = "⟦FKST:INTAKE⟧"
 local reason_label = "⟦FKST:REASON⟧"
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
@@ -120,6 +121,7 @@ local is_trusted_comment
 
 local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,
+  FKST_GITHUB_REPO = true,
   FKST_GITHUB_WRITE = true,
 }
 
@@ -482,6 +484,22 @@ function M.parse_pr_source_ref(source_ref)
   return repo, pr_number
 end
 
+function M.parse_issue_source_ref(source_ref)
+  if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
+    return nil
+  end
+  local ref = tostring(source_ref.ref or "")
+  local issue_number = ref:match("#issue/(%d+)$")
+  local repo = issue_number and ref:sub(1, #ref - #("#issue/" .. issue_number)) or nil
+  if repo == nil or repo == "" or not is_positive_pr_number(issue_number) then
+    return nil
+  end
+  if not M.issue_ref_round_trips(repo, issue_number) then
+    return nil
+  end
+  return repo, issue_number
+end
+
 function M.is_safe_proposal_ref(proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
@@ -550,6 +568,14 @@ end
 
 function M.proposal_dedup_key(proposal_id, updated_at)
   return tostring(proposal_id) .. "/" .. M.safe_updated_at(updated_at)
+end
+
+function M.intake_dedup_key(proposal_id, updated_at)
+  return M._dedup_key({
+    "intake",
+    tostring(proposal_id),
+    M.safe_updated_at(updated_at or "unknown"),
+  })
 end
 
 function M.observe_lock_key(repo, issue_number)
@@ -696,6 +722,7 @@ function M.neutralize_untrusted_prompt_text(text)
     local sentinel_line = line:match("^%s*[+%- ]?%s*(.+)$") or line
     if sentinel_line:match("^%s*" .. action_label) ~= nil
       or sentinel_line:match("^%s*" .. reason_label) ~= nil
+      or sentinel_line:match("^%s*" .. intake_label) ~= nil
       or sentinel_line:match("^%s*" .. verdict_label) ~= nil
       or sentinel_line:match("^%s*" .. reply_label) ~= nil
       or trim(line) == untrusted_issue_data_begin
@@ -719,6 +746,25 @@ function M.neutralize_untrusted_prompt_text(text)
     end
 
     table.insert(output, neutralize_line(value:sub(start, newline - 1)))
+    table.insert(output, "\n")
+    start = newline + 1
+  end
+
+  return table.concat(output)
+end
+
+function M.quote_untrusted_prompt_text(text)
+  local value = M._neutralize_fkst_markers(text)
+  local output = {}
+  local start = 1
+  while true do
+    local newline = value:find("\n", start, true)
+    if newline == nil then
+      table.insert(output, "> " .. value:sub(start))
+      break
+    end
+
+    table.insert(output, "> " .. value:sub(start, newline - 1))
     table.insert(output, "\n")
     start = newline + 1
   end
@@ -783,6 +829,7 @@ M._max_pr_diff_len = max_pr_diff_len
 M._max_pr_issue_context_len = max_pr_issue_context_len
 M._max_pr_title_len = max_pr_title_len
 M._action_label = action_label
+M._intake_label = intake_label
 M._reason_label = reason_label
 M._verdict_label = verdict_label
 M._reply_label = reply_label

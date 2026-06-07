@@ -188,6 +188,48 @@ function M.merging_marker(issue_proposal_id, pr_number, version, head_sha)
     .. '" -->'
 end
 
+function M.intake_decision_marker(issue_proposal_id, decision, dedup_key)
+  if decision ~= "enable" and decision ~= "decline" then
+    error("github-devloop: invalid intake decision")
+  end
+  if not M._is_bounded_string(dedup_key, M._max_dedup_len) then
+    error("github-devloop: invalid intake dedup")
+  end
+  return '<!-- fkst:github-devloop:intake-decision:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" decision="' .. tostring(decision)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.intake_decision_fact(comments, issue_proposal_id)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:intake%-decision:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local decision = marker:match('decision="([^"]+)"')
+      local dedup = marker:match('dedup="([^"]*)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and (decision == "enable" or decision == "decline")
+        and M._is_bounded_string(dedup, M._max_dedup_len) then
+        return {
+          proposal_id = marker_issue,
+          decision = decision,
+          dedup_key = dedup,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.has_intake_decision_marker(comments, issue_proposal_id)
+  return M.intake_decision_fact(comments, issue_proposal_id) ~= nil
+end
+
 function M.review_reject_fact(comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil

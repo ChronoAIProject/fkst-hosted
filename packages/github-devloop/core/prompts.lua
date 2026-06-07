@@ -53,6 +53,56 @@ function M.build_review_meta_prompt(review_meta, current_issue)
   })
 end
 
+function M.build_intake_prompt(proposal_id, current)
+  local prompt = require("prompts.intake")
+  local comments = table.concat(M.comment_bodies(current.comments), "\n\n--- comment ---\n\n")
+  if #comments > M._max_comments_len then
+    comments = comments:sub(1, M._max_comments_len)
+  end
+
+  return M.render_template(prompt.template, {
+    proposal_id = M.neutralize_untrusted_prompt_text(proposal_id),
+    title = M.quote_untrusted_prompt_text(current.title),
+    body = M.quote_untrusted_prompt_text(current.body),
+    comments = M.quote_untrusted_prompt_text(comments),
+  })
+end
+
+local function is_intake_action(value)
+  return value == "enable" or value == "decline"
+end
+
+function M.parse_intake_action(stdout)
+  local text = tostring(stdout or "")
+  local lines = {}
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    table.insert(lines, line)
+  end
+  while #lines > 0 and M._trim(lines[#lines]) == "" do
+    table.remove(lines)
+  end
+  if #lines ~= 2 then
+    return nil
+  end
+
+  local action = lines[1]:match("^" .. M._intake_label .. " (enable)$")
+    or lines[1]:match("^" .. M._intake_label .. " (decline)$")
+  local reason = lines[2]:match("^" .. M._reason_label .. " (.+)$")
+  if action == nil or not is_intake_action(action) then
+    return nil
+  end
+  if reason == nil or M._trim(reason) == "" then
+    return nil
+  end
+  if not M._is_bounded_string(reason, M._max_meta_reason_len) then
+    return nil
+  end
+  return {
+    action = action,
+    reason = M._trim(reason),
+  }
+end
+
 function M.parse_meta_action(stdout)
   local text = tostring(stdout or "")
 

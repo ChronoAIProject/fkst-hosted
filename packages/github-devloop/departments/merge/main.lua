@@ -272,8 +272,8 @@ function pipeline(event)
         and tostring(current_pr.head_ref_name or "") == tostring(origin.branch)
         and tostring(current_pr.head_sha or "") == tostring(merge_ready.reviewed_head_sha)
         and core.is_same_repo_pr_head(current_pr, repo) then
-        if state.state ~= "merging"
-          and core.merging_fact(current_issue.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) == nil then
+        local merging_fact = core.merging_fact(current_issue.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+        if merging_fact == nil then
           core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-external-merge(no-bot-merging-marker)", "PR is already merged without a prior trusted bot merging marker")
           return
         end

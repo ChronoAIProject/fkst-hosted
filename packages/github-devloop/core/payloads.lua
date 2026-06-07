@@ -110,6 +110,22 @@ function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, versi
   }
 end
 
+function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at)
+  local proposal_id = M.proposal_id(repo, issue_number)
+  local source_ref = {
+    kind = "external",
+    ref = tostring(repo) .. "#issue/" .. tostring(issue_number),
+  }
+  return {
+    schema = "github-devloop.intake-candidate.v1",
+    repo = repo,
+    issue_number = issue_number,
+    proposal_id = proposal_id,
+    dedup_key = M.intake_dedup_key(proposal_id, updated_at),
+    source_ref = source_ref,
+  }
+end
+
 function M.build_proposal(issue, body)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
