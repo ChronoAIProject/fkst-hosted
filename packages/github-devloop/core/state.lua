@@ -77,8 +77,20 @@ function M.version_updated_at(version)
 end
 
 function M.version_loop_round(version)
-  local n = tostring(version or ""):match("[/-]loop[/-](%d+)$")
-  return tonumber(n) or 0
+  -- Extract the no-consensus loop round wherever it appears, not only at the
+  -- end of the version string. A reviewing version like ".../loop/2" is later
+  -- extended to a fixing version ".../loop/2/fix/1"; an end-anchored match
+  -- returned 0 for the fixing version, so version ordering wrongly ranked the
+  -- (loop_n=2) reviewing marker above the (loop_n=0) fixing marker and the fix
+  -- loop stalled. Match the gmatch/max shape of the sibling round extractors.
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]loop[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
 end
 
 function M.version_fix_round(version)

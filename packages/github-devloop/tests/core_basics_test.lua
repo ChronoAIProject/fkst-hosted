@@ -486,6 +486,33 @@ return {
     t.eq(current.version, new_version)
   end,
 
+  test_version_loop_round_extracts_loop_with_trailing_fix_suffix = function()
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    t.eq(core.version_loop_round(base .. "/loop/2"), 2)
+    -- A fixing version extends the reviewing loop version with /fix/N; the loop
+    -- round must still be visible even though it is no longer the final segment.
+    t.eq(core.version_loop_round(base .. "/loop/2/fix/1"), 2)
+    t.eq(core.version_loop_round(base .. "/fix/1"), 0)
+  end,
+
+  test_fixing_after_no_consensus_loop_outranks_reviewing = function()
+    -- Regression: an issue that reached consensus via a no-consensus loop and
+    -- was then review-rejected must report current state = fixing, so the fix
+    -- loop runs instead of skip-idempotent on a stale reviewing marker.
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local reviewing_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z/loop/2"
+    local fixing_version = core.next_fix_version(reviewing_version)
+
+    local current = core.current_state({
+      core.state_marker(proposal_id, "reviewing", reviewing_version),
+      core.state_marker(proposal_id, "fixing", fixing_version),
+    }, proposal_id)
+
+    t.eq(fixing_version, reviewing_version .. "/fix/1")
+    t.eq(current.state, "fixing")
+    t.eq(current.version, fixing_version)
+  end,
+
   test_review_meta_action_version_orders_after_review_meta_stage = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
