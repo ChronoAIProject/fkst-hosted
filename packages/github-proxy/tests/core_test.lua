@@ -3,12 +3,12 @@ local t = fkst.test
 
 return {
   test_env_command_whitelist = function()
-    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
-    t.eq(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), 'printf %s "$FKST_GITHUB_BOT_LOGIN"')
-    t.raises(function()
-      core.read_env_command("HOME")
-    end)
-  end,
+	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
+	    t.eq(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), 'printf %s "$FKST_GITHUB_BOT_LOGIN"')
+	    t.raises(function()
+	      core.read_env_command("HOME")
+	    end)
+	  end,
 
   test_read_env_empty_is_nil = function()
     local value = core.read_env("FKST_GITHUB_REPO", function(_cmd)

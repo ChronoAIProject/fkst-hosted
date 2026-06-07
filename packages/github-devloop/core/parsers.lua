@@ -190,30 +190,6 @@ local function status_rollup_entries(value)
   return value
 end
 
-local function review_entries(value)
-  if type(value) ~= "table" then
-    return {}
-  end
-  if type(value.nodes) == "table" then
-    return value.nodes
-  end
-  return value
-end
-
-local function review_commit_id(review)
-  if type(review) ~= "table" then
-    return nil
-  end
-  local commit = review.commit_id or review.commitId or review.commitOID or review.commitOid or review.commit
-  if type(commit) == "table" then
-    commit = commit.oid or commit.id
-  end
-  if M._is_git_sha(commit) then
-    return tostring(commit)
-  end
-  return nil
-end
-
 function M.parse_pr_view_merge(stdout)
   local decoded = json.decode(stdout or "{}")
   local result = M.parse_pr_view_origin(stdout)
@@ -221,7 +197,6 @@ function M.parse_pr_view_merge(stdout)
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
   result.merged_at = decoded.mergedAt or decoded.merged_at
-  result.latest_reviews = review_entries(decoded.latestReviews or decoded.latest_reviews)
   return result
 end
 
@@ -375,7 +350,6 @@ function M.is_not_mergeable_reason(reason)
 end
 
 M._upper_text = upper_text
-M._review_commit_id = review_commit_id
 end
 
 return S

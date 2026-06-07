@@ -59,7 +59,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-write", {
@@ -97,7 +97,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_guard_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_guard_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-read-after-write-lag", {
@@ -148,7 +148,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-tail-pr-open", {
@@ -159,25 +159,35 @@ return {
     local edit = calls_matching("gh issue edit")[1]
     t.is_true(edit.rendered:find("--add-label 'fkst-dev:pr-open'", 1, true) ~= nil)
     t.is_true(edit.rendered:find("--remove-label 'fkst-dev:implementing'", 1, true) ~= nil)
-    t.is_true(edit.rendered:find("--remove-label 'fkst-dev:pr-authorized'", 1, true) ~= nil)
   end,
 
-  test_pr_open_request_skips_when_authorization_revoked_at_write_time = function()
+  test_pr_open_request_pushes_without_intent_label = function()
     mock_write_env("1")
     mock_bot_env()
     mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_guard_comments())
+    mock_branch_head("abc123")
+    mock_pr_head_list("[]\n")
+    mock_git_push()
+    mock_pr_create(7)
+    mock_pr_head_state("abc123", "OPEN")
+    mock_comment_view("existing issue comment")
+    mock_comment_write()
+    mock_pr_comment_view("existing pr comment")
+    mock_pr_comment_write()
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
+    mock_label_write()
 
-    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-revoked", {
+    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-write-without-label", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("git show-ref --verify refs/heads"), 0)
-    t.eq(count_calls("git push -u origin"), 0)
-    t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls("gh issue comment"), 0)
+    t.eq(count_calls("git push -u origin"), 1)
+    t.eq(count_calls("gh pr create"), 1)
+    t.eq(count_calls("gh issue comment"), 1)
+    t.eq(count_calls("gh issue edit"), 1)
   end,
 
-  test_pr_open_request_skips_when_branch_moved_past_recorded_head = function()
+	  test_pr_open_request_skips_when_branch_moved_past_recorded_head = function()
     mock_write_env("1")
     mock_bot_env()
     mock_pr_open_guard(nil, pr_open_guard_comments())
@@ -221,7 +231,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-list-after-create", {
@@ -288,7 +298,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-existing", {
@@ -353,7 +363,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-closed-head-not-reused", {
@@ -369,12 +379,12 @@ return {
   test_pr_open_retry_after_issue_marker_self_heals_missing_pr_backpointer_and_label = function()
     mock_write_env("1")
     mock_bot_env()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
     mock_pr_head_state("abc123", "OPEN")
     mock_pr_comment_view("existing pr comment without origin")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-self-heal", {
@@ -393,13 +403,12 @@ return {
     t.is_true(pr_written:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
     local edit = calls_matching("gh issue edit")[1]
     t.is_true(edit.rendered:find("--add-label 'fkst-dev:pr-open'", 1, true) ~= nil)
-    t.is_true(edit.rendered:find("--remove-label 'fkst-dev:pr-authorized'", 1, true) ~= nil)
   end,
 
   test_pr_open_guard_uses_canonical_rank_so_meta_escalated_implementing_can_open_pr = function()
     mock_write_env("1")
     mock_bot_env()
-    mock_pr_open_guard({ "fkst-dev:stuck", "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_guard_comments({
+    mock_pr_open_guard({ "fkst-dev:stuck", "fkst-dev:implementing" }, pr_open_guard_comments({
       '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="stuck" version="v1" stage_rank="300" -->',
     }))
     mock_branch_head("abc123")
@@ -411,7 +420,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:stuck", "fkst-dev:implementing", "fkst-dev:pr-authorized" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:stuck", "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-canonical-rank", {

@@ -79,20 +79,19 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
   core.log_raise("fix", fix.proposal_id, "devloop_reviewing", reviewing_payload)
 end
 
-local function assert_fix_write_gate(fix, labels, repo, issue_number)
-  local authorized = core.has_fix_authorized_label(labels)
+local function assert_fix_write_gate(fix, repo, issue_number)
   local write_enabled = core.write_mode() == "real"
-  if authorized and write_enabled then
-    return
+  if write_enabled then
+    return true
   end
   core.log_line("info", "fix", fix.proposal_id, "OUTBOUND", {
     "mode=dry-run",
     "repo=" .. tostring(repo),
     "issue=" .. tostring(issue_number),
     "pr=" .. tostring(fix.pr_number),
-    "reason=PR fix requires fkst-dev:fix-authorized and FKST_GITHUB_WRITE=1 before codex",
+    "reason=PR fix requires FKST_GITHUB_WRITE=1 before codex",
   })
-  error("github-devloop: fix write gate is not authorized; retrying")
+  return false
 end
 
 local function branch_head_if_ahead(base_head_sha, branch)
@@ -209,8 +208,6 @@ function pipeline(event)
       feedback_reason = merge_gate_fact.review_reason
     end
 
-    assert_fix_write_gate(fix, current_issue.labels, repo, issue_number)
-
     local link = core.pr_link_fact(current_issue.comments, fix.proposal_id)
     if link == nil or tostring(link.pr_number) ~= tostring(fix.pr_number) then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(pr-link)", "trusted issue PR link marker not visible")
@@ -264,6 +261,10 @@ function pipeline(event)
       return
     end
 
+    if not assert_fix_write_gate(fix, repo, issue_number) then
+      return
+    end
+
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local result = spawn_codex_sync({
@@ -295,10 +296,6 @@ function pipeline(event)
         if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
           core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
           return
-        end
-        if not core.has_fix_authorized_label(rechecked_issue.labels) then
-          core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "retry-pending(write-gate)", "write-time fix authorization label missing")
-          error("github-devloop: fix authorization label missing at write-time; retrying")
         end
         local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
         if pr_recheck.exit_code ~= 0 then
@@ -374,10 +371,6 @@ function pipeline(event)
     if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
       core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
       return
-    end
-    if not core.has_fix_authorized_label(rechecked_issue.labels) then
-      core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "retry-pending(write-gate)", "write-time fix authorization label missing")
-      error("github-devloop: fix authorization label missing at write-time; retrying")
     end
     local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pr_recheck.exit_code ~= 0 then

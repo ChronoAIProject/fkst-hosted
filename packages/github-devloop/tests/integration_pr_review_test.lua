@@ -52,7 +52,6 @@ local mock_issue_review_meta = h.mock_issue_review_meta
 local mock_issue_merge = h.mock_issue_merge
 local merge_comments = h.merge_comments
 local mock_pr_origin = h.mock_pr_origin
-local review_json = h.review_json
 local mock_pr_merge = h.mock_pr_merge
 local mock_pr_merge_rollup = h.mock_pr_merge_rollup
 local mock_merging_comment = h.mock_merging_comment
@@ -125,10 +124,10 @@ return {
     t.eq(count_calls("commit -m"), 1)
   end,
 
-  test_open_pr_authorized_write_raises_pr_open_request = function()
-    local event = issue({ labels = { "fkst-dev:implementing", "fkst-dev:pr-authorized" } })
+  test_open_pr_write_raises_pr_open_request = function()
+    local event = issue({ labels = { "fkst-dev:implementing" } })
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    mock_issue_open_pr({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, {
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
       core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
     })
@@ -137,7 +136,7 @@ return {
     mock_write_env("1")
     mock_write_env("1")
 
-    local result = run_open_pr(event, opts("open-pr-authorized-write", {
+    local result = run_open_pr(event, opts("open-pr-write", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
@@ -158,10 +157,10 @@ return {
     t.eq(count_calls("rev-parse --verify"), 1)
   end,
 
-  test_open_pr_authorized_write_does_not_raise_when_branch_head_moved = function()
-    local event = issue({ labels = { "fkst-dev:implementing", "fkst-dev:pr-authorized" } })
+  test_open_pr_write_does_not_raise_when_branch_head_moved = function()
+    local event = issue({ labels = { "fkst-dev:implementing" } })
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    mock_issue_open_pr({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, {
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
       core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
     })
@@ -169,7 +168,7 @@ return {
     mock_bot_env()
     mock_write_env("1")
 
-    local result = run_open_pr(event, opts("open-pr-authorized-branch-moved", {
+    local result = run_open_pr(event, opts("open-pr-branch-moved", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
@@ -178,7 +177,22 @@ return {
     t.eq(count_calls("rev-parse --verify"), 1)
   end,
 
-  test_open_pr_requires_human_label_and_write_switch = function()
+  test_open_pr_requires_write_switch = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
+    mock_bot_env()
+    mock_write_env("")
+    local missing_write = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-missing-write"))
+    t.eq(missing_write.exit_code, 0)
+    t.eq(#missing_write.raises, 0)
+  end,
+
+  test_open_pr_write_raises_pr_open_request_without_label = function()
+    local event = issue({ labels = { "fkst-dev:implementing" } })
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
@@ -188,21 +202,16 @@ return {
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
-    local missing_label = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-missing-label", {
+
+    local result = run_open_pr(event, opts("open-pr-write-without-label", {
       FKST_GITHUB_WRITE = "1",
     }))
-    t.eq(missing_label.exit_code, 0)
-    t.eq(#missing_label.raises, 0)
-
-    mock_issue_open_pr({ "fkst-dev:implementing", "fkst-dev:pr-authorized" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
-    })
-    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
-    mock_write_env("")
-    local missing_write = run_open_pr(issue({ labels = { "fkst-dev:implementing", "fkst-dev:pr-authorized" } }), opts("open-pr-missing-write"))
-    t.eq(missing_write.exit_code, 0)
-    t.eq(#missing_write.raises, 0)
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local pr_raise = find_raise(result.raises, "github-proxy.github_pr_open_request")
+    t.eq(pr_raise.payload.schema, "github-proxy.pr-open.v1")
+    t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
+    t.eq(pr_raise.payload.head_sha, "abc123")
   end,
 
   test_observe_pr_backpointer_advances_issue_to_reviewing = function()

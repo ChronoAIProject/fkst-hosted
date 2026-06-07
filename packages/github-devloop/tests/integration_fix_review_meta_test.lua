@@ -52,7 +52,6 @@ local mock_issue_review_meta = h.mock_issue_review_meta
 local mock_issue_merge = h.mock_issue_merge
 local merge_comments = h.merge_comments
 local mock_pr_origin = h.mock_pr_origin
-local review_json = h.review_json
 local mock_pr_merge = h.mock_pr_merge
 local mock_pr_merge_rollup = h.mock_pr_merge_rollup
 local mock_merging_comment = h.mock_merging_comment
@@ -84,7 +83,7 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 
 return {
-  test_fix_authorized_write_pushes_and_marks_reviewing_new_head = function()
+  test_fix_write_pushes_and_marks_reviewing_new_head = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local reject_comment = core.build_review_result_comment_request(
@@ -104,7 +103,7 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -119,7 +118,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -127,7 +126,7 @@ return {
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
-    local result = run_fix(event, opts("fix-authorized-write", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_fix(event, opts("fix-write", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
 	    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
@@ -135,8 +134,7 @@ return {
 	    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
     local expected_version = core.next_fix_version(event.version)
 	    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
-	    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:fix-authorized"))
-	    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-authorized"))
+	    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:fixing"))
 	    t.is_true(comment_raise.payload.body:find(core.fix_marker(event.proposal_id, event.review_proposal_id, event.review_dedup_key, "def456", "feedface"), 1, true) ~= nil)
     local current = core.current_state({
       core.state_marker(event.proposal_id, "fixing", event.version),
@@ -157,7 +155,7 @@ return {
     mock_pr_diff("diff --git a/packages/github-devloop/core.lua b/packages/github-devloop/core.lua\n+fixed again\n")
     mock_pr_origin({ origin_marker_for_review }, branch, "feedface")
 
-    local review_result = run_review_pr(reviewing_raise.payload, opts("fix-authorized-write-rereview"))
+    local review_result = run_review_pr(reviewing_raise.payload, opts("fix-write-rereview"))
     t.eq(review_result.exit_code, 0)
     t.eq(#review_result.raises, 1)
     local proposal = find_raise(review_result.raises, "consensus.proposal").payload
@@ -179,7 +177,7 @@ return {
 
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:enabled", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:enabled" }, {
       reject_comment,
     }, branch, event.version)
     local pending = run_fix(event, opts("fix-marker-lag", { FKST_GITHUB_WRITE = "1" }))
@@ -190,7 +188,7 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -205,7 +203,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -236,7 +234,7 @@ return {
 
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:reviewing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:reviewing" }, {
       core.state_marker(event.proposal_id, "reviewing", review_version),
       reject_comment,
     }, branch, review_version)
@@ -271,7 +269,7 @@ return {
     t.eq(count_calls("codex exec"), 0)
   end,
 
-  test_fix_missing_human_gate_dry_run_no_advance = function()
+  test_fix_missing_write_dry_run_no_advance = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local reject_comment = core.build_review_result_comment_request(
@@ -283,20 +281,21 @@ return {
       event.source_ref
     ).body
     mock_bot_env()
-    mock_write_env("1")
+    mock_write_env("")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
+    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version) }, branch, "def456")
 
-    local result = run_fix(event, opts("fix-missing-gate", { FKST_GITHUB_WRITE = "1" }))
-    t.eq(result.exit_code, 1)
+    local result = run_fix(event, opts("fix-missing-write"))
+    t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git push origin"), 0)
   end,
 
-  test_fix_runs_after_authorization_is_added = function()
+  test_fix_runs_after_write_is_enabled = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local reject_comment = core.build_review_result_comment_request(
@@ -310,18 +309,19 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
 
     mock_bot_env()
-    mock_write_env("1")
+    mock_write_env("")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    local unauthorized = run_fix(event, opts("fix-auth-later-first", { FKST_GITHUB_WRITE = "1" }))
-    t.eq(unauthorized.exit_code, 1)
+    mock_pr_fix({ origin_marker }, branch, "def456")
+    local without_write = run_fix(event, opts("fix-write-later-first"))
+    t.eq(without_write.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
 
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -336,7 +336,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -344,11 +344,11 @@ return {
     mock_git_push(branch)
     mock_pr_fix({ origin_marker }, branch, "feedface")
 
-    local authorized = run_fix(event, opts("fix-auth-later-second", { FKST_GITHUB_WRITE = "1" }))
-    t.eq(authorized.exit_code, 0)
-    t.eq(#authorized.raises, 3)
-    t.eq(find_raise(authorized.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(find_raise(authorized.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    local with_write = run_fix(event, opts("fix-write-later-second", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(with_write.exit_code, 0)
+    t.eq(#with_write.raises, 3)
+    t.eq(find_raise(with_write.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(find_raise(with_write.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("git push origin"), 1)
   end,
 
@@ -383,7 +383,7 @@ return {
     local origin_marker = core.pr_origin_marker(second_event.proposal_id, "42", first_branch, first_event.version)
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(second_event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(second_event, { "fkst-dev:fixing" }, {
       core.state_marker(second_event.proposal_id, "fixing", second_event.version),
       reject_comment,
     }, first_branch, first_event.version)
@@ -398,7 +398,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("baddad", first_branch)
     mock_write_env("1")
-    mock_issue_fix_for_event(second_event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(second_event, { "fkst-dev:fixing" }, {
       core.state_marker(second_event.proposal_id, "fixing", second_event.version),
       reject_comment,
     }, first_branch, first_event.version)
@@ -430,7 +430,7 @@ return {
 
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -467,7 +467,7 @@ return {
 
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -501,7 +501,7 @@ return {
     ).body
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -545,7 +545,7 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -569,7 +569,7 @@ return {
       exit_code = 0,
     })
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
@@ -753,7 +753,7 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(fix_event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(fix_event, { "fkst-dev:fixing" }, {
       meta_comment,
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
@@ -767,7 +767,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_issue_fix_for_event(fix_event, { "fkst-dev:fixing", "fkst-dev:fix-authorized" }, {
+    mock_issue_fix_for_event(fix_event, { "fkst-dev:fixing" }, {
       meta_comment,
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")

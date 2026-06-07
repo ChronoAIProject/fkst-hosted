@@ -234,7 +234,7 @@ return {
     t.is_true(pr_request.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
     t.is_true(pr_request.issue_comment_body_template:find("fkst:github-devloop:pr-link:v1", 1, true) ~= nil)
     t.eq(pr_request.issue_label_add[1], "fkst-dev:pr-open")
-    t.is_true(has_value(pr_request.issue_label_remove, "fkst-dev:pr-authorized"))
+    t.is_true(has_value(pr_request.issue_label_remove, "fkst-dev:implementing"))
 
     local origin = core.pr_origin_fact({
       core.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key),
@@ -325,55 +325,6 @@ return {
     t.is_nil(core.parse_review_meta_action(reason_label .. " orphan\n" .. meta_answer("fix", "real")))
     t.is_nil(core.parse_review_meta_action(action_label .. " implement\n" .. reason_label .. " not whitelisted for review meta"))
   end,
-
-  test_merge_authorization_requires_current_head_review_approval = function()
-    local fact = { head_sha = "def456" }
-
-	    t.eq(core.merge_authorization_matches_fact(fact, {
-	      head_sha = "def456",
-	      latest_reviews = {
-	        { state = "APPROVED", commit = { oid = "def456" } },
-	      },
-	    }), true)
-	    t.eq(core.merge_authorization_matches_fact(fact, {
-	      head_sha = "def456",
-	      latest_reviews = {
-	        { state = "COMMENTED", commit = { oid = "def456" } },
-	      },
-	    }), false)
-	    t.eq(core.merge_authorization_matches_fact(fact, {
-	      head_sha = "def456",
-	      latest_reviews = {
-	        { state = "APPROVED", commit = { oid = "feedface" } },
-	      },
-	    }), false)
-	    t.eq(core.merge_authorization_matches_fact(fact, {
-	      head_sha = "def456",
-	      review_decision = "APPROVED",
-	      latest_reviews = {},
-	    }), false)
-	    t.eq(core.merge_authorization_matches_fact(fact, {
-	      head_sha = "feedface",
-	      latest_reviews = {
-	        { state = "APPROVED", commit = { oid = "feedface" } },
-	      },
-	    }), false)
-	    t.eq(core.merge_authorization_matches_fact(fact, {
-	      head_sha = "def456",
-	      reviews = {
-	        { state = "APPROVED", commit = { oid = "def456" } },
-	      },
-	      latest_reviews = {
-	        { state = "CHANGES_REQUESTED", commit = { oid = "def456" } },
-	      },
-	    }), false)
-	    t.eq(core.merge_authorization_matches_fact(fact, {
-	      head_sha = "def456",
-	      reviews = {
-	        { state = "APPROVED", commit = { oid = "def456" } },
-	      },
-	    }), false)
-	  end,
 
 	  test_stuck_and_meta_dedup_keys_keep_long_version_tail = function()
 	    local prefix = "consensus:github-devloop/issue/owner/repo/42/"

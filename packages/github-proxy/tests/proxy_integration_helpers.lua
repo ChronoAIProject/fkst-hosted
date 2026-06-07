@@ -123,7 +123,7 @@ end
 
 local function mock_pr_open_guard(labels, comments)
   local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:implementing", "fkst-dev:pr-authorized" }) do
+  for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   local rendered_comments = {}
@@ -271,7 +271,7 @@ local function pr_open_event()
       body = 'github-devloop implementation PR for issue #42\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/x/42" issue="42" branch="devloop-owner-x-42-01HY" impl_version="v1" -->',
       issue_comment_body_template = 'github-devloop PR opened: #{{pr_number}}\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="{{pr_number}}" branch="devloop-owner-x-42-01HY" impl_version="v1" -->',
       issue_label_add = { "fkst-dev:pr-open" },
-      issue_label_remove = { "fkst-dev:implementing", "fkst-dev:pr-authorized" },
+      issue_label_remove = { "fkst-dev:implementing" },
       dedup_key = "open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY",
       source_ref = {
         kind = "external",

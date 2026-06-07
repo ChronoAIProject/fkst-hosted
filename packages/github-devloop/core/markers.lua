@@ -305,27 +305,73 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
   return nil
 end
 
-function M.merge_authorization_matches_fact(fact, pr)
-  if type(fact) ~= "table" or tostring(fact.head_sha or "") == "" then
-    return false
+function M.review_result_approval_matches_event(comments, merge_ready)
+  if type(comments) ~= "table" or type(merge_ready) ~= "table" then
+    return false, "missing-review-result-approve"
   end
-  if type(pr) ~= "table" then
-    return false
-  end
-  if tostring(pr.head_sha or "") ~= tostring(fact.head_sha) then
-    return false
-  end
-  local approved_at_head = false
-  for _, review in ipairs(pr.latest_reviews or {}) do
-    local state = M._upper_text(review.state)
-    if state == "CHANGES_REQUESTED" then
-      return false
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local review_proposal = marker:match('proposal="([^"]+)"')
+      local issue_proposal = marker:match('issue_proposal="([^"]+)"')
+      local decision = marker:match('decision="([^"]+)"')
+      local review_dedup = marker:match('dedup="([^"]*)"')
+      local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      if tostring(review_proposal or "") == tostring(merge_ready.review_proposal_id or "")
+        and tostring(issue_proposal or "") == tostring(merge_ready.proposal_id or "")
+        and decision == "approve"
+        and tostring(review_dedup or "") == tostring(merge_ready.review_dedup_key or "")
+        and tostring(review_pr_number or "") == tostring(merge_ready.pr_number or "")
+        and tostring(reviewed_head_sha or "") == tostring(merge_ready.reviewed_head_sha or "")
+        and tostring(review_version or "") == M.safe_version_segment(merge_ready.version) then
+        return true, "review-result-approve"
+      end
     end
-    if state == "APPROVED" and tostring(M._review_commit_id(review) or "") == tostring(fact.head_sha) then
-      approved_at_head = true
-    end
   end
-  return approved_at_head
+  return false, "missing-review-result-approve"
+end
+
+local function review_proposal_version_matches_merge_ready(review_version, merge_ready_version, review_dedup_key)
+  local merge_text = tostring(merge_ready_version or "")
+  if tostring(review_version or "") == M.safe_version_segment(merge_text) then
+    return true
+  end
+  local base = merge_text:match("^(.-)/review%-loop/%d+")
+  if base == nil then
+    return false
+  end
+  return tostring(review_dedup_key or ""):find("review%-meta", 1) ~= nil
+    and tostring(review_version or "") == M.safe_version_segment(base)
+    and merge_text:find("/review%-meta%-action/", 1) ~= nil
+end
+
+function M.merge_ready_approval_matches_event(fact, merge_ready)
+  if type(fact) ~= "table" or type(merge_ready) ~= "table" then
+    return false, "missing-merge-ready-approval"
+  end
+  if tostring(fact.proposal_id or "") ~= tostring(merge_ready.proposal_id or "")
+    or tostring(fact.pr_number or "") ~= tostring(merge_ready.pr_number or "")
+    or tostring(fact.version or "") ~= tostring(merge_ready.version or "")
+    or tostring(fact.review_proposal_id or "") ~= tostring(merge_ready.review_proposal_id or "")
+    or tostring(fact.review_dedup_key or "") ~= tostring(merge_ready.review_dedup_key or "")
+    or tostring(fact.head_sha or "") ~= tostring(merge_ready.reviewed_head_sha or "") then
+    return false, "merge-ready-approval-mismatch"
+  end
+
+  local issue_repo = M.parse_proposal_id(merge_ready.proposal_id)
+  local review_repo, review_pr_number, review_version, review_head_sha = M.parse_pr_review_proposal_id(fact.review_proposal_id)
+  local expected_review_repo = issue_repo and M.safe_pr_review_repo_segment(issue_repo) or nil
+  if review_repo == nil
+    or tostring(review_repo) ~= tostring(expected_review_repo or "")
+    or tostring(review_pr_number) ~= tostring(merge_ready.pr_number or "")
+    or tostring(review_head_sha) ~= tostring(merge_ready.reviewed_head_sha or "") then
+    return false, "merge-ready-review-proposal-mismatch"
+  end
+  if not review_proposal_version_matches_merge_ready(review_version, merge_ready.version, merge_ready.review_dedup_key) then
+    return false, "merge-ready-review-proposal-version-mismatch"
+  end
+
+  return true, "merge-ready-approval"
 end
 
 function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sha)

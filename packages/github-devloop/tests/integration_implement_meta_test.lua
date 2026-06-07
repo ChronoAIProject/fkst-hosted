@@ -52,7 +52,6 @@ local mock_issue_review_meta = h.mock_issue_review_meta
 local mock_issue_merge = h.mock_issue_merge
 local merge_comments = h.merge_comments
 local mock_pr_origin = h.mock_pr_origin
-local review_json = h.review_json
 local mock_pr_merge = h.mock_pr_merge
 local mock_pr_merge_rollup = h.mock_pr_merge_rollup
 local mock_merging_comment = h.mock_merging_comment

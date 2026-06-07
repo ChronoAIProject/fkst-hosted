@@ -467,10 +467,6 @@ function M.state_label_changes(to_state)
       table.insert(remove_labels, label)
     end
   end
-  if (to_state == "fixing" or to_state == "reviewing" or to_state == "merged")
-    and not M._has_value(remove_labels, M._merge_authorized_label) then
-    table.insert(remove_labels, M._merge_authorized_label)
-  end
   return { add_label }, remove_labels
 end
 
@@ -543,10 +539,6 @@ function M.has_implementing_label(labels)
   return M.has_label(labels, M._implementing_label)
 end
 
-function M.has_pr_authorized_label(labels)
-  return M.has_label(labels, M._pr_authorized_label)
-end
-
 function M.has_pr_open_label(labels)
   return M.has_label(labels, M._pr_open_label)
 end
@@ -559,10 +551,6 @@ function M.has_merge_ready_label(labels)
   return M.has_label(labels, M._merge_ready_label)
 end
 
-function M.has_merge_authorized_label(labels)
-  return M.has_label(labels, M._merge_authorized_label)
-end
-
 function M.has_merging_label(labels)
   return M.has_label(labels, M._merging_label)
 end
@@ -573,10 +561,6 @@ end
 
 function M.has_fixing_label(labels)
   return M.has_label(labels, M._fixing_label)
-end
-
-function M.has_fix_authorized_label(labels)
-  return M.has_label(labels, M._fix_authorized_label)
 end
 
 function M.has_review_meta_label(labels)

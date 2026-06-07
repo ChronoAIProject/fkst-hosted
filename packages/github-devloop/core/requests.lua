@@ -277,9 +277,6 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
   local body = "github-devloop implementation PR for issue #" .. tostring(issue_number)
     .. "\n\n" .. M.pr_origin_marker(proposal_id, issue_number, branch, current.version)
   local add_labels, remove_labels = M.state_label_changes("pr-open")
-  if not M._has_value(remove_labels, M._pr_authorized_label) then
-    table.insert(remove_labels, M._pr_authorized_label)
-  end
   return {
     schema = "github-proxy.pr-open.v1",
     repo = repo,
@@ -460,7 +457,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
 end
 
 function M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
-  local request = M.build_state_label_request(
+  return M.build_state_label_request(
     repo,
     issue_number,
     "reviewing",
@@ -473,10 +470,6 @@ function M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_s
     }),
     fix.source_ref
   )
-  if not M._has_value(request.remove_labels, M._fix_authorized_label) then
-    table.insert(request.remove_labels, M._fix_authorized_label)
-  end
-  return request
 end
 
 function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
@@ -503,7 +496,7 @@ function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head
 end
 
 function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
-  local request = M.build_state_label_request(
+  return M.build_state_label_request(
     repo,
     issue_number,
     "review-meta",
@@ -516,10 +509,6 @@ function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
     }),
     fix.source_ref
   )
-  if not M._has_value(request.remove_labels, M._fix_authorized_label) then
-    table.insert(request.remove_labels, M._fix_authorized_label)
-  end
-  return request
 end
 
 function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
@@ -570,7 +559,7 @@ function M.build_review_loop_comment_request(repo, issue_number, unresolved, iss
 end
 
 function M.build_review_meta_trigger_label_request(repo, issue_number, unresolved, issue_proposal_id, n, source_ref)
-  local request = M.build_state_label_request(
+  return M.build_state_label_request(
     repo,
     issue_number,
     "review-meta",
@@ -584,10 +573,6 @@ function M.build_review_meta_trigger_label_request(repo, issue_number, unresolve
     }),
     source_ref or unresolved.source_ref
   )
-  if not M._has_value(request.remove_labels, M._fix_authorized_label) then
-    table.insert(request.remove_labels, M._fix_authorized_label)
-  end
-  return request
 end
 
 function M.build_review_meta_trigger_comment_request(repo, issue_number, unresolved, issue_proposal_id, issue_version, n, source_ref)
@@ -614,7 +599,7 @@ end
 
 function M.build_review_meta_label_request(repo, issue_number, review_meta, action, version)
   local to_state = action == "fix" and "fixing" or action == "accept" and "merge-ready" or "blocked"
-  local request = M.build_state_label_request(
+  return M.build_state_label_request(
     repo,
     issue_number,
     to_state,
@@ -627,10 +612,6 @@ function M.build_review_meta_label_request(repo, issue_number, review_meta, acti
     }),
     review_meta.source_ref
   )
-  if to_state ~= "fixing" and not M._has_value(request.remove_labels, M._fix_authorized_label) then
-    table.insert(request.remove_labels, M._fix_authorized_label)
-  end
-  return request
 end
 
 function M.build_review_meta_comment_request(repo, issue_number, review_meta, action, reason, version)

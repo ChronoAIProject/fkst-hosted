@@ -110,11 +110,6 @@ local function guard_pr_open_write(repo, payload, bot_login)
     log.warn("github-proxy: PR open skipped because current issue state is not implementing at requested version")
     return nil
   end
-  if not core.has_label(issue.labels, "fkst-dev:pr-authorized") then
-    log.warn("github-proxy: PR open skipped because fkst-dev:pr-authorized is no longer present")
-    return nil
-  end
-
   local fact = core.devloop_implementing_fact(issue.comments, payload.proposal_id, payload.impl_version, bot_login)
   if fact == nil then
     log.warn("github-proxy: PR open skipped because implementing fact marker is not visible")

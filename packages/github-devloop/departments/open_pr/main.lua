@@ -75,21 +75,20 @@ function pipeline(event)
       return
     end
 
-    local authorized = core.has_pr_authorized_label(current_issue.labels)
     local write_enabled = core.write_mode() == "real"
-    if not authorized or not write_enabled then
+    if not write_enabled then
       core.log_line("info", "open_pr", proposal_id, "OUTBOUND", {
         "mode=dry-run",
         "queue=github-proxy.github_pr_open_request",
         "repo=" .. tostring(issue.repo),
         "issue=" .. tostring(issue.number),
         "branch=" .. tostring(fact.branch),
-        "reason=would push/create PR requires fkst-dev:pr-authorized and FKST_GITHUB_WRITE=1",
+        "reason=would push/create PR requires FKST_GITHUB_WRITE=1",
       })
       return
     end
 
-    core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", core.cas_outcome(state, "apply", state.version), "human gate satisfied; opening PR")
+    core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", core.cas_outcome(state, "apply", state.version), "write gate satisfied; opening PR")
     local pr_request = core.build_pr_open_request(issue.repo, issue.number, proposal_id, state, current_issue.title, fact.branch, fact.head_sha)
     core.log_apply("open_pr", proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
       "github-proxy.github_pr_open_request",

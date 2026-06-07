@@ -8,7 +8,7 @@
 
 fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrate** 引擎上的 Lua package。引擎本身在隔壁 `fkst-substrate` 仓；**本仓只写 Lua 行为层，不碰引擎 Rust**。
 
-一个 package = `core.lua`（包内共享库）+ `departments/<dept>/main.lua`（消费/产生事件的处理器，暴露 `M.spec` 与 `pipeline(event)`）+ `raisers/<r>.lua`（cron/file_watch 触发器）+ `tests/*_test.lua`。包分两类：flat 平包必须自洽、可单根 conformance、0 外部 package namespace 引用；composed 包是一等包，负责组合/适配兄弟包，可引用 `<pkg>.<queue>`，用 `composed.deps` 声明组合 conformance 需要一起加载的兄弟包。当前 flat 包：`packages/github-proxy/`（GitHub issue/PR 入站同步 + 出站评论/label）和 `packages/consensus/`（消费抽象 `proposal`、一个 pipeline 内多角度 codex 共识、产出 `consensus_reached` / `consensus_unresolved` 的通用 source-agnostic 共识引擎）。当前 composed 包：`packages/autochrono/`（消费自有 `issue` → 映射成 `consensus.proposal`，再消费 `consensus.consensus_reached` 产出自有 `reply`，组合 `consensus`）、`packages/github-autochrono/`（组合 `github-proxy` + `autochrono`）和 `packages/github-devloop/`（组合 `github-proxy` + `consensus`，用 GitHub 评论 `state:v1` marker 作为状态事实、`fkst-dev:<state>` label 作为自愈 UI hint，在 `devloop_stuck` 上做 meta-escalation，在 `devloop_ready` 上用隔离 worktree 进入 implementing，失败写入 `impl-failed` 终态 marker；PR 进入 `reviewing` 后复用 `consensus` 对 bounded PR diff 做 review decision，`approve` 推进 `merge-ready` 并产生 `devloop_merge_ready`、`reject` 推进 `fixing`，`fixing` 经 `fkst-dev:fix-authorized` + `FKST_GITHUB_WRITE=1` 人工门控非 force push 后回到新 head 的 `reviewing`；pr-review unresolved 进入独立 review loop，预算耗尽后进 `review-meta`，meta action `fix|accept|block` 分别推进 `fixing|merge-ready|blocked`；`merge` 在 `merge-ready` 或失败重试中的 `merging` + `FKST_GITHUB_WRITE=1` + `fkst-dev:merge-authorized` 人工意图 gate 且 PR open/same-repo/head 未变、存在 commit 等于当前 head 的 `APPROVED` review、CI green、mergeable 时执行普通 `gh pr merge --merge`，写 `merging`/`merged` marker 并关闭 issue，缺 gate dry-run，CI 红或明确不可合并回 `fixing`）。
+一个 package = `core.lua`（包内共享库）+ `departments/<dept>/main.lua`（消费/产生事件的处理器，暴露 `M.spec` 与 `pipeline(event)`）+ `raisers/<r>.lua`（cron/file_watch 触发器）+ `tests/*_test.lua`。包分两类：flat 平包必须自洽、可单根 conformance、0 外部 package namespace 引用；composed 包是一等包，负责组合/适配兄弟包，可引用 `<pkg>.<queue>`，用 `composed.deps` 声明组合 conformance 需要一起加载的兄弟包。当前 flat 包：`packages/github-proxy/`（GitHub issue/PR 入站同步 + 出站评论/label）和 `packages/consensus/`（消费抽象 `proposal`、一个 pipeline 内多角度 codex 共识、产出 `consensus_reached` / `consensus_unresolved` 的通用 source-agnostic 共识引擎）。当前 composed 包：`packages/autochrono/`（消费自有 `issue` → 映射成 `consensus.proposal`，再消费 `consensus.consensus_reached` 产出自有 `reply`，组合 `consensus`）、`packages/github-autochrono/`（组合 `github-proxy` + `autochrono`）和 `packages/github-devloop/`（组合 `github-proxy` + `consensus`，用 GitHub 评论 `state:v1` marker 作为状态事实、`fkst-dev:<state>` label 作为自愈 UI hint，在 `devloop_stuck` 上做 meta-escalation，在 `devloop_ready` 上用隔离 worktree 进入 implementing，失败写入 `impl-failed` 终态 marker；PR 进入 `reviewing` 后复用 `consensus` 对 bounded PR diff 做 review decision，`approve` 推进 `merge-ready` 并产生 `devloop_merge_ready`、`reject` 推进 `fixing`，`fixing` 在 `FKST_GITHUB_WRITE=1` 时经写前重导、same-repo PR/head 校验与非 force push 回到新 head 的 `reviewing`；pr-review unresolved 进入独立 review loop，预算耗尽后进 `review-meta`，meta action `fix|accept|block` 分别推进 `fixing|merge-ready|blocked`；`open_pr` 与 `merge` 没有人工 label gate 或模式开关，唯一姿态开关是 `FKST_GITHUB_WRITE`：未设置只 dry-run，设为 `1` 则直接自治真实写入；`merge` 必须有可信 `review-result:v1 decision="approve"` 与同一 review proposal/dedup/issue/head/version 绑定，`review_meta accept` 不足以 merge；`merge` 在 `merge-ready` 或失败重试中的 `merging` + `FKST_GITHUB_WRITE=1` 且 PR open/same-repo/head 未变、存在可信 head-bound `merge-ready:v1` comment-stream review-approval fact、CI green、mergeable 时执行普通 `gh pr merge --merge --match-head-commit`，写 `merging`/`merged` marker 并关闭 issue，缺 gate dry-run，CI 红或明确不可合并回 `fixing`；merge 不使用 GitHub `reviewDecision` / `latestReviews` / `addPullRequestReview`，不使用 admin override，真实全自动运行要求仓库 branch protection required status checks 服务端强制且 bot 不具备 bypass/admin override）。
 
 ## 引擎上下文（写包必须懂；权威见 fkst-substrate 的 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md`）
 
@@ -26,7 +26,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **包内共享库放 package-root**：`packages/<pkg>/core.lua`，department 内 `require("core")`。**只做包内共享**——不跨包 require、不建 `fkst/` 目录、不引包间版本管理。
 - **flat 包 vs composed 包**：flat 包必须自有契约、自有裸名队列、0 外部 package namespace 引用，并通过单根 conformance；composed 包可以引用兄弟包 namespace 做组合/适配，但必须放 `composed.deps` 声明所组合的兄弟包，并经组合 conformance 验证。`composed.deps` 是测试组合的最小约定，不是版本/依赖解析 manifest，也不是部署配置；这是本仓为了让组合 glue 成为 CI 覆盖的一等包而接受的取舍。
 - 事件带 `schema` 字段（如 `"github-proxy.v1"`）；幂等靠 `dedup_key`（+ 出站用评论里的 HTML marker 等外部 durable 源）。
-- 出站写外部（如 `gh issue comment`）会改外部状态：默认 dry-run，真写需 `FKST_GITHUB_WRITE` + 明确授权。
+- 出站写外部（如 `gh issue comment`）会改外部状态：默认 dry-run，真写只由 `FKST_GITHUB_WRITE=1` 表达。`github-devloop` 本质是直接自治系统，不保留历史兼容、双模式、人工 label gate 或 opt-in 写入开关；不可逆 merge 仍必须满足可信 marker、独立 PR diff `review-result:v1 approve`、head-bound、CI/mergeability、branch protection 与写前重导。
 
 ## 面向对象基本原则
 
@@ -47,6 +47,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **模板流程克制**：确有固定步骤、可变局部时才用 Template Method 形态的高阶函数；步骤顺序必须在代码中直观可读，不能让 hook 改变事件契约或投递语义。
 - **组合包即 Facade**：composed package 是跨包组合的 Facade / Adapter 层，只做协议映射、队列 wiring 和最小编排；不要把兄弟包内部逻辑复制进 composed 包。
 - **可删除性**：任何模式都要能被一个更直白的函数实现替换；如果删除模式后代码更短、更清楚、测试不变，优先删除模式。
+- **门控即管线**：自动化系统里的"门控/决策"用一个 codex 判断管线 + event 流转开关表达，**不是人逐 event 加 label 授权**。人只控制哪些判断管线在跑（event 流转拓扑），不逐条介入：`auto 关 = 把 event 丢死信/丢掉`（没管线处理→不流转），`auto 开 = 一个管线处理它`（codex 判断决定流转并写 forge-guarded marker）。需要"可否/该不该自动处理"的判断时，新增一个保守的 codex 判断 dept（如 issue intake 判断哪些 issue 可自动开发），而不是留一个人工 label gate。可逆/危险运行姿态用 host 环境事实表达（如 `FKST_GITHUB_WRITE` 的 dry-run vs real），不在代码里留模式分叉。FKST 本就是全自动系统：默认就是 codex 判断 + 管线流转，不为"人来把关"保留人工授权门控。
 
 ## 构建 / 测试 / dogfood
 
@@ -69,6 +70,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - 源文件内部英文；对外中文。错误分类要窄（避免 `general error`）；日志/commit/event payload 可 grep。AI 生成的对外文本末尾保留 `⟦AI:FKST⟧`。
 - 单个源代码文件不得超过 1000 行（范围含生产源码、测试源码、脚本源码，.lua/.sh/.py/.rs 等），硬上限、不设豁免；先删死码/重复代码，再按稳定职责拆成包内子模块或多个 `*_test.lua`；不得用无职责边界的碎片化、空转发文件或 compat/legacy/shim 壳凑行数。
 - 不留 deprecated shim / compat layer / `.old` / `_legacy`；改契约就改完整，旧形态从当前态删除。文档描述当前态，历史留 git。
+- **不要历史兼容性，不兼容历史遗留逻辑**。系统只有当前态一种形态：改行为就全量切换，不为向后兼容保留双模式、opt-in 开关、manual/legacy fallback 分支或旧路径并存。需要可关的运行姿态时，用 host 环境事实（如 `FKST_GITHUB_WRITE` 的 dry-run vs real）表达，而不是在代码里留"新逻辑 + 旧逻辑"的分叉。删就删干净，包括随之失效的常量、helper、测试与文档。
 - **引擎 Rust 改动属 fkst-substrate 仓**，不在本仓做；本仓只写/改 Lua package + 测试 + 包文档。引擎需要的新能力（新 SDK 原语等）先在 fkst-substrate 提 PR。
 - 跨文档定位：引擎事实以 fkst-substrate 的 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md` 为准；本仓 `README.md` 说明包约定与命令。
 

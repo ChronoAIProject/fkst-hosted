@@ -567,7 +567,7 @@ end
 
 local function mock_issue_open_pr(labels, comments, extra)
   local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:implementing", "fkst-dev:pr-authorized" }) do
+  for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   local rendered_comments = {}
@@ -628,7 +628,7 @@ end
 
 local function mock_issue_fix(labels, comments, extra)
   local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:fixing", "fkst-dev:fix-authorized" }) do
+  for _, label in ipairs(labels or { "fkst-dev:fixing" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   local rendered_comments = {}
@@ -664,7 +664,7 @@ end
 
 local function mock_issue_merge(labels, comments, extra)
   local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:merge-ready", "fkst-dev:merge-authorized" }) do
+  for _, label in ipairs(labels or { "fkst-dev:merge-ready" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   local rendered_comments = {}

@@ -5,13 +5,21 @@ local action_label = base.action_label
 local reason_label = base.reason_label
 local json_string = base.json_string
 local render_comment = base.render_comment
-local function merge_comments(event, branch, impl_version)
+local function review_result_approve_marker(event)
+  return core.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key)
+end
+
+local function merge_comments(event, branch, impl_version, include_review_result)
   local version = event.version
-  return {
+  local comments = {
     core.state_marker(event.proposal_id, "merge-ready", version),
     core.pr_link_marker(event.proposal_id, event.pr_number, branch or "devloop-owner-repo-42-01HY", impl_version or version),
     core.merge_ready_marker(event.proposal_id, event.pr_number, version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
   }
+  if include_review_result ~= false then
+    table.insert(comments, review_result_approve_marker(event))
+  end
+  return comments
 end
 
 local function mock_pr_origin(comments, head, head_sha, state)
@@ -32,21 +40,7 @@ local function mock_pr_origin(comments, head, head_sha, state)
   })
 end
 
-local function review_json(review_state, review_head)
-  if review_state == "REVIEW_REQUIRED" then
-    return "[]"
-  end
-  if tostring(review_state or ""):sub(1, 1) == "[" then
-    return tostring(review_state)
-  end
-  return string.format(
-    '[{"state":"%s","commit":{"oid":"%s"}}]',
-    json_string(review_state or "APPROVED"),
-    json_string(review_head or "def456")
-  )
-end
-
-local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, review_decision, review_head)
+local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at)
   local rendered_comments = {}
   for _, comment in ipairs(comments or {}) do
     table.insert(rendered_comments, render_comment(comment))
@@ -55,9 +49,9 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup,latestReviews", {
+  t.mock_command("--json headRefName,headRefOid,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","state":"%s","mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}],"latestReviews":%s}\n',
+      '{"headRefName":"%s","headRefOid":"%s","state":"%s","mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}]}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
       json_string(state or "OPEN"),
@@ -68,15 +62,14 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
       json_string(mergeable or "MERGEABLE"),
       json_string(merge_state or "CLEAN"),
       json_string(rollup_state or "COMPLETED"),
-      json_string(rollup_conclusion or "SUCCESS"),
-      review_json(review_decision, review_head or head_sha or "def456")
+      json_string(rollup_conclusion or "SUCCESS")
     ),
     stderr = "",
     exit_code = 0,
   })
 end
 
-local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, merged_at, review_decision, review_head)
+local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, merged_at)
   local rendered_comments = {}
   for _, comment in ipairs(comments or {}) do
     table.insert(rendered_comments, render_comment(comment))
@@ -85,9 +78,9 @@ local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup,latestReviews", {
+  t.mock_command("--json headRefName,headRefOid,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","state":"%s","mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s,"latestReviews":%s}\n',
+      '{"headRefName":"%s","headRefOid":"%s","state":"%s","mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
       json_string(state or "OPEN"),
@@ -97,8 +90,7 @@ local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state
       cross,
       json_string(mergeable or "MERGEABLE"),
       json_string(merge_state or "CLEAN"),
-      rollup_json or '[{"name":"ci","state":"COMPLETED","conclusion":"SUCCESS"}]',
-      review_json(review_decision, review_head or head_sha or "def456")
+      rollup_json or '[{"name":"ci","state":"COMPLETED","conclusion":"SUCCESS"}]'
     ),
     stderr = "",
     exit_code = 0,
@@ -219,8 +211,8 @@ end
 
 return {
   merge_comments = merge_comments,
+  review_result_approve_marker = review_result_approve_marker,
   mock_pr_origin = mock_pr_origin,
-  review_json = review_json,
   mock_pr_merge = mock_pr_merge,
   mock_pr_merge_rollup = mock_pr_merge_rollup,
   mock_merging_comment = mock_merging_comment,

@@ -51,6 +51,15 @@ local function log_gate(merge_ready, outcome, reason)
   })
 end
 
+local function require_consensus_review_approve(comments, merge_ready)
+  local ok, reason = core.review_result_approval_matches_event(comments, merge_ready)
+  if ok then
+    return true
+  end
+  log_gate(merge_ready, "dry-run", "merge requires trusted review-result approve: " .. tostring(reason))
+  return false
+end
+
 local function raise_fixing(repo, issue_number, merge_ready, current_state, reason)
   local source_ref = issue_source_ref(repo, issue_number)
   local fix_version = core.fix_version_from_review_version(current_state.version)
@@ -227,10 +236,9 @@ function pipeline(event)
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "retry-pending(merge-ready fact marker not visible)", "trusted merge-ready fact marker missing")
       error("github-devloop: merge-ready fact marker not visible for merge; retrying")
     end
-    if fact.review_proposal_id ~= merge_ready.review_proposal_id
-      or fact.review_dedup_key ~= merge_ready.review_dedup_key
-      or fact.head_sha ~= merge_ready.reviewed_head_sha then
-      core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(merge-ready-fact-mismatch)", "merge-ready event does not match canonical fact marker")
+    local approval_ok, approval_reason = core.merge_ready_approval_matches_event(fact, merge_ready)
+    if not approval_ok then
+      core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(" .. tostring(approval_reason) .. ")", "merge-ready event does not match canonical approval fact marker")
       return
     end
     local link = core.pr_link_fact(current_issue.comments, merge_ready.proposal_id)
@@ -289,14 +297,10 @@ function pipeline(event)
       log_gate(merge_ready, "dry-run", "merge requires FKST_GITHUB_WRITE=1")
       return
     end
-    if not core.has_merge_authorized_label(current_issue.labels) then
-      log_gate(merge_ready, "dry-run", "merge requires fkst-dev:merge-authorized")
+    if not require_consensus_review_approve(current_issue.comments, merge_ready) then
       return
     end
-    if not core.merge_authorization_matches_fact(fact, current_pr) then
-      log_gate(merge_ready, "dry-run", "merge requires an APPROVED review at the current head")
-      return
-    end
+    log_gate(merge_ready, "write-ready", "FKST_GITHUB_WRITE=1 and trusted review-result approve")
 
     local rollup_green, rollup_reason = core.pr_rollup_green(current_pr)
     if not rollup_green then
@@ -334,15 +338,13 @@ function pipeline(event)
       log_gate(merge_ready, "dry-run", "write-time FKST_GITHUB_WRITE missing")
       return
     end
-    if not core.has_merge_authorized_label(rechecked_issue.labels) then
-      log_gate(merge_ready, "dry-run", "write-time merge requires fkst-dev:merge-authorized")
+    if not require_consensus_review_approve(rechecked_issue.comments, merge_ready) then
       return
     end
+    log_gate(merge_ready, "write-ready", "write-time FKST_GITHUB_WRITE=1 and trusted review-result approve")
     local rechecked_fact = core.merge_ready_fact(rechecked_issue.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number)
-    if rechecked_fact == nil
-      or rechecked_fact.review_proposal_id ~= merge_ready.review_proposal_id
-      or rechecked_fact.review_dedup_key ~= merge_ready.review_dedup_key
-      or rechecked_fact.head_sha ~= merge_ready.reviewed_head_sha then
+    local rechecked_approval_ok, rechecked_approval_reason = core.merge_ready_approval_matches_event(rechecked_fact, merge_ready)
+    if not rechecked_approval_ok then
       core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready", "merging", "skip-stale(write-gate-fact)", "write-time merge-ready fact changed")
       return
     end
@@ -351,12 +353,13 @@ function pipeline(event)
       error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
     end
     local rechecked_pr = core.parse_pr_view_merge(pr_recheck.stdout)
-    if not core.merge_authorization_matches_fact(rechecked_fact, rechecked_pr) then
-      log_gate(merge_ready, "dry-run", "write-time merge requires an APPROVED review at the current head")
-      return
-    end
     local recheck_ok, recheck_reason = assert_open_same_repo_pr(merge_ready, rechecked_pr, repo, origin.branch, merge_ready.reviewed_head_sha)
     if not recheck_ok then
+      if recheck_reason == "head-sha-mismatch" then
+        log_gate(merge_ready, "fixing", "head-sha-mismatch")
+        raise_fixing(repo, issue_number, merge_ready, rechecked_state, "head-sha-mismatch")
+        return
+      end
       core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready", "merging", "fail-closed(write-gate)", "write-time PR fact failed: " .. tostring(recheck_reason))
       error("github-devloop: write-time PR fact changed before merge")
     end
