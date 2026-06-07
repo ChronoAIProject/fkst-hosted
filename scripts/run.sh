@@ -7,8 +7,17 @@
 #       run tests. Full test also runs composed graph conformance. This is the
 #       single CI and local test entrypoint.
 #
+#   scripts/run.sh check
+#       Run hermetic repository checks only. Does not resolve or execute BIN.
+#
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
+#
+#   scripts/run.sh update-test-manifest
+#       Run the full test suite and refresh scripts/test-manifest.txt from the
+#       engine's authoritative PASS output. Full test runs also enforce G5:
+#       every packages/*/tests/*_test.lua file must produce at least one
+#       engine PASS <relfile>::... line.
 #
 #   scripts/run.sh run <package> <department> [event-json]
 #       One-shot run a department against the REAL host environment via
@@ -34,8 +43,11 @@
 # fkst-framework binary resolution (priority): $BIN > repo .env `BIN=` > PATH >
 # sibling ../fkst-substrate/target/debug/fkst-framework.
 set -euo pipefail
+LC_ALL=C
+export LC_ALL
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_MANIFEST="$ROOT/scripts/test-manifest.txt"
 
 resolve_bin() {
   if [ -z "${BIN:-}" ] && [ -f "$ROOT/.env" ]; then
@@ -114,12 +126,114 @@ ensure_fresh_bin() {
 }
 
 usage() {
-  sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+cmd_check() {
+  python3 "$ROOT/scripts/check_repo.py"
+}
+
+extract_test_manifest() {
+  local log="$1" valid out rc
+  valid="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-valid.XXXXXX")"
+  out="$(mktemp "${TMPDIR:-/tmp}/fkst-test-manifest-extract.XXXXXX")"
+
+  (
+    cd "$ROOT"
+    find packages -path '*/tests/*_test.lua' -type f -print |
+      sed 's#^packages/##' |
+      LC_ALL=C sort -u
+  ) > "$valid"
+
+  rc=0
+  awk -v valid="$valid" '
+    BEGIN {
+      while ((getline file < valid) > 0) {
+        scanned[file] = 1
+      }
+      close(valid)
+    }
+    /^=== / {
+      section=$0
+      sub(/^=== /, "", section)
+      sub(/ ===$/, "", section)
+      next
+    }
+    /^PASS [^[:space:]]+::test_[A-Za-z0-9_]+$/ && section != "" && section != "self-test" && section != "composed conformance" {
+      test=$2
+      file=test
+      sub(/::.*/, "", file)
+      if (!(section "/" file in scanned)) {
+        next
+      }
+      print section " " test
+    }
+  ' "$log" > "$out" || rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    LC_ALL=C sort -u "$out"
+  fi
+  rm -f "$valid" "$out"
+  return "$rc"
+}
+
+write_test_manifest() {
+  local log="$1" tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/fkst-test-manifest.XXXXXX")"
+  extract_test_manifest "$log" > "$tmp"
+  mv "$tmp" "$TEST_MANIFEST"
+  echo "OK: refreshed scripts/test-manifest.txt"
+}
+
+check_test_manifest() {
+  local log="$1" actual
+  if [ ! -f "$TEST_MANIFEST" ]; then
+    echo "error: missing scripts/test-manifest.txt; run scripts/run.sh update-test-manifest" >&2
+    return 1
+  fi
+  actual="$(mktemp "${TMPDIR:-/tmp}/fkst-test-manifest.XXXXXX")"
+  extract_test_manifest "$log" > "$actual"
+  if ! diff -u "$TEST_MANIFEST" "$actual"; then
+    echo "error: test manifest mismatch; run scripts/run.sh update-test-manifest if this change is intentional" >&2
+    rm -f "$actual"
+    return 1
+  fi
+  rm -f "$actual"
+}
+
+check_test_file_coverage() {
+  local log="$1" expected actual missing
+  expected="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-expected.XXXXXX")"
+  actual="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-actual.XXXXXX")"
+  missing="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-missing.XXXXXX")"
+
+  (
+    cd "$ROOT"
+    find packages -path '*/tests/*_test.lua' -type f -print | LC_ALL=C sort -u
+  ) > "$expected"
+
+  extract_test_manifest "$log" |
+    awk '{sub(/::.*/, "", $2); print "packages/" $1 "/" $2}' |
+    LC_ALL=C sort -u > "$actual"
+
+  comm -23 "$expected" "$actual" > "$missing"
+  if [ -s "$missing" ]; then
+    echo "error: G5 engine test coverage failed; these *_test.lua files produced zero engine PASS lines:" >&2
+    sed 's/^/  /' "$missing" >&2
+    echo "  Each *_test.lua must contribute at least one real engine-enumerated top-level test." >&2
+    rm -f "$expected" "$actual" "$missing"
+    return 1
+  fi
+
+  rm -f "$expected" "$actual" "$missing"
+  echo "OK: G5 every *_test.lua produced engine PASS"
 }
 
 cmd_test() {
-  local target="${1:-}" ran=0 fail=0 pkg name
-  local self_rt
+  local target="${1:-}" mode="${2:-check}" ran=0 fail=0 pkg name
+  local self_rt test_log
+
+  test_log="$(mktemp "${TMPDIR:-/tmp}/fkst-test-output.XXXXXX")"
 
   echo "=== self-test ==="
   if [ -n "${FKST_RUNTIME_ROOT:-}" ]; then
@@ -137,7 +251,7 @@ cmd_test() {
     [ -d "$pkg" ] || continue
     name="$(basename "$pkg")"
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
-    echo "=== $name ==="
+    echo "=== $name ===" | tee -a "$test_log"
     ran=$((ran + 1))
     if [ -f "$pkg/composed.deps" ]; then
       echo "skip single-package conformance for composed package: $name"
@@ -147,7 +261,7 @@ cmd_test() {
         continue
       fi
     fi
-    if ! "$BIN" test --project-root "$pkg" --package-root "$pkg"; then
+    if ! "$BIN" test --project-root "$pkg" --package-root "$pkg" | tee -a "$test_log"; then
       fail=$((fail + 1))
     fi
   done
@@ -163,10 +277,31 @@ cmd_test() {
     if ! cmd_test_composed; then
       fail=$((fail + 1))
     fi
+    if [ "$fail" -eq 0 ]; then
+      if [ "$mode" = "update-manifest" ]; then
+        if ! check_test_file_coverage "$test_log"; then
+          fail=$((fail + 1))
+        fi
+      fi
+    fi
+    if [ "$fail" -eq 0 ]; then
+      if [ "$mode" = "update-manifest" ]; then
+        write_test_manifest "$test_log"
+      else
+        if ! check_test_manifest "$test_log"; then
+          fail=$((fail + 1))
+        fi
+        if [ "$fail" -eq 0 ] && ! check_test_file_coverage "$test_log"; then
+          fail=$((fail + 1))
+        fi
+      fi
+    fi
   fi
   if [ "$fail" -ne 0 ]; then
+    rm -f "$test_log"
     echo "FAILED: $fail failure(s) across $ran package(s)" >&2; exit 1
   fi
+  rm -f "$test_log"
   echo "OK: $ran package(s)"
 }
 
@@ -310,8 +445,10 @@ cmd_build() {
 }
 
 case "${1:-}" in
-  test) shift; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
-  test-composed) shift; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
+  check) shift; cmd_check "$@" ;;
+  test) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
+  test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
+  update-test-manifest) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "" update-manifest ;;
   run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
   supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
   build) shift; cmd_build "$@" ;;

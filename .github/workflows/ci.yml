@@ -47,7 +47,7 @@ jobs:
         working-directory: fkst-substrate
         run: cargo build -p fkst-framework
 
-      - name: Run package tests
+      - name: Run repository checks and package tests
         env:
           BIN: ${{ github.workspace }}/fkst-substrate/target/debug/fkst-framework
         run: |

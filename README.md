@@ -70,6 +70,35 @@ scripts/run.sh build
 - CI 调 `scripts/run.sh test`，与本地标准测试走同一路径：先跑一次 `fkst-framework --self-test`，flat 包跑 `conformance + test`，composed 包跑 test，最后跑组合 conformance。
 - 新包清单：有逻辑就写 unit，有运行时行为就写 integration，布线靠 conformance。
 
+## 测试运行体系 / 守卫
+
+`scripts/run.sh check` 只运行仓库静态守卫，不解析也不执行 `BIN`。`scripts/run.sh test` 与 `scripts/run.sh test-composed` 会先运行这些守卫，再进入引擎真实测试；CI 仍只调用 `scripts/run.sh test`。
+
+静态守卫由 `scripts/check_repo.py` 实现，只扫描 `packages/` 与 `scripts/`，不会广泛扫描仓库根，也不会扫 CI checkout 到根目录的 `fkst-substrate/`。这是快速、密闭、best-effort 的静态 lint，只负责不需要引擎的仓库形状约束；它不是完整 Lua parser，也不判断引擎实际会从 returned table 顶层枚举哪些 `test_` key。这个事实由下方 manifest + G5 的引擎真实输出检查负责；更深的 engine-loader-based Lua audit 已列入 engine-PR backlog。当前静态守卫包括：
+
+- `packages/` 与 `scripts/` 下的 `.lua`、`.sh`、`.py`、`.rs` 源文件硬上限 1000 行；超过即失败，先按职责拆分或删除重复代码。
+- `packages/*/tests/` 下的 Lua 文件只能命名为 `*_test.lua` 或 `*_helpers.lua`。
+- 对 `*_test.lua` 做 best-effort “看起来有 `test_<name> = function` 定义”的提示；这只是早期 lint，不作为引擎枚举真相。
+- 对单个 `*_test.lua` 内 best-effort 识别到的 top-level `test_<name>` key 做重复检查；常见 assignment form（如 `test_x = ...`、`["test_x"] = ...`、`M.test_x = ...`、`M["test_x"] = ...`）与常见 function-definition form（如 `function test_x() ... end`、`function M.test_x() ... end`、`function M:test_x() ... end`）都会归一到同一个 key，重复即 G2 失败，避免 Lua table 覆盖导致早期测试静默丢失。
+- `*_helpers.lua` 不能定义可被该 lint 识别的任何 `test_<name>` entry，无论 RHS 是什么；常见 assignment 与 function-definition form 都会被识别，避免测试漏进 helper。
+- 每个 helper 模块 `tests.<stem>` 必须被同包 tests 目录下至少一个其他 Lua 文件 `require("tests.<stem>")`；`require("tests.<x>")` 必须指向存在的 `tests/<x>.lua`，且测试文件和 helper 都不能 require 另一个 `*_test.lua` 模块。
+
+`scripts/test-manifest.txt` 是从引擎 stdout 中锚定提取的 `PASS <relfile>::<test_name>` 测试清单，格式为排序去重后的 `<package> <relfile>::<test_name>`。提取只接受整行精确匹配 `PASS <relfile>::test_<name>` 的行，其中 `<relfile>` 必须是本次实际扫描到的 `packages/*/tests/*_test.lua`，`<name>` 必须匹配 `test_[A-Za-z0-9_]+`；中间夹杂文本或 malformed `PASS ...` 不会计入。无参 `scripts/run.sh test` 会在全量测试结束后对比该清单，并执行 G5：每个 `packages/*/tests/*_test.lua` 文件必须至少产生一行被该规则接受的 engine-format `PASS <relfile>::...`，否则说明该文件没有贡献任何引擎实际运行的测试，测试会失败并列出文件名。`scripts/run.sh test <pkg>` 是局部运行，会跳过全量 manifest 与 G5。测试增删改名是有意变更时，用下面命令显式刷新：
+
+```sh
+scripts/run.sh update-test-manifest
+```
+
+这些守卫是确定性、密闭、可移植的早期失败机制，但不替代引擎真实运行：它们不执行 router、不验证 reliable delivery 的 ack/retry/backoff/DLQ/lease/fencing，不做真实外部状态 reconciliation，也不触达 GitHub 或 `codex`。dup/helper 静态 lint 只覆盖常见 assignment 与 function-definition syntax；穷尽 Lua 枚举形态仍是 engine-owned audit 的 engine-PR backlog item。stdout 形态的 manifest / G5 检查也只是 best-effort：锚定和文件白名单可以缩窄伪造面，但测试代码仍可能打印一行完全匹配真实格式的 `PASS <relfile>::<test_name>`；完全可信的测试 inventory 需要引擎提供机器可区分的结构化结果。外部 CLI 与真实事件流仍由 `fkst-framework test`、`conformance`、`run`、`supervise` 和只读 dogfood 覆盖，G5 的引擎真实输出仍是 runnability authority。
+
+engine-PR backlog：
+
+- 引擎侧 Lua loader / sandbox 的 stray-global 与 unused-local audit。
+- 引擎测试结果需要机器可区分的结构化输出：例如唯一 tag 的结果行、专用 channel，或 machine-readable inventory。当前 stdout-based manifest / G5 检查只能锚定真实格式并限制到已扫描测试文件，不能完全消除测试代码自行打印匹配 `PASS <relfile>::<test_name>` 的伪造风险。
+- router / reliable-delivery hermetic harness：注入 source event，断言 route、ack、retry、backoff、DLQ、lease、fencing。
+- deterministic `supervise --oneshot` / fixture runner，用于 package-level end-to-end reliable-delivery smoke。
+- 真实 GitHub / `codex` JSON-shape reconciliation，作为 `workflow_dispatch` 或本地只读 dogfood；需要凭证，不进默认 CI。
+
 ## github-proxy
 
 `packages/github-proxy/` 是首个官方公司：GitHub ↔ fkst 事件桥，覆盖 issue 与 PR。
