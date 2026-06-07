@@ -14,6 +14,7 @@
 #       Run only composed graph conformance for packages with composed.deps.
 #
 #   scripts/run.sh run <package> <department> [event-json]
+#   scripts/run.sh run <package> <department> --event-file <path>
 #       One-shot run a department against the REAL host environment via
 #       `fkst-framework run`: decode emitted RAISED events and dump the <RT>
 #       scratch tree. Generic across packages; pass package-specific config via
@@ -300,10 +301,68 @@ cmd_test_composed() {
 }
 
 cmd_run() {
-  local pkg="${1:-}" dept="${2:-}" event="${3:-{\"payload\":{}}}"
+  local pkg="${1:-}" dept="${2:-}"
   if [ -z "$pkg" ] || [ -z "$dept" ]; then
-    echo "usage: scripts/run.sh run <package> <department> [event-json]" >&2; exit 1
+    echo "usage: scripts/run.sh run <package> <department> [event-json]" >&2
+    echo "   or: scripts/run.sh run <package> <department> --event-file <path>" >&2
+    exit 1
   fi
+  shift 2
+
+  local event="{\"payload\":{}}" event_file="" inline_event=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --event-file)
+        if [ -n "$event_file" ]; then
+          echo "error: --event-file can only be provided once" >&2
+          exit 1
+        fi
+        if [ "$#" -lt 2 ] || [ -z "${2:-}" ]; then
+          echo "error: --event-file requires a readable path" >&2
+          exit 1
+        fi
+        event_file="$2"
+        shift 2
+        ;;
+      --event-file=*)
+        if [ -n "$event_file" ]; then
+          echo "error: --event-file can only be provided once" >&2
+          exit 1
+        fi
+        event_file="${1#--event-file=}"
+        if [ -z "$event_file" ]; then
+          echo "error: --event-file requires a readable path" >&2
+          exit 1
+        fi
+        shift
+        ;;
+      --*)
+        echo "error: unknown run option: $1" >&2
+        exit 1
+        ;;
+      *)
+        if [ -n "$inline_event" ]; then
+          echo "error: run accepts only one inline event JSON argument" >&2
+          exit 1
+        fi
+        inline_event="$1"
+        shift
+        ;;
+    esac
+  done
+
+  if [ -n "$event_file" ] && [ -n "$inline_event" ]; then
+    echo "error: use either inline event JSON or --event-file, not both" >&2
+    exit 1
+  fi
+  if [ -n "$event_file" ]; then
+    [ -f "$event_file" ] || { echo "error: event file does not exist: $event_file" >&2; exit 1; }
+    [ -r "$event_file" ] || { echo "error: event file is not readable: $event_file" >&2; exit 1; }
+    event="$(< "$event_file")"
+  elif [ -n "$inline_event" ]; then
+    event="$inline_event"
+  fi
+
   local pkgdir="$ROOT/packages/$pkg" lua
   lua="$pkgdir/departments/$dept/main.lua"
   [ -f "$lua" ] || { echo "error: no department at $lua" >&2; exit 1; }
