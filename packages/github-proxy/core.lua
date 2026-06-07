@@ -243,7 +243,10 @@ function M.parse_entity_list(gh_json_stdout)
   local decoded = json.decode(gh_json_stdout or "[]")
   local entities = {}
   for _, item in ipairs(decoded) do
-    local labels = {}
+    -- Array-tagged so an empty labels list serializes as JSON [] (not {}) when
+    -- the event payload leaves the engine via raise. See SPEC: a bare Lua {} is
+    -- ambiguous and serializes as a JSON object; json.decode("[]") preserves [].
+    local labels = json.decode("[]")
     for _, label in ipairs(item.labels or {}) do
       if type(label) == "table" and label.name ~= nil then
         table.insert(labels, tostring(label.name))
