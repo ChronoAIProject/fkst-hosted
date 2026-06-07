@@ -89,6 +89,40 @@ return {
     t.eq(current.state, "review-meta")
   end,
 
+  test_current_devloop_state_recognizes_merging = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local comments = core.parse_issue_comments(
+      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
+        .. proposal_id
+        .. '\\" state=\\"merging\\" version=\\"'
+        .. version
+        .. '\\" -->","author":{"login":"fkst-test-bot"}}]}'
+    )
+
+    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
+    t.eq(current.state, "merging")
+  end,
+
+  test_current_devloop_state_default_rank_converges_merging_to_merged = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local comments = core.parse_issue_comments(
+      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
+        .. proposal_id
+        .. '\\" state=\\"merging\\" version=\\"'
+        .. version
+        .. '\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
+        .. proposal_id
+        .. '\\" state=\\"merged\\" version=\\"'
+        .. version
+        .. '\\" -->","author":{"login":"fkst-test-bot"}}]}'
+    )
+
+    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
+    t.eq(current.state, "merged")
+  end,
+
   test_parse_entity_list = function()
     local entities = core.parse_entity_list('[{"number":7,"title":"Fix \\"x\\"","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]')
     t.eq(#entities, 1)
