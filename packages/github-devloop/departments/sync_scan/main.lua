@@ -6,7 +6,6 @@ M.spec = {
   consumes = { "devloop_branch_tick" },
   produces = { "devloop_sync_conflict" },
   fanout = { "devloop_branch_tick" },
-  ephemeral = { "devloop_branch_tick" },
   stall_window = "10m",
 }
 
