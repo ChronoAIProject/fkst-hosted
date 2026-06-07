@@ -81,6 +81,9 @@ return {
     t.eq(result.raises[1].payload.source_ref.kind, "proposal")
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_results, 3)
+    t.eq(result.raises[1].payload.angle_results[1].angle, "minimal")
+    t.eq(result.raises[1].payload.angle_results[2].angle, "structural")
+    t.eq(result.raises[1].payload.angle_results[3].angle, "delete")
 
     local calls = codex_calls()
     t.eq(#calls, 3)
