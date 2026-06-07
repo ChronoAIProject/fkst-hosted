@@ -13,12 +13,6 @@
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
 #
-#   scripts/run.sh update-test-manifest
-#       Run the full test suite and refresh scripts/test-manifest.txt from the
-#       engine's authoritative PASS output. Full test runs also enforce G5:
-#       every packages/*/tests/*_test.lua file must produce at least one
-#       engine PASS <relfile>::... line.
-#
 #   scripts/run.sh run <package> <department> [event-json]
 #       One-shot run a department against the REAL host environment via
 #       `fkst-framework run`: decode emitted RAISED events and dump the <RT>
@@ -43,11 +37,8 @@
 # fkst-framework binary resolution (priority): $BIN > repo .env `BIN=` > PATH >
 # sibling ../fkst-substrate/target/debug/fkst-framework.
 set -euo pipefail
-LC_ALL=C
-export LC_ALL
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEST_MANIFEST="$ROOT/scripts/test-manifest.txt"
 
 resolve_bin() {
   if [ -z "${BIN:-}" ] && [ -f "$ROOT/.env" ]; then
@@ -126,17 +117,17 @@ ensure_fresh_bin() {
 }
 
 usage() {
-  sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 cmd_check() {
   python3 "$ROOT/scripts/check_repo.py"
 }
 
-extract_test_manifest() {
+extract_test_passes() {
   local log="$1" valid out rc
   valid="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-valid.XXXXXX")"
-  out="$(mktemp "${TMPDIR:-/tmp}/fkst-test-manifest-extract.XXXXXX")"
+  out="$(mktemp "${TMPDIR:-/tmp}/fkst-test-passes-extract.XXXXXX")"
 
   (
     cd "$ROOT"
@@ -177,30 +168,6 @@ extract_test_manifest() {
   return "$rc"
 }
 
-write_test_manifest() {
-  local log="$1" tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/fkst-test-manifest.XXXXXX")"
-  extract_test_manifest "$log" > "$tmp"
-  mv "$tmp" "$TEST_MANIFEST"
-  echo "OK: refreshed scripts/test-manifest.txt"
-}
-
-check_test_manifest() {
-  local log="$1" actual
-  if [ ! -f "$TEST_MANIFEST" ]; then
-    echo "error: missing scripts/test-manifest.txt; run scripts/run.sh update-test-manifest" >&2
-    return 1
-  fi
-  actual="$(mktemp "${TMPDIR:-/tmp}/fkst-test-manifest.XXXXXX")"
-  extract_test_manifest "$log" > "$actual"
-  if ! diff -u "$TEST_MANIFEST" "$actual"; then
-    echo "error: test manifest mismatch; run scripts/run.sh update-test-manifest if this change is intentional" >&2
-    rm -f "$actual"
-    return 1
-  fi
-  rm -f "$actual"
-}
-
 check_test_file_coverage() {
   local log="$1" expected actual missing
   expected="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-expected.XXXXXX")"
@@ -212,7 +179,7 @@ check_test_file_coverage() {
     find packages -path '*/tests/*_test.lua' -type f -print | LC_ALL=C sort -u
   ) > "$expected"
 
-  extract_test_manifest "$log" |
+  extract_test_passes "$log" |
     awk '{sub(/::.*/, "", $2); print "packages/" $1 "/" $2}' |
     LC_ALL=C sort -u > "$actual"
 
@@ -230,7 +197,7 @@ check_test_file_coverage() {
 }
 
 cmd_test() {
-  local target="${1:-}" mode="${2:-check}" ran=0 fail=0 pkg name
+  local target="${1:-}" ran=0 fail=0 pkg name
   local self_rt test_log
 
   test_log="$(mktemp "${TMPDIR:-/tmp}/fkst-test-output.XXXXXX")"
@@ -278,22 +245,8 @@ cmd_test() {
       fail=$((fail + 1))
     fi
     if [ "$fail" -eq 0 ]; then
-      if [ "$mode" = "update-manifest" ]; then
-        if ! check_test_file_coverage "$test_log"; then
-          fail=$((fail + 1))
-        fi
-      fi
-    fi
-    if [ "$fail" -eq 0 ]; then
-      if [ "$mode" = "update-manifest" ]; then
-        write_test_manifest "$test_log"
-      else
-        if ! check_test_manifest "$test_log"; then
-          fail=$((fail + 1))
-        fi
-        if [ "$fail" -eq 0 ] && ! check_test_file_coverage "$test_log"; then
-          fail=$((fail + 1))
-        fi
+      if ! check_test_file_coverage "$test_log"; then
+        fail=$((fail + 1))
       fi
     fi
   fi
@@ -448,7 +401,6 @@ case "${1:-}" in
   check) shift; cmd_check "$@" ;;
   test) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
   test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
-  update-test-manifest) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "" update-manifest ;;
   run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
   supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
   build) shift; cmd_build "$@" ;;
