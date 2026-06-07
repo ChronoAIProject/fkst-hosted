@@ -53,6 +53,17 @@ local function is_ancestor(ancestor_sha, descendant_sha)
   error("github-devloop: git ancestor check failed: " .. tostring(result.stderr))
 end
 
+local function trees_equal(sha_a, sha_b)
+  local result = exec_sync({ cmd = core.git_trees_equal_quiet_cmd(sha_a, sha_b), timeout = 30 })
+  if result.exit_code == 0 then
+    return true
+  end
+  if result.exit_code == 1 then
+    return false
+  end
+  error("github-devloop: git tree compare failed: " .. tostring(result.stderr))
+end
+
 local function runtime_root()
   local result = run_git(core.read_runtime_root_cmd(), 30, "FKST_RUNTIME_ROOT read")
   return result.stdout
@@ -144,6 +155,48 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   core.log_apply("sync_scan", "branch-sync", "synced", upstream_sha, {}, {})
 end
 
+local function converge_integration_to_upstream(repo, upstream, integration, upstream_sha, integration_sha)
+  if core.write_mode() ~= "real" then
+    core.log_line("info", "sync_scan", "branch-sync", "OUTBOUND", {
+      "mode=dry-run",
+      "repo=" .. tostring(repo),
+      "upstream=" .. tostring(upstream),
+      "integration=" .. tostring(integration),
+      "upstream_sha=" .. tostring(upstream_sha),
+      "integration_sha=" .. tostring(integration_sha),
+      "reason=branch sync converge reset requires FKST_GITHUB_WRITE=1",
+    })
+    return
+  end
+
+  core.assert_trusted_bot_configured()
+  fetch_branch(integration)
+  local rechecked_integration_sha = remote_head(integration)
+  if rechecked_integration_sha ~= integration_sha then
+    core.log_cas_decision("sync_scan", "branch-sync", {
+      state = "integration",
+      version = rechecked_integration_sha,
+    }, "sync", "converge", "skip-foreign(head)", "integration head changed before converge reset")
+    return
+  end
+
+  if not trees_equal(upstream_sha, integration_sha) then
+    core.log_cas_decision("sync_scan", "branch-sync", {
+      state = "diverged",
+      version = integration_sha,
+    }, "sync", "converge", "skip-idempotent(tree-changed)", "branch trees changed before converge reset")
+    return
+  end
+
+  run_git(core.git_push_branch_force_with_lease_cmd(integration, upstream_sha, integration_sha), 120, "git branch sync converge")
+  fetch_branch(integration)
+  local pushed_head = remote_head(integration)
+  if pushed_head ~= upstream_sha then
+    error("github-devloop: branch sync converge verification failed")
+  end
+  core.log_apply("sync_scan", "branch-sync", "converged", upstream_sha, {}, {})
+end
+
 local function fast_forward_sync(repo, upstream, integration, upstream_sha, integration_sha)
   local runtime = runtime_root()
   with_temp_worktree(runtime, repo, upstream, integration, integration_sha, function(worktree)
@@ -175,6 +228,10 @@ function pipeline(event)
     end
     if is_ancestor(integration_sha, upstream_sha) then
       fast_forward_sync(repo, branches.upstream, branches.integration, upstream_sha, integration_sha)
+      return
+    end
+    if trees_equal(upstream_sha, integration_sha) then
+      converge_integration_to_upstream(repo, branches.upstream, branches.integration, upstream_sha, integration_sha)
       return
     end
 

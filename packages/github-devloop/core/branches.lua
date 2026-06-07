@@ -61,11 +61,28 @@ function M.git_fast_forward_cmd(worktree, sha)
     .. M._shell_single_quote(require_safe_sha("fast-forward sha", sha))
 end
 
-function M.git_remote_content_diff_quiet_cmd(upstream, integration)
+function M.git_remote_trees_equal_quiet_cmd(upstream, integration)
   return "git diff --quiet refs/remotes/origin/"
     .. M._shell_single_quote(require_safe_branch("upstream branch", upstream))
-    .. "...refs/remotes/origin/"
+    .. " refs/remotes/origin/"
     .. M._shell_single_quote(require_safe_branch("integration branch", integration))
+end
+
+function M.git_trees_equal_quiet_cmd(sha_a, sha_b)
+  return "git diff --quiet "
+    .. M._shell_single_quote(require_safe_sha("tree compare sha", sha_a))
+    .. " "
+    .. M._shell_single_quote(require_safe_sha("tree compare sha", sha_b))
+end
+
+function M.git_push_branch_force_with_lease_cmd(branch, new_sha, expected_old_sha)
+  local safe_branch = require_safe_branch("push branch", branch)
+  local safe_new_sha = require_safe_sha("new branch sha", new_sha)
+  local safe_expected_old_sha = require_safe_sha("expected old branch sha", expected_old_sha)
+  return "git push origin "
+    .. M._shell_single_quote(safe_new_sha .. ":refs/heads/" .. safe_branch)
+    .. " --force-with-lease="
+    .. M._shell_single_quote("refs/heads/" .. safe_branch .. ":" .. safe_expected_old_sha)
 end
 
 function M.git_push_branch_update_cmd(branch)
