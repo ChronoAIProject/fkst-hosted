@@ -135,10 +135,10 @@ local function repository_name_with_owner(head_repository, head_repository_owner
   if type(head_repository) ~= "table" then
     return nil
   end
-  if head_repository.nameWithOwner ~= nil then
+  if head_repository.nameWithOwner ~= nil and head_repository.nameWithOwner ~= "" then
     return tostring(head_repository.nameWithOwner)
   end
-  if head_repository.name_with_owner ~= nil then
+  if head_repository.name_with_owner ~= nil and head_repository.name_with_owner ~= "" then
     return tostring(head_repository.name_with_owner)
   end
   local name = head_repository.name

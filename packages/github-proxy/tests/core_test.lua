@@ -167,6 +167,15 @@ return {
     t.eq(same_repo_pr.state, "OPEN")
     t.eq(same_repo_pr.head_repository, "owner/repo")
     t.eq(same_repo_pr.is_target_repository, true)
+    -- Real gh form (observed via dogfood): a merged / branch-deleted PR returns
+    -- headRepository.nameWithOwner as an empty string. Fall back to owner/name so
+    -- a legitimate same-repo PR is not misjudged as cross-repo.
+    local empty_nwo_pr = core.parse_pr_view_head_state(
+      '{"headRefOid":"ABC123","state":"MERGED","headRepository":{"name":"fkst-packages","nameWithOwner":""},"headRepositoryOwner":{"login":"ChronoAIProject"},"isCrossRepository":false}',
+      "ChronoAIProject/fkst-packages"
+    )
+    t.eq(empty_nwo_pr.head_repository, "ChronoAIProject/fkst-packages")
+    t.eq(empty_nwo_pr.is_target_repository, true)
     t.eq(core.parse_pr_view_head_state(
       '{"headRefOid":"ABC123","state":"OPEN","headRepository":{"nameWithOwner":"fork/repo"},"isCrossRepository":true}',
       "owner/repo"
