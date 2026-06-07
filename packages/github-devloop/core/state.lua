@@ -241,6 +241,27 @@ local function compare_transition_versions(incoming_version, current_version)
   return compare_version_keys(version_sort_key(incoming_version, 0), version_sort_key(current_version, 0))
 end
 
+local function sign_order(value)
+  if value > 0 then
+    return 1
+  end
+  if value < 0 then
+    return -1
+  end
+  return 0
+end
+
+function M.compare_state_marker_order(current, target_state, target_version)
+  if current == nil or current.version == nil then
+    return -1
+  end
+  local version_order = compare_transition_versions(current.version, target_version)
+  if version_order ~= 0 then
+    return sign_order(version_order)
+  end
+  return sign_order(M.stage_rank(current.state) - M.stage_rank(target_state))
+end
+
 local function compare_state_marker(a, b)
   if a == nil then
     return true

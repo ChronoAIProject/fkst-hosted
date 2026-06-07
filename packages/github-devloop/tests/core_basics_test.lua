@@ -242,6 +242,12 @@ return {
       state = "reviewing",
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1",
     }, { "review-meta" }, "fixing", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"), "stale")
+    local review_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-05T01-02-03Z"
+    t.eq(core.compare_state_marker_order({ state = "pr-open", version = review_version }, "reviewing", review_version), -1)
+    t.eq(core.compare_state_marker_order({ state = "reviewing", version = review_version }, "reviewing", review_version), 0)
+    t.eq(core.compare_state_marker_order({ state = "merge-ready", version = review_version }, "reviewing", review_version), 1)
+    t.eq(core.compare_state_marker_order({ state = "merge-ready", version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z" }, "reviewing", review_version), -1)
+    t.eq(core.compare_state_marker_order({ state = "pr-open", version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-06T01-02-03Z" }, "reviewing", review_version), 1)
 
     local marker = core.result_marker(
       proposal_id,

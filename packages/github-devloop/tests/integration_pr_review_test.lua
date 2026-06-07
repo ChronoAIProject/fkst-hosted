@@ -676,10 +676,19 @@ return {
     t.eq(#advanced.raises, 0)
     t.eq(count_calls("gh pr diff"), 0)
 
+    mock_issue_review({ "fkst-dev:pr-open" }, {
+      core.state_marker(event.proposal_id, "pr-open", event.version),
+    })
+    local lagged_predecessor = run_review_pr(event, opts("review-pr-lagged-predecessor"))
+    t.eq(lagged_predecessor.exit_code, 1)
+    t.eq(#lagged_predecessor.raises, 0)
+    t.eq(count_calls("gh pr diff"), 0)
+
     mock_issue_review({ "fkst-dev:enabled" }, {})
     local pending = run_review_pr(event, opts("review-pr-pending-marker"))
     t.eq(pending.exit_code, 1)
     t.eq(#pending.raises, 0)
+    t.eq(count_calls("gh pr diff"), 0)
   end,
 
   test_review_result_approve_marks_issue_merge_ready = function()
