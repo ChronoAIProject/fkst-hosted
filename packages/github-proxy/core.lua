@@ -454,15 +454,21 @@ function M.devloop_implementing_fact(comments, proposal_id, impl_version, bot_lo
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local marker_branch = marker:match('branch="([^"]+)"')
       local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      local marker_base_branch = marker:match('base_branch="([^"]+)"')
+      local marker_base_sha = marker:match('base_sha="([^"]+)"')
       if marker_proposal == proposal_id
         and marker_dedup == tostring(impl_version)
         and is_git_ref_safe(marker_branch)
-        and is_git_sha(marker_head_sha) then
+        and is_git_sha(marker_head_sha)
+        and is_git_ref_safe(marker_base_branch)
+        and (marker_base_sha == nil or is_git_sha(marker_base_sha)) then
         return {
           proposal_id = marker_proposal,
           impl_version = marker_dedup,
           branch = marker_branch,
           head_sha = marker_head_sha,
+          base_branch = marker_base_branch,
+          base_sha = marker_base_sha,
         }
       end
     end
@@ -499,10 +505,21 @@ function M.gh_pr_list_cmd(repo)
   return "gh pr list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state,labels"
 end
 
-function M.gh_pr_list_head_cmd(repo, branch)
+function M.gh_pr_list_head_cmd(repo, branch, base_branch)
+  if not is_git_ref_safe(branch) then
+    error("github-proxy: invalid branch")
+  end
+  if base_branch ~= nil and not is_git_ref_safe(base_branch) then
+    error("github-proxy: invalid base branch")
+  end
+  local base_arg = ""
+  if base_branch ~= nil then
+    base_arg = " --base " .. shell_single_quote(base_branch)
+  end
   return "gh pr list --repo " .. shell_single_quote(repo)
     .. " --head " .. shell_single_quote(branch)
-    .. " --state open --json number,url,headRefName,state"
+    .. base_arg
+    .. " --state open --json number,url,headRefName,baseRefName,state"
 end
 
 function M.gh_issue_view_pr_open_guard_cmd(repo, issue_number)
@@ -516,6 +533,7 @@ function M.parse_pr_list_for_head(gh_json_stdout, branch)
   for _, item in ipairs(decoded) do
     local number = item.number
     local head = item.headRefName or item.head_ref_name
+    local base = item.baseRefName or item.base_ref_name
     local state = tostring(item.state or "")
     if is_positive_number(number)
       and tostring(head or "") == tostring(branch)
@@ -524,6 +542,7 @@ function M.parse_pr_list_for_head(gh_json_stdout, branch)
         number = tonumber(number),
         url = item.url,
         head_ref_name = head,
+        base_ref_name = base,
         state = item.state,
       }
     end
@@ -553,12 +572,20 @@ function M.parse_git_show_ref_head(stdout, branch)
   return nil
 end
 
-function M.gh_pr_create_cmd(repo, branch, title, body_file)
+function M.gh_pr_create_cmd(repo, branch, base_branch, title, body_file)
   if not is_git_ref_safe(branch) then
     error("github-proxy: invalid branch")
   end
+  if base_branch ~= nil and not is_git_ref_safe(base_branch) then
+    error("github-proxy: invalid base branch")
+  end
+  local base_arg = ""
+  if base_branch ~= nil then
+    base_arg = " --base " .. shell_single_quote(base_branch)
+  end
   return "gh pr create --repo " .. shell_single_quote(repo)
     .. " --head " .. shell_single_quote(branch)
+    .. base_arg
     .. " --title " .. shell_single_quote(title)
     .. " --body-file " .. shell_single_quote(body_file)
 end
@@ -587,7 +614,7 @@ function M.gh_pr_view_head_oid_cmd(repo, pr_number)
   end
   return "gh pr view " .. shell_single_quote(pr_number)
     .. " --repo " .. shell_single_quote(repo)
-    .. " --json headRefOid,state,headRepository,headRepositoryOwner,isCrossRepository"
+    .. " --json headRefOid,baseRefName,state,headRepository,headRepositoryOwner,isCrossRepository"
 end
 
 local function repository_name_with_owner(head_repository, head_repository_owner)
@@ -633,6 +660,7 @@ function M.parse_pr_view_head_state(gh_json_stdout, target_repo)
   if is_git_sha(head) and state ~= nil then
     return {
       head_ref_oid = tostring(head):lower(),
+      base_ref_name = decoded.baseRefName or decoded.base_ref_name,
       state = tostring(state),
       head_repository = head_repo,
       is_cross_repository = is_cross_repository,

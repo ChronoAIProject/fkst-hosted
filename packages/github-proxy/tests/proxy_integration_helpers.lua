@@ -173,15 +173,16 @@ local function mock_pr_head_list(stdout)
   })
 end
 
-local function mock_pr_head_state(head_sha, state, head_repo, is_cross_repository)
+local function mock_pr_head_state(head_sha, state, head_repo, is_cross_repository, base_branch)
   local cross = "false"
   if is_cross_repository == true then
     cross = "true"
   end
   t.mock_command("--json headRefOid", {
     stdout = string.format(
-      '{"headRefOid":"%s","state":"%s","headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s}\n',
+      '{"headRefOid":"%s","baseRefName":"%s","state":"%s","headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s}\n',
       head_sha or "abc123",
+      base_branch or "dev",
       state or "OPEN",
       head_repo or "owner/x",
       cross
@@ -268,8 +269,9 @@ local function pr_open_event()
       branch = "devloop-owner-x-42-01HY",
       head_sha = "abc123",
       title = "Implement decision recorder",
-      body = 'github-devloop implementation PR for issue #42\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/x/42" issue="42" branch="devloop-owner-x-42-01HY" impl_version="v1" -->',
-      issue_comment_body_template = 'github-devloop PR opened: #{{pr_number}}\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="{{pr_number}}" branch="devloop-owner-x-42-01HY" impl_version="v1" -->',
+      base_branch = "dev",
+      body = 'github-devloop implementation PR for issue #42\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/x/42" issue="42" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->',
+      issue_comment_body_template = 'github-devloop PR opened: #{{pr_number}}\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="{{pr_number}}" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->',
       issue_label_add = { "fkst-dev:pr-open" },
       issue_label_remove = { "fkst-dev:implementing" },
       dedup_key = "open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY",
@@ -284,7 +286,7 @@ end
 local function pr_open_guard_comments(extra)
   local comments = {
     '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" version="v1" stage_rank="600" -->',
-    '<!-- fkst:github-devloop:implementing:v1 proposal="github-devloop/issue/owner/x/42" dedup="v1" branch="devloop-owner-x-42-01HY" head_sha="abc123" -->',
+    '<!-- fkst:github-devloop:implementing:v1 proposal="github-devloop/issue/owner/x/42" dedup="v1" branch="devloop-owner-x-42-01HY" head_sha="abc123" base_branch="dev" base_sha="abc123" -->',
   }
   for _, comment in ipairs(extra or {}) do
     table.insert(comments, comment)
@@ -294,7 +296,7 @@ end
 
 local function pr_open_visible_comments(extra)
   local comments = {
-    'github-devloop PR opened: #9\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="9" branch="devloop-owner-x-42-01HY" impl_version="v1" -->\n' .. core.comment_marker("open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY"),
+    'github-devloop PR opened: #9\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="9" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->\n' .. core.comment_marker("open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY"),
   }
   for _, comment in ipairs(extra or {}) do
     table.insert(comments, comment)

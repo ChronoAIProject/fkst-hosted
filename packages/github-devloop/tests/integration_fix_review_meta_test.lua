@@ -100,7 +100,7 @@ return {
       },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -150,7 +150,7 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       comment_raise.payload.body,
     })
-    local origin_marker_for_review = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker_for_review = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_pr_origin({ origin_marker_for_review }, branch, "feedface")
     mock_pr_diff("diff --git a/packages/github-devloop/core.lua b/packages/github-devloop/core.lua\n+fixed again\n")
     mock_pr_origin({ origin_marker_for_review }, branch, "feedface")
@@ -185,7 +185,7 @@ return {
     t.eq(#pending.raises, 0)
     t.eq(count_calls("codex exec"), 0)
 
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -286,7 +286,7 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version) }, branch, "def456")
+    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
 
     local result = run_fix(event, opts("fix-missing-write"))
     t.eq(result.exit_code, 0)
@@ -306,7 +306,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     mock_bot_env()
     mock_write_env("")
@@ -380,7 +380,7 @@ return {
       },
       second_event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(second_event.proposal_id, "42", first_branch, first_event.version)
+    local origin_marker = core.pr_origin_marker(second_event.proposal_id, "42", first_branch, first_event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(second_event, { "fkst-dev:fixing" }, {
@@ -426,7 +426,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     mock_bot_env()
     mock_write_env("1")
@@ -463,7 +463,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     mock_bot_env()
     mock_write_env("1")
@@ -472,9 +472,9 @@ return {
       reject_comment,
     }, branch, event.version)
     mock_write_env("1")
-    t.mock_command("--json headRefName,headRefOid,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
       stdout = string.format(
-        '{"headRefName":"%s","headRefOid":"def456","state":"OPEN","comments":[%s],"isCrossRepository":false}\n',
+        '{"headRefName":"%s","headRefOid":"def456","baseRefName":"dev","state":"OPEN","comments":[%s],"isCrossRepository":false}\n',
         json_string(branch),
         render_comment(origin_marker)
       ),
@@ -506,7 +506,7 @@ return {
       reject_comment,
     }, branch, event.version)
     mock_write_env("1")
-    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version) }, branch, "def456")
+    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
     t.mock_command("git worktree list --porcelain", {
       stdout = "worktree /tmp/fix-worktree\nHEAD def456\nbranch refs/heads/" .. branch .. "\n\n",
@@ -542,7 +542,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -591,7 +591,7 @@ return {
   test_review_loop_unresolved_under_budget_reraises_review_proposal = function()
     local event = review_unresolved()
     local impl_version = reviewing().version
-    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version)
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
     mock_issue_review({ "fkst-dev:reviewing" }, {
@@ -612,7 +612,7 @@ return {
     local review_version = reviewing().version
     local event = review_unresolved()
     local fix_version = core.fix_version_from_review_version(review_version)
-    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", review_version)
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", review_version, "dev")
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
     mock_issue_review({ "fkst-dev:fixing" }, {
@@ -630,7 +630,7 @@ return {
       dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/2",
     })
     local impl_version = reviewing().version
-    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version)
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
     mock_issue_review({ "fkst-dev:reviewing" }, {
@@ -750,7 +750,7 @@ return {
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local recomputed_branch = core.implement_branch("owner/repo", "42", meta_exit_version)
     t.eq(branch ~= recomputed_branch, true)
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(fix_event, { "fkst-dev:fixing" }, {

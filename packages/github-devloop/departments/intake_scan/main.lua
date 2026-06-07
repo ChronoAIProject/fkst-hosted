@@ -25,7 +25,7 @@ local function should_skip_known(labels)
 end
 
 local function read_repo()
-  local repo = core.read_env("FKST_GITHUB_REPO")
+  local repo = core.devloop_config().repo
   if repo == nil or not core.issue_ref_round_trips(repo, 1) then
     return nil
   end

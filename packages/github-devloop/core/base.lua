@@ -119,12 +119,6 @@ local comment_body
 local comment_author_login
 local is_trusted_comment
 
-local allowed_env = {
-  FKST_GITHUB_BOT_LOGIN = true,
-  FKST_GITHUB_REPO = true,
-  FKST_GITHUB_WRITE = true,
-}
-
 local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
@@ -239,25 +233,6 @@ local function has_bounded_source_ref(source_ref)
   return type(source_ref) == "table"
     and is_bounded_string(source_ref.kind, max_key_len)
     and is_bounded_string(source_ref.ref, max_key_len)
-end
-
-function M.read_env_command(name)
-  if not allowed_env[name] then
-    error("github-devloop: env name is not allowed")
-  end
-  return 'printf %s "$' .. name .. '"'
-end
-
-function M.read_env(name, exec)
-  local run = exec or exec_sync
-  if type(run) ~= "function" then
-    return nil
-  end
-  local ok, out = pcall(run, M.read_env_command(name))
-  if not ok or type(out) ~= "table" or out.exit_code ~= 0 or out.stdout == "" then
-    return nil
-  end
-  return out.stdout
 end
 
 function M.configure_trusted_bot_login(login)
@@ -812,10 +787,6 @@ end
 
 function M.trusted_bot_login()
   return trusted_bot_login or test_bot_login
-end
-
-function M.write_mode()
-  return M.read_env("FKST_GITHUB_WRITE") == "1" and "real" or "dry-run"
 end
 
 M._max_key_len = max_key_len

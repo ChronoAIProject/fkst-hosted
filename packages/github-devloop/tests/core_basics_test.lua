@@ -12,6 +12,49 @@ local stuck = h.stuck
 local meta_answer = h.meta_answer
 
 return {
+  test_devloop_config_defaults_and_validation = function()
+    local responses = {
+      ['printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"'] = { stdout = "", exit_code = 0 },
+      ["git rev-parse --abbrev-ref HEAD"] = { stdout = "dev\n", exit_code = 0 },
+      ['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "", exit_code = 0 },
+      ['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "", exit_code = 0 },
+      ['printf %s "$FKST_GITHUB_REPO"'] = { stdout = "owner/repo", exit_code = 0 },
+      ['printf %s "$FKST_GITHUB_BOT_LOGIN"'] = { stdout = "fkst-test-bot", exit_code = 0 },
+      ['printf %s "$FKST_GITHUB_WRITE"'] = { stdout = "", exit_code = 0 },
+    }
+    local function exec(cmd)
+      local rendered = type(cmd) == "table" and cmd.cmd or cmd
+      return responses[rendered] or { stdout = "", stderr = "unexpected " .. tostring(rendered), exit_code = 1 }
+    end
+    local config = core.devloop_config(exec)
+    t.eq(config.repo, "owner/repo")
+    t.eq(config.bot_login, "fkst-test-bot")
+    t.eq(config.write_mode, "dry-run")
+    t.eq(config.upstream_branch, "dev")
+    t.eq(config.integration_branch, "dev")
+    t.eq(config.rollup_merge, "auto")
+
+    responses['printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"'] = { stdout = "main", exit_code = 0 }
+    responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "integration/dev", exit_code = 0 }
+    responses['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "manual", exit_code = 0 }
+    responses['printf %s "$FKST_GITHUB_WRITE"'] = { stdout = "1", exit_code = 0 }
+    config = core.devloop_config(exec)
+    t.eq(config.write_mode, "real")
+    t.eq(config.upstream_branch, "main")
+    t.eq(config.integration_branch, "integration/dev")
+    t.eq(config.rollup_merge, "manual")
+
+    responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "../bad", exit_code = 0 }
+    t.raises(function()
+      core.branch_config(exec)
+    end)
+    responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "integration/dev", exit_code = 0 }
+    responses['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "sometimes", exit_code = 0 }
+    t.raises(function()
+      core.devloop_config(exec)
+    end)
+  end,
+
   test_opt_in_detection = function()
     t.eq(core.is_opted_in({ "fkst-dev:enabled" }), true)
     t.eq(core.is_opted_in({ "bug" }), false)
@@ -103,7 +146,6 @@ return {
     local green, green_reason = core.pr_rollup_green({
       status_check_rollup = {
         { state = "COMPLETED", conclusion = "SUCCESS" },
-        { state = "COMPLETED", conclusion = "NEUTRAL" },
         { state = "COMPLETED", conclusion = "SKIPPED" },
         { state = "SUCCESS" },
       },
@@ -118,6 +160,14 @@ return {
     })
     t.eq(action_required, false)
     t.eq(action_reason, "rollup-red")
+
+    local neutral, neutral_reason = core.pr_rollup_green({
+      status_check_rollup = {
+        { state = "COMPLETED", conclusion = "NEUTRAL" },
+      },
+    })
+    t.eq(neutral, false)
+    t.eq(neutral_reason, "rollup-red")
 
     local failed, failed_reason = core.pr_rollup_green({
       status_check_rollup = {

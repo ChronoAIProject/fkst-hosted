@@ -26,6 +26,7 @@ local function opts(name, extra)
       FKST_RUNTIME_ROOT = runtime_root(name),
       FKST_CANDIDATE_PREFIX = "candidate",
       FKST_CANDIDATE_FROM_SEP = "-from-",
+      FKST_DEVLOOP_UPSTREAM_BRANCH = "dev",
     },
   }
   for key, value in pairs((extra and extra.env) or extra or {}) do
@@ -186,7 +187,7 @@ local function fixing(extra)
 end
 
 local function pr_link_marker_for_fix(fix, branch, impl_version)
-  return core.pr_link_marker(fix.proposal_id, fix.pr_number, branch, impl_version or fix.version)
+  return core.pr_link_marker(fix.proposal_id, fix.pr_number, branch, impl_version or fix.version, "dev")
 end
 
 local function review_meta_event(extra)
@@ -219,6 +220,19 @@ local function merge_ready(extra)
   return value
 end
 
+local function mock_branch_config_env()
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function run_observe(payload, run_opts)
   return t.run_department("departments/observe_issue/main.lua", {
     queue = "github-proxy.github_entity_changed",
@@ -248,6 +262,7 @@ local function run_meta(payload, run_opts)
 end
 
 local function run_implement(payload, run_opts)
+  mock_branch_config_env()
   return t.run_department("departments/implement/main.lua", {
     queue = "devloop_ready",
     payload = payload,
@@ -255,6 +270,7 @@ local function run_implement(payload, run_opts)
 end
 
 local function run_open_pr(payload, run_opts)
+  mock_branch_config_env()
   return t.run_department("departments/open_pr/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = payload,
@@ -262,6 +278,7 @@ local function run_open_pr(payload, run_opts)
 end
 
 local function run_observe_pr(payload, run_opts)
+  mock_branch_config_env()
   return t.run_department("departments/observe_pr/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = payload,
@@ -276,6 +293,7 @@ local function run_review_pr(payload, run_opts)
 end
 
 local function run_review_result(payload, run_opts)
+  mock_branch_config_env()
   return t.run_department("departments/review_result/main.lua", {
     queue = "consensus.consensus_reached",
     payload = payload,
@@ -283,6 +301,7 @@ local function run_review_result(payload, run_opts)
 end
 
 local function run_fix(payload, run_opts)
+  mock_branch_config_env()
   return t.run_department("departments/fix/main.lua", {
     queue = "devloop_fixing",
     payload = payload,
@@ -290,6 +309,7 @@ local function run_fix(payload, run_opts)
 end
 
 local function run_review_loop(payload, run_opts)
+  mock_branch_config_env()
   return t.run_department("departments/review_loop/main.lua", {
     queue = "consensus.consensus_unresolved",
     payload = payload,
@@ -304,6 +324,7 @@ local function run_review_meta(payload, run_opts)
 end
 
 local function run_merge(payload, run_opts)
+  mock_branch_config_env()
   return t.run_department("departments/merge/main.lua", {
     queue = "devloop_merge_ready",
     payload = payload,

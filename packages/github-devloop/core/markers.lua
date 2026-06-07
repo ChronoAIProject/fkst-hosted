@@ -84,53 +84,73 @@ function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_propo
     .. '" -->'
 end
 
-function M.implementing_marker(proposal_id, dedup_key, branch, head_sha)
-  local fields = ""
-  if branch ~= nil then
-    fields = fields .. '" branch="' .. tostring(branch)
+function M.implementing_marker(proposal_id, dedup_key, branch, head_sha, base_branch, base_sha)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
   end
-  if head_sha ~= nil then
-    fields = fields .. '" head_sha="' .. tostring(head_sha)
+  if not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid head sha")
+  end
+  if not M._is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid base branch")
+  end
+  if not M._is_git_sha(base_sha) then
+    error("github-devloop: invalid base sha")
   end
   return '<!-- fkst:github-devloop:implementing:v1 proposal="' .. tostring(proposal_id)
     .. '" dedup="' .. tostring(dedup_key)
-    .. fields
+    .. '" branch="' .. tostring(branch)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" base_branch="' .. tostring(base_branch)
+    .. '" base_sha="' .. tostring(base_sha)
     .. '" -->'
 end
 
-function M.pr_link_marker(proposal_id, pr_number, branch, impl_version)
+function M.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_branch)
   if not M._is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
   end
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
+  if not M._is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid base branch")
+  end
   return '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. tostring(proposal_id)
     .. '" pr="' .. tostring(pr_number)
     .. '" branch="' .. tostring(branch)
     .. '" impl_version="' .. tostring(impl_version)
+    .. '" base_branch="' .. tostring(base_branch)
     .. '" -->'
 end
 
-function M.pr_link_marker_template(proposal_id, branch, impl_version)
+function M.pr_link_marker_template(proposal_id, branch, impl_version, base_branch)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
+  end
+  if not M._is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid base branch")
   end
   return '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. tostring(proposal_id)
     .. '" pr="{{pr_number}}"'
     .. ' branch="' .. tostring(branch)
     .. '" impl_version="' .. tostring(impl_version)
+    .. '" base_branch="' .. tostring(base_branch)
     .. '" -->'
 end
 
-function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version)
+function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version, base_branch)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
+  end
+  if not M._is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid base branch")
   end
   return '<!-- fkst:github-devloop:pr-origin:v1 proposal="' .. tostring(proposal_id)
     .. '" issue="' .. tostring(issue_number)
     .. '" branch="' .. tostring(branch)
     .. '" impl_version="' .. tostring(impl_version)
+    .. '" base_branch="' .. tostring(base_branch)
     .. '" -->'
 end
 
@@ -738,7 +758,19 @@ local function has_versioned_marker(comments, marker)
 end
 
 function M.has_implementing_marker(comments, proposal_id, dedup_key)
-  return has_versioned_marker(comments, M.implementing_marker(proposal_id, dedup_key))
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:implementing:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
+        and marker:match('dedup="([^"]*)"') == tostring(dedup_key) then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 function M.is_safe_branch(branch)
@@ -783,15 +815,21 @@ function M.implementing_fact(comments, proposal_id, dedup_key)
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local marker_branch = marker:match('branch="([^"]+)"')
       local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      local marker_base_branch = marker:match('base_branch="([^"]+)"')
+      local marker_base_sha = marker:match('base_sha="([^"]+)"')
       if marker_proposal == proposal_id
         and marker_dedup == tostring(dedup_key)
         and M._is_git_ref_safe(marker_branch)
-        and M._is_git_sha(marker_head_sha) then
+        and M._is_git_sha(marker_head_sha)
+        and M._is_git_ref_safe(marker_base_branch)
+        and M._is_git_sha(marker_base_sha) then
         return {
           proposal_id = marker_proposal,
           dedup_key = marker_dedup,
           branch = marker_branch,
           head_sha = marker_head_sha,
+          base_branch = marker_base_branch,
+          base_sha = marker_base_sha,
         }
       end
     end
@@ -810,15 +848,18 @@ function M.pr_link_fact(comments, proposal_id)
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_branch = marker:match('branch="([^"]+)"')
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
+      local marker_base_branch = marker:match('base_branch="([^"]+)"')
       if marker_proposal == proposal_id
         and M._is_positive_pr_number(marker_pr)
         and M._is_git_ref_safe(marker_branch)
-        and M._is_bounded_string(marker_impl_version, M._max_dedup_len) then
+        and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
+        and M._is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,
           pr_number = tonumber(marker_pr),
           branch = marker_branch,
           impl_version = marker_impl_version,
+          base_branch = marker_base_branch,
         }
       end
     end
@@ -837,17 +878,20 @@ function M.pr_origin_fact(comments)
       local marker_issue = marker:match('issue="([^"]+)"')
       local marker_branch = marker:match('branch="([^"]+)"')
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
+      local marker_base_branch = marker:match('base_branch="([^"]+)"')
       local repo, issue_number = M.parse_proposal_id(marker_proposal)
       if repo ~= nil
         and marker_issue == issue_number
         and M._is_git_ref_safe(marker_branch)
-        and M._is_bounded_string(marker_impl_version, M._max_dedup_len) then
+        and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
+        and M._is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,
           repo = repo,
           issue_number = issue_number,
           branch = marker_branch,
           impl_version = marker_impl_version,
+          base_branch = marker_base_branch,
         }
       end
     end

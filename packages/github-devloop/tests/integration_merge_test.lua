@@ -85,7 +85,7 @@ local find_raise = h.find_raise
 return {
   test_merge_ready_green_mergeable_merges_closes_and_marks_merged = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -114,7 +114,7 @@ return {
 
   test_merge_legacy_status_context_success_merges = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     local legacy_rollup = '[{"__typename":"StatusContext","context":"ci","state":"SUCCESS"}]'
     mock_bot_env()
     mock_write_env("1")
@@ -138,7 +138,7 @@ return {
 
   test_merge_replay_after_close_failure_self_heals_when_pr_already_merged = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -180,7 +180,7 @@ return {
 
   test_merge_external_already_merged_without_bot_merging_marker_does_not_finalize = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -196,7 +196,7 @@ return {
 
   test_merge_canonical_merging_without_visible_merging_fact_does_not_finalize = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     local comments = merge_comments(event)
     table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
     mock_bot_env()
@@ -213,7 +213,7 @@ return {
 
   test_merge_forged_merging_fact_does_not_finalize = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     local comments = merge_comments(event)
     table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
     table.insert(comments, {
@@ -234,7 +234,7 @@ return {
 
   test_merge_self_heal_finalizes_without_label = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments_with_merging(event))
@@ -252,7 +252,7 @@ return {
 
 	  test_merge_missing_write_dry_runs_without_advance = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -265,7 +265,7 @@ return {
 
 		  test_merge_ready_without_review_result_approve_does_not_merge = function()
 		    local event = merge_ready()
-		    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+		    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
 	    mock_bot_env()
 	    mock_write_env("1")
 	    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event, nil, nil, false))
@@ -280,7 +280,7 @@ return {
 
   test_merge_trusted_review_result_approve_merges_without_label = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event, nil, nil, true))
@@ -307,7 +307,7 @@ return {
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/review-loop/3/review-meta-action/accept",
       review_dedup_key = "consensus:github-devloop/pr-review/owner-repo-0412650541/7/ready-consensus-github-devloop-issue-owner-repo-42-2026-06-03T01-02-03Z/review/loop/3/review-meta",
     })
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event, nil, nil, false))
@@ -324,12 +324,12 @@ return {
 
 		  test_merge_missing_trusted_merge_ready_marker_does_not_merge = function()
 	    local event = merge_ready()
-	    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+	    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
 	    mock_bot_env()
 	    mock_write_env("1")
 	    mock_issue_merge({ "fkst-dev:merge-ready" }, {
 	      core.state_marker(event.proposal_id, "merge-ready", event.version),
-	      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+	      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
 	    })
 
 	    local result = run_merge(event, opts("merge-missing-trusted-marker", { FKST_GITHUB_WRITE = "1" }))
@@ -341,12 +341,12 @@ return {
 
 	  test_merge_ready_review_proposal_mismatch_does_not_merge = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
-      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.merge_ready_marker(
         event.proposal_id,
         event.pr_number,
@@ -366,12 +366,12 @@ return {
 
   test_merge_ready_review_head_or_version_mismatch_does_not_merge = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
-      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.merge_ready_marker(
         event.proposal_id,
         event.pr_number,
@@ -391,7 +391,7 @@ return {
 
   test_merge_ci_red_moves_back_to_fixing = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -410,7 +410,7 @@ return {
 
   test_merge_completed_non_green_rollup_moves_back_to_fixing_without_merge = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -438,7 +438,7 @@ return {
 
   test_merge_write_time_rollup_red_moves_back_to_fixing_without_merge = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -459,14 +459,14 @@ return {
 
   test_merge_write_time_merge_ready_marker_changed_does_not_merge = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge({ origin_marker })
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
-      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.merge_ready_marker(
         event.proposal_id,
         event.pr_number,
@@ -487,12 +487,12 @@ return {
 
   test_merge_same_second_earlier_review_fact_does_not_merge_new_head = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
-      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       {
         body = core.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
         author_login = "fkst-test-bot",
@@ -509,7 +509,7 @@ return {
 
   test_merge_not_mergeable_moves_back_to_fixing = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -525,7 +525,7 @@ return {
 
   test_merge_unstable_merge_state_errors_for_retry_without_fixing = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -541,7 +541,7 @@ return {
 
   test_merge_unknown_mergeability_errors_for_retry_without_fixing = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -557,7 +557,7 @@ return {
 
   test_merge_pr_head_advanced_after_recheck_moves_back_to_fixing = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -577,7 +577,7 @@ return {
 
   test_merge_queue_result_errors_for_retry_before_merged_fact = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -598,7 +598,7 @@ return {
 
   test_merge_retry_after_failed_merge_with_moved_head_goes_to_fixing = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments_with_merging(event))
@@ -617,7 +617,7 @@ return {
 
   test_merge_queued_pr_finalizes_on_later_poll_when_bot_merging_marker_exists = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments_with_merging(event))
@@ -636,7 +636,7 @@ return {
 
   test_merge_pending_checks_errors_for_retry_without_advance = function()
     local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -651,7 +651,7 @@ return {
 
 	  test_merge_command_failure_errors_for_retry = function()
 	    local event = merge_ready()
-	    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version)
+	    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
@@ -713,7 +713,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
-      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version),
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       { body = forged, author_login = "ordinary-user" },
     })
     local forged_result = run_merge(event, opts("merge-forged", { FKST_GITHUB_WRITE = "1" }))

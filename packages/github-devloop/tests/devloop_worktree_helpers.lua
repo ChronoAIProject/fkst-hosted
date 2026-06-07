@@ -26,7 +26,12 @@ local function deterministic_branch_for(event)
 end
 
 local function mock_fresh_implement_worktree(path)
-  t.mock_command("git rev-parse HEAD", {
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
     stdout = "abc123\n",
     stderr = "",
     exit_code = 0,
@@ -49,7 +54,12 @@ local function mock_fresh_implement_worktree(path)
 end
 
 local function mock_existing_empty_implement_worktree(path)
-  t.mock_command("git rev-parse HEAD", {
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
     stdout = "abc123\n",
     stderr = "",
     exit_code = 0,
@@ -84,7 +94,12 @@ end
 local function mock_existing_empty_implement_worktree_reuse(path, branch)
   local worktree = (path or "/tmp/fkst-packages-test/github-devloop/runtime")
     .. "/worktrees/devloop-owner-repo-42-01HY"
-  t.mock_command("git rev-parse HEAD", {
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
     stdout = "abc123\n",
     stderr = "",
     exit_code = 0,
@@ -113,7 +128,12 @@ local function mock_existing_empty_implement_worktree_reuse(path, branch)
 end
 
 local function mock_existing_implement_branch(head)
-  t.mock_command("git rev-parse HEAD", {
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
     stdout = "abc123\n",
     stderr = "",
     exit_code = 0,
@@ -205,6 +225,21 @@ end
 local function mock_bot_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
     stdout = value or "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"', {
+    stdout = "",
     stderr = "",
     exit_code = 0,
   })

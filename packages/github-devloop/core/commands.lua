@@ -106,19 +106,48 @@ end
 function M.gh_pr_view_origin_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,headRefOid,state,comments"
+    .. " --json headRefName,headRefOid,baseRefName,state,comments"
 end
 
 function M.gh_pr_view_fix_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,headRefOid,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
+    .. " --json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
 end
 
 function M.gh_pr_view_merge_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,headRefOid,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
+    .. " --json headRefName,headRefOid,baseRefName,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
+end
+
+function M.gh_pr_list_head_base_cmd(repo, head, base)
+  if not M._is_git_ref_safe(head) then
+    error("github-devloop: invalid PR head branch")
+  end
+  if not M._is_git_ref_safe(base) then
+    error("github-devloop: invalid PR base branch")
+  end
+  return "gh pr list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --head " .. M._shell_single_quote(head)
+    .. " --base " .. M._shell_single_quote(base)
+    .. " --state open"
+    .. " --json number,headRefOid,headRefName,baseRefName,state"
+end
+
+function M.gh_pr_create_cmd(repo, head, base, title, body_file)
+  if not M._is_git_ref_safe(head) then
+    error("github-devloop: invalid PR head branch")
+  end
+  if not M._is_git_ref_safe(base) then
+    error("github-devloop: invalid PR base branch")
+  end
+  return "gh pr create --repo " .. M._shell_single_quote(repo)
+    .. " --head " .. M._shell_single_quote(head)
+    .. " --base " .. M._shell_single_quote(base)
+    .. " --title " .. M._shell_single_quote(title)
+    .. " --body-file " .. M._shell_single_quote(body_file)
 end
 
 function M.gh_pr_merge_cmd(repo, pr_number, head_sha)
@@ -150,7 +179,7 @@ end
 function M.gh_pr_view_head_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,state"
+    .. " --json headRefName,baseRefName,state"
 end
 
 function M.git_status_cmd(worktree)
@@ -177,8 +206,42 @@ function M.git_head_sha_cmd(worktree)
   return "git -C " .. M._shell_single_quote(worktree) .. " rev-parse HEAD"
 end
 
-function M.git_base_head_cmd()
-  return "git rev-parse HEAD"
+function M.git_base_head_cmd(branch)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid base branch")
+  end
+  return "git rev-parse --verify refs/remotes/origin/" .. M._shell_single_quote(branch) .. "^{commit}"
+end
+
+function M.git_fetch_branch_cmd(remote, branch)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid fetch branch")
+  end
+  return "git fetch " .. M._shell_single_quote(remote) .. " " .. M._shell_single_quote(branch)
+end
+
+function M.git_remote_branch_head_cmd(remote, branch)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid remote branch")
+  end
+  return "git rev-parse --verify refs/remotes/" .. M._shell_single_quote(remote) .. "/" .. M._shell_single_quote(branch) .. "^{commit}"
+end
+
+function M.git_ahead_count_cmd(upstream, integration)
+  if not M._is_git_ref_safe(upstream) then
+    error("github-devloop: invalid upstream branch")
+  end
+  if not M._is_git_ref_safe(integration) then
+    error("github-devloop: invalid integration branch")
+  end
+  return "git rev-list --count refs/remotes/origin/" .. M._shell_single_quote(upstream)
+    .. "..refs/remotes/origin/" .. M._shell_single_quote(integration)
 end
 
 function M.git_show_ref_branch_cmd(branch)

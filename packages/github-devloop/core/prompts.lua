@@ -37,6 +37,17 @@ function M.build_fix_prompt(fix, current_issue, review_reason)
   })
 end
 
+function M.build_sync_conflict_prompt(conflict)
+  local prompt = require("prompts.sync_conflict")
+  return M.render_template(prompt.template, {
+    repo = M.neutralize_untrusted_prompt_text(conflict.repo),
+    upstream_branch = M.neutralize_untrusted_prompt_text(conflict.upstream_branch),
+    integration_branch = M.neutralize_untrusted_prompt_text(conflict.integration_branch),
+    upstream_sha = M.neutralize_untrusted_prompt_text(conflict.upstream_sha),
+    integration_sha = M.neutralize_untrusted_prompt_text(conflict.integration_sha),
+  })
+end
+
 function M.build_review_meta_prompt(review_meta, current_issue)
   local prompt = require("prompts.review_meta")
   local comments = table.concat(M.comment_bodies(current_issue.comments), "\n\n--- comment ---\n\n")

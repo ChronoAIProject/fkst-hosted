@@ -51,7 +51,7 @@ local function render_pr_number_template(value, pr_number)
   return tostring(value or ""):gsub("{{pr_number}}", tostring(pr_number))
 end
 
-local function verify_pr_remote_head(repo, pr_number, expected_head_sha)
+local function verify_pr_remote_head(repo, pr_number, expected_head_sha, expected_base_branch)
   local pr_head = exec_sync({ cmd = core.gh_pr_view_head_oid_cmd(repo, pr_number), timeout = 30 })
   if pr_head.exit_code ~= 0 then
     error("github-proxy: gh pr view head repository/headRefOid/state failed: " .. tostring(pr_head.stderr))
@@ -69,6 +69,9 @@ local function verify_pr_remote_head(repo, pr_number, expected_head_sha)
   if remote_pr.head_ref_oid ~= tostring(expected_head_sha):lower() then
     error("github-proxy: PR headRefOid does not match implementing head_sha")
   end
+  if expected_base_branch ~= nil and tostring(remote_pr.base_ref_name or "") ~= tostring(expected_base_branch) then
+    error("github-proxy: PR baseRefName does not match requested base_branch")
+  end
 end
 
 local function guard_pr_open_write(repo, payload, bot_login)
@@ -76,7 +79,8 @@ local function guard_pr_open_write(repo, payload, bot_login)
     or payload.impl_version == nil
     or payload.expected_state == nil
     or payload.expected_version == nil
-    or payload.head_sha == nil then
+    or payload.head_sha == nil
+    or payload.base_branch == nil then
     log.warn("github-proxy: PR open request missing write-time guard facts")
     return nil
   end
@@ -86,6 +90,10 @@ local function guard_pr_open_write(repo, payload, bot_login)
   end
   if not core.is_safe_head_sha(payload.head_sha) then
     log.warn("github-proxy: PR open request has unsafe head_sha")
+    return nil
+  end
+  if not core.is_safe_branch(payload.base_branch) then
+    log.warn("github-proxy: PR open request has unsafe base_branch")
     return nil
   end
 
@@ -115,7 +123,9 @@ local function guard_pr_open_write(repo, payload, bot_login)
     log.warn("github-proxy: PR open skipped because implementing fact marker is not visible")
     return nil
   end
-  if tostring(fact.branch) ~= tostring(payload.branch) or tostring(fact.head_sha) ~= tostring(payload.head_sha) then
+  if tostring(fact.branch) ~= tostring(payload.branch)
+    or tostring(fact.head_sha) ~= tostring(payload.head_sha)
+    or tostring(fact.base_branch) ~= tostring(payload.base_branch) then
     log.warn("github-proxy: PR open skipped because request does not match implementing fact marker")
     return nil
   end
@@ -198,7 +208,7 @@ function pipeline(event)
       return
     end
 
-    local existing = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch), timeout = 30 })
+    local existing = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch), timeout = 30 })
     if existing.exit_code ~= 0 then
       error("github-proxy: gh pr list --head failed: " .. tostring(existing.stderr))
     end
@@ -216,13 +226,13 @@ function pipeline(event)
 
       local pr_body_path = temp_body_file(repo, payload.branch, "pr-body")
       file.write(pr_body_path, tostring(payload.body))
-      local created = exec_sync({ cmd = core.gh_pr_create_cmd(repo, payload.branch, payload.title, pr_body_path), timeout = 60 })
+      local created = exec_sync({ cmd = core.gh_pr_create_cmd(repo, payload.branch, payload.base_branch, payload.title, pr_body_path), timeout = 60 })
       if created.exit_code ~= 0 then
         error("github-proxy: gh pr create failed: " .. tostring(created.stderr))
       end
       pr = core.parse_pr_create(created.stdout)
       if pr == nil then
-        local listed = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch), timeout = 30 })
+        local listed = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch), timeout = 30 })
         if listed.exit_code ~= 0 then
           error("github-proxy: gh pr list --head failed after create: " .. tostring(listed.stderr))
         end
@@ -231,9 +241,9 @@ function pipeline(event)
       if pr == nil then
         error("github-proxy: gh pr create/list did not return a valid PR number")
       end
-      verify_pr_remote_head(repo, pr.number, payload.head_sha)
+      verify_pr_remote_head(repo, pr.number, payload.head_sha, payload.base_branch)
     else
-      verify_pr_remote_head(repo, pr.number, payload.head_sha)
+      verify_pr_remote_head(repo, pr.number, payload.head_sha, payload.base_branch)
       log.info("github-proxy: PR for head branch already exists; reusing #" .. tostring(pr.number))
     end
 

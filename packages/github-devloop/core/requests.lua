@@ -238,14 +238,20 @@ function M.build_impl_failed_label_request(repo, issue_number, ready, reason)
   )
 end
 
-function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha)
+function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid implementing branch")
   end
   if not M._is_git_sha(head_sha) then
     error("github-devloop: invalid implementing head_sha")
   end
-  local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha)
+  if not M._is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid implementing base_branch")
+  end
+  if not M._is_git_sha(base_sha) then
+    error("github-devloop: invalid implementing base_sha")
+  end
+  local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
   local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)
   return {
     schema = "github-proxy.v1",
@@ -255,6 +261,8 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
       .. "\n\nWorktree: " .. tostring(worktree)
       .. "\nBranch: " .. tostring(branch)
       .. "\nHead: " .. tostring(head_sha)
+      .. "\nBase branch: " .. tostring(base_branch)
+      .. "\nBase head: " .. tostring(base_sha)
       .. "\n\n" .. state_marker
       .. "\n" .. marker,
     dedup_key = M._dedup_key({
@@ -299,7 +307,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
   }
 end
 
-function M.build_pr_open_request(repo, issue_number, proposal_id, current, title, branch, head_sha)
+function M.build_pr_open_request(repo, issue_number, proposal_id, current, title, branch, head_sha, base_branch)
   if type(current) ~= "table" or current.state ~= "implementing" or not M._is_bounded_string(current.version, M._max_dedup_len) then
     error("github-devloop: invalid implementing state for pr request")
   end
@@ -309,6 +317,9 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
   if not M._is_git_sha(head_sha) then
     error("github-devloop: invalid pr head_sha")
   end
+  if not M._is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid pr base_branch")
+  end
   local bounded_title = tostring(title or "")
   if bounded_title == "" then
     bounded_title = "github-devloop implementation for #" .. tostring(issue_number)
@@ -317,7 +328,7 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
     bounded_title = bounded_title:sub(1, M._max_pr_title_len)
   end
   local body = "github-devloop implementation PR for issue #" .. tostring(issue_number)
-    .. "\n\n" .. M.pr_origin_marker(proposal_id, issue_number, branch, current.version)
+    .. "\n\n" .. M.pr_origin_marker(proposal_id, issue_number, branch, current.version, base_branch)
   local add_labels, remove_labels = M.state_label_changes("pr-open")
   return {
     schema = "github-proxy.pr-open.v1",
@@ -329,11 +340,12 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
     expected_version = current.version,
     branch = branch,
     head_sha = head_sha,
+    base_branch = base_branch,
     title = bounded_title,
     body = body,
     issue_comment_body_template = "github-devloop PR opened: #{{pr_number}}"
       .. "\n\n" .. M.state_marker(proposal_id, "pr-open", current.version)
-      .. "\n" .. M.pr_link_marker_template(proposal_id, branch, current.version),
+      .. "\n" .. M.pr_link_marker_template(proposal_id, branch, current.version, base_branch),
     issue_label_add = add_labels,
     issue_label_remove = remove_labels,
     dedup_key = M._dedup_key({
@@ -349,9 +361,9 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
   }
 end
 
-function M.build_pr_open_comment_request(repo, issue_number, proposal_id, current, pr_number, branch, source_ref)
+function M.build_pr_open_comment_request(repo, issue_number, proposal_id, current, pr_number, branch, base_branch, source_ref)
   local state_marker = M.state_marker(proposal_id, "pr-open", current.version)
-  local link_marker = M.pr_link_marker(proposal_id, pr_number, branch, current.version)
+  local link_marker = M.pr_link_marker(proposal_id, pr_number, branch, current.version, base_branch)
   return {
     schema = "github-proxy.v1",
     repo = repo,

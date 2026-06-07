@@ -208,6 +208,7 @@ function M.parse_pr_view_origin(stdout)
   return {
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
     head_sha = decoded.headRefOid or decoded.head_ref_oid,
+    base_ref_name = decoded.baseRefName or decoded.base_ref_name,
     state = decoded.state,
     comments = M.comments_from_json(decoded.comments),
     head_repository = head_repo,
@@ -239,10 +240,31 @@ function M.parse_pr_view_merge(stdout)
   return result
 end
 
+function M.parse_pr_list_head_base(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local prs = {}
+  if type(decoded) ~= "table" then
+    return prs
+  end
+  for _, pr in ipairs(decoded) do
+    if type(pr) == "table" then
+      table.insert(prs, {
+        number = pr.number,
+        head_sha = pr.headRefOid or pr.head_ref_oid,
+        head_ref_name = pr.headRefName or pr.head_ref_name,
+        base_ref_name = pr.baseRefName or pr.base_ref_name,
+        state = pr.state,
+      })
+    end
+  end
+  return prs
+end
+
 function M.parse_pr_view_head_state(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
+    base_ref_name = decoded.baseRefName or decoded.base_ref_name,
     state = decoded.state,
   }
 end
@@ -317,7 +339,7 @@ end
 
 local green_check_conclusions = {
   SUCCESS = true,
-  NEUTRAL = true,
+  -- NEUTRAL is excluded for irreversible-merge safety.
   SKIPPED = true,
 }
 

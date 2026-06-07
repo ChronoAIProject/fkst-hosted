@@ -23,6 +23,7 @@ function pipeline(event)
 
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   core.assert_trusted_bot_configured()
+  local branches = core.branch_config()
   local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(pr.repo, pr.number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
@@ -54,6 +55,11 @@ function pipeline(event)
   end
   if tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
     core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(head)", "pr-origin branch mismatch")
+    return
+  end
+  if tostring(current_pr.base_ref_name or "") ~= tostring(origin.base_branch)
+    or tostring(origin.base_branch or "") ~= tostring(branches.integration) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(base)", "PR base branch mismatch")
     return
   end
 
@@ -149,6 +155,10 @@ function pipeline(event)
     local current_head = core.parse_pr_view_head_state(head_view.stdout)
     if tostring(current_head.head_ref_name or "") ~= tostring(origin.branch) then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "re-derived PR head mismatch")
+      return
+    end
+    if tostring(current_head.base_ref_name or "") ~= tostring(origin.base_branch) then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-foreign(base)", "re-derived PR base mismatch")
       return
     end
     if tostring(current_head.state or ""):lower() ~= "open" then

@@ -129,7 +129,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
     mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
     mock_bot_env()
@@ -162,7 +162,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
     mock_branch_exists("devloop-owner-repo-42-01HY", "def456")
     mock_bot_env()
@@ -181,7 +181,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
     mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
     mock_bot_env()
@@ -196,7 +196,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123"),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
     mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
     mock_bot_env()
@@ -217,7 +217,7 @@ return {
   test_observe_pr_backpointer_advances_issue_to_reviewing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:pr-open" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
@@ -251,7 +251,7 @@ return {
   test_observe_pr_reconciles_regressed_label_to_reviewing_marker = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:pr-open" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
@@ -282,7 +282,7 @@ return {
   test_observe_pr_reraises_merge_ready_for_poll_self_heal = function()
     local event = merge_ready()
     mock_pr_origin({
-      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version),
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, merge_comments(event))
 
@@ -312,7 +312,7 @@ return {
     local comments = merge_comments(event)
     table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
     mock_pr_origin({
-      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version),
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:merging" }, comments)
 
@@ -341,7 +341,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local review_id = core.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
@@ -364,7 +364,7 @@ return {
     t.eq(reviewing_raise.payload.version, impl_version)
 
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
@@ -389,7 +389,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local fix_round_version = core.next_fix_version(impl_version)
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_reviewing({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", fix_round_version),
@@ -416,11 +416,11 @@ return {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", fix_round_version),
     })
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     }, "devloop-owner-repo-42-01HY", "feedface")
     mock_pr_diff("diff --git a/packages/github-devloop/core.lua b/packages/github-devloop/core.lua\n+fixed by replay\n")
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     }, "devloop-owner-repo-42-01HY", "feedface")
 
     local review = run_review_pr(reviewing_raise.payload, opts("observe-pr-reviewing-fix-round-rereview"))
@@ -474,7 +474,7 @@ return {
   test_observe_pr_closed_pr_does_not_advance_issue_to_reviewing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:pr-open" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
@@ -499,7 +499,7 @@ return {
   test_observe_pr_ignores_forged_backpointer = function()
     mock_pr_origin({
       {
-        body = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", "v1"),
+        body = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", "v1", "dev"),
         author_login = "ordinary-user",
       },
     })
@@ -549,7 +549,7 @@ return {
     t.eq(core.validate_proposal(proposal), true)
     t.eq(count_calls("--json title,body,labels,comments"), 1)
     t.eq(count_calls("gh pr diff"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,state,comments"), 2)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 2)
   end,
 
   test_review_pr_retries_when_head_moves_between_head_read_and_diff = function()
@@ -567,7 +567,7 @@ return {
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr diff"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,state,comments"), 2)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 2)
   end,
 
   test_review_pr_neutralizes_diff_fkst_markers = function()
@@ -704,7 +704,7 @@ return {
     local event = review_reached()
     local impl_version = reviewing().version
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
@@ -734,7 +734,7 @@ return {
     local impl_version = reviewing().version
     local fix_version = core.fix_version_from_review_version(impl_version)
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
@@ -760,7 +760,7 @@ return {
     local event = review_reached()
     local impl_version = reviewing().version
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     }, "devloop-owner-repo-42-01HY", "feedface")
 
     local result = run_review_result(event, opts("review-result-head-advanced"))
@@ -773,7 +773,7 @@ return {
     local event = review_reached()
     local impl_version = reviewing().version
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     }, "devloop-owner-repo-42-01HY", "def456", "CLOSED")
 
     local result = run_review_result(event, opts("review-result-closed"))
@@ -787,7 +787,7 @@ return {
     local impl_version = reviewing().version
     local fix_version = core.fix_version_from_review_version(impl_version)
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:merge-ready" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "merge-ready", impl_version),
@@ -817,7 +817,7 @@ return {
       dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, fix_round_version, "feedface") .. "/review",
     })
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", old_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", old_version, "dev"),
     }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", fix_round_version),
@@ -843,7 +843,7 @@ return {
     local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff." })
     local impl_version = reviewing().version
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:enabled" }, {})
 
@@ -852,7 +852,7 @@ return {
     t.eq(#pending.raises, 0)
 
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
@@ -869,7 +869,7 @@ return {
     local impl_version = reviewing().version
     local fix_version = core.fix_version_from_review_version(impl_version)
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:fixing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
@@ -884,7 +884,7 @@ return {
     local event = review_reached()
     local impl_version = reviewing().version
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:merge-ready" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "merge-ready", impl_version),
@@ -894,7 +894,7 @@ return {
     t.eq(#idempotent.raises, 0)
 
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", core.next_fix_version(impl_version)),
@@ -905,7 +905,7 @@ return {
 
     mock_pr_origin({
       {
-        body = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version),
+        body = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
         author_login = "ordinary-user",
       },
     }, "devloop/issue/owner/repo/v1")

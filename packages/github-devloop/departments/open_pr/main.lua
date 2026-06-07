@@ -28,6 +28,7 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
+    local branches = core.branch_config()
 
     local view = exec_sync({ cmd = core.gh_issue_view_open_pr_cmd(issue.repo, issue.number), timeout = 30 })
     if view.exit_code ~= 0 then
@@ -56,6 +57,10 @@ function pipeline(event)
     if fact == nil then
       core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "retry-pending(implementing fact marker not visible)", "branch fact marker missing")
       error("github-devloop: implementing branch fact not visible for open_pr; retrying")
+    end
+    if tostring(fact.base_branch or "") ~= tostring(branches.integration) then
+      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-foreign(base)", "implementing fact base branch mismatch")
+      return
     end
 
     local branch_ref = exec_sync({ cmd = core.git_show_ref_cmd(".", fact.branch), timeout = 30 })
@@ -89,7 +94,7 @@ function pipeline(event)
     end
 
     core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", core.cas_outcome(state, "apply", state.version), "write gate satisfied; opening PR")
-    local pr_request = core.build_pr_open_request(issue.repo, issue.number, proposal_id, state, current_issue.title, fact.branch, fact.head_sha)
+    local pr_request = core.build_pr_open_request(issue.repo, issue.number, proposal_id, state, current_issue.title, fact.branch, fact.head_sha, branches.integration)
     core.log_apply("open_pr", proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
       "github-proxy.github_pr_open_request",
     })

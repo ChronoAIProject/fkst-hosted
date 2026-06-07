@@ -140,6 +140,7 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
+    local branches = core.branch_config()
 
     local issue_view = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
     if issue_view.exit_code ~= 0 then
@@ -229,6 +230,9 @@ function pipeline(event)
       or tostring(origin.issue_number) ~= tostring(issue_number)
       or tostring(origin.branch) ~= tostring(link.branch)
       or tostring(origin.impl_version) ~= tostring(link.impl_version)
+      or tostring(origin.base_branch) ~= tostring(link.base_branch)
+      or tostring(origin.base_branch) ~= tostring(branches.integration)
+      or tostring(current_pr.base_ref_name or "") ~= tostring(origin.base_branch)
       or tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-foreign(pr-origin)", "PR origin/link does not match immutable PR branch")
       return

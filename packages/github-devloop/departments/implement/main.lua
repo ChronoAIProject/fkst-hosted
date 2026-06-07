@@ -23,8 +23,8 @@ local function raise_stuck(repo, issue_number, ready, reason, detail)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
-local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha)
-  local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha)
+local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha)
+  local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha)
   local label_request = core.build_implementing_label_request(repo, issue_number, ready)
   local add_labels, remove_labels = core.state_label_changes("implementing")
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
@@ -79,6 +79,7 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
+    local branches = core.branch_config()
 
     local view = exec_sync({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
@@ -111,9 +112,13 @@ function pipeline(event)
       "reason=implementation fact marker absent for this version",
     })
 
-    local base_result = exec_sync({ cmd = core.git_base_head_cmd(), timeout = 30 })
+    local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", branches.integration), timeout = 60 })
+    if fetch_result.exit_code ~= 0 then
+      error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
+    end
+    local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", branches.integration), timeout = 30 })
     if base_result.exit_code ~= 0 then
-      error("github-devloop: git base head failed: " .. tostring(base_result.stderr))
+      error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
     end
     local base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
     if not core.is_safe_head_sha(base_head) then
@@ -130,7 +135,7 @@ function pipeline(event)
           "head_sha=" .. tostring(head_sha),
           "reason=reusing existing implementation branch",
         })
-        raise_implementing(repo, issue_number, ready, "(existing deterministic branch)", branch, head_sha)
+        raise_implementing(repo, issue_number, ready, "(existing deterministic branch)", branch, head_sha, branches.integration, base_head)
         return
       end
     elseif branch_ref.exit_code ~= 1 then
@@ -196,7 +201,7 @@ function pipeline(event)
           "head_sha=" .. tostring(head_sha),
           "reason=reusing clean ahead implementation branch",
         })
-        raise_implementing(repo, issue_number, ready, worktree, branch, head_sha)
+        raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, branches.integration, base_head)
         return
       end
 
@@ -243,7 +248,7 @@ function pipeline(event)
       error("github-devloop: unsafe implementing head_sha")
     end
 
-    raise_implementing(repo, issue_number, ready, worktree, branch, head_sha)
+    raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, branches.integration, base_head)
   end)
 end
 

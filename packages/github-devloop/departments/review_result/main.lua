@@ -35,6 +35,7 @@ function pipeline(event)
   end
 
   core.assert_trusted_bot_configured()
+  local branches = core.branch_config()
   local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
@@ -55,6 +56,11 @@ function pipeline(event)
   end
   if tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(head)", "pr-origin branch mismatch")
+    return
+  end
+  if tostring(current_pr.base_ref_name or "") ~= tostring(origin.base_branch)
+    or tostring(origin.base_branch or "") ~= tostring(branches.integration) then
+    core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(base)", "PR base branch mismatch")
     return
   end
   if tostring(current_pr.state or ""):lower() ~= "open" then
