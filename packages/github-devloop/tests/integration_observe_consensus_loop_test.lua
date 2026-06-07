@@ -184,6 +184,92 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
+  test_observe_issue_reraises_fixing_for_poll_self_heal = function()
+    local event = fixing()
+    local reject_comment = core.build_review_result_comment_request(
+      "owner/repo",
+      "42",
+      event.proposal_id,
+      event.version,
+      {
+        proposal_id = event.review_proposal_id,
+        decision = "reject",
+        body = "Reject because tests failed.",
+        dedup_key = event.review_dedup_key,
+        source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+      },
+      event.source_ref
+    ).body
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
+    t.eq(fixing_raise.payload.proposal_id, event.proposal_id)
+    t.eq(tostring(fixing_raise.payload.pr_number), tostring(event.pr_number))
+    t.eq(fixing_raise.payload.version, event.version)
+    t.eq(fixing_raise.payload.review_proposal_id, event.review_proposal_id)
+    t.eq(fixing_raise.payload.review_dedup_key, event.review_dedup_key)
+    t.eq(fixing_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
+    t.eq(fixing_raise.payload.dedup_key, core.build_devloop_fixing_payload({
+      proposal_id = event.proposal_id,
+      impl_version = event.version,
+    }, event.pr_number, {
+      review_proposal_id = event.review_proposal_id,
+      review_dedup_key = event.review_dedup_key,
+      reviewed_head_sha = event.reviewed_head_sha,
+    }, event.source_ref).dedup_key)
+    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
+  test_observe_issue_skips_fixing_self_heal_after_reviewing_progress = function()
+    local event = fixing()
+    local reject_comment = core.build_review_result_comment_request(
+      "owner/repo",
+      "42",
+      event.proposal_id,
+      event.version,
+      {
+        proposal_id = event.review_proposal_id,
+        decision = "reject",
+        body = "Reject because tests failed.",
+        dedup_key = event.review_dedup_key,
+        source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+      },
+      event.source_ref
+    ).body
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+      core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(event.version)),
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-progressed"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
+  test_observe_issue_skips_fixing_self_heal_without_fix_fact = function()
+    local event = fixing()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-no-fact"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
   test_observe_uses_current_github_state_not_payload_state = function()
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN")
     mock_issue_body("Body from GitHub")

@@ -294,8 +294,12 @@ function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
         and marker_dedup ~= nil
         and action == "fix"
         and version == tostring(issue_version) then
+        local review_proposal = marker_dedup:match("^consensus:([^/].-)/review")
+        local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
         return {
+          review_proposal_id = review_proposal,
           review_dedup_key = marker_dedup,
+          reviewed_head_sha = reviewed_head_sha,
           review_reason = M._comment_body(comment),
         }
       end
