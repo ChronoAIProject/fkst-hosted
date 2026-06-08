@@ -163,7 +163,10 @@ function pipeline(event)
       kind = "external",
       ref = tostring(repo) .. "#pr/" .. tostring(pr_number),
     }
-    local proposal = core.build_pr_review_loop_proposal(repo, origin.issue_number, pr_number, state.version, current_pr.head_sha, current_issue, diff.stdout, pr_source_ref, next_n)
+    local proposal = core.build_pr_review_loop_proposal(repo, origin.issue_number, pr_number, state.version, current_pr.head_sha, current_issue, diff.stdout, pr_source_ref, next_n, {
+      narrowed_question = unresolved.narrowed_question,
+      angle_digests = unresolved.angle_digests,
+    })
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_loop proposal_id=" .. tostring(origin.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-loop-proposal")
       return

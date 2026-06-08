@@ -412,4 +412,54 @@ return {
     t.eq(origin.head_repository, "ChronoAIProject/fkst-packages")
     t.eq(origin.is_cross_repository, false)
   end,
+
+  test_loop_proposals_thread_meta_judge_narrowing = function()
+    -- Phase 2a-1: a re-raised next-round proposal must carry the meta-judge's narrowing
+    -- (convergence_question + round + bounded prior_round_digests) so the next angles
+    -- converge instead of blindly re-judging the same question. The `/loop/N` dedup shape
+    -- and proposal validity stay intact, and angle peer-invisibility is preserved by
+    -- carrying only verdict + short-reply digests, never prior peer full text.
+    local converge = {
+      narrowed_question = "Does the locking change still break idempotency under retry?",
+      angle_digests = {
+        { angle = "minimal", verdict = "approve", reply = "ok", digest = "smallest fix is sound" },
+        { angle = "structural", verdict = "reject", reply = "no", digest = "contract leak under growth" },
+      },
+    }
+
+    local thinking = core.build_loop_proposal("owner/repo", "42", {
+      title = "Converge narrowing",
+      body = "Body",
+      updated_at = "2026-06-08T00:00:00Z",
+    }, source_ref(), 2, converge)
+    t.eq(thinking.round, 2)
+    t.eq(thinking.convergence_question, converge.narrowed_question)
+    t.eq(#thinking.prior_round_digests, 2)
+    t.eq(thinking.prior_round_digests[2].verdict, "reject")
+    t.is_true(thinking.dedup_key:find("/loop/2", 1, true) ~= nil)
+    t.is_true(core.validate_proposal(thinking))
+
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local review = core.build_pr_review_loop_proposal("owner/repo", "42", 7, version, "abcdef1234567890", {
+      title = "Converge narrowing",
+      body = "Body",
+    }, "diff --git a/core.lua b/core.lua\n+return true\n", { kind = "external", ref = "owner/repo#pr/7" }, 2, converge)
+    t.eq(review.round, 2)
+    t.eq(review.convergence_question, converge.narrowed_question)
+    t.eq(#review.prior_round_digests, 2)
+    t.is_true(review.dedup_key:find("/loop/2", 1, true) ~= nil)
+    t.is_true(core.validate_proposal(review))
+
+    -- Without a converge carry the proposal stays valid and blind-compatible: the round is
+    -- still tracked, but no convergence_question / prior_round_digests are injected.
+    local blind = core.build_loop_proposal("owner/repo", "42", {
+      title = "Blind",
+      body = "Body",
+      updated_at = "2026-06-08T00:00:00Z",
+    }, source_ref(), 1)
+    t.eq(blind.round, 1)
+    t.eq(blind.convergence_question, nil)
+    t.eq(blind.prior_round_digests, nil)
+    t.is_true(core.validate_proposal(blind))
+  end,
 }

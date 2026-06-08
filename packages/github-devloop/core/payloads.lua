@@ -143,7 +143,26 @@ function M.build_proposal(issue, body)
   }
 end
 
-function M.build_loop_proposal(repo, issue_number, current, source_ref, n)
+-- Thread the meta-judge's narrowing onto a re-raised next-round proposal so the next
+-- angles converge instead of blindly re-judging the same question. The next round sees
+-- ONLY the bounded convergence_question + prior-round digests (verdict + short reply),
+-- never prior peer full text, preserving angle peer-invisibility. The `/loop/N` dedup
+-- shape stays unchanged so the existing round parsing + budget endpoint still work.
+local function apply_converge_fields(proposal, n, converge)
+  proposal.round = n
+  if type(converge) ~= "table" then
+    return proposal
+  end
+  if converge.narrowed_question ~= nil and converge.narrowed_question ~= "" then
+    proposal.convergence_question = converge.narrowed_question
+  end
+  if type(converge.angle_digests) == "table" then
+    proposal.prior_round_digests = converge.angle_digests
+  end
+  return proposal
+end
+
+function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge)
   local issue = {
     repo = repo,
     number = issue_number,
@@ -153,7 +172,7 @@ function M.build_loop_proposal(repo, issue_number, current, source_ref, n)
   }
   local proposal = M.build_proposal(issue, current.body)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
-  return proposal
+  return apply_converge_fields(proposal, n, converge)
 end
 
 function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref)
@@ -208,10 +227,10 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   }
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref, n)
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref, n, converge)
   local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
-  return proposal
+  return apply_converge_fields(proposal, n, converge)
 end
 end
 
