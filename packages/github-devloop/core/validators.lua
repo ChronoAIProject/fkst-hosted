@@ -71,7 +71,7 @@ end
 
 function M.is_supported_unresolved(payload)
   return type(payload) == "table"
-    and payload.schema == "consensus.consensus_unresolved.v1"
+    and payload.schema == "consensus.consensus_converge.v1"
     and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
     and payload.body == nil
     and payload.angle_results == nil
@@ -81,7 +81,7 @@ end
 
 function M.is_supported_pr_review_unresolved(payload)
   return type(payload) == "table"
-    and payload.schema == "consensus.consensus_unresolved.v1"
+    and payload.schema == "consensus.consensus_converge.v1"
     and M.is_safe_pr_review_result_ref(payload.proposal_id, payload.dedup_key)
     and payload.body == nil
     and payload.angle_results == nil

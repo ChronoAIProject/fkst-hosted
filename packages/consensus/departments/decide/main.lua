@@ -4,13 +4,20 @@ local M = {}
 
 M.spec = {
   consumes = { "proposal" },
-  produces = { "consensus_reached", "consensus_unresolved" },
+  produces = { "consensus_reached", "consensus_converge" },
   stall_window = "2m",
 }
 
 local function spawn_angle(proposal, angle)
   return spawn_codex({
     prompt = core.build_angle_prompt(proposal, angle),
+    stall_window = M.spec.stall_window,
+  })
+end
+
+local function spawn_meta_judge(proposal, angle_results)
+  return spawn_codex_sync({
+    prompt = core.build_meta_judge_prompt(proposal, angle_results),
     stall_window = M.spec.stall_window,
   })
 end
@@ -25,8 +32,16 @@ local function angle_result(angle, result)
     angle = angle,
     verdict = parsed and parsed.verdict or nil,
     reply = parsed and parsed.reply or nil,
+    stdout = type(result) == "table" and result.stdout or nil,
     exit_code = type(result) == "table" and result.exit_code or nil,
   }
+end
+
+local function raise_converge(proposal, angle_results, narrowed_question)
+  raise(
+    "consensus_converge",
+    core.build_converge_payload(proposal, narrowed_question, angle_results)
+  )
 end
 
 function pipeline(event)
@@ -58,13 +73,33 @@ function pipeline(event)
     end
 
     local decision = core.aggregate(angle_results)
-    if decision == nil then
-      raise("consensus_unresolved", core.build_unresolved_payload(proposal))
+    if decision ~= nil then
+      raise("consensus_reached", core.build_reached_payload(proposal, decision, angle_results))
+      cache_set(cache_key, proposal.dedup_key)
       return
     end
 
-    raise("consensus_reached", core.build_reached_payload(proposal, decision, angle_results))
-    cache_set(cache_key, proposal.dedup_key)
+    local meta_result = spawn_meta_judge(proposal, angle_results)
+    local parsed = nil
+    if type(meta_result) == "table" and meta_result.exit_code == 0 then
+      parsed = core.parse_meta_judge_output(meta_result.stdout)
+    end
+    if parsed ~= nil and parsed.kind == "reached" then
+      raise("consensus_reached", core.build_reached_payload(
+        proposal,
+        parsed.decision,
+        angle_results,
+        parsed.framing
+      ))
+      cache_set(cache_key, proposal.dedup_key)
+      return
+    end
+    if parsed ~= nil and parsed.kind == "converge" then
+      raise_converge(proposal, angle_results, parsed.narrowed_question)
+      return
+    end
+
+    raise_converge(proposal, angle_results, core.default_narrowed_question(proposal, angle_results))
   end)
 end
 

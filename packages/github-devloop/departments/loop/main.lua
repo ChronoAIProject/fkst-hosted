@@ -3,14 +3,14 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "consensus.consensus_unresolved" },
+  consumes = { "consensus.consensus_converge" },
   produces = {
     "devloop_stuck",
     "consensus.proposal",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
   },
-  fanout = { "consensus.consensus_unresolved" },
+  fanout = { "consensus.consensus_converge" },
   stall_window = "30s",
 }
 

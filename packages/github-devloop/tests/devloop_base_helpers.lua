@@ -79,7 +79,7 @@ end
 
 local function unresolved(extra)
   local value = {
-    schema = "consensus.consensus_unresolved.v1",
+    schema = "consensus.consensus_converge.v1",
     proposal_id = "github-devloop/issue/owner/repo/42",
     dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     source_ref = source_ref(),
@@ -152,7 +152,7 @@ local function review_unresolved(extra)
   local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
   local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
   local value = {
-    schema = "consensus.consensus_unresolved.v1",
+    schema = "consensus.consensus_converge.v1",
     proposal_id = proposal_id,
     dedup_key = "consensus:" .. proposal_id .. "/review",
     source_ref = {
@@ -249,7 +249,7 @@ end
 
 local function run_loop(payload, run_opts)
   return t.run_department("departments/loop/main.lua", {
-    queue = "consensus.consensus_unresolved",
+    queue = "consensus.consensus_converge",
     payload = payload,
   }, run_opts)
 end
@@ -311,7 +311,7 @@ end
 local function run_review_loop(payload, run_opts)
   mock_branch_config_env()
   return t.run_department("departments/review_loop/main.lua", {
-    queue = "consensus.consensus_unresolved",
+    queue = "consensus.consensus_converge",
     payload = payload,
   }, run_opts)
 end

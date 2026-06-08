@@ -12,6 +12,9 @@ local max_title_len = 240
 local max_body_len = 12000
 local max_context_len = 8000
 local max_reply_len = 2000
+local max_narrowed_question_len = 2000
+local max_digest_len = 600
+local max_prior_round_digests = 12
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 
@@ -52,7 +55,9 @@ local function neutralize_untrusted_prompt_text(text)
 
   local function neutralize_line(line)
     if line:match("^%s*" .. verdict_label) ~= nil
-      or line:match("^%s*" .. reply_label) ~= nil then
+      or line:match("^%s*" .. reply_label) ~= nil
+      or line:match("^%s*[Rr][Ee][Aa][Cc][Hh][Ee][Dd]%s*:") ~= nil
+      or line:match("^%s*[Cc][Oo][Nn][Vv][Ee][Rr][Gg][Ee]%s*:") ~= nil then
       return "> " .. line
     end
     return line
@@ -79,6 +84,63 @@ local function has_source_ref(value)
   return type(value) == "table"
     and is_bounded_string(value.kind, max_key_len)
     and is_bounded_string(value.ref, max_key_len)
+end
+
+local function normalize_round(value)
+  if value == nil then
+    return 0
+  end
+  local number = tonumber(value)
+  if number == nil or number < 0 or number ~= math.floor(number) or number > 100000 then
+    return nil
+  end
+  return number
+end
+
+local function bounded(value, limit)
+  local text = trim(value)
+  if #text > limit then
+    return text:sub(1, limit)
+  end
+  return text
+end
+
+local function is_verdict(value)
+  return value == "approve" or value == "reject" or value == "abstain" or value == "invalid"
+end
+
+local function valid_digest_item(item)
+  if type(item) ~= "table" then
+    return false
+  end
+  if not is_bounded_string(item.angle, max_key_len) or item.angle:find("%c") ~= nil then
+    return false
+  end
+  if not is_verdict(item.verdict) then
+    return false
+  end
+  if item.reply ~= nil and #tostring(item.reply) > max_digest_len then
+    return false
+  end
+  if item.digest ~= nil and #tostring(item.digest) > max_digest_len then
+    return false
+  end
+  return true
+end
+
+local function valid_prior_round_digests(value)
+  if value == nil then
+    return true
+  end
+  if type(value) ~= "table" or #value > max_prior_round_digests then
+    return false
+  end
+  for _, item in ipairs(value) do
+    if not valid_digest_item(item) then
+      return false
+    end
+  end
+  return true
 end
 
 local function normalized_angles(proposal)
@@ -124,6 +186,16 @@ function M.is_eligible(proposal)
     return false
   end
   if proposal.context ~= nil and not is_bounded_string(proposal.context, max_context_len) then
+    return false
+  end
+  if normalize_round(proposal.round) == nil then
+    return false
+  end
+  if proposal.convergence_question ~= nil
+    and not is_bounded_string(proposal.convergence_question, max_narrowed_question_len) then
+    return false
+  end
+  if not valid_prior_round_digests(proposal.prior_round_digests) then
     return false
   end
   return normalized_angles(proposal) ~= nil
@@ -175,6 +247,11 @@ function M.build_angle_prompt(proposal, angle)
   if proposal.context ~= nil and proposal.context ~= "" then
     context_block = "Context:\n" .. neutralize_untrusted_prompt_text(proposal.context)
   end
+  local convergence_block = ""
+  if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
+    convergence_block = "Convergence question:\n"
+      .. neutralize_untrusted_prompt_text(proposal.convergence_question)
+  end
 
   -- Belt-and-suspenders: angle is already rejected if multi-line above, but neutralize it
   -- too before it reaches the prompt (bias fallback + the Angle: line).
@@ -185,6 +262,7 @@ function M.build_angle_prompt(proposal, angle)
     title = neutralize_untrusted_prompt_text(proposal.title),
     body = neutralize_untrusted_prompt_text(proposal.body),
     context_block = context_block,
+    convergence_block = convergence_block,
   })
 end
 
@@ -270,7 +348,132 @@ function M.aggregate(angle_results)
   return decision
 end
 
-function M.build_reached_payload(proposal, decision, angle_results)
+function M.angle_digests(angle_results)
+  local digests = {}
+  for _, result in ipairs(angle_results or {}) do
+    local verdict = result.verdict
+    if not is_verdict(verdict) then
+      verdict = "invalid"
+    end
+    local reply = bounded(result.reply or "", max_digest_len)
+    local raw = bounded(result.stdout or "", max_digest_len)
+    local digest = reply
+    if digest == "" then
+      digest = raw
+    end
+    if digest == "" then
+      digest = "No parseable angle reply."
+    end
+    table.insert(digests, {
+      angle = bounded(result.angle or "unknown", max_key_len),
+      verdict = verdict,
+      reply = reply,
+      digest = bounded(digest, max_digest_len),
+    })
+  end
+  return digests
+end
+
+local function render_angle_outputs(angle_results)
+  local lines = {}
+  for _, item in ipairs(M.angle_digests(angle_results)) do
+    table.insert(lines, "Angle: " .. neutralize_untrusted_prompt_text(item.angle))
+    table.insert(lines, "Verdict: " .. item.verdict)
+    table.insert(lines, "Reply: " .. neutralize_untrusted_prompt_text(item.reply))
+    table.insert(lines, "Digest: " .. neutralize_untrusted_prompt_text(item.digest))
+    table.insert(lines, "")
+  end
+  if #lines > 0 then
+    table.remove(lines)
+  end
+  return table.concat(lines, "\n")
+end
+
+function M.build_meta_judge_prompt(proposal, angle_results)
+  if type(proposal) ~= "table" then
+    error("consensus: proposal must be a table")
+  end
+  local prompt = require("prompts.meta_judge")
+  local context_block = ""
+  if proposal.context ~= nil and proposal.context ~= "" then
+    context_block = "Context:\n" .. neutralize_untrusted_prompt_text(proposal.context)
+  end
+  local convergence_block = ""
+  if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
+    convergence_block = "Current convergence question:\n"
+      .. neutralize_untrusted_prompt_text(proposal.convergence_question)
+  end
+
+  return M.render_template(prompt.template, {
+    title = neutralize_untrusted_prompt_text(proposal.title),
+    body = neutralize_untrusted_prompt_text(proposal.body),
+    context_block = context_block,
+    convergence_block = convergence_block,
+    angle_outputs = render_angle_outputs(angle_results),
+  })
+end
+
+function M.parse_meta_judge_output(stdout)
+  local text = tostring(stdout or "")
+  local parsed = nil
+  local count = 0
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    local kind, value = line:match("^%s*([Rr][Ee][Aa][Cc][Hh][Ee][Dd])%s*:%s*(.+)%s*$")
+    if kind == nil then
+      kind, value = line:match("^%s*([Cc][Oo][Nn][Vv][Ee][Rr][Gg][Ee])%s*:%s*(.+)%s*$")
+    end
+    if kind ~= nil then
+      value = bounded(value, max_narrowed_question_len)
+      if value ~= "" then
+        count = count + 1
+        local lowered = kind:lower()
+        if lowered == "reached" then
+          -- decision must be an EXACT whitespace-delimited `approve`/`reject`
+          -- token followed by a non-empty framing; `approve/reject`,
+          -- `approve-ish`, or a bare `approve` (no framing) fail closed to
+          -- nil so the caller converges instead of fabricating a reached.
+          local first, framing = value:match("^(%S+)%s+(.+)$")
+          local decision = first and first:lower() or nil
+          if (decision == "approve" or decision == "reject")
+            and framing ~= nil and framing ~= "" then
+            parsed = {
+              kind = "reached",
+              decision = decision,
+              framing = value,
+            }
+          else
+            parsed = nil
+          end
+        else
+          parsed = {
+            kind = "converge",
+            narrowed_question = value,
+          }
+        end
+      end
+    end
+  end
+
+  if count ~= 1 then
+    return nil
+  end
+  return parsed
+end
+
+function M.default_narrowed_question(proposal, angle_results)
+  local parts = {}
+  for _, item in ipairs(M.angle_digests(angle_results)) do
+    table.insert(parts, tostring(item.angle) .. "=" .. tostring(item.verdict))
+  end
+  local question = "Resolve the concrete disagreement for proposal " .. tostring(proposal.proposal_id)
+    .. " and decide whether the current framing should be approved or rejected."
+  if #parts > 0 then
+    question = question .. " Angle verdicts: " .. table.concat(parts, ", ") .. "."
+  end
+  return bounded(question, max_narrowed_question_len)
+end
+
+function M.build_reached_payload(proposal, decision, angle_results, framing)
   if type(proposal) ~= "table" then
     error("consensus: proposal must be a table")
   end
@@ -286,13 +489,18 @@ function M.build_reached_payload(proposal, decision, angle_results)
   -- the reliable 64 KiB payload bound.
   local clean_results = {}
   local body_lines = {}
+  if framing ~= nil and framing ~= "" then
+    table.insert(body_lines, "Meta-judge framing:")
+    table.insert(body_lines, bounded(framing, max_reply_len))
+    table.insert(body_lines, "")
+  end
   for _, result in ipairs(angle_results or {}) do
     table.insert(clean_results, {
       angle = result.angle,
-      verdict = result.verdict,
+      verdict = is_verdict(result.verdict) and result.verdict or "invalid",
     })
     table.insert(body_lines, tostring(result.angle) .. ":")
-    table.insert(body_lines, tostring(result.reply))
+    table.insert(body_lines, bounded(result.reply, max_reply_len))
     table.insert(body_lines, "")
   end
 
@@ -316,7 +524,7 @@ function M.build_reached_payload(proposal, decision, angle_results)
   }
 end
 
-function M.build_unresolved_payload(proposal)
+function M.build_converge_payload(proposal, narrowed_question, angle_results)
   if type(proposal) ~= "table" then
     error("consensus: proposal must be a table")
   end
@@ -325,8 +533,11 @@ function M.build_unresolved_payload(proposal)
   end
 
   return {
-    schema = "consensus.consensus_unresolved.v1",
+    schema = "consensus.consensus_converge.v1",
     proposal_id = proposal.proposal_id,
+    round = tonumber(proposal.round) or 0,
+    narrowed_question = bounded(narrowed_question, max_narrowed_question_len),
+    angle_digests = M.angle_digests(angle_results),
     dedup_key = "consensus:" .. tostring(proposal.dedup_key),
     -- Keep this payload bounded and source-agnostic: consumers must re-derive any
     -- current source details from source_ref instead of trusting stale proposal text.

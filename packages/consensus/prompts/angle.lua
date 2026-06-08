@@ -9,6 +9,7 @@ Line two: the marker ⟦FKST:REPLY⟧ followed by one concise paragraph.
 Proposal:
 Angle: {{angle}}
 Title: {{title}}
+{{convergence_block}}
 Body:
 {{body}}
 {{context_block}}]],

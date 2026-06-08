@@ -56,7 +56,7 @@ end
 
 local function unresolved(extra)
   local value = {
-    schema = "consensus.consensus_unresolved.v1",
+    schema = "consensus.consensus_converge.v1",
     proposal_id = "github-devloop/issue/owner/repo/42",
     dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     source_ref = source_ref(),
