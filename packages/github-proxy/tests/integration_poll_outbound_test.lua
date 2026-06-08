@@ -36,6 +36,26 @@ local pr_open_guard_comments = h.pr_open_guard_comments
 local pr_open_visible_comments = h.pr_open_visible_comments
 local reviewing_marker = h.reviewing_marker
 
+local function pr_json(number, updated_at, state)
+  return string.format(
+    '{"number":%d,"title":"PR %d","url":"https://github.example/owner/x/pull/%d","updatedAt":"%s","state":"%s","labels":[{"name":"review"}]}',
+    number,
+    number,
+    number,
+    updated_at,
+    state or "OPEN"
+  )
+end
+
+local function pr_list_many_json(count, target_number, target_updated_at)
+  local parts = {}
+  for index = 1, count do
+    table.insert(parts, pr_json(100 + index, string.format("2026-06-03T03:%02d:00Z", index % 60), "OPEN"))
+  end
+  table.insert(parts, pr_json(target_number, target_updated_at, "OPEN"))
+  return "[" .. table.concat(parts, ",") .. "]\n"
+end
+
 return {
   test_inbound_poll_raises_issue_and_pr_then_cache_hit = function()
     local event = { queue = "github_poll_tick", payload = {} }
@@ -101,7 +121,7 @@ return {
     t.eq(changed.raises[2].payload.dedup_key, "owner/x#pr#7@2026-06-04T06:07:08Z")
   end,
 
-  test_inbound_poll_re_raises_closed_lifecycle_state_when_updated_at_changes = function()
+  test_inbound_poll_does_not_re_raise_closed_lifecycle_state_when_updated_at_changes = function()
     local event = { queue = "github_poll_tick", payload = {} }
     local run_opts = opts("inbound-closed-change")
 
@@ -113,18 +133,36 @@ return {
     t.eq(first.raises[1].payload.state, "OPEN")
 
     mock_poll(
-      issue_list_json("2026-06-04T09:10:11Z", "CLOSED"),
+      "[]\n",
       pr_list_json()
     )
     local closed = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(closed.exit_code, 0)
-    t.eq(#closed.raises, 1)
-    t.eq(closed.raises[1].queue, "github_entity_changed")
-    t.eq(closed.raises[1].payload.type, "issue")
-    t.eq(closed.raises[1].payload.number, 42)
-    t.eq(closed.raises[1].payload.updated_at, "2026-06-04T09:10:11Z")
-    t.eq(closed.raises[1].payload.state, "CLOSED")
-    t.eq(closed.raises[1].payload.dedup_key, "owner/x#issue#42@2026-06-04T09:10:11Z")
+    t.eq(#closed.raises, 0)
+    t.eq(count_calls("gh issue list"), 2)
+    t.eq(count_calls("gh pr list"), 2)
+  end,
+
+  test_inbound_poll_open_pr_coverage_is_not_limited_by_terminal_volume = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+
+    mock_repo_env()
+    mock_issue_list("[]\n")
+    mock_pr_list(pr_list_many_json(35, 12, "2026-06-02T00:00:00Z"))
+    local result = t.run_department("departments/github_poll/main.lua", event, opts("open-pr-coverage"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 36)
+    t.eq(result.raises[36].queue, "github_entity_changed")
+    t.eq(result.raises[36].payload.type, "pr")
+    t.eq(result.raises[36].payload.number, 12)
+    t.eq(result.raises[36].payload.updated_at, "2026-06-02T00:00:00Z")
+    t.eq(result.raises[36].payload.dedup_key, "owner/x#pr#12@2026-06-02T00:00:00Z")
+    t.eq(core.gh_pr_list_cmd("owner/x"), "gh pr list --repo 'owner/x' --state open --limit 1000 --json number,title,updatedAt,url,state,labels")
+    t.is_true(core.gh_pr_list_cmd("owner/x"):find("--state open", 1, true) ~= nil)
+    t.is_true(core.gh_pr_list_cmd("owner/x"):find("--limit 1000", 1, true) ~= nil)
+    t.eq(core.gh_pr_list_cmd("owner/x"):find("--state all", 1, true), nil)
+    t.eq(count_calls("gh issue list"), 1)
+    t.eq(count_calls("gh pr list"), 1)
   end,
 
   test_inbound_poll_continues_when_issue_list_fails = function()

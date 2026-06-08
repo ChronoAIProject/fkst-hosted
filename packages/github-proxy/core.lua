@@ -497,11 +497,11 @@ function M.parse_issue_list(gh_json_stdout)
 end
 
 function M.gh_issue_list_cmd(repo)
-  return "gh issue list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state,labels"
+  return "gh issue list --repo " .. shell_single_quote(repo) .. " --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
 end
 
 function M.gh_pr_list_cmd(repo)
-  return "gh pr list --repo " .. shell_single_quote(repo) .. " --state all --json number,title,updatedAt,url,state,labels"
+  return "gh pr list --repo " .. shell_single_quote(repo) .. " --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
 end
 
 function M.gh_pr_list_head_cmd(repo, branch, base_branch)

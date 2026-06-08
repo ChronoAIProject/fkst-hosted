@@ -157,11 +157,11 @@ return {
   test_gh_commands_are_quoted = function()
     t.eq(
       core.gh_issue_list_cmd("owner/repo"),
-      "gh issue list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state,labels"
+      "gh issue list --repo 'owner/repo' --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
     )
     t.eq(
       core.gh_pr_list_cmd("owner/repo"),
-      "gh pr list --repo 'owner/repo' --state all --json number,title,updatedAt,url,state,labels"
+      "gh pr list --repo 'owner/repo' --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
     )
     t.eq(
       core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY"),
