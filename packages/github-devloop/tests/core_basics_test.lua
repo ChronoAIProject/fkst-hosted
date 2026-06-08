@@ -8,6 +8,10 @@ local source_ref = h.source_ref
 local issue = h.issue
 local reached = h.reached
 local unresolved = h.unresolved
+local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
+local verdict_summary_label = string.char(
+  228, 184, 137, 230, 150, 185, 232, 163, 129, 229, 134, 179, 58, 32
+)
 
 return {
   test_devloop_config_defaults_and_validation = function()
@@ -342,11 +346,19 @@ return {
     t.eq(rejected.remove_labels[2], "fkst-dev:ready")
     t.is_true(#rejected.remove_labels >= 10)
 
-    local completed = reached()
+    local completed = reached({
+      angle_results = {
+        { angle = "minimal", verdict = "approve" },
+        { angle = "structural", verdict = "reject" },
+        { angle = "delete", verdict = "approve" },
+      },
+    })
     local comment = core.build_result_comment_request("owner/repo", "42", completed)
     t.eq(comment.schema, "github-proxy.v1")
     t.eq(comment.issue_number, "42")
     t.is_true(comment.body:find("github-devloop decision: approve", 1, true) ~= nil)
+    t.is_true(comment.body:find(verdict_summary_label .. "minimal=approve structural=reject delete=approve", 1, true) ~= nil)
+    t.is_true(comment.body:find(ai_sentinel, 1, true) ~= nil)
     t.is_true(comment.body:find('fkst:github-devloop:result:v1 proposal="github-devloop/issue/owner/repo/42"', 1, true) ~= nil)
     t.is_true(comment.body:find('fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="ready"', 1, true) ~= nil)
     local comment_version = tostring(completed.dedup_key):gsub(":", "-")

@@ -16,6 +16,10 @@ local review_unresolved = h.review_unresolved
 local fixing = h.fixing
 local pr_link_marker_for_fix = h.pr_link_marker_for_fix
 local review_meta_event = h.review_meta_event
+local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
+local verdict_summary_label = string.char(
+  228, 184, 137, 230, 150, 185, 232, 163, 129, 229, 134, 179, 58, 32
+)
 local merge_ready = h.merge_ready
 local run_observe = h.run_observe
 local run_result = h.run_result
@@ -698,7 +702,13 @@ return {
   end,
 
   test_review_result_approve_marks_issue_merge_ready = function()
-    local event = review_reached()
+    local event = review_reached({
+      angle_results = {
+        { angle = "minimal", verdict = "approve" },
+        { angle = "structural", verdict = "approve" },
+        { angle = "delete", verdict = "approve" },
+      },
+    })
     local impl_version = reviewing().version
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
@@ -716,6 +726,8 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:merge-ready")
     t.is_true(#label_raise.payload.remove_labels >= 10)
     t.is_true(comment_raise.payload.body:find("github-devloop PR review decision: approve", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(verdict_summary_label .. "minimal=approve structural=approve delete=approve", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(ai_sentinel, 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("state=\"merge-ready\"", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('state="merge-ready" version="' .. impl_version .. '"', 1, true) ~= nil)
     t.eq(core.current_state({ comment_raise.payload.body }, "github-devloop/issue/owner/repo/42").version, impl_version)

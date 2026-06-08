@@ -1,6 +1,116 @@
 local S = {}
 
 function S.install(M)
+local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
+local convergence_suffix = string.char(
+  32, 226, 128, 148, 32, 228, 184, 137, 230, 150, 185, 230, 156, 170, 232, 190,
+  190, 230, 136, 144, 229, 133, 177, 232, 175, 134, 239, 188, 140, 230, 148,
+  182, 231, 170, 132, 228, 184, 173
+)
+local display_separator = string.char(32, 226, 128, 148, 32)
+local narrowed_question_label = string.char(
+  230, 148, 182, 231, 170, 132, 233, 151, 174, 233, 162, 152, 58, 32
+)
+local angle_stances_label = string.char(
+  228, 184, 137, 230, 150, 185, 231, 171, 139, 229, 156, 186, 58
+)
+local verdict_summary_label = string.char(
+  228, 184, 137, 230, 150, 185, 232, 163, 129, 229, 134, 179, 58, 32
+)
+local max_display_question_len = 2000
+local max_display_digest_len = 600
+local max_display_attr_len = 120
+local max_display_block_len = 5000
+local max_verdict_summary_items = 8
+local max_verdict_summary_len = 600
+
+local function bounded_neutralized_text(value, limit)
+  local text = tostring(value or "")
+  local cap = limit or max_display_digest_len
+  if #text > cap then
+    text = text:sub(1, cap)
+  end
+  text = M.neutralize_untrusted_comment_text(text)
+  if #text > cap then
+    text = text:sub(1, cap)
+  end
+  return text
+end
+
+local function angle_display_text(item)
+  if type(item) ~= "table" then
+    return nil
+  end
+  local angle = bounded_neutralized_text(item.angle or "unknown", max_display_attr_len)
+  local verdict = bounded_neutralized_text(item.verdict or "invalid", max_display_attr_len)
+  local digest = item.digest
+  if digest == nil or tostring(digest) == "" then
+    digest = item.reply
+  end
+  digest = bounded_neutralized_text(digest or "", max_display_digest_len)
+  if digest == "" then
+    return "- " .. angle .. ": " .. verdict
+  end
+  return "- " .. angle .. ": " .. verdict .. display_separator .. digest
+end
+
+local function build_convergence_display(header, unresolved, round)
+  local lines = {
+    header .. " " .. tostring(round) .. convergence_suffix,
+  }
+  local question = bounded_neutralized_text(unresolved and unresolved.narrowed_question or "", max_display_question_len)
+  if question ~= "" then
+    table.insert(lines, "")
+    table.insert(lines, narrowed_question_label .. question)
+  end
+  local angle_lines = {}
+  if type(unresolved) == "table" and type(unresolved.angle_digests) == "table" then
+    for _, item in ipairs(unresolved.angle_digests) do
+      local line = angle_display_text(item)
+      if line ~= nil then
+        table.insert(angle_lines, line)
+      end
+    end
+  end
+  if #angle_lines > 0 then
+    table.insert(lines, "")
+    table.insert(lines, angle_stances_label)
+    for _, line in ipairs(angle_lines) do
+      table.insert(lines, line)
+    end
+  end
+  local body = table.concat(lines, "\n")
+  if #body > max_display_block_len then
+    body = body:sub(1, max_display_block_len)
+  end
+  return body
+end
+
+local function build_verdict_summary(angle_results)
+  if type(angle_results) ~= "table" then
+    return nil
+  end
+  local parts = {}
+  for _, item in ipairs(angle_results) do
+    if #parts >= max_verdict_summary_items then
+      break
+    end
+    if type(item) == "table" then
+      local angle = bounded_neutralized_text(item.angle or "unknown", max_display_attr_len)
+      local verdict = bounded_neutralized_text(item.verdict or "invalid", max_display_attr_len)
+      table.insert(parts, angle .. "=" .. verdict)
+    end
+  end
+  if #parts == 0 then
+    return nil
+  end
+  local summary = verdict_summary_label .. table.concat(parts, " ")
+  if #summary > max_verdict_summary_len then
+    summary = summary:sub(1, max_verdict_summary_len)
+  end
+  return summary
+end
+
 function M.build_label_request(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
   return {
     schema = "github-proxy.label.v1",
@@ -61,10 +171,16 @@ function M.build_result_comment_request(repo, issue_number, reached)
   local state = reached.decision == "approve" and "ready" or "blocked"
   local state_marker = M.state_marker(reached.proposal_id, state, reached.dedup_key)
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
+  local verdict_summary = build_verdict_summary(reached.angle_results)
   local body = "github-devloop decision: " .. tostring(reached.decision)
+  if verdict_summary ~= nil then
+    body = body .. "\n" .. verdict_summary
+  end
+  body = body
     .. "\n\n" .. body_text
     .. "\n\n" .. state_marker
     .. "\n" .. marker
+    .. "\n" .. ai_sentinel
   return {
     schema = "github-proxy.v1",
     repo = repo,
@@ -83,7 +199,9 @@ function M.build_converge_round_comment_request(repo, issue_number, unresolved, 
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop convergence round recorded: " .. tostring(round) .. "\n\n" .. tostring(marker_body),
+    body = build_convergence_display("github-devloop convergence round", unresolved, round)
+      .. "\n\n" .. tostring(marker_body)
+      .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
       "converge-round",
       "comment",
@@ -100,7 +218,9 @@ function M.build_review_converge_round_comment_request(repo, issue_number, unres
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop PR review convergence round recorded: " .. tostring(round) .. "\n\n" .. tostring(marker_body),
+    body = build_convergence_display("github-devloop PR review convergence round", unresolved, round)
+      .. "\n\n" .. tostring(marker_body)
+      .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
       "review-converge-round",
       "comment",
@@ -152,7 +272,8 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
     body = "github-devloop reconcile action: " .. tostring(action)
       .. "\n\nReason:\n" .. safe_reason
       .. "\n\n"
-      .. state_marker .. "\n" .. marker,
+      .. state_marker .. "\n" .. marker
+      .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
       "reconcile",
       "comment",
@@ -174,7 +295,8 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
     body = "github-devloop review reconcile action: " .. tostring(action)
       .. "\n\nReason:\n" .. safe_reason
       .. "\n\n"
-      .. state_marker .. "\n" .. marker,
+      .. state_marker .. "\n" .. marker
+      .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
       "review-reconcile",
       "comment",
@@ -478,15 +600,21 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
     merge_marker = "\n" .. M.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
   end
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
+  local verdict_summary = build_verdict_summary(reached.angle_results)
+  local body = "github-devloop PR review decision: " .. tostring(reached.decision)
+  if verdict_summary ~= nil then
+    body = body .. "\n" .. verdict_summary
+  end
   return {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop PR review decision: " .. tostring(reached.decision)
+    body = body
       .. "\n\n" .. body_text
       .. "\n\n" .. state_marker
       .. "\n" .. marker
-      .. merge_marker,
+      .. merge_marker
+      .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
       "review-result",
       "comment",
