@@ -29,12 +29,13 @@ The memory files carry detail and incident history. This skill is the decision t
 
 ## Non-negotiable guardrails (read before any intervention)
 
+- **UNATTENDED MODE — never pop up a question.** This runs unattended. Do NOT use AskUserQuestion; never block on a user prompt. When you are unsure or facing a judgment call (including a risky op below), run `sshx` to think it through and decide — independent worker perspectives are the gate, not a human prompt. Never act rashly, and never stall waiting for a human.
 - A hotfix fixes ONLY the one defect. Do NOT unilaterally change architecture, switch branch topology, delete/modify remote branches, or bypass the integration buffer + rollup gate.
-- Destructive/irreversible remote ops - close PR, delete branch, force-push, change default branch - require explicit USER confirmation FIRST, even under `/goal` "continue" pressure. Deleting a base branch auto-closes its open PRs; always check in-flight PR dependencies before touching a branch.
+- Destructive/irreversible remote ops - close PR, delete branch, force-push, change default branch - are high-risk: do NOT act rashly, and (unattended) do NOT pop up. Vet via `sshx` (multi-angle), check in-flight PR dependencies + branch ancestry FIRST, and proceed only if sshx confirms it is both safe AND necessary. Deleting a base branch auto-closes its open PRs.
 - Engine (Rust) changes belong in the sibling `fkst-substrate` repo, never here. A package fix must work package-side; an engine need is a separate substrate PR.
 - Autonomous changes flow through the integration buffer → rollup → dev. They do NOT go direct to dev - the ONE exception is an out-of-band infra hotfix when the automation path itself is broken/stopped (routing through it would be circular): that goes direct to dev, CI-gated.
 - Trust only marker-as-fact (bot-authored state markers) with version-CAS; GitHub is eventually-consistent (read-after-write lag), not strong-consistency - expect transient "marker not yet visible; retrying".
-- When unsure or facing a design-layer problem, STOP and ask + file an issue; do not improvise a workaround that bypasses a deliberate gate.
+- When unsure or facing a design-layer problem, do NOT improvise a workaround that bypasses a deliberate gate, and do NOT pop up a question — run `sshx` to think it through and decide, and file an issue for the record.
 
 ## Operating loop
 
@@ -51,8 +52,9 @@ The memory files carry detail and incident history. This skill is the decision t
      --framework-bin "$BIN"
    ```
 
-2. Watch it. Use "What to observe". If state keeps advancing, do NOT intervene - observe, and file issues only for real system defects.
-3. When it stalls, go to the Stall decision tree.
+2. **Keep the running code current.** The supervise loads `packages/` from the worktree at STARTUP — branch auto-sync (`sync_scan` ff'ing `dev`→`integration`) propagates branch CONTENT but does NOT reload a running process's code. So after ANY code change merges to `dev` (your out-of-band hotfix, or an autonomous rollup), sync the worktree to the latest remote `dev` and restart the supervise PROMPTLY, so it always runs the latest code. A supervise left running on stale code re-introduces already-fixed defects.
+3. Watch it. Use "What to observe". If state keeps advancing, do NOT intervene - observe, and file issues only for real system defects.
+4. When it stalls, go to the Stall decision tree.
 
 ## What to observe
 
