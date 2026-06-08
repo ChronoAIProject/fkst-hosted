@@ -1,22 +1,6 @@
 local S = {}
 
 function S.install(M)
-function M.review_loop_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
-  return '<!-- fkst:github-devloop:review-loop:v1 proposal="' .. tostring(review_proposal_id)
-    .. '" issue_proposal="' .. tostring(issue_proposal_id)
-    .. '" n="' .. tostring(n)
-    .. '" dedup="' .. tostring(dedup_key)
-    .. '" -->'
-end
-
-function M.review_meta_trigger_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
-  return '<!-- fkst:github-devloop:review-meta-trigger:v1 proposal="' .. tostring(review_proposal_id)
-    .. '" issue_proposal="' .. tostring(issue_proposal_id)
-    .. '" n="' .. tostring(n)
-    .. '" dedup="' .. tostring(dedup_key)
-    .. '" -->'
-end
-
 function M.review_meta_marker(issue_proposal_id, dedup_key, action, version)
   local fields = ""
   if action ~= nil then
@@ -466,134 +450,11 @@ function M.impl_failure_marker(proposal_id, dedup_key, reason)
     .. '" -->'
 end
 
-local function marker_records(comments, kind, proposal_id)
-  local records = {}
-  if type(comments) ~= "table" then
-    return records
-  end
-
-  local marker_pattern = "<!%-%- fkst:github%-devloop:" .. kind .. ":v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local n = tonumber(marker:match('n="(%d+)"'))
-      local dedup_key = marker:match('dedup="([^"]*)"')
-      if marker_proposal == proposal_id and n ~= nil then
-        table.insert(records, {
-          n = n,
-          dedup_key = dedup_key,
-        })
-      end
-    end
-  end
-  return records
-end
-
-local function has_marker_round(comments, kind, proposal_id, n)
-  for _, record in ipairs(marker_records(comments, kind, proposal_id)) do
-    if record.n == n then
-      return true
-    end
-  end
-  return false
-end
-
 function M.has_review_result_marker(comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
   if type(comments) ~= "table" then
     return false
   end
   local needle = M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key)
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    if M._comment_body(comment):find(needle, 1, true) ~= nil then
-      return true
-    end
-  end
-  return false
-end
-
-function M.has_review_loop_marker(comments, review_proposal_id, issue_proposal_id, n, dedup_key)
-  if type(comments) ~= "table" then
-    return false
-  end
-  local needle = M.review_loop_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    if M._comment_body(comment):find(needle, 1, true) ~= nil then
-      return true
-    end
-  end
-  return false
-end
-
-local function review_marker_records(comments, kind, review_proposal_id, issue_proposal_id)
-  local records = {}
-  if type(comments) ~= "table" then
-    return records
-  end
-
-  local safe_kind = tostring(kind):gsub("%-", "%%-")
-  local marker_pattern = "<!%-%- fkst:github%-devloop:" .. safe_kind .. ":v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_issue = marker:match('issue_proposal="([^"]+)"')
-      local n = tonumber(marker:match('n="(%d+)"'))
-      local dedup = marker:match('dedup="([^"]*)"')
-      if marker_proposal == tostring(review_proposal_id)
-        and marker_issue == tostring(issue_proposal_id)
-        and n ~= nil then
-        table.insert(records, {
-          n = n,
-          dedup_key = dedup,
-        })
-      end
-    end
-  end
-  return records
-end
-
-function M.has_review_loop_marker_round(comments, review_proposal_id, issue_proposal_id, n)
-  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
-    if record.n == n then
-      return true
-    end
-  end
-  return false
-end
-
-function M.has_review_loop_marker_dedup(comments, review_proposal_id, issue_proposal_id, dedup_key)
-  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
-    if record.dedup_key == tostring(dedup_key) then
-      return true
-    end
-  end
-  for _, record in ipairs(review_marker_records(comments, "review-meta-trigger", review_proposal_id, issue_proposal_id)) do
-    if record.dedup_key == tostring(dedup_key) then
-      return true
-    end
-  end
-  return false
-end
-
-function M.review_loop_count_from_github_markers(comments, review_proposal_id, issue_proposal_id)
-  local max_n = 0
-  for _, record in ipairs(review_marker_records(comments, "review-loop", review_proposal_id, issue_proposal_id)) do
-    if record.n > max_n then
-      max_n = record.n
-    end
-  end
-  for _, record in ipairs(review_marker_records(comments, "review-meta-trigger", review_proposal_id, issue_proposal_id)) do
-    if record.n > max_n then
-      max_n = record.n
-    end
-  end
-  return max_n
-end
-
-function M.has_review_meta_trigger_marker(comments, review_proposal_id, issue_proposal_id, n, dedup_key)
-  if type(comments) ~= "table" then
-    return false
-  end
-  local needle = M.review_meta_trigger_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     if M._comment_body(comment):find(needle, 1, true) ~= nil then
       return true
@@ -824,11 +685,6 @@ end
 function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)
   return M.has_implementing_marker(comments, proposal_id, dedup_key)
     or M.has_impl_failure_marker(comments, proposal_id, dedup_key)
-end
-
-function M.parse_loop_round_from_dedup(dedup_key)
-  local n = tostring(dedup_key or ""):match("/loop/(%d+)$")
-  return tonumber(n) or 0
 end
 
 function M.result_marker(proposal_id, decision, dedup_key)

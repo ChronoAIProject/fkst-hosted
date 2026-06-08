@@ -3,7 +3,7 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "devloop_reconcile" },
+  consumes = { "devloop_reconcile", "devloop_review_reconcile" },
   produces = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
@@ -11,7 +11,18 @@ M.spec = {
   stall_window = "2m",
 }
 
-function pipeline(event)
+local function emit_blocked_reconcile(kind, proposal_id, state, version, action, reason, comment_request, label_request)
+  local add_labels, remove_labels = core.state_label_changes("blocked")
+  core.log_cas_decision("reconcile", proposal_id, state, kind, "blocked", "applied", reason)
+  core.log_apply("reconcile", proposal_id, "blocked", version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_label_request",
+  })
+  core.log_raise("reconcile", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  core.log_raise("reconcile", proposal_id, "github-proxy.github_issue_label_request", label_request)
+end
+
+local function pipeline_thinking(event)
   local reconcile = event.payload or {}
   if not core.is_supported_reconcile(reconcile) then
     core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
@@ -68,15 +79,81 @@ function pipeline(event)
     local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-rounds"
     local comment_request = core.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
     local label_request = core.build_reconcile_label_request(repo, issue_number, reconcile)
-    local add_labels, remove_labels = core.state_label_changes("blocked")
-    core.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "applied", reason)
-    core.log_apply("reconcile", reconcile.proposal_id, "blocked", version, { add = add_labels, remove = remove_labels }, {
-      "github-proxy.github_issue_comment_request",
-      "github-proxy.github_issue_label_request",
-    })
-    core.log_raise("reconcile", reconcile.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-    core.log_raise("reconcile", reconcile.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    emit_blocked_reconcile("thinking", reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
   end)
+end
+
+local function pipeline_review(event)
+  local reconcile = event.payload or {}
+  if not core.is_supported_review_reconcile(reconcile) then
+    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
+    return
+  end
+
+  core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
+  local repo, issue_number = core.parse_proposal_id(reconcile.proposal_id)
+  if repo == nil then
+    core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    return
+  end
+
+  local lock_key = core.transition_lock_key(reconcile.proposal_id)
+  if lock_key == nil then
+    core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "no transition lock key")
+    return
+  end
+
+  with_lock(lock_key, function()
+    core.assert_trusted_bot_configured()
+
+    local view = exec_sync({ cmd = core.gh_issue_view_review_loop_cmd(repo, issue_number), timeout = 30 })
+    if view.exit_code ~= 0 then
+      error("github-devloop: gh issue review reconcile view failed: " .. tostring(view.stderr))
+    end
+
+    local current = core.parse_issue_view_review_loop(view.stdout)
+    core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
+    local state = core.current_state(current.comments, reconcile.proposal_id)
+    local version = core.review_reconcile_state_version(reconcile.issue_version, reconcile.round)
+    if core.has_review_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.issue_version, reconcile.round) then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(review reconcile marker already visible)", "review reconcile result marker for incoming version is already visible")
+      return
+    end
+    if state.state ~= nil and core.stage_rank(state.state) >= core.stage_rank("blocked") then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
+      return
+    end
+
+    local transition = core.versioned_transition_status(state, { "reviewing" }, "blocked", version)
+    if state.state == nil or transition == "pending" then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
+      error("github-devloop: reviewing state marker not yet visible for review reconcile; retrying")
+    end
+    if state.state ~= "reviewing"
+      or core.safe_version_segment(tostring(state.version or "")) ~= core.safe_version_segment(tostring(reconcile.issue_version)) then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-stale(version-mismatch)", "review reconcile event does not match canonical reviewing marker")
+      return
+    end
+    if transition == "idempotent" or transition == "stale" then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "current marker cannot be reconciled from reviewing")
+      return
+    end
+
+    local action = "drop"
+    local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-review-rounds"
+    local comment_request = core.build_review_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
+    local label_request = core.build_review_reconcile_label_request(repo, issue_number, reconcile)
+    emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
+  end)
+end
+
+function pipeline(event)
+  local payload = event.payload or {}
+  if payload.schema == "github-devloop.review-reconcile.v1" then
+    return pipeline_review(event)
+  end
+  return pipeline_thinking(event)
 end
 
 return M

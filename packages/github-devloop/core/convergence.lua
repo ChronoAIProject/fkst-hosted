@@ -180,6 +180,44 @@ function M.is_supported_reconcile(payload)
     and valid_round(payload.round) ~= nil
 end
 
+function M.build_devloop_review_reconcile_payload(unresolved, round, issue_proposal_id, issue_version, head_sha)
+  return {
+    schema = "github-devloop.review-reconcile.v1",
+    proposal_id = issue_proposal_id,
+    review_proposal_id = unresolved.proposal_id,
+    issue_version = issue_version,
+    head_sha = head_sha,
+    round = round,
+    dedup_key = "review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(round),
+    source_ref = {
+      kind = unresolved.source_ref.kind,
+      ref = unresolved.source_ref.ref,
+    },
+  }
+end
+
+function M.review_reconcile_state_version(issue_version, round)
+  return tostring(issue_version) .. "/review-loop/" .. tostring(round)
+end
+
+function M.is_supported_review_reconcile(payload)
+  if type(payload) ~= "table" then
+    return false
+  end
+  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  return payload.schema == "github-devloop.review-reconcile.v1"
+    and repo ~= nil
+    and issue_number ~= nil
+    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
+    and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and M._is_git_sha(payload.head_sha)
+    and valid_round(payload.round) ~= nil
+    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and tostring(payload.dedup_key) == "review-reconcile:" .. tostring(payload.issue_version) .. "/review-loop/" .. tostring(payload.round)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
 function M.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
   local n = valid_round(round)
   if n == nil then
@@ -213,6 +251,22 @@ function M.reconcile_marker(proposal_id, base_version, round, action)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
     .. '" dedup="' .. safe_attr("reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(n), M._max_dedup_len)
+    .. '" -->'
+end
+
+function M.review_reconcile_marker(issue_proposal_id, issue_version, round, action)
+  local n = valid_round(round)
+  if n == nil then
+    error("github-devloop: invalid review reconcile round")
+  end
+  if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
+    error("github-devloop: invalid review reconcile action")
+  end
+  return '<!-- fkst:github-devloop:review-reconcile:v1 proposal="' .. safe_attr(issue_proposal_id, M._max_key_len)
+    .. '" version="' .. safe_attr(M.review_reconcile_state_version(issue_version, n), M._max_dedup_len)
+    .. '" round="' .. tostring(n)
+    .. '" action="' .. safe_attr(action, max_attr_len)
+    .. '" dedup="' .. safe_attr("review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(n), M._max_dedup_len)
     .. '" -->'
 end
 
@@ -291,6 +345,25 @@ function M.has_reconcile_marker(comments, proposal_id, base_version, round)
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
+        and attr(marker, "version") == version
+        and valid_round(attr(marker, "round")) == n then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_review_reconcile_marker(comments, issue_proposal_id, issue_version, round)
+  local n = valid_round(round)
+  if n == nil or type(comments) ~= "table" then
+    return false
+  end
+  local version = M.review_reconcile_state_version(issue_version, n)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-reconcile:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if attr(marker, "proposal") == tostring(issue_proposal_id)
         and attr(marker, "version") == version
         and valid_round(attr(marker, "round")) == n then
         return true

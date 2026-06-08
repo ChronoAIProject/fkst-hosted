@@ -8,8 +8,37 @@ local unresolved = h.unresolved
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
 
+local function review_unresolved(extra)
+  local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+  local value = {
+    schema = "consensus.consensus_converge.v1",
+    proposal_id = proposal_id,
+    dedup_key = "consensus:" .. proposal_id .. "/review",
+    source_ref = {
+      kind = "external",
+      ref = "owner/repo#pr/7",
+    },
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
 local function meta_answer(action, reason)
   return action_label .. " " .. action .. "\n" .. reason_label .. " " .. reason
+end
+
+local function copy_table(value, extra)
+  local copied = {}
+  for key, field in pairs(value or {}) do
+    copied[key] = field
+  end
+  for key, field in pairs(extra or {}) do
+    copied[key] = field
+  end
+  return copied
 end
 
 return {
@@ -38,8 +67,6 @@ return {
     t.eq(#facts, 1)
     t.eq(facts[1].round, 2)
     t.eq(core.max_converge_round(facts), 2)
-    t.eq(core.parse_loop_round_from_dedup("consensus:github-devloop/issue/owner/repo/42/v1"), 0)
-    t.eq(core.parse_loop_round_from_dedup("consensus:github-devloop/issue/owner/repo/42/v1/loop/2"), 2)
 
     local event = unresolved()
     local round_comment = core.build_converge_round_comment_request("owner/repo", "42", event, 2, marker)
@@ -72,6 +99,46 @@ return {
     t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("fkst:github-devloop:reconcile:v1", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(proposal_id, "blocked", base_version .. "/loop/3"), 1, true) ~= nil)
+  end,
+
+  test_review_reconcile_payload_marker_validator_and_requests = function()
+    local issue_proposal_id = "github-devloop/issue/owner/repo/42"
+    local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local event = review_unresolved()
+    local reconcile = core.build_devloop_review_reconcile_payload(event, 3, issue_proposal_id, issue_version, "def456")
+
+    t.eq(reconcile.schema, "github-devloop.review-reconcile.v1")
+    t.eq(reconcile.proposal_id, issue_proposal_id)
+    t.eq(reconcile.review_proposal_id, event.proposal_id)
+    t.eq(reconcile.issue_version, issue_version)
+    t.eq(reconcile.head_sha, "def456")
+    t.eq(reconcile.round, 3)
+    t.eq(reconcile.dedup_key, "review-reconcile:" .. issue_version .. "/review-loop/3")
+    t.eq(core.is_supported_review_reconcile(reconcile), true)
+    local missing_round = copy_table(reconcile)
+    missing_round.round = nil
+    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { dedup_key = "review-reconcile:" .. issue_version .. "/review-loop/4" })), false)
+    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { head_sha = "not-a-sha" })), false)
+    t.eq(core.is_supported_review_reconcile(missing_round), false)
+    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { round = "1.5" })), false)
+    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
+    t.eq(core.review_reconcile_state_version(issue_version, 3), issue_version .. "/review-loop/3")
+
+    local marker = core.review_reconcile_marker(issue_proposal_id, issue_version, 3, "drop")
+    t.eq(core.has_review_reconcile_marker({ marker }, issue_proposal_id, issue_version, 3), true)
+    t.is_true(marker:find('action="drop"', 1, true) ~= nil)
+    t.is_true(marker:find('dedup="review-reconcile:' .. issue_version .. '/review-loop/3"', 1, true) ~= nil)
+
+    local label = core.build_review_reconcile_label_request("owner/repo", "42", reconcile)
+    t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.eq(label.remove_labels[1], "fkst-dev:thinking")
+    t.is_true(has_value(label.remove_labels, "fkst-dev:reviewing"))
+    t.eq(has_value(label.remove_labels, "fkst-dev:blocked"), false)
+
+    local comment = core.build_review_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-actionable-framing-after-3-review-rounds")
+    t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
+    t.is_true(comment.body:find("fkst:github-devloop:review-reconcile:v1", 1, true) ~= nil)
+    t.is_true(comment.body:find(core.state_marker(issue_proposal_id, "blocked", issue_version .. "/review-loop/3"), 1, true) ~= nil)
   end,
 
   test_ready_and_implementation_helpers = function()

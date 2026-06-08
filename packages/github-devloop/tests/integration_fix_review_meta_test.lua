@@ -16,10 +16,12 @@ local review_unresolved = h.review_unresolved
 local fixing = h.fixing
 local pr_link_marker_for_fix = h.pr_link_marker_for_fix
 local review_meta_event = h.review_meta_event
+local review_reconcile = h.review_reconcile
 local merge_ready = h.merge_ready
 local run_observe = h.run_observe
 local run_result = h.run_result
 local run_loop = h.run_loop
+local run_review_reconcile = h.run_review_reconcile
 local run_implement = h.run_implement
 local run_open_pr = h.run_open_pr
 local run_observe_pr = h.run_observe_pr
@@ -602,7 +604,8 @@ return {
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.is_true(result.raises[1].payload.dedup_key:find("/loop/1", 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:review-loop:v1", 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,
 
   test_review_loop_old_unresolved_skips_after_issue_advanced_to_newer_fixing = function()
@@ -622,46 +625,102 @@ return {
     t.eq(count_calls("gh pr diff"), 0)
   end,
 
-	  test_review_loop_at_budget_escalates_to_review_meta_then_accepts = function()
+  test_review_loop_true_stall_records_round_and_raises_review_reconcile = function()
     local event = review_unresolved({
-      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/2",
+      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
+      round = 3,
+      narrowed_question = "Same review framing",
+      angle_digests = {
+        { angle = "minimal", verdict = "reject", digest = "same" },
+      },
     })
     local impl_version = reviewing().version
+    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
     local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local sr_digest = core.source_ref_digest(event.source_ref)
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
     mock_issue_review({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
-      core.review_loop_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", 1, "base"),
-      core.review_loop_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", 2, "loop1"),
+      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 1, "base", event.narrowed_question, event.angle_digests),
+      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 2, "loop1", event.narrowed_question, event.angle_digests),
     })
 
-    local loop_result = run_review_loop(event, opts("review-loop-budget"))
+    local loop_result = run_review_loop(event, opts("review-loop-true-stall"))
     t.eq(loop_result.exit_code, 0)
-    t.eq(#loop_result.raises, 3)
-	    t.eq(find_raise(loop_result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:review-meta")
-	    local review_meta_payload = find_raise(loop_result.raises, "devloop_review_meta").payload
-    t.eq(review_meta_payload.version, impl_version .. "/review-loop/3")
-    t.eq(find_raise(loop_result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:review-meta:v1", 1, true), nil)
+    t.eq(#loop_result.raises, 2)
+    t.eq(loop_result.raises[1].queue, "github-proxy.github_issue_comment_request")
+    t.is_true(loop_result.raises[1].payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(loop_result.raises[1].payload.body:find('round="3"', 1, true) ~= nil)
+    local reconcile_payload = find_raise(loop_result.raises, "devloop_review_reconcile").payload
+    t.eq(reconcile_payload.schema, "github-devloop.review-reconcile.v1")
+    t.eq(reconcile_payload.proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(reconcile_payload.review_proposal_id, event.proposal_id)
+    t.eq(reconcile_payload.issue_version, review_version)
+    t.eq(reconcile_payload.head_sha, "def456")
+    t.eq(reconcile_payload.round, 3)
+    t.eq(reconcile_payload.dedup_key, "review-reconcile:" .. review_version .. "/review-loop/3")
+    t.eq(reconcile_payload.source_ref.ref, "owner/repo#pr/7")
+  end,
 
-	    mock_issue_review_meta({ "fkst-dev:review-meta" }, {
-	      find_raise(loop_result.raises, "github-proxy.github_issue_comment_request").payload.body,
+  test_review_reconcile_drop_blocks_reviewing_issue = function()
+    local event = review_reconcile()
+    mock_bot_env()
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker(event.proposal_id, "reviewing", event.issue_version),
     })
-    mock_meta_codex("accept", "The unresolved review is acceptable.")
 
-    local meta_result = run_review_meta(review_meta_payload, opts("review-meta-accept"))
-    t.eq(meta_result.exit_code, 0)
-    t.eq(#meta_result.raises, 3)
-	    t.eq(find_raise(meta_result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merge-ready")
-	    t.is_true(find_raise(meta_result.raises, "github-proxy.github_issue_comment_request").payload.body:find("github-devloop review-meta action: accept", 1, true) ~= nil)
-    t.eq(find_raise(meta_result.raises, "devloop_merge_ready").payload.schema, "github-devloop.merge-ready.v1")
-    local accept_version = core.next_review_meta_action_version(review_meta_payload.version)
-    local accept_current = core.current_state({
-      find_raise(meta_result.raises, "github-proxy.github_issue_comment_request").payload.body,
-    }, review_meta_payload.proposal_id)
-    t.eq(accept_current.state, "merge-ready")
-    t.eq(accept_current.version, accept_version)
-	  end,
+    local result = run_review_reconcile(event, opts("review-reconcile-drop"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    local version = core.review_reconcile_state_version(event.issue_version, event.round)
+    t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
+    t.is_true(comment.body:find("no-actionable-framing-after-3-review-rounds", 1, true) ~= nil)
+    t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
+    t.is_true(comment.body:find(core.review_reconcile_marker(event.proposal_id, event.issue_version, event.round, "drop"), 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.eq(label.remove_labels[1], "fkst-dev:thinking")
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_review_reconcile_visible_marker_is_idempotent = function()
+    local event = review_reconcile()
+    mock_bot_env()
+    mock_issue_review({ "fkst-dev:blocked" }, {
+      core.build_review_reconcile_comment_request("owner/repo", "42", event, "drop", "already done").body,
+    })
+
+    local result = run_review_reconcile(event, opts("review-reconcile-idempotent"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_review_reconcile_version_cas_skips_newer_reviewing = function()
+    local event = review_reconcile()
+    mock_bot_env()
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker(event.proposal_id, "reviewing", event.issue_version .. "/review-loop/4"),
+    })
+
+    local result = run_review_reconcile(event, opts("review-reconcile-newer-reviewing"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh issue comment"), 0)
+    t.eq(count_calls("gh issue edit"), 0)
+  end,
+
+  test_review_reconcile_requires_visible_reviewing_marker = function()
+    local event = review_reconcile()
+    mock_bot_env()
+    mock_issue_review({ "fkst-dev:enabled" }, {})
+
+    local result = run_review_reconcile(event, opts("review-reconcile-pending-reviewing"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+  end,
 
   test_review_meta_parse_failure_errors_for_retry = function()
     local event = review_meta_event()

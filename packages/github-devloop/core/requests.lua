@@ -95,6 +95,23 @@ function M.build_converge_round_comment_request(repo, issue_number, unresolved, 
   }
 end
 
+function M.build_review_converge_round_comment_request(repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop PR review convergence round recorded: " .. tostring(round) .. "\n\n" .. tostring(marker_body),
+    dedup_key = M._dedup_key({
+      "review-converge-round",
+      "comment",
+      tostring(issue_proposal_id),
+      tostring(round),
+      tostring(unresolved.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
+  }
+end
+
 function M.build_reconcile_label_request(repo, issue_number, reconcile)
   return M.build_state_label_request(
     repo,
@@ -106,6 +123,20 @@ function M.build_reconcile_label_request(repo, issue_number, reconcile)
       tostring(reconcile.dedup_key),
     }),
     reconcile.source_ref
+  )
+end
+
+function M.build_review_reconcile_label_request(repo, issue_number, review_reconcile)
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    "blocked",
+    M._dedup_key({
+      "review-reconcile",
+      "label",
+      tostring(review_reconcile.dedup_key),
+    }),
+    review_reconcile.source_ref
   )
 end
 
@@ -128,6 +159,28 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
       tostring(reconcile.dedup_key),
     }),
     source_ref = M.normalize_source_ref(reconcile.source_ref),
+  }
+end
+
+function M.build_review_reconcile_comment_request(repo, issue_number, review_reconcile, action, reason)
+  local version = M.review_reconcile_state_version(review_reconcile.issue_version, review_reconcile.round)
+  local marker = M.review_reconcile_marker(review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
+  local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
+  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop review reconcile action: " .. tostring(action)
+      .. "\n\nReason:\n" .. safe_reason
+      .. "\n\n"
+      .. state_marker .. "\n" .. marker,
+    dedup_key = M._dedup_key({
+      "review-reconcile",
+      "comment",
+      tostring(review_reconcile.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(review_reconcile.source_ref),
   }
 end
 
@@ -557,63 +610,6 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
       tostring(fix.dedup_key),
     }),
     source_ref = M.normalize_source_ref(fix.source_ref),
-  }
-end
-
-function M.build_review_loop_comment_request(repo, issue_number, unresolved, issue_proposal_id, n, source_ref)
-  return {
-    schema = "github-proxy.v1",
-    repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop PR review no-consensus loop: " .. tostring(n)
-      .. "\n\n" .. M.review_loop_marker(unresolved.proposal_id, issue_proposal_id, n, unresolved.dedup_key),
-    dedup_key = M._dedup_key({
-      "review-loop",
-      "comment",
-      tostring(issue_proposal_id),
-      tostring(n),
-      tostring(unresolved.dedup_key),
-    }),
-    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
-  }
-end
-
-function M.build_review_meta_trigger_label_request(repo, issue_number, unresolved, issue_proposal_id, n, source_ref)
-  return M.build_state_label_request(
-    repo,
-    issue_number,
-    "review-meta",
-    M._dedup_key({
-      "review-loop",
-      "label",
-      "review-meta",
-      tostring(issue_proposal_id),
-      tostring(n),
-      tostring(unresolved.dedup_key),
-    }),
-    source_ref or unresolved.source_ref
-  )
-end
-
-function M.build_review_meta_trigger_comment_request(repo, issue_number, unresolved, issue_proposal_id, issue_version, n, source_ref)
-  local state_marker = M.state_marker(issue_proposal_id, "review-meta", issue_version)
-  local marker = M.review_meta_trigger_marker(unresolved.proposal_id, issue_proposal_id, n, unresolved.dedup_key)
-  return {
-    schema = "github-proxy.v1",
-    repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop PR review unresolved: escalating to review-meta after " .. tostring(n) .. " attempts"
-      .. "\n\n" .. state_marker
-      .. "\n" .. marker,
-    dedup_key = M._dedup_key({
-      "review-loop",
-      "comment",
-      "review-meta",
-      tostring(issue_proposal_id),
-      tostring(n),
-      tostring(unresolved.dedup_key),
-    }),
-    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
   }
 end
 
