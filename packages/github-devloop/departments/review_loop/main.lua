@@ -28,6 +28,27 @@ local function append_round_fact(facts, round, narrowed_question, angle_digests,
   return copied
 end
 
+-- review_version is parse_pr_review_proposal_id's safe_version_segment form (truncated +
+-- checksummed for long versions): it preserves version EQUALITY only, never ordering, so it
+-- must NOT be fed to the ordering-based CAS. The PR head is already pinned to reviewed_head_sha
+-- before the lock, so we only need: same reviewing version (segment equality) -> apply; issue
+-- advanced past reviewing (stage_rank, which IS order-preserving) or reviewing at a different
+-- version -> stale skip; not yet at reviewing -> pending retry.
+local function reviewing_segment_transition_status(state, review_version)
+  if state.state == "reviewing"
+    and tostring(core.safe_version_segment(state.version or "")) == tostring(review_version) then
+    return "apply"
+  end
+  if state.state ~= nil and core.stage_rank(state.state) > core.stage_rank("reviewing") then
+    return "stale"
+  end
+  if state.state == "reviewing" then
+    -- reviewing but a different version segment (head already pinned): treat as version-mismatch stale, do not retry
+    return "stale"
+  end
+  return "pending"  -- no marker yet, or a state earlier than reviewing -> reviewing marker not yet visible
+end
+
 function pipeline(event)
   local unresolved = event.payload or {}
   if not core.is_supported_pr_review_unresolved(unresolved) then
@@ -96,17 +117,13 @@ function pipeline(event)
     local current_issue = core.parse_issue_view_review_loop(issue_view.stdout)
     core.log_forged_markers("review_loop", origin.proposal_id, current_issue.comments)
     local state = core.current_state(current_issue.comments, origin.proposal_id)
-    local transition = core.cyclic_transition_status(state, { "reviewing" }, "blocked", review_version)
+    local transition = reviewing_segment_transition_status(state, review_version)
     if transition == "pending" then
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, transition, review_version), "reviewing state marker not yet visible")
+      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")
       error("github-devloop: reviewing marker not yet visible for review loop; retrying")
     end
-    if state.state ~= "reviewing" or transition == "stale" then
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, transition, review_version), "issue is not currently reviewing")
-      return
-    end
-    if tostring(core.safe_version_segment(state.version or "")) ~= tostring(review_version) then
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", "skip-stale(version-mismatch)", "review proposal version does not match canonical issue marker")
+    if transition == "stale" then
+      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", "skip-stale(reviewing-version)", "issue is not currently reviewing at this version")
       return
     end
     local sr_digest = core.source_ref_digest(unresolved.source_ref)

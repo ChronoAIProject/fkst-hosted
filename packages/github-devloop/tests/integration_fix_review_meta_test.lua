@@ -608,6 +608,162 @@ return {
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,
 
+  test_review_loop_long_reviewing_version_segment_applies = function()
+    local full_version = reviewing().version
+    for _ = 1, 6 do
+      full_version = core.next_fix_version(full_version)
+    end
+    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local event = review_unresolved({
+      proposal_id = proposal_id,
+      dedup_key = "consensus:" .. proposal_id .. "/review",
+    })
+    local _, _, review_version = core.parse_pr_review_proposal_id(proposal_id)
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    t.is_true(core.safe_version_segment(full_version) ~= full_version)
+    t.eq(review_version, core.safe_version_segment(full_version))
+
+    mock_bot_env()
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", full_version),
+    })
+    mock_pr_diff("diff --git a/core.lua b/core.lua\n+return true\n")
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+
+    local result = run_review_loop(event, opts("review-loop-long-version-apply"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "consensus.proposal")
+    t.eq(result.raises[1].payload.proposal_id, proposal_id)
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
+  end,
+
+  test_review_loop_long_reviewing_version_skips_after_issue_advanced = function()
+    local full_version = reviewing().version
+    for _ = 1, 6 do
+      full_version = core.next_fix_version(full_version)
+    end
+    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local event = review_unresolved({
+      proposal_id = proposal_id,
+      dedup_key = "consensus:" .. proposal_id .. "/review",
+    })
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    t.is_true(core.safe_version_segment(full_version) ~= full_version)
+
+    mock_bot_env()
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:fixing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", core.next_fix_version(full_version)),
+    })
+
+    local result = run_review_loop(event, opts("review-loop-long-version-stale"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr diff"), 0)
+  end,
+
+  test_review_loop_skips_when_issue_advanced_to_merge_ready = function()
+    local full_version = reviewing().version
+    for _ = 1, 6 do
+      full_version = core.next_fix_version(full_version)
+    end
+    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local event = review_unresolved({
+      proposal_id = proposal_id,
+      dedup_key = "consensus:" .. proposal_id .. "/review",
+    })
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    t.is_true(core.stage_rank("merge-ready") > core.stage_rank("reviewing"))
+
+    mock_bot_env()
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:merge-ready" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "merge-ready", full_version),
+    })
+
+    local result = run_review_loop(event, opts("review-loop-advanced-merge-ready-stale"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr diff"), 0)
+  end,
+
+  test_review_loop_retries_when_no_issue_state_marker_visible = function()
+    local full_version = reviewing().version
+    for _ = 1, 6 do
+      full_version = core.next_fix_version(full_version)
+    end
+    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local event = review_unresolved({
+      proposal_id = proposal_id,
+      dedup_key = "consensus:" .. proposal_id .. "/review",
+    })
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+
+    mock_bot_env()
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:enabled" }, {})
+
+    local result = run_review_loop(event, opts("review-loop-no-state-marker-pending"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr diff"), 0)
+  end,
+
+  test_review_loop_skips_same_stage_different_review_version = function()
+    local issue_version = reviewing().version
+    for _ = 1, 6 do
+      issue_version = core.next_fix_version(issue_version)
+    end
+    local event_version = core.next_fix_version(issue_version)
+    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, event_version, "def456")
+    local event = review_unresolved({
+      proposal_id = proposal_id,
+      dedup_key = "consensus:" .. proposal_id .. "/review",
+    })
+    local _, _, review_version = core.parse_pr_review_proposal_id(proposal_id)
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", issue_version, "dev")
+    t.is_true(core.safe_version_segment(issue_version) ~= review_version)
+
+    mock_bot_env()
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", issue_version),
+    })
+
+    local result = run_review_loop(event, opts("review-loop-reviewing-version-mismatch-stale"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr diff"), 0)
+  end,
+
+  test_review_loop_long_reviewing_version_retries_before_reviewing_marker = function()
+    local full_version = reviewing().version
+    for _ = 1, 6 do
+      full_version = core.next_fix_version(full_version)
+    end
+    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local event = review_unresolved({
+      proposal_id = proposal_id,
+      dedup_key = "consensus:" .. proposal_id .. "/review",
+    })
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    t.is_true(core.safe_version_segment(full_version) ~= full_version)
+
+    mock_bot_env()
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:pr-open" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", full_version),
+    })
+
+    local result = run_review_loop(event, opts("review-loop-long-version-pending"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr diff"), 0)
+  end,
+
   test_review_loop_old_unresolved_skips_after_issue_advanced_to_newer_fixing = function()
     local review_version = reviewing().version
     local event = review_unresolved()
