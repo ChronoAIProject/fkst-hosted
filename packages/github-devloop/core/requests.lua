@@ -156,11 +156,10 @@ function M.build_observe_comment_request(issue, proposal)
 end
 
 function M.build_result_label_request(repo, issue_number, reached)
-  local to_state = reached.decision == "approve" and "ready" or "blocked"
   return M.build_state_label_request(
     repo,
     issue_number,
-    to_state,
+    "ready",
     tostring(reached.proposal_id) .. "/label/" .. tostring(reached.decision),
     reached.source_ref
   )
@@ -168,8 +167,7 @@ end
 
 function M.build_result_comment_request(repo, issue_number, reached)
   local marker = M.result_marker(reached.proposal_id, reached.decision, reached.dedup_key)
-  local state = reached.decision == "approve" and "ready" or "blocked"
-  local state_marker = M.state_marker(reached.proposal_id, state, reached.dedup_key)
+  local state_marker = M.state_marker(reached.proposal_id, "ready", reached.dedup_key)
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = build_verdict_summary(reached.angle_results)
   local body = "github-devloop decision: " .. tostring(reached.decision)

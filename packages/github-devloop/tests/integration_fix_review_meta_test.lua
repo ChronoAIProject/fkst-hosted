@@ -787,7 +787,7 @@ return {
       round = 3,
       narrowed_question = "Same review framing",
       angle_digests = {
-        { angle = "minimal", verdict = "reject", digest = "same" },
+        { angle = "minimal", verdict = "abstain", digest = "same" },
       },
     })
     local impl_version = reviewing().version

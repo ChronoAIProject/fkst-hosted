@@ -147,9 +147,13 @@ function pipeline(event)
     )
     local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, issue_source_ref)
     local facts_with_current = append_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
-    if core.is_true_stall(facts_with_current, round) then
+    local hit_round_cap = round >= core.max_converge_rounds()
+    if hit_round_cap or core.is_true_stall(facts_with_current, round) then
       local review_reconcile = core.build_devloop_review_reconcile_payload(unresolved, round, origin.proposal_id, review_version, reviewed_head_sha)
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", core.cas_outcome(state, transition, review_version), "true PR review convergence stall at round " .. tostring(round))
+      local reason = hit_round_cap
+        and ("PR review convergence round cap reached at round " .. tostring(round))
+        or ("true PR review convergence stall at round " .. tostring(round))
+      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", core.cas_outcome(state, transition, review_version), reason)
       core.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_issue_comment_request",
         "devloop_review_reconcile",

@@ -11,7 +11,7 @@ local source_ref = {
 
 local function angles(extra)
   local values = {
-    { angle = "structural", verdict = "reject", reply = "Needs clearer boundaries.", digest = "Needs clearer boundaries." },
+    { angle = "structural", verdict = "abstain", reply = "Needs clearer boundaries.", digest = "Needs clearer boundaries." },
     { angle = "minimal", verdict = "approve", reply = "Small enough.", digest = "Small enough." },
   }
   for index, value in pairs(extra or {}) do

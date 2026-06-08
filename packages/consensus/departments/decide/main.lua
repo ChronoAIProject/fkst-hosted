@@ -22,21 +22,6 @@ local function spawn_meta_judge(proposal, angle_results)
   })
 end
 
-local function angle_result(angle, result)
-  local parsed = nil
-  if type(result) == "table" and result.exit_code == 0 then
-    parsed = core.parse_angle_output(result.stdout)
-  end
-
-  return {
-    angle = angle,
-    verdict = parsed and parsed.verdict or nil,
-    reply = parsed and parsed.reply or nil,
-    stdout = type(result) == "table" and result.stdout or nil,
-    exit_code = type(result) == "table" and result.exit_code or nil,
-  }
-end
-
 local function raise_converge(proposal, angle_results, narrowed_question)
   raise(
     "consensus_converge",
@@ -63,16 +48,28 @@ function pipeline(event)
     local angle_results = {}
     local handles = {}
     local angles = core.angles(proposal)
+    local verdict_mode = core.verdict_mode(proposal)
     for _, angle in ipairs(angles) do
       table.insert(handles, spawn_angle(proposal, angle))
     end
 
     local results = await_all(handles)
     for index, angle in ipairs(angles) do
-      table.insert(angle_results, angle_result(angle, results[index]))
+      local parsed = nil
+      local result = results[index]
+      if type(result) == "table" and result.exit_code == 0 then
+        parsed = core.parse_angle_output(result.stdout, verdict_mode)
+      end
+      table.insert(angle_results, {
+        angle = angle,
+        verdict = parsed and parsed.verdict or nil,
+        reply = parsed and parsed.reply or nil,
+        stdout = type(result) == "table" and result.stdout or nil,
+        exit_code = type(result) == "table" and result.exit_code or nil,
+      })
     end
 
-    local decision = core.aggregate(angle_results)
+    local decision = core.aggregate(angle_results, verdict_mode)
     if decision ~= nil then
       raise("consensus_reached", core.build_reached_payload(proposal, decision, angle_results))
       cache_set(cache_key, proposal.dedup_key)
@@ -82,7 +79,7 @@ function pipeline(event)
     local meta_result = spawn_meta_judge(proposal, angle_results)
     local parsed = nil
     if type(meta_result) == "table" and meta_result.exit_code == 0 then
-      parsed = core.parse_meta_judge_output(meta_result.stdout)
+      parsed = core.parse_meta_judge_output(meta_result.stdout, verdict_mode)
     end
     if parsed ~= nil and parsed.kind == "reached" then
       raise("consensus_reached", core.build_reached_payload(

@@ -41,6 +41,10 @@ function M.fix_loop_budget()
   return 3
 end
 
+function M.max_converge_rounds()
+  return 8
+end
+
 local function current_checkout_branch(exec)
   local run = exec or exec_sync
   if type(run) ~= "function" then

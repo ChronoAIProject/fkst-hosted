@@ -340,16 +340,10 @@ return {
     t.is_true(#reconcile.remove_labels >= 10)
     t.is_true(reconcile.dedup_key:find("reconcile/label/github-devloop/issue/owner/repo/42/reviewing", 1, true) ~= nil)
 
-    local rejected = core.build_result_label_request("owner/repo", "42", reached({ decision = "reject" }))
-    t.eq(rejected.add_labels[1], "fkst-dev:blocked")
-    t.eq(rejected.remove_labels[1], "fkst-dev:thinking")
-    t.eq(rejected.remove_labels[2], "fkst-dev:ready")
-    t.is_true(#rejected.remove_labels >= 10)
-
     local completed = reached({
       angle_results = {
         { angle = "minimal", verdict = "approve" },
-        { angle = "structural", verdict = "reject" },
+        { angle = "structural", verdict = "abstain" },
         { angle = "delete", verdict = "approve" },
       },
     })
@@ -357,7 +351,7 @@ return {
     t.eq(comment.schema, "github-proxy.v1")
     t.eq(comment.issue_number, "42")
     t.is_true(comment.body:find("github-devloop decision: approve", 1, true) ~= nil)
-    t.is_true(comment.body:find(verdict_summary_label .. "minimal=approve structural=reject delete=approve", 1, true) ~= nil)
+    t.is_true(comment.body:find(verdict_summary_label .. "minimal=approve structural=abstain delete=approve", 1, true) ~= nil)
     t.is_true(comment.body:find(ai_sentinel, 1, true) ~= nil)
     t.is_true(comment.body:find('fkst:github-devloop:result:v1 proposal="github-devloop/issue/owner/repo/42"', 1, true) ~= nil)
     t.is_true(comment.body:find('fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="ready"', 1, true) ~= nil)

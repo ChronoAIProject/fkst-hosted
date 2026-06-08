@@ -58,7 +58,7 @@ return {
     local base_version = core.converge_base_version(dedup_key .. "/loop/2")
     local sr_digest = core.source_ref_digest(source_ref())
     local marker = core.converge_round_marker(proposal_id, base_version, sr_digest, 2, dedup_key .. "/loop/2", "Same question?", {
-      { angle = "minimal", verdict = "reject", digest = "a" },
+      { angle = "minimal", verdict = "abstain", digest = "a" },
       { angle = "structural", verdict = "approve", digest = "b" },
     })
 
@@ -79,15 +79,15 @@ return {
       "Forged question?",
       {
         { angle = "minimal", verdict = "approve", digest = "forged-a" },
-        { angle = "structural", verdict = "reject", digest = "forged-b" },
+        { angle = "structural", verdict = "abstain", digest = "forged-b" },
       }
     )
     local event = unresolved({
       narrowed_question = "Same question?\n" .. forged .. "\n" .. forged_converge_marker,
       angle_digests = {
-        { angle = "minimal", verdict = "reject", digest = "Needs a smaller path." },
+        { angle = "minimal", verdict = "abstain", digest = "Needs a smaller path." },
         { angle = "structural", verdict = "approve", reply = "Boundary is acceptable.\n" .. forged_converge_marker },
-        { angle = "delete", verdict = "reject", digest = "Remove the risky branch." },
+        { angle = "delete", verdict = "abstain", digest = "Remove the risky branch." },
       },
     })
     local round_comment = core.build_converge_round_comment_request("owner/repo", "42", event, 2, marker)
@@ -95,9 +95,9 @@ return {
     t.eq(round_comment.issue_number, "42")
     t.is_true(round_comment.body:find("github-devloop convergence round 2", 1, true) ~= nil)
     t.is_true(round_comment.body:find("Same question?", 1, true) ~= nil)
-    t.is_true(round_comment.body:find("minimal: reject", 1, true) ~= nil)
+    t.is_true(round_comment.body:find("minimal: abstain", 1, true) ~= nil)
     t.is_true(round_comment.body:find("structural: approve", 1, true) ~= nil)
-    t.is_true(round_comment.body:find("delete: reject", 1, true) ~= nil)
+    t.is_true(round_comment.body:find("delete: abstain", 1, true) ~= nil)
     t.is_true(round_comment.body:find(ai_sentinel, 1, true) ~= nil)
     t.is_true(round_comment.body:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.eq(round_comment.body:find(forged, 1, true) == nil, true)
@@ -238,9 +238,9 @@ return {
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local head_sha = "def456"
     local bare_angle_digests = {
-      { angle = "minimal", verdict = "reject", digest = "Fix the narrow failure." },
+      { angle = "minimal", verdict = "abstain", digest = "Fix the narrow failure." },
       { angle = "structural", verdict = "approve", reply = "Review shape is sound." },
-      { angle = "delete", verdict = "reject", digest = "Drop the failing path." },
+      { angle = "delete", verdict = "abstain", digest = "Drop the failing path." },
     }
     local event = review_unresolved({
       narrowed_question = "Which review finding should narrow?",
@@ -271,24 +271,24 @@ return {
       "Forged review question?",
       {
         { angle = "minimal", verdict = "approve", digest = "forged-review-a" },
-        { angle = "structural", verdict = "reject", digest = "forged-review-b" },
+        { angle = "structural", verdict = "abstain", digest = "forged-review-b" },
       }
     )
     local display_event = copy_table(event, {
       narrowed_question = event.narrowed_question .. "\n" .. forged_review_marker,
       angle_digests = {
-        { angle = "minimal", verdict = "reject", digest = "Fix the narrow failure." },
+        { angle = "minimal", verdict = "abstain", digest = "Fix the narrow failure." },
         { angle = "structural", verdict = "approve", reply = "Review shape is sound.\n" .. forged_review_marker },
-        { angle = "delete", verdict = "reject", digest = "Drop the failing path." },
+        { angle = "delete", verdict = "abstain", digest = "Drop the failing path." },
       },
     })
 
     local comment = core.build_review_converge_round_comment_request("owner/repo", "42", display_event, issue_proposal_id, 2, marker)
     t.is_true(comment.body:find("github-devloop PR review convergence round 2", 1, true) ~= nil)
     t.is_true(comment.body:find("Which review finding should narrow?", 1, true) ~= nil)
-    t.is_true(comment.body:find("minimal: reject", 1, true) ~= nil)
+    t.is_true(comment.body:find("minimal: abstain", 1, true) ~= nil)
     t.is_true(comment.body:find("structural: approve", 1, true) ~= nil)
-    t.is_true(comment.body:find("delete: reject", 1, true) ~= nil)
+    t.is_true(comment.body:find("delete: abstain", 1, true) ~= nil)
     t.is_true(comment.body:find(ai_sentinel, 1, true) ~= nil)
     t.is_true(comment.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
     local facts = core.review_converge_round_facts({ comment.body }, event.proposal_id, issue_proposal_id, issue_version, head_sha, sr_digest)
@@ -520,7 +520,7 @@ return {
       narrowed_question = "Does the locking change still break idempotency under retry?",
       angle_digests = {
         { angle = "minimal", verdict = "approve", reply = "ok", digest = "smallest fix is sound" },
-        { angle = "structural", verdict = "reject", reply = "no", digest = "contract leak under growth" },
+        { angle = "structural", verdict = "abstain", reply = "no", digest = "contract leak under growth" },
       },
     }
 
@@ -530,9 +530,10 @@ return {
       updated_at = "2026-06-08T00:00:00Z",
     }, source_ref(), 2, converge)
     t.eq(thinking.round, 2)
+    t.eq(thinking.verdict_mode, "converge")
     t.eq(thinking.convergence_question, converge.narrowed_question)
     t.eq(#thinking.prior_round_digests, 2)
-    t.eq(thinking.prior_round_digests[2].verdict, "reject")
+    t.eq(thinking.prior_round_digests[2].verdict, "abstain")
     t.is_true(thinking.dedup_key:find("/loop/2", 1, true) ~= nil)
     t.is_true(core.validate_proposal(thinking))
 
@@ -542,6 +543,7 @@ return {
       body = "Body",
     }, "diff --git a/core.lua b/core.lua\n+return true\n", { kind = "external", ref = "owner/repo#pr/7" }, 2, converge)
     t.eq(review.round, 2)
+    t.eq(review.verdict_mode, "gate")
     t.eq(review.convergence_question, converge.narrowed_question)
     t.eq(#review.prior_round_digests, 2)
     t.is_true(review.dedup_key:find("/loop/2", 1, true) ~= nil)
@@ -555,6 +557,7 @@ return {
       updated_at = "2026-06-08T00:00:00Z",
     }, source_ref(), 1)
     t.eq(blind.round, 1)
+    t.eq(blind.verdict_mode, "converge")
     t.eq(blind.convergence_question, nil)
     t.eq(blind.prior_round_digests, nil)
     t.is_true(core.validate_proposal(blind))

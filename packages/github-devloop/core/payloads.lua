@@ -120,6 +120,7 @@ function M.build_proposal(issue, body)
 
   return {
     schema = "consensus.proposal.v1",
+    verdict_mode = "converge",
     proposal_id = proposal_id,
     title = title,
     body = M.bounded_body(body),
@@ -201,6 +202,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
 
   return {
     schema = "consensus.proposal.v1",
+    verdict_mode = "gate",
     proposal_id = review_id,
     title = M.neutralize_untrusted_prompt_text(title),
     body = body,

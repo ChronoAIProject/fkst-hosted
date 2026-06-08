@@ -553,6 +553,61 @@ return {
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 2)
   end,
 
+  test_review_pr_gate_reject_reached_routes_to_fixing = function()
+    local event = reviewing()
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker(event.proposal_id, "reviewing", event.version),
+    }, {
+      title = "Implement decision recorder",
+      body = "Issue context",
+    })
+    mock_pr_origin_sequence({
+      { head = "devloop-owner-repo-42-01HY", head_sha = "def456" },
+      { head = "devloop-owner-repo-42-01HY", head_sha = "def456" },
+    })
+    mock_pr_diff("diff --git a/core.lua b/core.lua\n+return true\n")
+
+    local review = run_review_pr(event, opts("review-pr-gate-reject-link"))
+    t.eq(review.exit_code, 0)
+    t.eq(#review.raises, 1)
+    local proposal = find_raise(review.raises, "consensus.proposal").payload
+    t.eq(proposal.verdict_mode, "gate")
+    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
+
+    local reached_payload = {
+      schema = "consensus.consensus_reached.v1",
+      proposal_id = proposal.proposal_id,
+      decision = "reject",
+      body = "Reject the current PR diff.",
+      angle_results = {
+        { angle = "minimal", verdict = "reject" },
+        { angle = "structural", verdict = "reject" },
+        { angle = "delete", verdict = "abstain" },
+      },
+      dedup_key = "consensus:" .. proposal.dedup_key,
+      source_ref = proposal.source_ref,
+    }
+    mock_pr_origin({
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    })
+    mock_issue_result({ "fkst-dev:reviewing" }, {
+      core.state_marker(event.proposal_id, "reviewing", event.version),
+    })
+
+    local result = run_review_result(reached_payload, opts("review-pr-gate-reject-result"))
+    local fix_version = core.fix_version_from_review_version(event.version)
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    t.is_true(comment_raise.payload.body:find("decision=\"reject\"", 1, true) ~= nil)
+    t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
+    t.eq(fixing_raise.payload.review_proposal_id, proposal.proposal_id)
+    t.eq(fixing_raise.payload.review_dedup_key, reached_payload.dedup_key)
+    t.eq(fixing_raise.payload.version, fix_version)
+  end,
+
   test_review_pr_retries_when_head_moves_between_head_read_and_diff = function()
     local event = reviewing()
     mock_issue_review({ "fkst-dev:reviewing" }, {

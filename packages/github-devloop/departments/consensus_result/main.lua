@@ -15,22 +15,28 @@ M.spec = {
 
 function pipeline(event)
   local reached = event.payload or {}
+  if type(reached) == "table" and reached.schema == "consensus.consensus_reached.v1"
+    and reached.decision == "reject" then
+    core.log_entry("consensus_result", event, tostring(reached.proposal_id or "unknown"), reached.dedup_key)
+    core.log_cas_decision("consensus_result", tostring(reached.proposal_id or "unknown"), { state = nil, version = nil }, "thinking", "ready", "skip-unsupported(decision)", "issue consensus does not support reject")
+    return
+  end
   if not core.is_supported_result(reached) then
     core.log_entry("consensus_result", event, "unknown", reached.dedup_key)
-    core.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready|blocked", "skip-foreign(proposal_id)", "unsupported event payload")
+    core.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
   core.log_entry("consensus_result", event, reached.proposal_id, reached.dedup_key)
   local repo, issue_number = core.parse_proposal_id(reached.proposal_id)
   if repo == nil then
-    core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready|blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
 
   local lock_key = core.result_lock_key(reached.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready|blocked", "skip-foreign(proposal_id)", "no transition lock key")
+    core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
 
@@ -43,7 +49,7 @@ function pipeline(event)
     end
 
     local current = core.parse_issue_view_result(view.stdout)
-    local to_state = reached.decision == "approve" and "ready" or "blocked"
+    local to_state = "ready"
     core.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
     local state = core.current_state(current.comments, reached.proposal_id)
     local transition = core.versioned_transition_status(state, { "thinking" }, to_state, reached.dedup_key)
@@ -64,15 +70,11 @@ function pipeline(event)
       "github-proxy.github_issue_comment_request",
       "github-proxy.github_issue_label_request",
     }
-    if reached.decision == "approve" then
-      table.insert(raised, "devloop_ready")
-    end
+    table.insert(raised, "devloop_ready")
     core.log_apply("consensus_result", reached.proposal_id, to_state, reached.dedup_key, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", label_request)
-    if reached.decision == "approve" then
-      core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(reached))
-    end
+    core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(reached))
   end)
 end
 

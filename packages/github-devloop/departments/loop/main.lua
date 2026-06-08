@@ -89,9 +89,13 @@ function pipeline(event)
     )
     local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)
     local facts_with_current = append_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
-    if core.is_true_stall(facts_with_current, round) then
+    local hit_round_cap = round >= core.max_converge_rounds()
+    if hit_round_cap or core.is_true_stall(facts_with_current, round) then
       local reconcile = core.build_devloop_reconcile_payload(unresolved, round, base_version)
-      core.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), "true convergence stall at round " .. tostring(round))
+      local reason = hit_round_cap
+        and ("convergence round cap reached at round " .. tostring(round))
+        or ("true convergence stall at round " .. tostring(round))
+      core.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), reason)
       core.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_issue_comment_request",
         "devloop_reconcile",

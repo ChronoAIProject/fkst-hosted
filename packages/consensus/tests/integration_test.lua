@@ -100,21 +100,23 @@ return {
     t.is_true(calls[3].stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
-  test_unanimous_reject_raises_consensus_reached = function()
-    mock_angle("reject", "Minimal angle rejects.")
-    mock_angle("reject", "Structural angle rejects.")
-    mock_angle("reject", "Delete angle rejects.")
+  test_unanimous_abstain_raises_consensus_converge = function()
+    mock_angle("abstain", "Minimal angle needs narrower scope.")
+    mock_angle("abstain", "Structural angle needs clearer boundaries.")
+    mock_angle("abstain", "Delete angle needs proof the scope is necessary.")
+    mock_meta("converge: What concrete evidence would make the narrowed scope approvable?")
 
-    local result = run_decide(proposal(), opts("all-reject"))
+    local result = run_decide(proposal(), opts("all-abstain"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
-    t.eq(result.raises[1].payload.decision, "reject")
-    t.eq(#codex_calls(), 3)
+    t.eq(result.raises[1].queue, "consensus_converge")
+    t.eq(result.raises[1].payload.narrowed_question, "What concrete evidence would make the narrowed scope approvable?")
+    t.eq(#codex_calls(), 4)
   end,
 
   test_split_verdicts_spawn_meta_and_raise_consensus_converge = function()
     mock_angle("approve", "Minimal angle approves.")
-    mock_angle("reject", "Structural angle rejects.")
+    mock_angle("abstain", "Structural angle needs one blocker resolved.")
     mock_angle("approve", "Delete angle approves.")
     mock_meta("converge: Should structural concerns block this proposal?")
 
@@ -131,7 +133,7 @@ return {
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_digests, 3)
     t.eq(result.raises[1].payload.angle_digests[1].verdict, "approve")
-    t.eq(result.raises[1].payload.angle_digests[2].verdict, "reject")
+    t.eq(result.raises[1].payload.angle_digests[2].verdict, "abstain")
     t.is_nil(result.raises[1].payload.body)
     t.is_nil(result.raises[1].payload.angle_results)
     t.is_nil(result.raises[1].payload.decision)
@@ -140,9 +142,52 @@ return {
     t.is_true(calls[4].stdin:find("Angle outputs:", 1, true) ~= nil)
   end,
 
+  test_converge_mode_reject_outputs_raise_consensus_converge = function()
+    mock_angle("reject", "Minimal angle rejects but converge mode cannot reject.")
+    mock_angle("approve", "Structural angle approves.")
+    mock_angle("approve", "Delete angle approves.")
+    mock_meta("converge: What concern prevents approval?")
+
+    local result = run_decide(proposal({ verdict_mode = "converge" }), opts("converge-reject-output"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_converge")
+    t.eq(result.raises[1].payload.angle_digests[1].verdict, "invalid")
+    t.eq(result.raises[1].payload.narrowed_question, "What concern prevents approval?")
+    t.eq(#codex_calls(), 4)
+  end,
+
+  test_gate_mode_unanimous_reject_raises_consensus_reached_reject = function()
+    mock_angle("reject", "Minimal angle rejects the diff.")
+    mock_angle("reject", "Structural angle rejects the diff.")
+    mock_angle("reject", "Delete angle rejects the diff.")
+
+    local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-all-reject"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_reached")
+    t.eq(result.raises[1].payload.decision, "reject")
+    t.eq(#codex_calls(), 3)
+  end,
+
+  test_gate_mode_meta_reject_raises_consensus_reached_reject = function()
+    mock_angle("reject", "Minimal angle rejects the diff.")
+    mock_angle("approve", "Structural angle approves.")
+    mock_angle("reject", "Delete angle rejects the diff.")
+    mock_meta("reached:reject reject until the failing test is fixed")
+
+    local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-meta-reject"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_reached")
+    t.eq(result.raises[1].payload.decision, "reject")
+    t.is_true(result.raises[1].payload.body:find("Meta-judge framing:", 1, true) ~= nil)
+    t.eq(#codex_calls(), 4)
+  end,
+
   test_meta_reached_after_split_raises_consensus_reached = function()
     mock_angle("approve", "Minimal angle approves.")
-    mock_angle("reject", "Structural angle rejects but accepts the narrowed framing.")
+    mock_angle("abstain", "Structural angle abstains but accepts the narrowed framing.")
     mock_angle("approve", "Delete angle approves.")
     mock_meta("reached:approve approve the narrowed framing")
 
@@ -160,7 +205,7 @@ return {
     mock_angle("approve", "Minimal angle approves.")
     mock_angle("abstain", "Structural angle abstains.")
     mock_angle("approve", "Delete angle approves.")
-    mock_meta("converge: Ask structural to choose approve or reject with one blocker.")
+    mock_meta("converge: Ask structural to name the one blocker that prevents approval.")
 
     local result = run_decide(proposal(), opts("abstain"))
     t.eq(result.exit_code, 0)

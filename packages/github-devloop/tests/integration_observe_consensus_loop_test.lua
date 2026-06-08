@@ -366,35 +366,31 @@ return {
     t.eq(current.version, event.dedup_key)
   end,
 
-  test_consensus_result_reject_raises_blocked = function()
+  test_consensus_result_reject_is_unsupported = function()
     mock_issue_result({ "fkst-dev:thinking" })
     local result = run_result(reached({ decision = "reject" }), opts("result-reject"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
-    t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
-    t.is_true(#label_raise.payload.remove_labels >= 10)
-    t.is_true(comment_raise.payload.body:find('decision="reject"', 1, true) ~= nil)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
-  test_consensus_result_reject_self_heals_opposite_ready_and_skips_completed_marker = function()
+  test_consensus_result_approve_self_heals_missing_ready_and_skips_completed_marker = function()
     mock_issue_result({ "fkst-dev:thinking", "fkst-dev:ready" })
 
-    local stale_ready = run_result(reached({ decision = "reject" }), opts("result-reject-stale-ready"))
+    local stale_ready = run_result(reached(), opts("result-approve-stale-ready"))
     t.eq(stale_ready.exit_code, 0)
-    t.eq(#stale_ready.raises, 2)
+    t.eq(#stale_ready.raises, 3)
     local label_raise = find_raise(stale_ready.raises, "github-proxy.github_issue_label_request")
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
     t.is_true(#label_raise.payload.remove_labels >= 10)
     t.is_true(find_raise(stale_ready.raises, "github-proxy.github_issue_comment_request") ~= nil)
+    t.is_true(find_raise(stale_ready.raises, "devloop_ready") ~= nil)
 
-    local completed = reached({ decision = "reject" })
+    local completed = reached()
     local marker = core.result_marker(completed.proposal_id, completed.decision, completed.dedup_key)
-    mock_issue_result({ "fkst-dev:blocked" }, { marker })
+    mock_issue_result({ "fkst-dev:ready" }, { marker })
 
-    local complete = run_result(completed, opts("result-reject-complete"))
+    local complete = run_result(completed, opts("result-approve-complete"))
     t.eq(complete.exit_code, 0)
     t.eq(#complete.raises, 0)
     t.eq(count_calls("--json labels,comments"), 2)
@@ -484,12 +480,12 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_consensus_result_opposite_decision_without_thinking_skips = function()
-    local current = reached({ decision = "reject" })
+  test_consensus_result_same_decision_without_thinking_skips = function()
+    local current = reached()
     local stale_marker = core.result_marker(current.proposal_id, "approve", current.dedup_key)
     mock_issue_result({ "fkst-dev:ready" }, { stale_marker })
 
-    local result = run_result(current, opts("result-stale-opposite-marker"))
+    local result = run_result(current, opts("result-stale-same-marker"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
   end,
@@ -586,7 +582,7 @@ return {
     local event = unresolved({
       narrowed_question = "Can the issue be implemented as-is?",
       angle_digests = {
-        { angle = "minimal", verdict = "reject", digest = "needs-scope" },
+        { angle = "minimal", verdict = "abstain", digest = "needs-scope" },
       },
     })
     local result = run_loop(event, opts("loop-converge-round"))
@@ -613,7 +609,7 @@ return {
       round = 3,
       narrowed_question = "Same framing",
       angle_digests = {
-        { angle = "minimal", verdict = "reject", digest = "same" },
+        { angle = "minimal", verdict = "abstain", digest = "same" },
       },
     })
     local sr_digest = core.source_ref_digest(event.source_ref)
@@ -637,6 +633,81 @@ return {
     t.eq(reconcile_raise.source_ref.ref, "owner/repo#issue/42")
   end,
 
+  test_loop_round_cap_records_round_and_raises_reconcile_even_when_question_varies = function()
+    local cap = core.max_converge_rounds()
+    local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local function varying_digest(round)
+      return {
+        { angle = "minimal", verdict = "abstain", digest = "digest-" .. tostring(round) },
+      }
+    end
+    local event = unresolved({
+      dedup_key = base_version .. "/loop/" .. tostring(cap),
+      round = cap,
+      narrowed_question = "Question " .. tostring(cap),
+      angle_digests = varying_digest(cap),
+    })
+    local sr_digest = core.source_ref_digest(event.source_ref)
+    mock_issue_loop({ "fkst-dev:thinking" }, {
+      core.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 2, base_version .. "/loop/" .. tostring(cap - 2), "Question " .. tostring(cap - 2), varying_digest(cap - 2)),
+      core.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 1, base_version .. "/loop/" .. tostring(cap - 1), "Question " .. tostring(cap - 1), varying_digest(cap - 1)),
+    })
+
+    local result = run_loop(event, opts("loop-round-cap"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
+    t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
+    t.eq(result.raises[2].queue, "devloop_reconcile")
+    local reconcile_raise = find_raise(result.raises, "devloop_reconcile").payload
+    t.eq(reconcile_raise.round, cap)
+    t.eq(reconcile_raise.dedup_key, "reconcile:" .. base_version .. "/loop/" .. tostring(cap))
+  end,
+
+  test_review_loop_round_cap_records_round_and_raises_review_reconcile_even_when_question_varies = function()
+    local cap = core.max_converge_rounds()
+    local event = review_unresolved({
+      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/" .. tostring(cap),
+      round = cap,
+      narrowed_question = "Review question " .. tostring(cap),
+      angle_digests = {
+        { angle = "minimal", verdict = "abstain", digest = "review-digest-" .. tostring(cap) },
+      },
+    })
+    local impl_version = reviewing().version
+    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local sr_digest = core.source_ref_digest(event.source_ref)
+    local function varying_digest(round)
+      return {
+        { angle = "minimal", verdict = "abstain", digest = "review-digest-" .. tostring(round) },
+      }
+    end
+    mock_bot_env()
+    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 2, "base", "Review question " .. tostring(cap - 2), varying_digest(cap - 2)),
+      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 1, "loop", "Review question " .. tostring(cap - 1), varying_digest(cap - 1)),
+    })
+
+    local result = run_review_loop(event, opts("review-loop-round-cap"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
+    t.is_true(result.raises[1].payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
+    t.eq(result.raises[2].queue, "devloop_review_reconcile")
+    local reconcile_raise = find_raise(result.raises, "devloop_review_reconcile").payload
+    t.eq(reconcile_raise.schema, "github-devloop.review-reconcile.v1")
+    t.eq(reconcile_raise.proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(reconcile_raise.review_proposal_id, event.proposal_id)
+    t.eq(reconcile_raise.issue_version, review_version)
+    t.eq(reconcile_raise.head_sha, "def456")
+    t.eq(reconcile_raise.round, cap)
+    t.eq(reconcile_raise.dedup_key, "review-reconcile:" .. review_version .. "/review-loop/" .. tostring(cap))
+  end,
+
   test_loop_duplicate_converge_round_marker_skips = function()
     local event = unresolved({ round = 1 })
     local base_version = core.converge_base_version(event.dedup_key)
@@ -657,7 +728,7 @@ return {
       round = 2,
       narrowed_question = "Same framing",
       angle_digests = {
-        { angle = "minimal", verdict = "reject", digest = "same" },
+        { angle = "minimal", verdict = "abstain", digest = "same" },
       },
     })
     local sr_digest = core.source_ref_digest(event.source_ref)

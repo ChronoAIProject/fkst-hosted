@@ -18,6 +18,13 @@ local max_prior_round_digests = 12
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 
+function M.verdict_mode(proposal)
+  if type(proposal) == "table" and proposal.verdict_mode == "gate" then
+    return "gate"
+  end
+  return "converge"
+end
+
 local function trim(value)
   return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
@@ -243,6 +250,7 @@ function M.build_angle_prompt(proposal, angle)
   -- model echoing the prompt cannot produce lines the strict parser would mistake for
   -- the real answer.
   local prompt = require("prompts.angle")
+  local verdict_mode = M.verdict_mode(proposal)
   local context_block = ""
   if proposal.context ~= nil and proposal.context ~= "" then
     context_block = "Context:\n" .. neutralize_untrusted_prompt_text(proposal.context)
@@ -263,20 +271,25 @@ function M.build_angle_prompt(proposal, angle)
     body = neutralize_untrusted_prompt_text(proposal.body),
     context_block = context_block,
     convergence_block = convergence_block,
+    verdict_options = verdict_mode == "gate" and "approve, reject, or abstain" or "approve or abstain",
+    readiness_instruction = verdict_mode == "gate"
+      and "If the proposal should not proceed as-is, reject and state the concrete reason in the reply; abstain only when you genuinely cannot judge."
+      or "If this angle is not ready to approve, abstain and state the concrete concern in the reply.",
   })
 end
 
 -- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean verdict line
 -- immediately followed by exactly one reply line (the prompt asks for line one = verdict,
 -- line two = reply). The verdict sentinel must be followed by one whitelist word on its
--- own line (rejects the prompt echo "approve|reject|abstain", "approve/reject",
+-- own line (rejects the prompt echo "approve|abstain", "approve/reject",
 -- "approve-ish"); the reply sentinel must be anchored at line start. A proposal body/context
 -- is untrusted and may be echoed into stdout, so requiring a UNIQUE ADJACENT pair closes both
 -- duplicate injection (a second clean sentinel pair) and orphan pairing (a lone echoed reply
 -- attached to a verdict that lacked its own reply). Overlong replies are NOT truncated here;
 -- aggregate() rejects them so we never raise a partial body.
-function M.parse_angle_output(stdout)
+function M.parse_angle_output(stdout, verdict_mode)
   local text = tostring(stdout or "")
+  local mode = verdict_mode == "gate" and "gate" or "converge"
 
   local verdict = nil
   local verdict_count = 0
@@ -291,7 +304,7 @@ function M.parse_angle_output(stdout)
     local token = line:match("^%s*" .. verdict_label .. "%s*(%a+)%s*$")
     if token ~= nil then
       local lowered = token:lower()
-      if lowered == "approve" or lowered == "reject" or lowered == "abstain" then
+      if lowered == "approve" or lowered == "abstain" or (mode == "gate" and lowered == "reject") then
         verdict = lowered
         verdict_count = verdict_count + 1
         verdict_index = index
@@ -322,30 +335,38 @@ function M.parse_angle_output(stdout)
   }
 end
 
-function M.aggregate(angle_results)
+function M.aggregate(angle_results, verdict_mode)
   if type(angle_results) ~= "table" or #angle_results == 0 then
     return nil
   end
+  local mode = verdict_mode == "gate" and "gate" or "converge"
+  local first_verdict = nil
 
-  local decision = nil
   for _, result in ipairs(angle_results) do
     if type(result) ~= "table" or result.exit_code ~= 0 then
-      return nil
-    end
-    if result.verdict ~= "approve" and result.verdict ~= "reject" then
       return nil
     end
     if not is_bounded_string(result.reply, max_reply_len) then
       return nil
     end
-    if decision == nil then
-      decision = result.verdict
-    elseif decision ~= result.verdict then
+    if mode == "converge" then
+      if result.verdict ~= "approve" then
+        return nil
+      end
+    elseif result.verdict ~= "approve" and result.verdict ~= "reject" then
+      return nil
+    end
+    if first_verdict == nil then
+      first_verdict = result.verdict
+    elseif result.verdict ~= first_verdict then
       return nil
     end
   end
 
-  return decision
+  if mode == "gate" then
+    return first_verdict
+  end
+  return "approve"
 end
 
 function M.angle_digests(angle_results)
@@ -403,6 +424,7 @@ function M.build_meta_judge_prompt(proposal, angle_results)
     convergence_block = "Current convergence question:\n"
       .. neutralize_untrusted_prompt_text(proposal.convergence_question)
   end
+  local verdict_mode = M.verdict_mode(proposal)
 
   return M.render_template(prompt.template, {
     title = neutralize_untrusted_prompt_text(proposal.title),
@@ -410,11 +432,15 @@ function M.build_meta_judge_prompt(proposal, angle_results)
     context_block = context_block,
     convergence_block = convergence_block,
     angle_outputs = render_angle_outputs(angle_results),
+    reached_options = verdict_mode == "gate"
+      and "- reached:approve <short framing> when the angles support approving the current framing.\n- reached:reject <short framing> when the angles support rejecting the current framing."
+      or "- reached:approve <short framing> when the angles support approving the current framing.",
   })
 end
 
-function M.parse_meta_judge_output(stdout)
+function M.parse_meta_judge_output(stdout, verdict_mode)
   local text = tostring(stdout or "")
+  local mode = verdict_mode == "gate" and "gate" or "converge"
   local parsed = nil
   local count = 0
   for line in (text .. "\n"):gmatch("(.-)\n") do
@@ -428,13 +454,13 @@ function M.parse_meta_judge_output(stdout)
         count = count + 1
         local lowered = kind:lower()
         if lowered == "reached" then
-          -- decision must be an EXACT whitespace-delimited `approve`/`reject`
+          -- decision must be an EXACT whitespace-delimited `approve`
           -- token followed by a non-empty framing; `approve/reject`,
           -- `approve-ish`, or a bare `approve` (no framing) fail closed to
           -- nil so the caller converges instead of fabricating a reached.
           local first, framing = value:match("^(%S+)%s+(.+)$")
           local decision = first and first:lower() or nil
-          if (decision == "approve" or decision == "reject")
+          if (decision == "approve" or (mode == "gate" and decision == "reject"))
             and framing ~= nil and framing ~= "" then
             parsed = {
               kind = "reached",
@@ -466,7 +492,7 @@ function M.default_narrowed_question(proposal, angle_results)
     table.insert(parts, tostring(item.angle) .. "=" .. tostring(item.verdict))
   end
   local question = "Resolve the concrete disagreement for proposal " .. tostring(proposal.proposal_id)
-    .. " and decide whether the current framing should be approved or rejected."
+    .. " and decide whether the current framing can be approved."
   if #parts > 0 then
     question = question .. " Angle verdicts: " .. table.concat(parts, ", ") .. "."
   end
