@@ -196,8 +196,30 @@ function M.build_devloop_review_reconcile_payload(unresolved, round, issue_propo
   }
 end
 
+function M.build_devloop_fix_reconcile_payload(reject_ctx, issue_version)
+  return {
+    schema = "github-devloop.fix-reconcile.v1",
+    proposal_id = reject_ctx.proposal_id,
+    review_proposal_id = reject_ctx.review_proposal_id,
+    review_dedup_key = reject_ctx.review_dedup_key,
+    issue_version = issue_version,
+    head_sha = reject_ctx.reviewed_head_sha,
+    round = M.version_fix_round(issue_version),
+    pr_number = reject_ctx.pr_number,
+    dedup_key = "fix-reconcile:" .. tostring(issue_version),
+    source_ref = {
+      kind = reject_ctx.source_ref.kind,
+      ref = reject_ctx.source_ref.ref,
+    },
+  }
+end
+
 function M.review_reconcile_state_version(issue_version, round)
   return tostring(issue_version) .. "/review-loop/" .. tostring(round)
+end
+
+function M.fix_reconcile_state_version(issue_version)
+  return tostring(issue_version)
 end
 
 function M.is_supported_review_reconcile(payload)
@@ -215,6 +237,27 @@ function M.is_supported_review_reconcile(payload)
     and valid_round(payload.round) ~= nil
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "review-reconcile:" .. tostring(payload.issue_version) .. "/review-loop/" .. tostring(payload.round)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_fix_reconcile(payload)
+  if type(payload) ~= "table" then
+    return false
+  end
+  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  return payload.schema == "github-devloop.fix-reconcile.v1"
+    and repo ~= nil
+    and issue_number ~= nil
+    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
+    and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
+    and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and M._is_git_sha(payload.head_sha)
+    and valid_round(payload.round) ~= nil
+    and tonumber(payload.round) == M.version_fix_round(payload.issue_version)
+    and M._is_positive_pr_number(payload.pr_number)
+    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and tostring(payload.dedup_key) == "fix-reconcile:" .. tostring(payload.issue_version)
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
@@ -267,6 +310,22 @@ function M.review_reconcile_marker(issue_proposal_id, issue_version, round, acti
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
     .. '" dedup="' .. safe_attr("review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(n), M._max_dedup_len)
+    .. '" -->'
+end
+
+function M.fix_reconcile_marker(proposal_id, issue_version, action)
+  local n = valid_round(M.version_fix_round(issue_version))
+  if n == nil then
+    error("github-devloop: invalid fix reconcile round")
+  end
+  if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
+    error("github-devloop: invalid fix reconcile action")
+  end
+  return '<!-- fkst:github-devloop:fix-reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
+    .. '" version="' .. safe_attr(issue_version, M._max_dedup_len)
+    .. '" round="' .. tostring(n)
+    .. '" action="' .. safe_attr(action, max_attr_len)
+    .. '" dedup="' .. safe_attr("fix-reconcile:" .. tostring(issue_version), M._max_dedup_len)
     .. '" -->'
 end
 
@@ -365,6 +424,24 @@ function M.has_review_reconcile_marker(comments, issue_proposal_id, issue_versio
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(issue_proposal_id)
         and attr(marker, "version") == version
+        and valid_round(attr(marker, "round")) == n then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_fix_reconcile_marker(comments, proposal_id, issue_version)
+  local n = valid_round(M.version_fix_round(issue_version))
+  if n == nil or type(comments) ~= "table" then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:fix%-reconcile:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if attr(marker, "proposal") == tostring(proposal_id)
+        and attr(marker, "version") == tostring(issue_version)
         and valid_round(attr(marker, "round")) == n then
         return true
       end

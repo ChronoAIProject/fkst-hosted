@@ -260,6 +260,20 @@ function M.build_review_reconcile_label_request(repo, issue_number, review_recon
   )
 end
 
+function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    "blocked",
+    M._dedup_key({
+      "fix-reconcile",
+      "label",
+      tostring(fix_reconcile.dedup_key),
+    }),
+    fix_reconcile.source_ref
+  )
+end
+
 function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
   local version = M.reconcile_state_version(reconcile.base_version, reconcile.round)
   local marker = M.reconcile_marker(reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
@@ -280,6 +294,29 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
       tostring(reconcile.dedup_key),
     }),
     source_ref = M.normalize_source_ref(reconcile.source_ref),
+  }
+end
+
+function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile, action, reason)
+  local version = M.fix_reconcile_state_version(fix_reconcile.issue_version)
+  local marker = M.fix_reconcile_marker(fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
+  local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
+  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop fix reconcile action: " .. tostring(action)
+      .. "\n\nReason:\n" .. safe_reason
+      .. "\n\n"
+      .. state_marker .. "\n" .. marker
+      .. "\n" .. ai_sentinel,
+    dedup_key = M._dedup_key({
+      "fix-reconcile",
+      "comment",
+      tostring(fix_reconcile.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(fix_reconcile.source_ref),
   }
 end
 

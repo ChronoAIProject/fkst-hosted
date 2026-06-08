@@ -178,6 +178,61 @@ return {
     t.is_true(comment.body:find(ai_sentinel, 1, true) ~= nil)
   end,
 
+  test_fix_reconcile_payload_marker_validator_and_requests = function()
+    local issue_proposal_id = "github-devloop/issue/owner/repo/42"
+    local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/4"
+    local review_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+    local reconcile = core.build_devloop_fix_reconcile_payload({
+      proposal_id = issue_proposal_id,
+      review_proposal_id = review_id,
+      review_dedup_key = "consensus:" .. review_id .. "/review",
+      reviewed_head_sha = "def456",
+      pr_number = 7,
+      source_ref = source_ref(),
+    }, issue_version)
+
+    t.eq(reconcile.schema, "github-devloop.fix-reconcile.v1")
+    t.eq(reconcile.proposal_id, issue_proposal_id)
+    t.eq(reconcile.review_proposal_id, review_id)
+    t.eq(reconcile.review_dedup_key, "consensus:" .. review_id .. "/review")
+    t.eq(reconcile.issue_version, issue_version)
+    t.eq(reconcile.head_sha, "def456")
+    t.eq(reconcile.round, 4)
+    t.eq(reconcile.pr_number, 7)
+    t.eq(reconcile.dedup_key, "fix-reconcile:" .. issue_version)
+    t.eq(core.fix_reconcile_state_version(issue_version), issue_version)
+    t.eq(core.is_supported_fix_reconcile(reconcile), true)
+    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { dedup_key = "fix-reconcile:" .. issue_version .. "/other" })), false)
+    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { round = 3 })), false)
+    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { head_sha = "not-a-sha" })), false)
+    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
+
+    local marker = core.fix_reconcile_marker(issue_proposal_id, issue_version, "drop")
+    t.eq(core.has_fix_reconcile_marker({ marker }, issue_proposal_id, issue_version), true)
+    t.is_true(marker:find('action="drop"', 1, true) ~= nil)
+    t.is_true(marker:find('round="4"', 1, true) ~= nil)
+    t.is_true(marker:find('dedup="fix-reconcile:' .. issue_version .. '"', 1, true) ~= nil)
+
+    local label = core.build_fix_reconcile_label_request("owner/repo", "42", reconcile)
+    t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.eq(label.remove_labels[1], "fkst-dev:thinking")
+    t.is_true(has_value(label.remove_labels, "fkst-dev:reviewing"))
+    t.eq(has_value(label.remove_labels, "fkst-dev:blocked"), false)
+
+    local comment = core.build_fix_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "fix-loop-budget-exhausted-after-4-rounds")
+    t.is_true(comment.body:find("github-devloop fix reconcile action: drop", 1, true) ~= nil)
+    t.is_true(comment.body:find("fkst:github-devloop:fix-reconcile:v1", 1, true) ~= nil)
+    t.is_true(comment.body:find(core.state_marker(issue_proposal_id, "blocked", issue_version), 1, true) ~= nil)
+    t.is_true(comment.body:find(ai_sentinel, 1, true) ~= nil)
+  end,
+
+  test_version_fix_round_counts_max_fix_suffix = function()
+    local version = "ready/base/fix/1/review-loop/2/fix/3"
+    t.eq(core.version_fix_round(version), 3)
+    t.eq(core.version_fix_round("ready/base"), 0)
+    t.eq(core.next_fix_version(version), version .. "/fix/4")
+  end,
+
   test_review_converge_round_comment_display_keeps_marker_parseable = function()
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"

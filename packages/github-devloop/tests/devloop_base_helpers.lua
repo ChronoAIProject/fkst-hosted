@@ -213,6 +213,22 @@ local function review_reconcile(extra)
   return value
 end
 
+local function fix_reconcile(extra)
+  local issue_version = core.next_fix_version(core.next_fix_version(core.next_fix_version(reviewing().version)))
+  local value = core.build_devloop_fix_reconcile_payload({
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456"),
+    review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456") .. "/review",
+    reviewed_head_sha = "def456",
+    pr_number = 7,
+    source_ref = source_ref(),
+  }, issue_version)
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
 local function merge_ready(extra)
   local event = review_reached()
   local value = core.build_devloop_merge_ready_payload(
@@ -276,6 +292,13 @@ end
 local function run_review_reconcile(payload, run_opts)
   return t.run_department("departments/reconcile/main.lua", {
     queue = "devloop_review_reconcile",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_fix_reconcile(payload, run_opts)
+  return t.run_department("departments/reconcile/main.lua", {
+    queue = "devloop_fix_reconcile",
     payload = payload,
   }, run_opts)
 end
@@ -723,12 +746,14 @@ return {
   pr_link_marker_for_fix = pr_link_marker_for_fix,
   review_meta_event = review_meta_event,
   review_reconcile = review_reconcile,
+  fix_reconcile = fix_reconcile,
   merge_ready = merge_ready,
   run_observe = run_observe,
   run_result = run_result,
   run_loop = run_loop,
   run_reconcile = run_reconcile,
   run_review_reconcile = run_review_reconcile,
+  run_fix_reconcile = run_fix_reconcile,
   run_implement = run_implement,
   run_open_pr = run_open_pr,
   run_observe_pr = run_observe_pr,

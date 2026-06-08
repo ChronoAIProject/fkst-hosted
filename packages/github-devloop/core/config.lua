@@ -37,6 +37,10 @@ function M.write_mode(exec)
   return M.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
 end
 
+function M.fix_loop_budget()
+  return 3
+end
+
 local function current_checkout_branch(exec)
   local run = exec or exec_sync
   if type(run) ~= "function" then

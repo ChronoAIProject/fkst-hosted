@@ -8,6 +8,7 @@ M.spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
     "devloop_fixing",
+    "devloop_fix_reconcile",
     "devloop_merge_ready",
   },
   fanout = { "consensus.consensus_reached" },
@@ -118,11 +119,25 @@ function pipeline(event)
       return
     end
 
-    core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
     local issue_version = state.version
     if reached.decision == "reject" then
+      local current_fix_round = core.version_fix_round(state.version)
+      if current_fix_round >= core.fix_loop_budget() then
+        local fix_reconcile = core.build_devloop_fix_reconcile_payload({
+          proposal_id = origin.proposal_id,
+          review_proposal_id = reached.proposal_id,
+          review_dedup_key = reached.dedup_key,
+          reviewed_head_sha = reviewed_head_sha,
+          pr_number = pr_number,
+          source_ref = issue_source_ref,
+        }, state.version)
+        core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(fix-loop-budget-exhausted)", "review decision=reject")
+        core.log_raise("review_result", origin.proposal_id, "devloop_fix_reconcile", fix_reconcile)
+        return
+      end
       issue_version = core.fix_version_from_review_version(state.version)
     end
+    core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
     local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, reached, issue_source_ref)
     local label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, reached, issue_source_ref)
     local add_labels, remove_labels = core.state_label_changes(to_state)
