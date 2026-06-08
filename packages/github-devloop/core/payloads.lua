@@ -1,21 +1,6 @@
 local S = {}
 
 function S.install(M)
-function M.build_devloop_stuck_payload(unresolved, n)
-  return {
-    schema = "github-devloop.stuck.v1",
-    proposal_id = unresolved.proposal_id,
-    dedup_key = M._dedup_key({
-      tostring(unresolved.proposal_id),
-      "stuck",
-      tostring(n),
-      tostring(unresolved.dedup_key),
-    }),
-    no_consensus_dedup_key = unresolved.dedup_key,
-    source_ref = M.normalize_source_ref(unresolved.source_ref),
-  }
-end
-
 function M.build_devloop_ready_payload(source)
   return {
     schema = "github-devloop.ready.v1",

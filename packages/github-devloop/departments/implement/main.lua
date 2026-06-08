@@ -11,7 +11,7 @@ M.spec = {
   stall_window = "10m",
 }
 
-local function raise_stuck(repo, issue_number, ready, reason, detail)
+local function raise_impl_failed(repo, issue_number, ready, reason, detail)
   local comment_request = core.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail)
   local label_request = core.build_impl_failed_label_request(repo, issue_number, ready, reason)
   local add_labels, remove_labels = core.state_label_changes("impl-failed")
@@ -183,7 +183,7 @@ function pipeline(event)
     if type(result) ~= "table" or result.exit_code ~= 0 then
       local stderr = type(result) == "table" and result.stderr or "nil result"
       core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr)
-      raise_stuck(repo, issue_number, ready, "codex-failed", stderr)
+      raise_impl_failed(repo, issue_number, ready, "codex-failed", stderr)
       return
     end
     core.log_codex_result("implement", ready.proposal_id, "implement", result, "result=completed", nil)
@@ -210,7 +210,7 @@ function pipeline(event)
         detail = tostring(result.stderr or "")
       end
       core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes")
-      raise_stuck(repo, issue_number, ready, "no-changes", detail)
+      raise_impl_failed(repo, issue_number, ready, "no-changes", detail)
       return
     end
 

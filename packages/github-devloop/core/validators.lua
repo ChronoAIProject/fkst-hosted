@@ -89,14 +89,6 @@ function M.is_supported_pr_review_unresolved(payload)
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
-function M.is_supported_stuck(payload)
-  return type(payload) == "table"
-    and payload.schema == "github-devloop.stuck.v1"
-    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
-    and M.is_safe_consensus_result_ref(payload.proposal_id, payload.no_consensus_dedup_key)
-    and M._has_bounded_source_ref(payload.source_ref)
-end
-
 function M.is_supported_ready(payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.ready.v1"

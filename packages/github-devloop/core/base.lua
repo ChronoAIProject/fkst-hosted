@@ -41,8 +41,6 @@ local fixing_label = "fkst-dev:fixing"
 local review_meta_label = "fkst-dev:review-meta"
 local impl_failed_label = "fkst-dev:impl-failed"
 local blocked_label = "fkst-dev:blocked"
-local stuck_label = "fkst-dev:stuck"
-local loop_budget = 3
 
 local state_labels = {
   [thinking_label] = true,
@@ -57,7 +55,6 @@ local state_labels = {
   [review_meta_label] = true,
   [impl_failed_label] = true,
   [blocked_label] = true,
-  [stuck_label] = true,
 }
 
 local label_by_state = {
@@ -73,7 +70,6 @@ local label_by_state = {
   ["review-meta"] = review_meta_label,
   ["impl-failed"] = impl_failed_label,
   blocked = blocked_label,
-  stuck = stuck_label,
 }
 
 local state_by_label = {}
@@ -83,8 +79,7 @@ end
 
 local state_graph = {
   unmanaged = { "thinking" },
-  thinking = { "ready", "blocked", "stuck" },
-  stuck = { "ready", "blocked" },
+  thinking = { "ready", "blocked" },
   ready = { "implementing" },
   implementing = { "pr-open", "impl-failed" },
   ["pr-open"] = { "reviewing" },
@@ -98,10 +93,9 @@ local state_graph = {
   blocked = {},
 }
 
-local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "stuck", "review-meta", "merging", "merged" }
+local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged" }
 local state_stage_rank = {
   thinking = 100,
-  stuck = 300,
   ready = 500,
   implementing = 600,
   ["pr-open"] = 650,
@@ -159,10 +153,6 @@ local function has_value(values, expected)
     end
   end
   return false
-end
-
-local function is_meta_action(value)
-  return value == "implement" or value == "block"
 end
 
 local function is_review_meta_action(value)
@@ -581,10 +571,6 @@ function M.loop_lock_key(proposal_id)
   return M.transition_lock_key(proposal_id)
 end
 
-function M.meta_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
-end
-
 function M.implement_lock_key(proposal_id)
   return M.transition_lock_key(proposal_id)
 end
@@ -820,8 +806,6 @@ M._fixing_label = fixing_label
 M._review_meta_label = review_meta_label
 M._impl_failed_label = impl_failed_label
 M._blocked_label = blocked_label
-M._stuck_label = stuck_label
-M._loop_budget = loop_budget
 M._state_labels = state_labels
 M._label_by_state = label_by_state
 M._state_graph = state_graph
@@ -834,7 +818,6 @@ M._one_line = one_line
 M._decimal_checksum = decimal_checksum
 M._is_bounded_string = is_bounded_string
 M._has_value = has_value
-M._is_meta_action = is_meta_action
 M._is_review_meta_action = is_review_meta_action
 M._is_path_safe_key = is_path_safe_key
 M._is_git_ref_safe = is_git_ref_safe

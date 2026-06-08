@@ -90,10 +90,10 @@ local function unresolved(extra)
   return value
 end
 
-local function stuck(extra)
-  local value = core.build_devloop_stuck_payload(unresolved({
-    dedup_key = "consensus:github-devloop/issue/owner/repo/42/v1",
-  }), 3)
+local function reconcile(extra)
+  local value = core.build_devloop_reconcile_payload(unresolved({
+    dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
+  }), 3, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
@@ -254,9 +254,9 @@ local function run_loop(payload, run_opts)
   }, run_opts)
 end
 
-local function run_meta(payload, run_opts)
-  return t.run_department("departments/meta/main.lua", {
-    queue = "devloop_stuck",
+local function run_reconcile(payload, run_opts)
+  return t.run_department("departments/reconcile/main.lua", {
+    queue = "devloop_reconcile",
     payload = payload,
   }, run_opts)
 end
@@ -388,8 +388,6 @@ local function mock_issue_state(labels, state, comments)
         state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "impl-failed", default_marker_version)
       elseif label == "fkst-dev:blocked" then
         state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "blocked", default_marker_version)
-      elseif label == "fkst-dev:stuck" then
-        state_marker = core.state_marker("github-devloop/issue/owner/repo/42", "stuck", default_marker_version)
       end
     end
     if state_marker ~= nil then
@@ -440,9 +438,6 @@ local function state_from_labels(labels)
     end
     if label == "fkst-dev:blocked" then
       return "blocked"
-    end
-    if label == "fkst-dev:stuck" then
-      return "stuck"
     end
   end
   return nil
@@ -517,27 +512,8 @@ local function mock_issue_loop(labels, comments, extra)
   })
 end
 
-local function mock_issue_meta(labels, comments, extra)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:stuck" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:stuck" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local fields = extra or {}
-  t.mock_command("--json title,body,labels,comments", {
-    stdout = string.format(
-      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
-      json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.body or "Body from GitHub"),
-      table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+local function mock_issue_reconcile(labels, comments, extra)
+  mock_issue_loop(labels or { "fkst-dev:thinking" }, comments, extra)
 end
 
 local function mock_issue_implement(labels, comments, extra)
@@ -719,7 +695,7 @@ return {
   issue = issue,
   reached = reached,
   unresolved = unresolved,
-  stuck = stuck,
+  reconcile = reconcile,
   ready = ready,
   reviewing = reviewing,
   review_reached = review_reached,
@@ -731,7 +707,7 @@ return {
   run_observe = run_observe,
   run_result = run_result,
   run_loop = run_loop,
-  run_meta = run_meta,
+  run_reconcile = run_reconcile,
   run_implement = run_implement,
   run_open_pr = run_open_pr,
   run_observe_pr = run_observe_pr,
@@ -750,7 +726,7 @@ return {
   mock_issue_body = mock_issue_body,
   mock_issue_result = mock_issue_result,
   mock_issue_loop = mock_issue_loop,
-  mock_issue_meta = mock_issue_meta,
+  mock_issue_reconcile = mock_issue_reconcile,
   mock_issue_implement = mock_issue_implement,
   mock_issue_implement_raw = mock_issue_implement_raw,
   mock_issue_open_pr = mock_issue_open_pr,

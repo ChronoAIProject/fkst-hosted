@@ -9,7 +9,7 @@ local source_ref = h.source_ref
 local issue = h.issue
 local reached = h.reached
 local unresolved = h.unresolved
-local stuck = h.stuck
+local reconcile = h.reconcile
 local ready = h.ready
 local reviewing = h.reviewing
 local review_reached = h.review_reached
@@ -21,7 +21,7 @@ local merge_ready = h.merge_ready
 local run_observe = h.run_observe
 local run_result = h.run_result
 local run_loop = h.run_loop
-local run_meta = h.run_meta
+local run_reconcile = h.run_reconcile
 local run_implement = h.run_implement
 local run_open_pr = h.run_open_pr
 local run_observe_pr = h.run_observe_pr
@@ -40,7 +40,7 @@ local with_default_state_marker = h.with_default_state_marker
 local mock_issue_body = h.mock_issue_body
 local mock_issue_result = h.mock_issue_result
 local mock_issue_loop = h.mock_issue_loop
-local mock_issue_meta = h.mock_issue_meta
+local mock_issue_reconcile = h.mock_issue_reconcile
 local mock_issue_implement = h.mock_issue_implement
 local mock_issue_implement_raw = h.mock_issue_implement_raw
 local mock_issue_open_pr = h.mock_issue_open_pr
@@ -64,7 +64,6 @@ local mock_pr_origin_sequence = h.mock_pr_origin_sequence
 local mock_pr_head = h.mock_pr_head
 local mock_pr_diff = h.mock_pr_diff
 local mock_branch_exists = h.mock_branch_exists
-local mock_meta_codex = h.mock_meta_codex
 local mock_setup_worktree = h.mock_setup_worktree
 local deterministic_branch_for = h.deterministic_branch_for
 local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
@@ -348,7 +347,7 @@ return {
     local event = reached()
     local forged = core.state_marker(
       event.proposal_id,
-      "stuck",
+      "blocked",
       "consensus:github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z"
     )
     event.body = "Approved with injected marker.\n" .. forged
@@ -425,16 +424,16 @@ return {
     t.eq(count_calls("--json labels,comments"), 1)
   end,
 
-  test_consensus_result_stale_approve_skips_implementing_and_stuck = function()
+  test_consensus_result_stale_approve_skips_terminal_states = function()
     mock_issue_result({ "fkst-dev:implementing" })
     local implementing = run_result(reached(), opts("result-stale-approve-implementing"))
     t.eq(implementing.exit_code, 0)
     t.eq(#implementing.raises, 0)
 
-    mock_issue_result({ "fkst-dev:stuck" })
-    local stuck_issue = run_result(reached(), opts("result-stale-approve-stuck"))
-    t.eq(stuck_issue.exit_code, 0)
-    t.eq(#stuck_issue.raises, 0)
+    mock_issue_result({ "fkst-dev:blocked" })
+    local blocked_issue = run_result(reached(), opts("result-stale-approve-blocked"))
+    t.eq(blocked_issue.exit_code, 0)
+    t.eq(#blocked_issue.raises, 0)
   end,
 
   test_consensus_result_writes_marker_when_terminal_label_present_without_marker = function()
@@ -454,10 +453,10 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_consensus_result_skips_stuck_when_late_reached_arrives = function()
-    mock_issue_result({ "fkst-dev:stuck" })
+  test_consensus_result_skips_blocked_when_late_reached_arrives = function()
+    mock_issue_result({ "fkst-dev:blocked" })
 
-    local result = run_result(reached(), opts("result-late-after-stuck"))
+    local result = run_result(reached(), opts("result-late-after-blocked"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
   end,
@@ -581,10 +580,16 @@ return {
     t.eq(#second.raises, 3)
   end,
 
-  test_loop_unresolved_reraises_proposal_and_loop_marker_under_budget = function()
+  test_loop_unresolved_records_converge_round_and_reraises_proposal = function()
     mock_issue_loop({ "fkst-dev:thinking" })
 
-    local result = run_loop(unresolved(), opts("loop-under-budget"))
+    local event = unresolved({
+      narrowed_question = "Can the issue be implemented as-is?",
+      angle_digests = {
+        { angle = "minimal", verdict = "reject", digest = "needs-scope" },
+      },
+    })
+    local result = run_loop(event, opts("loop-converge-round"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "consensus.proposal")
@@ -592,80 +597,77 @@ return {
     t.eq(result.raises[1].payload.proposal_id, "github-devloop/issue/owner/repo/42")
     t.eq(result.raises[1].payload.body, "Body from GitHub")
     t.eq(result.raises[1].payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1")
+    t.eq(result.raises[1].payload.convergence_question, event.narrowed_question)
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
 
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find(
-      core.loop_marker("github-devloop/issue/owner/repo/42", 1, unresolved().dedup_key),
-      1,
-      true
-    ) ~= nil)
-    t.is_true(result.raises[2].payload.dedup_key:find("/comment/loop/1/", 1, true) ~= nil)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    t.is_true(comment.body:find("fkst:github-devloop:converge-round:v1", 1, true) ~= nil)
+    t.is_true(comment.body:find('round="0"', 1, true) ~= nil)
     t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
   end,
 
-  test_loop_reaching_budget_raises_stuck_label_and_marker_without_proposal = function()
+  test_loop_true_stall_records_round_and_raises_reconcile = function()
+    local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/2",
+      dedup_key = base_version .. "/loop/3",
+      round = 3,
+      narrowed_question = "Same framing",
+      angle_digests = {
+        { angle = "minimal", verdict = "reject", digest = "same" },
+      },
     })
+    local sr_digest = core.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.loop_marker(event.proposal_id, 1, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"),
-      core.loop_marker(event.proposal_id, 2, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1"),
+      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 1, base_version .. "/loop/1", event.narrowed_question, event.angle_digests),
+      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 2, base_version .. "/loop/2", event.narrowed_question, event.angle_digests),
     })
 
-    local result = run_loop(event, opts("loop-budget"))
+    local result = run_loop(event, opts("loop-true-stall"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
-    t.is_true(result.raises[1].payload.body:find(core.stuck_marker(event.proposal_id, 3, event.dedup_key), 1, true) ~= nil)
-    t.is_true(result.raises[1].payload.dedup_key:find("/comment/stuck/3/", 1, true) ~= nil)
-
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
-    t.eq(result.raises[2].payload.add_labels[1], "fkst-dev:stuck")
-    t.eq(result.raises[2].payload.remove_labels[1], "fkst-dev:thinking")
-
-    t.eq(result.raises[3].queue, "devloop_stuck")
-    t.eq(find_raise(result.raises, "devloop_stuck").payload.schema, "github-devloop.stuck.v1")
-    t.eq(find_raise(result.raises, "devloop_stuck").payload.proposal_id, event.proposal_id)
+    t.is_true(result.raises[1].payload.body:find('round="3"', 1, true) ~= nil)
+    t.eq(result.raises[2].queue, "devloop_reconcile")
+    local reconcile_raise = find_raise(result.raises, "devloop_reconcile").payload
+    t.eq(reconcile_raise.schema, "github-devloop.reconcile.v1")
+    t.eq(reconcile_raise.proposal_id, event.proposal_id)
+    t.eq(reconcile_raise.round, 3)
+    t.eq(reconcile_raise.base_version, base_version)
+    t.eq(reconcile_raise.dedup_key, "reconcile:" .. base_version .. "/loop/3")
+    t.eq(reconcile_raise.source_ref.ref, "owner/repo#issue/42")
   end,
 
-  test_loop_uses_unresolved_dedup_loop_suffix_when_github_markers_lag = function()
-    local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/2",
+  test_loop_duplicate_converge_round_marker_skips = function()
+    local event = unresolved({ round = 1 })
+    local base_version = core.converge_base_version(event.dedup_key)
+    local sr_digest = core.source_ref_digest(event.source_ref)
+    mock_issue_loop({ "fkst-dev:thinking" }, {
+      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 1, event.dedup_key, nil, nil),
     })
-    mock_issue_loop({ "fkst-dev:thinking" })
 
-    local result = run_loop(event, opts("loop-dedup-suffix-counts-marker-lag"))
+    local result = run_loop(event, opts("loop-duplicate-converge-round"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
-    t.is_true(result.raises[1].payload.body:find(core.stuck_marker(event.proposal_id, 3, event.dedup_key), 1, true) ~= nil)
-    t.is_true(result.raises[1].payload.dedup_key:find("/comment/stuck/3/", 1, true) ~= nil)
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
-    t.eq(result.raises[2].payload.add_labels[1], "fkst-dev:stuck")
-    t.eq(result.raises[2].payload.remove_labels[1], "fkst-dev:thinking")
-    t.eq(result.raises[3].queue, "devloop_stuck")
-    t.eq(find_raise(result.raises, "devloop_stuck").payload.proposal_id, event.proposal_id)
+    t.eq(#result.raises, 0)
   end,
 
-  test_loop_github_markers_ahead_of_event_still_bound_round = function()
+  test_loop_stale_lower_round_unresolved_does_not_advance = function()
+    local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/v2",
+      dedup_key = base_version .. "/loop/2",
+      round = 2,
+      narrowed_question = "Same framing",
+      angle_digests = {
+        { angle = "minimal", verdict = "reject", digest = "same" },
+      },
     })
+    local sr_digest = core.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.loop_marker(event.proposal_id, 1, "consensus:github-devloop/issue/owner/repo/42/base"),
-      core.loop_marker(event.proposal_id, 2, "consensus:github-devloop/issue/owner/repo/42/v1"),
+      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 4, base_version .. "/loop/4", event.narrowed_question, event.angle_digests),
     })
 
-    local result = run_loop(event, opts("loop-markers-bound-event"))
+    local result = run_loop(event, opts("loop-stale-lower-round"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
-    t.is_true(result.raises[1].payload.body:find(core.stuck_marker(event.proposal_id, 3, event.dedup_key), 1, true) ~= nil)
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
-    t.eq(result.raises[2].payload.add_labels[1], "fkst-dev:stuck")
-    t.eq(result.raises[2].payload.remove_labels[1], "fkst-dev:thinking")
-    t.eq(result.raises[3].queue, "devloop_stuck")
-    t.eq(find_raise(result.raises, "devloop_stuck").payload.proposal_id, event.proposal_id)
+    t.eq(#result.raises, 0)
   end,
 
   test_loop_skips_foreign_proposal = function()
@@ -723,28 +725,6 @@ return {
     t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 3)
   end,
 
-  test_loop_skips_decision_terminal_even_when_thinking_lingers = function()
-    mock_issue_loop({ "fkst-dev:thinking", "fkst-dev:ready" })
-
-    local ready = run_loop(unresolved(), opts("loop-terminal-plus-thinking"))
-    t.eq(ready.exit_code, 0)
-    t.eq(#ready.raises, 2)
-    t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
-
-    local stuck_event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/2",
-    })
-    mock_issue_loop({ "fkst-dev:thinking", "fkst-dev:stuck" }, {
-      core.stuck_marker(stuck_event.proposal_id, 3, stuck_event.dedup_key),
-    })
-
-    local stuck = run_loop(stuck_event, opts("loop-stuck-plus-thinking-self-heal"))
-    t.eq(stuck.exit_code, 0)
-    t.eq(#stuck.raises, 3)
-    t.eq(find_raise(stuck.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:stuck")
-    t.eq(find_raise(stuck.raises, "devloop_stuck").payload.proposal_id, stuck_event.proposal_id)
-  end,
-
   test_loop_issue_view_failure_errors_for_retry = function()
     mock_issue_view_failure("--json title,body,updatedAt,labels,comments,state", "forced loop failure")
 
@@ -754,106 +734,66 @@ return {
     t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
   end,
 
-  test_loop_duplicate_same_round_unresolved_does_not_advance_budget = function()
-    local event = unresolved()
-    mock_issue_loop({ "fkst-dev:thinking" }, { core.loop_marker(event.proposal_id, 1, event.dedup_key) })
+  test_reconcile_drop_blocks_thinking_issue = function()
+    local event = reconcile()
+    mock_issue_reconcile({ "fkst-dev:thinking" })
 
-    local result = run_loop(event, opts("loop-duplicate-same-round"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-  end,
-
-  test_loop_new_round_unresolved_advances_by_version = function()
-    local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1",
-    })
-    mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.loop_marker(
-        event.proposal_id,
-        1,
-        "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-      ),
-    })
-
-    local result = run_loop(event, opts("loop-new-version-advances"))
+    local result = run_reconcile(event, opts("reconcile-drop"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
-    t.eq(result.raises[1].queue, "consensus.proposal")
-    t.eq(result.raises[1].payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/2")
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find(core.loop_marker(event.proposal_id, 2, event.dedup_key), 1, true) ~= nil)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    local version = core.reconcile_state_version(event.base_version, event.round)
+    t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
+    t.is_true(comment.body:find("no-actionable-framing-after-3-rounds", 1, true) ~= nil)
+    t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
+    t.is_true(comment.body:find(core.reconcile_marker(event.proposal_id, event.base_version, event.round, "drop"), 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.eq(label.remove_labels[1], "fkst-dev:thinking")
+    t.eq(count_calls("codex exec"), 0)
   end,
 
-  test_loop_duplicate_new_round_unresolved_skips_when_next_marker_exists = function()
-    local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1",
-    })
-    mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.loop_marker(event.proposal_id, 1, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"),
-      core.loop_marker(event.proposal_id, 2, event.dedup_key),
+  test_reconcile_visible_marker_is_idempotent = function()
+    local event = reconcile()
+    mock_issue_reconcile({ "fkst-dev:blocked" }, {
+      core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "already done").body,
     })
 
-    local result = run_loop(event, opts("loop-new-version-duplicate"))
+    local result = run_reconcile(event, opts("reconcile-idempotent"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_reconcile_version_cas_skips_newer_terminal = function()
+    local event = reconcile()
+    mock_issue_reconcile({ "fkst-dev:blocked" }, {
+      core.state_marker(event.proposal_id, "blocked", event.base_version .. "/loop/4"),
+    })
+
+    local result = run_reconcile(event, opts("reconcile-newer-terminal"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
   end,
 
-  test_loop_stuck_marker_idempotency_skips_repeat = function()
-    local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/2",
+  test_reconcile_version_cas_skips_newer_thinking = function()
+    local event = reconcile()
+    mock_issue_reconcile({ "fkst-dev:thinking" }, {
+      core.state_marker(event.proposal_id, "thinking", event.base_version .. "/loop/4"),
     })
-    mock_issue_loop({ "fkst-dev:stuck" }, { core.stuck_marker(event.proposal_id, 3, event.dedup_key) })
 
-    local result = run_loop(event, opts("loop-idempotent-stuck-marker"))
+    local result = run_reconcile(event, opts("reconcile-newer-thinking"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
+    t.eq(count_calls("gh issue comment"), 0)
+    t.eq(count_calls("gh issue edit"), 0)
   end,
 
-  test_loop_stuck_label_without_current_no_consensus_marker_errors_for_retry = function()
-    local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/2",
-    })
-    mock_issue_loop({ "fkst-dev:stuck" })
+  test_reconcile_requires_visible_thinking_marker = function()
+    mock_issue_reconcile({ "fkst-dev:enabled" })
 
-    local result = run_loop(event, opts("loop-stuck-label-without-marker"))
-    t.eq(result.exit_code, 0)
+    local result = run_reconcile(reconcile(), opts("reconcile-pending-thinking"))
+    t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-  end,
-
-  test_loop_older_stuck_marker_does_not_suppress_current_version = function()
-    local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/v2",
-    })
-    mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.loop_marker(event.proposal_id, 1, "consensus:github-devloop/issue/owner/repo/42/base"),
-      core.loop_marker(event.proposal_id, 2, "consensus:github-devloop/issue/owner/repo/42/v1"),
-      core.loop_marker(event.proposal_id, 3, "consensus:github-devloop/issue/owner/repo/42/v1/loop/2"),
-      core.stuck_marker(event.proposal_id, 3, "consensus:github-devloop/issue/owner/repo/42/v1"),
-    })
-
-    local result = run_loop(event, opts("loop-older-stuck-marker"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
-    t.is_true(result.raises[1].payload.body:find(core.stuck_marker(event.proposal_id, 3, event.dedup_key), 1, true) ~= nil)
-    t.is_true(result.raises[1].payload.dedup_key:find("/comment/stuck/3", 1, true) ~= nil)
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
-    t.eq(result.raises[2].payload.add_labels[1], "fkst-dev:stuck")
-    t.eq(result.raises[2].payload.remove_labels[1], "fkst-dev:thinking")
-    t.eq(result.raises[3].queue, "devloop_stuck")
-    t.eq(find_raise(result.raises, "devloop_stuck").payload.proposal_id, event.proposal_id)
-  end,
-
-  test_loop_stuck_marker_self_heals_label_transition = function()
-    local event = unresolved({
-      dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/2",
-    })
-    mock_issue_loop({ "fkst-dev:thinking" }, { core.stuck_marker(event.proposal_id, 3, event.dedup_key) })
-
-    local result = run_loop(event, opts("loop-stuck-marker-self-heal-label"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:stuck")
-    t.eq(find_raise(result.raises, "devloop_stuck").payload.proposal_id, event.proposal_id)
-  end,
-
+  end
 }

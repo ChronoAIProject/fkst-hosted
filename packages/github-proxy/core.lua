@@ -10,7 +10,6 @@ local max_branch_len = 160
 local max_marker_value_len = 300
 local state_stage_rank = {
   thinking = 100,
-  stuck = 300,
   ready = 500,
   implementing = 600,
   ["pr-open"] = 650,

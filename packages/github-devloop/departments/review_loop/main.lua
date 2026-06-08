@@ -1,6 +1,7 @@
 local core = require("core")
 
 local M = {}
+local review_round_limit = 3
 
 M.spec = {
   consumes = { "consensus.consensus_converge" },
@@ -101,7 +102,7 @@ function pipeline(event)
       return
     end
 
-    local budget = core.loop_budget()
+    local budget = review_round_limit
     local event_n = core.parse_loop_round_from_dedup(unresolved.dedup_key)
     local marker_n = core.review_loop_count_from_github_markers(current_issue.comments, unresolved.proposal_id, origin.proposal_id)
     local current_n = math.max(event_n, marker_n)

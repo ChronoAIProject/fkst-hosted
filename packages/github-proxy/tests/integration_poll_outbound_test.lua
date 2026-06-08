@@ -222,7 +222,7 @@ return {
   end,
 
   test_same_version_meta_comment_marker_dedups_opposite_action = function()
-    local dedup = "meta/comment/github-devloop/issue/owner/x/42/stuck/3/consensus-github-devloop/issue/owner/x/42/v1"
+    local dedup = "meta/comment/github-devloop/issue/owner/x/42/blocked/3/consensus-github-devloop/issue/owner/x/42/v1"
     local event = {
       queue = "github_issue_comment_request",
       payload = {
@@ -261,7 +261,7 @@ return {
   end,
 
   test_forged_proxy_comment_marker_does_not_suppress_bot_state_marker_comment = function()
-    local dedup = "meta/comment/github-devloop/issue/owner/x/42/stuck/3/consensus-github-devloop/issue/owner/x/42/v1"
+    local dedup = "meta/comment/github-devloop/issue/owner/x/42/blocked/3/consensus-github-devloop/issue/owner/x/42/v1"
     local state_marker = '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v1" -->'
     local event = {
       queue = "github_issue_comment_request",
@@ -295,7 +295,7 @@ return {
   end,
 
   test_neutralized_forged_proxy_comment_marker_does_not_suppress_later_real_comment = function()
-    local dedup = "meta/comment/github-devloop/issue/owner/x/42/stuck/3/consensus-github-devloop/issue/owner/x/42/v2"
+    local dedup = "meta/comment/github-devloop/issue/owner/x/42/blocked/3/consensus-github-devloop/issue/owner/x/42/v2"
     local state_marker = '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v2" -->'
     local event = {
       queue = "github_issue_comment_request",
@@ -593,7 +593,7 @@ return {
         repo = "owner/x",
         issue_number = 42,
         add_labels = { "fkst-dev:blocked" },
-        remove_labels = { "fkst-dev:stuck", "fkst-dev:thinking", "fkst-dev:ready" },
+        remove_labels = { "fkst-dev:blocked", "fkst-dev:thinking", "fkst-dev:ready" },
         dedup_key = "github-devloop/issue/owner/x/42/blocked-hint",
         source_ref = {
           kind = "external",

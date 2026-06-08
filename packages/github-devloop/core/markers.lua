@@ -1,30 +1,6 @@
 local S = {}
 
 function S.install(M)
-function M.loop_budget()
-  return M._loop_budget
-end
-
-function M.loop_marker(proposal_id, n, dedup_key)
-  return '<!-- fkst:github-devloop:loop:v1 proposal="' .. tostring(proposal_id)
-    .. '" n="' .. tostring(n)
-    .. '" dedup="' .. tostring(dedup_key)
-    .. '" -->'
-end
-
-function M.stuck_marker(proposal_id, n, dedup_key)
-  return '<!-- fkst:github-devloop:stuck:v1 proposal="' .. tostring(proposal_id)
-    .. '" n="' .. tostring(n)
-    .. '" dedup="' .. tostring(dedup_key)
-    .. '" -->'
-end
-
-function M.meta_marker(proposal_id, dedup_key)
-  return '<!-- fkst:github-devloop:meta:v1 proposal="' .. tostring(proposal_id)
-    .. '" dedup="' .. tostring(dedup_key)
-    .. '" -->'
-end
-
 function M.review_loop_marker(review_proposal_id, issue_proposal_id, n, dedup_key)
   return '<!-- fkst:github-devloop:review-loop:v1 proposal="' .. tostring(review_proposal_id)
     .. '" issue_proposal="' .. tostring(issue_proposal_id)
@@ -522,82 +498,6 @@ local function has_marker_round(comments, kind, proposal_id, n)
   return false
 end
 
-function M.has_loop_marker(comments, proposal_id, n, dedup_key)
-  if type(comments) ~= "table" then
-    return false
-  end
-  local needle = M.loop_marker(proposal_id, n, dedup_key)
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    if M._comment_body(comment):find(needle, 1, true) ~= nil then
-      return true
-    end
-  end
-  return false
-end
-
-function M.has_loop_marker_round(comments, proposal_id, n)
-  return has_marker_round(comments, "loop", proposal_id, n)
-end
-
-function M.has_loop_marker_dedup(comments, proposal_id, dedup_key)
-  for _, record in ipairs(marker_records(comments, "loop", proposal_id)) do
-    if record.dedup_key == tostring(dedup_key) then
-      return true
-    end
-  end
-  return false
-end
-
-function M.has_stuck_marker(comments, proposal_id, n, dedup_key)
-  if type(comments) ~= "table" then
-    return false
-  end
-  local needle = M.stuck_marker(proposal_id, n, dedup_key)
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    if M._comment_body(comment):find(needle, 1, true) ~= nil then
-      return true
-    end
-  end
-  return false
-end
-
-function M.has_stuck_marker_round(comments, proposal_id, n)
-  return has_marker_round(comments, "stuck", proposal_id, n)
-end
-
-function M.loop_count_from_github_markers(comments, proposal_id)
-  local max_n = 0
-  for _, record in ipairs(marker_records(comments, "loop", proposal_id)) do
-    if record.n > max_n then
-      max_n = record.n
-    end
-  end
-  for _, record in ipairs(marker_records(comments, "stuck", proposal_id)) do
-    if record.n > max_n then
-      max_n = record.n
-    end
-  end
-  return max_n
-end
-
-function M.has_meta_marker(comments, proposal_id, dedup_key)
-  if type(comments) ~= "table" then
-    return false
-  end
-
-  local marker_pattern = "<!%-%- fkst:github%-devloop:meta:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_dedup = marker:match('dedup="([^"]*)"')
-      if marker_proposal == proposal_id and marker_dedup == tostring(dedup_key) then
-        return true
-      end
-    end
-  end
-  return false
-end
-
 function M.has_review_result_marker(comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
   if type(comments) ~= "table" then
     return false
@@ -926,16 +826,11 @@ function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)
     or M.has_impl_failure_marker(comments, proposal_id, dedup_key)
 end
 
-function M.has_no_consensus_stuck_fact(comments, proposal_id, dedup_key)
-  local budget = M.loop_budget()
-  return M.has_stuck_marker(comments, proposal_id, budget, dedup_key)
-    or M.has_loop_marker_dedup(comments, proposal_id, dedup_key)
-end
-
 function M.parse_loop_round_from_dedup(dedup_key)
   local n = tostring(dedup_key or ""):match("/loop/(%d+)$")
   return tonumber(n) or 0
 end
+
 function M.result_marker(proposal_id, decision, dedup_key)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid decision")

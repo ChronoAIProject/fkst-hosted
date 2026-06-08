@@ -141,6 +141,45 @@ function M.converge_base_version(consensus_dedup)
   return (tostring(consensus_dedup or ""):gsub("/loop/%d+$", ""))
 end
 
+function M.build_devloop_reconcile_payload(unresolved, round, base_version)
+  return {
+    schema = "github-devloop.reconcile.v1",
+    proposal_id = unresolved.proposal_id,
+    dedup_key = "reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(round),
+    round = round,
+    base_version = base_version,
+    source_ref = {
+      kind = unresolved.source_ref.kind,
+      ref = unresolved.source_ref.ref,
+    },
+  }
+end
+
+function M.is_supported_reconcile(payload)
+  if type(payload) ~= "table" then
+    return false
+  end
+  local dedup_tail = tostring(payload.dedup_key or ""):match("^reconcile:(.+)$")
+  -- The reconcile dedup carries the consensus base version (`reconcile:consensus:<path>/loop/N`).
+  -- Strip the inherent `consensus:` prefix before path-checking, mirroring
+  -- is_safe_consensus_result_ref, so the legitimate colon is not rejected.
+  local inner_dedup = dedup_tail ~= nil and (dedup_tail:match("^consensus:(.+)$") or dedup_tail) or nil
+  -- parse_proposal_id returns TWO values; do NOT wrap it in `and ... or` (that truncates
+  -- the multi-return so issue_number would always be nil).
+  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  return payload.schema == "github-devloop.reconcile.v1"
+    and repo ~= nil
+    and issue_number ~= nil
+    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and M._is_bounded_string(payload.base_version, M._max_dedup_len)
+    and tostring(payload.dedup_key) == "reconcile:" .. tostring(payload.base_version) .. "/loop/" .. tostring(payload.round)
+    and inner_dedup ~= nil
+    and M._is_path_safe_key(inner_dedup, M._max_dedup_len)
+    and M._has_bounded_source_ref(payload.source_ref)
+    and valid_round(payload.round) ~= nil
+end
+
 function M.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
   local n = valid_round(round)
   if n == nil then
@@ -154,6 +193,26 @@ function M.converge_round_marker(proposal_id, base_version, source_ref_digest, r
     .. '" question="' .. M.converge_question_digest(narrowed_question)
     .. '" verdicts="' .. M.converge_verdicts_digest(angle_digests)
     .. '" angles="' .. M.converge_angles_digest(angle_digests)
+    .. '" -->'
+end
+
+function M.reconcile_state_version(base_version, round)
+  return tostring(base_version) .. "/loop/" .. tostring(round)
+end
+
+function M.reconcile_marker(proposal_id, base_version, round, action)
+  local n = valid_round(round)
+  if n == nil then
+    error("github-devloop: invalid reconcile round")
+  end
+  if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
+    error("github-devloop: invalid reconcile action")
+  end
+  return '<!-- fkst:github-devloop:reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
+    .. '" version="' .. safe_attr(M.reconcile_state_version(base_version, n), M._max_dedup_len)
+    .. '" round="' .. tostring(n)
+    .. '" action="' .. safe_attr(action, max_attr_len)
+    .. '" dedup="' .. safe_attr("reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(n), M._max_dedup_len)
     .. '" -->'
 end
 
@@ -217,6 +276,25 @@ function M.has_converge_round_marker(comments, proposal_id, base_version, source
   for _, fact in ipairs(M.converge_round_facts(comments, proposal_id, base_version, source_ref_digest)) do
     if fact.round == n then
       return true
+    end
+  end
+  return false
+end
+
+function M.has_reconcile_marker(comments, proposal_id, base_version, round)
+  local n = valid_round(round)
+  if n == nil or type(comments) ~= "table" then
+    return false
+  end
+  local version = M.reconcile_state_version(base_version, n)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:reconcile:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if attr(marker, "proposal") == tostring(proposal_id)
+        and attr(marker, "version") == version
+        and valid_round(attr(marker, "round")) == n then
+        return true
+      end
     end
   end
   return false

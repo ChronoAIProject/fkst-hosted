@@ -78,42 +78,56 @@ function M.build_result_comment_request(repo, issue_number, reached)
   }
 end
 
-function M.build_loop_comment_request(repo, issue_number, unresolved, n)
-  local marker = M.loop_marker(unresolved.proposal_id, n, unresolved.dedup_key)
+function M.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)
   return {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop no-consensus loop: " .. tostring(n) .. "\n\n" .. marker,
-    dedup_key = tostring(unresolved.proposal_id) .. "/comment/loop/" .. tostring(n)
-      .. "/" .. (tostring(unresolved.dedup_key):gsub(":", "-")),
+    body = "github-devloop convergence round recorded: " .. tostring(round) .. "\n\n" .. tostring(marker_body),
+    dedup_key = M._dedup_key({
+      "converge-round",
+      "comment",
+      tostring(unresolved.proposal_id),
+      tostring(round),
+      tostring(unresolved.dedup_key),
+    }),
     source_ref = M.normalize_source_ref(unresolved.source_ref),
   }
 end
 
-function M.build_stuck_label_request(repo, issue_number, unresolved, n)
+function M.build_reconcile_label_request(repo, issue_number, reconcile)
   return M.build_state_label_request(
     repo,
     issue_number,
-    "stuck",
-    tostring(unresolved.proposal_id) .. "/label/stuck/" .. tostring(n)
-      .. "/" .. (tostring(unresolved.dedup_key):gsub(":", "-")),
-    unresolved.source_ref
+    "blocked",
+    M._dedup_key({
+      "reconcile",
+      "label",
+      tostring(reconcile.dedup_key),
+    }),
+    reconcile.source_ref
   )
 end
 
-function M.build_stuck_comment_request(repo, issue_number, unresolved, n)
-  local marker = M.stuck_marker(unresolved.proposal_id, n, unresolved.dedup_key)
-  local state_marker = M.state_marker(unresolved.proposal_id, "stuck", unresolved.dedup_key)
+function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
+  local version = M.reconcile_state_version(reconcile.base_version, reconcile.round)
+  local marker = M.reconcile_marker(reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
+  local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
+  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   return {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop stuck: no consensus after " .. tostring(n) .. " attempts\n\n"
+    body = "github-devloop reconcile action: " .. tostring(action)
+      .. "\n\nReason:\n" .. safe_reason
+      .. "\n\n"
       .. state_marker .. "\n" .. marker,
-    dedup_key = tostring(unresolved.proposal_id) .. "/comment/stuck/" .. tostring(n)
-      .. "/" .. (tostring(unresolved.dedup_key):gsub(":", "-")),
-    source_ref = M.normalize_source_ref(unresolved.source_ref),
+    dedup_key = M._dedup_key({
+      "reconcile",
+      "comment",
+      tostring(reconcile.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(reconcile.source_ref),
   }
 end
 
@@ -157,49 +171,6 @@ function M.build_intake_enabled_label_request(repo, issue_number, candidate)
     }),
     candidate.source_ref
   )
-end
-
-function M.build_meta_label_request(repo, issue_number, stuck, action)
-  local to_state = action == "implement" and "ready" or "blocked"
-
-  return M.build_state_label_request(
-    repo,
-    issue_number,
-    to_state,
-    -- stuck.dedup_key already encodes proposal_id + version; do NOT also prefix proposal_id (that
-    -- double-counts it and can push the meta dedup over M._max_dedup_len). The version-bearing
-    -- stuck.dedup_key alone keeps it unique across attempts.
-    M._dedup_key({
-      "meta",
-      "label",
-      tostring(action),
-      tostring(stuck.dedup_key),
-    }),
-    stuck.source_ref
-  )
-end
-
-function M.build_meta_comment_request(repo, issue_number, stuck, action, reason)
-  local marker = M.meta_marker(stuck.proposal_id, stuck.dedup_key)
-  local to_state = action == "implement" and "ready" or "blocked"
-  local state_marker = M.state_marker(stuck.proposal_id, to_state, stuck.dedup_key)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
-  local heading = "github-devloop meta action: " .. tostring(action) .. "\n\nReason:\n" .. safe_reason
-
-  return {
-    schema = "github-proxy.v1",
-    repo = repo,
-    issue_number = issue_number,
-    body = heading .. "\n\n" .. state_marker .. "\n" .. marker,
-    -- The result comment is the durable meta fact. Key it by stuck version only so replayed
-    -- non-deterministic meta runs cannot append contradictory same-version state markers.
-    dedup_key = M._dedup_key({
-      "meta",
-      "comment",
-      tostring(stuck.dedup_key),
-    }),
-    source_ref = M.normalize_source_ref(stuck.source_ref),
-  }
 end
 
 function M.build_implementing_label_request(repo, issue_number, ready)

@@ -29,8 +29,7 @@ function M.state_marker(proposal_id, state, version)
     and state ~= "merged"
     and state ~= "fixing"
     and state ~= "impl-failed"
-    and state ~= "blocked"
-    and state ~= "stuck" then
+    and state ~= "blocked" then
     error("github-devloop: invalid state")
   end
   return '<!-- fkst:github-devloop:state:v1 proposal="' .. tostring(proposal_id)
@@ -528,15 +527,10 @@ function M.has_terminal_label(labels)
     or M.has_label(labels, M._fixing_label)
     or M.has_label(labels, M._impl_failed_label)
     or M.has_label(labels, M._blocked_label)
-    or M.has_label(labels, M._stuck_label)
 end
 
 function M.has_thinking_label(labels)
   return M.has_label(labels, M._thinking_label)
-end
-
-function M.has_stuck_label(labels)
-  return M.has_label(labels, M._stuck_label)
 end
 
 function M.has_blocked_label(labels)
@@ -609,7 +603,6 @@ function M.is_loop_terminal(labels)
     or M.has_label(labels, M._fixing_label)
     or M.has_label(labels, M._impl_failed_label)
     or M.has_label(labels, M._blocked_label)
-    or M.has_label(labels, M._stuck_label)
 end
 
 function M.has_result_marker(comments, proposal_id, decision, dedup_key)

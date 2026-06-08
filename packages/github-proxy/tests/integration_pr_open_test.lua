@@ -461,11 +461,16 @@ return {
   end,
 
   test_pr_open_guard_uses_canonical_rank_so_meta_escalated_implementing_can_open_pr = function()
+    local event = pr_open_event()
+    event.payload.impl_version = "v1/loop/1"
+    event.payload.expected_version = "v1/loop/1"
     mock_write_env("1")
     mock_bot_env()
-    mock_pr_open_guard({ "fkst-dev:stuck", "fkst-dev:implementing" }, pr_open_guard_comments({
-      '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="stuck" version="v1" stage_rank="300" -->',
-    }))
+    mock_pr_open_guard({ "fkst-dev:blocked", "fkst-dev:implementing" }, {
+      '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v1" stage_rank="800" -->',
+      '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" version="v1/loop/1" stage_rank="600" -->',
+      '<!-- fkst:github-devloop:implementing:v1 proposal="github-devloop/issue/owner/x/42" dedup="v1/loop/1" branch="devloop-owner-x-42-01HY" head_sha="abc123" base_branch="dev" base_sha="abc123" -->',
+    })
     mock_branch_head("abc123")
     mock_pr_head_list("[]\n")
     mock_git_push()
@@ -475,10 +480,10 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:stuck", "fkst-dev:implementing" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:blocked", "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
-    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-canonical-rank", {
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-canonical-rank", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)

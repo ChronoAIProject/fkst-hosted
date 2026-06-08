@@ -1,15 +1,13 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
-local action_label = h.action_label
-local reason_label = h.reason_label
+local action_label = "⟦FKST:ACTION⟧"
+local reason_label = "⟦FKST:REASON⟧"
 local has_value = h.has_value
 local source_ref = h.source_ref
 local issue = h.issue
 local reached = h.reached
 local unresolved = h.unresolved
-local stuck = h.stuck
-local meta_answer = h.meta_answer
 
 return {
   test_devloop_config_defaults_and_validation = function()
@@ -411,7 +409,7 @@ return {
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local comments = {
       core.state_marker(proposal_id, "ready", "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"),
-      core.state_marker(proposal_id, "stuck", "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"),
+      core.state_marker(proposal_id, "blocked", "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"),
     }
 
     local current = core.current_state(comments, proposal_id)
@@ -425,12 +423,12 @@ return {
     local comments = {
       core.state_marker(proposal_id, "thinking", version),
       core.state_marker(proposal_id, "ready", version),
-      core.state_marker(proposal_id, "stuck", version),
+      core.state_marker(proposal_id, "blocked", version),
     }
 
     local current = core.current_state(comments, proposal_id)
-    t.eq(current.state, "ready")
-    t.eq(current.stage_rank, core.stage_rank("ready"))
+    t.eq(current.state, "blocked")
+    t.eq(current.stage_rank, core.stage_rank("blocked"))
   end,
 
   test_current_state_converges_same_version_review_conflict_to_fixing = function()
@@ -550,17 +548,17 @@ return {
     local base = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
     local comments = {
       core.state_marker(proposal_id, "ready", base),
-      core.state_marker(proposal_id, "stuck", base .. "/loop/2"),
+      core.state_marker(proposal_id, "blocked", base .. "/loop/2"),
     }
 
     local current = core.current_state(comments, proposal_id)
-    t.eq(current.state, "stuck")
+    t.eq(current.state, "blocked")
     t.eq(current.version, base .. "/loop/2")
   end,
 
-  test_current_state_converges_same_version_meta_terminal_conflict_to_blocked = function()
+  test_current_state_converges_same_version_ready_blocked_conflict_to_blocked = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "github-devloop/issue/owner/repo/42/stuck/3/consensus-github-devloop/issue/owner/repo/42/v1"
+    local version = "consensus:github-devloop/issue/owner/repo/42/v1/loop/3"
 
     local ready_first = core.current_state({
       core.state_marker(proposal_id, "ready", version),
@@ -612,7 +610,7 @@ return {
 
   test_untrusted_comment_text_neutralizes_fkst_markers = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
-    local forged = core.state_marker(proposal_id, "stuck", "consensus:github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z")
+    local forged = core.state_marker(proposal_id, "blocked", "consensus:github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z")
     local proxy_marker = "<!-- fkst:github-proxy:comment:future-dedup -->"
     local neutralized = core.neutralize_untrusted_comment_text("Before\n" .. forged .. "\n" .. proxy_marker .. "\nAfter")
 
@@ -626,7 +624,7 @@ return {
   test_result_comment_neutralizes_untrusted_body_marker_before_real_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local forged_version = "consensus:github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z"
-    local forged = core.state_marker(proposal_id, "stuck", forged_version)
+    local forged = core.state_marker(proposal_id, "blocked", forged_version)
     local event = reached({
       body = "Looks fine.\n" .. forged,
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
@@ -640,18 +638,19 @@ return {
     t.eq(current.version, event.dedup_key)
   end,
 
-  test_meta_comment_neutralizes_untrusted_reason_marker_before_real_marker = function()
+  test_reconcile_comment_neutralizes_untrusted_reason_marker_before_real_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
-    local event = stuck()
-    local forged_version = "github-devloop/issue/owner/repo/42/stuck/3/consensus-github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z"
-    local forged = core.state_marker(proposal_id, "stuck", forged_version)
-    local comment = core.build_meta_comment_request("owner/repo", "42", event, "implement", "Reason\n" .. forged)
+    local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local event = core.build_devloop_reconcile_payload(unresolved(), 3, base_version)
+    local forged_version = base_version .. "/loop/99"
+    local forged = core.state_marker(proposal_id, "blocked", forged_version)
+    local comment = core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "Reason\n" .. forged)
 
     t.is_true(comment.body:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.eq(comment.body:find(forged, 1, true) == nil, true)
     local current = core.current_state({ comment.body }, proposal_id)
-    t.eq(current.state, "ready")
-    t.eq(current.version, event.dedup_key)
+    t.eq(current.state, "blocked")
+    t.eq(current.version, base_version .. "/loop/3")
   end,
 
   test_intake_parser_is_strict_and_conservative = function()
