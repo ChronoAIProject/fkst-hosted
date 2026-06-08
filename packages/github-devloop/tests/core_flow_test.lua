@@ -110,31 +110,16 @@ return {
     t.eq(label.remove_labels[7], "fkst-dev:impl-failed")
     t.is_true(#label.remove_labels >= 10)
 
-    local split_label = core.build_meta_label_request("owner/repo", "42", stuck(), "split")
-    t.eq(split_label.add_labels[1], "fkst-dev:blocked")
-    t.eq(split_label.remove_labels[1], "fkst-dev:thinking")
-    t.eq(split_label.remove_labels[2], "fkst-dev:ready")
-    t.eq(split_label.remove_labels[3], "fkst-dev:implementing")
-    t.eq(split_label.remove_labels[4], "fkst-dev:pr-open")
-    t.eq(split_label.remove_labels[5], "fkst-dev:reviewing")
-    t.eq(split_label.remove_labels[6], "fkst-dev:merge-ready")
-    t.eq(split_label.remove_labels[7], "fkst-dev:fixing")
-    t.is_true(#split_label.remove_labels >= 10)
-
-    local comment = core.build_meta_comment_request("owner/repo", "42", stuck(), "split", "Create separate parser and writer tasks.")
-    t.is_true(comment.body:find("Suggested split:", 1, true) ~= nil)
-    t.is_true(comment.body:find("Create separate parser and writer tasks.", 1, true) ~= nil)
-	    t.is_true(comment.body:find('fkst:github-devloop:meta:v1 proposal="github-devloop/issue/owner/repo/42" dedup=', 1, true) ~= nil)
-
     local same_version_block = core.build_meta_comment_request("owner/repo", "42", stuck(), "block", "Needs human input.")
     local same_version_implement = core.build_meta_comment_request("owner/repo", "42", stuck(), "implement", "Clear path.")
-    t.eq(comment.dedup_key, same_version_block.dedup_key)
     t.eq(same_version_block.dedup_key, same_version_implement.dedup_key)
+    t.is_true(same_version_block.body:find("Reason:\nNeeds human input.", 1, true) ~= nil)
+    t.is_true(same_version_block.body:find('fkst:github-devloop:meta:v1 proposal="github-devloop/issue/owner/repo/42" dedup=', 1, true) ~= nil)
     local next_version = stuck({
       dedup_key = "github-devloop/issue/owner/repo/42/stuck/3/consensus-github-devloop/issue/owner/repo/42/v2",
     })
-    local next_version_comment = core.build_meta_comment_request("owner/repo", "42", next_version, "split", "Still split.")
-    t.eq(comment.dedup_key ~= next_version_comment.dedup_key, true)
+    local next_version_comment = core.build_meta_comment_request("owner/repo", "42", next_version, "block", "Still blocked.")
+    t.eq(same_version_block.dedup_key ~= next_version_comment.dedup_key, true)
 	  end,
 
   test_ready_and_implementation_helpers = function()

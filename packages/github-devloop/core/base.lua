@@ -162,7 +162,7 @@ local function has_value(values, expected)
 end
 
 local function is_meta_action(value)
-  return value == "implement" or value == "split" or value == "block"
+  return value == "implement" or value == "block"
 end
 
 local function is_review_meta_action(value)

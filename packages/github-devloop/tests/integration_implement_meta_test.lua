@@ -574,24 +574,6 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
-  test_meta_split_raises_blocked_label_and_records_suggestion = function()
-    local event = stuck()
-    mock_issue_meta({ "fkst-dev:stuck", "fkst-dev:thinking" }, {
-      core.stuck_marker(event.proposal_id, 3, event.no_consensus_dedup_key),
-    })
-    mock_meta_codex("split", "Split parser hardening from label transition behavior.")
-
-    local result = run_meta(event, opts("meta-split"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
-    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    t.is_true(#label_raise.payload.remove_labels >= 10)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("Suggested split:", 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("Split parser hardening from label transition behavior.", 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find(core.meta_marker(event.proposal_id, event.dedup_key), 1, true) ~= nil)
-  end,
-
   test_meta_block_raises_blocked_label_and_marker = function()
     local event = stuck()
     mock_issue_meta({ "fkst-dev:stuck" }, { core.stuck_marker(event.proposal_id, 3, event.no_consensus_dedup_key) })
@@ -601,6 +583,9 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
+    -- Block must also clean up the full prior-state label set (coverage previously held by
+    -- the deleted meta-split test): the blocked transition removes every non-terminal hint.
+    t.is_true(#find_raise(result.raises, "github-proxy.github_issue_label_request").payload.remove_labels >= 10)
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("github-devloop meta action: block", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find(core.meta_marker(event.proposal_id, event.dedup_key), 1, true) ~= nil)
   end,

@@ -184,12 +184,7 @@ function M.build_meta_comment_request(repo, issue_number, stuck, action, reason)
   local to_state = action == "implement" and "ready" or "blocked"
   local state_marker = M.state_marker(stuck.proposal_id, to_state, stuck.dedup_key)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
-  local heading = "github-devloop meta action: " .. tostring(action)
-  if action == "split" then
-    heading = "github-devloop meta action: split\n\nSuggested split:\n" .. safe_reason
-  else
-    heading = heading .. "\n\nReason:\n" .. safe_reason
-  end
+  local heading = "github-devloop meta action: " .. tostring(action) .. "\n\nReason:\n" .. safe_reason
 
   return {
     schema = "github-proxy.v1",
