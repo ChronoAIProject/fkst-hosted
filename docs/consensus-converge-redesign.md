@@ -1,5 +1,7 @@
 # Consensus 收敛重设计：从「盲循环 + 拆分」到「meta-judge 收敛 + 真停滞调和」
 
+> **状态（2026-06）：本重设计的 Phase 1 + Phase 2a 已全部实现并合并（PR #44–#49）。** 下文「当前（错）」一节描述的是重设计**之前**的状态；当前态权威见 `README.md`（consensus / github-devloop 段）与 `CLAUDE.md`。Phase 2b（共识透明化，把三角度 + meta-judge 决定 post 成评论，覆盖 #11/#15）见下文分期。
+
 ## 动机
 
 dogfood 暴露 + maintainer 指出：当前 no-consensus 处理「拆分太多、不正确」。参考已长期运行的 `consensus-rnd`（sshx / codex-refactor-loop 的源设计），其 **meta-judge 收敛** 模型才是正解：分歧只收敛到固定出口（达成 / 收敛中 / 真停滞），真停滞才进 meta-layer 调和，**绝不把 proposal 拆成子 proposal，绝不直接升级人**。
