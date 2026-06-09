@@ -52,10 +52,11 @@ local function render_pr_number_template(value, pr_number)
 end
 
 local function verify_pr_remote_head(repo, pr_number, expected_head_sha, expected_base_branch)
-  local pr_head = exec_sync({ cmd = core.gh_pr_view_head_oid_cmd(repo, pr_number), timeout = 30 })
-  if pr_head.exit_code ~= 0 then
-    error("github-proxy: gh pr view head repository/headRefOid/state failed: " .. tostring(pr_head.stderr))
-  end
+  local pr_head = core.gh_exec(
+    core.gh_pr_view_head_oid_cmd(repo, pr_number),
+    30,
+    "gh pr view head repository/headRefOid/state"
+  )
   local remote_pr = core.parse_pr_view_head_state(pr_head.stdout, repo)
   if remote_pr == nil then
     error("github-proxy: gh pr view head repository/headRefOid/state did not return a valid open PR fact")
@@ -97,10 +98,11 @@ local function guard_pr_open_write(repo, payload, bot_login)
     return nil
   end
 
-  local view = exec_sync({ cmd = core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number), timeout = 30 })
-  if view.exit_code ~= 0 then
-    error("github-proxy: gh issue view failed before PR open: " .. tostring(view.stderr))
-  end
+  local view = core.gh_exec(
+    core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number),
+    30,
+    "gh issue view before PR open"
+  )
 
   local issue = core.parse_issue_state(view.stdout)
   local state = core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
@@ -163,10 +165,11 @@ local function can_apply_pr_open_labels(state, impl_version)
 end
 
 local function current_issue_state_for_label_edit(repo, payload, bot_login)
-  local view = exec_sync({ cmd = core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number), timeout = 30 })
-  if view.exit_code ~= 0 then
-    error("github-proxy: gh issue view failed before PR open label edit: " .. tostring(view.stderr))
-  end
+  local view = core.gh_exec(
+    core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number),
+    30,
+    "gh issue view before PR open label edit"
+  )
   local issue = core.parse_issue_state(view.stdout)
   return core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
 end
@@ -208,10 +211,11 @@ function pipeline(event)
       return
     end
 
-    local existing = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch), timeout = 30 })
-    if existing.exit_code ~= 0 then
-      error("github-proxy: gh pr list --head failed: " .. tostring(existing.stderr))
-    end
+    local existing = core.gh_exec(
+      core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch),
+      30,
+      "gh pr list --head"
+    )
     local pr = core.parse_pr_list_for_head(existing.stdout, payload.branch)
 
     if pr == nil then
@@ -226,16 +230,18 @@ function pipeline(event)
 
       local pr_body_path = temp_body_file(repo, payload.branch, "pr-body")
       file.write(pr_body_path, tostring(payload.body))
-      local created = exec_sync({ cmd = core.gh_pr_create_cmd(repo, payload.branch, payload.base_branch, payload.title, pr_body_path), timeout = 60 })
-      if created.exit_code ~= 0 then
-        error("github-proxy: gh pr create failed: " .. tostring(created.stderr))
-      end
+      local created = core.gh_exec(
+        core.gh_pr_create_cmd(repo, payload.branch, payload.base_branch, payload.title, pr_body_path),
+        60,
+        "gh pr create"
+      )
       pr = core.parse_pr_create(created.stdout)
       if pr == nil then
-        local listed = exec_sync({ cmd = core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch), timeout = 30 })
-        if listed.exit_code ~= 0 then
-          error("github-proxy: gh pr list --head failed after create: " .. tostring(listed.stderr))
-        end
+        local listed = core.gh_exec(
+          core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch),
+          30,
+          "gh pr list --head after create"
+        )
         pr = core.parse_pr_list_for_head(listed.stdout, payload.branch)
       end
       if pr == nil then
@@ -248,10 +254,11 @@ function pipeline(event)
     end
 
     if not guard.pr_open_visible then
-      local issue_view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
-      if issue_view.exit_code ~= 0 then
-        error("github-proxy: gh issue view failed after PR open: " .. tostring(issue_view.stderr))
-      end
+      local issue_view = core.gh_exec(
+        core.gh_issue_view_comments_cmd(repo, payload.issue_number),
+        30,
+        "gh issue view after PR open"
+      )
       if core.has_trusted_marker(core.parse_issue_comments(issue_view.stdout), payload.dedup_key, bot_login) then
         guard.pr_open_visible = true
       end
@@ -262,24 +269,27 @@ function pipeline(event)
         .. "\n"
       local issue_body_path = temp_body_file(repo, payload.branch, "issue-comment")
       file.write(issue_body_path, issue_body)
-      local issue_comment = exec_sync({ cmd = core.gh_issue_comment_cmd(repo, payload.issue_number, issue_body_path), timeout = 30 })
-      if issue_comment.exit_code ~= 0 then
-        error("github-proxy: gh issue comment failed after PR open: " .. tostring(issue_comment.stderr))
-      end
+      core.gh_exec(
+        core.gh_issue_comment_cmd(repo, payload.issue_number, issue_body_path),
+        30,
+        "gh issue comment after PR open"
+      )
     end
 
-    local pr_view = exec_sync({ cmd = core.gh_pr_view_comments_cmd(repo, pr.number), timeout = 30 })
-    if pr_view.exit_code ~= 0 then
-      error("github-proxy: gh pr view failed after PR open: " .. tostring(pr_view.stderr))
-    end
+    local pr_view = core.gh_exec(
+      core.gh_pr_view_comments_cmd(repo, pr.number),
+      30,
+      "gh pr view after PR open"
+    )
     if not core.has_trusted_comment_fragment(core.parse_issue_comments(pr_view.stdout), tostring(payload.body), bot_login) then
       local pr_body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
       local pr_body_path = temp_body_file(repo, payload.branch, "pr-comment")
       file.write(pr_body_path, pr_body)
-      local pr_comment = exec_sync({ cmd = core.gh_pr_comment_cmd(repo, pr.number, pr_body_path), timeout = 30 })
-      if pr_comment.exit_code ~= 0 then
-        error("github-proxy: gh pr comment failed: " .. tostring(pr_comment.stderr))
-      end
+      core.gh_exec(
+        core.gh_pr_comment_cmd(repo, pr.number, pr_body_path),
+        30,
+        "gh pr comment"
+      )
     end
 
     local add_labels = normalize_labels(payload.issue_label_add)
@@ -291,13 +301,11 @@ function pipeline(event)
           log.warn("github-proxy: PR open label update skipped because current issue state advanced past pr-open")
           return
         end
-        local label = exec_sync({
-          cmd = core.gh_issue_edit_labels_cmd(repo, payload.issue_number, add_labels, remove_labels),
-          timeout = 30,
-        })
-        if label.exit_code ~= 0 then
-          error("github-proxy: gh issue edit failed after PR open: " .. tostring(label.stderr))
-        end
+        core.gh_exec(
+          core.gh_issue_edit_labels_cmd(repo, payload.issue_number, add_labels, remove_labels),
+          30,
+          "gh issue edit after PR open"
+        )
       end)
     end
   end)

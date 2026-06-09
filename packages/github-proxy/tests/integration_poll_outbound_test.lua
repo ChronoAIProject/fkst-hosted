@@ -193,6 +193,17 @@ return {
     t.eq(count_calls("gh pr list"), 1)
   end,
 
+  test_inbound_poll_rate_limit_failure_errors_for_retry = function()
+    mock_repo_env()
+    mock_issue_list("", 1, "API rate limit exceeded")
+    mock_pr_list()
+
+    local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, opts("issue-list-rate-limit"))
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("gh issue list"), 1)
+    t.eq(count_calls("gh pr list"), 0)
+  end,
+
   test_inbound_poll_no_raise_without_repo_env = function()
     mock_repo_env("")
 

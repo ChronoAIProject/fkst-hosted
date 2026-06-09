@@ -21,11 +21,14 @@ function pipeline(_event)
   end
 
   for _, entity_type in ipairs(entity_types) do
-    local result = exec_sync({ cmd = entity_type.cmd(repo), timeout = 30 })
-    if result.exit_code ~= 0 then
-      log.warn("github-proxy: gh " .. entity_type.type .. " list failed: " .. tostring(result.stderr))
+    local ok, result_or_err = core.gh_exec_result(entity_type.cmd(repo), 30, "gh " .. entity_type.type .. " list")
+    if not ok then
+      if core.is_gh_rate_limit_error(result_or_err) then
+        error(result_or_err.message)
+      end
+      log.warn(result_or_err.message)
     else
-      local entities = core.parse_entity_list(result.stdout)
+      local entities = core.parse_entity_list(result_or_err.stdout)
       for _, entity in ipairs(entities) do
         local key = core.entity_cache_key(repo, entity_type.type, entity.number)
         with_lock(key, function()
