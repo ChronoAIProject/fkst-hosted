@@ -301,11 +301,7 @@ function pipeline(event)
           log.warn("github-proxy: PR open label update skipped because current issue state advanced past pr-open")
           return
         end
-        core.gh_exec(
-          core.gh_issue_edit_labels_cmd(repo, payload.issue_number, add_labels, remove_labels),
-          30,
-          "gh issue edit after PR open"
-        )
+        core.apply_issue_labels(repo, payload.issue_number, add_labels, remove_labels)
       end)
     end
   end)
