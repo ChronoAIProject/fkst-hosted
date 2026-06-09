@@ -19,7 +19,7 @@
 #       `fkst-framework run`: decode emitted RAISED events and dump the <RT>
 #       scratch tree. Generic across packages; pass package-specific config via
 #       env, e.g.:
-#         FKST_GITHUB_REPO=owner/repo scripts/run.sh run github-proxy github_poll
+#         PACKAGE_CONFIG=value scripts/run.sh run example-package example_department
 #       Reuses $FKST_RUNTIME_ROOT if already set (run twice with the same one to
 #       observe dedup), else uses a fresh temp dir. Never sets FKST_GITHUB_WRITE,
 #       so a read-only inbound dogfood stays read-only.
@@ -125,68 +125,48 @@ cmd_check() {
   python3 "$ROOT/scripts/check_repo.py"
 }
 
-extract_test_passes() {
-  local log="$1" valid out rc
-  valid="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-valid.XXXXXX")"
-  out="$(mktemp "${TMPDIR:-/tmp}/fkst-test-passes-extract.XXXXXX")"
-
-  (
-    cd "$ROOT"
-    find packages -path '*/tests/*_test.lua' -type f -print |
-      sed 's#^packages/##' |
-      LC_ALL=C sort -u
-  ) > "$valid"
-
-  rc=0
-  awk -v valid="$valid" '
-    BEGIN {
-      while ((getline file < valid) > 0) {
-        scanned[file] = 1
-      }
-      close(valid)
-    }
-    /^=== / {
-      section=$0
-      sub(/^=== /, "", section)
-      sub(/ ===$/, "", section)
-      next
-    }
-    /^PASS [^[:space:]]+::test_[A-Za-z0-9_]+$/ && section != "" && section != "self-test" && section != "composed conformance" {
-      test=$2
-      file=test
-      sub(/::.*/, "", file)
-      if (!(section "/" file in scanned)) {
-        next
-      }
-      print section " " test
-    }
-  ' "$log" > "$out" || rc=$?
-
-  if [ "$rc" -eq 0 ]; then
-    LC_ALL=C sort -u "$out"
-  fi
-  rm -f "$valid" "$out"
-  return "$rc"
-}
-
 check_test_file_coverage() {
-  local log="$1" expected actual missing
+  local report_dir="$1" expected actual missing
   expected="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-expected.XXXXXX")"
   actual="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-actual.XXXXXX")"
   missing="$(mktemp "${TMPDIR:-/tmp}/fkst-test-files-missing.XXXXXX")"
 
   (
     cd "$ROOT"
-    find packages -path '*/tests/*_test.lua' -type f -print | LC_ALL=C sort -u
+    find packages \( -path '*/tests/*_test.lua' -o -path '*/departments/*/*_test.lua' \) -type f -print | LC_ALL=C sort -u
   ) > "$expected"
 
-  extract_test_passes "$log" |
-    awk '{sub(/::.*/, "", $2); print "packages/" $1 "/" $2}' |
-    LC_ALL=C sort -u > "$actual"
+  python3 - "$report_dir" <<'PY' | LC_ALL=C sort -u > "$actual"
+import json
+import sys
+from pathlib import Path
+
+report_dir = Path(sys.argv[1])
+for report_path in sorted(report_dir.glob("*.json")):
+    with report_path.open(encoding="utf-8") as handle:
+        report = json.load(handle)
+    if report.get("schema") != "fkst.test.report.v1":
+        raise SystemExit(f"bad test report schema in {report_path}: {report.get('schema')!r}")
+    summary = report.get("summary")
+    if not isinstance(summary, dict):
+        raise SystemExit(f"missing test report summary in {report_path}")
+    if int(summary.get("failed", 0)) != 0:
+        raise SystemExit(f"test report contains failures in {report_path}")
+    for test in report.get("tests", []):
+        if not isinstance(test, dict) or test.get("status") != "pass":
+            continue
+        owner = test.get("owner_namespace")
+        file_name = test.get("file")
+        if not isinstance(owner, str) or not isinstance(file_name, str):
+            continue
+        if not (file_name.startswith("tests/") or file_name.startswith("departments/")) or not file_name.endswith("_test.lua"):
+            continue
+        print(f"packages/{owner}/{file_name}")
+PY
 
   comm -23 "$expected" "$actual" > "$missing"
   if [ -s "$missing" ]; then
-    echo "error: G5 engine test coverage failed; these *_test.lua files produced zero engine PASS lines:" >&2
+    echo "error: G5 engine test coverage failed; these *_test.lua files produced zero report-json pass results:" >&2
     sed 's/^/  /' "$missing" >&2
     echo "  Each *_test.lua must contribute at least one real engine-enumerated top-level test." >&2
     rm -f "$expected" "$actual" "$missing"
@@ -194,14 +174,14 @@ check_test_file_coverage() {
   fi
 
   rm -f "$expected" "$actual" "$missing"
-  echo "OK: G5 every *_test.lua produced engine PASS"
+  echo "OK: G5 every *_test.lua produced an engine report-json pass"
 }
 
 cmd_test() {
   local target="${1:-}" ran=0 fail=0 pkg name
-  local self_rt test_log
+  local self_rt report_dir report_file
 
-  test_log="$(mktemp "${TMPDIR:-/tmp}/fkst-test-output.XXXXXX")"
+  report_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-reports.XXXXXX")"
 
   echo "=== self-test ==="
   if [ -n "${FKST_RUNTIME_ROOT:-}" ]; then
@@ -219,7 +199,7 @@ cmd_test() {
     [ -d "$pkg" ] || continue
     name="$(basename "$pkg")"
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
-    echo "=== $name ===" | tee -a "$test_log"
+    echo "=== $name ==="
     ran=$((ran + 1))
     if [ -f "$pkg/composed.deps" ]; then
       echo "skip single-package conformance for composed package: $name"
@@ -229,7 +209,8 @@ cmd_test() {
         continue
       fi
     fi
-    if ! "$BIN" test --project-root "$pkg" --package-root "$pkg" | tee -a "$test_log"; then
+    report_file="$report_dir/$name.json"
+    if ! "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file"; then
       fail=$((fail + 1))
     fi
   done
@@ -246,16 +227,16 @@ cmd_test() {
       fail=$((fail + 1))
     fi
     if [ "$fail" -eq 0 ]; then
-      if ! check_test_file_coverage "$test_log"; then
+      if ! check_test_file_coverage "$report_dir"; then
         fail=$((fail + 1))
       fi
     fi
   fi
   if [ "$fail" -ne 0 ]; then
-    rm -f "$test_log"
+    rm -rf "$report_dir"
     echo "FAILED: $fail failure(s) across $ran package(s)" >&2; exit 1
   fi
-  rm -f "$test_log"
+  rm -rf "$report_dir"
   echo "OK: $ran package(s)"
 }
 

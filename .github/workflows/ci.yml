@@ -9,7 +9,7 @@ on:
     inputs:
       substrate_ref:
         description: "fkst-substrate ref to build fkst-framework from"
-        default: dev
+        default: ""
         required: false
 
 concurrency:
@@ -23,13 +23,29 @@ jobs:
       - name: Checkout fkst-packages
         uses: actions/checkout@v4
 
-      # fkst-framework is built from the sibling engine repo. It is public, so no
-      # token is needed. Default to its dev branch; override via workflow_dispatch.
+      - name: Resolve fkst-substrate source pin
+        id: substrate_ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${{ github.event.inputs.substrate_ref }}"
+          if [ -z "$ref" ]; then
+            ref="$(sed -n '1{s/[[:space:]]//g;p;q}' .fkst-substrate-ref 2>/dev/null || true)"
+          fi
+          if [ -z "$ref" ]; then
+            ref="dev"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "fkst-substrate ref: $ref"
+
+      # fkst-framework is built from the sibling engine source repo. A downstream
+      # package repo should set .fkst-substrate-ref to a tag or SHA for a
+      # reproducible engine source pin; this is not semver or binary distribution.
       - name: Checkout fkst-substrate
         uses: actions/checkout@v4
         with:
           repository: ChronoAIProject/fkst-substrate
-          ref: ${{ github.event.inputs.substrate_ref || 'dev' }}
+          ref: ${{ steps.substrate_ref.outputs.ref }}
           path: fkst-substrate
 
       - name: Install stable Rust

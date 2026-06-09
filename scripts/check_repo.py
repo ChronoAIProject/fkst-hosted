@@ -8,7 +8,7 @@ contain a test definition.
 
 It is not a Lua parser and does not decide which top-level returned-table
 ``test_`` keys the engine actually enumerates. The authoritative coverage check
-is the full-suite engine PASS-output audit in scripts/run.sh. A deeper
+is the full-suite engine report-json audit in scripts/run.sh. A deeper
 engine-loader-based Lua audit remains an engine-PR backlog item.
 """
 
