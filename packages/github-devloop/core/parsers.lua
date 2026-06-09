@@ -1,11 +1,6 @@
 local S = {}
 
 function S.install(M)
-function M.parse_issue_view_body(stdout)
-  local decoded = json.decode(stdout or "{}")
-  return M.bounded_body(decoded.body)
-end
-
 function M.parse_issue_view_state(stdout)
   local decoded = json.decode(stdout or "{}")
   return M.issue_state_from_json(decoded)

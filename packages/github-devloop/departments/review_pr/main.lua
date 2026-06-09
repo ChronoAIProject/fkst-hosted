@@ -67,25 +67,6 @@ function pipeline(event)
       return
     end
 
-    local diff = exec_sync({ cmd = core.gh_pr_diff_cmd(repo, reviewing.pr_number), timeout = 30 })
-    if diff.exit_code ~= 0 then
-      error("github-devloop: gh pr diff failed: " .. tostring(diff.stderr))
-    end
-
-    local after_diff_pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, reviewing.pr_number), timeout = 30 })
-    if after_diff_pr_view.exit_code ~= 0 then
-      error("github-devloop: gh pr review head recheck failed: " .. tostring(after_diff_pr_view.stderr))
-    end
-    local after_diff_pr = core.parse_pr_view_origin(after_diff_pr_view.stdout)
-    if tostring(after_diff_pr.head_ref_name or "") ~= tostring(current_pr.head_ref_name or "")
-      or tostring(after_diff_pr.head_sha or "") ~= tostring(current_pr.head_sha or "") then
-      error("github-devloop: PR head moved while reading review diff; retrying")
-    end
-    if tostring(after_diff_pr.state or ""):lower() ~= "open" then
-      core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(pr-closed)", "re-derived PR is not open after diff")
-      return
-    end
-
     local pr_source_ref = core.pr_source_ref(repo, reviewing.pr_number)
     local current_issue = {
       title = "PR #" .. tostring(reviewing.pr_number),
@@ -99,7 +80,7 @@ function pipeline(event)
       end
       current_issue = core.parse_issue_view_review(issue_view.stdout)
     end
-    local proposal = core.build_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, diff.stdout, pr_source_ref)
+    local proposal = core.build_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return

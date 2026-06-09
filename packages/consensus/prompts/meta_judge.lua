@@ -11,8 +11,9 @@ Respond with exactly one line and no other text.
 Proposal:
 Title: {{title}}
 {{convergence_block}}
-Body:
+{{body_label}}
 {{body}}
+{{content_fetch_block}}
 {{context_block}}
 
 Angle outputs:

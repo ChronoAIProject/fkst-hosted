@@ -596,7 +596,7 @@ return {
     local review = core.build_pr_review_loop_proposal("owner/repo", "42", 7, version, "abcdef1234567890", {
       title = "Converge narrowing",
       body = "Body",
-    }, "diff --git a/core.lua b/core.lua\n+return true\n", { kind = "external", ref = "owner/repo#pr/7" }, 2, converge)
+    }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge)
     t.eq(review.round, 2)
     t.eq(review.verdict_mode, "gate")
     t.eq(review.convergence_question, converge.narrowed_question)

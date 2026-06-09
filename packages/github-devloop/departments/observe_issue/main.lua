@@ -84,12 +84,7 @@ function pipeline(event)
     end
     core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
 
-    local view = exec_sync({ cmd = core.gh_issue_view_body_cmd(issue.repo, issue.number), timeout = 30 })
-    if view.exit_code ~= 0 then
-      error("github-devloop: gh issue view failed: " .. tostring(view.stderr))
-    end
-
-    local proposal = core.build_proposal(issue, core.parse_issue_view_body(view.stdout))
+    local proposal = core.build_proposal(issue)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-build-valid-proposal")
       return

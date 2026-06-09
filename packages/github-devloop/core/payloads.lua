@@ -116,19 +116,45 @@ function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
   }
 end
 
-function M.build_proposal(issue, body)
+local function issue_fetch_instruction(M, repo, issue_number)
+  return "gh issue view " .. M._shell_single_quote(issue_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --json title,body,comments,labels,state"
+end
+
+local function pr_review_fetch_instruction(M, repo, pr_number, head_sha, issue_number)
+  local lines = {
+    "gh pr view " .. M._shell_single_quote(pr_number)
+      .. " --repo " .. M._shell_single_quote(repo)
+      .. " --json headRefOid,headRefName,baseRefName,state",
+    "Confirm headRefOid equals reviewed head " .. tostring(head_sha) .. " before judging.",
+    "gh pr diff " .. M._shell_single_quote(pr_number)
+      .. " --repo " .. M._shell_single_quote(repo),
+  }
+  if issue_number ~= nil then
+    table.insert(lines, "gh issue view " .. M._shell_single_quote(issue_number)
+      .. " --repo " .. M._shell_single_quote(repo)
+      .. " --json title,body,comments,labels,state")
+  end
+  return table.concat(lines, "\n")
+end
+
+function M.build_proposal(issue)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
   if #title > M._max_title_len then
     title = title:sub(1, M._max_title_len)
   end
+  local body = "Judge the current GitHub issue from the full source content."
+    .. "\nIssue: " .. tostring(issue.repo) .. "#" .. tostring(issue.number)
 
   return {
     schema = "consensus.proposal.v1",
     verdict_mode = "converge",
     proposal_id = proposal_id,
     title = title,
-    body = M.bounded_body(body),
+    body = body,
+    content_fetch = issue_fetch_instruction(M, issue.repo, issue.number),
     dedup_key = M.proposal_dedup_key(proposal_id, issue.updated_at),
     source_ref = M.normalize_source_ref(issue.source_ref),
   }
@@ -161,12 +187,12 @@ function M.build_loop_proposal(repo, issue_number, current, source_ref, n, conve
     updated_at = current.updated_at,
     source_ref = source_ref,
   }
-  local proposal = M.build_proposal(issue, current.body)
+  local proposal = M.build_proposal(issue)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref)
+function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
   local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
@@ -183,27 +209,12 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   if #issue_title > M._max_title_len then
     issue_title = issue_title:sub(1, M._max_title_len)
   end
-  local issue_body = type(current_issue) == "table" and tostring(current_issue.body or "") or "(issue context unavailable)"
-  if issue_body == "" then
-    issue_body = "(empty issue body)"
-  end
   issue_title = M.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
-  issue_body = M.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_body))
-  if #issue_body > M._max_pr_issue_context_len then
-    issue_body = issue_body:sub(1, M._max_pr_issue_context_len)
-  end
-  local bounded_diff = M.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(M.bounded_pr_diff(diff)))
-  if #bounded_diff > M._max_pr_diff_len then
-    bounded_diff = bounded_diff:sub(1, M._max_pr_diff_len)
-  end
   local body = "Review the PR diff and decide whether it should advance to merge-ready."
-    .. "\n\n" .. M._untrusted_issue_data_begin
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
-    .. "\nIssue title:\n" .. issue_title
-    .. "\n\nIssue body:\n" .. issue_body
-    .. "\n\nPR diff:\n" .. bounded_diff
-    .. "\n" .. M._untrusted_issue_data_end
+    .. "\nIssue title: " .. issue_title
+    .. "\nFetch the current PR diff and backing issue content before judging."
   if #body > M._max_body_len then
     error("github-devloop: PR review proposal exceeds bounded body")
   end
@@ -214,6 +225,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     proposal_id = review_id,
     title = M.neutralize_untrusted_prompt_text(title),
     body = body,
+    content_fetch = pr_review_fetch_instruction(M, repo, pr_number, head_sha, issue_number),
     dedup_key = M._dedup_key({
       review_id,
       "review",
@@ -222,8 +234,8 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   }
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref, n, converge)
-  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref)
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge)
+  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
 end

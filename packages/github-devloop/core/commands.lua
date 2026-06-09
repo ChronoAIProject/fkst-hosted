@@ -36,12 +36,6 @@ function M.gh_issue_view_intake_judge_cmd(repo, issue_number)
     .. " --json title,body,updatedAt,labels,comments,state"
 end
 
-function M.gh_issue_view_body_cmd(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json body"
-end
-
 function M.gh_issue_view_state_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)

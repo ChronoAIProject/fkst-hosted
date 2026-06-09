@@ -24,6 +24,7 @@ local function proposal(extra)
     proposal_id = "proposal-42",
     title = "Adopt consensus package",
     body = "Create a small flat package that asks several angles to judge a proposal.",
+    content_fetch = "fetch-source --ref demo/consensus/42 --full",
     context = "The package must stay silent unless all angles agree.",
     angles = { "minimal", "structural", "delete" },
     dedup_key = "proposal-42-v1",
@@ -96,8 +97,31 @@ return {
     local calls = codex_calls()
     t.eq(#calls, 3)
     t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
     t.is_true(calls[2].stdin:find("Angle: structural", 1, true) ~= nil)
     t.is_true(calls[3].stdin:find("Angle: delete", 1, true) ~= nil)
+  end,
+
+  test_codex_stdin_carries_fetch_instruction_not_full_body = function()
+    local full_tail = "FULL_BODY_TAIL_MUST_NOT_REACH_CODEX"
+    mock_angle("approve", "Minimal angle approves.")
+    mock_angle("approve", "Structural angle approves.")
+    mock_angle("approve", "Delete angle approves.")
+
+    local result = run_decide(proposal({
+      body = "Brief only.",
+      content_fetch = "fetch-source --ref demo/consensus/42 --full",
+      context = nil,
+      full_body = string.rep("x", 16000) .. full_tail,
+    }), opts("stdin-fetch-not-full-body"))
+
+    t.eq(result.exit_code, 0)
+    local calls = codex_calls()
+    t.eq(#calls, 3)
+    t.is_true(calls[1].stdin:find("Brief only.", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
+    t.is_nil(calls[1].stdin:find(full_tail, 1, true))
   end,
 
   test_unanimous_abstain_raises_consensus_converge = function()
@@ -229,7 +253,13 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.eq(result.raises[1].payload.angle_digests[2].verdict, "invalid")
+    local invalid = false
+    for _, digest in ipairs(result.raises[1].payload.angle_digests) do
+      if digest.verdict == "invalid" then
+        invalid = true
+      end
+    end
+    t.eq(invalid, true)
     t.eq(#codex_calls(), 4)
   end,
 
