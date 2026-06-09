@@ -84,6 +84,46 @@ function M.parse_issue_list_intake(stdout)
   return issues
 end
 
+local function each_paginated_item(decoded, callback)
+  if type(decoded) ~= "table" then
+    return
+  end
+  for _, value in ipairs(decoded) do
+    if type(value) == "table" then
+      if value[1] ~= nil then
+        for _, item in ipairs(value) do
+          callback(item)
+        end
+      else
+        callback(value)
+      end
+    end
+  end
+end
+
+local function parse_numbered_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  each_paginated_item(decoded, function(item)
+    if type(item) == "table" and tonumber(item.number) ~= nil then
+      table.insert(items, {
+        number = tonumber(item.number),
+        state = item.state,
+        updated_at = item.updated_at or item.updatedAt,
+      })
+    end
+  end)
+  return items
+end
+
+function M.parse_issue_list_observe(stdout)
+  return parse_numbered_list(stdout)
+end
+
+function M.parse_pr_list_observe(stdout)
+  return parse_numbered_list(stdout)
+end
+
 function M.parse_issue_view_result(stdout)
   local decoded = json.decode(stdout or "{}")
   local state = M.issue_state_from_json(decoded)
@@ -174,6 +214,14 @@ function M.parse_issue_view_merge(stdout)
   local result = M.parse_issue_view_meta(stdout)
   result.state = decoded.state
   return result
+end
+
+function M.parse_issue_view_observe(stdout)
+  local decoded = json.decode(stdout or "{}")
+  return {
+    state = decoded.state,
+    comments = M.comments_from_json(decoded.comments),
+  }
 end
 
 local function repository_name_with_owner(head_repository, head_repository_owner)

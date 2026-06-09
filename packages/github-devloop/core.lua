@@ -16,5 +16,6 @@ require("core.requests").install(M)
 require("core.entity").install(M)
 require("core.validators").install(M)
 require("core.decompose").install(M)
+require("core.observability").install(M)
 
 return M

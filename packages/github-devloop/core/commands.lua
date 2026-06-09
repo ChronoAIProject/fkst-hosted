@@ -13,6 +13,17 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --json number,title,updatedAt,labels"
 end
 
+function M.gh_issue_list_observe_cmd(repo, label)
+  local selected_label = label or M._enabled_label
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=all&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
+end
+
+function M.gh_pr_list_observe_cmd(repo)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=all&per_page=100")
+end
+
 function M.gh_issue_view_intake_scan_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
@@ -103,10 +114,20 @@ function M.gh_issue_view_merge_cmd(repo, issue_number)
     .. " --json title,body,labels,comments,state"
 end
 
+function M.gh_issue_view_observe_cmd(repo, issue_number)
+  return "gh issue view " .. M._shell_single_quote(issue_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --json comments,state"
+end
+
 function M.gh_pr_view_origin_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
     .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+end
+
+function M.gh_pr_view_observe_cmd(repo, pr_number)
+  return M.gh_pr_view_origin_cmd(repo, pr_number)
 end
 
 function M.gh_pr_view_fix_cmd(repo, pr_number)

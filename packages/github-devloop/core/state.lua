@@ -318,6 +318,7 @@ function M.current_state(comments, proposal_id)
           state = marker_state,
           version = marker_version,
           stage_rank = marker_stage_rank(marker, marker_state),
+          marker_created_at = M._comment_created_at(comment),
         }
         if compare_state_marker(current, candidate) then
           current = candidate
