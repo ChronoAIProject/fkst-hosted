@@ -1,6 +1,17 @@
 local S = {}
 
 function S.install(M)
+local function bounded_framing(M, framing)
+  if framing == nil then
+    return nil
+  end
+  local value = tostring(framing)
+  if #value > M._max_framing_len then
+    value = value:sub(1, M._max_framing_len)
+  end
+  return value
+end
+
 function M.build_devloop_ready_payload(source)
   local payload = {
     schema = "github-devloop.ready.v1",
@@ -11,8 +22,9 @@ function M.build_devloop_ready_payload(source)
     }),
     source_ref = M.normalize_source_ref(source.source_ref),
   }
-  if source.framing ~= nil then
-    payload.framing = tostring(source.framing)
+  local framing = bounded_framing(M, source.framing)
+  if framing ~= nil then
+    payload.framing = framing
   end
   return payload
 end
@@ -56,6 +68,10 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
+  local framing = bounded_framing(M, review_fact.framing or origin.framing)
+  if framing ~= nil then
+    payload.framing = framing
+  end
   return payload
 end
 
@@ -116,7 +132,7 @@ function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
   }
 end
 
-local function issue_fetch_instruction(M, repo, issue_number)
+function M.issue_fetch_instruction(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
     .. " --json title,body,comments,labels,state"
@@ -154,7 +170,7 @@ function M.build_proposal(issue)
     proposal_id = proposal_id,
     title = title,
     body = body,
-    content_fetch = issue_fetch_instruction(M, issue.repo, issue.number),
+    content_fetch = M.issue_fetch_instruction(issue.repo, issue.number),
     dedup_key = M.proposal_dedup_key(proposal_id, issue.updated_at),
     source_ref = M.normalize_source_ref(issue.source_ref),
   }

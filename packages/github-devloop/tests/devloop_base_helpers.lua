@@ -720,11 +720,10 @@ local function mock_issue_loop(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,body,updatedAt,labels,comments,state", {
+  t.mock_command("--json title,updatedAt,labels,comments,state", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.body or "Body from GitHub"),
       json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
       json_string(fields.state or "OPEN"),
       table.concat(rendered_labels, ","),
@@ -749,11 +748,10 @@ local function mock_issue_implement(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,body,labels,comments", {
+  t.mock_command("--json title,labels,comments", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.body or "Body from GitHub"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
     ),
@@ -772,11 +770,10 @@ local function mock_issue_implement_raw(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,body,labels,comments", {
+  t.mock_command("--json title,labels,comments", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.body or "Body from GitHub"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
     ),
@@ -835,6 +832,29 @@ local function mock_issue_review(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
+  t.mock_command("--json title,labels,comments", {
+    stdout = string.format(
+      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
+      json_string(fields.title or "Implement decision recorder"),
+      table.concat(rendered_labels, ","),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_decompose(labels, comments, extra)
+  set_pr_phase_comments(labels or { "fkst-dev:blocked" }, comments)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:blocked" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:blocked" }, comments)) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  local fields = extra or {}
   t.mock_command("--json title,body,labels,comments", {
     stdout = string.format(
       '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
@@ -859,11 +879,10 @@ local function mock_issue_fix(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,body,labels,comments", {
+  t.mock_command("--json title,labels,comments", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.body or "Body from GitHub"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
     ),
@@ -898,11 +917,10 @@ local function mock_issue_merge(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,body,labels,comments,state", {
+  t.mock_command("--json title,labels,comments,state", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.body or "Body from GitHub"),
       json_string(fields.state or "OPEN"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
@@ -972,6 +990,7 @@ return {
   mock_issue_open_pr = mock_issue_open_pr,
   mock_issue_reviewing = mock_issue_reviewing,
   mock_issue_review = mock_issue_review,
+  mock_issue_decompose = mock_issue_decompose,
   mock_issue_fix = mock_issue_fix,
   mock_issue_fix_for_event = mock_issue_fix_for_event,
   mock_issue_review_meta = mock_issue_review_meta,

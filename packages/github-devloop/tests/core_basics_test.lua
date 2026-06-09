@@ -76,13 +76,6 @@ return {
     t.is_nil(core.parse_proposal_id("autochrono/issue/owner/repo/42"))
   end,
 
-  test_bounded_body = function()
-    t.eq(core.bounded_body("hello"), "hello")
-    t.eq(core.bounded_body(""), "(empty issue body)")
-    local bounded = core.bounded_body(string.rep("x", core.max_body_len() + 10))
-    t.eq(#bounded, core.max_body_len())
-  end,
-
   test_build_proposal = function()
     local proposal = core.build_proposal(issue())
     t.eq(proposal.schema, "consensus.proposal.v1")
@@ -132,8 +125,6 @@ return {
     t.is_true(proposal.content_fetch:find("gh issue view '42' --repo 'owner/repo' --json title,body,comments,labels,state", 1, true) ~= nil)
     t.eq(core.validate_proposal(proposal), true)
 
-    local bounded = core.bounded_pr_diff(string.rep("x", core.max_pr_diff_len() + 10))
-    t.eq(#bounded, core.max_pr_diff_len())
     local marker = core.review_result_marker(id, "github-devloop/issue/owner/repo/42", "approve", "consensus:v1")
     t.eq(core.has_review_result_marker({ marker }, id, "github-devloop/issue/owner/repo/42", "approve", "consensus:v1"), true)
     t.eq(core.has_any_review_result_marker({ marker }, id, "github-devloop/issue/owner/repo/42"), true)
@@ -457,6 +448,29 @@ return {
     t.eq(parsed.updated_at, "2026-06-03T01:02:03Z")
     t.eq(parsed.state, "OPEN")
     t.eq(parsed.labels[1], "bug")
+  end,
+
+  test_meta_parse_omits_issue_body_snapshot = function()
+    local long_body = string.rep("body-line-", core.max_body_len() + 1) .. "FULL_BODY_TAIL"
+    local parsed = core.parse_issue_view_meta(
+      '{"title":"Long meta","body":"' .. long_body .. '","labels":[{"name":"bug"}],"comments":[]}'
+    )
+
+    t.eq(parsed.title, "Long meta")
+    t.is_nil(parsed.body)
+    t.eq(parsed.labels[1], "bug")
+  end,
+
+  test_decompose_parse_keeps_full_issue_body_for_lineage_only = function()
+    local long_body = string.rep("body-line-", core.max_body_len() + 1) .. "FULL_BODY_TAIL"
+    local parsed = core.parse_issue_view_decompose(
+      '{"title":"Long decompose","body":"' .. long_body .. '","labels":[{"name":"bug"}],"comments":[]}'
+    )
+
+    t.eq(parsed.title, "Long decompose")
+    t.eq(parsed.body, long_body)
+    t.is_true(#parsed.body > core.max_body_len())
+    t.is_true(parsed.body:find("FULL_BODY_TAIL", 1, true) ~= nil)
   end,
 
   test_current_state_uses_highest_version_not_append_order = function()

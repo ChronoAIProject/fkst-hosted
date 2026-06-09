@@ -149,6 +149,7 @@ function pipeline(event)
         review_dedup_key = reached.dedup_key,
         reviewed_head_sha = reviewed_head_sha,
         fix_version = issue_version,
+        framing = reached.framing,
       }, pr_source_ref)
       table.insert(raised, "devloop_fixing")
     else

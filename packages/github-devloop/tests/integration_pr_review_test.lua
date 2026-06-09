@@ -116,7 +116,7 @@ return {
     end
     t.eq(saw_worktree_prefix, true)
     t.eq(saw_prompt, true)
-    t.eq(count_calls("--json title,body,labels,comments"), 1)
+    t.eq(count_calls("--json title,labels,comments"), 1)
     t.eq(count_calls("git -C"), 5)
     t.eq(count_calls("git worktree add -b"), 1)
     t.eq(count_calls("codex exec"), 1)
@@ -544,7 +544,7 @@ return {
     t.is_true(proposal.content_fetch:find("Confirm headRefOid equals reviewed head def456", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("gh issue view '42' --repo 'owner/repo' --json title,body,comments,labels,state", 1, true) ~= nil)
     t.eq(core.validate_proposal(proposal), true)
-    t.eq(count_calls("--json title,body,labels,comments"), 1)
+    t.eq(count_calls("--json title,labels,comments"), 1)
     t.eq(count_calls("gh pr diff"), 0)
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 1)
   end,

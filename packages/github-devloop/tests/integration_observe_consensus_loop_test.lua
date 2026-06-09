@@ -580,7 +580,7 @@ return {
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     t.is_true(comment.body:find("fkst:github-devloop:converge-round:v1", 1, true) ~= nil)
     t.is_true(comment.body:find('round="0"', 1, true) ~= nil)
-    t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
+    t.eq(count_calls("--json title,updatedAt,labels,comments,state"), 1)
   end,
 
   test_loop_true_stall_records_round_and_raises_reconcile = function()
@@ -735,7 +735,7 @@ return {
     local result = run_loop(unresolved(), opts("loop-terminal"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
+    t.eq(count_calls("--json title,updatedAt,labels,comments,state"), 1)
   end,
 
   test_loop_skips_already_implementing_issue = function()
@@ -744,7 +744,7 @@ return {
     local result = run_loop(unresolved(), opts("loop-implementing-terminal"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
+    t.eq(count_calls("--json title,updatedAt,labels,comments,state"), 1)
   end,
 
   test_loop_skips_impl_failed_issue_by_label = function()
@@ -753,7 +753,7 @@ return {
     local result = run_loop(unresolved(), opts("loop-impl-failed-label"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
+    t.eq(count_calls("--json title,updatedAt,labels,comments,state"), 1)
   end,
 
   test_loop_retries_until_state_label_is_visible = function()
@@ -774,16 +774,16 @@ return {
     t.eq(#thinking.raises, 2)
     t.eq(thinking.raises[1].queue, "consensus.proposal")
     t.eq(thinking.raises[2].queue, "github-proxy.github_issue_comment_request")
-    t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 3)
+    t.eq(count_calls("--json title,updatedAt,labels,comments,state"), 3)
   end,
 
   test_loop_issue_view_failure_errors_for_retry = function()
-    mock_issue_view_failure("--json title,body,updatedAt,labels,comments,state", "forced loop failure")
+    mock_issue_view_failure("--json title,updatedAt,labels,comments,state", "forced loop failure")
 
     local result = run_loop(unresolved(), opts("loop-view-failure"))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json title,body,updatedAt,labels,comments,state"), 1)
+    t.eq(count_calls("--json title,updatedAt,labels,comments,state"), 1)
   end,
 
   test_reconcile_drop_blocks_thinking_issue = function()

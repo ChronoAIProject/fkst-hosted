@@ -130,11 +130,11 @@ function pipeline(event)
       return
     end
 
-    local issue_view = exec_sync({ cmd = core.gh_issue_view_review_cmd(repo, issue_number), timeout = 30 })
+    local issue_view = exec_sync({ cmd = core.gh_issue_view_decompose_cmd(repo, issue_number), timeout = 30 })
     if issue_view.exit_code ~= 0 then
       error("github-devloop: gh issue decompose view failed: " .. tostring(issue_view.stderr))
     end
-    local current_issue = core.parse_issue_view_review(issue_view.stdout)
+    local current_issue = core.parse_issue_view_decompose(issue_view.stdout)
     local depth = core.decompose_lineage_depth(current_issue.body)
     if depth >= core.max_decompose_depth() then
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-depth-cap(decompose-lineage)", "decompose lineage depth cap reached")

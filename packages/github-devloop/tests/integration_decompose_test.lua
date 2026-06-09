@@ -5,7 +5,7 @@ local opts = h.opts
 local decompose_event = h.decompose_event
 local run_decompose = h.run_decompose
 local mock_bot_env = h.mock_bot_env
-local mock_issue_review = h.mock_issue_review
+local mock_issue_decompose = h.mock_issue_decompose
 local find_raise = h.find_raise
 local count_calls = h.count_calls
 
@@ -87,7 +87,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
-    mock_issue_review({ "fkst-dev:blocked" }, blocked_comments(event), {
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
       title = "Original large issue",
       body = "Original body that describes too much scope.",
     })
@@ -134,7 +134,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
-    mock_issue_review({ "fkst-dev:blocked" }, blocked_comments(event), {
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
       title = "Original large issue",
       body = "Original body that describes too much scope.",
     })
@@ -154,7 +154,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
-    mock_issue_review({ "fkst-dev:blocked" }, blocked_comments(event), {
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
       title = "Original large issue",
       body = "Original body that describes too much scope.",
     })
@@ -174,7 +174,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
-    mock_issue_review({ "fkst-dev:blocked" }, blocked_comments(event), {
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
       title = "Child issue",
       body = "Child body.\n\n" .. core.decompose_lineage_marker(event.proposal_id, 1),
     })
@@ -193,7 +193,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
-    mock_issue_review({ "fkst-dev:blocked" }, blocked_comments(event))
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex("not json")
 
     local first = run_decompose(event, run_opts)
@@ -203,7 +203,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
-    mock_issue_review({ "fkst-dev:blocked" }, blocked_comments(event))
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex("not json")
     mock_pr_comment_write(0)
 
@@ -220,7 +220,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
-    mock_issue_review({ "fkst-dev:blocked" }, blocked_comments(event))
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex([[{"issues":[{"title":"One","body":"Smaller scope: one.\nNon-goals: no extra.\nAcceptance: one."},{"title":"Two","body":"Smaller scope: two.\nNon-goals: no extra.\nAcceptance: two."},{"title":"Three","body":"Smaller scope: three.\nNon-goals: no extra.\nAcceptance: three."},{"title":"Four","body":"Smaller scope: four.\nNon-goals: no extra.\nAcceptance: four."}]}]])
     mock_pr_comment_write(0)
 

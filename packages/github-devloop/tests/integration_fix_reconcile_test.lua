@@ -78,6 +78,7 @@ return {
     t.is_true(comment.payload.body:find('state="fixing" version="' .. fix_version .. '"', 1, true) ~= nil)
     t.is_true(comment.payload.body:find('fix_round="' .. tostring(core.version_fix_round(fix_version)) .. '"', 1, true) ~= nil)
     t.eq(fixing.payload.version, fix_version)
+    t.eq(fixing.payload.framing, event.framing)
   end,
 
   test_review_result_reject_max_fix_rounds_blocks_even_when_framing_changes = function()

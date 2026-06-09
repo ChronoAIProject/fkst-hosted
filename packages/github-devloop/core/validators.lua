@@ -119,6 +119,7 @@ function M.is_supported_fixing(payload)
     and M._is_bounded_string(payload.version, M._max_dedup_len)
     and M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
     and M._is_git_sha(payload.reviewed_head_sha)
+    and (payload.framing == nil or M._is_bounded_string(payload.framing, M._max_framing_len))
     and M._has_bounded_source_ref(payload.source_ref)
 end
 

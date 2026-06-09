@@ -10,7 +10,6 @@ local max_comments_len = 12000
 local max_meta_reason_len = 2000
 local max_framing_len = 1000
 local max_impl_output_len = 2000
-local max_pr_diff_len = 8000
 local max_pr_issue_context_len = 3000
 local max_repo_key_len = 100
 local max_issue_key_len = 30
@@ -89,7 +88,7 @@ local state_graph = {
   merging = { "merged", "fixing", "blocked" },
   merged = {},
   fixing = { "reviewing", "review-meta" },
-  ["review-meta"] = { "fixing", "merge-ready", "blocked" },
+  ["review-meta"] = { "fixing", "blocked" },
   ["impl-failed"] = {},
   blocked = {},
 }
@@ -157,7 +156,7 @@ local function has_value(values, expected)
 end
 
 local function is_review_meta_action(value)
-  return value == "fix" or value == "accept" or value == "block"
+  return value == "fix" or value == "block"
 end
 
 local function is_path_safe_key(value, limit)
@@ -630,34 +629,8 @@ function M.implement_worktree_path(runtime_root, repo, issue_number, impl_versio
   return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
 end
 
-function M.bounded_body(value)
-  local text = tostring(value or "")
-  if text == "" then
-    return "(empty issue body)"
-  end
-  if #text <= max_body_len then
-    return text
-  end
-  return text:sub(1, max_body_len)
-end
-
-function M.bounded_pr_diff(value)
-  local text = tostring(value or "")
-  if text == "" then
-    return "(empty PR diff)"
-  end
-  if #text <= max_pr_diff_len then
-    return text
-  end
-  return text:sub(1, max_pr_diff_len)
-end
-
 function M.max_body_len()
   return max_body_len
-end
-
-function M.max_pr_diff_len()
-  return max_pr_diff_len
 end
 
 function M.render_template(template, vars)
@@ -784,7 +757,6 @@ M._max_comments_len = max_comments_len
 M._max_meta_reason_len = max_meta_reason_len
 M._max_framing_len = max_framing_len
 M._max_impl_output_len = max_impl_output_len
-M._max_pr_diff_len = max_pr_diff_len
 M._max_pr_issue_context_len = max_pr_issue_context_len
 M._max_pr_title_len = max_pr_title_len
 M._action_label = action_label

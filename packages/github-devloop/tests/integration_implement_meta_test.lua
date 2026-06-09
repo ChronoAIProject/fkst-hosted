@@ -425,12 +425,12 @@ return {
   end,
 
   test_implement_issue_view_failure_errors_for_retry = function()
-    mock_issue_view_failure("--json title,body,labels,comments", "forced implement failure")
+    mock_issue_view_failure("--json title,labels,comments", "forced implement failure")
 
     local result = run_implement(ready(), opts("implement-view-failure"))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json title,body,labels,comments"), 1)
+    t.eq(count_calls("--json title,labels,comments"), 1)
     t.eq(count_calls("codex exec"), 0)
   end
 }

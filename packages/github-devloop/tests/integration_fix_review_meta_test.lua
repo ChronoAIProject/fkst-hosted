@@ -877,7 +877,7 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_review_meta_parse_failure_errors_for_retry = function()
+  test_review_meta_parse_failure_blocks_fail_closed = function()
     local event = review_meta_event()
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
@@ -889,8 +889,10 @@ return {
     })
 
     local result = run_review_meta(event, opts("review-meta-parse-failure"))
-    t.eq(result.exit_code, 1)
-    t.eq(#result.raises, 0)
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
     t.eq(count_calls("codex exec"), 1)
   end,
 
@@ -928,13 +930,13 @@ return {
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
     })
-    mock_meta_codex("accept", "The unresolved review is acceptable.")
+    mock_meta_codex("block", "The unresolved review needs human intervention.")
 
     local visible = run_review_meta(event, opts("review-meta-marker-visible"))
     t.eq(visible.exit_code, 0)
-    t.eq(#visible.raises, 3)
-    t.eq(find_raise(visible.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merge-ready")
-    t.eq(find_raise(visible.raises, "devloop_merge_ready").payload.schema, "github-devloop.merge-ready.v1")
+    t.eq(#visible.raises, 2)
+    t.eq(find_raise(visible.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(find_raise(visible.raises, "devloop_merge_ready"), nil)
   end,
 
   test_review_meta_fix_becomes_canonical_and_fix_uses_meta_feedback = function()

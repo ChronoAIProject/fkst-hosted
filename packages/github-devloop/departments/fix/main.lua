@@ -275,7 +275,7 @@ function pipeline(event)
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local result = spawn_codex_sync({
-      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason),
+      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing),
       worktree = worktree,
     })
     if type(result) ~= "table" or result.exit_code ~= 0 then

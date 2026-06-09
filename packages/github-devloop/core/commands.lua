@@ -51,19 +51,17 @@ end
 function M.gh_issue_view_loop_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,updatedAt,labels,comments,state"
+    .. " --json title,updatedAt,labels,comments,state"
 end
 
 function M.gh_issue_view_meta_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,labels,comments"
+    .. " --json title,labels,comments"
 end
 
 function M.gh_issue_view_implement_cmd(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,labels,comments"
+  return M.gh_issue_view_meta_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_open_pr_cmd(repo, issue_number)
@@ -79,33 +77,27 @@ function M.gh_issue_view_reviewing_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_review_cmd(repo, issue_number)
+  return M.gh_issue_view_meta_cmd(repo, issue_number)
+end
+
+function M.gh_issue_view_decompose_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
     .. " --json title,body,labels,comments"
 end
 
 function M.gh_issue_view_fix_cmd(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,labels,comments"
+  return M.gh_issue_view_meta_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_review_loop_cmd(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,labels,comments"
-end
-
-function M.gh_issue_view_review_meta_cmd(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,labels,comments"
+  return M.gh_issue_view_meta_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_merge_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,labels,comments,state"
+    .. " --json title,labels,comments,state"
 end
 
 function M.gh_issue_view_observe_cmd(repo, issue_number)

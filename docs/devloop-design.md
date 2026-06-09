@@ -58,14 +58,13 @@ state marker = `<!-- fkst:github-devloop:state:v1 proposal="<id>" state="<S>" ve
 
  reviewing --approve--------------> merge-ready
  reviewing --reject---------------> fixing
- reviewing --unresolved & n<budget-> reviewing          # 自环 loop
- reviewing --unresolved & n>=budget> review-meta
+ reviewing --unresolved-----------> reviewing          # review_loop 收窄自环
+ reviewing --true-stall-----------> (blocked)          # devloop_review_reconcile
 
  fixing --ok----------------------> reviewing
- fixing --fail--------------------> review-meta
+ fixing --无新 head---------------> review-meta
 
  review-meta --fix----------------> fixing
- review-meta --accept-------------> merge-ready
  review-meta --block--------------> (blocked)
 
  merge-ready --CI+mergeable OK + review approve-> merging
@@ -86,7 +85,7 @@ merging --fail-------------------> retry                 # merge 竞态/命令�
 ## 3. 包布局（复用 > 扩展 > 新建）
 
 - **consensus**（复用，不改）：source-agnostic 共识引擎。两段共识都用它。
-- **github-proxy**（扩展，保持薄 I/O）：bounded issue/PR snapshot（labels + 解析的 marker）、label 读写请求、
+- **github-proxy**（扩展，保持薄 I/O）：issue/PR fact snapshot（labels + 解析的 marker）、label 读写请求、
   marker 评论；label request 不做状态 precondition，只执行 best-effort UI hint；后续加 issue-create / PR-create / PR-merge 请求。
 - **autochrono / github-autochrono**（不改）：保持简单 reply 流，不塞 devloop 逻辑。
 - **github-devloop**（新 composed）：状态机本体 —— 状态↔label 映射、converge-round 计数、true-stall reconcile、
@@ -108,7 +107,7 @@ autochrono proposal_id lossless。状态机核心是 consensus，先确保它稳
 **Phase 2（已被 converge→reconcile 重设计取代）**：原为 stuck → meta-escalation（`ACTION: implement|split|block`）。现 no-consensus 改为收敛模型：`loop` 消费 `consensus_converge` 写 converge-round marker、带 `narrowed_question` 以 round+1 收窄重发，router 判 true-stall（round≥3 且连续三轮 question+verdicts digest 不变）→ `devloop_reconcile` → 确定性 `reconcile` 部门 `drop` 到 `blocked`（不跑 codex、不拆分子 proposal、不直接升级人）。权威见 `docs/consensus-converge-redesign.md` 与 README。
 **Phase 3**：ready-CAS gates the attempt（`setup_worktree` + `spawn_codex` 实施；失败或无变更 → `impl-failed` state marker；有变更 → `implementing` state marker + branch/worktree marker；**先不开 PR**）。
 **Phase 4**：`FKST_GITHUB_WRITE=1` → `gh pr create` + linkage marker；dry-run 只记录 would-open；PR poll → reviewing。
-**Phase 5a**：PR diff review consensus 的 decision-only 切片：`observe_pr` 进入 `reviewing` 时产生 `devloop_reviewing`；`review_pr` 回源确认 issue canonical state 后，用独立预算保留 bounded PR diff，再附加 bounded issue context，中和为带 reviewed `head_sha` 的 `github-devloop/pr-review/.../<head_sha>` `consensus.proposal`；`review_result` 重新读取 PR trusted backpointer 和当前 head，要求当前 head 仍等于 reviewed `head_sha`，并用 issue state marker CAS 把 `approve` 写成 `merge-ready`、`reject` 写成 `fixing`，同时写 issue-versioned state marker、`review-result:v1` marker、`merge-ready:v1` fact marker 与 set-exclusive label。`approve` 产生 `devloop_merge_ready`，`reject` 产生 `devloop_fixing`；不 push、不 merge。
+**Phase 5a**：PR diff review consensus 的 decision-only 切片：`observe_pr` 进入 `reviewing` 时产生 `devloop_reviewing`；`review_pr` 回源确认 issue canonical state 后，构造带 reviewed `head_sha` 的 `github-devloop/pr-review/.../<head_sha>` `consensus.proposal`，payload 只带短 brief、`source_ref` 与 `content_fetch`，由 consensus codex 回源读取完整 PR diff 与 backing issue 内容；`review_result` 重新读取 PR trusted backpointer 和当前 head，要求当前 head 仍等于 reviewed `head_sha`，并用 issue state marker CAS 把 `approve` 写成 `merge-ready`、`reject` 写成 `fixing`，同时写 issue-versioned state marker、`review-result:v1` marker、`merge-ready:v1` fact marker 与 set-exclusive label。`approve` 产生 `devloop_merge_ready`，`reject` 产生 `devloop_fixing`；不 push、不 merge。
 **Phase 5b（已实现，review 侧已重设计为 converge→reconcile）**：fix loop + review 收敛。`review_result` 的 `reject` 产生 `devloop_fixing`；`fix`
 回源确认 canonical `fixing` marker、reject review marker、open same-repo PR、trusted PR origin 与 deterministic branch/head
 都匹配后，在 deterministic branch worktree 中运行 codex 修复并提交。更新 PR 分支只由 `FKST_GITHUB_WRITE=1`
@@ -116,9 +115,10 @@ autochrono proposal_id lossless。状态机核心是 consensus，先确保它稳
 new head；成功写新 `reviewing` marker（version = `core.next_fix_version` 生成的 new-head fix-round canonical version）并重新产生 `devloop_reviewing`。缺写开关
 不推进；无变更进入 `review-meta`。pr-review `consensus_converge` 由 `review_loop` 写 `review-converge-round:v1`
 marker 带 `narrowed_question` 收窄重审同一 head，true-stall 时产生 `devloop_review_reconcile` 交 `reconcile`
-`drop` 到 `blocked`；`review_meta`（`⟦FKST:ACTION⟧ fix|accept|block` → `fixing|merge-ready|blocked`，`accept`
-产生 `devloop_merge_ready`）不再由 review loop 预算触发，现仅由 `fix` 在 codex 无新 head 时进入。
-**Phase 6（已实现）**：`merge` 消费 `devloop_merge_ready`，写前重新回源校验 canonical issue state 仍是同版本 `merge-ready` 或失败重试中的 `merging`、可信 head-bound `merge-ready:v1` comment-stream review-approval fact 与事件字段完全匹配、`review_proposal_id` 解析后仍指向同一 repo / PR / version 派生链 / reviewed `head_sha`、`FKST_GITHUB_WRITE=1`、可信 `review-result:v1 decision="approve"` marker 绑定同一 `review_proposal_id` / `review_dedup_key` / issue proposal / reviewed `head_sha` / version，PR current head open / same-repo / head branch 与 reviewed `head_sha` 未变、`gh pr view --json statusCheckRollup` green、`mergeable` / `mergeStateStatus` 可合并。`review_meta accept` 是预算耗尽后的较弱保守 override，只能产生 `merge-ready`，不能满足 merge 的 `review-result:v1 approve` backstop。`github-devloop` merge 不使用 GitHub `reviewDecision` / `latestReviews` / `addPullRequestReview`，也不生成 merge-time codex。全部满足才先由本 bot 直接写可信 `merging:v1` marker，再执行普通 `gh pr merge --merge --match-head-commit`，不使用 admin override、不绕过 branch protection；随后写 `merged` state marker、`merged:v1` marker、set-exclusive `fkst-dev:merged`，并 `gh issue close`。GitHub branch protection 的 required status checks 是真实运行的必需 repo-ops 前提，bot 账号不得具备 bypass/admin override；Lua 的 `statusCheckRollup` 只是早期/诊断 backstop，真正不可绕过的 gate 是 GitHub 在 `gh pr merge` 时服务端强制的 branch protection。若重试时 PR 仍 open / same head / not merged，会重新推导全部 gate 并再次执行 merge；若重试时 PR 已是 MERGED，只有匹配当前 PR/head 的本 bot `merging:v1` marker 或 canonical `merging` state 已可见才允许 finalize；外部 merge 不会被 devloop 自动关闭 issue 或写 terminal marker。缺可信 `review-result:v1 approve`、缺可信 `merge-ready:v1` approval fact、缺写开关、CI pending 或 mergeability 未定只 dry-run 或 retry 不推进；CI red、明确不可合并或 PR head 在写前重导时前进会写 `merge-gate:v1` marker 后回 `fixing`；merge/close 命令失败 error retry。独立性来自 codex context / proposal / head-bound diff / deterministic checks，不来自 GitHub 账号身份。
+`drop` 到 `blocked`；`review_meta`（`⟦FKST:ACTION⟧ fix|block` → `fixing|blocked`，无 `accept` 路径，
+解析失败/歧义 fail-closed 到 `block`）不再由 review loop 预算触发，现仅由 `fix` 在 codex 无新 head 时进入，
+不产生 `merge-ready`——唯一 `merge-ready` 权威是 PR-diff review consensus 的 `review-result:v1 approve`。
+**Phase 6（已实现）**：`merge` 消费 `devloop_merge_ready`，写前重新回源校验 canonical issue state 仍是同版本 `merge-ready` 或失败重试中的 `merging`、可信 head-bound `merge-ready:v1` comment-stream review-approval fact 与事件字段完全匹配、`review_proposal_id` 解析后仍指向同一 repo / PR / version 派生链 / reviewed `head_sha`、`FKST_GITHUB_WRITE=1`、可信 `review-result:v1 decision="approve"` marker 绑定同一 `review_proposal_id` / `review_dedup_key` / issue proposal / reviewed `head_sha` / version，PR current head open / same-repo / head branch 与 reviewed `head_sha` 未变、`gh pr view --json statusCheckRollup` green、`mergeable` / `mergeStateStatus` 可合并。`review_meta` 已无 `accept` 路径，不能产生 `merge-ready`，故无法触发 merge；唯一 merge 权威是 PR-diff review consensus 的可信 head-bound `review-result:v1 approve` backstop。`github-devloop` merge 不使用 GitHub `reviewDecision` / `latestReviews` / `addPullRequestReview`，也不生成 merge-time codex。全部满足才先由本 bot 直接写可信 `merging:v1` marker，再执行普通 `gh pr merge --merge --match-head-commit`，不使用 admin override、不绕过 branch protection；随后写 `merged` state marker、`merged:v1` marker、set-exclusive `fkst-dev:merged`，并 `gh issue close`。GitHub branch protection 的 required status checks 是真实运行的必需 repo-ops 前提，bot 账号不得具备 bypass/admin override；Lua 的 `statusCheckRollup` 只是早期/诊断 backstop，真正不可绕过的 gate 是 GitHub 在 `gh pr merge` 时服务端强制的 branch protection。若重试时 PR 仍 open / same head / not merged，会重新推导全部 gate 并再次执行 merge；若重试时 PR 已是 MERGED，只有匹配当前 PR/head 的本 bot `merging:v1` marker 或 canonical `merging` state 已可见才允许 finalize；外部 merge 不会被 devloop 自动关闭 issue 或写 terminal marker。缺可信 `review-result:v1 approve`、缺可信 `merge-ready:v1` approval fact、缺写开关、CI pending 或 mergeability 未定只 dry-run 或 retry 不推进；CI red、明确不可合并或 PR head 在写前重导时前进会写 `merge-gate:v1` marker 后回 `fixing`；merge/close 命令失败 error retry。独立性来自 codex context / proposal / head-bound diff / deterministic checks，不来自 GitHub 账号身份。
 
 ## 5. 关键风险 / doctrine 约束
 
@@ -126,11 +126,11 @@ marker 带 `narrowed_question` 收窄重审同一 head，true-stall 时产生 `d
 - 状态转移**只能用最新 state marker CAS**；label 不区分 stale replay 与合法移除，只能做 UI hint。
 - converge-round / 真停滞计数**只能用 GitHub trusted-bot marker**（不用 `<RT>`/cache）。
 - 同一 issue 的 version 排序是 `(updated_at ISO, loop round N, stage_rank)`；同 timestamp 下较大的 `/loop/N`（PR 侧 `/review-loop/N`）胜过无 loop 或较小 loop，即使后者阶段更靠后。reconcile 是确定性 `drop` 判（无 codex 非确定性），同 round 重放按 reconcile / review-reconcile marker 幂等收敛，避免 GitHub 评论返回顺序影响当前态。
-- PR diff / issue body 可能超 **64 KiB payload** → 用 `source_ref` 回源 + bounded snapshot。
+- PR diff / issue body 可能超 **64 KiB payload** → payload 只带 `source_ref`、短 brief 和控制字段；codex / department 需要内容时回源读取完整内容。
 - 自动 child-issue / PR / merge 有 **runaway + 权限**风险 → 只能用 `FKST_GITHUB_WRITE` 在 dry-run 与真实自治之间切换，并保留严格 budget 与 merge deterministic backstop。
 - Phase 3 的 implement no-push/no-PR 约束目前由 prompt 表达；host-level sandbox 是后续 hardening。
 - label 可被人改 → 下次转移 set-exclusive 自愈；状态事实仍以最新 state marker 为准。
-- merge **不绕过** branch protection / CI。merge 要求可信 head-bound `merge-ready:v1` + 独立可信 `review-result:v1 approve` + `FKST_GITHUB_WRITE=1` + CI/mergeability/head gate；`review_meta accept` 不能合并。仓库必须配置 branch protection required status checks，bot 不能有 bypass/admin override；package 不查询也不配置 branch protection。
+- merge **不绕过** branch protection / CI。merge 要求可信 head-bound `merge-ready:v1` + 独立可信 `review-result:v1 approve` + `FKST_GITHUB_WRITE=1` + CI/mergeability/head gate；`review_meta` 无 `accept` 路径，只能 `fix|block`，不参与 merge 授权。仓库必须配置 branch protection required status checks，bot 不能有 bypass/admin override；package 不查询也不配置 branch protection。
 - 真实 supervisor 应从 pinned engine/package revision 启动，不从 mutable dev HEAD 启动；坏的自动 merge 会影响未来 repo 状态，但不会改变正在运行的实例代码。
 - 残余风险：bot 账号被攻破可伪造可信 marker；LLM 独立 review 是 bot 派生判断，不是客观证明；branch protection 是 ops 配置，Lua 不能强制；sshx 不授权 commit/push/merge。
 

@@ -783,7 +783,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
 end
 
 function M.build_review_meta_label_request(repo, issue_number, review_meta, action, version)
-  local to_state = action == "fix" and "fixing" or action == "accept" and "merge-ready" or "blocked"
+  local to_state = action == "fix" and "fixing" or "blocked"
   return M.build_state_label_request(
     repo,
     issue_number,
@@ -800,14 +800,9 @@ function M.build_review_meta_label_request(repo, issue_number, review_meta, acti
 end
 
 function M.build_review_meta_comment_request(repo, issue_number, review_meta, action, reason, version)
-  local to_state = action == "fix" and "fixing" or action == "accept" and "merge-ready" or "blocked"
+  local to_state = action == "fix" and "fixing" or "blocked"
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   local state_version = version or review_meta.version
-  local merge_marker = ""
-  if action == "accept" then
-    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_meta.review_proposal_id)
-    merge_marker = "\n" .. M.merge_ready_marker(review_meta.proposal_id, review_meta.pr_number, state_version, review_meta.review_proposal_id, review_meta.dedup_key, reviewed_head_sha)
-  end
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -815,8 +810,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
   }, "github-devloop review-meta action: " .. tostring(action)
     .. "\n\nReason:\n" .. safe_reason
     .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
-    .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version)
-    .. merge_marker, M._dedup_key({
+    .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version), M._dedup_key({
     "review-meta",
     "comment",
     tostring(review_meta.dedup_key),

@@ -134,7 +134,6 @@ function M.parse_issue_view_loop(stdout)
   local result = M.parse_issue_view_result(stdout)
   return {
     title = tostring(decoded.title or ""),
-    body = M.bounded_body(decoded.body),
     updated_at = decoded.updatedAt or decoded.updated_at,
     state = decoded.state,
     labels = result.labels,
@@ -164,7 +163,6 @@ function M.parse_issue_view_meta(stdout)
   local result = M.parse_issue_view_result(stdout)
   return {
     title = tostring(decoded.title or ""),
-    body = M.bounded_body(decoded.body),
     labels = result.labels,
     comments = result.comments,
   }
@@ -192,15 +190,22 @@ function M.parse_issue_view_review(stdout)
   return M.parse_issue_view_meta(stdout)
 end
 
+function M.parse_issue_view_decompose(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_result(stdout)
+  return {
+    title = tostring(decoded.title or ""),
+    body = tostring(decoded.body or ""),
+    labels = result.labels,
+    comments = result.comments,
+  }
+end
+
 function M.parse_issue_view_fix(stdout)
   return M.parse_issue_view_meta(stdout)
 end
 
 function M.parse_issue_view_review_loop(stdout)
-  return M.parse_issue_view_meta(stdout)
-end
-
-function M.parse_issue_view_review_meta(stdout)
   return M.parse_issue_view_meta(stdout)
 end
 
