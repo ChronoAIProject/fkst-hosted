@@ -206,7 +206,7 @@ local function pipeline_fix(event)
     end
 
     local action = "drop"
-    local reason = "fix-loop-budget-exhausted-after-" .. tostring(reconcile.round) .. "-rounds"
+    local reason = "fix-loop-true-stall-after-" .. tostring(reconcile.round) .. "-rounds"
     local comment_request = core.build_fix_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
     local label_request = core.build_fix_reconcile_label_request(repo, issue_number, reconcile)
     emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request)

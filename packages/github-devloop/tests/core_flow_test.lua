@@ -219,7 +219,7 @@ return {
     t.is_true(has_value(label.remove_labels, "fkst-dev:reviewing"))
     t.eq(has_value(label.remove_labels, "fkst-dev:blocked"), false)
 
-    local comment = core.build_fix_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "fix-loop-budget-exhausted-after-4-rounds")
+    local comment = core.build_fix_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "fix-loop-true-stall-after-4-rounds")
     t.is_true(comment.body:find("github-devloop fix reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("fkst:github-devloop:fix-reconcile:v1", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(issue_proposal_id, "blocked", issue_version), 1, true) ~= nil)

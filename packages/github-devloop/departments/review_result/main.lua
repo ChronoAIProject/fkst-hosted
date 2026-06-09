@@ -121,8 +121,10 @@ function pipeline(event)
 
     local issue_version = state.version
     if reached.decision == "reject" then
-      local current_fix_round = core.version_fix_round(state.version)
-      if current_fix_round >= core.fix_loop_budget() then
+      local fix_round = core.version_fix_round(state.version)
+      local max_rounds_hit = fix_round >= core.max_fix_rounds()
+      local true_stall = core.is_fix_framing_true_stall(current_issue.comments, origin.proposal_id, reached.framing)
+      if max_rounds_hit or true_stall then
         local fix_reconcile = core.build_devloop_fix_reconcile_payload({
           proposal_id = origin.proposal_id,
           review_proposal_id = reached.proposal_id,
@@ -131,7 +133,8 @@ function pipeline(event)
           pr_number = pr_number,
           source_ref = issue_source_ref,
         }, state.version)
-        core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(fix-loop-budget-exhausted)", "review decision=reject")
+        local reason = max_rounds_hit and "fix-loop-max-rounds" or "fix-loop-true-stall"
+        core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(" .. reason .. ")", "review decision=reject")
         core.log_raise("review_result", origin.proposal_id, "devloop_fix_reconcile", fix_reconcile)
         return
       end

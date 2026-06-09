@@ -31,24 +31,49 @@ local function reject_review_event(version)
   return review_reached({
     decision = "reject",
     body = "Review consensus rejects the diff.",
+    framing = "Review feedback for " .. tostring(version),
     proposal_id = proposal_id,
     dedup_key = "consensus:" .. proposal_id .. "/review",
   })
 end
 
+local function reject_marker(version, framing, created_at)
+  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "feedface")
+  return {
+    body = core.review_result_marker(
+      proposal_id,
+      "github-devloop/issue/owner/repo/42",
+      "reject",
+      "consensus:" .. proposal_id .. "/review",
+      core.review_reject_framing_digest(framing),
+      core.version_fix_round(version)
+    ),
+    created_at = created_at,
+  }
+end
+
 return {
-  test_review_result_reject_within_fix_budget_marks_fixing = function()
+  test_review_result_reject_changing_framing_keeps_fixing_past_round_three = function()
     local base_version = reviewing().version
-    local review_version = core.next_fix_version(base_version)
+    local round1 = core.next_fix_version(base_version)
+    local round2 = core.next_fix_version(round1)
+    local round3 = core.next_fix_version(round2)
+    local round4 = core.next_fix_version(round3)
+    local review_version = round4
     local event = reject_review_event(review_version)
+    event.framing = "Fourth review now asks for fixture cleanup."
     local fix_version = core.fix_version_from_review_version(review_version)
-    t.eq(core.version_fix_round(fix_version) <= core.fix_loop_budget(), true)
+    t.eq(core.version_fix_round(review_version) > core.fix_stall_rounds(), true)
+    mock_bot_env()
     mock_pr_origin({ origin_marker(base_version) }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", review_version),
+      reject_marker(round1, "First review asks for payload bounds.", "2026-06-03T01:00:01Z"),
+      reject_marker(round2, "Second review asks for source_ref checks.", "2026-06-03T01:00:02Z"),
+      reject_marker(round3, "Third review asks for branch rechecks.", "2026-06-03T01:00:03Z"),
     })
 
-    local result = run_review_result(event, opts("fix-budget-within"))
+    local result = run_review_result(event, opts("fix-progress-changing"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
@@ -57,19 +82,27 @@ return {
     t.eq(find_raise(result.raises, "devloop_fix_reconcile"), nil)
     t.eq(label.payload.add_labels[1], "fkst-dev:fixing")
     t.is_true(comment.payload.body:find('state="fixing" version="' .. fix_version .. '"', 1, true) ~= nil)
+    t.is_true(comment.payload.body:find('framing_digest="' .. core.review_reject_framing_digest(event.framing) .. '"', 1, true) ~= nil)
     t.eq(fixing.payload.version, fix_version)
   end,
 
-  test_review_result_reject_over_fix_budget_raises_fix_reconcile = function()
-    local review_version = fix_round_version(core.fix_loop_budget())
+  test_review_result_reject_same_framing_stalls_after_configured_rounds = function()
+    local review_version = fix_round_version(core.fix_stall_rounds())
     local event = reject_review_event(review_version)
-    t.eq(core.version_fix_round(review_version), core.fix_loop_budget())
+    local same_framing = "Raising bounds breaks the reliable payload proof."
+    event.framing = same_framing
+    t.eq(core.version_fix_round(review_version), core.fix_stall_rounds())
+    local round1 = fix_round_version(1)
+    local round2 = fix_round_version(2)
+    mock_bot_env()
     mock_pr_origin({ origin_marker(reviewing().version) }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", review_version),
+      reject_marker(round1, same_framing, "2026-06-03T01:00:01Z"),
+      reject_marker(round2, same_framing, "2026-06-03T01:00:02Z"),
     })
 
-    local result = run_review_result(event, opts("fix-budget-over"))
+    local result = run_review_result(event, opts("fix-stall-same-framing"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
@@ -82,7 +115,7 @@ return {
     t.eq(reconcile.review_dedup_key, event.dedup_key)
     t.eq(reconcile.issue_version, review_version)
     t.eq(reconcile.head_sha, "feedface")
-    t.eq(reconcile.round, core.fix_loop_budget())
+    t.eq(reconcile.round, core.fix_stall_rounds())
     t.eq(reconcile.pr_number, "7")
     t.eq(reconcile.dedup_key, "fix-reconcile:" .. review_version)
     t.eq(reconcile.source_ref.ref, "owner/repo#issue/42")
@@ -99,32 +132,26 @@ return {
     t.is_true(accepted_comment.body:find(core.state_marker(reconcile.proposal_id, "blocked", reconcile.issue_version), 1, true) ~= nil)
   end,
 
-  test_review_result_reject_fix_budget_exact_boundary = function()
-    local within_version = fix_round_version(core.fix_loop_budget() - 1)
-    local within_event = reject_review_event(within_version)
-    mock_pr_origin({ origin_marker(reviewing().version) }, "devloop-owner-repo-42-01HY", "feedface")
-    mock_issue_result({ "fkst-dev:reviewing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", within_version),
-    })
-
-    local within = run_review_result(within_event, opts("fix-budget-boundary-within"))
-    t.eq(within.exit_code, 0)
-    t.eq(find_raise(within.raises, "devloop_fix_reconcile"), nil)
-    t.eq(find_raise(within.raises, "devloop_fixing").payload.version, core.next_fix_version(within_version))
-
-    local over_version = fix_round_version(core.fix_loop_budget())
+  test_review_result_reject_max_fix_rounds_blocks_even_when_framing_changes = function()
+    local over_version = fix_round_version(core.max_fix_rounds())
     local over_event = reject_review_event(over_version)
+    over_event.framing = "Round " .. tostring(core.max_fix_rounds()) .. " has new feedback."
+    local previous_a = fix_round_version(core.max_fix_rounds() - 1)
+    local previous_b = fix_round_version(core.max_fix_rounds() - 2)
+    mock_bot_env()
     mock_pr_origin({ origin_marker(reviewing().version) }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", over_version),
+      reject_marker(previous_b, "Earlier distinct feedback.", "2026-06-03T01:00:01Z"),
+      reject_marker(previous_a, "Previous distinct feedback.", "2026-06-03T01:00:02Z"),
     })
 
-    local over = run_review_result(over_event, opts("fix-budget-boundary-over"))
+    local over = run_review_result(over_event, opts("fix-max-rounds"))
     t.eq(over.exit_code, 0)
     t.eq(find_raise(over.raises, "devloop_fixing"), nil)
     local reconcile = find_raise(over.raises, "devloop_fix_reconcile").payload
     t.eq(reconcile.issue_version, over_version)
-    t.eq(reconcile.round, core.fix_loop_budget())
+    t.eq(reconcile.round, core.max_fix_rounds())
   end,
 
   test_fix_reconcile_drop_blocks_reviewing_issue = function()
@@ -141,7 +168,7 @@ return {
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find("github-devloop fix reconcile action: drop", 1, true) ~= nil)
-    t.is_true(comment.body:find("fix-loop-budget-exhausted-after-3-rounds", 1, true) ~= nil)
+    t.is_true(comment.body:find("fix-loop-true-stall-after-3-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", event.issue_version), 1, true) ~= nil)
     t.is_true(comment.body:find(core.fix_reconcile_marker(event.proposal_id, event.issue_version, "drop"), 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:blocked")

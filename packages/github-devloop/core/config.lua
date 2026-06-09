@@ -37,7 +37,11 @@ function M.write_mode(exec)
   return M.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
 end
 
-function M.fix_loop_budget()
+function M.max_fix_rounds()
+  return 12
+end
+
+function M.fix_stall_rounds()
   return 3
 end
 
