@@ -676,6 +676,10 @@ end
 
 function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, source_ref)
   local safe_reason = M.sanitize_key(reason or "gate-failed", false):gsub("/", "-")
+  local display_reason = M.neutralize_untrusted_comment_text(reason or "gate-failed")
+  if display_reason == "" then
+    display_reason = "gate-failed"
+  end
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
   local marker = M.merge_gate_marker(
     merge_ready.proposal_id,
@@ -690,7 +694,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
-  }, "github-devloop merge gate failed: " .. safe_reason
+  }, "github-devloop merge gate failed: " .. display_reason
     .. "\n\n" .. state_marker
     .. "\n" .. marker, M._dedup_key({
     "merge",

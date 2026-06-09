@@ -287,8 +287,9 @@ function pipeline(event)
         log_gate(merge_ready, "dry-run", rollup_reason)
         error("github-devloop: merge wait on " .. tostring(rollup_reason) .. "; retrying")
       end
-      log_gate(merge_ready, "fixing", rollup_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, rollup_reason)
+      local fix_reason = core.rollup_red_fix_reason(current_pr, rollup_reason)
+      log_gate(merge_ready, "fixing", fix_reason)
+      raise_fixing(repo, issue_number, merge_ready, state, fix_reason)
       return
     end
     local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
@@ -328,7 +329,7 @@ function pipeline(event)
       return
     end
     core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready", "merging", "applied", "all merge gates satisfied; invoking gh pr merge")
-    local merge_ok, merge_reason = core.run_verified_pr_merge({
+    local merge_ok, merge_reason, merge_rechecked_pr = core.run_verified_pr_merge({
       repo = repo,
       pr_number = merge_ready.pr_number,
       head_sha = merge_ready.reviewed_head_sha,
@@ -369,8 +370,9 @@ function pipeline(event)
       return
     end
     if not merge_ok and core.is_ci_red_reason(merge_reason) then
-      log_gate(merge_ready, "fixing", merge_reason)
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_reason)
+      local fix_reason = core.rollup_red_fix_reason(merge_rechecked_pr, merge_reason)
+      log_gate(merge_ready, "fixing", fix_reason)
+      raise_fixing(repo, issue_number, merge_ready, rechecked_state, fix_reason)
       return
     end
     if not merge_ok and core.is_not_mergeable_reason(merge_reason) then

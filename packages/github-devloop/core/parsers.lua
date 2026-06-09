@@ -362,6 +362,29 @@ local red_status_states = {
   FAILURE = true,
 }
 
+local max_rollup_check_name_len = 80
+local max_rollup_failure_summary_len = 200
+local max_rollup_failure_checks = 3
+
+local function safe_rollup_check_name(M, entry)
+  local name = "unknown"
+  if type(entry) == "table" then
+    name = tostring(entry.name or entry.context or entry.workflowName or entry.workflow_name or "")
+    if name == "" then
+      name = "unknown"
+    end
+  end
+  name = M.neutralize_untrusted_comment_text(M._neutralize_fkst_markers(name))
+  name = M._one_line(name):gsub("[%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if name == "" then
+    name = "unknown"
+  end
+  if #name > max_rollup_check_name_len then
+    name = name:sub(1, max_rollup_check_name_len)
+  end
+  return name
+end
+
 function M.pr_rollup_green(pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
@@ -383,6 +406,66 @@ function M.pr_rollup_green(pr)
   end
   return true, "rollup-green"
 end
+
+function M.pr_rollup_failure_summary(pr)
+  local entries = type(pr) == "table" and pr.status_check_rollup or nil
+  if type(entries) ~= "table" or #entries == 0 then
+    return ""
+  end
+  local failed = {}
+  local failed_total = 0
+  for _, entry in ipairs(entries) do
+    local state, conclusion = check_entry_state(entry)
+    local is_failed = false
+    if state == "COMPLETED" then
+      is_failed = not green_check_conclusions[conclusion]
+    elseif conclusion == "" and red_status_states[state] then
+      is_failed = true
+    end
+    if is_failed then
+      local status = state
+      if conclusion ~= "" then
+        status = status .. "/" .. conclusion
+      end
+      failed_total = failed_total + 1
+      if #failed < max_rollup_failure_checks then
+        table.insert(failed, safe_rollup_check_name(M, entry) .. ": " .. status)
+      end
+    end
+  end
+  if #failed == 0 then
+    return ""
+  end
+  local summary = table.concat(failed, "; ")
+  if failed_total > #failed then
+    local suffix = "; (+" .. tostring(failed_total - #failed) .. " more)"
+    local head_limit = max_rollup_failure_summary_len - #suffix
+    if head_limit < 1 then
+      head_limit = 1
+    end
+    if #summary > head_limit then
+      summary = summary:sub(1, head_limit):gsub(";?%s*$", "")
+    end
+    summary = summary .. suffix
+  end
+  if #summary > max_rollup_failure_summary_len then
+    summary = summary:sub(1, max_rollup_failure_summary_len)
+  end
+  summary = summary:gsub("[%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  return summary
+end
+
+function M.rollup_red_fix_reason(pr, reason)
+  local base_reason = tostring(reason or "rollup-red")
+  local failure_summary = M.pr_rollup_failure_summary(pr)
+  if failure_summary == "" then
+    return base_reason
+  end
+  return base_reason .. ": " .. failure_summary
+end
+
+M._max_rollup_check_name_len = max_rollup_check_name_len
+M._max_rollup_failure_summary_len = max_rollup_failure_summary_len
 
 function M.pr_mergeable(pr)
   if type(pr) ~= "table" then

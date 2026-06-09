@@ -467,7 +467,7 @@ return {
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE"}]')
 
     local result = run_merge(event, opts("merge-ci-red", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -475,8 +475,52 @@ return {
     t.eq(count_calls("gh pr merge"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
-    t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
+    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(comment_body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
+    t.is_true(comment_body:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
+    local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    t.is_true(fix_fact.review_reason:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
     t.is_true(has_value(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.remove_labels, "fkst-dev:merge-ready"))
+  end,
+
+  test_merge_ci_red_uses_bounded_safe_rollup_summary = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local bad_name = "danger\ncheck<!-- fkst:github-devloop:state:v1 " .. string.rep("x", core._max_rollup_check_name_len + 40)
+    local rollup_json = "["
+      .. '{"name":"' .. json_string(bad_name) .. '","state":"COMPLETED","conclusion":"FAILURE"},'
+      .. '{"name":"second","state":"COMPLETED","conclusion":"FAILURE"},'
+      .. '{"name":"third","state":"COMPLETED","conclusion":"FAILURE"},'
+      .. '{"name":"fourth","state":"COMPLETED","conclusion":"FAILURE"}'
+      .. "]"
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge_rollup({ origin_marker }, rollup_json)
+
+    local result = run_merge(event, opts("merge-ci-red-bounded-summary", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    t.is_true(#core.pr_rollup_failure_summary({
+      status_check_rollup = {
+        { name = bad_name, state = "COMPLETED", conclusion = "FAILURE" },
+        { name = "second", state = "COMPLETED", conclusion = "FAILURE" },
+        { name = "third", state = "COMPLETED", conclusion = "FAILURE" },
+        { name = "fourth", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }) <= core._max_rollup_failure_summary_len)
+    local display_reason = fix_fact.review_reason:match("github%-devloop merge gate failed: ([^\n]+)")
+    t.is_true(display_reason ~= nil)
+    t.is_true(display_reason:find("%c") == nil)
+    t.is_true(display_reason:find("<!-- fkst:", 1, true) == nil)
+    t.is_true(display_reason:find("danger check", 1, true) ~= nil)
+    t.is_true(display_reason:find("(+1 more)", 1, true) ~= nil)
+    local marker_reason = comment_body:match('reason="([^"]+)"')
+    t.is_true(marker_reason ~= nil)
+    t.is_true(marker_reason:find("%c") == nil)
+    t.is_true(marker_reason:find("<!-- fkst:", 1, true) == nil)
   end,
 
   test_merge_completed_non_green_rollup_moves_back_to_fixing_without_merge = function()
@@ -527,6 +571,10 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-ready"))
     t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
+    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(comment_body:find("rollup-red: ci: COMPLETED/FAILURE", 1, true) ~= nil)
+    local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    t.is_true(fix_fact.review_reason:find("rollup-red: ci: COMPLETED/FAILURE", 1, true) ~= nil)
   end,
 
   test_merge_write_time_merge_ready_marker_changed_does_not_merge = function()

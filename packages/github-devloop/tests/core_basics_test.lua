@@ -198,6 +198,41 @@ return {
     t.eq(pending_reason, "rollup-pending")
   end,
 
+  test_ci_rollup_failure_summary_lists_failed_checks = function()
+    local summary = core.pr_rollup_failure_summary({
+      status_check_rollup = {
+        { name = "test", state = "COMPLETED", conclusion = "FAILURE" },
+        { context = "lint", state = "ERROR", conclusion = "" },
+        { name = "docs", state = "COMPLETED", conclusion = "SUCCESS" },
+      },
+    })
+    t.is_true(summary:find("test: COMPLETED/FAILURE", 1, true) ~= nil)
+    t.is_true(summary:find("lint: ERROR", 1, true) ~= nil)
+    t.is_true(summary:find("docs", 1, true) == nil)
+  end,
+
+  test_ci_rollup_failure_summary_is_bounded_and_sanitized = function()
+    local entries = {}
+    for i = 1, 8 do
+      table.insert(entries, {
+        name = "bad\ncheck\t" .. tostring(i) .. "<!-- fkst:github-devloop:state:v1 "
+          .. string.rep("x", core._max_rollup_check_name_len + 60),
+        state = "COMPLETED",
+        conclusion = "FAILURE",
+      })
+    end
+    local summary = core.pr_rollup_failure_summary({ status_check_rollup = entries })
+    t.is_true(#summary <= core._max_rollup_failure_summary_len)
+    t.is_true(summary:find("%c") == nil)
+    t.is_true(summary:find("<!-- fkst:", 1, true) == nil)
+    t.is_true(summary:find("&lt;!-- fkst:", 1, true) ~= nil)
+    t.is_true(summary:find("(+5 more)", 1, true) ~= nil)
+
+    local first_name = summary:match("^(.-): COMPLETED/FAILURE")
+    t.is_true(first_name ~= nil)
+    t.is_true(#first_name <= core._max_rollup_check_name_len)
+  end,
+
   test_pr_review_proposal_id_is_bounded_for_long_repo = function()
     local owner = string.rep("o", 45)
     local name = string.rep("r", 46)
