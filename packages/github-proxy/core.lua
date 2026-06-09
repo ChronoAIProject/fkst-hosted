@@ -786,6 +786,16 @@ function M.gh_issue_view_labels_cmd(repo, issue_number)
     .. " --json labels"
 end
 
+function M.gh_label_list_cmd(repo)
+  return "gh label list --repo " .. shell_single_quote(repo) .. " --limit 1000 --json name"
+end
+
+function M.gh_label_create_cmd(repo, label)
+  return "gh label create " .. shell_single_quote(label)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --color 'ededed'"
+end
+
 function M.parse_issue_labels(gh_json_stdout)
   local decoded = json.decode(gh_json_stdout or "{}")
   local labels = {}
@@ -797,6 +807,59 @@ function M.parse_issue_labels(gh_json_stdout)
     end
   end
   return labels
+end
+
+function M.parse_repo_labels(gh_json_stdout)
+  local decoded = json.decode(gh_json_stdout or "[]")
+  local labels = {}
+  for _, label in ipairs(decoded or {}) do
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(labels, tostring(label.name))
+    elseif type(label) == "string" then
+      table.insert(labels, label)
+    end
+  end
+  return labels
+end
+
+local function label_set(labels)
+  local set = {}
+  for _, label in ipairs(labels or {}) do
+    set[tostring(label)] = true
+  end
+  return set
+end
+
+local function normalized_unique_labels(labels)
+  local unique = {}
+  local seen = {}
+  for _, label in ipairs(labels or {}) do
+    local text = tostring(label)
+    if text ~= "" and not seen[text] then
+      seen[text] = true
+      table.insert(unique, text)
+    end
+  end
+  return unique
+end
+
+function M.is_gh_label_already_exists(result)
+  local lower = command_result_stderr(result):lower()
+  return lower:find("already exists", 1, true) ~= nil
+    or lower:find("name already exists", 1, true) ~= nil
+end
+
+function M.ensure_repo_label(repo, label, existing_labels)
+  if existing_labels[label] then
+    return true
+  end
+
+  local result = exec_sync({ cmd = M.gh_label_create_cmd(repo, label), timeout = 30 })
+  if command_result_exit_code(result) ~= 0 and not M.is_gh_label_already_exists(result) then
+    error(M.gh_error_message("gh label create", result))
+  end
+  existing_labels[label] = true
+  return true
 end
 
 function M.gh_issue_comment_cmd(repo, issue_number, body_file)
@@ -871,6 +934,41 @@ function M.gh_issue_edit_labels_cmd(repo, issue_number, add_labels, remove_label
     cmd = cmd .. " --remove-label " .. shell_single_quote(label)
   end
   return cmd
+end
+
+function M.apply_issue_labels(repo, issue_number, add_labels, remove_labels)
+  local add = normalized_unique_labels(add_labels)
+  local remove = normalized_unique_labels(remove_labels)
+  if #add == 0 and #remove == 0 then
+    return false
+  end
+
+  local listed = M.gh_exec(M.gh_label_list_cmd(repo), 30, "gh label list")
+  local existing = label_set(M.parse_repo_labels(listed.stdout))
+
+  for _, label in ipairs(add) do
+    M.ensure_repo_label(repo, label, existing)
+  end
+
+  local safe_remove = {}
+  for _, label in ipairs(remove) do
+    if existing[label] then
+      table.insert(safe_remove, label)
+    else
+      log.info("github-proxy: label remove skipped because repo label is missing: " .. label)
+    end
+  end
+
+  if #add == 0 and #safe_remove == 0 then
+    return false
+  end
+
+  M.gh_exec(
+    M.gh_issue_edit_labels_cmd(repo, issue_number, add, safe_remove),
+    30,
+    "gh issue edit"
+  )
+  return true
 end
 
 return M

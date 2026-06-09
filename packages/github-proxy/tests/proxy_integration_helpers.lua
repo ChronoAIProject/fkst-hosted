@@ -161,7 +161,46 @@ local function mock_comment_write()
   t.mock_command("gh issue comment", { stdout = "", exit_code = 0 })
 end
 
-local function mock_label_write()
+local function label_list_json(labels)
+  local parts = {}
+  for _, label in ipairs(labels or {}) do
+    table.insert(parts, string.format('{"name":"%s"}', json_string(label)))
+  end
+  return "[" .. table.concat(parts, ",") .. "]\n"
+end
+
+local default_repo_labels = {
+  "fkst-dev:enabled",
+  "fkst-dev:thinking",
+  "fkst-dev:ready",
+  "fkst-dev:implementing",
+  "fkst-dev:pr-open",
+  "fkst-dev:reviewing",
+  "fkst-dev:merge-ready",
+  "fkst-dev:fixing",
+  "fkst-dev:blocked",
+  "fkst-dev:blocked-on-dependency",
+  "fkst-dev:impl-failed",
+}
+
+local function mock_repo_label_list(labels)
+  t.mock_command("gh label list", {
+    stdout = label_list_json(labels or default_repo_labels),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_label_create(exit_code, stderr)
+  t.mock_command("gh label create", {
+    stdout = "",
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
+end
+
+local function mock_label_write(labels)
+  mock_repo_label_list(labels)
   t.mock_command("gh issue edit", { stdout = "", exit_code = 0 })
 end
 
@@ -374,6 +413,8 @@ return {
   mock_branch_head = mock_branch_head,
   mock_non_branch_ref_head = mock_non_branch_ref_head,
   mock_comment_write = mock_comment_write,
+  mock_repo_label_list = mock_repo_label_list,
+  mock_label_create = mock_label_create,
   mock_label_write = mock_label_write,
   mock_pr_head_list = mock_pr_head_list,
   mock_pr_head_state = mock_pr_head_state,
