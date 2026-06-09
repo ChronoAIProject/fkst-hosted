@@ -8,6 +8,7 @@ M.spec = {
     "consensus.proposal",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "devloop_ready",
     "devloop_fixing",
     "devloop_merge_ready",
   },
@@ -82,6 +83,17 @@ function pipeline(event)
           })
           core.log_raise("observe_issue", proposal_id, "devloop_merge_ready", merge_payload)
         end
+      end
+      if state.state == "ready" then
+        local ready_payload = core.build_devloop_ready_payload({
+          proposal_id = proposal_id,
+          dedup_key = state.version,
+          source_ref = issue.source_ref,
+        })
+        core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
+          "devloop_ready",
+        })
+        core.log_raise("observe_issue", proposal_id, "devloop_ready", ready_payload)
       end
       if state.state == "fixing" then
         local fact = fixing_fact(current.comments, proposal_id, state.version)

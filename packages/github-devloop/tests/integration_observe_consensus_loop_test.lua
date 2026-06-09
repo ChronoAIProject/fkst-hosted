@@ -124,7 +124,8 @@ return {
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled" } }), opts("observe-stale-payload"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    t.eq(find_raise(result.raises, "devloop_ready").payload.schema, "github-devloop.ready.v1")
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
