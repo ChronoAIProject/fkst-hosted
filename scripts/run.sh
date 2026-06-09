@@ -123,6 +123,7 @@ usage() {
 
 cmd_check() {
   python3 "$ROOT/scripts/check_repo.py"
+  python3 "$ROOT/scripts/check_repo_test.py"
 }
 
 check_test_file_coverage() {
