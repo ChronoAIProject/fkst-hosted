@@ -93,6 +93,18 @@ function M.read_env(name, exec)
   return out.stdout
 end
 
+function M.log_line(level, dept, tag, fields)
+  local parts = {
+    "github-proxy",
+    "dept=" .. tostring(dept or "unknown"),
+    "tag=" .. tostring(tag or "event"),
+  }
+  for _, field in ipairs(fields or {}) do
+    table.insert(parts, tostring(field))
+  end
+  log[level or "info"](table.concat(parts, " "))
+end
+
 local function command_result_stderr(result)
   if type(result) ~= "table" then
     return ""

@@ -30,6 +30,7 @@ local mock_pr_comment_view = h.mock_pr_comment_view
 local mock_pr_comment_write = h.mock_pr_comment_write
 local calls_matching = h.calls_matching
 local count_calls = h.count_calls
+local capture_comment_department_logs = h.capture_comment_department_logs
 local long_dedup = h.long_dedup
 local pr_open_event = h.pr_open_event
 local pr_open_guard_comments = h.pr_open_guard_comments
@@ -230,6 +231,22 @@ return {
         dedup_key = "reply-42",
       },
     }
+
+    local dry_logs, dry_write_requests = capture_comment_department_logs(
+      "departments/github_comment/main.lua",
+      event,
+      ""
+    )
+    t.eq(dry_write_requests, 1)
+    t.eq(dry_logs[1], "github-proxy dept=github_comment tag=OUTBOUND mode=dry-run repo=owner/x issue=42 dedup_key=reply-42 reason=FKST_GITHUB_WRITE!=1")
+
+    local real_logs, real_write_requests = capture_comment_department_logs(
+      "departments/github_comment/main.lua",
+      event,
+      "1"
+    )
+    t.eq(real_write_requests, 1)
+    t.eq(real_logs[1], "github-proxy dept=github_comment tag=OUTBOUND mode=real repo=owner/x issue=42 dedup_key=reply-42")
 
     mock_repo_env()
     mock_write_env("")

@@ -250,6 +250,49 @@ local function count_calls(needle)
   return #calls_matching(needle)
 end
 
+local function package_root()
+  local source = package.searchpath("tests.proxy_integration_helpers", package.path)
+  return source:match("(.+)/tests/proxy_integration_helpers%.lua$")
+end
+
+local function capture_comment_department_logs(department_path, event, write_env)
+  mock_write_env(write_env)
+
+  local captured = {}
+  local old_log = log
+  local old_write_comment_request = core.write_comment_request
+  local write_requests = 0
+
+  log = {
+    info = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    warn = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    error = function(message)
+      table.insert(captured, tostring(message))
+    end,
+  }
+  core.write_comment_request = function(_payload, _target)
+    write_requests = write_requests + 1
+    core.read_env("FKST_GITHUB_WRITE")
+  end
+
+  local ok, err = pcall(function()
+    dofile(package_root() .. "/" .. department_path)
+    pipeline(event)
+  end)
+
+  core.write_comment_request = old_write_comment_request
+  log = old_log
+  if not ok then
+    error(err)
+  end
+
+  return captured, write_requests
+end
+
 local function long_dedup(suffix, total_len)
   local prefix = "github-devloop/issue/owner/x/42/result/"
   return prefix .. string.rep("v", total_len - #prefix - #suffix) .. suffix
@@ -341,6 +384,7 @@ return {
   mock_pr_comment_write = mock_pr_comment_write,
   calls_matching = calls_matching,
   count_calls = count_calls,
+  capture_comment_department_logs = capture_comment_department_logs,
   long_dedup = long_dedup,
   pr_open_event = pr_open_event,
   pr_open_guard_comments = pr_open_guard_comments,

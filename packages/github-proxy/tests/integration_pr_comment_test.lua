@@ -7,6 +7,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_pr_comment_view = h.mock_pr_comment_view
 local mock_pr_comment_write = h.mock_pr_comment_write
 local count_calls = h.count_calls
+local capture_comment_department_logs = h.capture_comment_department_logs
 
 local function event(extra)
   local payload = {
@@ -30,6 +31,28 @@ local function event(extra)
 end
 
 return {
+  test_pr_comment_request_dry_run_logs_structured_outbound = function()
+    local logs, write_requests = capture_comment_department_logs(
+      "departments/github_pr_comment/main.lua",
+      event(),
+      ""
+    )
+
+    t.eq(write_requests, 1)
+    t.eq(logs[1], "github-proxy dept=github_pr_comment tag=OUTBOUND mode=dry-run repo=owner/x pr=7 dedup_key=review-result/comment/owner/x/7/v1 reason=FKST_GITHUB_WRITE!=1")
+  end,
+
+  test_pr_comment_request_real_write_logs_structured_outbound = function()
+    local logs, write_requests = capture_comment_department_logs(
+      "departments/github_pr_comment/main.lua",
+      event(),
+      "1"
+    )
+
+    t.eq(write_requests, 1)
+    t.eq(logs[1], "github-proxy dept=github_pr_comment tag=OUTBOUND mode=real repo=owner/x pr=7 dedup_key=review-result/comment/owner/x/7/v1")
+  end,
+
   test_pr_comment_request_dry_run_does_not_view_or_write = function()
     mock_write_env("")
 
