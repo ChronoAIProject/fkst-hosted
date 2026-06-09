@@ -70,6 +70,17 @@ function M.build_intake_prompt(proposal_id, current)
   })
 end
 
+function M.build_decompose_prompt(decompose, current_issue)
+  local prompt = require("prompts.decompose")
+  return M.render_template(prompt.template, {
+    proposal_id = M.neutralize_untrusted_prompt_text(decompose.proposal_id),
+    pr_source_ref = M.neutralize_untrusted_prompt_text(decompose.source_ref and decompose.source_ref.ref or ""),
+    round = M.neutralize_untrusted_prompt_text(decompose.round),
+    title = M.quote_untrusted_prompt_text(current_issue.title),
+    body = M.quote_untrusted_prompt_text(current_issue.body),
+  })
+end
+
 local function is_intake_action(value)
   return value == "enable" or value == "decline"
 end

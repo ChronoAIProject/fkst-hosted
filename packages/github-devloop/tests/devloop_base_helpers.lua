@@ -242,6 +242,14 @@ local function fix_reconcile(extra)
   return value
 end
 
+local function decompose_event(extra)
+  local value = core.build_devloop_decompose_payload(fix_reconcile())
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
 local function merge_ready(extra)
   local event = review_reached()
   local value = core.build_devloop_merge_ready_payload(
@@ -344,6 +352,14 @@ local function run_fix_reconcile(payload, run_opts)
   end
   return t.run_department("departments/reconcile/main.lua", {
     queue = "devloop_fix_reconcile",
+    payload = payload,
+  }, run_opts)
+end
+
+local function run_decompose(payload, run_opts)
+  mock_pr_origin_from_cached(payload, payload and payload.head_sha or "def456")
+  return t.run_department("departments/decompose/main.lua", {
+    queue = "devloop_decompose",
     payload = payload,
   }, run_opts)
 end
@@ -919,6 +935,7 @@ return {
   review_meta_event = review_meta_event,
   review_reconcile = review_reconcile,
   fix_reconcile = fix_reconcile,
+  decompose_event = decompose_event,
   merge_ready = merge_ready,
   run_observe = run_observe,
   run_result = run_result,
@@ -926,6 +943,7 @@ return {
   run_reconcile = run_reconcile,
   run_review_reconcile = run_review_reconcile,
   run_fix_reconcile = run_fix_reconcile,
+  run_decompose = run_decompose,
   run_implement = run_implement,
   run_open_pr = run_open_pr,
   run_observe_pr = run_observe_pr,

@@ -1,5 +1,7 @@
 local M = {}
 
+require("core.issue_create").install(M)
+
 local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_BOT_LOGIN = true,

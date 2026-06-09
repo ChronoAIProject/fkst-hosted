@@ -98,8 +98,13 @@ return {
     t.eq(over.exit_code, 0)
     t.eq(find_raise(over.raises, "devloop_fixing"), nil)
     local reconcile = find_raise(over.raises, "devloop_fix_reconcile").payload
+    local decompose = find_raise(over.raises, "devloop_decompose").payload
     t.eq(reconcile.issue_version, over_version)
     t.eq(reconcile.round, core.max_fix_rounds())
+    t.eq(decompose.schema, "github-devloop.decompose.v1")
+    t.eq(decompose.proposal_id, reconcile.proposal_id)
+    t.eq(decompose.version, reconcile.issue_version)
+    t.eq(decompose.pr_number, reconcile.pr_number)
   end,
 
   test_fix_reconcile_drop_blocks_reviewing_issue = function()

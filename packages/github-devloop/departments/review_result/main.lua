@@ -9,6 +9,7 @@ M.spec = {
     "github-proxy.github_pr_comment_request",
     "devloop_fixing",
     "devloop_fix_reconcile",
+    "devloop_decompose",
     "devloop_merge_ready",
   },
   fanout = { "consensus.consensus_reached" },
@@ -118,9 +119,11 @@ function pipeline(event)
           pr_number = pr_number,
           source_ref = pr_source_ref,
         }, state.version)
+        local decompose = core.build_devloop_decompose_payload(fix_reconcile)
         local reason = "fix-loop-max-rounds"
         core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(" .. reason .. ")", "review decision=reject")
         core.log_raise("review_result", origin.proposal_id, "devloop_fix_reconcile", fix_reconcile)
+        core.log_raise("review_result", origin.proposal_id, "devloop_decompose", decompose)
         return
       end
       issue_version = core.fix_version_from_review_version(state.version)
