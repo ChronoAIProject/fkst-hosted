@@ -118,6 +118,50 @@ local function has_call(needle)
   return count_calls(needle) > 0
 end
 
+local function package_root()
+  local source = package.searchpath("tests.integration_observability_test", package.path)
+  return source:match("(.+)/tests/integration_observability_test%.lua$")
+end
+
+local function capture_observability_logs(event)
+  local captured = {}
+  local old_log = log
+  log = {
+    info = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    warn = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    error = function(message)
+      table.insert(captured, tostring(message))
+    end,
+  }
+
+  local ok, err = pcall(function()
+    dofile(package_root() .. "/departments/observability/main.lua")
+    pipeline(event or {
+      queue = "devloop_observe_tick",
+      payload = { schema = "github-devloop.observe-tick.v1" },
+    })
+  end)
+
+  log = old_log
+  if not ok then
+    error(err)
+  end
+  return captured
+end
+
+local function summary_log(logs)
+  for _, line in ipairs(logs or {}) do
+    if line:find("tag=OBSERVE_SUMMARY", 1, true) ~= nil then
+      return line
+    end
+  end
+  return nil
+end
+
 local function call_contains_bad_limit()
   for _, call in ipairs(t.command_calls()) do
     if call.rendered:find("observ", 1, true) == nil
@@ -131,6 +175,26 @@ local function call_contains_bad_limit()
 end
 
 return {
+  test_summary_logs_all_known_states_with_zero_defaults = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "ready", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
+    })
+
+    local summary = summary_log(capture_observability_logs())
+
+    t.is_true(summary ~= nil)
+    t.is_true(summary:find("total=1", 1, true) ~= nil)
+    for _, state in ipairs(core._state_order) do
+      local expected = state == "ready" and 1 or 0
+      t.is_true(summary:find(state .. "=" .. tostring(expected), 1, true) ~= nil)
+    end
+    t.is_true(summary:find("unmanaged=", 1, true) == nil)
+  end,
+
   test_logs_issue_phase_state_from_trusted_marker_and_ignores_forged_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     mock_env()

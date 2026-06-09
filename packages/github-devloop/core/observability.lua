@@ -151,9 +151,7 @@ local function log_summary(counts, total)
     "total=" .. tostring(total or 0),
   }
   for _, state in ipairs(M._state_order) do
-    if counts[state] ~= nil then
-      table.insert(fields, state .. "=" .. tostring(counts[state]))
-    end
+    table.insert(fields, state .. "=" .. tostring(counts[state] or 0))
   end
   if counts.unmanaged ~= nil then
     table.insert(fields, "unmanaged=" .. tostring(counts.unmanaged))
