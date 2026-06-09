@@ -61,9 +61,6 @@ end
 function M.build_intake_prompt(proposal_id, current)
   local prompt = require("prompts.intake")
   local comments = table.concat(M.comment_bodies(current.comments), "\n\n--- comment ---\n\n")
-  if #comments > M._max_comments_len then
-    comments = comments:sub(1, M._max_comments_len)
-  end
 
   return M.render_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(proposal_id),

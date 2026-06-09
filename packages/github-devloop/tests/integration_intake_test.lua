@@ -185,8 +185,10 @@ return {
   test_judge_negative_and_malformed_codex_write_comment_only = function()
     local payload = candidate()
     mock_bot_env()
-    mock_intake_judge_view({}, {})
-    mock_intake_codex("⟦FKST:INTAKE⟧ decline\n⟦FKST:REASON⟧ Needs human confirmation.")
+    mock_intake_judge_view({}, {}, {
+      body = "Rotate the production deploy credentials after confirming with the on-call engineer.",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ decline\n⟦FKST:REASON⟧ Requires production credentials and human confirmation.")
 
     local negative = run_judge(payload, opts("intake-negative"))
     t.eq(negative.exit_code, 0)
@@ -202,6 +204,48 @@ return {
     t.eq(#malformed.raises, 1)
     t.is_true(find_raise(malformed.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="decline"', 1, true) ~= nil)
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
+  end,
+
+  test_judge_enables_ambiguous_cross_repo_and_insufficient_detail_tasks = function()
+    local payload = candidate()
+
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Make sync less flaky",
+      body = "The sync behavior is ambiguous and needs investigation to find the right code change.",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Implementation request; downstream consensus can narrow scope.")
+    local ambiguous = run_judge(payload, opts("intake-enable-ambiguous"))
+    t.eq(ambiguous.exit_code, 0)
+    t.eq(#ambiguous.raises, 2)
+    t.is_true(find_raise(ambiguous.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_raise(ambiguous.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Update package wiring across repos",
+      body = "This may span packages and another repository; determine the code change needed.",
+      updated_at = "2026-06-03T01:03:03Z",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Cross-repository uncertainty is not a human gate.")
+    local cross_repo = run_judge(candidate({ updated_at = "2026-06-03T01:03:03Z" }), opts("intake-enable-cross-repo"))
+    t.eq(cross_repo.exit_code, 0)
+    t.eq(#cross_repo.raises, 2)
+    t.is_true(find_raise(cross_repo.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_raise(cross_repo.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Fix the dashboard bug",
+      body = "It fails sometimes; there are not enough acceptance details yet.",
+      updated_at = "2026-06-03T01:04:03Z",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Insufficient detail should converge downstream.")
+    local insufficient = run_judge(candidate({ updated_at = "2026-06-03T01:04:03Z" }), opts("intake-enable-insufficient"))
+    t.eq(insufficient.exit_code, 0)
+    t.eq(#insufficient.raises, 2)
+    t.is_true(find_raise(insufficient.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_raise(insufficient.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
   end,
 
   test_judge_idempotent_skips_trusted_marker = function()

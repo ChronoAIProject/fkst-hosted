@@ -112,7 +112,16 @@ function M.parse_issue_view_intake_scan(stdout)
 end
 
 function M.parse_issue_view_intake_judge(stdout)
-  return M.parse_issue_view_loop(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_result(stdout)
+  return {
+    title = tostring(decoded.title or ""),
+    body = tostring(decoded.body or ""),
+    updated_at = decoded.updatedAt or decoded.updated_at,
+    state = decoded.state,
+    labels = result.labels,
+    comments = result.comments,
+  }
 end
 
 function M.parse_issue_view_meta(stdout)
