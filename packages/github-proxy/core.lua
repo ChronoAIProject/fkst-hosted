@@ -131,21 +131,49 @@ function M.is_gh_rate_limited(result)
   return false
 end
 
-function M.gh_error_message(context, result)
-  local prefix = "github-proxy: " .. tostring(context)
+function M.gh_error_class(result)
   if M.is_gh_rate_limited(result) then
-    return prefix .. " failed: gh-rate-limited: " .. command_result_stderr(result)
+    return "gh-rate-limited"
   end
-  return prefix .. " failed: gh-command-failed: " .. command_result_stderr(result)
+  return "gh-command-failed"
 end
 
-function M.gh_exec(cmd, timeout, context, exec)
+function M.is_gh_rate_limit_error(err)
+  if type(err) == "table" then
+    return err.class == "gh-rate-limited"
+  end
+  return tostring(err):find("gh-rate-limited", 1, true) ~= nil
+end
+
+function M.gh_error(context, result)
+  local class = M.gh_error_class(result)
+  local prefix = "github-proxy: " .. tostring(context)
+  return {
+    class = class,
+    retryable = class == "gh-rate-limited",
+    message = prefix .. " failed: " .. class .. ": " .. command_result_stderr(result),
+  }
+end
+
+function M.gh_error_message(context, result)
+  return M.gh_error(context, result).message
+end
+
+function M.gh_exec_result(cmd, timeout, context, exec)
   local run = exec or exec_sync
   local result = run({ cmd = cmd, timeout = timeout or 30 })
   if command_result_exit_code(result) ~= 0 then
-    error(M.gh_error_message(context or "gh command", result))
+    return false, M.gh_error(context or "gh command", result)
   end
-  return result
+  return true, result
+end
+
+function M.gh_exec(cmd, timeout, context, exec)
+  local ok, result_or_error = M.gh_exec_result(cmd, timeout, context, exec)
+  if not ok then
+    error(result_or_error.message)
+  end
+  return result_or_error
 end
 
 function M.configure_trusted_bot_login(login)

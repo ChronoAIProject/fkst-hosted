@@ -172,7 +172,21 @@ return {
     t.eq(core.is_gh_rate_limited(api_limit), true)
     t.eq(core.is_gh_rate_limited(too_quick), true)
     t.eq(core.is_gh_rate_limited(too_many), true)
+    t.eq(core.gh_error_class(api_limit), "gh-rate-limited")
+    t.eq(core.gh_error("gh issue list", api_limit).class, "gh-rate-limited")
+    t.eq(core.gh_error("gh issue list", api_limit).retryable, true)
     t.is_true(core.gh_error_message("gh issue list", api_limit):find("gh-rate-limited", 1, true) ~= nil)
+  end,
+
+  test_gh_exec_result_returns_structured_failure = function()
+    local ok, err = core.gh_exec_result("gh issue list", 30, "gh issue list", function(_spec)
+      return { stdout = "", stderr = "GraphQL: field does not exist", exit_code = 1 }
+    end)
+
+    t.eq(ok, false)
+    t.eq(err.class, "gh-command-failed")
+    t.eq(err.retryable, false)
+    t.is_true(err.message:find("gh-command-failed", 1, true) ~= nil)
   end,
 
   test_gh_exec_fails_closed_for_non_rate_limit_failure = function()
@@ -185,6 +199,7 @@ return {
     t.eq(ok, false)
     t.is_true(tostring(err):find("gh-command-failed", 1, true) ~= nil)
     t.eq(tostring(err):find("gh-rate-limited", 1, true), nil)
+    t.eq(core.is_gh_rate_limit_error(err), false)
   end,
 
   test_gh_exec_raises_retryable_rate_limit_class = function()
@@ -196,6 +211,7 @@ return {
 
     t.eq(ok, false)
     t.is_true(tostring(err):find("gh-rate-limited", 1, true) ~= nil)
+    t.eq(core.is_gh_rate_limit_error(err), true)
   end,
 
   test_gh_commands_are_quoted = function()
