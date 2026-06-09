@@ -71,6 +71,12 @@ function pipeline(event)
     return
   end
 
+  local gate = core.dependency_gate(repo, issue_number)
+  if not gate.ok then
+    core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "hold-dependency-backstop", gate.reason)
+    return
+  end
+
   local lock_key = core.implement_lock_key(ready.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "no transition lock key")

@@ -560,6 +560,34 @@ function M.has_implementing_marker(comments, proposal_id, dedup_key)
   return false
 end
 
+local function dependency_unmet_field(unmet_numbers)
+  local parts = {}
+  for _, number in ipairs(unmet_numbers or {}) do
+    if M._is_positive_pr_number(number) then
+      local next_value = tostring(math.floor(tonumber(number)))
+      local candidate = #parts == 0 and next_value or (table.concat(parts, ",") .. "," .. next_value)
+      if #candidate > 200 then
+        break
+      end
+      table.insert(parts, next_value)
+    end
+  end
+  return table.concat(parts, ",")
+end
+
+function M.dependency_wait_marker(proposal_id, version, unmet_numbers)
+  return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" unmet="' .. dependency_unmet_field(unmet_numbers)
+    .. '" -->'
+end
+
+function M.dependency_cycle_marker(proposal_id, version)
+  return '<!-- fkst:github-devloop:dependency-cycle:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" -->'
+end
+
 function M.is_safe_branch(branch)
   return M._is_git_ref_safe(branch)
 end

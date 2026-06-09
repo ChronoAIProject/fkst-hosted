@@ -65,15 +65,52 @@ function pipeline(event)
 
     local comment_request = core.build_result_comment_request(repo, issue_number, reached)
     local label_request = core.build_result_label_request(repo, issue_number, reached)
+    local gate = core.dependency_gate(repo, issue_number)
+    local dependency_comment_request = nil
+    local dependency_label_request = nil
+    if not gate.ok then
+      local version = tostring(reached.dedup_key)
+      local marker = gate.kind == "cycle"
+        and core.dependency_cycle_marker(reached.proposal_id, version)
+        or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet)
+      dependency_comment_request = {
+        schema = "github-proxy.v1",
+        repo = repo,
+        issue_number = issue_number,
+        body = "github-devloop dependency hold: " .. tostring(gate.kind) .. "\n\nReason: " .. tostring(gate.reason) .. "\n\n" .. marker,
+        dedup_key = core._dedup_key({ "dependency", "comment", tostring(reached.proposal_id), version, tostring(gate.kind) }),
+        source_ref = core.normalize_source_ref(reached.source_ref),
+      }
+      dependency_label_request = core.build_label_request(
+        repo,
+        issue_number,
+        { core._blocked_on_dependency_label },
+        {},
+        core._dedup_key({ "dependency", "label", "hold", tostring(reached.proposal_id), version, tostring(gate.kind) }),
+        reached.source_ref
+      )
+    end
+    table.insert(label_request.remove_labels, core._blocked_on_dependency_label)
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {
       "github-proxy.github_issue_comment_request",
       "github-proxy.github_issue_label_request",
     }
-    table.insert(raised, "devloop_ready")
+    if gate.ok then
+      table.insert(raised, "devloop_ready")
+    else
+      table.insert(raised, "github-proxy.github_issue_comment_request")
+      table.insert(raised, "github-proxy.github_issue_label_request")
+    end
     core.log_apply("consensus_result", reached.proposal_id, to_state, reached.dedup_key, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    if not gate.ok then
+      core.log_cas_decision("consensus_result", reached.proposal_id, state, "ready", "implementing", "hold-dependency", gate.reason)
+      core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_comment_request)
+      core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", dependency_label_request)
+      return
+    end
     core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(reached))
   end)
 end

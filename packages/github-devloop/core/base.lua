@@ -41,6 +41,7 @@ local fixing_label = "fkst-dev:fixing"
 local review_meta_label = "fkst-dev:review-meta"
 local impl_failed_label = "fkst-dev:impl-failed"
 local blocked_label = "fkst-dev:blocked"
+local blocked_on_dependency_label = "fkst-dev:blocked-on-dependency"
 
 local state_labels = {
   [thinking_label] = true,
@@ -780,6 +781,7 @@ M._fixing_label = fixing_label
 M._review_meta_label = review_meta_label
 M._impl_failed_label = impl_failed_label
 M._blocked_label = blocked_label
+M._blocked_on_dependency_label = blocked_on_dependency_label
 M._state_labels = state_labels
 M._label_by_state = label_by_state
 M._state_graph = state_graph

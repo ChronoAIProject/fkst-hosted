@@ -14,6 +14,33 @@ for key, value in pairs(worktree) do
 end
 
 local base_mock_bot_env = helpers.mock_bot_env
+local base_run_observe = helpers.run_observe
+local base_run_result = helpers.run_result
+local base_run_implement = helpers.run_implement
+
+local function mock_empty_dependencies()
+  helpers.t.mock_command("gh api graphql", {
+    stdout = '{"data":{"repository":{"issue":{"blockedBy":{"nodes":[]}}}}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+helpers.run_observe = function(...)
+  mock_empty_dependencies()
+  return base_run_observe(...)
+end
+
+helpers.run_result = function(...)
+  mock_empty_dependencies()
+  return base_run_result(...)
+end
+
+helpers.run_implement = function(...)
+  mock_empty_dependencies()
+  return base_run_implement(...)
+end
+
 helpers.mock_bot_env = function(...)
   if type(helpers.reset_pr_helper_state) == "function" then
     helpers.reset_pr_helper_state()
