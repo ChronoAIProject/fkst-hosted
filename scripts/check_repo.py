@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -42,6 +43,17 @@ TEST_REQUIRE_RE = re.compile(
     r"|(?P<long_literal>\[(?P<long_eq>=*)\[tests\.(?P<long>[A-Za-z0-9_.-]+)\](?P=long_eq)\]))"
     r"\s*(?P<close_parens>\)*)"
 )
+GRAPHQL_FIRST_CONNECTION_RE = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*\s*"
+    r"\([^(){}]*\bfirst\s*:\s*\d+\b[^(){}]*\)\s*\{",
+    re.DOTALL,
+)
+
+
+@dataclass(frozen=True)
+class LuaStringLiteral:
+    line: int
+    content: str
 
 
 def repo_root() -> Path:
@@ -164,6 +176,134 @@ def strip_lua_comments_and_strings(text: str) -> str:
 
         cursor += 1
     return "".join(chars)
+
+
+def lua_string_literals(text: str) -> list[LuaStringLiteral]:
+    literals: list[LuaStringLiteral] = []
+    cursor = 0
+    while cursor < len(text):
+        if text.startswith("--", cursor):
+            bracket = long_bracket_at(text, cursor + 2)
+            if bracket is not None:
+                opener_len, closer = bracket
+                cursor = end_of_long_bracket(text, cursor + 2 + opener_len, closer)
+            else:
+                newline = text.find("\n", cursor)
+                cursor = len(text) if newline == -1 else newline
+            continue
+
+        char = text[cursor]
+        if char in ("'", '"'):
+            end = end_of_quoted_string(text, cursor)
+            content_end = end - 1 if end <= len(text) and text[end - 1] == char else end
+            literals.append(
+                LuaStringLiteral(
+                    line=text.count("\n", 0, cursor) + 1,
+                    content=text[cursor + 1 : content_end],
+                )
+            )
+            cursor = end
+            continue
+
+        if char == "[":
+            bracket = long_bracket_at(text, cursor)
+            if bracket is not None:
+                opener_len, closer = bracket
+                body_start = cursor + opener_len
+                close_start = text.find(closer, body_start)
+                body_end = len(text) if close_start == -1 else close_start
+                literals.append(
+                    LuaStringLiteral(
+                        line=text.count("\n", 0, cursor) + 1,
+                        content=text[body_start:body_end],
+                    )
+                )
+                cursor = len(text) if close_start == -1 else close_start + len(closer)
+                continue
+
+        cursor += 1
+    return literals
+
+
+def matching_graphql_brace(text: str, open_index: int) -> int | None:
+    depth = 0
+    for index in range(open_index, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def graphql_top_level_text(text: str) -> str:
+    chars: list[str] = []
+    depth = 0
+    for char in text:
+        if char == "{":
+            depth += 1
+            chars.append(" ")
+        elif char == "}":
+            depth = max(0, depth - 1)
+            chars.append(" ")
+        elif depth == 0:
+            chars.append(char)
+        elif char == "\n":
+            chars.append("\n")
+        else:
+            chars.append(" ")
+    return "".join(chars)
+
+
+def graphql_depth_at(text: str, index: int) -> int:
+    depth = 0
+    for char in text[:index]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth = max(0, depth - 1)
+    return depth
+
+
+def graphql_top_level_field_body(text: str, field_name: str) -> str | None:
+    field_re = re.compile(r"\b" + re.escape(field_name) + r"\b\s*\{")
+    for match in field_re.finditer(text):
+        if graphql_depth_at(text, match.start()) != 0:
+            continue
+        open_index = match.end() - 1
+        close_index = matching_graphql_brace(text, open_index)
+        if close_index is not None:
+            return text[open_index + 1 : close_index]
+    return None
+
+
+def graphql_connection_has_truncation_guard(selection_body: str) -> bool:
+    top_level = graphql_top_level_text(selection_body)
+    if re.search(r"\btotalCount\b", top_level):
+        return True
+
+    page_info_body = graphql_top_level_field_body(selection_body, "pageInfo")
+    if page_info_body is None:
+        return False
+    return re.search(r"\bhasNextPage\b", graphql_top_level_text(page_info_body)) is not None
+
+
+def unguarded_graphql_first_connection_lines(text: str) -> list[int]:
+    lines: list[int] = []
+    for literal in lua_string_literals(text):
+        if "first" not in literal.content or "{" not in literal.content:
+            continue
+        for match in GRAPHQL_FIRST_CONNECTION_RE.finditer(literal.content):
+            open_index = match.end() - 1
+            close_index = matching_graphql_brace(literal.content, open_index)
+            if close_index is None:
+                continue
+            selection_body = literal.content[match.end() : close_index]
+            if not graphql_connection_has_truncation_guard(selection_body):
+                lines.append(literal.line + literal.content.count("\n", 0, match.start()))
+    return lines
 
 
 def check_line_limit(root: Path, violations: list[str]) -> None:
@@ -428,6 +568,21 @@ def check_helper_reachability(root: Path, violations: list[str]) -> None:
                 )
 
 
+def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
+    packages = root / "packages"
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file():
+            continue
+        for line in unguarded_graphql_first_connection_lines(read_text(path)):
+            add(
+                warnings,
+                "G4",
+                f"{rel(root, path)}:{line} GraphQL first:N connection lacks a truncation guard; possible fail-open; explicitly detect truncation or fail closed",
+            )
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -436,6 +591,7 @@ def main() -> int:
     check_line_limit(root, violations)
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
+    check_graphql_connection_guards(root, warnings)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
