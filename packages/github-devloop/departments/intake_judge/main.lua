@@ -59,7 +59,6 @@ function pipeline(event)
     core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
     local result = spawn_codex_sync({
       prompt = core.build_intake_prompt(candidate.proposal_id, current),
-      stall_window = M.spec.stall_window,
     })
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"

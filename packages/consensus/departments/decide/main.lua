@@ -11,14 +11,12 @@ M.spec = {
 local function spawn_angle(proposal, angle)
   return spawn_codex({
     prompt = core.build_angle_prompt(proposal, angle),
-    stall_window = M.spec.stall_window,
   })
 end
 
 local function spawn_meta_judge(proposal, angle_results)
   return spawn_codex_sync({
     prompt = core.build_meta_judge_prompt(proposal, angle_results),
-    stall_window = M.spec.stall_window,
   })
 end
 

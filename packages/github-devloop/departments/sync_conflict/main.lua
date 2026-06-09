@@ -205,7 +205,6 @@ function pipeline(event)
       local result = spawn_codex_sync({
         prompt = core.build_sync_conflict_prompt(active_conflict),
         worktree = worktree,
-        stall_window = M.spec.stall_window,
       })
       if type(result) ~= "table" or result.exit_code ~= 0 then
         local stderr = type(result) == "table" and result.stderr or "nil result"

@@ -66,7 +66,6 @@ function pipeline(event)
     core.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
     local result = spawn_codex_sync({
       prompt = core.build_review_meta_prompt(review_meta, current_issue),
-      stall_window = M.spec.stall_window,
     })
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
