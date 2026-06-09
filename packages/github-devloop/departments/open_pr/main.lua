@@ -45,8 +45,8 @@ function pipeline(event)
 
     local transition = core.transition_status(state, { "implementing" }, "pr-open")
     if transition == "pending" then
-      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", core.cas_outcome(state, transition, state.version), "implementing state marker not yet visible")
-      error("github-devloop: implementing state marker not yet visible for open_pr; retrying")
+      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-idempotent(not-at-implementing)", "not implementing yet; wide fanout event is not for open_pr")
+      return
     end
     if transition == "stale" then
       core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", core.cas_outcome(state, transition, state.version), "implementing state cannot advance to PR")
