@@ -41,10 +41,6 @@ function M.max_fix_rounds()
   return 12
 end
 
-function M.fix_stall_rounds()
-  return 3
-end
-
 function M.max_converge_rounds()
   return 8
 end

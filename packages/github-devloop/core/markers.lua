@@ -114,20 +114,7 @@ function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version, bas
     .. '" -->'
 end
 
-local max_digest_len = 64
 local max_round = 100000
-
-local function normalize_framing(value)
-  return tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
-local function attr(marker, name)
-  return marker:match(name .. '="([^"]*)"')
-end
-
-local function is_digest(value)
-  return type(value) == "string" and value ~= "" and #value <= max_digest_len and value:find("%c") == nil
-end
 
 local function valid_round(value)
   local n = tonumber(value)
@@ -137,37 +124,25 @@ local function valid_round(value)
   return n
 end
 
-function M.review_reject_framing_digest(framing)
-  local normalized = normalize_framing(framing)
-  if #normalized > M._max_framing_len then
-    normalized = normalized:sub(1, M._max_framing_len)
-  end
-  return "rf-" .. #normalized .. "-" .. M._decimal_checksum(normalized)
-end
-
-function M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key, framing_digest, fix_round)
+function M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key, fix_round)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid review decision")
   end
-  local framing_field = ""
+  local fix_round_field = ""
   if decision == "reject" then
-    if not is_digest(framing_digest) then
-      error("github-devloop: invalid review reject framing digest")
-    end
-    framing_field = '" framing_digest="' .. tostring(framing_digest)
     if fix_round ~= nil then
       local n = valid_round(fix_round)
       if n == nil then
         error("github-devloop: invalid review reject fix round")
       end
-      framing_field = framing_field .. '" fix_round="' .. tostring(n)
+      fix_round_field = '" fix_round="' .. tostring(n)
     end
   end
   return '<!-- fkst:github-devloop:review-result:v1 proposal="' .. tostring(review_proposal_id)
     .. '" issue_proposal="' .. tostring(issue_proposal_id)
     .. '" decision="' .. tostring(decision)
     .. '" dedup="' .. tostring(dedup_key)
-    .. framing_field
+    .. fix_round_field
     .. '" -->'
 end
 
@@ -283,79 +258,6 @@ function M.review_reject_fact(comments, issue_proposal_id, issue_version)
     end
   end
   return nil
-end
-
-function M.recent_review_reject_framing_digests(comments, issue_proposal_id, limit)
-  local cap = tonumber(limit) or M.fix_stall_rounds()
-  if cap <= 0 or type(comments) ~= "table" then
-    return {}
-  end
-
-  local facts = {}
-  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local review_proposal = attr(marker, "proposal")
-      local marker_issue = attr(marker, "issue_proposal")
-      local decision = attr(marker, "decision")
-      local framing_digest = attr(marker, "framing_digest")
-      local _, _, review_version = M.parse_pr_review_proposal_id(review_proposal)
-      local fix_round = valid_round(attr(marker, "fix_round"))
-      if fix_round == nil then
-        fix_round = M.version_fix_round(review_version)
-      end
-      if marker_issue == tostring(issue_proposal_id)
-        and decision == "reject"
-        and is_digest(framing_digest)
-        and review_version ~= nil then
-        table.insert(facts, {
-          round = fix_round,
-          digest = framing_digest,
-          comment_created_at = M._comment_created_at(comment) or "",
-        })
-      end
-    end
-  end
-
-  table.sort(facts, function(a, b)
-    if a.round == b.round then
-      return tostring(a.comment_created_at) > tostring(b.comment_created_at)
-    end
-    return a.round > b.round
-  end)
-
-  local digests = {}
-  for _, fact in ipairs(facts) do
-    if #digests >= cap then
-      break
-    end
-    table.insert(digests, fact.digest)
-  end
-  return digests
-end
-
-function M.is_fix_framing_true_stall(comments, issue_proposal_id, current_framing)
-  local expected_count = M.fix_stall_rounds()
-  local digests = M.recent_review_reject_framing_digests(
-    comments,
-    issue_proposal_id,
-    expected_count - 1
-  )
-  table.insert(digests, 1, M.review_reject_framing_digest(current_framing))
-  if #digests < expected_count then
-    return false
-  end
-
-  local current = digests[1]
-  if current == nil or current == "" then
-    return false
-  end
-  for i = 2, expected_count do
-    if digests[i] ~= current then
-      return false
-    end
-  end
-  return true
 end
 
 function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)

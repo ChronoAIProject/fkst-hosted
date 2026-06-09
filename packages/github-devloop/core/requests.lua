@@ -637,13 +637,11 @@ end
 function M.build_review_result_comment_request(repo, issue_number, issue_proposal_id, issue_version, reached, source_ref)
   local to_state = reached.decision == "approve" and "merge-ready" or "fixing"
   local state_marker = M.state_marker(issue_proposal_id, to_state, issue_version)
-  local framing_digest = nil
   local fix_round = nil
   if reached.decision == "reject" then
-    framing_digest = M.review_reject_framing_digest(reached.framing)
     fix_round = M.version_fix_round(issue_version)
   end
-  local marker = M.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, framing_digest, fix_round)
+  local marker = M.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round)
   local merge_marker = ""
   if reached.decision == "approve" then
     local _, pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)

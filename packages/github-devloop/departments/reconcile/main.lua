@@ -222,7 +222,7 @@ local function pipeline_fix(event)
     end
 
     local action = "drop"
-    local reason = "fix-loop-true-stall-after-" .. tostring(reconcile.round) .. "-rounds"
+    local reason = "fix-loop-max-rounds-after-" .. tostring(reconcile.round) .. "-rounds"
     local comment_request = core.build_fix_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
     local label_request = issue_number ~= nil and core.build_fix_reconcile_label_request(repo, issue_number, reconcile) or nil
     emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
