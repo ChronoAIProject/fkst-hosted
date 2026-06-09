@@ -56,12 +56,11 @@ function pipeline(event)
   local bot_login = core.assert_trusted_bot_configured()
 
   with_lock(lock_name(repo, payload.issue_number), function()
-    local view = exec_sync({ cmd = core.gh_issue_view_comments_cmd(repo, payload.issue_number), timeout = 30 })
-    if view.exit_code ~= 0 then
-      -- A re-derive command failure must NOT silent-ack a reliable comment request; error so
-      -- delivery retries (otherwise a result marker comment could be permanently lost).
-      error("github-proxy: gh issue view failed: " .. tostring(view.stderr))
-    end
+    local view = core.gh_exec(
+      core.gh_issue_view_comments_cmd(repo, payload.issue_number),
+      30,
+      "gh issue view"
+    )
     if core.has_trusted_marker(core.parse_issue_comments(view.stdout), payload.dedup_key, bot_login) then
       log.info("github-proxy: comment marker already present")
       return
@@ -70,10 +69,11 @@ function pipeline(event)
     local body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
     local path = temp_body_file(repo, payload.issue_number)
     file.write(path, body)
-    local comment = exec_sync({ cmd = core.gh_issue_comment_cmd(repo, payload.issue_number, path), timeout = 30 })
-    if comment.exit_code ~= 0 then
-      error("github-proxy: gh issue comment failed: " .. tostring(comment.stderr))
-    end
+    core.gh_exec(
+      core.gh_issue_comment_cmd(repo, payload.issue_number, path),
+      30,
+      "gh issue comment"
+    )
   end)
 end
 

@@ -93,6 +93,89 @@ function M.read_env(name, exec)
   return out.stdout
 end
 
+local function command_result_stderr(result)
+  if type(result) ~= "table" then
+    return ""
+  end
+  return tostring(result.stderr or "")
+end
+
+local function command_result_exit_code(result)
+  if type(result) ~= "table" then
+    return nil
+  end
+  return tonumber(result.exit_code)
+end
+
+function M.is_gh_rate_limited(result)
+  local stderr = command_result_stderr(result)
+  local lower = stderr:lower()
+  if lower:find("api rate limit exceeded", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("was submitted too quickly", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("secondary rate limit", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("abuse", 1, true) ~= nil and lower:find("rate", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("http 429", 1, true) ~= nil or lower:find("status 429", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("429 too many requests", 1, true) ~= nil or lower:find("too many requests", 1, true) ~= nil then
+    return true
+  end
+  return false
+end
+
+function M.gh_error_class(result)
+  if M.is_gh_rate_limited(result) then
+    return "gh-rate-limited"
+  end
+  return "gh-command-failed"
+end
+
+function M.is_gh_rate_limit_error(err)
+  if type(err) == "table" then
+    return err.class == "gh-rate-limited"
+  end
+  return tostring(err):find("gh-rate-limited", 1, true) ~= nil
+end
+
+function M.gh_error(context, result)
+  local class = M.gh_error_class(result)
+  local prefix = "github-proxy: " .. tostring(context)
+  return {
+    class = class,
+    retryable = class == "gh-rate-limited",
+    message = prefix .. " failed: " .. class .. ": " .. command_result_stderr(result),
+  }
+end
+
+function M.gh_error_message(context, result)
+  return M.gh_error(context, result).message
+end
+
+function M.gh_exec_result(cmd, timeout, context, exec)
+  local run = exec or exec_sync
+  local result = run({ cmd = cmd, timeout = timeout or 30 })
+  if command_result_exit_code(result) ~= 0 then
+    return false, M.gh_error(context or "gh command", result)
+  end
+  return true, result
+end
+
+function M.gh_exec(cmd, timeout, context, exec)
+  local ok, result_or_error = M.gh_exec_result(cmd, timeout, context, exec)
+  if not ok then
+    error(result_or_error.message)
+  end
+  return result_or_error
+end
+
 function M.configure_trusted_bot_login(login)
   if login == nil or tostring(login) == "" then
     trusted_bot_login = nil
