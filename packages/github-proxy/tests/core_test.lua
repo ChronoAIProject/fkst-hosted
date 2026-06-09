@@ -154,6 +154,50 @@ return {
     t.eq(core.parse_issue_list("[]")[1], nil)
   end,
 
+  test_gh_exec_returns_success_result = function()
+    local result = core.gh_exec("gh issue list", 30, "gh issue list", function(spec)
+      t.eq(spec.cmd, "gh issue list")
+      t.eq(spec.timeout, 30)
+      return { stdout = "[]\n", stderr = "", exit_code = 0 }
+    end)
+
+    t.eq(result.stdout, "[]\n")
+  end,
+
+  test_gh_error_classifies_rate_limit_and_abuse = function()
+    local api_limit = { stdout = "", stderr = "API rate limit exceeded", exit_code = 1 }
+    local too_quick = { stdout = "", stderr = "You have triggered an abuse detection mechanism. The request was submitted too quickly.", exit_code = 1 }
+    local too_many = { stdout = "", stderr = "HTTP 429: too many requests", exit_code = 1 }
+
+    t.eq(core.is_gh_rate_limited(api_limit), true)
+    t.eq(core.is_gh_rate_limited(too_quick), true)
+    t.eq(core.is_gh_rate_limited(too_many), true)
+    t.is_true(core.gh_error_message("gh issue list", api_limit):find("gh-rate-limited", 1, true) ~= nil)
+  end,
+
+  test_gh_exec_fails_closed_for_non_rate_limit_failure = function()
+    local ok, err = pcall(function()
+      core.gh_exec("gh issue list", 30, "gh issue list", function(_spec)
+        return { stdout = "", stderr = "GraphQL: field does not exist", exit_code = 1 }
+      end)
+    end)
+
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh-command-failed", 1, true) ~= nil)
+    t.eq(tostring(err):find("gh-rate-limited", 1, true), nil)
+  end,
+
+  test_gh_exec_raises_retryable_rate_limit_class = function()
+    local ok, err = pcall(function()
+      core.gh_exec("gh issue list", 30, "gh issue list", function(_spec)
+        return { stdout = "", stderr = "API rate limit exceeded", exit_code = 1 }
+      end)
+    end)
+
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh-rate-limited", 1, true) ~= nil)
+  end,
+
   test_gh_commands_are_quoted = function()
     t.eq(
       core.gh_issue_list_cmd("owner/repo"),

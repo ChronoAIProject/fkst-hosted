@@ -93,6 +93,61 @@ function M.read_env(name, exec)
   return out.stdout
 end
 
+local function command_result_stderr(result)
+  if type(result) ~= "table" then
+    return ""
+  end
+  return tostring(result.stderr or "")
+end
+
+local function command_result_exit_code(result)
+  if type(result) ~= "table" then
+    return nil
+  end
+  return tonumber(result.exit_code)
+end
+
+function M.is_gh_rate_limited(result)
+  local stderr = command_result_stderr(result)
+  local lower = stderr:lower()
+  if lower:find("api rate limit exceeded", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("was submitted too quickly", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("secondary rate limit", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("abuse", 1, true) ~= nil and lower:find("rate", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("http 429", 1, true) ~= nil or lower:find("status 429", 1, true) ~= nil then
+    return true
+  end
+  if lower:find("429 too many requests", 1, true) ~= nil or lower:find("too many requests", 1, true) ~= nil then
+    return true
+  end
+  return false
+end
+
+function M.gh_error_message(context, result)
+  local prefix = "github-proxy: " .. tostring(context)
+  if M.is_gh_rate_limited(result) then
+    return prefix .. " failed: gh-rate-limited: " .. command_result_stderr(result)
+  end
+  return prefix .. " failed: gh-command-failed: " .. command_result_stderr(result)
+end
+
+function M.gh_exec(cmd, timeout, context, exec)
+  local run = exec or exec_sync
+  local result = run({ cmd = cmd, timeout = timeout or 30 })
+  if command_result_exit_code(result) ~= 0 then
+    error(M.gh_error_message(context or "gh command", result))
+  end
+  return result
+end
+
 function M.configure_trusted_bot_login(login)
   if login == nil or tostring(login) == "" then
     trusted_bot_login = nil
