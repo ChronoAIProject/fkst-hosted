@@ -20,6 +20,8 @@ local mock_pr_open_guard = h.mock_pr_open_guard
 local mock_branch_head = h.mock_branch_head
 local mock_non_branch_ref_head = h.mock_non_branch_ref_head
 local mock_comment_write = h.mock_comment_write
+local mock_repo_label_list = h.mock_repo_label_list
+local mock_label_create = h.mock_label_create
 local mock_label_write = h.mock_label_write
 local mock_pr_head_list = h.mock_pr_head_list
 local mock_pr_head_state = h.mock_pr_head_state
@@ -580,6 +582,8 @@ return {
     mock_label_write()
     local write = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
     t.eq(write.exit_code, 0)
+    t.eq(count_calls("gh label list"), 1)
+    t.eq(count_calls("gh label create"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local edit_calls = calls_matching("gh issue edit")
     t.is_true(edit_calls[1].rendered:find("--add-label 'fkst-dev:ready'", 1, true) ~= nil)
@@ -589,7 +593,74 @@ return {
     mock_label_write()
     local again = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
     t.eq(again.exit_code, 0)
+    t.eq(count_calls("gh label list"), 2)
+    t.eq(count_calls("gh label create"), 0)
     t.eq(count_calls("gh issue edit"), 2)
+  end,
+
+  test_label_request_creates_missing_repo_label_before_add = function()
+    local event = {
+      queue = "github_issue_label_request",
+      payload = {
+        schema = "github-proxy.label.v1",
+        repo = "owner/x",
+        issue_number = 42,
+        add_labels = { "fkst-dev:fresh" },
+        remove_labels = {},
+        dedup_key = "github-devloop/issue/owner/x/42/fresh-label",
+        source_ref = {
+          kind = "external",
+          ref = "owner/x#issue/42",
+        },
+      },
+    }
+
+    mock_write_env("1")
+    mock_repo_label_list({ "fkst-dev:ready" })
+    mock_label_create()
+    t.mock_command("gh issue edit", { stdout = "", exit_code = 0 })
+    local result = t.run_department("departments/github_issue_label/main.lua", event, opts("label-create-missing", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh label list"), 1)
+    t.eq(count_calls("gh label create"), 1)
+    t.eq(count_calls("gh issue edit"), 1)
+    local create = calls_matching("gh label create")[1]
+    t.is_true(create.rendered:find("'fkst-dev:fresh'", 1, true) ~= nil)
+    t.is_true(create.rendered:find("--repo 'owner/x'", 1, true) ~= nil)
+    local edit = calls_matching("gh issue edit")[1]
+    t.is_true(edit.rendered:find("--add-label 'fkst-dev:fresh'", 1, true) ~= nil)
+  end,
+
+  test_label_request_skips_remove_when_repo_label_is_missing = function()
+    local event = {
+      queue = "github_issue_label_request",
+      payload = {
+        schema = "github-proxy.label.v1",
+        repo = "owner/x",
+        issue_number = 42,
+        add_labels = {},
+        remove_labels = { "fkst-dev:gone" },
+        dedup_key = "github-devloop/issue/owner/x/42/remove-gone-label",
+        source_ref = {
+          kind = "external",
+          ref = "owner/x#issue/42",
+        },
+      },
+    }
+
+    mock_write_env("1")
+    mock_repo_label_list({ "fkst-dev:ready" })
+    local result = t.run_department("departments/github_issue_label/main.lua", event, opts("label-remove-missing", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh label list"), 1)
+    t.eq(count_calls("gh label create"), 0)
+    t.eq(count_calls("gh issue edit"), 0)
   end,
 
   test_long_label_dedup_uses_bounded_lock_key = function()
@@ -680,6 +751,6 @@ return {
     local edit = calls_matching("gh issue edit")[1]
     t.is_true(edit.rendered:find("--add-label 'fkst-dev:blocked'", 1, true) ~= nil)
     t.is_true(edit.rendered:find("--remove-label 'fkst-dev:ready'", 1, true) ~= nil)
-	  end,
+  end,
 
 }

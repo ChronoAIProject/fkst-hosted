@@ -56,11 +56,7 @@ function pipeline(event)
       return
     end
 
-    core.gh_exec(
-      core.gh_issue_edit_labels_cmd(repo, payload.issue_number, add_labels, remove_labels),
-      30,
-      "gh issue edit"
-    )
+    core.apply_issue_labels(repo, payload.issue_number, add_labels, remove_labels)
   end)
 end
 
