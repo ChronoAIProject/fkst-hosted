@@ -17,6 +17,10 @@ Security:
 Proposal ID:
 {{proposal_id}}
 
+## Agreed consensus framing (the scope the proposal was approved under)
+Implement EXACTLY within this; do NOT re-scope, raise limits, or change anything the framing did not call for:
+{{framing}}
+
 BEGIN UNTRUSTED ISSUE DATA
 Issue title:
 {{title}}

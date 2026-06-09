@@ -175,7 +175,7 @@ function pipeline(event)
 
     core.log_codex_start("implement", ready.proposal_id, "implement")
     local result = spawn_codex_sync({
-      prompt = core.build_implement_prompt(ready.proposal_id, current),
+      prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing),
       worktree = worktree,
       stall_window = M.spec.stall_window,
     })

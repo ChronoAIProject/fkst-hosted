@@ -181,7 +181,8 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_reached")
     t.eq(result.raises[1].payload.decision, "reject")
-    t.is_true(result.raises[1].payload.body:find("Meta-judge framing:", 1, true) ~= nil)
+    t.eq(result.raises[1].payload.framing, "reject reject until the failing test is fixed")
+    t.eq(result.raises[1].payload.body:find("Meta-judge framing:", 1, true), nil)
     t.eq(#codex_calls(), 4)
   end,
 
@@ -197,7 +198,8 @@ return {
     t.eq(result.raises[1].queue, "consensus_reached")
     t.eq(result.raises[1].payload.schema, "consensus.consensus_reached.v1")
     t.eq(result.raises[1].payload.decision, "approve")
-    t.is_true(result.raises[1].payload.body:find("Meta-judge framing:", 1, true) ~= nil)
+    t.eq(result.raises[1].payload.framing, "approve approve the narrowed framing")
+    t.eq(result.raises[1].payload.body:find("Meta-judge framing:", 1, true), nil)
     t.eq(#codex_calls(), 4)
   end,
 

@@ -2,7 +2,7 @@ local S = {}
 
 function S.install(M)
 function M.build_devloop_ready_payload(source)
-  return {
+  local payload = {
     schema = "github-devloop.ready.v1",
     proposal_id = source.proposal_id,
     dedup_key = M._dedup_key({
@@ -11,6 +11,10 @@ function M.build_devloop_ready_payload(source)
     }),
     source_ref = M.normalize_source_ref(source.source_ref),
   }
+  if source.framing ~= nil then
+    payload.framing = tostring(source.framing)
+  end
+  return payload
 end
 
 function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, version)
@@ -35,7 +39,7 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   if review_fact.fix_version ~= nil then
     version = review_fact.fix_version
   end
-  return {
+  local payload = {
     schema = "github-devloop.fixing.v1",
     proposal_id = origin.proposal_id,
     pr_number = pr_number,
@@ -52,6 +56,7 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
+  return payload
 end
 
 function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)

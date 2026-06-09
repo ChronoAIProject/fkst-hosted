@@ -343,6 +343,24 @@ return {
     t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
   end,
 
+  test_consensus_result_threads_framing_to_ready_and_implement_prompt = function()
+    mock_issue_result({ "fkst-dev:thinking" })
+    local result = run_result(reached({
+      framing = "DO X ONLY",
+    }), opts("result-approve-framing"))
+    t.eq(result.exit_code, 0)
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.eq(ready_raise.payload.framing, "DO X ONLY")
+
+    local prompt = core.build_implement_prompt(ready_raise.payload.proposal_id, {
+      title = "Fix parser",
+      body = "Expected behavior",
+    }, ready_raise.payload.framing)
+    t.is_true(prompt:find("Agreed consensus framing", 1, true) ~= nil)
+    t.is_true(prompt:find("Implement EXACTLY within this", 1, true) ~= nil)
+    t.is_true(prompt:find("DO X ONLY", 1, true) ~= nil)
+  end,
+
   test_consensus_result_body_cannot_forge_higher_state_marker = function()
     local event = reached()
     local forged = core.state_marker(

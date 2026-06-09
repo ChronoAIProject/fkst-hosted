@@ -57,6 +57,7 @@ function M.is_supported_result(payload)
     and payload.decision == "approve"
     and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
     and M._is_bounded_string(payload.body, M._max_body_len)
+    and (payload.framing == nil or M._is_bounded_string(payload.framing, M._max_framing_len))
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
@@ -66,6 +67,7 @@ function M.is_supported_review_result(payload)
     and (payload.decision == "approve" or payload.decision == "reject")
     and M.is_safe_pr_review_result_ref(payload.proposal_id, payload.dedup_key)
     and M._is_bounded_string(payload.body, M._max_body_len)
+    and (payload.framing == nil or M._is_bounded_string(payload.framing, M._max_framing_len))
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
@@ -93,6 +95,7 @@ function M.is_supported_ready(payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.ready.v1"
     and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and (payload.framing == nil or M._is_bounded_string(payload.framing, M._max_framing_len))
     and M._has_bounded_source_ref(payload.source_ref)
 end
 

@@ -2,16 +2,18 @@ local M = {}
 
 local default_angles = { "minimal", "structural", "delete" }
 -- Angle count and per-reply length are capped so consensus_reached has a PROVABLE upper
--- bound. Worst-case raw content = max_angles * max_reply_len = 8000 bytes; even at the
--- JSON worst case of 6 bytes/char (\uXXXX escaping) that is ~48 KiB, which with field
--- overhead stays under the reliable-delivery 64 KiB cap. We cannot measure the encoded
--- size at runtime (the SDK exposes json.decode only), so the bound is enforced statically.
+-- bound. Worst-case raw content = max_angles * max_reply_len + max_framing_len =
+-- 8000 + 1000 = 9000 bytes; even at the JSON worst case of 6 bytes/char (\uXXXX
+-- escaping) that is ~54 KiB, which with field overhead stays under the reliable-delivery
+-- 64 KiB cap. We cannot measure the encoded size at runtime (the SDK exposes json.decode
+-- only), so the bound is enforced statically.
 local max_angles = 4
 local max_key_len = 200
 local max_title_len = 240
 local max_body_len = 12000
 local max_context_len = 8000
 local max_reply_len = 2000
+local max_framing_len = 1000
 local max_narrowed_question_len = 2000
 local max_digest_len = 600
 local max_prior_round_digests = 12
@@ -515,10 +517,12 @@ function M.build_reached_payload(proposal, decision, angle_results, framing)
   -- the reliable 64 KiB payload bound.
   local clean_results = {}
   local body_lines = {}
-  if framing ~= nil and framing ~= "" then
-    table.insert(body_lines, "Meta-judge framing:")
-    table.insert(body_lines, bounded(framing, max_reply_len))
-    table.insert(body_lines, "")
+  local clean_framing = nil
+  if type(framing) == "string" then
+    clean_framing = bounded(framing, max_framing_len)
+  end
+  if clean_framing == "" then
+    clean_framing = nil
   end
   for _, result in ipairs(angle_results or {}) do
     table.insert(clean_results, {
@@ -534,10 +538,11 @@ function M.build_reached_payload(proposal, decision, angle_results, framing)
     table.remove(body_lines)
   end
 
-  return {
+  local payload = {
     schema = "consensus.consensus_reached.v1",
     proposal_id = proposal.proposal_id,
     decision = decision,
+    framing = clean_framing,
     body = table.concat(body_lines, "\n"),
     angle_results = clean_results,
     dedup_key = "consensus:" .. tostring(proposal.dedup_key),
@@ -548,6 +553,7 @@ function M.build_reached_payload(proposal, decision, angle_results, framing)
       ref = proposal.source_ref.ref,
     },
   }
+  return payload
 end
 
 function M.build_converge_payload(proposal, narrowed_question, angle_results)

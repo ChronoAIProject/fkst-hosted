@@ -1,10 +1,19 @@
 local S = {}
 
 function S.install(M)
-function M.build_implement_prompt(proposal_id, current)
+local function bounded_framing(M, framing)
+  local value = M.neutralize_untrusted_prompt_text(framing)
+  if #value > M._max_framing_len then
+    value = value:sub(1, M._max_framing_len)
+  end
+  return value
+end
+
+function M.build_implement_prompt(proposal_id, current, framing)
   local prompt = require("prompts.implement")
   return M.render_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(proposal_id),
+    framing = bounded_framing(M, framing),
     title = M.neutralize_untrusted_prompt_text(current.title),
     body = M.neutralize_untrusted_prompt_text(current.body),
   })

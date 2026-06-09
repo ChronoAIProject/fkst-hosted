@@ -355,11 +355,12 @@ return {
       result("minimal", "approve"),
       result("structural", "approve"),
       result("delete", "approve"),
-    })
+    }, "Only implement the bounded parser fix.")
 
     t.eq(payload.schema, "consensus.consensus_reached.v1")
     t.eq(payload.proposal_id, "proposal-42")
     t.eq(payload.decision, "approve")
+    t.eq(payload.framing, "Only implement the bounded parser fix.")
     t.eq(payload.dedup_key, "consensus:proposal-42-v1")
     -- source_ref is normalized to {kind, ref} (a fresh table, not the input identity)
     t.eq(payload.source_ref.kind, "proposal")
@@ -372,8 +373,29 @@ return {
     t.eq(payload.angle_results[3].angle, "delete")
     -- reply is NOT duplicated into angle_results; it lives only in body
     t.is_nil(payload.angle_results[1].reply)
+    t.eq(payload.body:find("Meta-judge framing:", 1, true), nil)
+    t.eq(payload.body:find("Only implement the bounded parser fix.", 1, true), nil)
     t.is_true(payload.body:find("minimal:", 1, true) ~= nil)
     t.is_true(payload.body:find("minimal reply", 1, true) ~= nil)
+  end,
+
+  test_build_reached_payload_omits_nil_framing = function()
+    local payload = core.build_reached_payload(proposal(), "approve", {
+      result("minimal", "approve"),
+    })
+
+    t.is_nil(payload.framing)
+    t.eq(payload.body:find("Meta-judge framing:", 1, true), nil)
+  end,
+
+  test_build_reached_payload_bounds_top_level_framing = function()
+    local payload = core.build_reached_payload(proposal(), "approve", {
+      result("minimal", "approve"),
+    }, string.rep("x", 1001))
+
+    t.is_true(#payload.framing <= 1000)
+    t.eq(#payload.framing, 1000)
+    t.eq(payload.body:find(payload.framing, 1, true), nil)
   end,
 
   test_build_reached_payload_drops_extra_source_ref_fields = function()
