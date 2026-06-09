@@ -35,10 +35,23 @@ local function opts(name, extra)
   return result
 end
 
+local render_comment
+local take_pr_phase_comments
+local json_string
+local take_pending_pr_origin
+local mock_pr_origin_from_cached
+
 local function source_ref()
   return {
     kind = "external",
     ref = "owner/repo#issue/42",
+  }
+end
+
+local function pr_source_ref()
+  return {
+    kind = "external",
+    ref = "owner/repo#pr/7",
   }
 end
 
@@ -120,7 +133,7 @@ local function reviewing(extra)
     pr_number = 7,
     version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     dedup_key = "reviewing/github-devloop/issue/owner/repo/42/ready-consensus-github-devloop-issue-owner-repo-42-2026-06-03T01-02-03Z/7",
-    source_ref = source_ref(),
+    source_ref = pr_source_ref(),
   }
   for key, field in pairs(extra or {}) do
     value[key] = field
@@ -178,7 +191,7 @@ local function fixing(extra)
     review_dedup_key = event.dedup_key,
     reviewed_head_sha = "def456",
     dedup_key = "fixing/github-devloop/issue/owner/repo/42/v1",
-    source_ref = source_ref(),
+    source_ref = pr_source_ref(),
   }
   for key, field in pairs(extra or {}) do
     value[key] = field
@@ -221,7 +234,7 @@ local function fix_reconcile(extra)
     review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456") .. "/review",
     reviewed_head_sha = "def456",
     pr_number = 7,
-    source_ref = source_ref(),
+    source_ref = pr_source_ref(),
   }, issue_version)
   for key, field in pairs(extra or {}) do
     value[key] = field
@@ -240,7 +253,7 @@ local function merge_ready(extra)
       review_dedup_key = event.dedup_key,
       reviewed_head_sha = "def456",
     },
-    source_ref()
+    pr_source_ref()
   )
   for key, field in pairs(extra or {}) do
     value[key] = field
@@ -290,6 +303,22 @@ local function run_reconcile(payload, run_opts)
 end
 
 local function run_review_reconcile(payload, run_opts)
+  local cached = take_pr_phase_comments()
+  if cached ~= nil then
+    local rendered_comments = {}
+    table.insert(rendered_comments, render_comment(core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev")))
+    for _, comment in ipairs(cached) do
+      table.insert(rendered_comments, render_comment(comment))
+    end
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+      stdout = string.format(
+        '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+        table.concat(rendered_comments, ",")
+      ),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   return t.run_department("departments/reconcile/main.lua", {
     queue = "devloop_review_reconcile",
     payload = payload,
@@ -297,6 +326,22 @@ local function run_review_reconcile(payload, run_opts)
 end
 
 local function run_fix_reconcile(payload, run_opts)
+  local cached = take_pr_phase_comments()
+  if cached ~= nil then
+    local rendered_comments = {}
+    table.insert(rendered_comments, render_comment(core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev")))
+    for _, comment in ipairs(cached) do
+      table.insert(rendered_comments, render_comment(comment))
+    end
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+      stdout = string.format(
+        '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+        table.concat(rendered_comments, ",")
+      ),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   return t.run_department("departments/reconcile/main.lua", {
     queue = "devloop_fix_reconcile",
     payload = payload,
@@ -321,6 +366,10 @@ end
 
 local function run_observe_pr(payload, run_opts)
   mock_branch_config_env()
+  mock_pr_origin_from_cached({
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    version = reviewing().version,
+  }, "def456")
   return t.run_department("departments/observe_pr/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = payload,
@@ -328,6 +377,7 @@ local function run_observe_pr(payload, run_opts)
 end
 
 local function run_review_pr(payload, run_opts)
+  mock_pr_origin_from_cached(payload, payload and (payload.head_sha or payload.reviewed_head_sha) or "def456")
   return t.run_department("departments/review_pr/main.lua", {
     queue = "devloop_reviewing",
     payload = payload,
@@ -336,6 +386,8 @@ end
 
 local function run_review_result(payload, run_opts)
   mock_branch_config_env()
+  local _, _, _, head_sha = core.parse_pr_review_proposal_id(payload.proposal_id)
+  mock_pr_origin_from_cached({ proposal_id = "github-devloop/issue/owner/repo/42", version = reviewing().version }, head_sha)
   return t.run_department("departments/review_result/main.lua", {
     queue = "consensus.consensus_reached",
     payload = payload,
@@ -344,6 +396,36 @@ end
 
 local function run_fix(payload, run_opts)
   mock_branch_config_env()
+  local cached = take_pr_phase_comments()
+  local pending = take_pending_pr_origin()
+  if cached ~= nil or pending ~= nil then
+    local comments = {}
+    local head = pending and pending.head or "devloop-owner-repo-42-01HY"
+    local base_branch = pending and pending.base_branch or "dev"
+    local state = pending and pending.state or "OPEN"
+    for _, comment in ipairs(pending and pending.comments or { core.pr_origin_marker(payload.proposal_id, "42", head, payload.version, base_branch) }) do
+      table.insert(comments, comment)
+    end
+    for _, comment in ipairs(cached or {}) do
+      table.insert(comments, comment)
+    end
+    local rendered_comments = {}
+    for _, comment in ipairs(comments) do
+      table.insert(rendered_comments, render_comment(comment))
+    end
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
+      stdout = string.format(
+        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false}\n',
+        json_string(head),
+        json_string(payload.reviewed_head_sha or pending and pending.head_sha or "def456"),
+        json_string(base_branch),
+        json_string(state),
+        table.concat(rendered_comments, ",")
+      ),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   return t.run_department("departments/fix/main.lua", {
     queue = "devloop_fixing",
     payload = payload,
@@ -352,6 +434,8 @@ end
 
 local function run_review_loop(payload, run_opts)
   mock_branch_config_env()
+  local _, _, _, head_sha = core.parse_pr_review_proposal_id(payload.proposal_id)
+  mock_pr_origin_from_cached({ proposal_id = "github-devloop/issue/owner/repo/42", version = reviewing().version }, head_sha)
   return t.run_department("departments/review_loop/main.lua", {
     queue = "consensus.consensus_converge",
     payload = payload,
@@ -359,6 +443,7 @@ local function run_review_loop(payload, run_opts)
 end
 
 local function run_review_meta(payload, run_opts)
+  mock_pr_origin_from_cached(payload, "def456")
   return t.run_department("departments/review_meta/main.lua", {
     queue = "devloop_review_meta",
     payload = payload,
@@ -373,14 +458,14 @@ local function run_merge(payload, run_opts)
   }, run_opts)
 end
 
-local function json_string(value)
+json_string = function(value)
   return tostring(value)
     :gsub("\\", "\\\\")
     :gsub('"', '\\"')
     :gsub("\n", "\\n")
 end
 
-local function render_comment(comment)
+render_comment = function(comment)
   local body = comment
   local author = "fkst-test-bot"
   local created_at = "2026-06-03T01:00:00Z"
@@ -398,6 +483,8 @@ local function render_comment(comment)
 end
 
 local default_marker_version = "2026-06-02T00-00-00Z"
+local pr_phase_comments = nil
+local pending_pr_origin = nil
 
 local function mock_issue_state(labels, state, comments)
   local rendered_labels = {}
@@ -505,6 +592,83 @@ local function with_default_state_marker(labels, comments)
   return rendered
 end
 
+local function set_pr_phase_comments(labels, comments)
+  pr_phase_comments = with_default_state_marker(labels, comments)
+end
+
+take_pr_phase_comments = function()
+  local comments = pr_phase_comments
+  pr_phase_comments = nil
+  return comments
+end
+
+local function set_pending_pr_origin(value)
+  pending_pr_origin = value
+end
+
+local function latest_fix_head_sha(comments)
+  local found = nil
+  for _, comment in ipairs(comments or {}) do
+    local body = comment
+    if type(comment) == "table" then
+      body = comment.body
+    end
+    local head = tostring(body or ""):match('fkst:github%-devloop:fix:v1[^<]*new_head_sha="([^"]+)"')
+    if head ~= nil and core.is_safe_head_sha(head) then
+      found = head
+    end
+  end
+  return found
+end
+
+take_pending_pr_origin = function()
+  local value = pending_pr_origin
+  pending_pr_origin = nil
+  return value
+end
+
+mock_pr_origin_from_cached = function(payload, head_sha)
+  local cached = take_pr_phase_comments()
+  local pending = take_pending_pr_origin()
+  if cached == nil and pending == nil then
+    return
+  end
+  local repo = pending and pending.repo or "owner/repo"
+  local pr_number = pending and pending.pr_number or 7
+  local head = pending and pending.head or "devloop-owner-repo-42-01HY"
+  local base_branch = pending and pending.base_branch or "dev"
+  local state = pending and pending.state or "OPEN"
+  local effective_head_sha = latest_fix_head_sha(cached) or (pending and pending.head_sha) or head_sha or "def456"
+  local comments = {}
+  if pending ~= nil then
+    for _, comment in ipairs(pending.comments or {}) do
+      table.insert(comments, comment)
+    end
+  elseif cached ~= nil then
+    table.insert(comments, core.pr_origin_marker(payload.proposal_id, "42", head, payload.version or reviewing().version, base_branch))
+  end
+  for _, comment in ipairs(cached or {}) do
+    table.insert(comments, comment)
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(comments) do
+    table.insert(rendered_comments, render_comment(comment))
+  end
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+    stdout = string.format(
+      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+      json_string(head),
+      json_string(effective_head_sha),
+      json_string(base_branch),
+      json_string(state),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+  return repo, pr_number
+end
+
 local function mock_issue_body(body)
   t.mock_command("--json body", {
     stdout = string.format('{"body":"%s"}\n', json_string(body or "Issue body")),
@@ -514,6 +678,7 @@ local function mock_issue_body(body)
 end
 
 local function mock_issue_result(labels, comments)
+  set_pr_phase_comments(labels or { "fkst-dev:thinking" }, comments)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:thinking" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
@@ -627,6 +792,7 @@ local function mock_issue_open_pr(labels, comments, extra)
 end
 
 local function mock_issue_reviewing(labels, comments)
+  set_pr_phase_comments(labels or { "fkst-dev:pr-open" }, comments)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:pr-open" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
@@ -643,6 +809,7 @@ local function mock_issue_reviewing(labels, comments)
 end
 
 local function mock_issue_review(labels, comments, extra)
+  set_pr_phase_comments(labels or { "fkst-dev:reviewing" }, comments)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:reviewing" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
@@ -666,6 +833,7 @@ local function mock_issue_review(labels, comments, extra)
 end
 
 local function mock_issue_fix(labels, comments, extra)
+  set_pr_phase_comments(labels or { "fkst-dev:fixing" }, comments)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:fixing" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
@@ -694,14 +862,17 @@ local function mock_issue_fix_for_event(fix, labels, comments, branch, impl_vers
     table.insert(with_link, comment)
   end
   table.insert(with_link, pr_link_marker_for_fix(fix, branch, impl_version))
+  set_pr_phase_comments(labels or { "fkst-dev:fixing" }, comments)
   mock_issue_fix(labels, with_link, extra)
 end
 
 local function mock_issue_review_meta(labels, comments, extra)
+  set_pr_phase_comments(labels or { "fkst-dev:review-meta" }, comments)
   mock_issue_fix(labels or { "fkst-dev:review-meta" }, comments, extra)
 end
 
 local function mock_issue_merge(labels, comments, extra)
+  set_pr_phase_comments(labels or { "fkst-dev:merge-ready" }, comments)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:merge-ready" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
@@ -734,6 +905,7 @@ return {
   has_value = has_value,
   opts = opts,
   source_ref = source_ref,
+  pr_source_ref = pr_source_ref,
   issue = issue,
   reached = reached,
   unresolved = unresolved,
@@ -769,6 +941,10 @@ return {
   mock_issue_state = mock_issue_state,
   state_from_labels = state_from_labels,
   with_default_state_marker = with_default_state_marker,
+  set_pr_phase_comments = set_pr_phase_comments,
+  take_pr_phase_comments = take_pr_phase_comments,
+  set_pending_pr_origin = set_pending_pr_origin,
+  take_pending_pr_origin = take_pending_pr_origin,
   mock_issue_body = mock_issue_body,
   mock_issue_result = mock_issue_result,
   mock_issue_loop = mock_issue_loop,

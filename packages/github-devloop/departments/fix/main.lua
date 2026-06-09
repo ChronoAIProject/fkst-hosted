@@ -6,7 +6,7 @@ M.spec = {
   consumes = { "devloop_fixing" },
   produces = {
     "github-proxy.github_issue_label_request",
-    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "devloop_reviewing",
     "devloop_review_meta",
   },
@@ -40,12 +40,14 @@ local function raise_review_meta(repo, issue_number, fix, reason, detail)
   local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
   local add_labels, remove_labels = core.state_label_changes("review-meta")
   core.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "github-proxy.github_issue_label_request",
     "devloop_review_meta",
   })
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if issue_number ~= nil then
+    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
   core.log_raise("fix", fix.proposal_id, "devloop_review_meta", {
     schema = "github-devloop.review-meta.v1",
     proposal_id = fix.proposal_id,
@@ -70,12 +72,14 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
     impl_version = new_version,
   }, fix.pr_number, fix.source_ref)
   core.log_apply("fix", fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "github-proxy.github_issue_label_request",
     "devloop_reviewing",
   })
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if issue_number ~= nil then
+    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
   core.log_raise("fix", fix.proposal_id, "devloop_reviewing", reviewing_payload)
 end
 
@@ -126,11 +130,13 @@ function pipeline(event)
   end
 
   core.log_entry("fix", event, fix.proposal_id, fix.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(fix.proposal_id)
-  if repo == nil then
+  local entity = core.parse_entity_proposal_id(fix.proposal_id)
+  if entity == nil then
     core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
+  local repo = entity.repo
+  local issue_number = entity.issue_number
 
   local lock_key = core.transition_lock_key(fix.proposal_id)
   if lock_key == nil then
@@ -142,18 +148,18 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local issue_view = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
-    if issue_view.exit_code ~= 0 then
-      error("github-devloop: gh issue fix view failed: " .. tostring(issue_view.stderr))
+    local pr_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    if pr_view.exit_code ~= 0 then
+      error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
-    local current_issue = core.parse_issue_view_fix(issue_view.stdout)
-    core.log_forged_markers("fix", fix.proposal_id, current_issue.comments)
+    local current_pr = core.parse_pr_view_fix(pr_view.stdout)
+    core.log_forged_markers("fix", fix.proposal_id, current_pr.comments)
     local reviewing_version = core.next_fix_version(fix.version)
-    if core.has_state_marker(current_issue.comments, fix.proposal_id, "reviewing", reviewing_version) then
+    if core.has_state_marker(current_pr.comments, fix.proposal_id, "reviewing", reviewing_version) then
       core.log_cas_decision("fix", fix.proposal_id, { state = "reviewing", version = reviewing_version }, "fixing", "reviewing", "skip-idempotent(already at to_state)", "reviewing state marker for fix already visible")
       return
     end
-    local state = core.current_state(current_issue.comments, fix.proposal_id)
+    local state = core.current_entity_state(current_pr.comments, fix.proposal_id)
     local transition = core.cyclic_transition_status(state, { "fixing" }, "reviewing", fix.version, reviewing_version)
     if transition == "pending" then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "fixing state marker not yet visible")
@@ -171,14 +177,14 @@ function pipeline(event)
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(version-mismatch)", "fix event version does not match canonical issue marker")
       return
     end
-    local reject_fact = core.review_reject_fact(current_issue.comments, fix.proposal_id, fix.version)
+    local reject_fact = core.review_reject_fact(current_pr.comments, fix.proposal_id, fix.version)
     local meta_fix_fact = nil
     if reject_fact == nil then
-      meta_fix_fact = core.review_meta_fix_fact(current_issue.comments, fix.proposal_id, fix.version)
+      meta_fix_fact = core.review_meta_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
     end
     local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
-      merge_gate_fact = core.merge_gate_fix_fact(current_issue.comments, fix.proposal_id, fix.version)
+      merge_gate_fact = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
     end
     if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
@@ -209,28 +215,12 @@ function pipeline(event)
       feedback_reason = merge_gate_fact.review_reason
     end
 
-    local link = core.pr_link_fact(current_issue.comments, fix.proposal_id)
-    if link == nil or tostring(link.pr_number) ~= tostring(fix.pr_number) then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(pr-link)", "trusted issue PR link marker not visible")
-      error("github-devloop: trusted pr-link marker not visible for fix; retrying")
-    end
-
-    local pr_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
-    if pr_view.exit_code ~= 0 then
-      error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
-    end
-    local current_pr = core.parse_pr_view_fix(pr_view.stdout)
     local origin = core.pr_origin_fact(current_pr.comments)
     if origin == nil then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(pr-origin)", "trusted PR origin marker not visible")
-      error("github-devloop: trusted pr-origin marker not visible for fix; retrying")
+      origin = core.pr_native_origin(repo, fix.pr_number, current_pr)
     end
     if origin.proposal_id ~= fix.proposal_id
       or origin.repo ~= repo
-      or tostring(origin.issue_number) ~= tostring(issue_number)
-      or tostring(origin.branch) ~= tostring(link.branch)
-      or tostring(origin.impl_version) ~= tostring(link.impl_version)
-      or tostring(origin.base_branch) ~= tostring(link.base_branch)
       or tostring(origin.base_branch) ~= tostring(branches.integration)
       or tostring(current_pr.base_ref_name or "") ~= tostring(origin.base_branch)
       or tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
@@ -269,6 +259,19 @@ function pipeline(event)
       return
     end
 
+    local current_issue = {
+      title = "PR #" .. tostring(fix.pr_number),
+      body = "(PR-only fix context; issue backing is absent)",
+      comments = current_pr.comments,
+    }
+    if issue_number ~= nil then
+      local issue_view = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
+      if issue_view.exit_code ~= 0 then
+        error("github-devloop: gh issue fix view failed: " .. tostring(issue_view.stderr))
+      end
+      current_issue = core.parse_issue_view_fix(issue_view.stdout)
+    end
+
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local result = spawn_codex_sync({
@@ -290,21 +293,16 @@ function pipeline(event)
       local existing_head_sha = branch_head_if_ahead(fix.reviewed_head_sha, branch)
       if existing_head_sha ~= nil then
         core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
-        local issue_recheck = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
-        if issue_recheck.exit_code ~= 0 then
-          error("github-devloop: gh issue fix recheck failed: " .. tostring(issue_recheck.stderr))
-        end
-        local rechecked_issue = core.parse_issue_view_fix(issue_recheck.stdout)
-        local rechecked_state = core.current_state(rechecked_issue.comments, fix.proposal_id)
-        if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-          core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
-          return
-        end
         local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
         if pr_recheck.exit_code ~= 0 then
           error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
         end
         local rechecked_pr = core.parse_pr_view_fix(pr_recheck.stdout)
+        local rechecked_state = core.current_entity_state(rechecked_pr.comments, fix.proposal_id)
+        if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
+          core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
+          return
+        end
         if tostring(rechecked_pr.state or ""):lower() ~= "open"
           or tostring(rechecked_pr.head_ref_name or "") ~= branch
           or tostring(rechecked_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
@@ -365,21 +363,16 @@ function pipeline(event)
       return
     end
 
-    local issue_recheck = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
-    if issue_recheck.exit_code ~= 0 then
-      error("github-devloop: gh issue fix recheck failed: " .. tostring(issue_recheck.stderr))
-    end
-    local rechecked_issue = core.parse_issue_view_fix(issue_recheck.stdout)
-    local rechecked_state = core.current_state(rechecked_issue.comments, fix.proposal_id)
-    if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-      core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
-      return
-    end
     local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pr_recheck.exit_code ~= 0 then
       error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
     end
     local rechecked_pr = core.parse_pr_view_fix(pr_recheck.stdout)
+    local rechecked_state = core.current_entity_state(rechecked_pr.comments, fix.proposal_id)
+    if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
+      core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
+      return
+    end
     if tostring(rechecked_pr.state or ""):lower() ~= "open"
       or tostring(rechecked_pr.head_ref_name or "") ~= branch
       or tostring(rechecked_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)

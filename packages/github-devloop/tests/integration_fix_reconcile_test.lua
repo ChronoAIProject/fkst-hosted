@@ -76,7 +76,7 @@ return {
     local result = run_review_result(event, opts("fix-progress-changing"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
     local fixing = find_raise(result.raises, "devloop_fixing")
     t.eq(find_raise(result.raises, "devloop_fix_reconcile"), nil)
@@ -106,7 +106,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
     local reconcile = find_raise(result.raises, "devloop_fix_reconcile").payload
     t.eq(reconcile.schema, "github-devloop.fix-reconcile.v1")
@@ -118,7 +118,7 @@ return {
     t.eq(reconcile.round, core.fix_stall_rounds())
     t.eq(reconcile.pr_number, "7")
     t.eq(reconcile.dedup_key, "fix-reconcile:" .. review_version)
-    t.eq(reconcile.source_ref.ref, "owner/repo#issue/42")
+    t.eq(reconcile.source_ref.ref, "owner/repo#pr/7")
     t.eq(core.safe_version_segment(reconcile.issue_version), core.safe_version_segment(review_version))
 
     mock_bot_env()
@@ -128,7 +128,7 @@ return {
     local accepted = run_fix_reconcile(reconcile, opts("fix-budget-over-accepted"))
     t.eq(accepted.exit_code, 0)
     t.eq(#accepted.raises, 2)
-    local accepted_comment = find_raise(accepted.raises, "github-proxy.github_issue_comment_request").payload
+    local accepted_comment = find_raise(accepted.raises, "github-proxy.github_pr_comment_request").payload
     t.is_true(accepted_comment.body:find(core.state_marker(reconcile.proposal_id, "blocked", reconcile.issue_version), 1, true) ~= nil)
   end,
 
@@ -165,7 +165,7 @@ return {
     local result = run_fix_reconcile(event, opts("fix-reconcile-drop"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find("github-devloop fix reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("fix-loop-true-stall-after-3-rounds", 1, true) ~= nil)

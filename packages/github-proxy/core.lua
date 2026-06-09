@@ -791,6 +791,62 @@ function M.gh_issue_comment_cmd(repo, issue_number, body_file)
     .. " --body-file " .. shell_single_quote(body_file)
 end
 
+local max_runtime_id_len = 180
+
+local function safe_runtime_segment(value)
+  local safe = tostring(value or ""):gsub("[^%w._-]", "_")
+  safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
+  if safe == "" then
+    return "empty"
+  end
+  return safe
+end
+
+local function comment_runtime_identity(repo, kind, number)
+  local id = "comment-" .. safe_runtime_segment(repo)
+    .. "-" .. safe_runtime_segment(kind)
+    .. "-" .. safe_runtime_segment(number)
+  if #id > max_runtime_id_len then
+    return id:sub(1, max_runtime_id_len)
+  end
+  return id
+end
+
+function M.write_comment_request(payload, target)
+  local repo = payload.repo
+  if repo == nil or repo == "" then
+    repo = M.read_env("FKST_GITHUB_REPO")
+  end
+  if repo == nil or repo == "" then
+    log.warn("github-proxy: comment request missing repo")
+    return
+  end
+  if target.number == nil or payload.body == nil or payload.dedup_key == nil then
+    log.warn("github-proxy: comment request missing " .. tostring(target.number_field) .. ", body, or dedup_key")
+    return
+  end
+
+  if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
+    log.info("github-proxy dry-run: would comment on " .. repo .. "#" .. tostring(target.number))
+    return
+  end
+  local bot_login = M.assert_trusted_bot_configured()
+
+  local runtime_id = comment_runtime_identity(repo, target.kind, target.number)
+  with_lock("github-proxy/" .. runtime_id, function()
+    local view = M.gh_exec(target.view_comments_cmd(repo, target.number), 30, target.view_label)
+    if M.has_trusted_marker(M.parse_issue_comments(view.stdout), payload.dedup_key, bot_login) then
+      log.info("github-proxy: comment marker already present")
+      return
+    end
+
+    local body = tostring(payload.body) .. "\n\n" .. M.comment_marker(payload.dedup_key) .. "\n"
+    local path = "/tmp/fkst-github-proxy-" .. runtime_id .. ".md"
+    file.write(path, body)
+    M.gh_exec(target.comment_cmd(repo, target.number, path), 30, target.comment_label)
+  end)
+end
+
 function M.gh_issue_edit_labels_cmd(repo, issue_number, add_labels, remove_labels)
   local cmd = "gh issue edit " .. shell_single_quote(issue_number)
     .. " --repo " .. shell_single_quote(repo)

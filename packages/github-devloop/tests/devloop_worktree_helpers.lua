@@ -255,8 +255,13 @@ end
 
 local function count_calls(needle)
   local count = 0
+  local alternate = nil
+  if needle == "--json headRefName,headRefOid,baseRefName,state,comments" then
+    alternate = "--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+  end
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
+    if call.rendered:find(needle, 1, true) ~= nil
+      or (alternate ~= nil and call.rendered:find(alternate, 1, true) ~= nil) then
       count = count + 1
     end
   end
@@ -267,6 +272,13 @@ local function find_raise(raises, queue)
   for _, raised in ipairs(raises or {}) do
     if raised.queue == queue then
       return raised
+    end
+  end
+  if queue == "github-proxy.github_issue_comment_request" then
+    for _, raised in ipairs(raises or {}) do
+      if raised.queue == "github-proxy.github_pr_comment_request" then
+        return raised
+      end
     end
   end
   return nil

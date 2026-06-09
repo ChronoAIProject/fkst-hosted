@@ -13,6 +13,7 @@ require("core.payloads").install(M)
 require("core.convergence").install(M)
 require("core.prompts").install(M)
 require("core.requests").install(M)
+require("core.entity").install(M)
 require("core.validators").install(M)
 
 return M

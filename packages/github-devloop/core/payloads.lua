@@ -168,7 +168,10 @@ end
 
 function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, diff, source_ref)
   local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
-  local title = "Review PR #" .. tostring(pr_number) .. " for issue #" .. tostring(issue_number)
+  local title = "Review PR #" .. tostring(pr_number)
+  if issue_number ~= nil then
+    title = title .. " for issue #" .. tostring(issue_number)
+  end
   if type(current_issue) == "table" and tostring(current_issue.title or "") ~= "" then
     title = "Review PR #" .. tostring(pr_number) .. ": " .. tostring(current_issue.title)
   end
@@ -195,7 +198,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   end
   local body = "Review the PR diff and decide whether it should advance to merge-ready."
     .. "\n\n" .. M._untrusted_issue_data_begin
-    .. "\nIssue proposal: " .. tostring(M.proposal_id(repo, issue_number))
+    .. "\nEntity proposal: " .. tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title:\n" .. issue_title
     .. "\n\nIssue body:\n" .. issue_body

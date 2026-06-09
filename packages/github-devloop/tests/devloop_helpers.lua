@@ -13,4 +13,12 @@ for key, value in pairs(worktree) do
   helpers[key] = value
 end
 
+local base_mock_bot_env = helpers.mock_bot_env
+helpers.mock_bot_env = function(...)
+  if type(helpers.reset_pr_helper_state) == "function" then
+    helpers.reset_pr_helper_state()
+  end
+  return base_mock_bot_env(...)
+end
+
 return helpers

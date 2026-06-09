@@ -6,7 +6,7 @@ M.spec = {
   consumes = { "devloop_review_meta" },
   produces = {
     "github-proxy.github_issue_label_request",
-    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "devloop_fixing",
     "devloop_merge_ready",
   },
@@ -22,11 +22,13 @@ function pipeline(event)
   end
 
   core.log_entry("review_meta", event, review_meta.proposal_id, review_meta.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(review_meta.proposal_id)
-  if repo == nil then
+  local entity = core.parse_entity_proposal_id(review_meta.proposal_id)
+  if entity == nil then
     core.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|merge-ready|blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
+  local repo = entity.repo
+  local issue_number = entity.issue_number
 
   local lock_key = core.transition_lock_key(review_meta.proposal_id)
   if lock_key == nil then
@@ -37,13 +39,26 @@ function pipeline(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_review_meta_cmd(repo, issue_number), timeout = 30 })
+    local view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, review_meta.pr_number), timeout = 30 })
     if view.exit_code ~= 0 then
-      error("github-devloop: gh issue review-meta view failed: " .. tostring(view.stderr))
+      error("github-devloop: gh pr review-meta view failed: " .. tostring(view.stderr))
     end
-    local current_issue = core.parse_issue_view_review_meta(view.stdout)
-    core.log_forged_markers("review_meta", review_meta.proposal_id, current_issue.comments)
-    local state = core.current_state(current_issue.comments, review_meta.proposal_id)
+    local current_pr = core.parse_pr_view_origin(view.stdout)
+    local current_issue = {
+      title = "PR #" .. tostring(review_meta.pr_number),
+      body = "(PR-only review-meta context; issue backing is absent)",
+      comments = current_pr.comments,
+    }
+    if issue_number ~= nil then
+      local issue_view = exec_sync({ cmd = core.gh_issue_view_review_meta_cmd(repo, issue_number), timeout = 30 })
+      if issue_view.exit_code ~= 0 then
+        error("github-devloop: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
+      end
+      current_issue = core.parse_issue_view_review_meta(issue_view.stdout)
+      current_issue.comments = current_pr.comments
+    end
+    core.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
+    local state = core.current_entity_state(current_pr.comments, review_meta.proposal_id)
     local transition = core.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
     if transition == "pending" then
       core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|merge-ready|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")
@@ -57,7 +72,7 @@ function pipeline(event)
       core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|merge-ready|blocked", "skip-stale(version-mismatch)", "review-meta event version does not match canonical issue marker")
       return
     end
-    if core.has_review_meta_marker(current_issue.comments, review_meta.proposal_id, review_meta.dedup_key) then
+    if core.has_review_meta_marker(current_pr.comments, review_meta.proposal_id, review_meta.dedup_key) then
       core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|merge-ready|blocked", "skip-idempotent(review-meta marker already visible)", "review-meta result marker for incoming version is already visible")
       return
     end
@@ -82,12 +97,17 @@ function pipeline(event)
     local to_state = parsed.action == "fix" and "fixing" or parsed.action == "accept" and "merge-ready" or "blocked"
     local exit_version = core.next_review_meta_action_version(review_meta.version)
     local comment_request = core.build_review_meta_comment_request(repo, issue_number, review_meta, parsed.action, parsed.reason, exit_version)
-    local label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
+    local label_request = nil
+    if issue_number ~= nil then
+      label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
+    end
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {
-      "github-proxy.github_issue_comment_request",
-      "github-proxy.github_issue_label_request",
+      "github-proxy.github_pr_comment_request",
     }
+    if label_request ~= nil then
+      table.insert(raised, "github-proxy.github_issue_label_request")
+    end
     local fix_payload = nil
     local merge_payload = nil
     if parsed.action == "fix" then
@@ -112,8 +132,10 @@ function pipeline(event)
     end
 
     core.log_apply("review_meta", review_meta.proposal_id, to_state, exit_version, { add = add_labels, remove = remove_labels }, raised)
-    core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-    core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+    if label_request ~= nil then
+      core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    end
     if fix_payload ~= nil then
       core.log_raise("review_meta", review_meta.proposal_id, "devloop_fixing", fix_payload)
     end

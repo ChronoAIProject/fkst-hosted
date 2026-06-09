@@ -6,7 +6,7 @@ M.spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
     "consensus.proposal",
-    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "devloop_review_reconcile",
   },
   fanout = { "consensus.consensus_converge" },
@@ -74,12 +74,7 @@ function pipeline(event)
   local current_pr = core.parse_pr_view_origin(pr_view.stdout)
   local origin = core.pr_origin_fact(current_pr.comments)
   if origin == nil then
-    if core.is_devloop_issue_branch(current_pr.head_ref_name) then
-      core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "retry-pending(pr-origin)", "trusted PR origin marker not yet visible")
-      error("github-devloop: trusted pr-origin marker not yet visible for review loop; retrying")
-    end
-    core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(pr-origin)", "trusted PR origin marker absent")
-    return
+    origin = core.pr_native_origin(repo, pr_number, current_pr)
   end
   if origin.repo ~= repo or tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
     core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(pr-origin)", "PR origin mismatch")
@@ -104,19 +99,11 @@ function pipeline(event)
     core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "no issue transition lock key")
     return
   end
-  local issue_source_ref = {
-    kind = "external",
-    ref = tostring(origin.repo) .. "#issue/" .. tostring(origin.issue_number),
-  }
+  local pr_source_ref = core.pr_source_ref(repo, pr_number)
 
   with_lock(lock_key, function()
-    local issue_view = exec_sync({ cmd = core.gh_issue_view_review_loop_cmd(origin.repo, origin.issue_number), timeout = 30 })
-    if issue_view.exit_code ~= 0 then
-      error("github-devloop: gh issue review loop view failed: " .. tostring(issue_view.stderr))
-    end
-    local current_issue = core.parse_issue_view_review_loop(issue_view.stdout)
-    core.log_forged_markers("review_loop", origin.proposal_id, current_issue.comments)
-    local state = core.current_state(current_issue.comments, origin.proposal_id)
+    core.log_forged_markers("review_loop", origin.proposal_id, current_pr.comments)
+    local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
     local transition = reviewing_segment_transition_status(state, review_version)
     if transition == "pending" then
       core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")
@@ -127,9 +114,9 @@ function pipeline(event)
       return
     end
     local sr_digest = core.source_ref_digest(unresolved.source_ref)
-    local facts = core.review_converge_round_facts(current_issue.comments, unresolved.proposal_id, origin.proposal_id, review_version, reviewed_head_sha, sr_digest)
+    local facts = core.review_converge_round_facts(current_pr.comments, unresolved.proposal_id, origin.proposal_id, review_version, reviewed_head_sha, sr_digest)
     local round = math.max(tonumber(unresolved.round) or 0, core.max_converge_round(facts))
-    if core.has_review_converge_round_marker(current_issue.comments, unresolved.proposal_id, origin.proposal_id, review_version, reviewed_head_sha, sr_digest, round) then
+    if core.has_review_converge_round_marker(current_pr.comments, unresolved.proposal_id, origin.proposal_id, review_version, reviewed_head_sha, sr_digest, round) then
       core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review converge round marker already visible)", "review converge round marker for incoming round is already visible")
       return
     end
@@ -145,7 +132,7 @@ function pipeline(event)
       unresolved.narrowed_question,
       unresolved.angle_digests
     )
-    local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, issue_source_ref)
+    local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
     local facts_with_current = append_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local hit_round_cap = round >= core.max_converge_rounds()
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
@@ -155,10 +142,10 @@ function pipeline(event)
         or ("true PR review convergence stall at round " .. tostring(round))
       core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", core.cas_outcome(state, transition, review_version), reason)
       core.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
-        "github-proxy.github_issue_comment_request",
+        "github-proxy.github_pr_comment_request",
         "devloop_review_reconcile",
       })
-      core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+      core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
       core.log_raise("review_loop", origin.proposal_id, "devloop_review_reconcile", review_reconcile)
       return
     end
@@ -178,10 +165,18 @@ function pipeline(event)
       error("github-devloop: PR head moved while reading review loop diff; retrying")
     end
 
-    local pr_source_ref = {
-      kind = "external",
-      ref = tostring(repo) .. "#pr/" .. tostring(pr_number),
+    local current_issue = {
+      title = "PR #" .. tostring(pr_number),
+      body = "(PR-only review context; issue backing is absent)",
+      comments = current_pr.comments,
     }
+    if origin.issue_number ~= nil then
+      local issue_view = exec_sync({ cmd = core.gh_issue_view_review_loop_cmd(origin.repo, origin.issue_number), timeout = 30 })
+      if issue_view.exit_code ~= 0 then
+        error("github-devloop: gh issue review loop view failed: " .. tostring(issue_view.stderr))
+      end
+      current_issue = core.parse_issue_view_review_loop(issue_view.stdout)
+    end
     local next_n = round + 1
     local proposal = core.build_pr_review_loop_proposal(repo, origin.issue_number, pr_number, state.version, current_pr.head_sha, current_issue, diff.stdout, pr_source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
@@ -193,10 +188,10 @@ function pipeline(event)
     end
     core.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
       "consensus.proposal",
-      "github-proxy.github_issue_comment_request",
+      "github-proxy.github_pr_comment_request",
     })
     core.log_raise("review_loop", origin.proposal_id, "consensus.proposal", proposal)
-    core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+    core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   end)
 end
 

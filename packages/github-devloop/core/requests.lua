@@ -212,6 +212,22 @@ function M.build_converge_round_comment_request(repo, issue_number, unresolved, 
 end
 
 function M.build_review_converge_round_comment_request(repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = unresolved.pr_number or select(2, M.parse_pr_source_ref(unresolved.source_ref)),
+  }, build_convergence_display("github-devloop PR review convergence round", unresolved, round)
+    .. "\n\n" .. tostring(marker_body)
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "review-converge-round",
+    "comment",
+    tostring(issue_proposal_id),
+    tostring(round),
+    tostring(unresolved.dedup_key),
+  }), source_ref or unresolved.source_ref)
+end
+
+function M.build_issue_review_converge_round_comment_request(repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
   return {
     schema = "github-proxy.v1",
     repo = repo,
@@ -300,22 +316,20 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
   local marker = M.fix_reconcile_marker(fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
   local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
-  return {
-    schema = "github-proxy.v1",
+  local _, pr_number = M.parse_pr_source_ref(fix_reconcile.source_ref)
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop fix reconcile action: " .. tostring(action)
-      .. "\n\nReason:\n" .. safe_reason
-      .. "\n\n"
-      .. state_marker .. "\n" .. marker
-      .. "\n" .. ai_sentinel,
-    dedup_key = M._dedup_key({
-      "fix-reconcile",
-      "comment",
-      tostring(fix_reconcile.dedup_key),
-    }),
-    source_ref = M.normalize_source_ref(fix_reconcile.source_ref),
-  }
+    number = pr_number,
+  }, "github-devloop fix reconcile action: " .. tostring(action)
+    .. "\n\nReason:\n" .. safe_reason
+    .. "\n\n"
+    .. state_marker .. "\n" .. marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "fix-reconcile",
+    "comment",
+    tostring(fix_reconcile.dedup_key),
+  }), fix_reconcile.source_ref)
 end
 
 function M.build_review_reconcile_comment_request(repo, issue_number, review_reconcile, action, reason)
@@ -323,22 +337,20 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
   local marker = M.review_reconcile_marker(review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
   local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
-  return {
-    schema = "github-proxy.v1",
+  local _, pr_number = M.parse_pr_source_ref(review_reconcile.source_ref)
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop review reconcile action: " .. tostring(action)
-      .. "\n\nReason:\n" .. safe_reason
-      .. "\n\n"
-      .. state_marker .. "\n" .. marker
-      .. "\n" .. ai_sentinel,
-    dedup_key = M._dedup_key({
-      "review-reconcile",
-      "comment",
-      tostring(review_reconcile.dedup_key),
-    }),
-    source_ref = M.normalize_source_ref(review_reconcile.source_ref),
-  }
+    number = pr_number,
+  }, "github-devloop review reconcile action: " .. tostring(action)
+    .. "\n\nReason:\n" .. safe_reason
+    .. "\n\n"
+    .. state_marker .. "\n" .. marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "review-reconcile",
+    "comment",
+    tostring(review_reconcile.dedup_key),
+  }), review_reconcile.source_ref)
 end
 
 function M.build_intake_decision_comment_request(repo, issue_number, candidate, decision, reason)
@@ -575,21 +587,18 @@ end
 
 function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number, source_ref)
   local state_marker = M.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
-  return {
-    schema = "github-proxy.v1",
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop PR is ready for review: #" .. tostring(pr_number)
-      .. "\n\n" .. state_marker,
-    dedup_key = M._dedup_key({
-      "observe-pr",
-      "comment",
-      tostring(origin.proposal_id),
-      tostring(origin.impl_version),
-      tostring(pr_number),
-    }),
-    source_ref = M.normalize_source_ref(source_ref),
-  }
+    number = pr_number,
+  }, "github-devloop PR is ready for review"
+    .. "\n\n" .. state_marker, M._dedup_key({
+    "observe-pr",
+    "comment",
+    tostring(origin.proposal_id),
+    tostring(origin.impl_version),
+    tostring(pr_number),
+  }), source_ref)
 end
 
 function M.build_reviewing_label_request(repo, issue_number, origin, pr_number, source_ref)
@@ -646,25 +655,23 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
   if verdict_summary ~= nil then
     body = body .. "\n" .. verdict_summary
   end
-  return {
-    schema = "github-proxy.v1",
+  local _, pr_number = M.parse_pr_source_ref(source_ref)
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = body
-      .. "\n\n" .. body_text
-      .. "\n\n" .. state_marker
-      .. "\n" .. marker
-      .. merge_marker
-      .. "\n" .. ai_sentinel,
-    dedup_key = M._dedup_key({
-      "review-result",
-      "comment",
-      tostring(issue_proposal_id),
-      tostring(reached.decision),
-      tostring(reached.dedup_key),
-    }),
-    source_ref = M.normalize_source_ref(source_ref),
-  }
+    number = pr_number,
+  }, body
+    .. "\n\n" .. body_text
+    .. "\n\n" .. state_marker
+    .. "\n" .. marker
+    .. merge_marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "review-result",
+    "comment",
+    tostring(issue_proposal_id),
+    tostring(reached.decision),
+    tostring(reached.dedup_key),
+  }), source_ref)
 end
 
 function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, source_ref)
@@ -679,23 +686,20 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     merge_ready.reviewed_head_sha,
     safe_reason
   )
-  return {
-    schema = "github-proxy.v1",
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop merge gate failed: " .. safe_reason
-      .. "\n\n" .. state_marker
-      .. "\n" .. marker,
-    dedup_key = M._dedup_key({
-      "merge",
-      "comment",
-      "fixing",
-      tostring(merge_ready.proposal_id),
-      tostring(merge_ready.version),
-      safe_reason,
-    }),
-    source_ref = M.normalize_source_ref(source_ref),
-  }
+    number = merge_ready.pr_number,
+  }, "github-devloop merge gate failed: " .. safe_reason
+    .. "\n\n" .. state_marker
+    .. "\n" .. marker, M._dedup_key({
+    "merge",
+    "comment",
+    "fixing",
+    tostring(merge_ready.proposal_id),
+    tostring(merge_ready.version),
+    safe_reason,
+  }), source_ref)
 end
 
 function M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
@@ -717,24 +721,21 @@ end
 function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
   local state_marker = M.state_marker(fix.proposal_id, "reviewing", new_version or fix.version)
   local marker = M.fix_marker(fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
-  return {
-    schema = "github-proxy.v1",
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop fix pushed for re-review"
-      .. "\n\nPrevious reviewed head: " .. tostring(old_head_sha)
-      .. "\nNew head: " .. tostring(new_head_sha)
-      .. "\n\n" .. state_marker
-      .. "\n" .. marker,
-    dedup_key = M._dedup_key({
-      "fix",
-      "comment",
-      tostring(fix.proposal_id),
-      tostring(fix.review_dedup_key),
-      tostring(new_head_sha),
-    }),
-    source_ref = M.normalize_source_ref(fix.source_ref),
-  }
+    number = fix.pr_number,
+  }, "github-devloop fix pushed for re-review"
+    .. "\n\nPrevious reviewed head: " .. tostring(old_head_sha)
+    .. "\nNew head: " .. tostring(new_head_sha)
+    .. "\n\n" .. state_marker
+    .. "\n" .. marker, M._dedup_key({
+    "fix",
+    "comment",
+    tostring(fix.proposal_id),
+    tostring(fix.review_dedup_key),
+    tostring(new_head_sha),
+  }), fix.source_ref)
 end
 
 function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
@@ -764,22 +765,19 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
   end
   text = M.neutralize_untrusted_comment_text(text)
   local state_marker = M.state_marker(fix.proposal_id, "review-meta", fix.version)
-  return {
-    schema = "github-proxy.v1",
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop fix escalated to review-meta: " .. safe_reason
-      .. "\n\n" .. text
-      .. "\n\n" .. state_marker,
-    dedup_key = M._dedup_key({
-      "fix",
-      "comment",
-      "review-meta",
-      safe_reason,
-      tostring(fix.dedup_key),
-    }),
-    source_ref = M.normalize_source_ref(fix.source_ref),
-  }
+    number = fix.pr_number,
+  }, "github-devloop fix escalated to review-meta: " .. safe_reason
+    .. "\n\n" .. text
+    .. "\n\n" .. state_marker, M._dedup_key({
+    "fix",
+    "comment",
+    "review-meta",
+    safe_reason,
+    tostring(fix.dedup_key),
+  }), fix.source_ref)
 end
 
 function M.build_review_meta_label_request(repo, issue_number, review_meta, action, version)
@@ -808,23 +806,20 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_meta.review_proposal_id)
     merge_marker = "\n" .. M.merge_ready_marker(review_meta.proposal_id, review_meta.pr_number, state_version, review_meta.review_proposal_id, review_meta.dedup_key, reviewed_head_sha)
   end
-  return {
-    schema = "github-proxy.v1",
+  return M.build_entity_comment_request({
+    kind = "pr",
     repo = repo,
-    issue_number = issue_number,
-    body = "github-devloop review-meta action: " .. tostring(action)
-      .. "\n\nReason:\n" .. safe_reason
-      .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
-      .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version)
-      .. merge_marker,
-    dedup_key = M._dedup_key({
-      "review-meta",
-      "comment",
-      tostring(review_meta.dedup_key),
-      tostring(state_version),
-    }),
-    source_ref = M.normalize_source_ref(review_meta.source_ref),
-  }
+    number = review_meta.pr_number,
+  }, "github-devloop review-meta action: " .. tostring(action)
+    .. "\n\nReason:\n" .. safe_reason
+    .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
+    .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version)
+    .. merge_marker, M._dedup_key({
+    "review-meta",
+    "comment",
+    tostring(review_meta.dedup_key),
+    tostring(state_version),
+  }), review_meta.source_ref)
 end
 end
 

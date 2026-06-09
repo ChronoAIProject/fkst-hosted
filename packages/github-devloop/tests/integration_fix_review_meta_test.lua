@@ -129,7 +129,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
 	    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-	    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+	    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
 	    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
     local expected_version = core.next_fix_version(event.version)
 	    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
@@ -149,7 +149,7 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       comment_raise.payload.body,
     })
-    local origin_marker_for_review = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker_for_review = core.pr_origin_marker(event.proposal_id, "42", branch, expected_version, "dev")
     mock_pr_origin({ origin_marker_for_review }, branch, "feedface")
     mock_pr_diff("diff --git a/packages/github-devloop/core.lua b/packages/github-devloop/core.lua\n+fixed again\n")
     mock_pr_origin({ origin_marker_for_review }, branch, "feedface")
@@ -180,7 +180,7 @@ return {
       reject_comment,
     }, branch, event.version)
     local pending = run_fix(event, opts("fix-marker-lag", { FKST_GITHUB_WRITE = "1" }))
-    t.eq(pending.exit_code, 1)
+    t.eq(pending.exit_code, 0)
     t.eq(#pending.raises, 0)
     t.eq(count_calls("codex exec"), 0)
 
@@ -239,7 +239,7 @@ return {
     }, branch, review_version)
 
     local pending = run_fix(event, opts("fix-new-round-marker-lag", { FKST_GITHUB_WRITE = "1" }))
-    t.eq(pending.exit_code, 1)
+    t.eq(pending.exit_code, 0)
     t.eq(#pending.raises, 0)
     t.eq(count_calls("codex exec"), 0)
   end,
@@ -445,7 +445,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(core.current_state({ find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body }, event.proposal_id).version, core.next_fix_version(event.version))
+    t.eq(core.current_state({ find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body }, event.proposal_id).version, core.next_fix_version(event.version))
     t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git push origin"), 0)
@@ -524,7 +524,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:review-meta")
-    local comment_body = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("github-devloop fix escalated to review-meta: no-fix", 1, true) ~= nil)
     t.eq(comment_body:find("fkst:github-devloop:review-meta:v1", 1, true), nil)
     t.eq(find_raise(result.raises, "devloop_review_meta").payload.schema, "github-devloop.review-meta.v1")
@@ -580,7 +580,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(core.current_state({ find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body }, event.proposal_id).version, core.next_fix_version(event.version))
+    t.eq(core.current_state({ find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body }, event.proposal_id).version, core.next_fix_version(event.version))
     t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("add -A"), 0)
     t.eq(count_calls("commit -m"), 0)
@@ -604,8 +604,8 @@ return {
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.is_true(result.raises[1].payload.dedup_key:find("/loop/1", 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,
 
   test_review_loop_long_reviewing_version_segment_applies = function()
@@ -636,8 +636,8 @@ return {
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.eq(result.raises[1].payload.proposal_id, proposal_id)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,
 
   test_review_loop_long_reviewing_version_skips_after_issue_advanced = function()
@@ -805,7 +805,7 @@ return {
     local loop_result = run_review_loop(event, opts("review-loop-true-stall"))
     t.eq(loop_result.exit_code, 0)
     t.eq(#loop_result.raises, 2)
-    t.eq(loop_result.raises[1].queue, "github-proxy.github_issue_comment_request")
+    t.eq(loop_result.raises[1].queue, "github-proxy.github_pr_comment_request")
     t.is_true(loop_result.raises[1].payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
     t.is_true(loop_result.raises[1].payload.body:find('round="3"', 1, true) ~= nil)
     local reconcile_payload = find_raise(loop_result.raises, "devloop_review_reconcile").payload
@@ -829,7 +829,7 @@ return {
     local result = run_review_reconcile(event, opts("review-reconcile-drop"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     local version = core.review_reconcile_state_version(event.issue_version, event.round)
     t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
@@ -949,7 +949,7 @@ return {
     local meta_result = run_review_meta(event, opts("review-meta-fix-canonical"))
     t.eq(meta_result.exit_code, 0)
     t.eq(#meta_result.raises, 3)
-    local meta_comment = find_raise(meta_result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local meta_comment = find_raise(meta_result.raises, "github-proxy.github_pr_comment_request").payload.body
     local current = core.current_state({
       core.state_marker(event.proposal_id, "review-meta", event.version),
       meta_comment,

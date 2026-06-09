@@ -16,18 +16,6 @@ M.spec = {
   stall_window = "30s",
 }
 
-local function fixing_fact(comments, proposal_id, version)
-  local reject_fact = core.review_reject_fact(comments, proposal_id, version)
-  if reject_fact ~= nil then
-    return reject_fact
-  end
-  local meta_fix_fact = core.review_meta_fix_fact(comments, proposal_id, version)
-  if meta_fix_fact ~= nil then
-    return meta_fix_fact
-  end
-  return core.merge_gate_fix_fact(comments, proposal_id, version)
-end
-
 function pipeline(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
@@ -70,20 +58,6 @@ function pipeline(event)
         })
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
       end
-      if state.state == "merge-ready" or state.state == "merging" then
-        local fact = core.merge_ready_fact(current.comments, proposal_id, state.version)
-        if fact ~= nil then
-          local merge_payload = core.build_devloop_merge_ready_payload(proposal_id, fact.pr_number, state.version, {
-            review_proposal_id = fact.review_proposal_id,
-            review_dedup_key = fact.review_dedup_key,
-            reviewed_head_sha = fact.head_sha,
-          }, issue.source_ref)
-          core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
-            "devloop_merge_ready",
-          })
-          core.log_raise("observe_issue", proposal_id, "devloop_merge_ready", merge_payload)
-        end
-      end
       if state.state == "ready" then
         local ready_payload = core.build_devloop_ready_payload({
           proposal_id = proposal_id,
@@ -95,29 +69,7 @@ function pipeline(event)
         })
         core.log_raise("observe_issue", proposal_id, "devloop_ready", ready_payload)
       end
-      if state.state == "fixing" then
-        local fact = fixing_fact(current.comments, proposal_id, state.version)
-        local reviewing_version = core.next_fix_version(state.version)
-        if fact ~= nil
-          and fact.review_proposal_id ~= nil
-          and fact.reviewed_head_sha ~= nil
-          and not core.has_state_marker(current.comments, proposal_id, "reviewing", reviewing_version) then
-          local _, pr_number = core.parse_pr_review_proposal_id(fact.review_proposal_id)
-          local fix_payload = core.build_devloop_fixing_payload({
-            proposal_id = proposal_id,
-            impl_version = state.version,
-          }, pr_number, {
-            review_proposal_id = fact.review_proposal_id,
-            review_dedup_key = fact.review_dedup_key,
-            reviewed_head_sha = fact.reviewed_head_sha,
-          }, issue.source_ref)
-          core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
-            "devloop_fixing",
-          })
-          core.log_raise("observe_issue", proposal_id, "devloop_fixing", fix_payload)
-        end
-      end
-      if state.state == "thinking" then
+      if state.state == "thinking" or state.state == "pr-open" then
         return
       end
     end

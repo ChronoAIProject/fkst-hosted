@@ -148,24 +148,18 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_reraises_merge_ready_for_poll_self_heal = function()
+  test_observe_issue_does_not_reraise_merge_ready_after_pr_handoff = function()
     local event = merge_ready()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:merge-ready" }, "OPEN", merge_comments(event))
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:merge-ready" } }), opts("observe-issue-merge-ready-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local merge_raise = find_raise(result.raises, "devloop_merge_ready")
-    t.eq(merge_raise.payload.schema, "github-devloop.merge-ready.v1")
-    t.eq(merge_raise.payload.proposal_id, event.proposal_id)
-    t.eq(merge_raise.payload.pr_number, event.pr_number)
-    t.eq(merge_raise.payload.version, event.version)
-    t.eq(merge_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
+    t.eq(#result.raises, 0)
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_reraises_merging_for_poll_self_heal = function()
+  test_observe_issue_does_not_reraise_merging_after_pr_handoff = function()
     local event = merge_ready()
     local comments = merge_comments(event)
     table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
@@ -173,18 +167,12 @@ return {
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:merging" } }), opts("observe-issue-merging-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local merge_raise = find_raise(result.raises, "devloop_merge_ready")
-    t.eq(merge_raise.payload.schema, "github-devloop.merge-ready.v1")
-    t.eq(merge_raise.payload.proposal_id, event.proposal_id)
-    t.eq(merge_raise.payload.pr_number, event.pr_number)
-    t.eq(merge_raise.payload.version, event.version)
-    t.eq(merge_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
+    t.eq(#result.raises, 0)
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_reraises_fixing_for_poll_self_heal = function()
+  test_observe_issue_does_not_reraise_fixing_after_pr_handoff = function()
     local event = fixing()
     local reject_comment = core.build_review_result_comment_request(
       "owner/repo",
@@ -207,23 +195,7 @@ return {
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local fixing_raise = find_raise(result.raises, "devloop_fixing")
-    t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
-    t.eq(fixing_raise.payload.proposal_id, event.proposal_id)
-    t.eq(tostring(fixing_raise.payload.pr_number), tostring(event.pr_number))
-    t.eq(fixing_raise.payload.version, event.version)
-    t.eq(fixing_raise.payload.review_proposal_id, event.review_proposal_id)
-    t.eq(fixing_raise.payload.review_dedup_key, event.review_dedup_key)
-    t.eq(fixing_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
-    t.eq(fixing_raise.payload.dedup_key, core.build_devloop_fixing_payload({
-      proposal_id = event.proposal_id,
-      impl_version = event.version,
-    }, event.pr_number, {
-      review_proposal_id = event.review_proposal_id,
-      review_dedup_key = event.review_dedup_key,
-      reviewed_head_sha = event.reviewed_head_sha,
-    }, event.source_ref).dedup_key)
+    t.eq(#result.raises, 0)
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
@@ -703,17 +675,17 @@ return {
       }
     end
     mock_bot_env()
-    mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
-    mock_issue_review({ "fkst-dev:reviewing" }, {
+    mock_pr_origin({
+      origin_marker,
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
       core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 2, "base", "Review question " .. tostring(cap - 2), varying_digest(cap - 2)),
       core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 1, "loop", "Review question " .. tostring(cap - 1), varying_digest(cap - 1)),
-    })
+    }, "devloop-owner-repo-42-01HY", "def456")
 
     local result = run_review_loop(event, opts("review-loop-round-cap"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
-    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
     t.is_true(result.raises[1].payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
     t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
     t.eq(result.raises[2].queue, "devloop_review_reconcile")

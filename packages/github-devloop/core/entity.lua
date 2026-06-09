@@ -1,0 +1,161 @@
+local S = {}
+
+function S.install(M)
+local previous_transition_lock_key = M.transition_lock_key
+local previous_observe_lock_key = M.observe_lock_key
+
+local function pr_source_ref(repo, pr_number)
+  return {
+    kind = "external",
+    ref = tostring(repo) .. "#pr/" .. tostring(pr_number),
+  }
+end
+
+function M.pr_source_ref(repo, pr_number)
+  return pr_source_ref(repo, pr_number)
+end
+
+function M.issue_source_ref(repo, issue_number)
+  return {
+    kind = "external",
+    ref = tostring(repo) .. "#issue/" .. tostring(issue_number),
+  }
+end
+
+function M.build_entity_comment_request(target, body, dedup_key, source_ref)
+  if type(target) ~= "table" then
+    error("github-devloop: invalid entity comment target")
+  end
+  local request = {
+    schema = "github-proxy.v1",
+    repo = target.repo,
+    body = body,
+    dedup_key = dedup_key,
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+  if target.kind == "issue" then
+    request.issue_number = target.number
+  elseif target.kind == "pr" then
+    request.pr_number = target.number
+  else
+    error("github-devloop: invalid entity comment target kind")
+  end
+  return request
+end
+
+function M.current_entity_state(entity_comments, proposal_id)
+  return M.current_state(entity_comments, proposal_id)
+end
+
+function M.pr_proposal_id(repo, pr_number)
+  if not M.is_safe_pr_number(pr_number) then
+    error("github-devloop: invalid PR proposal number")
+  end
+  local safe_repo = M.sanitize_key(repo, false)
+  if safe_repo == nil or safe_repo == "" then
+    error("github-devloop: invalid PR proposal repo")
+  end
+  return "github-devloop/pr/" .. safe_repo .. "/" .. tostring(pr_number)
+end
+
+function M.parse_pr_proposal_id(proposal_id)
+  local repo_part, number = tostring(proposal_id or ""):match("^github%-devloop/pr/(.+)/(%d+)$")
+  if repo_part == nil or not M.is_safe_pr_number(number) then
+    return nil, nil
+  end
+  return repo_part, tonumber(number)
+end
+
+function M.pr_transition_lock_key(repo, pr_number)
+  return "github-devloop/transition/" .. M.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
+end
+
+function M.parse_entity_proposal_id(proposal_id)
+  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  if repo ~= nil then
+    return {
+      kind = "issue",
+      repo = repo,
+      issue_number = issue_number,
+      number = issue_number,
+      proposal_id = proposal_id,
+    }
+  end
+  local pr_repo, pr_number = M.parse_pr_proposal_id(proposal_id)
+  if pr_repo ~= nil then
+    return {
+      kind = "pr",
+      repo = pr_repo,
+      pr_number = pr_number,
+      number = pr_number,
+      proposal_id = proposal_id,
+    }
+  end
+  return nil
+end
+
+function M.is_safe_entity_proposal_ref(proposal_id, dedup_key)
+  local entity = M.parse_entity_proposal_id(proposal_id)
+  if entity == nil then
+    return false
+  end
+  if entity.kind == "issue" then
+    return M.is_safe_proposal_ref(proposal_id, dedup_key)
+  end
+  return M._is_path_safe_key(proposal_id, M._max_key_len)
+    and M._is_path_safe_key(dedup_key, M._max_dedup_len)
+end
+
+function M.transition_lock_key(proposal_id)
+  local lock = previous_transition_lock_key and previous_transition_lock_key(proposal_id)
+  if lock ~= nil then
+    return lock
+  end
+  local repo, pr_number = M.parse_pr_proposal_id(proposal_id)
+  if repo == nil then
+    return nil
+  end
+  return M.pr_transition_lock_key(repo, pr_number)
+end
+
+function M.observe_lock_key(repo, number, kind)
+  if kind == "pr" then
+    return M.pr_transition_lock_key(repo, number)
+  end
+  return previous_observe_lock_key(repo, number)
+end
+
+function M.result_lock_key(proposal_id)
+  return M.transition_lock_key(proposal_id)
+end
+
+function M.review_result_lock_key(proposal_id)
+  return M.transition_lock_key(proposal_id)
+end
+
+function M.review_lock_key(proposal_id)
+  return M.transition_lock_key(proposal_id)
+end
+
+function M.loop_lock_key(proposal_id)
+  return M.transition_lock_key(proposal_id)
+end
+
+function M.implement_lock_key(proposal_id)
+  return M.transition_lock_key(proposal_id)
+end
+
+function M.pr_native_origin(repo, pr_number, pr)
+  return {
+    proposal_id = M.pr_proposal_id(repo, pr_number),
+    repo = repo,
+    issue_number = nil,
+    branch = pr.head_ref_name,
+    impl_version = pr.updated_at or pr.updatedAt or pr.head_sha or "pr/" .. tostring(pr_number),
+    base_branch = pr.base_ref_name,
+    pr_native = true,
+  }
+end
+end
+
+return S

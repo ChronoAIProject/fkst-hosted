@@ -6,20 +6,24 @@ M.spec = {
   consumes = { "devloop_reconcile", "devloop_review_reconcile", "devloop_fix_reconcile" },
   produces = {
     "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "github-proxy.github_issue_label_request",
   },
   stall_window = "2m",
 }
 
-local function emit_blocked_reconcile(kind, proposal_id, state, version, action, reason, comment_request, label_request)
+local function emit_blocked_reconcile(kind, proposal_id, state, version, action, reason, comment_request, label_request, comment_queue)
   local add_labels, remove_labels = core.state_label_changes("blocked")
+  local queue = comment_queue or "github-proxy.github_issue_comment_request"
   core.log_cas_decision("reconcile", proposal_id, state, kind, "blocked", "applied", reason)
   core.log_apply("reconcile", proposal_id, "blocked", version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_issue_comment_request",
+    queue,
     "github-proxy.github_issue_label_request",
   })
-  core.log_raise("reconcile", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise("reconcile", proposal_id, "github-proxy.github_issue_label_request", label_request)
+  core.log_raise("reconcile", proposal_id, queue, comment_request)
+  if label_request ~= nil then
+    core.log_raise("reconcile", proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
 end
 
 local function pipeline_thinking(event)
@@ -92,10 +96,16 @@ local function pipeline_review(event)
   end
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(reconcile.proposal_id)
-  if repo == nil then
+  local entity = core.parse_entity_proposal_id(reconcile.proposal_id)
+  if entity == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
+  end
+  local repo = entity.repo
+  local issue_number = entity.issue_number
+  local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
+  if pr_number == nil then
+    pr_number = entity.pr_number
   end
 
   local lock_key = core.transition_lock_key(reconcile.proposal_id)
@@ -107,14 +117,14 @@ local function pipeline_review(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_review_loop_cmd(repo, issue_number), timeout = 30 })
+    local view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
     if view.exit_code ~= 0 then
-      error("github-devloop: gh issue review reconcile view failed: " .. tostring(view.stderr))
+      error("github-devloop: gh pr review reconcile view failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_issue_view_review_loop(view.stdout)
+    local current = core.parse_pr_view_origin(view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
-    local state = core.current_state(current.comments, reconcile.proposal_id)
+    local state = core.current_entity_state(current.comments, reconcile.proposal_id)
     local version = core.review_reconcile_state_version(reconcile.issue_version, reconcile.round)
     if core.has_review_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.issue_version, reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(review reconcile marker already visible)", "review reconcile result marker for incoming version is already visible")
@@ -143,8 +153,8 @@ local function pipeline_review(event)
     local action = "drop"
     local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-review-rounds"
     local comment_request = core.build_review_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
-    local label_request = core.build_review_reconcile_label_request(repo, issue_number, reconcile)
-    emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
+    local label_request = issue_number ~= nil and core.build_review_reconcile_label_request(repo, issue_number, reconcile) or nil
+    emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
   end)
 end
 
@@ -157,10 +167,16 @@ local function pipeline_fix(event)
   end
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(reconcile.proposal_id)
-  if repo == nil then
+  local entity = core.parse_entity_proposal_id(reconcile.proposal_id)
+  if entity == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
+  end
+  local repo = entity.repo
+  local issue_number = entity.issue_number
+  local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
+  if pr_number == nil then
+    pr_number = entity.pr_number
   end
 
   local lock_key = core.transition_lock_key(reconcile.proposal_id)
@@ -172,14 +188,14 @@ local function pipeline_fix(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_review_loop_cmd(repo, issue_number), timeout = 30 })
+    local view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
     if view.exit_code ~= 0 then
-      error("github-devloop: gh issue fix reconcile view failed: " .. tostring(view.stderr))
+      error("github-devloop: gh pr fix reconcile view failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_issue_view_review_loop(view.stdout)
+    local current = core.parse_pr_view_origin(view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
-    local state = core.current_state(current.comments, reconcile.proposal_id)
+    local state = core.current_entity_state(current.comments, reconcile.proposal_id)
     local version = core.fix_reconcile_state_version(reconcile.issue_version)
     if core.has_fix_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.issue_version) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(fix reconcile marker already visible)", "fix reconcile result marker for incoming version is already visible")
@@ -208,8 +224,8 @@ local function pipeline_fix(event)
     local action = "drop"
     local reason = "fix-loop-true-stall-after-" .. tostring(reconcile.round) .. "-rounds"
     local comment_request = core.build_fix_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
-    local label_request = core.build_fix_reconcile_label_request(repo, issue_number, reconcile)
-    emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
+    local label_request = issue_number ~= nil and core.build_fix_reconcile_label_request(repo, issue_number, reconcile) or nil
+    emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
   end)
 end
 

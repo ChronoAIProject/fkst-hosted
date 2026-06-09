@@ -6,7 +6,7 @@ M.spec = {
   consumes = { "consensus.consensus_reached" },
   produces = {
     "github-proxy.github_issue_label_request",
-    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "devloop_fixing",
     "devloop_fix_reconcile",
     "devloop_merge_ready",
@@ -45,12 +45,7 @@ function pipeline(event)
   local current_pr = core.parse_pr_view_origin(pr_view.stdout)
   local origin = core.pr_origin_fact(current_pr.comments)
   if origin == nil then
-    if core.is_devloop_issue_branch(current_pr.head_ref_name) then
-      core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "retry-pending(pr-origin)", "trusted PR origin marker not yet visible")
-      error("github-devloop: trusted pr-origin marker not yet visible for review result; retrying")
-    end
-    core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(pr-origin)", "trusted PR origin marker absent")
-    return
+    origin = core.pr_native_origin(repo, pr_number, current_pr)
   end
   if origin.repo ~= repo then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(repo)", "pr-origin repo mismatch")
@@ -86,18 +81,9 @@ function pipeline(event)
   end
 
   with_lock(lock_key, function()
-    local issue_source_ref = {
-      kind = "external",
-      ref = tostring(origin.repo) .. "#issue/" .. tostring(origin.issue_number),
-    }
-    local issue_view = exec_sync({ cmd = core.gh_issue_view_result_cmd(origin.repo, origin.issue_number), timeout = 30 })
-    if issue_view.exit_code ~= 0 then
-      error("github-devloop: gh issue review result view failed: " .. tostring(issue_view.stderr))
-    end
-
-    local current_issue = core.parse_issue_view_result(issue_view.stdout)
-    core.log_forged_markers("review_result", origin.proposal_id, current_issue.comments)
-    local state = core.current_state(current_issue.comments, origin.proposal_id)
+    local pr_source_ref = core.pr_source_ref(origin.repo, pr_number)
+    core.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
+    local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
     local to_state = reached.decision == "approve" and "merge-ready" or "fixing"
     local current_review_version = core.safe_version_segment(state.version or "")
     local transition = core.cyclic_transition_status({
@@ -123,7 +109,7 @@ function pipeline(event)
     if reached.decision == "reject" then
       local fix_round = core.version_fix_round(state.version)
       local max_rounds_hit = fix_round >= core.max_fix_rounds()
-      local true_stall = core.is_fix_framing_true_stall(current_issue.comments, origin.proposal_id, reached.framing)
+      local true_stall = core.is_fix_framing_true_stall(current_pr.comments, origin.proposal_id, reached.framing)
       if max_rounds_hit or true_stall then
         local fix_reconcile = core.build_devloop_fix_reconcile_payload({
           proposal_id = origin.proposal_id,
@@ -131,7 +117,7 @@ function pipeline(event)
           review_dedup_key = reached.dedup_key,
           reviewed_head_sha = reviewed_head_sha,
           pr_number = pr_number,
-          source_ref = issue_source_ref,
+          source_ref = pr_source_ref,
         }, state.version)
         local reason = max_rounds_hit and "fix-loop-max-rounds" or "fix-loop-true-stall"
         core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(" .. reason .. ")", "review decision=reject")
@@ -141,13 +127,18 @@ function pipeline(event)
       issue_version = core.fix_version_from_review_version(state.version)
     end
     core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
-    local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, reached, issue_source_ref)
-    local label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, reached, issue_source_ref)
+    local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, reached, pr_source_ref)
+    local label_request = nil
+    if origin.issue_number ~= nil then
+      label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, reached, core.issue_source_ref(origin.repo, origin.issue_number))
+    end
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {
-      "github-proxy.github_issue_comment_request",
-      "github-proxy.github_issue_label_request",
+      "github-proxy.github_pr_comment_request",
     }
+    if label_request ~= nil then
+      table.insert(raised, "github-proxy.github_issue_label_request")
+    end
     local fix_payload = nil
     local merge_payload = nil
     if reached.decision == "reject" then
@@ -156,19 +147,21 @@ function pipeline(event)
         review_dedup_key = reached.dedup_key,
         reviewed_head_sha = reviewed_head_sha,
         fix_version = issue_version,
-      }, issue_source_ref)
+      }, pr_source_ref)
       table.insert(raised, "devloop_fixing")
     else
       merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, pr_number, issue_version, {
         review_proposal_id = reached.proposal_id,
         review_dedup_key = reached.dedup_key,
         reviewed_head_sha = reviewed_head_sha,
-      }, issue_source_ref)
+      }, pr_source_ref)
       table.insert(raised, "devloop_merge_ready")
     end
     core.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
-    core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-    core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    core.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+    if origin.issue_number ~= nil then
+      core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    end
     if fix_payload ~= nil then
       core.log_raise("review_result", origin.proposal_id, "devloop_fixing", fix_payload)
     end
