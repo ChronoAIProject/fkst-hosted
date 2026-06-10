@@ -31,7 +31,8 @@ local function sorted_numbers(items)
   local seen = {}
   for _, item in ipairs(items or {}) do
     local number = tonumber(item and item.number)
-    if number ~= nil and number >= 1 and number % 1 == 0 and not seen[number] then
+    local state = tostring(item and item.state or ""):lower()
+    if number ~= nil and number >= 1 and number % 1 == 0 and state == "open" and not seen[number] then
       seen[number] = true
       table.insert(numbers, number)
     end
