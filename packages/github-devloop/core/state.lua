@@ -141,6 +141,12 @@ function M.next_review_meta_action_version(version)
   return base .. "/review-meta-action/" .. tostring(next_n)
 end
 
+function M.next_review_loop_version(version)
+  local base = tostring(version or "")
+  local next_n = M.version_review_loop_round(base) + 1
+  return base .. "/review-loop/" .. tostring(next_n)
+end
+
 local function version_primary_key(version)
   local updated_at = M.version_updated_at(version)
   if updated_at ~= "" then

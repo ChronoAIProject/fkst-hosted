@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
+    "devloop_reviewing",
     "devloop_fixing",
   },
   stall_window = "2m",
@@ -84,6 +85,49 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, reas
     core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
   core.log_raise("merge", merge_ready.proposal_id, "devloop_fixing", fix_payload)
+end
+
+local function raise_reviewing_for_current_head(repo, issue_number, merge_ready, current_state, current_pr, reason)
+  local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
+  local review_version = core.next_review_loop_version(merge_ready.version)
+  if core.has_state_marker(current_pr.comments, merge_ready.proposal_id, "reviewing", review_version) then
+    core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "skip-idempotent(already at to_state)", reason)
+    return
+  end
+  local current_head_sha = tostring(current_pr.head_sha or "")
+  local comment_request = core.build_merge_head_reviewing_comment_request(
+    repo,
+    issue_number,
+    merge_ready,
+    merge_ready.reviewed_head_sha,
+    current_head_sha,
+    review_version,
+    source_ref
+  )
+  local label_request = issue_number ~= nil and core.build_merge_head_reviewing_label_request(
+    repo,
+    issue_number,
+    merge_ready,
+    current_head_sha,
+    review_version,
+    core.issue_source_ref(repo, issue_number)
+  ) or nil
+  local reviewing_payload = core.build_devloop_reviewing_payload({
+    proposal_id = merge_ready.proposal_id,
+    impl_version = review_version,
+  }, merge_ready.pr_number, source_ref, review_version)
+  local add_labels, remove_labels = core.state_label_changes("reviewing")
+  core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "applied", reason)
+  core.log_apply("merge", merge_ready.proposal_id, "reviewing", review_version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_reviewing",
+  })
+  core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if label_request ~= nil then
+    core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  core.log_raise("merge", merge_ready.proposal_id, "devloop_reviewing", reviewing_payload)
 end
 
 local function assert_open_same_repo_pr(merge_ready, pr, repo, branch, head_sha)
@@ -324,6 +368,11 @@ function pipeline(event)
         raise_fixing(repo, issue_number, merge_ready, state, "head-sha-mismatch")
         return
       end
+      if pr_reason == "head-sha-mismatch" and state.state == "merge-ready" then
+        log_gate(merge_ready, "reviewing", "head-sha-mismatch")
+        raise_reviewing_for_current_head(repo, issue_number, merge_ready, state, current_pr, "head-sha-mismatch")
+        return
+      end
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(" .. pr_reason .. ")", "write-time PR fact failed")
       return
     end
@@ -374,8 +423,8 @@ function pipeline(event)
     local recheck_ok, recheck_reason, rechecked_state = assert_merge_pr_authority(merge_ready, rechecked_pr_for_gate, repo, issue_number, origin, branches)
     if not recheck_ok then
       if recheck_reason == "head-sha-mismatch" then
-        log_gate(merge_ready, "fixing", "head-sha-mismatch")
-        raise_fixing(repo, issue_number, merge_ready, rechecked_state, "head-sha-mismatch")
+        log_gate(merge_ready, "reviewing", "head-sha-mismatch")
+        raise_reviewing_for_current_head(repo, issue_number, merge_ready, rechecked_state, rechecked_pr_for_gate, "head-sha-mismatch")
         return
       end
       core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready|merging", "merging", "skip-stale(write-gate)", "write-time PR state changed")
@@ -423,8 +472,8 @@ function pipeline(event)
       error("github-devloop: merged PR fact changed before finalization")
     end
     if not merge_ok and merge_reason == "head-sha-mismatch" then
-      log_gate(merge_ready, "fixing", "head-sha-mismatch")
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, "head-sha-mismatch")
+      log_gate(merge_ready, "reviewing", "head-sha-mismatch")
+      raise_reviewing_for_current_head(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr or rechecked_pr_for_gate, "head-sha-mismatch")
       return
     end
     if not merge_ok and core.is_ci_red_reason(merge_reason) then
