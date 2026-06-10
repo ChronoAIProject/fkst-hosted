@@ -172,8 +172,19 @@ return {
     t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
     t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
     t.is_true(captured[1]:find("attempt=4", 1, true) ~= nil)
-    t.is_true(captured[1]:find("terminal=false", 1, true) ~= nil)
+    t.is_nil(captured[1]:find("terminal=", 1, true))
     t.is_true(captured[1]:find("queue=devloop_ready", 1, true) ~= nil)
+  end,
+
+  test_error_class_from_message_prefers_inner_codex_failure = function()
+    t.eq(
+      core.error_class_from_message("github-devloop: fix codex failed: bad sha abcdef1234567890"),
+      "codex-failed"
+    )
+    t.eq(
+      core.error_class_from_message("github-devloop: intake codex failed: timed out"),
+      "codex-failed"
+    )
   end,
 
   test_build_proposal = function()

@@ -59,7 +59,11 @@ end
 
 function M.error_class_from_message(message)
   local text = tostring(message or "")
-  local class = text:match("github%-devloop: ([%w%-]+):")
+  if text:match("github%-devloop: .-codex failed:") then
+    return "codex-failed"
+  end
+  local class = text:match("github%-devloop: [^:]+ failed: ([%w%-]+):")
+    or text:match("github%-devloop: ([%w%-]+):")
     or text:match("github%-devloop: ([%w%-]+) failed:")
     or text:match("github%-devloop: ([%w%-]+) retrying")
   return class or "caught-failure"
@@ -94,7 +98,6 @@ function M.wrap_pipeline_failure(dept, fn)
     M.log_error_fact("error", dept, proposal_id, "FAILURE", M.error_class_from_message(err), type(event) == "table" and event.queue or nil, err, {
       source_ref = event_source_ref(event),
       attempt = type(event) == "table" and event.attempt or nil,
-      terminal = false,
     })
     error(err, 0)
   end

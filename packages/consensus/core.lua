@@ -114,7 +114,6 @@ function M.wrap_pipeline_failure(dept, fn)
     M.log_error_fact("error", dept, "FAILURE", M.error_class_from_message(err), type(event) == "table" and event.queue or nil, err, {
       source_ref = event_source_ref(event),
       attempt = type(event) == "table" and event.attempt or nil,
-      terminal = false,
     })
     error(err, 0)
   end

@@ -299,7 +299,7 @@ return {
     t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
     t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
     t.is_true(captured[1]:find("attempt=5", 1, true) ~= nil)
-    t.is_true(captured[1]:find("terminal=false", 1, true) ~= nil)
+    t.is_nil(captured[1]:find("terminal=", 1, true))
     t.is_true(captured[1]:find("queue=github_pr_open_request", 1, true) ~= nil)
   end,
 
