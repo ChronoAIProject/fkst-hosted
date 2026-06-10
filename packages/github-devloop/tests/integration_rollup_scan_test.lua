@@ -129,6 +129,16 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 1)
     t.eq(h.count_calls("codex exec"), 1)
+    local saw_prompt_range = false
+    local saw_prompt_issue_fetch = false
+    for _, call in ipairs(t.command_calls()) do
+      if call.rendered:find("codex exec", 1, true) ~= nil then
+        saw_prompt_range = call.stdin:find("git log --format=%H%x09%s refs/remotes/origin/dev..def456", 1, true) ~= nil
+        saw_prompt_issue_fetch = call.stdin:find("gh issue view <referenced-number> --repo owner/repo --json title,body,comments,labels,state", 1, true) ~= nil
+      end
+    end
+    t.is_true(saw_prompt_range)
+    t.is_true(saw_prompt_issue_fetch)
     t.is_true(h.has_call("--head 'integration/dev'"))
     t.is_true(h.has_call("--base 'dev'"))
     local written = file.read(rollup_body_path())
