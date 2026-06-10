@@ -316,6 +316,14 @@ return {
     t.eq(second.kind, "satisfied")
     t.eq(count_calls("gh api graphql"), graphql_calls_after_first + 1)
 
+    mock_blocked_by(42, { { number = 17 }, { number = 18 } })
+    mock_blocked_by(18, {})
+    mock_blocker_issue(18, "ready")
+    local changed_root_edges = core.dependency_gate(repo, 42)
+    t.eq(changed_root_edges.ok, false)
+    t.eq(changed_root_edges.kind, "waiting")
+    t.eq(changed_root_edges.unmet[1], 18)
+
     mock_blocked_by(42, { { number = 17 } })
     mock_blocked_by(17, {})
     mock_blocker_issue_failure(17)
