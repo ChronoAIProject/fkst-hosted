@@ -672,7 +672,7 @@ return {
     t.eq(count_calls("gh issue close"), 0)
   end,
 
-  test_merge_same_second_earlier_review_fact_does_not_merge_new_head = function()
+  test_merge_same_second_earlier_review_fact_reenters_reviewing_for_new_head = function()
     local event = merge_ready()
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
@@ -690,8 +690,10 @@ return {
 
     local result = run_merge(event, opts("merge-same-second-old-review-new-head", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 3)
     t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, event.version .. "/review-loop/1")
   end,
 
   test_merge_not_mergeable_moves_back_to_fixing = function()
@@ -742,7 +744,7 @@ return {
     t.eq(count_calls("gh issue close"), 0)
   end,
 
-  test_merge_pr_head_advanced_after_recheck_moves_back_to_fixing = function()
+  test_merge_pr_head_advanced_after_recheck_reenters_reviewing_for_current_head = function()
     local event = merge_ready()
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
@@ -758,8 +760,57 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
     t.eq(count_calls("gh pr merge"), 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
-    t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-ready"))
+    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    t.eq(reviewing_raise.payload.schema, "github-devloop.reviewing.v1")
+    t.eq(reviewing_raise.payload.version, event.version .. "/review-loop/1")
+    t.eq(reviewing_raise.payload.pr_number, event.pr_number)
+    local review_repo, review_pr, review_version, review_head = core.parse_pr_review_proposal_id(
+      core.pr_review_proposal_id("owner/repo", reviewing_raise.payload.pr_number, reviewing_raise.payload.version, "feedface")
+    )
+    t.eq(review_repo, core.safe_pr_review_repo_segment("owner/repo"))
+    t.eq(review_pr, tostring(event.pr_number))
+    t.eq(review_version, core.safe_version_segment(reviewing_raise.payload.version))
+    t.eq(review_head, "feedface")
+    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(comment_body:find('state="reviewing"', 1, true) ~= nil)
+    t.is_true(comment_body:find('version="' .. event.version .. "/review-loop/1" .. '"', 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_pr_head_advanced_reentry_is_idempotent_for_current_head = function()
+    local event = merge_ready()
+    local review_version = event.version .. "/review-loop/1"
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local comments = merge_comments(event)
+    table.insert(comments, core.state_marker(event.proposal_id, "reviewing", review_version))
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:reviewing" }, comments)
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "feedface")
+
+    local result = run_merge(event, opts("merge-head-advanced-reviewing-idempotent", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_calls("gh issue close"), 0)
+  end,
+
+  test_merge_closed_pr_head_mismatch_does_not_reenter_reviewing = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "feedface", "CLOSED")
+
+    local result = run_merge(event, opts("merge-head-advanced-closed-pr", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
     t.eq(count_calls("gh issue close"), 0)
   end,
 
