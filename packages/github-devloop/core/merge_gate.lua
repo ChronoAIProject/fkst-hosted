@@ -65,14 +65,9 @@ function M.dispatch_ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_sec
   end
   local head_sha = tostring(pr and pr.head_sha or "")
   local head_ref = tostring(pr and pr.head_ref_name or "")
-  local date_result = exec_sync({ cmd = M.gh_commit_date_cmd(repo, head_sha), timeout = 30 })
-  if date_result.exit_code ~= 0 then
-    return false, "missing-status-head-date-unavailable"
-  end
-  local head_pushed_at = tostring(date_result.stdout or ""):gsub("^%s+", ""):gsub("%s+$", "")
   local eligible, reason, age_seconds = M.ci_missing_status_dispatch_eligible({
     status_check_rollup = pr and pr.status_check_rollup,
-    updated_at = head_pushed_at,
+    updated_at = pr and pr.updated_at,
   }, now(), grace_seconds)
   if not eligible then
     return false, reason
@@ -88,7 +83,7 @@ function M.dispatch_ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_sec
       "pr=" .. tostring(pr_number),
       "head_sha=" .. head_sha,
       "head_ref=" .. head_ref,
-      "head_pushed_at=" .. head_pushed_at,
+      "pr_updated_at=" .. tostring(pr and pr.updated_at or ""),
       "age_seconds=" .. tostring(age_seconds or ""),
       "once_key=" .. key,
     })

@@ -169,11 +169,6 @@ function M.gh_workflow_dispatch_ci_cmd(repo, ref)
     .. " --ref " .. M._shell_single_quote(ref)
 end
 
-function M.gh_commit_date_cmd(repo, head_sha)
-  return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/commits/" .. M.safe_head_segment(head_sha))
-    .. " --jq " .. M._shell_single_quote(".commit.committer.date")
-end
-
 function M.gh_issue_comment_cmd(repo, issue_number, body_file)
   return "gh issue comment " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)

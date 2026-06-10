@@ -14,14 +14,6 @@ local count_calls = h.count_calls
 
 local dispatch_cmd = "gh workflow run 'ci.yml' --repo 'owner/repo' --ref 'devloop-owner-repo-42-01HY'"
 
-local function mock_head_commit_date(date)
-  t.mock_command("gh api 'repos/owner/repo/commits/def456' --jq '.commit.committer.date'", {
-    stdout = tostring(date or "2026-06-03T02:03:04Z") .. "\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
 local function origin_marker(event)
   return core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
 end
@@ -35,7 +27,6 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, "[]")
-    mock_head_commit_date()
     t.mock_command(dispatch_cmd, {
       stdout = "dispatched\n",
       stderr = "",
@@ -53,7 +44,6 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, "[]")
-    mock_head_commit_date()
     t.mock_command(dispatch_cmd, {
       stdout = "dispatched\n",
       stderr = "",
@@ -64,7 +54,7 @@ return {
     t.eq(retry.exit_code, 1)
     t.eq(#retry.raises, 0)
     t.eq(count_calls(dispatch_cmd), 1)
-    t.eq(count_calls("gh api 'repos/owner/repo/commits/def456' --jq '.commit.committer.date'"), 2)
+    t.eq(count_calls("gh api"), 0)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 
@@ -80,24 +70,18 @@ return {
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh workflow run"), 0)
-    t.eq(count_calls("gh api 'repos/owner/repo/commits/def456' --jq '.commit.committer.date'"), 0)
+    t.eq(count_calls("gh api"), 0)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 
-  test_missing_status_within_head_grace_does_not_dispatch = function()
-    local event = merge_ready()
-    mock_bot_env()
-    mock_write_env("1")
-    mock_write_env("1")
-    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge_rollup({ origin_marker(event) }, "[]")
-    mock_head_commit_date("2099-01-01T00:00:00Z")
+  test_missing_status_within_pr_updated_grace_does_not_dispatch = function()
+    local eligible, reason = core.ci_missing_status_dispatch_eligible({
+      status_check_rollup = {},
+      updated_at = "2026-06-03T02:02:00Z",
+    }, core.iso_timestamp_epoch_seconds("2026-06-03T02:06:00Z"), 300)
 
-    local result = run_merge(event, opts("merge-missing-status-grace", { FKST_GITHUB_WRITE = "1" }))
-    t.eq(result.exit_code, 1)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("gh workflow run"), 0)
-    t.eq(count_calls("gh api 'repos/owner/repo/commits/def456' --jq '.commit.committer.date'"), 1)
-    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(eligible, false)
+    t.eq(reason, "missing-status-grace")
+    t.eq(count_calls("gh api"), 0)
   end,
 }
