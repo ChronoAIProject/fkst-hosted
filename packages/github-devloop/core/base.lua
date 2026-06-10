@@ -601,6 +601,17 @@ function M.ci_dispatch_once_key(repo, pr_number, head_sha)
   })
 end
 
+function M.ci_missing_status_first_observed_key(repo, pr_number, head_sha)
+  return M._dedup_key({
+    "github-devloop",
+    "ci-missing-status-observed",
+    M.safe_repo(repo),
+    "pr",
+    M.safe_issue(pr_number),
+    M.safe_head_segment(head_sha),
+  })
+end
+
 function M.iso_timestamp_epoch_seconds(timestamp)
   local year, month, day, hour, minute, second = tostring(timestamp or ""):match(
     "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d)[%-:](%d%d)[%-:](%d%d)Z$"

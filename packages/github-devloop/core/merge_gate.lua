@@ -39,19 +39,18 @@ function M.evaluate_ci_merge_gate(pr)
   return true, "merge-gate-ok"
 end
 
-function M.ci_missing_status_dispatch_eligible(pr, now_seconds, grace_seconds)
+function M.ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_seconds, grace_seconds)
   local green, green_reason = M.pr_rollup_green(pr)
   if green or green_reason ~= "missing-status-rollup" then
     return false, green_reason
   end
-  local updated_at = tostring(type(pr) == "table" and pr.updated_at or "")
-  local updated_seconds = M.iso_timestamp_epoch_seconds(updated_at)
   local current_seconds = tonumber(now_seconds)
+  local observed_seconds = tonumber(first_observed_seconds)
   local grace = tonumber(grace_seconds or 300)
-  if updated_seconds == nil or current_seconds == nil then
+  if observed_seconds == nil or current_seconds == nil then
     return false, "missing-status-age-unknown"
   end
-  local age_seconds = current_seconds - updated_seconds
+  local age_seconds = current_seconds - observed_seconds
   if age_seconds < grace then
     return false, "missing-status-grace"
   end
@@ -65,10 +64,19 @@ function M.dispatch_ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_sec
   end
   local head_sha = tostring(pr and pr.head_sha or "")
   local head_ref = tostring(pr and pr.head_ref_name or "")
+  local now_seconds = now()
+  local observed_key = M.ci_missing_status_first_observed_key(repo, pr_number, head_sha)
+  local first_observed_seconds = tonumber(cache_get(observed_key) or "")
+  if first_observed_seconds == nil then
+    first_observed_seconds = tonumber(now_seconds)
+    if first_observed_seconds == nil then
+      return false, "missing-status-age-unknown"
+    end
+    cache_set(observed_key, tostring(first_observed_seconds))
+  end
   local eligible, reason, age_seconds = M.ci_missing_status_dispatch_eligible({
     status_check_rollup = pr and pr.status_check_rollup,
-    updated_at = pr and pr.updated_at,
-  }, now(), grace_seconds)
+  }, now_seconds, first_observed_seconds, grace_seconds)
   if not eligible then
     return false, reason
   end
@@ -83,7 +91,7 @@ function M.dispatch_ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_sec
       "pr=" .. tostring(pr_number),
       "head_sha=" .. head_sha,
       "head_ref=" .. head_ref,
-      "pr_updated_at=" .. tostring(pr and pr.updated_at or ""),
+      "first_observed_seconds=" .. tostring(first_observed_seconds),
       "age_seconds=" .. tostring(age_seconds or ""),
       "once_key=" .. key,
     })
