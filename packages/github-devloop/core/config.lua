@@ -8,6 +8,7 @@ local allowed_env = {
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
+  FKST_DEVLOOP_RELEASE_NOTES_FALLBACK = true,
 }
 
 local function read_env_command(name)
@@ -101,6 +102,7 @@ function M.devloop_config(exec)
     upstream_branch = branches.upstream,
     integration_branch = branches.integration,
     rollup_merge = rollup_merge,
+    allow_release_notes_fallback = M.read_env("FKST_DEVLOOP_RELEASE_NOTES_FALLBACK", exec) == "1",
   }
 end
 end
