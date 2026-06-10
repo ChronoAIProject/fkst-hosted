@@ -12,6 +12,19 @@ M.spec = {
   stall_window = "2m",
 }
 
+local function judgment_worktree(role, identity)
+  local runtime = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
+  if runtime.exit_code ~= 0 then
+    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
+  end
+  local worktree = core.judgment_worktree_path(runtime.stdout, role, identity)
+  local mkdir = exec_sync({ cmd = core.mkdir_p_cmd(worktree), timeout = 30 })
+  if mkdir.exit_code ~= 0 then
+    error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
+  end
+  return worktree
+end
+
 function pipeline(event)
   local review_meta = event.payload or {}
   if not core.is_supported_review_meta(review_meta) then
@@ -72,6 +85,7 @@ function pipeline(event)
     core.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
     local result = spawn_codex_sync({
       prompt = core.build_review_meta_prompt(review_meta, current_issue),
+      worktree = judgment_worktree("review-meta", review_meta.dedup_key),
     })
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"

@@ -39,10 +39,24 @@ local function parse_failure_key(decompose)
   })
 end
 
+local function judgment_worktree(role, identity)
+  local runtime = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
+  if runtime.exit_code ~= 0 then
+    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
+  end
+  local worktree = core.judgment_worktree_path(runtime.stdout, role, identity)
+  local mkdir = exec_sync({ cmd = core.mkdir_p_cmd(worktree), timeout = 30 })
+  if mkdir.exit_code ~= 0 then
+    error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
+  end
+  return worktree
+end
+
 local function decompose_plan(decompose, current_issue)
   local prompt = core.build_decompose_prompt(decompose, current_issue)
   local result = spawn_codex_sync({
     prompt = prompt,
+    worktree = judgment_worktree("decompose", decompose.dedup_key),
   })
   if type(result) == "table" and result.exit_code ~= nil and result.exit_code ~= 0 then
     error("github-devloop: decompose codex failed: " .. tostring(result.stderr or ""))

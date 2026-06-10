@@ -94,11 +94,41 @@ local function mock_intake_judge_view(labels, comments, extra)
 end
 
 local function mock_intake_codex(stdout, exit_code, stderr)
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("codex exec", {
     stdout = stdout or "⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded implementation task.",
     stderr = stderr or "",
     exit_code = exit_code or 0,
   })
+end
+
+local function codex_calls()
+  local calls = {}
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("codex exec", 1, true) ~= nil then
+      table.insert(calls, call)
+    end
+  end
+  return calls
+end
+
+local function assert_intake_judgment_call()
+  local calls = codex_calls()
+  t.eq(#calls, 1)
+  t.is_true(calls[1].rendered:find(" -C ", 1, true) ~= nil)
+  t.is_true(calls[1].rendered:find("/judgment-worktrees/github-devloop-intake-", 1, true) ~= nil)
+  t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
+  t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
+  t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
 end
 
 local function candidate(extra)
@@ -180,6 +210,7 @@ return {
     t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
     t.eq(#label.remove_labels, 0)
+    assert_intake_judgment_call()
   end,
 
   test_judge_negative_and_malformed_codex_write_comment_only = function()

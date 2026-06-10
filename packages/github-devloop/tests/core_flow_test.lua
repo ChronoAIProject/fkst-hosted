@@ -322,6 +322,9 @@ return {
     t.eq(core.is_devloop_issue_branch("feature/unrelated"), false)
     local worktree_path = core.implement_worktree_path("/tmp/fkst-rt", "owner/repo", "42", ready.dedup_key)
     t.is_true(worktree_path:find("/tmp/fkst-rt/worktrees/devloop-owner-repo-42-", 1, true) == 1)
+    local judgment_path = core.judgment_worktree_path("/tmp/fkst-rt", "intake", ready.dedup_key)
+    t.is_true(judgment_path:find("/tmp/fkst-rt/judgment-worktrees/github-devloop-intake-", 1, true) == 1)
+    t.is_nil(judgment_path:find("/worktrees/", 1, true))
     t.eq(
       core.gh_issue_view_implement_cmd("owner/repo", 42),
       "gh issue view '42' --repo 'owner/repo' --json title,labels,comments"

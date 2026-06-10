@@ -286,6 +286,14 @@ function M.read_runtime_root_cmd()
   return 'printf %s "$FKST_RUNTIME_ROOT"'
 end
 
+function M.mkdir_p_cmd(path)
+  local value = tostring(path or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid directory path")
+  end
+  return "mkdir -p " .. M._shell_single_quote(value)
+end
+
 function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")

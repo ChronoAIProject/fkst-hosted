@@ -72,11 +72,41 @@ blocked_comments = function(event, extra)
 end
 
 local function mock_decompose_codex(stdout)
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("codex exec", {
     stdout = stdout,
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function codex_calls()
+  local calls = {}
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("codex exec", 1, true) ~= nil then
+      table.insert(calls, call)
+    end
+  end
+  return calls
+end
+
+local function assert_decompose_judgment_call()
+  local calls = codex_calls()
+  t.eq(#calls, 1)
+  t.is_true(calls[1].rendered:find(" -C ", 1, true) ~= nil)
+  t.is_true(calls[1].rendered:find("/judgment-worktrees/github-devloop-decompose-", 1, true) ~= nil)
+  t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
+  t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
+  t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
 end
 
 local two_issue_json = [[{"issues":[{"title":"Extract a minimal retry helper","body":"Smaller scope: implement only the retry helper used by the blocked PR.\nNon-goals: do not change the whole workflow.\nAcceptance: helper tests pass."},{"title":"Wire retry helper into one call site","body":"Smaller scope: apply the helper to one review-gate path.\nNon-goals: do not rewrite unrelated states.\nAcceptance: focused integration test passes."}]}]]
@@ -112,6 +142,7 @@ return {
     t.is_true(first.body:find('decompose-lineage:v1 root="github-devloop/issue/owner/repo/42" depth="1"', 1, true) ~= nil)
     t.eq(#first.labels, 0)
     t.eq(count_calls("codex exec"), 1)
+    assert_decompose_judgment_call()
   end,
 
   test_decompose_idempotent_skips_when_marker_visible = function()

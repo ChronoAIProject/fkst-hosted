@@ -19,6 +19,7 @@ local max_worktree_prefix_len = 90
 local max_branch_len = 160
 local max_sha_len = 64
 local max_pr_title_len = 240
+local max_judgment_prefix_len = 120
 local action_label = "⟦FKST:ACTION⟧"
 local intake_label = "⟦FKST:INTAKE⟧"
 local reason_label = "⟦FKST:REASON⟧"
@@ -628,6 +629,26 @@ function M.implement_worktree_path(runtime_root, repo, issue_number, impl_versio
   local slug = M.safe_issue_slug(repo, issue_number)
   local suffix = decimal_checksum(tostring(repo) .. "#" .. tostring(issue_number) .. "#" .. tostring(impl_version))
   return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
+end
+
+function M.judgment_worktree_path(runtime_root, role, identity)
+  local root = trim(runtime_root)
+  if root == "" or root:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid FKST_RUNTIME_ROOT")
+  end
+  local slug = M.sanitize_key(tostring(role or "") .. "-" .. tostring(identity or ""), false):gsub("/", "-")
+  slug = slug:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
+  if slug == "" then
+    slug = "judgment"
+  end
+  if #slug > max_judgment_prefix_len then
+    slug = slug:sub(1, max_judgment_prefix_len):gsub("%-+$", ""):gsub("%.+$", "")
+  end
+  if slug == "" then
+    slug = "judgment"
+  end
+  local suffix = decimal_checksum(tostring(role) .. "#" .. tostring(identity))
+  return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
 end
 
 function M.max_body_len()
