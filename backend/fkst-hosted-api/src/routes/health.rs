@@ -1,33 +1,44 @@
-//! `GET /health` liveness endpoint.
+//! `GET /health` / `GET /api/v1/health`: liveness plus a real Mongo ping.
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::Json;
 use serde::Serialize;
 
 use crate::state::AppState;
 
 /// Health response body. Field order is the wire contract:
-/// `status`, `version`, `checks`.
+/// `status`, `mongo`, `version`.
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
-    pub version: &'static str,
-    pub checks: HealthChecks,
-}
-
-/// Per-dependency health checks.
-#[derive(Debug, Serialize)]
-pub struct HealthChecks {
     pub mongo: &'static str,
+    pub version: &'static str,
 }
 
-/// Liveness probe: reports process liveness only for now. The real Mongo
-/// ping is wired by the Mongo-connection issue; until then `checks.mongo`
-/// stays `"unknown"` so the response shape is already stable.
-pub async fn health(State(_state): State<AppState>) -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok",
-        version: env!("CARGO_PKG_VERSION"),
-        checks: HealthChecks { mongo: "unknown" },
-    })
+/// Ping Mongo and report `200 ok/up` or `503 degraded/down`. The ping is
+/// bounded by the driver's server-selection timeout, so a dead Mongo yields
+/// a fast 503 instead of a hang; the ping error is logged, never echoed.
+pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
+    match state.db.ping().await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(HealthResponse {
+                status: "ok",
+                mongo: "up",
+                version: env!("CARGO_PKG_VERSION"),
+            }),
+        ),
+        Err(e) => {
+            tracing::error!(error = ?e, "health mongo ping failed");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HealthResponse {
+                    status: "degraded",
+                    mongo: "down",
+                    version: env!("CARGO_PKG_VERSION"),
+                }),
+            )
+        }
+    }
 }
