@@ -102,6 +102,12 @@ return {
     t.is_true(notes:sub(-#ai_sentinel) == ai_sentinel)
   end,
 
+  test_release_notes_empty_output_fails_closed = function()
+    t.raises(function()
+      core.normalize_release_notes("\n\n" .. ai_sentinel .. "\n")
+    end)
+  end,
+
   test_release_notes_prompt_fetches_from_git_and_gh_not_payload = function()
     local prompt = core.build_release_notes_prompt("owner/repo", "dev", "integration/dev", "def456", 3)
     t.is_true(prompt:find("git log --format=", 1, true) ~= nil)
@@ -162,6 +168,37 @@ return {
     t.is_true(#explicit_notes <= core._max_release_notes_len)
     t.is_true(explicit_notes:find("Zh: zi dong", 1, true) == nil)
     t.is_true(explicit_notes:find(zh_summary, 1, true) ~= nil)
+  end,
+
+  test_release_notes_empty_codex_output_fallback_requires_explicit_policy = function()
+    local old_spawn = spawn_codex_sync
+    spawn_codex_sync = function()
+      return { stdout = "\n" .. ai_sentinel .. "\n", stderr = "", exit_code = 0 }
+    end
+    local broad_policy = core.release_notes_publish_policy({ write_mode = "real" })
+    local broad_ok = pcall(function()
+      core.draft_release_notes({
+        repo = "owner/repo",
+        upstream_branch = "dev",
+        integration_branch = "integration/dev",
+        head_sha = "def456",
+        ahead = 2,
+        publish_policy = broad_policy,
+      })
+    end)
+    local explicit_notes, explicit_mode = core.draft_release_notes({
+      repo = "owner/repo",
+      upstream_branch = "dev",
+      integration_branch = "integration/dev",
+      head_sha = "def456",
+      ahead = 2,
+      publish_policy = { allow_fallback = true },
+    })
+    spawn_codex_sync = old_spawn
+    t.eq(broad_ok, false)
+    t.eq(explicit_mode, "fallback")
+    t.is_true(explicit_notes:find("Automated rollup", 1, true) ~= nil)
+    t.is_true(explicit_notes:sub(-#ai_sentinel) == ai_sentinel)
   end,
 
   test_release_notes_fallback_is_bounded_and_marker_safe = function()

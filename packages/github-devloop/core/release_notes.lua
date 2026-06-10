@@ -77,14 +77,14 @@ end
 function M.normalize_release_notes(stdout)
   local body = normalize_lines(strip_sentinel(M._neutralize_fkst_markers(stdout)))
   if body == "" then
-    body = "Automated rollup release notes."
+    error("github-devloop: release notes body is empty")
   end
   local suffix = "\n" .. ai_sentinel
   local limit = max_release_notes_len - #suffix
   body = bounded(body, limit)
   body = body:gsub("%s+$", "")
   if body == "" then
-    body = "Automated rollup release notes."
+    error("github-devloop: release notes body is empty")
   end
   return body .. suffix
 end
@@ -149,7 +149,14 @@ function M.draft_release_notes(args)
     local stderr = type(result) == "table" and result.stderr or "missing codex result"
     error("github-devloop: release notes codex failed: " .. tostring(stderr))
   end
-  return M.normalize_release_notes(result.stdout), "codex"
+  local ok, normalized = pcall(M.normalize_release_notes, result.stdout)
+  if not ok then
+    if policy.allow_fallback == true then
+      return M.release_notes_fallback_body(args.upstream_branch, args.integration_branch, args.ahead), "fallback"
+    end
+    error(normalized)
+  end
+  return normalized, "codex"
 end
 
 M._max_release_notes_len = max_release_notes_len

@@ -165,6 +165,19 @@ return {
     t.eq(h.count_calls("gh pr create"), 0)
   end,
 
+  test_rollup_scan_empty_codex_output_fails_closed_before_create = function()
+    mock_env("1")
+    mock_fetches()
+    mock_ahead(3)
+    mock_content_diff(true)
+    mock_pr_list(nil)
+    mock_integration_head("def456")
+    t.mock_command("codex exec", { stdout = "\n" .. core._release_notes_ai_sentinel .. "\n", stderr = "", exit_code = 0 })
+    local result = run_scan(opts("rollup-codex-empty", { FKST_GITHUB_WRITE = "1" }))
+    t.is_true(result.exit_code ~= 0)
+    t.eq(h.count_calls("gh pr create"), 0)
+  end,
+
   test_rollup_scan_explicit_release_notes_fallback_allows_create = function()
     mock_env("1", "auto", nil, "1")
     mock_fetches()
