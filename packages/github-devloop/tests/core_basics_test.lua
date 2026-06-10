@@ -435,6 +435,30 @@ return {
     t.eq(core.has_result_marker(result.comments, proposal_id, decision, dedup_key), true)
   end,
 
+  test_gh_issue_view_commands_match_existing_strings = function()
+    local cases = {
+      { core.gh_issue_view_intake_scan_cmd, "labels,comments,state" },
+      { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state" },
+      { core.gh_issue_view_state_cmd, "labels,state,comments" },
+      { core.gh_issue_view_result_cmd, "labels,comments" },
+      { core.gh_issue_view_loop_cmd, "title,updatedAt,labels,comments,state" },
+      { core.gh_issue_view_meta_cmd, "title,labels,comments" },
+      { core.gh_issue_view_implement_cmd, "title,labels,comments" },
+      { core.gh_issue_view_open_pr_cmd, "title,labels,comments" },
+      { core.gh_issue_view_reviewing_cmd, "labels,comments" },
+      { core.gh_issue_view_review_cmd, "title,labels,comments" },
+      { core.gh_issue_view_decompose_cmd, "title,body,labels,comments" },
+      { core.gh_issue_view_fix_cmd, "title,labels,comments" },
+      { core.gh_issue_view_review_loop_cmd, "title,labels,comments" },
+      { core.gh_issue_view_merge_cmd, "title,labels,comments,state" },
+      { core.gh_issue_view_observe_cmd, "comments,state" },
+    }
+
+    for _, case in ipairs(cases) do
+      t.eq(case[1]("owner/repo", 42), "gh issue view '42' --repo 'owner/repo' --json " .. case[2])
+    end
+  end,
+
   test_intake_judge_parse_keeps_full_issue_body = function()
     local long_body = string.rep("body-line-", core.max_body_len() + 1) .. "FULL_BODY_TAIL"
     local parsed = core.parse_issue_view_intake_judge(
