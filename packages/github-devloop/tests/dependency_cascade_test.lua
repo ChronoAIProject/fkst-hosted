@@ -174,8 +174,8 @@ local function mock_result_issue(labels, comments)
 end
 
 local function mock_observe_issue(labels, comments)
-  t.mock_command(core.gh_issue_view_state_cmd(repo, 42), {
-    stdout = observe_issue_state_json(labels or { "fkst-dev:enabled", "fkst-dev:ready" }, comments or {
+  t.mock_command(core.gh_issue_view_entity_cmd(repo, 42), {
+    stdout = issue_view_json(labels or { "fkst-dev:enabled", "fkst-dev:ready" }, comments or {
       core.state_marker(proposal_id, "ready", version),
     }),
     stderr = "",

@@ -539,8 +539,8 @@ local function mock_issue_state(labels, state, comments)
       table.insert(rendered_comments, render_comment(state_marker))
     end
   end
-  t.mock_command("--json labels,state,comments", {
-    stdout = string.format('{"state":"%s","labels":[%s],"comments":[%s]}\n',
+  t.mock_command("--json title,body,comments,labels,state", {
+    stdout = string.format('{"title":"Implement decision recorder","body":"","state":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(state or "OPEN"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")),
@@ -792,10 +792,12 @@ local function mock_issue_open_pr(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,labels,comments", {
+  t.mock_command("--json title,body,comments,labels,state", {
     stdout = string.format(
-      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","body":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or ""),
+      json_string(fields.state or "OPEN"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
     ),

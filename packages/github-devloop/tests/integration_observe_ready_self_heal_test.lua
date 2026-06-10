@@ -65,13 +65,13 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       core.state_marker(original.proposal_id, "thinking", original.dedup_key),
     })
-    local second = run_observe(event, opts("observe-issue-thinking-self-heal-2"))
+    local second = run_observe(issue({ updated_at = "2026-06-03T01:02:04Z" }), opts("observe-issue-thinking-self-heal-2"))
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 1)
     local second_proposal = find_raise(second.raises, "consensus.proposal").payload
     t.eq(second_proposal.dedup_key, first_proposal.dedup_key)
     t.eq(second_proposal.content_fetch, first_proposal.content_fetch)
-    t.eq(count_calls("--json labels,state"), 2)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 2)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -85,7 +85,7 @@ return {
     local result = run_observe(event, opts("observe-issue-thinking-mid-loop-self-heal"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -107,7 +107,7 @@ return {
       dedup_key = event.dedup_key,
       source_ref = event.source_ref,
     }).dedup_key)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -123,7 +123,7 @@ return {
     local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-issue-ready-self-heal-advanced"))
     t.eq(observed.exit_code, 0)
     t.eq(find_raise(observed.raises, "devloop_ready"), nil)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
 
     mock_issue_implement_raw({ "fkst-dev:implementing" }, {
@@ -154,7 +154,7 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"))
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
   end,
 

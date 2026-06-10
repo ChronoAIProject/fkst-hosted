@@ -1,6 +1,7 @@
 local M = {}
 
 require("core.issue_create").install(M)
+require("core.entity_view").install(M)
 
 local allowed_env = {
   FKST_GITHUB_REPO = true,

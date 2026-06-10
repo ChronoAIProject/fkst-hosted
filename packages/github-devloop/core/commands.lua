@@ -94,6 +94,56 @@ function M.gh_issue_view_observe_cmd(repo, issue_number)
   return M.gh_issue_view_cmd(repo, issue_number, "comments,state")
 end
 
+function M.gh_issue_view_entity_cmd(repo, issue_number)
+  return M.gh_issue_view_cmd(repo, issue_number, "title,body,comments,labels,state")
+end
+
+function M.gh_pr_view_entity_cmd(repo, pr_number)
+  return M.gh_pr_view_origin_cmd(repo, pr_number)
+end
+
+function M.entity_view_cache_key(repo, kind, number, updated_at)
+  return "github-proxy/view/"
+    .. M.sanitize_key(repo, false)
+    .. "/"
+    .. M.sanitize_key(kind)
+    .. "/"
+    .. M.sanitize_key(number)
+    .. "/"
+    .. M.safe_updated_at(updated_at)
+end
+
+local function fetch_entity_view(M, repo, kind, number, updated_at, cmd, opts)
+  local options = opts or {}
+  if options.fresh == true or updated_at == nil or tostring(updated_at) == "" then
+    return exec_sync({ cmd = cmd, timeout = 30 })
+  end
+
+  local key = M.entity_view_cache_key(repo, kind, number, updated_at)
+  local cached = cache_get(key)
+  if cached ~= nil and cached ~= "" then
+    return {
+      stdout = cached,
+      stderr = "",
+      exit_code = 0,
+    }
+  end
+
+  local result = exec_sync({ cmd = cmd, timeout = 30 })
+  if result.exit_code == 0 then
+    cache_set(key, result.stdout or "")
+  end
+  return result
+end
+
+function M.fetch_issue_view_state(repo, issue_number, updated_at, opts)
+  return fetch_entity_view(M, repo, "issue", issue_number, updated_at, M.gh_issue_view_entity_cmd(repo, issue_number), opts)
+end
+
+function M.fetch_issue_view_open_pr(repo, issue_number, updated_at, opts)
+  return fetch_entity_view(M, repo, "issue", issue_number, updated_at, M.gh_issue_view_entity_cmd(repo, issue_number), opts)
+end
+
 function M.gh_pr_view_origin_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
@@ -102,6 +152,10 @@ end
 
 function M.gh_pr_view_observe_cmd(repo, pr_number)
   return M.gh_pr_view_origin_cmd(repo, pr_number)
+end
+
+function M.fetch_pr_view_origin(repo, pr_number, updated_at, opts)
+  return fetch_entity_view(M, repo, "pr", pr_number, updated_at, M.gh_pr_view_entity_cmd(repo, pr_number), opts)
 end
 
 function M.gh_pr_view_fix_cmd(repo, pr_number)

@@ -102,7 +102,7 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:thinking")
     t.eq(label_raise.payload.issue_number, 42)
     t.eq(count_calls("gh issue view"), 1)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -128,7 +128,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(find_raise(result.raises, "devloop_ready").payload.schema, "github-devloop.ready.v1")
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -146,7 +146,7 @@ return {
     t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
     t.eq(label_raise.payload.remove_labels[3], "fkst-dev:implementing")
     t.is_true(#label_raise.payload.remove_labels >= 10)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -157,7 +157,7 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:merge-ready" } }), opts("observe-issue-merge-ready-self-heal"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -170,7 +170,7 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:merging" } }), opts("observe-issue-merging-self-heal"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -198,7 +198,7 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -227,7 +227,7 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-progressed"))
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -240,7 +240,7 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-no-fact"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -254,12 +254,12 @@ return {
   end,
 
   test_observe_issue_state_view_failure_errors_for_retry = function()
-    mock_issue_view_failure("--json labels,state", "forced state failure")
+    mock_issue_view_failure("--json title,body,comments,labels,state", "forced state failure")
 
 	    local result = run_observe(issue(), opts("observe-state-view-failure"))
 	    t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -272,16 +272,16 @@ return {
     t.eq(#first.raises, 3)
 
     mock_issue_state({ "fkst-dev:enabled" })
-    local second = run_observe(issue(), run_opts)
+    local second = run_observe(issue({ updated_at = "2026-06-03T01:02:04Z" }), run_opts)
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 3)
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
-    local thinking = run_observe(issue(), run_opts)
+    local thinking = run_observe(issue({ updated_at = "2026-06-03T01:02:05Z" }), run_opts)
     t.eq(thinking.exit_code, 0)
     t.eq(#thinking.raises, 1)
     t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)
-    t.eq(count_calls("--json labels,state"), 3)
+    t.eq(count_calls("--json title,body,comments,labels,state"), 3)
     t.eq(count_calls("--json body"), 0)
   end,
 

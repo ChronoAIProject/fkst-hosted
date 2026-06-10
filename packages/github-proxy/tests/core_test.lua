@@ -22,6 +22,19 @@ return {
     t.eq(key, "github-proxy/issue/owner/repo/12")
   end,
 
+  test_entity_view_cache_key = function()
+    local key = core.entity_view_cache_key("owner/repo", "issue", 12, "2026-06-03T01:02:03Z")
+    t.eq(key, "github-proxy/view/owner/repo/issue/12/2026-06-03T01-02-03Z")
+    t.eq(
+      core.gh_issue_view_entity_cmd("owner/repo", 12),
+      "gh issue view '12' --repo 'owner/repo' --json title,body,comments,labels,state"
+    )
+    t.eq(
+      core.gh_pr_view_entity_cmd("owner/repo", 7),
+      "gh pr view '7' --repo 'owner/repo' --json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+    )
+  end,
+
   test_entity_dedup_key = function()
     local key = core.entity_dedup_key("owner/repo", "pr", 12, "2026-06-03T01:02:03Z")
     t.eq(key, "owner/repo#pr#12@2026-06-03T01:02:03Z")
