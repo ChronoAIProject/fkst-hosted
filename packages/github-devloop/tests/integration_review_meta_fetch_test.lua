@@ -19,11 +19,48 @@ local function find_raise(raises, queue)
 end
 
 local function mock_meta_codex(stdout)
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("codex exec", {
     stdout = stdout,
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function codex_calls()
+  local calls = {}
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("codex exec", 1, true) ~= nil then
+      table.insert(calls, call)
+    end
+  end
+  return calls
+end
+
+local function assert_review_meta_judgment_call()
+  local calls = codex_calls()
+  t.eq(#calls, 1)
+  t.is_true(calls[1].rendered:find(" -C ", 1, true) ~= nil)
+  t.is_true(calls[1].rendered:find("/judgment-worktrees/github-devloop-review-meta-", 1, true) ~= nil)
+  t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
+  t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
+  t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
+  local chmod_calls = 0
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("chmod 0555", 1, true) ~= nil then
+      chmod_calls = chmod_calls + 1
+    end
+  end
+  t.eq(chmod_calls, 1)
 end
 
 local function run_case(stdout, name)
@@ -53,6 +90,7 @@ return {
   test_review_meta_fetch_failure_block_reaches_blocked = function()
     local result = run_case(action_label .. " block\n" .. reason_label .. " Full source content could not be fetched.", "review-meta-fetch-failure-block")
     assert_blocked_without_merge(result)
+    assert_review_meta_judgment_call()
   end,
 
   test_review_meta_ambiguous_output_blocks = function()

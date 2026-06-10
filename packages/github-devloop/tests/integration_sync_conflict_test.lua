@@ -62,6 +62,27 @@ local function mock_successful_codex_resolution()
   t.mock_command("commit -F", { stdout = "[detached cccc3333] Sync dev into integration/dev\n", stderr = "", exit_code = 0 })
 end
 
+local function codex_calls()
+  local calls = {}
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("codex exec", 1, true) ~= nil then
+      table.insert(calls, call)
+    end
+  end
+  return calls
+end
+
+local function assert_sync_conflict_worktree_call()
+  local calls = codex_calls()
+  t.eq(#calls, 1)
+  t.is_true(calls[1].rendered:find(" -C ", 1, true) ~= nil)
+  t.is_true(calls[1].rendered:find("/worktrees/sync-owner-repo-dev-integration-dev-", 1, true) ~= nil)
+  t.is_nil(calls[1].rendered:find("/judgment-worktrees/", 1, true))
+  t.is_true(calls[1].stdin:find("isolated runtime branch-sync worktree", 1, true) ~= nil)
+  t.is_true(calls[1].stdin:find("not the supervise source checkout", 1, true) ~= nil)
+  t.is_true(calls[1].stdin:find("Do not clone, checkout another branch", 1, true) ~= nil)
+end
+
 local function mock_real_push(integration_recheck, pushed_head)
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "1", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
@@ -92,6 +113,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(h.count_calls("codex exec"), 1)
+    assert_sync_conflict_worktree_call()
     t.eq(h.count_calls("ls-files -u"), 3)
     t.eq(h.count_calls("commit -F"), 1)
     t.eq(h.count_calls("push origin HEAD:refs/heads/"), 1)

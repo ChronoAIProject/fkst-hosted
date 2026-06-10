@@ -882,11 +882,7 @@ return {
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
     })
-    t.mock_command("codex exec", {
-      stdout = "unparseable review-meta answer",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_meta_codex(nil)
 
     local result = run_review_meta(event, opts("review-meta-parse-failure"))
     t.eq(result.exit_code, 0)

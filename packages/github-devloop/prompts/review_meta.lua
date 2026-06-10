@@ -1,6 +1,11 @@
 return {
   template = [[You are resolving a GitHub pull request review that repeatedly failed to reach automated consensus.
 
+Execution boundary:
+- You are running in an empty runtime scratch directory, not a repository checkout.
+- Do not clone, checkout, fetch with git, create branches, or modify any repository.
+- Fetch GitHub content only via gh/source_ref context.
+
 Choose the conservative next state. Pick exactly one action:
 - fix: the PR probably needs another fix pass before review.
 - block: the work should stop for human intervention.
