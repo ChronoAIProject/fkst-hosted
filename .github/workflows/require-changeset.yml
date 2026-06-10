@@ -1,5 +1,8 @@
 # Gate: every PR into `develop` or `develop-auto` must include a changeset.
 # Skipped for automated release PRs (label: release-automation).
+# The file-list query runs with bounded retries — GitHub's API intermittently
+# returns transient 401/5xx errors and a single flaky call must not turn into
+# a spurious red required check.
 name: Require changeset
 
 on:
@@ -30,7 +33,17 @@ jobs:
             exit 0
           fi
 
-          FILES=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path')
+          FILES=""
+          for attempt in 1 2 3 4 5; do
+            FILES=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path') && break
+            FILES=""
+            echo "WARN: GitHub API attempt ${attempt}/5 failed; retrying in 5s."
+            sleep 5
+          done
+          if [ -z "$FILES" ]; then
+            echo "::error::Could not list the PR's changed files after 5 attempts (transient GitHub API failures). Re-run this check."
+            exit 1
+          fi
           echo "INFO: changed files:"
           printf '%s\n' "$FILES"
 
