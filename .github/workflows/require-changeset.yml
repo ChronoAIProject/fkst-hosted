@@ -1,10 +1,10 @@
-# Gate: every PR into `develop` must include a changeset.
+# Gate: every PR into `develop` or `develop-auto` must include a changeset.
 # Skipped for automated release PRs (label: release-automation).
 name: Require changeset
 
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, develop-auto]
     types: [opened, edited, reopened, synchronize, labeled, unlabeled]
 
 permissions:
