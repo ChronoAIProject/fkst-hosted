@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
 
 local function opts(name, extra)
   local env = {
@@ -75,6 +76,14 @@ local function mock_integration_head(head)
   })
 end
 
+local function mock_release_notes_codex(stdout, exit_code, stderr)
+  t.mock_command("codex exec", {
+    stdout = stdout or ("Release summary.\n\nZh: release summary.\n" .. ai_sentinel),
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
+end
+
 return {
   test_rollup_scan_integration_equal_upstream_noops = function()
     mock_env("", "auto", "dev")
@@ -100,14 +109,62 @@ return {
     mock_ahead(3)
     mock_content_diff(true)
     mock_pr_list(nil)
+    mock_integration_head("def456")
+    mock_release_notes_codex()
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-create", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 1)
+    t.eq(h.count_calls("codex exec"), 1)
     t.is_true(h.has_call("--head 'integration/dev'"))
     t.is_true(h.has_call("--base 'dev'"))
+  end,
+
+  test_rollup_scan_release_notes_prompt_fetches_from_git_and_gh_not_payload = function()
+    mock_env("1")
+    mock_fetches()
+    mock_ahead(3)
+    mock_content_diff(true)
+    mock_pr_list(nil)
+    mock_integration_head("def456")
+    mock_release_notes_codex("Highlights\n\nZh: notes.")
+    t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    local result = run_scan(opts("rollup-notes-prompt", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local calls = t.command_calls()
+    local codex_call = nil
+    for _, call in ipairs(calls) do
+      if call.rendered:find("codex exec", 1, true) ~= nil then
+        codex_call = call
+      end
+    end
+    t.is_true(codex_call ~= nil)
+    t.is_true(codex_call.stdin:find("git log --format=", 1, true) ~= nil)
+    t.is_true(codex_call.stdin:find("refs/remotes/origin/dev..refs/remotes/origin/integration/dev", 1, true) ~= nil)
+    t.is_true(codex_call.stdin:find("gh issue view <referenced-number> --repo owner/repo --json title,body,comments,labels,state", 1, true) ~= nil)
+    t.is_true(codex_call.stdin:find("Do not use delivery payload content as source material.", 1, true) ~= nil)
+    t.is_true(codex_call.stdin:find("Integration head: def456", 1, true) ~= nil)
+  end,
+
+  test_rollup_scan_codex_failure_uses_minimal_notes_when_real_publish_allows_fallback = function()
+    mock_env("1")
+    mock_fetches()
+    mock_ahead(3)
+    mock_content_diff(true)
+    mock_pr_list(nil)
+    mock_integration_head("def456")
+    mock_release_notes_codex("", 7, "codex unavailable")
+    t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    local result = run_scan(opts("rollup-notes-fallback", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(h.count_calls("gh pr create"), 1)
+    t.eq(h.count_calls("codex exec"), 1)
   end,
 
   test_rollup_scan_ahead_without_content_diff_skips_pr = function()

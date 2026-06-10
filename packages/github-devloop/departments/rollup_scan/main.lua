@@ -72,17 +72,19 @@ local function list_open_pr(repo, integration, upstream)
   return prs[1]
 end
 
-local function rollup_body(upstream, integration, ahead)
-  return "Automated rollup from `" .. tostring(integration) .. "` into `" .. tostring(upstream) .. "`.\n\n"
-    .. "Ahead commits: " .. tostring(ahead) .. "\n"
-    .. "Merge policy: CI green and mergeable current PR facts.\n"
-end
-
-local function create_rollup_pr(repo, upstream, integration, ahead)
+local function create_rollup_pr(repo, upstream, integration, ahead, head_sha)
   local body_file = "/tmp/fkst-github-devloop-rollup-"
     .. core._decimal_checksum(repo .. "#" .. upstream .. "#" .. integration)
     .. ".md"
-  file.write(body_file, rollup_body(upstream, integration, ahead))
+  local notes = core.draft_release_notes({
+    repo = repo,
+    upstream_branch = upstream,
+    integration_branch = integration,
+    head_sha = head_sha,
+    ahead = ahead,
+    allow_fallback = true,
+  })
+  file.write(body_file, notes)
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
   run_cmd(core.gh_pr_create_cmd(repo, integration, upstream, title, body_file), 60, "gh rollup PR create")
 end
@@ -111,6 +113,7 @@ function pipeline(event)
       return
     end
 
+    local integration_head = nil
     local pr = list_open_pr(repo, branches.integration, branches.upstream)
     if pr == nil then
       if cfg.write_mode ~= "real" then
@@ -123,14 +126,15 @@ function pipeline(event)
         })
         return
       end
-      create_rollup_pr(repo, branches.upstream, branches.integration, ahead)
+      integration_head = remote_head(branches.integration)
+      create_rollup_pr(repo, branches.upstream, branches.integration, ahead, integration_head)
       pr = list_open_pr(repo, branches.integration, branches.upstream)
       if pr == nil then
         error("github-devloop: gh rollup PR create/list did not return an open PR")
       end
     end
 
-    local integration_head = remote_head(branches.integration)
+    integration_head = integration_head or remote_head(branches.integration)
     if cfg.rollup_merge == "manual" then
       core.log_line("info", "rollup_scan", "rollup", "POSTURE", {
         "posture=manual",

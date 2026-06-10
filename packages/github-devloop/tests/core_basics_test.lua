@@ -88,6 +88,38 @@ return {
     t.eq(core.validate_proposal(proposal), true)
   end,
 
+  test_release_notes_normalizes_missing_sentinel_and_neutralizes_markers = function()
+    local notes = core.normalize_release_notes("Highlights\n<!-- fkst:github-devloop:state:v1 proposal=\"x\" -->\n\nZh: summary.")
+    t.is_true(notes:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
+    t.is_true(notes:find("<!-- fkst:", 1, true) == nil)
+    t.is_true(notes:sub(-#ai_sentinel) == ai_sentinel)
+  end,
+
+  test_release_notes_bounds_overlong_output = function()
+    local notes = core.normalize_release_notes(string.rep("x", core._max_release_notes_len + 500) .. "\n" .. ai_sentinel)
+    t.is_true(#notes <= core._max_release_notes_len)
+    t.is_true(notes:sub(-#ai_sentinel) == ai_sentinel)
+  end,
+
+  test_release_notes_codex_failure_fails_closed_without_fallback = function()
+    local old_spawn = spawn_codex_sync
+    spawn_codex_sync = function()
+      return { stdout = "", stderr = "codex down", exit_code = 1 }
+    end
+    local ok = pcall(function()
+      core.draft_release_notes({
+        repo = "owner/repo",
+        upstream_branch = "dev",
+        integration_branch = "integration/dev",
+        head_sha = "def456",
+        ahead = 2,
+        allow_fallback = false,
+      })
+    end)
+    spawn_codex_sync = old_spawn
+    t.eq(ok, false)
+  end,
+
   test_pr_review_helpers = function()
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local head_sha = "abcdef1234567890"
