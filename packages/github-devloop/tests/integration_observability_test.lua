@@ -166,6 +166,20 @@ local function summary_log(logs)
   return nil
 end
 
+local function stall_suspect_logs(logs)
+  local matches = {}
+  for _, line in ipairs(logs or {}) do
+    if line:find("tag=STALL_SUSPECT", 1, true) ~= nil then
+      table.insert(matches, line)
+    end
+  end
+  return matches
+end
+
+local function version_minutes_ago(minutes)
+  return os.date("!%Y-%m-%dT%H-%M-%SZ", now() - (tonumber(minutes) or 0) * 60)
+end
+
 local function call_contains_bad_limit()
   for _, call in ipairs(t.command_calls()) do
     if call.rendered:find("observ", 1, true) == nil
@@ -294,6 +308,70 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr view"), 1)
+  end,
+
+  test_stall_suspect_logs_once_when_entity_exceeds_state_threshold = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = version_minutes_ago(31)
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "thinking", version), "fkst-test-bot"),
+    })
+
+    local logs = stall_suspect_logs(capture_observability_logs())
+
+    t.eq(#logs, 1)
+    t.is_true(logs[1]:find("github-devloop", 1, true) ~= nil)
+    t.is_true(logs[1]:find("dept=observability", 1, true) ~= nil)
+    t.is_true(logs[1]:find("proposal=" .. proposal_id, 1, true) ~= nil)
+    t.is_true(logs[1]:find("state=thinking", 1, true) ~= nil)
+    t.is_true(logs[1]:find("threshold_minutes=30", 1, true) ~= nil)
+  end,
+
+  test_stall_suspect_does_not_log_under_threshold = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "reviewing", version_minutes_ago(60)), "fkst-test-bot"),
+    })
+
+    local logs = stall_suspect_logs(capture_observability_logs())
+
+    t.eq(#logs, 0)
+  end,
+
+  test_stall_suspect_excludes_dependency_held_ready_entities = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = version_minutes_ago(31)
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "ready", version), "fkst-test-bot"),
+      render_comment(core.dependency_wait_marker(proposal_id, version, { 7 }), "fkst-test-bot"),
+    })
+
+    local logs = stall_suspect_logs(capture_observability_logs())
+
+    t.eq(#logs, 0)
+  end,
+
+  test_stall_suspect_never_logs_terminal_states = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "blocked", version_minutes_ago(1000)), "fkst-test-bot"),
+    })
+
+    local logs = stall_suspect_logs(capture_observability_logs())
+
+    t.eq(#logs, 0)
   end,
 
   test_fail_closed_when_bot_login_is_unset = function()
