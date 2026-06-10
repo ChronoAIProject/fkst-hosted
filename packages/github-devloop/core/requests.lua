@@ -730,6 +730,42 @@ function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head
   }), fix.source_ref)
 end
 
+function M.build_merge_head_reviewing_label_request(repo, issue_number, merge_ready, new_head_sha, new_version, source_ref)
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    "reviewing",
+    M._dedup_key({
+      "merge",
+      "label",
+      "reviewing",
+      tostring(merge_ready.proposal_id),
+      tostring(new_version),
+      tostring(new_head_sha),
+    }),
+    source_ref
+  )
+end
+
+function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_ready, old_head_sha, new_head_sha, new_version, source_ref)
+  local state_marker = M.state_marker(merge_ready.proposal_id, "reviewing", new_version)
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = merge_ready.pr_number,
+  }, "github-devloop PR head advanced after merge approval; re-entering review"
+    .. "\n\nPrevious reviewed head: " .. tostring(old_head_sha)
+    .. "\nCurrent head: " .. tostring(new_head_sha)
+    .. "\n\n" .. state_marker, M._dedup_key({
+    "merge",
+    "comment",
+    "reviewing",
+    tostring(merge_ready.proposal_id),
+    tostring(new_version),
+    tostring(new_head_sha),
+  }), source_ref)
+end
+
 function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
   return M.build_state_label_request(
     repo,
