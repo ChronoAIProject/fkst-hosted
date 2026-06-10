@@ -115,4 +115,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("consensus_result", pipeline)
+
 return M

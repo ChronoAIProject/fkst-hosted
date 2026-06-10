@@ -15,4 +15,6 @@ function pipeline(event)
   core.observe_devloop_entities()
 end
 
+pipeline = core.wrap_pipeline_failure("observability", pipeline)
+
 return M

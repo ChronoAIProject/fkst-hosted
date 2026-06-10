@@ -224,4 +224,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("sync_conflict", pipeline)
+
 return M

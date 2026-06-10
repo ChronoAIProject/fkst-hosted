@@ -96,4 +96,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("github_issue_label", pipeline)
+
 return M

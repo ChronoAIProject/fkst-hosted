@@ -57,6 +57,49 @@ function M.error_fact_fields(error_class, queue, dept, message, context)
   return fields
 end
 
+function M.error_class_from_message(message)
+  local text = tostring(message or "")
+  local class = text:match("github%-devloop: ([%w%-]+):")
+    or text:match("github%-devloop: ([%w%-]+) failed:")
+    or text:match("github%-devloop: ([%w%-]+) retrying")
+  return class or "caught-failure"
+end
+
+function M.log_error_fact(level, dept, proposal_id, tag, error_class, queue, message, context)
+  local fields = M.error_fact_fields(error_class, queue, dept, message, context)
+  table.insert(fields, "queue=" .. M._one_line(queue))
+  table.insert(fields, "error=" .. M._one_line(message))
+  M.log_line(level or "error", dept, proposal_id, tag or "FAILURE", fields)
+end
+
+local function event_source_ref(event)
+  if type(event) == "table" and event.source_ref ~= nil then
+    return event.source_ref
+  end
+  local payload = type(event) == "table" and event.payload or nil
+  if type(payload) == "table" then
+    return payload.source_ref
+  end
+  return nil
+end
+
+function M.wrap_pipeline_failure(dept, fn)
+  return function(event)
+    local ok, err = pcall(fn, event)
+    if ok then
+      return err
+    end
+    local payload = type(event) == "table" and event.payload or nil
+    local proposal_id = type(payload) == "table" and payload.proposal_id or "unknown"
+    M.log_error_fact("error", dept, proposal_id, "FAILURE", M.error_class_from_message(err), type(event) == "table" and event.queue or nil, err, {
+      source_ref = event_source_ref(event),
+      attempt = type(event) == "table" and event.attempt or nil,
+      terminal = false,
+    })
+    error(err, 0)
+  end
+end
+
 function M.log_line(level, dept, proposal_id, tag, fields)
   local parts = {
     "github-devloop",

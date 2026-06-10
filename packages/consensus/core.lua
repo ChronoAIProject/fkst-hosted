@@ -80,6 +80,46 @@ function M.error_fact_fields(error_class, queue, dept, message, context)
   return fields
 end
 
+function M.error_class_from_message(message)
+  local text = tostring(message or "")
+  local class = text:match("consensus: ([%w%-]+):")
+    or text:match("consensus: ([%w%-]+) failed:")
+  return class or "caught-failure"
+end
+
+function M.log_error_fact(level, dept, tag, error_class, queue, message, context)
+  local fields = M.error_fact_fields(error_class, queue, dept, message, context)
+  table.insert(fields, "queue=" .. one_line(queue))
+  table.insert(fields, "error=" .. one_line(message))
+  log[level or "warn"]("consensus dept=" .. one_line(dept) .. " tag=" .. one_line(tag or "FAILURE") .. " " .. table.concat(fields, " "))
+end
+
+local function event_source_ref(event)
+  if type(event) == "table" and event.source_ref ~= nil then
+    return event.source_ref
+  end
+  local payload = type(event) == "table" and event.payload or nil
+  if type(payload) == "table" then
+    return payload.source_ref
+  end
+  return nil
+end
+
+function M.wrap_pipeline_failure(dept, fn)
+  return function(event)
+    local ok, err = pcall(fn, event)
+    if ok then
+      return err
+    end
+    M.log_error_fact("error", dept, "FAILURE", M.error_class_from_message(err), type(event) == "table" and event.queue or nil, err, {
+      source_ref = event_source_ref(event),
+      attempt = type(event) == "table" and event.attempt or nil,
+      terminal = false,
+    })
+    error(err, 0)
+  end
+end
+
 function M.verdict_mode(proposal)
   if type(proposal) == "table" and proposal.verdict_mode == "gate" then
     return "gate"

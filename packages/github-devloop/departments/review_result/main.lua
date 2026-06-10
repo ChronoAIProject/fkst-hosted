@@ -174,4 +174,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("review_result", pipeline)
+
 return M

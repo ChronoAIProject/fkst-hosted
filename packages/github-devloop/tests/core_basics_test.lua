@@ -140,6 +140,42 @@ return {
     t.is_true(captured[1]:find("terminal=false", 1, true) ~= nil)
   end,
 
+  test_wrapped_pipeline_failure_logs_delivery_error_fact_and_rethrows = function()
+    local captured = {}
+    local old_log = log
+    log = {
+      error = function(message)
+        table.insert(captured, tostring(message))
+      end,
+    }
+
+    local wrapped = core.wrap_pipeline_failure("implement", function(_event)
+      error("github-devloop: gh-issue-view-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a")
+    end)
+    local ok, err = pcall(function()
+      wrapped({
+        queue = "devloop_ready",
+        attempt = 4,
+        payload = {
+          proposal_id = "github-devloop/issue/owner/repo/42",
+          source_ref = source_ref(),
+        },
+      })
+    end)
+
+    log = old_log
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh-issue-view-failed", 1, true) ~= nil)
+    t.eq(#captured, 1)
+    t.is_true(captured[1]:find("github-devloop dept=implement proposal_id=github-devloop/issue/owner/repo/42 tag=FAILURE", 1, true) ~= nil)
+    t.is_true(captured[1]:find("error_class=gh-issue-view-failed", 1, true) ~= nil)
+    t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(captured[1]:find("attempt=4", 1, true) ~= nil)
+    t.is_true(captured[1]:find("terminal=false", 1, true) ~= nil)
+    t.is_true(captured[1]:find("queue=devloop_ready", 1, true) ~= nil)
+  end,
+
   test_build_proposal = function()
     local proposal = core.build_proposal(issue())
     t.eq(proposal.schema, "consensus.proposal.v1")

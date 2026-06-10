@@ -125,4 +125,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("loop", pipeline)
+
 return M

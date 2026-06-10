@@ -50,10 +50,6 @@ local function write_with_outbound_log(payload, target)
   end)
   core.read_env = read_env
   if not ok then
-    core.log_error_fact("error", "github_pr_comment", "FAILURE", core.error_class_from_message(err), "github_pr_comment_request", err, {
-      source_ref = payload.source_ref,
-      terminal = false,
-    })
     error(err)
   end
 end
@@ -70,5 +66,7 @@ function pipeline(event)
     comment_label = "gh pr comment",
   })
 end
+
+pipeline = core.wrap_pipeline_failure("github_pr_comment", pipeline)
 
 return M

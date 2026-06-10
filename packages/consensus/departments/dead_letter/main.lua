@@ -56,4 +56,6 @@ function pipeline(event)
   )
 end
 
+pipeline = core.wrap_pipeline_failure("dead_letter", pipeline)
+
 return M

@@ -307,4 +307,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("github_pr_open", pipeline)
+
 return M

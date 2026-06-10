@@ -65,4 +65,6 @@ function pipeline(event)
   end
 end
 
+pipeline = core.wrap_pipeline_failure("github_poll", pipeline)
+
 return M

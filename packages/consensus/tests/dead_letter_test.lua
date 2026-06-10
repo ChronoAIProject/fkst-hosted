@@ -89,4 +89,39 @@ return {
 
     t.eq(first, second)
   end,
+
+  test_wrapped_pipeline_failure_logs_delivery_error_fact_and_rethrows = function()
+    local logs = {}
+    local old_log = log
+    log = {
+      error = function(message)
+        table.insert(logs, tostring(message))
+      end,
+    }
+
+    local wrapped = core.wrap_pipeline_failure("decide", function(_event)
+      error("consensus: codex-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a")
+    end)
+    local ok, err = pcall(function()
+      wrapped({
+        queue = "proposal",
+        attempt = 6,
+        payload = {
+          source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+        },
+      })
+    end)
+
+    log = old_log
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("codex-failed", 1, true) ~= nil)
+    t.eq(#logs, 1)
+    t.is_true(logs[1]:find("consensus dept=decide tag=FAILURE", 1, true) ~= nil)
+    t.is_true(logs[1]:find("error_class=codex-failed", 1, true) ~= nil)
+    t.is_true(logs[1]:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(logs[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(logs[1]:find("attempt=6", 1, true) ~= nil)
+    t.is_true(logs[1]:find("terminal=false", 1, true) ~= nil)
+    t.is_true(logs[1]:find("queue=proposal", 1, true) ~= nil)
+  end,
 }

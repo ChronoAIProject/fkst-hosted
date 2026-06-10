@@ -70,4 +70,6 @@ function pipeline(event)
   end
 end
 
+pipeline = core.wrap_pipeline_failure("intake_scan", pipeline)
+
 return M
