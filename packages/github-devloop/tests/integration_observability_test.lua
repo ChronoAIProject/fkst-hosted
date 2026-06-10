@@ -55,19 +55,21 @@ local function render_comment(body, author, created_at)
   )
 end
 
-local function mock_all_issue_lists(numbers)
+local function mock_all_issue_lists(items)
   local rendered = {}
-  for _, number in ipairs(numbers or {}) do
-    table.insert(rendered, string.format('{"number":%d,"state":"open"}', number))
+  for _, item in ipairs(items or {}) do
+    local number = type(item) == "table" and item.number or item
+    local state = type(item) == "table" and item.state or "open"
+    table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
   end
   local stdout = "[[" .. table.concat(rendered, ",") .. "]]\n"
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=all&labels=fkst-dev%3Aenabled&per_page=100'", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'", {
     stdout = stdout,
     stderr = "",
     exit_code = 0,
   })
   for _, state in ipairs(core._state_order) do
-    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=all&labels=" .. core.state_label(state):gsub(":", "%%3A") .. "&per_page=100'", {
+    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=" .. core.state_label(state):gsub(":", "%%3A") .. "&per_page=100'", {
       stdout = "[[]]\n",
       stderr = "",
       exit_code = 0,
@@ -75,12 +77,14 @@ local function mock_all_issue_lists(numbers)
   end
 end
 
-local function mock_pr_list(numbers)
+local function mock_pr_list(items)
   local rendered = {}
-  for _, number in ipairs(numbers or {}) do
-    table.insert(rendered, string.format('{"number":%d,"state":"open"}', number))
+  for _, item in ipairs(items or {}) do
+    local number = type(item) == "table" and item.number or item
+    local state = type(item) == "table" and item.state or "open"
+    table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
   end
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=all&per_page=100'", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'", {
     stdout = "[[" .. table.concat(rendered, ",") .. "]]\n",
     stderr = "",
     exit_code = 0,
@@ -165,8 +169,8 @@ end
 local function call_contains_bad_limit()
   for _, call in ipairs(t.command_calls()) do
     if call.rendered:find("observ", 1, true) == nil
-      and (call.rendered:find("issues%?state=all", 1, false) ~= nil
-        or call.rendered:find("pulls%?state=all", 1, false) ~= nil)
+      and (call.rendered:find("issues%?state=open", 1, false) ~= nil
+        or call.rendered:find("pulls%?state=open", 1, false) ~= nil)
       and call.rendered:find("--limit 100", 1, true) ~= nil then
       return true
     end
@@ -218,6 +222,30 @@ return {
     t.is_true(observed:find("tag=OBSERVE_ENTITY", 1, true) ~= nil)
     t.is_true(observed:find("state=ready", 1, true) ~= nil)
     t.is_true(observed:find("marker_source=issue", 1, true) ~= nil)
+  end,
+
+  test_observe_summary_counts_only_open_list_entities = function()
+    local open_proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({
+      { number = 42, state = "open" },
+      { number = 43, state = "closed" },
+    })
+    mock_pr_list({
+      { number = 8, state = "closed" },
+    })
+    mock_issue_view({
+      render_comment(core.state_marker(open_proposal_id, "ready", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
+    })
+
+    local summary = summary_log(capture_observability_logs())
+
+    t.is_true(summary ~= nil)
+    t.is_true(summary:find("total=1", 1, true) ~= nil)
+    t.is_true(summary:find("ready=1", 1, true) ~= nil)
+    t.eq(count_calls("gh issue view"), 1)
+    t.eq(count_calls("gh pr view"), 0)
+    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'"))
   end,
 
   test_pr_phase_comment_stream_wins_over_stale_issue_pr_open = function()
@@ -285,8 +313,8 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/issues?state=all&labels=fkst-dev%3Aenabled&per_page=100'"))
-    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/pulls?state=all&per_page=100'"))
+    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'"))
+    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'"))
     t.eq(call_contains_bad_limit(), false)
   end,
 }
