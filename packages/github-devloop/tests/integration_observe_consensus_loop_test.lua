@@ -93,7 +93,8 @@ return {
     t.eq(result.raises[1].payload.proposal_id, "github-devloop/issue/owner/repo/42")
     t.is_true(#result.raises[1].payload.body < 256)
     t.is_nil(result.raises[1].payload.body:find("Body from GitHub", 1, true))
-    t.eq(result.raises[1].payload.content_fetch, "gh issue view '42' --repo 'owner/repo' --json title,body,comments,labels,state")
+    t.is_true(result.raises[1].payload.content_fetch:find("runtime-cache:", 1, true) == 1)
+    t.is_nil(result.raises[1].payload.content_fetch:find("gh issue", 1, true))
     t.eq(result.raises[1].payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
 
@@ -101,7 +102,7 @@ return {
     t.eq(label_raise.payload.schema, "github-proxy.label.v1")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:thinking")
     t.eq(label_raise.payload.issue_number, 42)
-    t.eq(count_calls("gh issue view"), 1)
+    t.eq(count_calls("gh issue view"), 2)
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
@@ -117,7 +118,7 @@ return {
     t.eq(thinking.exit_code, 0)
     t.eq(#thinking.raises, 1)
     t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)
-    t.eq(count_calls("gh issue view"), 2)
+    t.eq(count_calls("gh issue view"), 3)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -576,7 +577,8 @@ return {
     t.eq(result.raises[1].payload.proposal_id, "github-devloop/issue/owner/repo/42")
     t.is_true(#result.raises[1].payload.body < 256)
     t.is_nil(result.raises[1].payload.body:find("Body from GitHub", 1, true))
-    t.eq(result.raises[1].payload.content_fetch, "gh issue view '42' --repo 'owner/repo' --json title,body,comments,labels,state")
+    t.is_true(result.raises[1].payload.content_fetch:find("runtime-cache:", 1, true) == 1)
+    t.is_nil(result.raises[1].payload.content_fetch:find("gh issue", 1, true))
     t.eq(result.raises[1].payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1")
     t.eq(result.raises[1].payload.convergence_question, event.narrowed_question)
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")

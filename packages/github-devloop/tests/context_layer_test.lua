@@ -9,8 +9,8 @@ local function assert_preamble_slots(prompt)
 end
 
 local function assert_github_entity_history(prompt)
-  t.is_true(prompt:find("Before judging, fetch and read the COMPLETE GitHub comment stream of the subject issue/PR via the source_ref", 1, true) ~= nil)
-  t.is_true(prompt:find("gh issue view --comments / gh pr view --comments", 1, true) ~= nil)
+  t.is_true(prompt:find("Before judging, read the local context files named below.", 1, true) ~= nil)
+  t.is_nil(prompt:find("gh issue view --comments / gh pr view --comments", 1, true))
 end
 
 local function prompt_issue()
@@ -108,28 +108,33 @@ return {
 
   test_devloop_issue_pr_role_prompts_include_scoped_github_history = function()
     local issue = prompt_issue()
+    local manifest = "Read these local files for your complete context.\nIssue JSON: /tmp/ctx/issue.json\nBoard digest: /tmp/ctx/board.txt\nPR diff patch: /tmp/ctx/diff.patch"
     local prompts = {
-      core.build_intake_prompt("github-devloop/issue/owner/repo/42", issue),
-      core.build_implement_prompt("github-devloop/issue/owner/repo/42", issue, "Approved framing."),
+      core.build_intake_prompt("github-devloop/issue/owner/repo/42", issue, manifest),
+      core.build_implement_prompt("github-devloop/issue/owner/repo/42", issue, "Approved framing.", manifest),
       core.build_fix_prompt({
         proposal_id = "github-devloop/issue/owner/repo/42",
         review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
         reviewed_head_sha = "abcdef123456",
-      }, issue, "Review feedback.", "Approved framing."),
+      }, issue, "Review feedback.", "Approved framing.", manifest),
       core.build_decompose_prompt({
         proposal_id = "github-devloop/issue/owner/repo/42",
         source_ref = { kind = "external", ref = "owner/repo#pr/7" },
         round = 4,
-      }, issue),
+      }, issue, manifest),
       core.build_review_meta_prompt({
         proposal_id = "github-devloop/issue/owner/repo/42",
         review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
-      }, issue),
+      }, issue, manifest),
     }
 
     for _, prompt in ipairs(prompts) do
       assert_preamble_slots(prompt)
       assert_github_entity_history(prompt)
+      t.is_true(prompt:find("/tmp/ctx/issue.json", 1, true) ~= nil)
+      t.is_nil(prompt:find("gh issue", 1, true))
+      t.is_nil(prompt:find("gh pr", 1, true))
+      t.is_nil(prompt:find("gh api", 1, true))
       t.is_nil(prompt:find("{{", 1, true))
     end
   end,
@@ -160,17 +165,16 @@ return {
       payload = h.issue(),
     }
     local opts = h.opts("board-digest-cache")
-    local first = t.run_department("departments/observe_issue/main.lua", event, opts)
+    local first = h.run_observe(event.payload, opts)
     h.mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {})
-    local second = t.run_department("departments/observe_issue/main.lua", event, opts)
+    local second = h.run_observe(event.payload, opts)
     local proposal = find_raise(first.raises, "consensus.proposal").payload
 
-    t.is_true(proposal.body:find("> BEGIN UNTRUSTED ISSUE DATA", 1, true) ~= nil)
-    t.is_true(proposal.body:find("Open items snapshot:", 1, true) ~= nil)
-    t.is_true(proposal.body:find("#1 [fkst-dev:thinking] Issue title number 1", 1, true) ~= nil)
+    t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
+    t.is_true(proposal.body:find("GitHub issue", 1, true) ~= nil)
     t.is_nil(proposal.body:find("#101 ", 1, true))
-    t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 1)
-    t.eq(count_calls("gh pr list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 1)
+    t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 0)
+    t.eq(count_calls("gh pr list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 0)
     t.eq(find_raise(second.raises, "consensus.proposal").payload.body, proposal.body)
   end,
 

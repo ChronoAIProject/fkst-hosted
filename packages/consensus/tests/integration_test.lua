@@ -1,4 +1,5 @@
 local t = fkst.test
+require("tests.cache_seed_helpers")
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 
@@ -8,6 +9,10 @@ end
 
 local function runtime_root(name)
   return "/tmp/fkst-packages-test/consensus/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
+end
+
+local function shell_single_quote(value)
+  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
 local function opts(name)
@@ -44,6 +49,16 @@ local function run_decide(event_payload, run_opts)
   return t.run_department("departments/decide/main.lua", {
     queue = "proposal",
     payload = event_payload,
+  }, run_opts)
+end
+
+local function seed_cache(key, value, run_opts)
+  return t.run_department("tests/cache_seed_helpers.lua", {
+    queue = "cache_seed",
+    payload = {
+      key = key,
+      value = value,
+    },
   }, run_opts)
 end
 
@@ -166,6 +181,50 @@ return {
     t.is_true(calls[1].stdin:find("Brief only.", 1, true) ~= nil)
     t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
     t.is_nil(calls[1].stdin:find(full_tail, 1, true))
+  end,
+
+  test_codex_stdin_resolves_runtime_cache_context_manifest = function()
+    mock_judgment_runtime()
+    mock_angle("approve", "Minimal angle approves.")
+    mock_angle("approve", "Structural angle approves.")
+    mock_angle("approve", "Delete angle approves.")
+    local run_opts = opts("stdin-runtime-cache-context")
+    local root = run_opts.env.FKST_RUNTIME_ROOT
+    os.execute("mkdir -p " .. shell_single_quote(root .. "/ctx"))
+    local issue = assert(io.open(root .. "/ctx/issue.json", "w"))
+    issue:write("issue")
+    issue:close()
+    local diff = assert(io.open(root .. "/ctx/diff.patch", "w"))
+    diff:write("diff")
+    diff:close()
+    local notice = assert(io.open(root .. "/ctx/UNTRUSTED-NOTICE.txt", "w"))
+    notice:write("notice")
+    notice:close()
+    seed_cache("consensus-test/context", "Untrusted notice: " .. root .. "/ctx/UNTRUSTED-NOTICE.txt\nIssue JSON: " .. root .. "/ctx/issue.json\nPR diff patch: " .. root .. "/ctx/diff.patch", run_opts)
+
+    local result = run_decide(proposal({
+      content_fetch = "runtime-cache:consensus-test/context",
+    }), run_opts)
+
+    t.eq(result.exit_code, 0)
+    local calls = codex_calls()
+    t.eq(#calls, 3)
+    t.is_true(calls[1].stdin:find(root .. "/ctx/issue.json", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find(root .. "/ctx/diff.patch", 1, true) ~= nil)
+    t.is_nil(calls[1].stdin:find("runtime-cache:consensus-test/context", 1, true))
+  end,
+
+  test_runtime_cache_context_manifest_missing_file_fails_closed = function()
+    mock_judgment_runtime()
+    local run_opts = opts("stdin-runtime-cache-missing-file")
+    seed_cache("consensus-test/missing-context", "Issue JSON: /tmp/fkst-packages-test/consensus/missing-file.json", run_opts)
+
+    local result = run_decide(proposal({
+      content_fetch = "runtime-cache:consensus-test/missing-context",
+    }), run_opts)
+
+    t.eq(result.exit_code, 1)
+    t.eq(#codex_calls(), 0)
   end,
 
   test_unanimous_abstain_raises_consensus_converge = function()

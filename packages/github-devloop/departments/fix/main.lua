@@ -283,8 +283,17 @@ function pipeline(event)
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
     core.log_codex_start("fix", fix.proposal_id, "fix")
+    local content_fetch = core.context_fetch_from_bundle({
+      dept = "fix",
+      repo = repo,
+      issue_number = issue_number,
+      pr_number = fix.pr_number,
+      proposal_id = fix.proposal_id,
+      version = fix.dedup_key,
+      tick = event.ts,
+    })
     local result = spawn_codex_sync({
-      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing),
+      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing, content_fetch),
       worktree = worktree,
     })
     if type(result) ~= "table" or result.exit_code ~= 0 then

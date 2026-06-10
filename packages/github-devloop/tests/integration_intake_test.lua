@@ -99,6 +99,37 @@ local function mock_intake_codex(stdout, exit_code, stderr)
     stderr = "",
     exit_code = 0,
   })
+  for _ = 1, 2 do
+    t.mock_command("test -d", { stdout = "", stderr = "", exit_code = 1 })
+  end
+  t.mock_command("install -d -m 0755", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("mktemp -d", {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime/context/.bundle-tmp.intake\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  mock_intake_judge_view({}, {})
+  for _ = 1, 3 do
+    t.mock_command(" > ", { stdout = "", stderr = "", exit_code = 0 })
+  end
+  t.mock_command("python3 -c", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("test -r", { stdout = "", stderr = "", exit_code = 0 })
+  for _ = 1, 8 do
+    t.mock_command("wc -c < ", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("mkdir -p", {
     stdout = "",
     stderr = "",
@@ -129,7 +160,7 @@ local function assert_intake_judgment_call()
   t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
   t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
   t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
-  t.eq(count_calls("chmod 0555"), 1)
+  t.is_true(calls[1].stdin:find("issue.json", 1, true) ~= nil)
 end
 
 local function candidate(extra)

@@ -80,7 +80,17 @@ function pipeline(event)
       end
       current_issue = core.parse_issue_view_review(issue_view.stdout)
     end
-    local proposal = core.build_board_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments)
+    local review_id = core.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
+    local content_fetch = core.context_fetch_ref_from_bundle({
+      dept = "review_pr",
+      repo = repo,
+      issue_number = issue_number,
+      pr_number = reviewing.pr_number,
+      proposal_id = review_id,
+      version = core._dedup_key({ review_id, "review" }),
+      tick = event.ts,
+    })
+    local proposal = core.build_board_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return

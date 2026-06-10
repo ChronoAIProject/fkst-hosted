@@ -97,6 +97,7 @@ return {
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
     })
+    h.mock_context_bundle()
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
       stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
       stderr = "",

@@ -70,8 +70,16 @@ function pipeline(event)
     end
 
     core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
+    local content_fetch = core.context_fetch_from_bundle({
+      dept = "intake_judge",
+      repo = repo,
+      issue_number = issue_number,
+      proposal_id = candidate.proposal_id,
+      version = candidate.dedup_key,
+      tick = event.ts,
+    })
     local result = spawn_codex_sync(core.judgment_codex_opts(
-      core.build_intake_prompt(candidate.proposal_id, current),
+      core.build_intake_prompt(candidate.proposal_id, current, content_fetch),
       judgment_worktree("intake", candidate.dedup_key)
     ))
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then

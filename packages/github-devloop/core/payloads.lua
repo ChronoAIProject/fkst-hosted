@@ -300,29 +300,6 @@ function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
   }
 end
 
-function M.issue_fetch_instruction(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,comments,labels,state"
-end
-
-local function pr_review_fetch_instruction(M, repo, pr_number, head_sha, issue_number)
-  local lines = {
-    "gh pr view " .. M._shell_single_quote(pr_number)
-      .. " --repo " .. M._shell_single_quote(repo)
-      .. " --json headRefOid,headRefName,baseRefName,state",
-    "Confirm headRefOid equals reviewed head " .. tostring(head_sha) .. " before judging.",
-    "gh pr diff " .. M._shell_single_quote(pr_number)
-      .. " --repo " .. M._shell_single_quote(repo),
-  }
-  if issue_number ~= nil then
-    table.insert(lines, "gh issue view " .. M._shell_single_quote(issue_number)
-      .. " --repo " .. M._shell_single_quote(repo)
-      .. " --json title,body,comments,labels,state")
-  end
-  return table.concat(lines, "\n")
-end
-
 function M.build_proposal(issue)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
@@ -338,7 +315,7 @@ function M.build_proposal(issue)
     proposal_id = proposal_id,
     title = title,
     body = body,
-    content_fetch = M.issue_fetch_instruction(issue.repo, issue.number),
+    content_fetch = issue.content_fetch,
     dedup_key = M.proposal_dedup_key(proposal_id, issue.updated_at),
     source_ref = M.normalize_source_ref(issue.source_ref),
   }
@@ -367,24 +344,25 @@ local function apply_converge_fields(proposal, n, converge)
   return proposal
 end
 
-function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge)
+function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch)
   local issue = {
     repo = repo,
     number = issue_number,
     title = current.title,
     updated_at = current.updated_at,
     source_ref = source_ref,
+    content_fetch = content_fetch,
   }
   local proposal = M.build_proposal(issue)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n, converge, tick)
-  return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge), repo, tick)
+function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n, converge, tick, content_fetch)
+  return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch), repo, tick)
 end
 
-function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments)
+function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
   local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
@@ -406,7 +384,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
-    .. "\nFetch the current PR diff and backing issue content before judging."
+    .. "\nRead the local context bundle before judging."
   local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
   local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
   if ledger ~= nil and ledger ~= "" then
@@ -425,7 +403,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     proposal_id = review_id,
     title = M.neutralize_untrusted_prompt_text(title),
     body = body,
-    content_fetch = pr_review_fetch_instruction(M, repo, pr_number, head_sha, issue_number),
+    content_fetch = content_fetch,
     dedup_key = M._dedup_key({
       review_id,
       "review",
@@ -434,18 +412,18 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   }
 end
 
-function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments)
-  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments), repo, tick)
+function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch)
+  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch), repo, tick)
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments)
-  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments)
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch)
+  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments)
-  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments), repo, tick)
+function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch)
+  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch), repo, tick)
 end
 end
 

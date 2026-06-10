@@ -180,8 +180,16 @@ function pipeline(event)
     end
 
     core.log_codex_start("implement", ready.proposal_id, "implement")
+    local content_fetch = core.context_fetch_from_bundle({
+      dept = "implement",
+      repo = repo,
+      issue_number = issue_number,
+      proposal_id = ready.proposal_id,
+      version = ready.dedup_key,
+      tick = event.ts,
+    })
     local result = spawn_codex_sync({
-      prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing),
+      prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing, content_fetch),
       worktree = worktree,
     })
 

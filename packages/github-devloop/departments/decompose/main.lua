@@ -52,8 +52,8 @@ local function judgment_worktree(role, identity)
   return worktree
 end
 
-local function decompose_plan(decompose, current_issue)
-  local prompt = core.build_decompose_prompt(decompose, current_issue)
+local function decompose_plan(decompose, current_issue, content_fetch)
+  local prompt = core.build_decompose_prompt(decompose, current_issue, content_fetch)
   local result = spawn_codex_sync(core.judgment_codex_opts(
     prompt,
     judgment_worktree("decompose", decompose.dedup_key)
@@ -155,7 +155,16 @@ function pipeline(event)
       return
     end
     decompose.current_issue_body = current_issue.body
-    local issues = decompose_plan(decompose, current_issue)
+    local content_fetch = core.context_fetch_from_bundle({
+      dept = "decompose",
+      repo = repo,
+      issue_number = issue_number,
+      pr_number = decompose.pr_number,
+      proposal_id = decompose.proposal_id,
+      version = decompose.dedup_key,
+      tick = event.ts,
+    })
+    local issues = decompose_plan(decompose, current_issue, content_fetch)
     local count = math.min(#issues, core.max_decompose_issues())
     if count < 1 then
       issues = core.fallback_decompose_plan(decompose)

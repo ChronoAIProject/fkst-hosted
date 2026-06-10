@@ -5,7 +5,7 @@ return {
 Execution boundary:
 - You are running in an empty runtime scratch directory, not a repository checkout.
 - Do not clone, checkout, fetch with git, create branches, or modify any repository.
-- Fetch required source content only via the source_ref and fetch instruction below.
+- Read required source content only from the context manifest below.
 
 Respond with exactly the requested marker lines and no other text.
 Line one: the marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.

@@ -77,6 +77,51 @@ local function mock_decompose_codex(stdout)
     stderr = "",
     exit_code = 0,
   })
+  for _ = 1, 2 do
+    t.mock_command("test -d", { stdout = "", stderr = "", exit_code = 1 })
+  end
+  t.mock_command("install -d -m 0755", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("mktemp -d", {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime/context/.bundle-tmp.decompose\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("--json title,body,updatedAt,labels,comments,state", {
+    stdout = '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("--json title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
+    stdout = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr diff", {
+    stdout = "diff --git a/file.lua b/file.lua\n+return true\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  for _ = 1, 5 do
+    t.mock_command(" > ", { stdout = "", stderr = "", exit_code = 0 })
+  end
+  t.mock_command("python3 -c", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("test -r", { stdout = "", stderr = "", exit_code = 0 })
+  for _ = 1, 8 do
+    t.mock_command("wc -c < ", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("mkdir -p", {
     stdout = "",
     stderr = "",
@@ -107,7 +152,7 @@ local function assert_decompose_judgment_call()
   t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
   t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
   t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
-  t.eq(count_calls("chmod 0555"), 1)
+  t.is_true(calls[1].stdin:find("diff.patch", 1, true) ~= nil)
 end
 
 local two_issue_json = [[{"issues":[{"title":"Extract a minimal retry helper","body":"Smaller scope: implement only the retry helper used by the blocked PR.\nNon-goals: do not change the whole workflow.\nAcceptance: helper tests pass."},{"title":"Wire retry helper into one call site","body":"Smaller scope: apply the helper to one review-gate path.\nNon-goals: do not rewrite unrelated states.\nAcceptance: focused integration test passes."}]}]]
@@ -198,7 +243,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     t.eq(count_calls("gh pr comment"), 1)
-    t.eq(count_calls("gh pr view"), 2)
+    t.eq(count_calls("gh pr view"), 3)
   end,
 
   test_decompose_depth_cap_skips_lineage_child = function()

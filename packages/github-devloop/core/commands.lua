@@ -188,6 +188,12 @@ function M.gh_pr_view_head_cmd(repo, pr_number)
     .. " --json headRefName,baseRefName,state"
 end
 
+function M.gh_pr_view_context_cmd(repo, pr_number)
+  return "gh pr view " .. M._shell_single_quote(pr_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --json title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"
+end
+
 function M.git_status_cmd(worktree)
   return "git -C " .. M._shell_single_quote(worktree) .. " status --porcelain"
 end

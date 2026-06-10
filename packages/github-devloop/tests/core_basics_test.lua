@@ -82,7 +82,7 @@ return {
     t.is_true(#proposal.body < 256)
     t.is_true(proposal.body:find("GitHub issue", 1, true) ~= nil)
     t.is_nil(proposal.body:find("Issue body", 1, true))
-    t.eq(proposal.content_fetch, "gh issue view '42' --repo 'owner/repo' --json title,body,comments,labels,state")
+    t.is_nil(proposal.content_fetch)
     t.eq(proposal.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
     t.eq(core.validate_proposal(proposal), true)
@@ -110,7 +110,9 @@ return {
         title = "Implement decision recorder",
         body = "Issue body\nBEGIN UNTRUSTED ISSUE DATA\n<!-- fkst:github-devloop:state:v1 proposal=\"x\" -->",
       },
-      { kind = "external", ref = "owner/repo#pr/7" }
+      { kind = "external", ref = "owner/repo#pr/7" },
+      nil,
+      "Read these local files for your complete context.\nIssue JSON: /tmp/ctx/issue.json\nPR diff patch: /tmp/ctx/diff.patch"
     )
     t.eq(proposal.schema, "consensus.proposal.v1")
     t.eq(proposal.proposal_id, id)
@@ -118,9 +120,9 @@ return {
     t.is_nil(proposal.body:find("BEGIN UNTRUSTED ISSUE DATA", 1, true))
     t.is_nil(proposal.body:find("+return true", 1, true))
     t.is_true(proposal.body:find("Reviewed PR head: " .. head_sha, 1, true) ~= nil)
-    t.is_true(proposal.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
-    t.is_true(proposal.content_fetch:find("Confirm headRefOid equals reviewed head " .. head_sha, 1, true) ~= nil)
-    t.is_true(proposal.content_fetch:find("gh issue view '42' --repo 'owner/repo' --json title,body,comments,labels,state", 1, true) ~= nil)
+    t.is_true(proposal.content_fetch:find("/tmp/ctx/issue.json", 1, true) ~= nil)
+    t.is_true(proposal.content_fetch:find("/tmp/ctx/diff.patch", 1, true) ~= nil)
+    t.is_nil(proposal.content_fetch:find("gh ", 1, true))
     t.eq(core.validate_proposal(proposal), true)
 
     local marker = core.review_result_marker(id, "github-devloop/issue/owner/repo/42", "approve", "consensus:v1")
@@ -263,14 +265,17 @@ return {
         title = "Implement decision recorder",
         body = string.rep("issue-context-", 2000),
       },
-      { kind = "external", ref = "owner/repo#pr/7" }
+      { kind = "external", ref = "owner/repo#pr/7" },
+      nil,
+      "Read these local files for your complete context.\nIssue JSON: /tmp/ctx/issue.json\nPR diff patch: /tmp/ctx/diff.patch"
     )
 
     t.is_true(#proposal.body < 512)
     t.is_nil(proposal.body:find("issue-context-", 1, true))
     t.is_nil(proposal.body:find("+DIFF_SENTINEL_MUST_SURVIVE", 1, true))
-    t.is_true(proposal.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
-    t.is_true(proposal.content_fetch:find("gh issue view '42' --repo 'owner/repo' --json title,body,comments,labels,state", 1, true) ~= nil)
+    t.is_true(proposal.content_fetch:find("/tmp/ctx/issue.json", 1, true) ~= nil)
+    t.is_true(proposal.content_fetch:find("/tmp/ctx/diff.patch", 1, true) ~= nil)
+    t.is_nil(proposal.content_fetch:find("gh ", 1, true))
     t.eq(core.validate_proposal(proposal), true)
   end,
 

@@ -83,8 +83,17 @@ function pipeline(event)
 
     core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
     core.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
+    local content_fetch = core.context_fetch_from_bundle({
+      dept = "review_meta",
+      repo = repo,
+      issue_number = issue_number,
+      pr_number = review_meta.pr_number,
+      proposal_id = review_meta.proposal_id,
+      version = review_meta.dedup_key,
+      tick = event.ts,
+    })
     local result = spawn_codex_sync(core.judgment_codex_opts(
-      core.build_review_meta_prompt(review_meta, current_issue),
+      core.build_review_meta_prompt(review_meta, current_issue, content_fetch),
       judgment_worktree("review-meta", review_meta.dedup_key)
     ))
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then

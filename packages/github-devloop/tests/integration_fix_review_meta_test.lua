@@ -159,8 +159,7 @@ return {
     local proposal = find_raise(review_result.raises, "consensus.proposal").payload
     t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, expected_version, "feedface"))
     t.is_nil(proposal.body:find("+fixed again", 1, true))
-    t.is_true(proposal.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
-    t.is_true(proposal.content_fetch:find("Confirm headRefOid equals reviewed head feedface", 1, true) ~= nil)
+    t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
 	  end,
 
   test_fix_marker_lag_retries_then_visible_marker_runs = function()
@@ -605,7 +604,6 @@ return {
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.is_true(result.raises[1].payload.dedup_key:find("/loop/1", 1, true) ~= nil)
     t.is_nil(result.raises[1].payload.body:find("+return true", 1, true))
-    t.is_true(result.raises[1].payload.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,
@@ -636,7 +634,6 @@ return {
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.eq(result.raises[1].payload.proposal_id, proposal_id)
-    t.is_true(result.raises[1].payload.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,

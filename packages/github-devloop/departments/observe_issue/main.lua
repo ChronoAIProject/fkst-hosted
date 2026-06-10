@@ -103,6 +103,14 @@ function pipeline(event)
       if state.state == "thinking" then
         core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
         if core.version_loop_round(state.version) == 0 then
+          issue.content_fetch = core.context_fetch_ref_from_bundle({
+            dept = "observe_issue",
+            repo = issue.repo,
+            issue_number = issue.number,
+            proposal_id = proposal_id,
+            version = state.version,
+            tick = event.ts,
+          })
           local proposal = core.build_board_proposal(issue, event.ts)
           proposal.dedup_key = state.version
           if core.validate_proposal(proposal) then
@@ -195,6 +203,14 @@ function pipeline(event)
     end
     core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
 
+    issue.content_fetch = core.context_fetch_ref_from_bundle({
+      dept = "observe_issue",
+      repo = issue.repo,
+      issue_number = issue.number,
+      proposal_id = proposal_id,
+      version = issue.dedup_key,
+      tick = event.ts,
+    })
     local proposal = core.build_board_proposal(issue, event.ts)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-build-valid-proposal")

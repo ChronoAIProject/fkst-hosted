@@ -1,0 +1,90 @@
+local h = require("tests.devloop_core_helpers")
+require("tests.context_bundle_probe_helpers")
+local core = h.core
+local t = h.t
+
+local function nonce()
+  return tostring({}):gsub("[^%w._-]", "_")
+end
+
+local function runtime_root(name)
+  return "/tmp/fkst-packages-test/github-devloop-context-bundle/" .. tostring(now()) .. "/" .. nonce() .. "/" .. name
+end
+
+local function run_probe(mode, root)
+  local result = t.run_department("tests/context_bundle_probe_helpers.lua", {
+    queue = "context_bundle_probe",
+    payload = {
+      mode = mode,
+      root = root,
+    },
+  }, {
+    env = {
+      FKST_RUNTIME_ROOT = root,
+    },
+  })
+  t.eq(result.exit_code, 0)
+  for _, raised in ipairs(result.raises or {}) do
+    if raised.queue == "context_bundle_probe_result" then
+      return raised.payload
+    end
+  end
+  error("missing context bundle probe result")
+end
+
+return {
+  test_context_bundle_files_round_trip_from_different_cwd = function()
+    local result = run_probe("round_trip", runtime_root("round-trip"))
+
+    t.eq(#result.paths, 5)
+    t.is_true(result.manifest:find("UNTRUSTED-NOTICE.txt", 1, true) ~= nil)
+    t.is_true(result.manifest:find("bytes):", 1, true) ~= nil)
+    t.is_true(result.manifest:find("Files may be large; read them in segments as needed.", 1, true) ~= nil)
+    t.is_true(result.notice_content:find("BEGIN UNTRUSTED BUNDLE DATA", 1, true) == 1)
+    t.is_true(result.issue_content:find("{", 1, true) == 1)
+    t.is_nil(result.issue_content:find(core._untrusted_issue_data_begin, 1, true))
+  end,
+
+  test_context_bundle_cache_hit_with_deleted_file_rebuilds = function()
+    local result = run_probe("deleted_file", runtime_root("deleted-file"))
+
+    t.is_true(result.second_dir ~= result.first_dir)
+    t.is_true(result.second_dir:find(result.first_dir .. ".publish-", 1, true) == 1)
+    t.is_true(result.issue_content:find("Second issue", 1, true) ~= nil)
+    t.eq(result.issue_fetch_count, 2)
+  end,
+
+  test_context_bundle_reuses_preexisting_final_dir_after_validation = function()
+    local result = run_probe("preexisting", runtime_root("preexisting-final"))
+
+    t.eq(result.dir, result.expected_dir)
+    t.is_true(result.issue_content:find("preexisting issue", 1, true) ~= nil)
+    t.is_true(result.manifest:find("UNTRUSTED-NOTICE.txt", 1, true) ~= nil)
+    t.eq(result.issue_fetch_count, 0)
+  end,
+
+  test_context_bundle_second_publish_reuses_valid_final_dir = function()
+    local result = run_probe("publish_reuse", runtime_root("publish-reuse"))
+
+    t.eq(result.second_dir, result.first_dir)
+    t.eq(result.fetches_after_first, 1)
+    t.eq(result.fetches_after_second, 1)
+    t.eq(result.notice_unchanged, true)
+    t.eq(result.issue_unchanged, true)
+    t.eq(result.board_unchanged, true)
+  end,
+
+  test_context_bundle_second_publish_uses_unique_dir_when_final_invalid = function()
+    local result = run_probe("publish_unique_on_invalid", runtime_root("publish-unique-invalid"))
+
+    t.is_true(result.dir ~= result.original_dir)
+    t.is_true(result.dir:find(result.original_dir .. ".publish-", 1, true) == 1)
+    t.eq(result.issue_fetch_count, 2)
+    t.eq(result.original_notice_absent, true)
+    t.eq(result.original_issue_unchanged, true)
+    t.eq(result.original_board_unchanged, true)
+    t.is_true(result.rebuilt_issue:find("Rebuilt issue", 1, true) ~= nil)
+    t.eq(result.has_notice, true)
+    t.is_true(result.manifest:find("UNTRUSTED-NOTICE.txt", 1, true) ~= nil)
+  end,
+}
