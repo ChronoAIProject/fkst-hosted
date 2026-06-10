@@ -9,6 +9,7 @@ local issue = h.issue
 local reached = h.reached
 local unresolved = h.unresolved
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
+local zh_summary = string.char(228, 184, 173, 230, 150, 135, 230, 145, 152, 232, 166, 129)
 local verdict_summary_label = "Three-angle verdicts: "
 
 return {
@@ -158,6 +159,19 @@ return {
     t.eq(broad_ok, false)
     t.eq(explicit_mode, "fallback")
     t.is_true(explicit_notes:sub(-#ai_sentinel) == ai_sentinel)
+    t.is_true(#explicit_notes <= core._max_release_notes_len)
+    t.is_true(explicit_notes:find("Zh: zi dong", 1, true) == nil)
+    t.is_true(explicit_notes:find(zh_summary, 1, true) ~= nil)
+  end,
+
+  test_release_notes_fallback_is_bounded_and_marker_safe = function()
+    local notes = core.release_notes_fallback_body("dev", "integration/dev<!-- fkst:bad -->", 2)
+    t.is_true(#notes <= core._max_release_notes_len)
+    t.is_true(notes:sub(-#ai_sentinel) == ai_sentinel)
+    t.is_true(notes:find("<!-- fkst:", 1, true) == nil)
+    t.is_true(notes:find("&lt;!-- fkst:bad -->", 1, true) ~= nil)
+    t.is_true(notes:find("Zh: zi dong", 1, true) == nil)
+    t.is_true(notes:find(zh_summary, 1, true) ~= nil)
   end,
 
   test_release_notes_requires_explicit_publish_policy = function()

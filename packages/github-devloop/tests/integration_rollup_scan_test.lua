@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local zh_summary = string.char(228, 184, 173, 230, 150, 135, 230, 145, 152, 232, 166, 129)
 
 local function opts(name, extra)
   local env = {
@@ -89,26 +90,6 @@ local function mock_release_notes(body)
   })
 end
 
-local function rollup_body_path(name)
-  return "/tmp/fkst-github-devloop-rollup." .. tostring(name or "notes")
-end
-
-local function mock_rollup_body_file(name)
-  t.mock_command("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'", {
-    stdout = rollup_body_path(name) .. "\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_rollup_body_cleanup(name)
-  t.mock_command("rm -f -- '" .. rollup_body_path(name) .. "'", {
-    stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
 local function find_call(needle)
   for _, call in ipairs(t.command_calls()) do
     if call.rendered:find(needle, 1, true) ~= nil then
@@ -145,9 +126,7 @@ return {
     mock_pr_list(nil)
     mock_integration_head("def456")
     mock_release_notes("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel)
-    mock_rollup_body_file("create")
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
-    mock_rollup_body_cleanup("create")
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-create", { FKST_GITHUB_WRITE = "1" }))
@@ -167,9 +146,10 @@ return {
     t.is_true(h.has_call("--head 'integration/dev'"))
     t.is_true(h.has_call("--base 'dev'"))
     local create_call = find_call("gh pr create")
-    t.is_true(create_call.rendered:find("--body-file '" .. rollup_body_path("create") .. "'", 1, true) ~= nil)
-    t.eq(h.count_calls("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'"), 1)
-    t.eq(h.count_calls("rm -f -- '" .. rollup_body_path("create") .. "'"), 1)
+    t.is_true(create_call.rendered:find("--body 'Release highlights", 1, true) ~= nil)
+    t.is_true(create_call.rendered:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
+    t.eq(h.count_calls("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'"), 0)
+    t.eq(h.count_calls("rm -f --"), 0)
   end,
 
   test_rollup_scan_codex_failure_fails_closed_before_create = function()
@@ -194,8 +174,6 @@ return {
     mock_integration_head("def456")
     t.mock_command("codex exec", { stdout = "", stderr = "model unavailable", exit_code = 1 })
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
-    mock_rollup_body_file("fallback")
-    mock_rollup_body_cleanup("fallback")
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-fallback", {
@@ -205,11 +183,14 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 1)
     local create_call = find_call("gh pr create")
-    t.is_true(create_call.rendered:find("--body-file '" .. rollup_body_path("fallback") .. "'", 1, true) ~= nil)
-    t.eq(h.count_calls("rm -f -- '" .. rollup_body_path("fallback") .. "'"), 1)
+    t.is_true(create_call.rendered:find("--body 'Automated rollup", 1, true) ~= nil)
+    t.is_true(create_call.rendered:find("Zh: zi dong", 1, true) == nil)
+    t.is_true(create_call.rendered:find(zh_summary, 1, true) ~= nil)
+    t.is_true(create_call.rendered:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
+    t.eq(h.count_calls("rm -f --"), 0)
   end,
 
-  test_rollup_scan_cleans_release_notes_body_file_when_pr_create_fails = function()
+  test_rollup_scan_create_failure_has_no_release_notes_body_file = function()
     mock_env("1")
     mock_fetches()
     mock_ahead(3)
@@ -217,13 +198,12 @@ return {
     mock_pr_list(nil)
     mock_integration_head("def456")
     mock_release_notes("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel)
-    mock_rollup_body_file("create-fail")
     t.mock_command("gh pr create", { stdout = "", stderr = "create failed", exit_code = 1 })
-    mock_rollup_body_cleanup("create-fail")
     local result = run_scan(opts("rollup-create-fail", { FKST_GITHUB_WRITE = "1" }))
     t.is_true(result.exit_code ~= 0)
     t.eq(h.count_calls("gh pr create"), 1)
-    t.eq(h.count_calls("rm -f -- '" .. rollup_body_path("create-fail") .. "'"), 1)
+    t.eq(h.count_calls("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'"), 0)
+    t.eq(h.count_calls("rm -f --"), 0)
   end,
 
   test_rollup_scan_ahead_without_content_diff_skips_pr = function()

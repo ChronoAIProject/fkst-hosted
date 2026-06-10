@@ -36,16 +36,42 @@ local function strip_sentinel(text)
   return table.concat(lines, "\n")
 end
 
+local function utf8(...)
+  return string.char(...)
+end
+
+local function zh_summary_label()
+  return utf8(228, 184, 173, 230, 150, 135, 230, 145, 152, 232, 166, 129) .. ": "
+end
+
+local function zh_fallback_sentence(integration, upstream)
+  return utf8(232, 135, 170, 229, 138, 168, 229, 176, 134) .. " `"
+    .. tostring(integration)
+    .. "` "
+    .. utf8(230, 177, 135, 230, 128, 187, 229, 136, 176)
+    .. " `"
+    .. tostring(upstream)
+    .. "`; "
+    .. utf8(
+      229, 143, 145, 229, 184, 131, 228, 187, 141, 228, 190, 157,
+      232, 181, 150, 229, 189, 147, 229, 137, 141, 32, 80, 82, 32,
+      228, 186, 139, 229, 174, 158, 227, 128, 129, 67, 73, 32,
+      228, 184, 142, 229, 143, 175, 229, 144, 136, 229, 185, 182,
+      231, 138, 182, 230, 128, 129
+    )
+    .. "."
+end
+
 function M.release_notes_fallback_body(upstream, integration, ahead)
-  return table.concat({
+  local body = table.concat({
     "Automated rollup from `" .. tostring(integration) .. "` into `" .. tostring(upstream) .. "`.",
     "",
     "Ahead commits: " .. tostring(ahead),
     "Merge policy: CI green and mergeable current PR facts.",
     "",
-    "Zh: zi dong hui zong `" .. tostring(integration) .. "` to `" .. tostring(upstream) .. "`; publish still depends on current PR facts and CI.",
-    ai_sentinel,
+    zh_summary_label() .. zh_fallback_sentence(integration, upstream),
   }, "\n")
+  return M.normalize_release_notes(body)
 end
 
 function M.normalize_release_notes(stdout)
@@ -84,6 +110,21 @@ function M.release_notes_publish_policy(cfg)
     allow_fallback = cfg.allow_release_notes_fallback == true,
     write_mode = tostring(cfg.write_mode or ""),
   }
+end
+
+function M.gh_pr_create_body_cmd(repo, head, base, title, body)
+  if not M._is_git_ref_safe(head) then
+    error("github-devloop: invalid PR head branch")
+  end
+  if not M._is_git_ref_safe(base) then
+    error("github-devloop: invalid PR base branch")
+  end
+  local normalized_body = M.normalize_release_notes(body)
+  return "gh pr create --repo " .. M._shell_single_quote(repo)
+    .. " --head " .. M._shell_single_quote(head)
+    .. " --base " .. M._shell_single_quote(base)
+    .. " --title " .. M._shell_single_quote(title)
+    .. " --body " .. M._shell_single_quote(normalized_body)
 end
 
 function M.draft_release_notes(args)

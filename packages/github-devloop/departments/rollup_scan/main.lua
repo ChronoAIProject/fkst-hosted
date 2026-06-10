@@ -72,46 +72,6 @@ local function list_open_pr(repo, integration, upstream)
   return prs[1]
 end
 
-local function rollup_body_file()
-  local result = run_cmd(
-    "mktemp " .. core._shell_single_quote("/tmp/fkst-github-devloop-rollup.XXXXXX"),
-    30,
-    "rollup body temp file"
-  )
-  local path = trim_stdout(result)
-  if path == "" or path:find("[\r\n]") ~= nil or path:find("^/tmp/fkst%-github%-devloop%-rollup%.") == nil then
-    error("github-devloop: invalid rollup body temp file")
-  end
-  return path
-end
-
-local function cleanup_body_file(path)
-  if path == nil then
-    return
-  end
-  local result = exec_sync({ cmd = "rm -f -- " .. core._shell_single_quote(path), timeout = 30 })
-  if result.exit_code ~= 0 then
-    error("github-devloop: rollup body cleanup failed: " .. tostring(result.stderr))
-  end
-end
-
-local function with_rollup_body_file(notes, fn)
-  local body_file = rollup_body_file()
-
-  local ok, result = pcall(function()
-    file.write(body_file, notes)
-    return fn(body_file)
-  end)
-  local cleanup_ok, cleanup_err = pcall(cleanup_body_file, body_file)
-  if not ok then
-    error(result)
-  end
-  if not cleanup_ok then
-    error(cleanup_err)
-  end
-  return result
-end
-
 local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, publish_policy)
   local notes = core.draft_release_notes({
     repo = repo,
@@ -122,9 +82,7 @@ local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, pu
     publish_policy = publish_policy,
   })
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
-  with_rollup_body_file(notes, function(body_file)
-    run_cmd(core.gh_pr_create_cmd(repo, integration, upstream, title, body_file), 60, "gh rollup PR create")
-  end)
+  run_cmd(core.gh_pr_create_body_cmd(repo, integration, upstream, title, notes), 60, "gh rollup PR create")
 end
 
 function pipeline(event)
