@@ -61,8 +61,17 @@ local function raise_review_meta(repo, issue_number, fix, reason, detail)
   })
 end
 
-local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason)
+local function bounded_fix_summary(value)
+  local text = tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if #text > 600 then
+    text = text:sub(1, 600)
+  end
+  return text
+end
+
+local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
   local new_version = core.next_fix_version(fix.version)
+  fix.fix_summary = bounded_fix_summary(summary)
   core.log_cas_decision("fix", fix.proposal_id, { state = "fixing", version = fix.version }, "fixing", "reviewing", "applied", reason)
   local comment_request = core.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
   local label_request = core.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
@@ -327,7 +336,7 @@ function pipeline(event)
           error("github-devloop: pushed PR head verification failed")
         end
 
-        raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, existing_head_sha, "existing fix commit pushed and PR head verified")
+        raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, existing_head_sha, "existing fix commit pushed and PR head verified", result.stdout or result.stderr)
         return
       end
       core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, "no-changes")
@@ -397,7 +406,7 @@ function pipeline(event)
       error("github-devloop: pushed PR head verification failed")
     end
 
-    raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, new_head_sha, "fix pushed and PR head verified")
+    raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, new_head_sha, "fix pushed and PR head verified", result.stdout or result.stderr)
   end)
 end
 

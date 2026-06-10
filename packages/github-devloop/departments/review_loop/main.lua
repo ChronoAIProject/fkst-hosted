@@ -7,6 +7,8 @@ M.spec = {
   produces = {
     "consensus.proposal",
     "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_review_meta",
     "devloop_review_reconcile",
   },
   fanout = { "consensus.consensus_converge" },
@@ -26,6 +28,32 @@ local function append_round_fact(facts, round, narrowed_question, angle_digests,
     dedup = dedup_key,
   })
   return copied
+end
+
+local function review_truth_table_unapproved(unresolved)
+  if tonumber(unresolved.round) == nil or tonumber(unresolved.round) < 1 then
+    return false
+  end
+  if type(unresolved.angle_digests) ~= "table" or #unresolved.angle_digests == 0 then
+    return false
+  end
+  local has_comment = false
+  for _, item in ipairs(unresolved.angle_digests) do
+    local verdict = type(item) == "table" and item.verdict or nil
+    if verdict == "approve" or verdict == "reject" or verdict == "invalid" then
+      return false
+    end
+    if verdict == "comment" then
+      has_comment = true
+    elseif verdict == "abstain" then
+    else
+      return false
+    end
+  end
+  if not has_comment then
+    return true
+  end
+  return tostring(unresolved.dedup_key or ""):find("/loop/", 1, true) ~= nil
 end
 
 -- review_version is parse_pr_review_proposal_id's safe_version_segment form (truncated +
@@ -132,10 +160,10 @@ function pipeline(event)
       unresolved.narrowed_question,
       unresolved.angle_digests
     )
-    local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
     local facts_with_current = append_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local hit_round_cap = round >= core.max_converge_rounds()
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
+      local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
       local review_reconcile = core.build_devloop_review_reconcile_payload(unresolved, round, origin.proposal_id, review_version, reviewed_head_sha)
       local reason = hit_round_cap
         and ("PR review convergence round cap reached at round " .. tostring(round))
@@ -149,6 +177,28 @@ function pipeline(event)
       core.log_raise("review_loop", origin.proposal_id, "devloop_review_reconcile", review_reconcile)
       return
     end
+    if review_truth_table_unapproved(unresolved) then
+      marker_body = marker_body .. "\n" .. core.state_marker(origin.proposal_id, "review-meta", state.version)
+      local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
+      local review_meta = core.build_devloop_review_meta_payload(unresolved, origin.proposal_id, state.version, pr_number, round, pr_source_ref)
+      local label_request = nil
+      if origin.issue_number ~= nil then
+        label_request = core.build_state_label_request(origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
+      end
+      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "review-meta", core.cas_outcome(state, transition, review_version), "review truth table reached no approve after bounded pass")
+      core.log_apply("review_loop", origin.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = {} }, {
+        "github-proxy.github_pr_comment_request",
+        "github-proxy.github_issue_label_request",
+        "devloop_review_meta",
+      })
+      core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+      if label_request ~= nil then
+        core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+      end
+      core.log_raise("review_loop", origin.proposal_id, "devloop_review_meta", review_meta)
+      return
+    end
+    local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
 
     local current_issue = {
       title = "PR #" .. tostring(pr_number),
@@ -166,7 +216,7 @@ function pipeline(event)
     local proposal = core.build_board_pr_review_loop_proposal(repo, origin.issue_number, pr_number, state.version, current_pr.head_sha, current_issue, pr_source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
-    }, event.ts)
+    }, event.ts, current_pr.comments)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_loop proposal_id=" .. tostring(origin.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-loop-proposal")
       return

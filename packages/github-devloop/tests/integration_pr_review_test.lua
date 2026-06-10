@@ -571,6 +571,7 @@ return {
       proposal_id = proposal.proposal_id,
       decision = "reject",
       body = "Reject the current PR diff.",
+      blocking_gap = "missing regression guard",
       angle_results = {
         { angle = "minimal", verdict = "reject" },
         { angle = "structural", verdict = "reject" },
@@ -594,7 +595,9 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local fixing_raise = find_raise(result.raises, "devloop_fixing")
     t.is_true(comment_raise.payload.body:find("decision=\"reject\"", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("Blocking gap: missing regression guard", 1, true) ~= nil)
     t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
+    t.eq(fixing_raise.payload.blocking_gap, "missing regression guard")
     t.eq(fixing_raise.payload.review_proposal_id, proposal.proposal_id)
     t.eq(fixing_raise.payload.review_dedup_key, reached_payload.dedup_key)
     t.eq(fixing_raise.payload.version, fix_version)
@@ -778,7 +781,7 @@ return {
   end,
 
   test_review_result_reject_marks_issue_fixing = function()
-    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff." })
+    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff.", blocking_gap = "missing regression guard" })
     local impl_version = reviewing().version
     local fix_version = core.fix_version_from_review_version(impl_version)
     mock_pr_origin({
@@ -831,7 +834,7 @@ return {
   end,
 
   test_review_result_reject_new_fix_round_converges_over_same_review_version_merge_ready = function()
-    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff." })
+    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff.", blocking_gap = "missing regression guard" })
     local impl_version = reviewing().version
     local fix_version = core.fix_version_from_review_version(impl_version)
     mock_pr_origin({
@@ -888,7 +891,7 @@ return {
   end,
 
   test_review_result_marker_lag_retries_then_visible_marker_applies = function()
-    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff." })
+    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff.", blocking_gap = "missing regression guard" })
     local impl_version = reviewing().version
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),

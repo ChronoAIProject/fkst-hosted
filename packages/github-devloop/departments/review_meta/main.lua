@@ -100,11 +100,19 @@ function pipeline(event)
         reason = "Review-meta codex output was unparseable.",
       }
     end
+    if parsed.action == "fix"
+      and not core._is_bounded_string(parsed.blocking_gap, core._max_blocking_gap_len) then
+      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "missing-blocking-gap")
+      parsed = {
+        action = "block",
+        reason = "Review-meta fix output omitted a bounded blocking gap.",
+      }
+    end
     core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
 
     local to_state = parsed.action == "fix" and "fixing" or "blocked"
     local exit_version = core.next_review_meta_action_version(review_meta.version)
-    local comment_request = core.build_review_meta_comment_request(repo, issue_number, review_meta, parsed.action, parsed.reason, exit_version)
+    local comment_request = core.build_review_meta_comment_request(repo, issue_number, review_meta, parsed.action, parsed.reason, exit_version, parsed.blocking_gap)
     local label_request = nil
     if issue_number ~= nil then
       label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
@@ -126,6 +134,7 @@ function pipeline(event)
         review_proposal_id = review_meta.review_proposal_id,
         review_dedup_key = review_meta.dedup_key,
         reviewed_head_sha = reviewed_head_sha,
+        blocking_gap = parsed.blocking_gap,
       }, review_meta.source_ref)
       table.insert(raised, "devloop_fixing")
     end

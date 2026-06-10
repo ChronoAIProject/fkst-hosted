@@ -12,6 +12,22 @@ local function bounded_framing(M, framing)
   return value
 end
 
+local function bounded_control_text(M, value, limit)
+  if value == nil then
+    return nil
+  end
+  local text = tostring(value):gsub("%c", " "):gsub("%s+", " ")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then
+    return nil
+  end
+  local cap = limit or M._max_blocking_gap_len
+  if #text > cap then
+    text = text:sub(1, cap)
+  end
+  return text
+end
+
 local function board_digest_issue_list_cmd(M, repo)
   return "gh issue list"
     .. " --repo " .. M._shell_single_quote(repo)
@@ -220,6 +236,10 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   if framing ~= nil then
     payload.framing = framing
   end
+  local blocking_gap = bounded_control_text(M, review_fact.blocking_gap, M._max_blocking_gap_len)
+  if blocking_gap ~= nil then
+    payload.blocking_gap = blocking_gap
+  end
   return payload
 end
 
@@ -364,7 +384,7 @@ function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n,
   return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge), repo, tick)
 end
 
-function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
+function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments)
   local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
@@ -387,6 +407,14 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
     .. "\nFetch the current PR diff and backing issue content before judging."
+  local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
+  local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
+  if ledger ~= nil and ledger ~= "" then
+    body = body
+      .. "\nPrior review ledger:\n"
+      .. ledger
+      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix."
+  end
   if #body > M._max_body_len then
     error("github-devloop: PR review proposal exceeds bounded body")
   end
@@ -406,18 +434,18 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   }
 end
 
-function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick)
-  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref), repo, tick)
+function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments)
+  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments), repo, tick)
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge)
-  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments)
+  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick)
-  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge), repo, tick)
+function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments)
+  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments), repo, tick)
 end
 end
 

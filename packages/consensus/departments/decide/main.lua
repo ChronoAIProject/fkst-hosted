@@ -81,6 +81,7 @@ function pipeline(event)
         angle = angle,
         verdict = parsed and parsed.verdict or nil,
         reply = parsed and parsed.reply or nil,
+        blocking_gap = parsed and parsed.blocking_gap or nil,
         stdout = type(result) == "table" and result.stdout or nil,
         exit_code = type(result) == "table" and result.exit_code or nil,
       })

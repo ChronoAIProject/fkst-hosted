@@ -127,14 +127,16 @@ return {
     t.eq(core.has_review_result_marker({ marker }, id, "github-devloop/issue/owner/repo/42", "approve", "consensus:v1"), true)
     t.eq(core.has_any_review_result_marker({ marker }, id, "github-devloop/issue/owner/repo/42"), true)
     local review_v1 = core.pr_review_proposal_id("owner/repo", 7, version .. "/fix/1", head_sha)
-    local reject_marker = core.review_result_marker(review_v1, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_v1 .. "/review", 1)
+    local reject_marker = core.review_result_marker(review_v1, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_v1 .. "/review", 1, "missing regression guard")
     t.is_true(reject_marker:find('fix_round="1"', 1, true) ~= nil)
+    t.is_true(reject_marker:find('gap="missing regression guard"', 1, true) ~= nil)
     local action_version = core.next_review_meta_action_version(version)
     local meta_comment = "github-devloop review-meta action: fix\n\nReason:\nRun another fix pass."
       .. "\n\n" .. core.state_marker("github-devloop/issue/owner/repo/42", "fixing", action_version)
-      .. "\n" .. core.review_meta_marker("github-devloop/issue/owner/repo/42", "meta-dedup", "fix", action_version)
+      .. "\n" .. core.review_meta_marker("github-devloop/issue/owner/repo/42", "meta-dedup", "fix", action_version, "missing retry guard")
     local meta_fact = core.review_meta_fix_fact({ meta_comment }, "github-devloop/issue/owner/repo/42", action_version)
     t.eq(meta_fact.review_dedup_key, "meta-dedup")
+    t.eq(meta_fact.blocking_gap, "missing retry guard")
     t.is_true(meta_fact.review_reason:find("Run another fix pass.", 1, true) ~= nil)
   end,
 

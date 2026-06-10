@@ -444,10 +444,13 @@ local function mock_branch_exists(branch, head)
   })
 end
 
-local function mock_meta_codex(action, reason, exit_code)
+local function mock_meta_codex(action, reason, exit_code, blocking_gap)
   local stdout = ""
   if action ~= nil then
     stdout = action_label .. " " .. tostring(action) .. "\n" .. reason_label .. " " .. tostring(reason or "Reason.")
+    if action == "fix" then
+      stdout = stdout .. "\nBlocking gap: " .. tostring(blocking_gap or "missing retry guard")
+    end
   end
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime",

@@ -72,6 +72,7 @@ local function issue(extra)
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
+  if value.decision == "reject" and value.blocking_gap == nil then value.blocking_gap = "missing regression guard" end
   return value
 end
 
@@ -189,7 +190,7 @@ local function fixing(extra)
     version = core.fix_version_from_review_version(review_version),
     review_proposal_id = event.proposal_id,
     review_dedup_key = event.dedup_key,
-    reviewed_head_sha = "def456",
+    reviewed_head_sha = "def456", blocking_gap = "missing regression guard",
     dedup_key = "fixing/github-devloop/issue/owner/repo/42/v1",
     source_ref = pr_source_ref(),
   }

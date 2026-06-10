@@ -43,6 +43,18 @@ local function bounded_framing(M, framing)
   return value
 end
 
+local function bounded_gap(M, gap)
+  local value = M.neutralize_untrusted_prompt_text(gap or "")
+  value = value:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if value == "" then
+    value = "the rejected review's named blocking gap"
+  end
+  if #value > M._max_blocking_gap_len then
+    value = value:sub(1, M._max_blocking_gap_len)
+  end
+  return value
+end
+
 local function issue_fetch_block(M, repo, issue_number, failure_action)
   if repo == nil or issue_number == nil then
     return "No backing GitHub issue is available; use only the PR/worktree context."
@@ -91,6 +103,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing)
     review_proposal_id = M.neutralize_untrusted_prompt_text(fix.review_proposal_id),
     reviewed_head_sha = M.neutralize_untrusted_prompt_text(fix.reviewed_head_sha),
     framing = bounded_framing(M, framing),
+    blocking_gap = bounded_gap(M, fix.blocking_gap),
     title = M.neutralize_untrusted_prompt_text(current_issue.title),
     content_fetch_block = issue_fetch_block(M, repo, issue_number, "stop and report the fetch failure without modifying files"),
     review_feedback = M.neutralize_untrusted_prompt_text(review_reason),
@@ -192,7 +205,7 @@ function M.parse_review_meta_action(stdout)
       table.insert(lines, line)
     end
   end
-  if #lines ~= 2 then
+  if #lines ~= 2 and #lines ~= 3 then
     return nil
   end
 
@@ -202,6 +215,9 @@ function M.parse_review_meta_action(stdout)
   local reason = nil
   local reason_count = 0
   local reason_index = nil
+  local gap = nil
+  local gap_count = 0
+  local gap_index = nil
   local index = 0
   for _, line in ipairs(lines) do
     index = index + 1
@@ -225,6 +241,16 @@ function M.parse_review_meta_action(stdout)
       reason_count = reason_count + 1
       reason_index = index
     end
+
+    if line:match("^%s*Blocking gap:") ~= nil then
+      local captured = line:match("^%s*Blocking gap:%s*(.+)$")
+      if captured == nil or M._trim(captured) == "" then
+        return nil
+      end
+      gap = M._trim(captured)
+      gap_count = gap_count + 1
+      gap_index = index
+    end
   end
 
   if action_count ~= 1 or reason_count ~= 1 then
@@ -239,10 +265,24 @@ function M.parse_review_meta_action(stdout)
   if not M._is_bounded_string(reason, M._max_meta_reason_len) then
     return nil
   end
+  if action == "fix" then
+    if gap_count ~= 1 or gap_index ~= reason_index + 1 then
+      return nil
+    end
+    if not M._is_bounded_string(gap, M._max_blocking_gap_len)
+      or gap:find("%c") ~= nil
+      or gap:find("<!%-%- fkst:") ~= nil
+      or gap:find("&lt;!%-%- fkst:") ~= nil then
+      return nil
+    end
+  elseif gap_count ~= 0 then
+    return nil
+  end
 
   return {
     action = action,
     reason = reason,
+    blocking_gap = gap,
   }
 end
 end

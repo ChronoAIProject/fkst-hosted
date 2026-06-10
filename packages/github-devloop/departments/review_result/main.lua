@@ -74,6 +74,11 @@ function pipeline(event)
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
     return
   end
+  if reached.decision == "reject"
+    and not core._is_bounded_string(reached.blocking_gap, core._max_blocking_gap_len) then
+    core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
+    return
+  end
 
   local lock_key = core.review_result_lock_key(origin.proposal_id)
   if lock_key == nil then
@@ -150,6 +155,7 @@ function pipeline(event)
         reviewed_head_sha = reviewed_head_sha,
         fix_version = issue_version,
         framing = reached.framing,
+        blocking_gap = reached.blocking_gap,
       }, pr_source_ref)
       table.insert(raised, "devloop_fixing")
     else

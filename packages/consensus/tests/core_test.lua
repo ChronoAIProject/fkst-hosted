@@ -2,10 +2,15 @@ local core = require("core")
 local t = fkst.test
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
+local gap_label = "⟦FKST:GAP⟧"
 local history_directive = "Before judging, fetch and read the complete prior history of this proposal via its source_ref"
 
 local function answer(verdict, reply)
   return verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply
+end
+
+local function reject_answer(reply, gap)
+  return answer("reject", reply) .. "\n" .. gap_label .. " " .. gap
 end
 
 local function proposal(extra)
@@ -219,8 +224,9 @@ return {
     t.is_true(converge_prompt:find("If this angle is not ready to approve, abstain and state the concrete concern in the reply.", 1, true) ~= nil)
     t.is_nil(converge_prompt:find("If the proposal should not proceed as-is", 1, true))
     t.is_nil(converge_prompt:find("reject, or abstain", 1, true))
-    t.is_true(gate_prompt:find("approve, reject, or abstain", 1, true) ~= nil)
-    t.is_true(gate_prompt:find("If the proposal should not proceed as-is, reject and state the concrete reason in the reply; abstain only when you genuinely cannot judge.", 1, true) ~= nil)
+    t.is_true(gate_prompt:find("approve, comment, reject, or abstain", 1, true) ~= nil)
+    t.is_true(gate_prompt:find("reject ONLY for a goal-blocking gap", 1, true) ~= nil)
+    t.is_true(gate_prompt:find("Advisory observations are comment", 1, true) ~= nil)
     t.is_true(gate_prompt:find("If you cannot fetch the source, reject and state the fetch failure.", 1, true) ~= nil)
     t.is_nil(gate_prompt:find("If this angle is not ready to approve", 1, true))
   end,
@@ -323,9 +329,17 @@ return {
     t.is_nil(core.parse_angle_output(answer("reject", "This diff is not ready."), "converge"))
     t.is_nil(core.parse_angle_output(answer("reject", "This diff is not ready.")))
 
-    local parsed = core.parse_angle_output(answer("reject", "This diff is not ready."), "gate")
+    local parsed = core.parse_angle_output(reject_answer("This diff is not ready.", "missing regression test"), "gate")
     t.eq(parsed.verdict, "reject")
     t.eq(parsed.reply, "This diff is not ready.")
+    t.eq(parsed.blocking_gap, "missing regression test")
+  end,
+
+  test_parse_angle_output_reject_requires_exactly_one_bounded_gap = function()
+    t.is_nil(core.parse_angle_output(answer("reject", "No gap line."), "gate"))
+    t.is_nil(core.parse_angle_output(reject_answer("Gap too long.", string.rep("x", 241)), "gate"))
+    t.is_nil(core.parse_angle_output(reject_answer("One.", "gap one") .. "\n" .. gap_label .. " gap two", "gate"))
+    t.is_nil(core.parse_angle_output(answer("approve", "Looks good.") .. "\n" .. gap_label .. " stray gap", "gate"))
   end,
 
   test_parse_angle_output_tolerates_preamble_and_case = function()
@@ -400,12 +414,27 @@ return {
     }))
   end,
 
-  test_aggregate_gate_accepts_unanimous_reject = function()
-    t.eq(core.aggregate({
-      result("minimal", "reject"),
-      result("structural", "reject"),
-      result("delete", "reject"),
-    }, "gate"), "reject")
+  test_aggregate_gate_rejects_on_any_named_gap = function()
+    local decision = core.aggregate({
+      { angle = "minimal", verdict = "comment", reply = "Advisory.", exit_code = 0 },
+      { angle = "structural", verdict = "reject", reply = "Blocking.", blocking_gap = "missing CAS check", exit_code = 0 },
+      result("delete", "approve"),
+    }, "gate")
+    t.eq(decision.decision, "reject")
+    t.eq(decision.blocking_gaps[1], "missing CAS check")
+  end,
+
+  test_aggregate_gate_approves_with_comments_and_converges_without_approve = function()
+    local decision = core.aggregate({
+      { angle = "minimal", verdict = "comment", reply = "Advisory.", exit_code = 0 },
+      result("structural", "approve"),
+      { angle = "delete", verdict = "abstain", reply = "Cannot judge.", exit_code = 0 },
+    }, "gate")
+    t.eq(decision.decision, "approve")
+    t.is_nil(core.aggregate({
+      { angle = "minimal", verdict = "comment", reply = "Advisory.", exit_code = 0 },
+      { angle = "structural", verdict = "abstain", reply = "Cannot judge.", exit_code = 0 },
+    }, "gate"))
   end,
 
   test_aggregate_converge_never_rejects = function()
@@ -522,6 +551,27 @@ return {
 
     t.eq(payload.decision, "reject")
     t.eq(payload.angle_results[1].verdict, "reject")
+  end,
+
+  test_build_reached_payload_carries_blocking_gap_and_advisory_section = function()
+    local reject_payload = core.build_reached_payload(proposal({ verdict_mode = "gate" }), {
+      decision = "reject",
+      blocking_gaps = { "missing rollback guard" },
+    }, {
+      { angle = "minimal", verdict = "reject", reply = "Blocks merge.", exit_code = 0 },
+    })
+    t.eq(reject_payload.decision, "reject")
+    t.eq(reject_payload.blocking_gap, "missing rollback guard")
+    t.eq(reject_payload.blocking_gaps[1], "missing rollback guard")
+
+    local approve_payload = core.build_reached_payload(proposal({ verdict_mode = "gate" }), {
+      decision = "approve",
+    }, {
+      result("minimal", "approve"),
+      { angle = "structural", verdict = "comment", reply = "Rename helper later.", exit_code = 0 },
+    })
+    t.is_true(approve_payload.body:find("Advisory (non-blocking):", 1, true) ~= nil)
+    t.is_true(approve_payload.body:find("Rename helper later.", 1, true) ~= nil)
   end,
 
   test_build_reached_payload_bounds_worst_case = function()

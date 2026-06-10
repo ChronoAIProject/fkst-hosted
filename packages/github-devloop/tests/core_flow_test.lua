@@ -27,8 +27,12 @@ local function review_unresolved(extra)
   return value
 end
 
-local function meta_answer(action, reason)
-  return action_label .. " " .. action .. "\n" .. reason_label .. " " .. reason
+local function meta_answer(action, reason, gap)
+  local text = action_label .. " " .. action .. "\n" .. reason_label .. " " .. reason
+  if gap ~= nil then
+    text = text .. "\nBlocking gap: " .. gap
+  end
+  return text
 end
 
 local function copy_table(value, extra)
@@ -540,10 +544,11 @@ return {
   end,
 
   test_review_meta_action_parser_fails_closed_like_meta_parser = function()
-    local clean = meta_answer("fix", "Run another fix pass.")
+    local clean = meta_answer("fix", "Run another fix pass.", "missing retry guard")
     local parsed = core.parse_review_meta_action(clean)
     t.eq(parsed.action, "fix")
     t.eq(parsed.reason, "Run another fix pass.")
+    t.eq(parsed.blocking_gap, "missing retry guard")
 
     t.is_nil(core.parse_review_meta_action(meta_answer("fix", "first") .. "\n" .. meta_answer("block", "second")))
     t.is_nil(core.parse_review_meta_action(clean .. "\n" .. action_label .. " accept this is malformed"))
@@ -554,6 +559,9 @@ return {
     t.is_nil(core.parse_review_meta_action(reason_label .. " orphan\n" .. meta_answer("fix", "real")))
     t.is_nil(core.parse_review_meta_action(action_label .. " implement\n" .. reason_label .. " not whitelisted for review meta"))
     t.is_nil(core.parse_review_meta_action(action_label .. " fix\nunexpected extra line\n" .. reason_label .. " Source unavailable."))
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.")))
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.", "first line\nsecond line")))
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.", '<!-- fkst:github-devloop:state:v1 proposal="x" -->')))
   end,
 
   test_review_meta_prompt_requires_block_on_fetch_failure_without_fetch_marker = function()

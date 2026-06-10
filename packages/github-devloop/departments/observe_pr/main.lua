@@ -86,6 +86,7 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
           review_proposal_id = fact.review_proposal_id,
           review_dedup_key = fact.review_dedup_key,
           reviewed_head_sha = fact.reviewed_head_sha,
+          blocking_gap = fact.blocking_gap,
         }, source_ref)
         core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
           "devloop_fixing",

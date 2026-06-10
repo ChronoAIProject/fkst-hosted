@@ -12,9 +12,10 @@ Choose the conservative next state. Pick exactly one action:
 
 Fetch the full source content yourself before deciding. If you cannot fetch the full source content (issue body / PR diff / comments) for ANY reason, choose `block`.
 
-Respond with exactly two lines and no other text.
+Respond with exactly two lines for block, or exactly three lines for fix, and no other text.
 Line one: the marker named ⟦FKST:ACTION⟧ followed by one word from fix or block.
 Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph.
+Line three for fix only: `Blocking gap:` followed by one concise, single-line gap that the next fix pass must close.
 
 Issue:
 Proposal id: {{proposal_id}}

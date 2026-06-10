@@ -21,6 +21,7 @@ local function pr_native_review_reached(extra)
     proposal_id = proposal_id,
     decision = "reject",
     body = "Review consensus rejects the PR-native diff.",
+    blocking_gap = "missing regression guard",
     dedup_key = "consensus:" .. proposal_id .. "/review",
     source_ref = h.pr_source_ref(),
   }
@@ -63,6 +64,7 @@ return {
         proposal_id = event.review_proposal_id,
         decision = "reject",
         body = "Reject because the PR-native parser must fail closed.",
+        blocking_gap = "missing regression guard",
         dedup_key = event.review_dedup_key,
         source_ref = h.pr_source_ref(),
       },

@@ -93,8 +93,9 @@ end
 
 local function mock_angle(verdict, reply, exit_code)
   mock_judgment_dir()
+  local gap = verdict == "reject" and "\n" .. "⟦FKST:GAP⟧ " .. tostring(reply):sub(1, 80) or ""
   t.mock_command("codex exec", {
-    stdout = verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. "\n",
+    stdout = verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. gap .. "\n",
     stderr = "",
     exit_code = exit_code or 0,
   })
@@ -229,35 +230,34 @@ return {
     t.eq(#codex_calls(), 4)
   end,
 
-  test_gate_mode_unanimous_reject_raises_consensus_reached_reject = function()
-    mock_judgment_runtime()
-    mock_angle("reject", "Minimal angle rejects the diff.")
-    mock_angle("reject", "Structural angle rejects the diff.")
-    mock_angle("reject", "Delete angle rejects the diff.")
-
-    local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-all-reject"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "consensus_reached")
-    t.eq(result.raises[1].payload.decision, "reject")
-    t.eq(#codex_calls(), 3)
-  end,
-
-  test_gate_mode_meta_reject_raises_consensus_reached_reject = function()
+  test_gate_mode_any_reject_raises_consensus_reached_reject_with_gap = function()
     mock_judgment_runtime()
     mock_angle("reject", "Minimal angle rejects the diff.")
     mock_angle("approve", "Structural angle approves.")
-    mock_angle("reject", "Delete angle rejects the diff.")
-    mock_meta("reached:reject reject until the failing test is fixed")
+    mock_angle("comment", "Delete angle has advisory feedback.")
 
-    local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-meta-reject"))
+    local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-any-reject"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_reached")
     t.eq(result.raises[1].payload.decision, "reject")
-    t.eq(result.raises[1].payload.framing, "reject reject until the failing test is fixed")
-    t.eq(result.raises[1].payload.body:find("Meta-judge framing:", 1, true), nil)
-    t.eq(#codex_calls(), 4)
+    t.eq(result.raises[1].payload.blocking_gap, "Minimal angle rejects the diff.")
+    t.eq(#codex_calls(), 3)
+  end,
+
+  test_gate_mode_approve_with_comment_raises_consensus_reached_approve = function()
+    mock_judgment_runtime()
+    mock_angle("comment", "Minimal angle notes naming could improve.")
+    mock_angle("approve", "Structural angle approves.")
+    mock_angle("abstain", "Delete angle cannot judge.")
+
+    local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-approve-comment"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_reached")
+    t.eq(result.raises[1].payload.decision, "approve")
+    t.is_true(result.raises[1].payload.body:find("Advisory (non-blocking):", 1, true) ~= nil)
+    t.eq(#codex_calls(), 3)
   end,
 
   test_meta_reached_after_split_raises_consensus_reached = function()
