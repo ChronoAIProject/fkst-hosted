@@ -13,7 +13,7 @@ use fkst_hosted_api::db::{
     Db, IDX_LEASES_EXPIRES_AT, IDX_SESSIONS_PACKAGE_NAME, IDX_SESSIONS_POD_ID, IDX_SESSIONS_STATUS,
 };
 use fkst_hosted_api::models::{SessionDoc, SessionStatus};
-use fkst_hosted_api::packages::{Package, PackageFile, PACKAGES_COLLECTION};
+use fkst_hosted_api::packages::{Package, PackageFile, PackageRepository, PACKAGES_COLLECTION};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
@@ -258,7 +258,12 @@ async fn health_endpoints_reflect_mongo_liveness() {
     }
     // Short selection timeout so the post-stop request fails fast.
     let (container, config, db) = mongo_db(500).await;
-    let router = build_router(AppState { config, db });
+    let packages = PackageRepository::new(&db.database);
+    let router = build_router(AppState {
+        config,
+        db,
+        packages,
+    });
 
     // Mongo up: exact 200 body.
     let response = router
