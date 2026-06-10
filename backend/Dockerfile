@@ -1,4 +1,11 @@
 # syntax=docker/dockerfile:1
+#
+# The pinned fkst-substrate engine ref lives in backend/engine.ref (single
+# line, 40-char commit SHA). Local build, from the repo root:
+#
+#   docker build -f backend/Dockerfile \
+#     --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
+#     -t fkst-hosted-api:dev .
 
 ARG RUST_VERSION=1
 
