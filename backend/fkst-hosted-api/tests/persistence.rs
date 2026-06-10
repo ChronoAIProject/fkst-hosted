@@ -57,21 +57,25 @@ async fn mongo_db(selection_timeout_ms: u64) -> (ContainerAsync<Mongo>, Config, 
     (container, config, db)
 }
 
-/// Collect the index names of a collection via the driver's own cursor API.
-async fn index_names<T: Send + Sync>(coll: &mongodb::Collection<T>) -> Vec<String> {
+/// Collect `(name, key document)` pairs of a collection's indexes via the
+/// driver's own cursor API, sorted by name.
+async fn index_specs<T: Send + Sync>(
+    coll: &mongodb::Collection<T>,
+) -> Vec<(String, bson::Document)> {
     let mut cursor = coll.list_indexes().await.expect("list_indexes");
-    let mut names = Vec::new();
+    let mut specs = Vec::new();
     while cursor.advance().await.expect("cursor advance") {
         let model = cursor.deserialize_current().expect("index model");
         let options = model.options.expect("index options present");
-        names.push(options.name.expect("index name present"));
+        let name = options.name.expect("index name present");
         // No extra unique index beyond the implicit `_id`.
         if let Some(unique) = options.unique {
-            assert!(!unique, "unexpected unique index declared");
+            assert!(!unique, "unexpected unique index declared: {name}");
         }
+        specs.push((name, model.keys));
     }
-    names.sort();
-    names
+    specs.sort_by(|a, b| a.0.cmp(&b.0));
+    specs
 }
 
 fn sample_session() -> SessionDoc {
@@ -129,21 +133,36 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
 
     db.ensure_indexes().await.expect("first ensure_indexes");
 
-    let mut expected_sessions = vec![
-        "_id_".to_string(),
-        IDX_SESSIONS_PACKAGE_NAME.to_string(),
-        IDX_SESSIONS_STATUS.to_string(),
-        IDX_SESSIONS_POD_ID.to_string(),
-    ];
-    expected_sessions.sort();
-    let mut expected_leases = vec!["_id_".to_string(), IDX_LEASES_EXPIRES_AT.to_string()];
-    expected_leases.sort();
+    // The wire-level names are asserted as STRING LITERALS (not only via the
+    // IDX_* constants) so a constant rename or a key swap fails this test;
+    // these asserts pin the constants to the literals.
+    assert_eq!(IDX_SESSIONS_PACKAGE_NAME, "sessions_package_name");
+    assert_eq!(IDX_SESSIONS_STATUS, "sessions_status");
+    assert_eq!(IDX_SESSIONS_POD_ID, "sessions_pod_id");
+    assert_eq!(IDX_LEASES_EXPIRES_AT, "leases_expires_at");
 
-    assert_eq!(index_names(&db.sessions()).await, expected_sessions);
-    assert_eq!(index_names(&db.leases()).await, expected_leases);
-    // No secondary index is ever declared for packages; the collection may
-    // not even exist yet (older servers answer NamespaceNotFound), so at
-    // most the implicit `_id` index is present.
+    // EXACTLY the implicit `_id` plus the declared secondaries, with their
+    // exact key documents (sorted by name).
+    let expected_sessions = vec![
+        ("_id_".to_string(), doc! { "_id": 1 }),
+        (
+            "sessions_package_name".to_string(),
+            doc! { "package_name": 1 },
+        ),
+        ("sessions_pod_id".to_string(), doc! { "pod_id": 1 }),
+        ("sessions_status".to_string(), doc! { "status": 1 }),
+    ];
+    let expected_leases = vec![
+        ("_id_".to_string(), doc! { "_id": 1 }),
+        ("leases_expires_at".to_string(), doc! { "expires_at": 1 }),
+    ];
+
+    assert_eq!(index_specs(&db.sessions()).await, expected_sessions);
+    assert_eq!(index_specs(&db.leases()).await, expected_leases);
+    // No secondary index is ever declared for packages and nothing has been
+    // inserted, so the collection does not exist; mongo:7 answers
+    // NamespaceNotFound for list_indexes on a missing namespace (verified
+    // empirically). Stay tolerant of an existing-but-empty collection too.
     match db.packages().list_indexes().await {
         Ok(mut cursor) => {
             let mut package_names = Vec::new();
@@ -165,17 +184,17 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
         }
     }
 
-    // Second run: Ok, identical set (idempotency, no duplicates).
+    // Second run: Ok, identical specs (idempotency, no duplicates).
     db.ensure_indexes().await.expect("second ensure_indexes");
-    assert_eq!(index_names(&db.sessions()).await, expected_sessions);
-    assert_eq!(index_names(&db.leases()).await, expected_leases);
+    assert_eq!(index_specs(&db.sessions()).await, expected_sessions);
+    assert_eq!(index_specs(&db.leases()).await, expected_leases);
 
-    // Concurrent runs (two pods racing startup): both Ok, same set.
+    // Concurrent runs (two pods racing startup): both Ok, same specs.
     let (left, right) = tokio::join!(db.ensure_indexes(), db.ensure_indexes());
     left.expect("concurrent ensure_indexes (left)");
     right.expect("concurrent ensure_indexes (right)");
-    assert_eq!(index_names(&db.sessions()).await, expected_sessions);
-    assert_eq!(index_names(&db.leases()).await, expected_leases);
+    assert_eq!(index_specs(&db.sessions()).await, expected_sessions);
+    assert_eq!(index_specs(&db.leases()).await, expected_leases);
 }
 
 #[tokio::test]

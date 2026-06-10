@@ -141,7 +141,8 @@ impl Db {
             tracing::debug!(collection = LEASES, index = name, "index ensured");
         }
 
-        tracing::info!("indexes ensured");
+        // No INFO here: the single "indexes ensured" lifecycle line is
+        // emitted by the caller (main.rs) so it appears exactly once.
         Ok(())
     }
 }
