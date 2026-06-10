@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
+use fkst_hosted_api::packages::PackageRepository;
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::state::AppState;
 use tracing_subscriber::EnvFilter;
@@ -64,6 +65,15 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     tracing::info!("indexes ensured");
+
+    // 4b. Ensure the packages-collection indexes via the domain repository's
+    //     own startup hook (idempotent; fail-closed on error). The repository
+    //     joins AppState in a later issue; only the hook is wired here.
+    let package_repository = PackageRepository::new(&db.database);
+    if let Err(error) = package_repository.ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure packages indexes");
+        return ExitCode::FAILURE;
+    }
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);

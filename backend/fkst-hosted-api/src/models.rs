@@ -1,5 +1,6 @@
-//! Authoritative BSON document shapes for the `packages`, `sessions`, and
-//! `leases` collections.
+//! Authoritative BSON document shapes for the `sessions` and `leases`
+//! collections. (The `packages` collection shape is owned by
+//! [`crate::packages`].)
 //!
 //! Conventions (load-bearing for downstream queries):
 //! - `Option<T>` fields serialize as explicit BSON `null` (no
@@ -11,25 +12,6 @@
 //!   round-trips are lossless.
 
 use serde::{Deserialize, Serialize};
-
-/// One file of a stored package. Files are an array (not a map) because BSON
-/// keys cannot contain dots while file paths do.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PackageFile {
-    pub path: String,
-    pub content: String,
-}
-
-/// `packages` collection: `_id` is the package name.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PackageDoc {
-    #[serde(rename = "_id")]
-    pub name: String,
-    pub files: Vec<PackageFile>,
-    pub composed_deps: Vec<String>,
-    pub created_at: bson::DateTime,
-    pub updated_at: bson::DateTime,
-}
 
 /// Lifecycle state of a session. Serializes lowercase on the wire.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,25 +62,6 @@ mod tests {
 
     use super::*;
 
-    fn sample_package() -> PackageDoc {
-        PackageDoc {
-            name: "demo-package".to_string(),
-            files: vec![
-                PackageFile {
-                    path: "init.lua".to_string(),
-                    content: "return {}".to_string(),
-                },
-                PackageFile {
-                    path: "lib/util.lua".to_string(),
-                    content: "-- util".to_string(),
-                },
-            ],
-            composed_deps: vec!["base".to_string()],
-            created_at: bson::DateTime::from_millis(1_700_000_000_000),
-            updated_at: bson::DateTime::from_millis(1_700_000_001_000),
-        }
-    }
-
     fn sample_session() -> SessionDoc {
         SessionDoc {
             id: bson::Uuid::new(),
@@ -124,14 +87,6 @@ mod tests {
             expires_at: bson::DateTime::from_millis(1_700_000_060_000),
             renewed_at: bson::DateTime::from_millis(1_700_000_030_000),
         }
-    }
-
-    #[test]
-    fn package_doc_round_trips_losslessly() {
-        let doc = sample_package();
-        let raw = bson::to_document(&doc).expect("serialize");
-        let back: PackageDoc = bson::from_document(raw).expect("deserialize");
-        assert_eq!(back, doc);
     }
 
     #[test]
@@ -174,25 +129,6 @@ mod tests {
         for (status, expected) in cases {
             let bson = bson::to_bson(&status).expect("serialize");
             assert_eq!(bson, Bson::String(expected.to_string()));
-        }
-    }
-
-    #[test]
-    fn package_doc_id_carries_the_name() {
-        let raw = bson::to_document(&sample_package()).expect("serialize");
-        assert_eq!(
-            raw.get("_id").expect("_id present"),
-            &Bson::String("demo-package".to_string())
-        );
-        assert!(!raw.contains_key("name"), "name must map onto _id only");
-    }
-
-    #[test]
-    fn package_files_serialize_as_a_bson_array() {
-        let raw = bson::to_document(&sample_package()).expect("serialize");
-        match raw.get("files").expect("files present") {
-            Bson::Array(items) => assert_eq!(items.len(), 2),
-            other => panic!("expected Bson::Array, got {other:?}"),
         }
     }
 

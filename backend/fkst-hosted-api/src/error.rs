@@ -41,6 +41,21 @@ pub enum AppError {
     Internal(#[from] anyhow::Error),
 }
 
+/// Map packages-domain errors onto the unified type: `Validation` -> 400,
+/// `Duplicate` -> 409, `Db` -> 500 (driver text logged, never echoed).
+impl From<crate::packages::PackageError> for AppError {
+    fn from(err: crate::packages::PackageError) -> Self {
+        use crate::packages::PackageError;
+        match err {
+            PackageError::Validation(message) => AppError::Validation(message),
+            PackageError::Duplicate(name) => {
+                AppError::Conflict(format!("package already exists: {name}"))
+            }
+            PackageError::Db(source) => AppError::Mongo(source),
+        }
+    }
+}
+
 /// Stable JSON error envelope: `{"error": "<code>", "message": "<text>"}`.
 #[derive(Debug, Serialize)]
 struct ErrorEnvelope {
@@ -183,6 +198,39 @@ mod tests {
         assert_eq!(body["message"], "internal server error");
         assert!(!body.to_string().contains("db creds"));
         assert!(!body.to_string().contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn package_validation_renders_400_invalid_request() {
+        let err: AppError =
+            crate::packages::PackageError::Validation("invalid package name".into()).into();
+        let (status, body) = render(err).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "invalid_request");
+        assert_eq!(body["message"], "invalid package name");
+    }
+
+    #[tokio::test]
+    async fn package_duplicate_renders_409_conflict() {
+        let err: AppError = crate::packages::PackageError::Duplicate("demo".into()).into();
+        let (status, body) = render(err).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"], "conflict");
+        assert_eq!(body["message"], "package already exists: demo");
+    }
+
+    #[tokio::test]
+    async fn package_db_renders_500_without_leaking_driver_text() {
+        let io = std::io::Error::other("dial mongodb://user:secret@db:27017 refused");
+        let err: AppError =
+            crate::packages::PackageError::Db(mongodb::error::Error::from(io)).into();
+
+        let (status, body) = render(err).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], "internal");
+        assert_eq!(body["message"], "internal server error");
+        assert!(!body.to_string().contains("secret"));
+        assert!(!body.to_string().contains("27017"));
     }
 
     #[tokio::test]

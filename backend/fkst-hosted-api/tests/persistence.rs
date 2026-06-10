@@ -12,7 +12,8 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{
     Db, IDX_LEASES_EXPIRES_AT, IDX_SESSIONS_PACKAGE_NAME, IDX_SESSIONS_POD_ID, IDX_SESSIONS_STATUS,
 };
-use fkst_hosted_api::models::{PackageDoc, PackageFile, SessionDoc, SessionStatus};
+use fkst_hosted_api::models::{SessionDoc, SessionStatus};
+use fkst_hosted_api::packages::{Package, PackageFile, PACKAGES_COLLECTION};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
@@ -94,8 +95,8 @@ fn sample_session() -> SessionDoc {
     }
 }
 
-fn sample_package() -> PackageDoc {
-    PackageDoc {
+fn sample_package() -> Package {
+    Package {
         name: "demo-package".to_string(),
         files: vec![
             PackageFile {
@@ -163,7 +164,11 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
     // inserted, so the collection does not exist; mongo:7 answers
     // NamespaceNotFound for list_indexes on a missing namespace (verified
     // empirically). Stay tolerant of an existing-but-empty collection too.
-    match db.packages().list_indexes().await {
+    match db
+        .collection::<Package>(PACKAGES_COLLECTION)
+        .list_indexes()
+        .await
+    {
         Ok(mut cursor) => {
             let mut package_names = Vec::new();
             while cursor.advance().await.expect("cursor advance") {
@@ -230,13 +235,13 @@ async fn package_doc_round_trips_with_id_as_name() {
     let (_container, _config, db) = mongo_db(5000).await;
     let package = sample_package();
 
-    db.packages()
+    db.collection::<Package>(PACKAGES_COLLECTION)
         .insert_one(package.clone())
         .await
         .expect("insert package");
 
     let found = db
-        .packages()
+        .collection::<Package>(PACKAGES_COLLECTION)
         .find_one(doc! { "_id": &package.name })
         .await
         .expect("find_one")
