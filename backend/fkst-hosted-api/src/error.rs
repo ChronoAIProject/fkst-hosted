@@ -25,6 +25,17 @@ pub enum AppError {
     /// The request conflicts with the current state. Renders as 409.
     #[error("conflict: {0}")]
     Conflict(String),
+    /// A required dependency (e.g. MongoDB) is unreachable. Renders as 503.
+    /// The message must be safe for clients (no connection detail).
+    #[error("unavailable: {0}")]
+    Unavailable(String),
+    /// MongoDB driver failure. Renders as 500; the driver text may carry
+    /// host/connection detail, so it is logged but never echoed.
+    #[error("mongodb error: {0}")]
+    Mongo(#[from] mongodb::error::Error),
+    /// BSON serialization failure. Renders as 500.
+    #[error("bson serialization error: {0}")]
+    Bson(#[from] bson::ser::Error),
     /// Any unexpected internal failure. Renders as 500.
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
@@ -43,7 +54,13 @@ impl IntoResponse for AppError {
             AppError::Validation(msg) => (StatusCode::BAD_REQUEST, "invalid_request", msg.clone()),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, "conflict", msg.clone()),
-            AppError::Config(_) | AppError::Internal(_) => (
+            AppError::Unavailable(msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "unavailable", msg.clone())
+            }
+            AppError::Config(_)
+            | AppError::Mongo(_)
+            | AppError::Bson(_)
+            | AppError::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal",
                 INTERNAL_CLIENT_MESSAGE.to_string(),
@@ -108,6 +125,49 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(body["error"], "conflict");
         assert_eq!(body["message"], "duplicate name");
+    }
+
+    #[tokio::test]
+    async fn unavailable_renders_503_unavailable() {
+        let (status, body) = render(AppError::Unavailable("mongo unreachable".into())).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"], "unavailable");
+        assert_eq!(body["message"], "mongo unreachable");
+    }
+
+    #[tokio::test]
+    async fn mongo_renders_500_without_leaking_inner_text() {
+        // A real driver error wrapping a deterministic inner text.
+        let io = std::io::Error::other("dial mongodb://user:secret@db:27017 refused");
+        let err = AppError::Mongo(mongodb::error::Error::from(io));
+        // The inner text stays reachable for logging via Display/Debug.
+        assert!(format!("{err}").contains("secret"));
+
+        let (status, body) = render(err).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], "internal");
+        assert_eq!(body["message"], "internal server error");
+        assert!(!body.to_string().contains("secret"));
+        assert!(!body.to_string().contains("27017"));
+    }
+
+    #[tokio::test]
+    async fn bson_renders_500_without_leaking_inner_text() {
+        // BSON document keys must be strings; integer keys produce a real
+        // bson::ser::Error.
+        let bad_keys: std::collections::HashMap<u32, &str> =
+            std::collections::HashMap::from([(1, "leaky-detail")]);
+        let bson_err = bson::to_document(&bad_keys).expect_err("non-string keys must fail");
+        let err = AppError::Bson(bson_err);
+        let inner_text = format!("{err}");
+
+        let (status, body) = render(err).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], "internal");
+        assert_eq!(body["message"], "internal server error");
+        // The serializer's own message never reaches the client.
+        let rendered = body.to_string();
+        assert!(!rendered.contains(inner_text.trim_start_matches("bson serialization error: ")));
     }
 
     #[tokio::test]
