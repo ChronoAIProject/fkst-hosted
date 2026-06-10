@@ -42,6 +42,11 @@ return {
         delivery_id = "delivery/v1/raised/queue/consensus.proposal/dept/consensus.decide/01HY",
         queue = "consensus.proposal",
         dept = "consensus.decide",
+        source_ref = {
+          kind = "external",
+          ref = "owner/repo#issue/135",
+        },
+        dedup_key = "github-devloop/issue/owner/repo/135/2026-06-10T07-43-16Z",
         attempt = 3,
         error = "codex timed out\nwhile running decide",
       },
@@ -54,6 +59,8 @@ return {
         .. " delivery_id=delivery/v1/raised/queue/consensus.proposal/dept/consensus.decide/01HY"
         .. " queue=consensus.proposal"
         .. " dead_dept=consensus.decide"
+        .. " source_ref=external:owner/repo#issue/135"
+        .. " dedup_key=github-devloop/issue/owner/repo/135/2026-06-10T07-43-16Z"
         .. " attempt=3"
         .. " error=codex timed out while running decide"
     )
