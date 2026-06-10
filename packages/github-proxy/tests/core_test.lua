@@ -312,6 +312,32 @@ return {
       core.gh_issue_view_comments_cmd("owner/repo", 3),
       "gh issue view '3' --repo 'owner/repo' --json comments"
     )
+    local expected_label_colors = {
+      ["fkst-dev:enabled"] = "1D76DB",
+      ["fkst-dev:thinking"] = "8250DF",
+      ["fkst-dev:ready"] = "0E8A16",
+      ["fkst-dev:implementing"] = "FBCA04",
+      ["fkst-dev:pr-open"] = "006B75",
+      ["fkst-dev:reviewing"] = "5319E7",
+      ["fkst-dev:fixing"] = "D93F0B",
+      ["fkst-dev:merge-ready"] = "2EA44F",
+      ["fkst-dev:merging"] = "C2E0C6",
+      ["fkst-dev:merged"] = "8957E5",
+      ["fkst-dev:impl-failed"] = "B60205",
+      ["fkst-dev:blocked"] = "1B1F23",
+      ["fkst-dev:blocked-on-dependency"] = "E99695",
+      ["fkst-dev:review-meta"] = "BFD4F2",
+    }
+    for label, color in pairs(expected_label_colors) do
+      t.eq(
+        core.gh_label_create_cmd("owner/repo", label),
+        "gh label create '" .. label .. "' --repo 'owner/repo' --color '" .. color .. "'"
+      )
+    end
+    t.eq(
+      core.gh_label_create_cmd("owner/repo", "custom'label"),
+      "gh label create 'custom'\\''label' --repo 'owner/repo' --color 'ededed'"
+    )
     t.eq(
       core.gh_issue_comment_cmd("owner/repo", 3, "/tmp/body's.md"),
       "gh issue comment '3' --repo 'owner/repo' --body-file '/tmp/body'\\''s.md'"
