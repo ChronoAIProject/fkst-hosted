@@ -62,7 +62,9 @@ impl PackageRepository {
     pub async fn create(&self, new_package: NewPackage) -> Result<Package, PackageError> {
         if let Err(reason) = new_package.validate() {
             // Reasons carry paths, sizes, and counts only — never content.
-            tracing::warn!(name = %new_package.name, reason = %reason, "package validation rejected");
+            // The name is NOT yet validated here: log it debug-escaped (`?`)
+            // so embedded newlines/ANSI cannot forge log lines.
+            tracing::warn!(name = ?new_package.name, reason = %reason, "package validation rejected");
             return Err(PackageError::Validation(reason));
         }
 
