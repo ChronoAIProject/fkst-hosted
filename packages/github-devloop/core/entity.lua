@@ -79,8 +79,16 @@ local function linked_pr_numbers(issue_comments, proposal_id)
 end
 
 function M.current_linked_entity_state(repo, proposal_id, issue_comments)
-  local comments = {}
-  copy_comments(comments, issue_comments)
+  local snapshot = M.linked_entity_snapshot(repo, proposal_id, issue_comments)
+  return M.current_entity_state(snapshot.comments, proposal_id)
+end
+
+function M.linked_entity_snapshot(repo, proposal_id, issue_comments)
+  local snapshot = {
+    comments = {},
+    prs = {},
+  }
+  copy_comments(snapshot.comments, issue_comments)
   for _, pr_number in ipairs(linked_pr_numbers(issue_comments, proposal_id)) do
     local pr_view = exec_sync({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
@@ -90,9 +98,14 @@ function M.current_linked_entity_state(repo, proposal_id, issue_comments)
     if type(current_pr.comments) ~= "table" or tostring(current_pr.state or "") == "" then
       error("github-devloop: linked PR state view malformed")
     end
-    copy_comments(comments, current_pr.comments)
+    table.insert(snapshot.prs, {
+      number = pr_number,
+      current = current_pr,
+    })
+    copy_comments(snapshot.comments, current_pr.comments)
   end
-  return M.current_entity_state(comments, proposal_id)
+  snapshot.state = M.current_entity_state(snapshot.comments, proposal_id)
+  return snapshot
 end
 
 function M.pr_proposal_id(repo, pr_number)
