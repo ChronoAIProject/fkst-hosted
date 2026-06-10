@@ -1,0 +1,14 @@
+# Enforce use of the issue templates above — blank issues are disabled so
+# every issue carries the required structure (and the scope check).
+blank_issues_enabled: false
+
+contact_links:
+  - name: Kernel / engine issues (fkst-substrate)
+    url: https://github.com/ChronoAIProject/fkst-substrate/issues
+    about: >-
+      fkst-hosted does not cover the kernel engine. File engine/kernel issues
+      upstream in fkst-substrate.
+  - name: Shared packages issues (fkst-packages)
+    url: https://github.com/ChronoAIProject/fkst-packages/issues
+    about: >-
+      For changes to shared packages, file issues upstream in fkst-packages.
