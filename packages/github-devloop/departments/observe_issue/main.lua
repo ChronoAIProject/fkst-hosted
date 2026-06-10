@@ -9,12 +9,56 @@ M.spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
     "devloop_ready",
+    "devloop_reviewing",
     "devloop_fixing",
     "devloop_merge_ready",
   },
   fanout = { "github-proxy.github_entity_changed" },
   stall_window = "30s",
 }
+
+local function raise_pr_open_reviewing(issue, proposal_id, state, link, snapshot)
+  if link == nil or snapshot == nil then
+    return false
+  end
+  for _, item in ipairs(snapshot.prs or {}) do
+    if tostring(item.number or "") == tostring(link.pr_number or "") then
+      local pr = item.current or {}
+      if tostring(pr.state or ""):lower() ~= "open" then
+        core.log_cas_decision("observe_issue", proposal_id, state, "pr-open", "reviewing", "skip-stale(pr-closed)", "linked PR is not open")
+        return false
+      end
+      if tostring(pr.head_ref_name or "") ~= tostring(link.branch or "") then
+        core.log_cas_decision("observe_issue", proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "linked PR head branch does not match pr-link marker")
+        return false
+      end
+      if tostring(pr.base_ref_name or "") ~= tostring(link.base_branch or "") then
+        core.log_cas_decision("observe_issue", proposal_id, state, "pr-open", "reviewing", "skip-foreign(base)", "linked PR base branch does not match pr-link marker")
+        return false
+      end
+      if not core._is_git_sha(pr.head_sha) then
+        core.log_cas_decision("observe_issue", proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
+        return false
+      end
+      local review_proposal_id = core.pr_review_proposal_id(issue.repo, link.pr_number, state.version, pr.head_sha)
+      if core.has_any_review_result_marker(snapshot.comments, review_proposal_id, proposal_id) then
+        core.log_cas_decision("observe_issue", proposal_id, state, "pr-open", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
+        return false
+      end
+      local reviewing_payload = core.build_devloop_reviewing_payload({
+        proposal_id = proposal_id,
+        impl_version = state.version,
+      }, link.pr_number, core.pr_source_ref(issue.repo, link.pr_number), state.version)
+      core.log_apply("observe_issue", proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
+        "devloop_reviewing",
+      })
+      core.log_raise("observe_issue", proposal_id, "devloop_reviewing", reviewing_payload)
+      return true
+    end
+  end
+  core.log_cas_decision("observe_issue", proposal_id, state, "pr-open", "reviewing", "skip-foreign(pr-link)", "linked PR fact is not visible")
+  return false
+end
 
 function pipeline(event)
   local issue = event.payload or {}
@@ -45,7 +89,9 @@ function pipeline(event)
       return
     end
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
-    local state = core.current_linked_entity_state(issue.repo, proposal_id, current.comments)
+    local link = core.pr_link_fact(current.comments, proposal_id)
+    local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
+    local state = snapshot.state
     if state.state ~= nil then
       if state.state == "thinking" then
         core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
@@ -125,6 +171,9 @@ function pipeline(event)
         core.log_raise("observe_issue", proposal_id, "devloop_ready", ready_payload)
       end
       if state.state == "thinking" or state.state == "pr-open" then
+        if state.state == "pr-open" and tostring(state.version or "") == tostring(link and link.impl_version or "") then
+          raise_pr_open_reviewing(issue, proposal_id, state, link, snapshot)
+        end
         return
       end
     end
