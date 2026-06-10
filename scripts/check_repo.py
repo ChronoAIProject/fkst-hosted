@@ -48,6 +48,9 @@ GRAPHQL_FIRST_CONNECTION_RE = re.compile(
     r"\([^(){}]*\bfirst\s*:\s*\d+\b[^(){}]*\)\s*\{",
     re.DOTALL,
 )
+LONG_STRING_CHAR_RE = re.compile(r"\bstring\s*\.\s*char\s*\((?P<args>[^)]*)\)", re.DOTALL)
+NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*\d+\s*(?=,|\Z)")
+HIDDEN_TEXT_STRING_CHAR_ARG_MIN = 6
 
 
 @dataclass(frozen=True)
@@ -303,6 +306,16 @@ def unguarded_graphql_first_connection_lines(text: str) -> list[int]:
             selection_body = literal.content[match.end() : close_index]
             if not graphql_connection_has_truncation_guard(selection_body):
                 lines.append(literal.line + literal.content.count("\n", 0, match.start()))
+    return lines
+
+
+def hidden_text_string_char_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = []
+    for match in LONG_STRING_CHAR_RE.finditer(stripped):
+        numeric_args = NUMERIC_ARG_RE.findall(match.group("args"))
+        if len(numeric_args) >= HIDDEN_TEXT_STRING_CHAR_ARG_MIN:
+            lines.append(text.count("\n", 0, match.start()) + 1)
     return lines
 
 
@@ -583,6 +596,21 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
             )
 
 
+def check_hidden_text_string_char(root: Path, warnings: list[str]) -> None:
+    packages = root / "packages"
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file() or "tests" in path.relative_to(packages).parts:
+            continue
+        for line in hidden_text_string_char_lines(read_text(path)):
+            add(
+                warnings,
+                "G6",
+                f"{rel(root, path)}:{line} string.char call uses a long numeric byte sequence; use a plain English literal instead",
+            )
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -592,6 +620,7 @@ def main() -> int:
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
+    check_hidden_text_string_char(root, warnings)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

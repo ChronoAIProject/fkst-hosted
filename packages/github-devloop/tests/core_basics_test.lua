@@ -9,9 +9,7 @@ local issue = h.issue
 local reached = h.reached
 local unresolved = h.unresolved
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
-local verdict_summary_label = string.char(
-  228, 184, 137, 230, 150, 185, 232, 163, 129, 229, 134, 179, 58, 32
-)
+local verdict_summary_label = "Three-angle verdicts: "
 
 return {
   test_devloop_config_defaults_and_validation = function()
