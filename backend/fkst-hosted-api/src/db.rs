@@ -35,8 +35,12 @@ pub struct Db {
 ///
 /// `mongodb://user:secret@host:27017` -> `mongodb://<redacted>@host:27017`;
 /// a URI without userinfo is returned unchanged.
+///
+/// Splits at the LAST `@` so even a malformed URI with an unescaped `@`
+/// inside the password (`mongodb://user:p@ss@host:27017`) cannot leak a
+/// password tail into the redacted log line.
 pub fn redact_mongodb_uri(uri: &str) -> String {
-    match uri.split_once('@') {
+    match uri.rsplit_once('@') {
         Some((before_at, rest)) => match before_at.split_once("://") {
             Some((scheme, _userinfo)) => format!("{scheme}://<redacted>@{rest}"),
             None => format!("<redacted>@{rest}"),
@@ -152,6 +156,17 @@ mod tests {
         assert!(!redacted.contains("secret"), "password leaked: {redacted}");
         assert!(!redacted.contains("user"), "username leaked: {redacted}");
         assert_eq!(redacted, "mongodb://<redacted>@host:27017");
+    }
+
+    #[test]
+    fn redaction_splits_at_the_last_at_sign() {
+        // Malformed but real-world: unescaped '@' inside the password. A
+        // first-'@' split would leak "ss@host:27017" as the redacted tail.
+        let redacted = redact_mongodb_uri("mongodb://user:p@ss@host:27017");
+        assert_eq!(redacted, "mongodb://<redacted>@host:27017");
+        assert!(!redacted.contains("p@"), "password head leaked: {redacted}");
+        assert!(!redacted.contains("ss"), "password tail leaked: {redacted}");
+        assert!(!redacted.contains("user"), "username leaked: {redacted}");
     }
 
     #[test]
