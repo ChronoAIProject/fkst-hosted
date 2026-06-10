@@ -62,9 +62,17 @@ impl Config {
     /// Testable seam: unit tests feed explicit pairs instead of mutating the
     /// process environment.
     pub fn from_vars(vars: impl IntoIterator<Item = (String, String)>) -> Result<Config, AppError> {
-        envy::prefixed(ENV_PREFIX)
+        let config: Config = envy::prefixed(ENV_PREFIX)
             .from_iter(vars)
-            .map_err(|e| AppError::Config(e.to_string()))
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        // A zero timeout would make every request time out (408) — a total
+        // outage from a one-character misconfiguration. Reject it loudly.
+        if config.request_timeout_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_HOSTED_REQUEST_TIMEOUT_SECS must be at least 1".to_string(),
+            ));
+        }
+        Ok(config)
     }
 
     /// Load the configuration from the process environment.
@@ -128,6 +136,14 @@ mod tests {
     fn request_timeout_secs_is_overridable() {
         let config = Config::from_vars(vars(&[("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "5")])).unwrap();
         assert_eq!(config.request_timeout_secs, 5);
+    }
+
+    #[test]
+    fn zero_request_timeout_is_a_config_error() {
+        let err = Config::from_vars(vars(&[("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "0")]))
+            .expect_err("zero timeout must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_HOSTED_REQUEST_TIMEOUT_SECS"));
     }
 
     #[test]
