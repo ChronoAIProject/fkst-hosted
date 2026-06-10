@@ -308,3 +308,47 @@ async fn invalid_input_is_rejected_before_any_write() {
     // Validation failures must never reach Mongo.
     assert_eq!(repository.list().await.expect("list"), Vec::<String>::new());
 }
+
+#[tokio::test]
+async fn case_variant_package_names_are_distinct_documents() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, _database, repository) = repo().await;
+
+    // Names are case-sensitive, consistent with the engine and `_id`
+    // semantics: "MY-PKG" and "my-pkg" must coexist as distinct documents.
+    let upper = repository
+        .create(sample_new_package("MY-PKG"))
+        .await
+        .expect("create MY-PKG");
+    let lower = repository
+        .create(sample_new_package("my-pkg"))
+        .await
+        .expect("create my-pkg");
+
+    assert!(repository.exists("MY-PKG").await.expect("exists upper"));
+    assert!(repository.exists("my-pkg").await.expect("exists lower"));
+
+    // Sorted ascending: ASCII uppercase sorts before lowercase.
+    let names = repository.list().await.expect("list");
+    assert_eq!(names, vec!["MY-PKG".to_string(), "my-pkg".to_string()]);
+
+    // get() resolves each name to its own distinct document.
+    let found_upper = repository
+        .get("MY-PKG")
+        .await
+        .expect("get upper")
+        .expect("MY-PKG present");
+    let found_lower = repository
+        .get("my-pkg")
+        .await
+        .expect("get lower")
+        .expect("my-pkg present");
+    assert_eq!(found_upper, upper);
+    assert_eq!(found_lower, lower);
+    assert_ne!(found_upper, found_lower);
+    assert_eq!(found_upper.name, "MY-PKG");
+    assert_eq!(found_lower.name, "my-pkg");
+}
