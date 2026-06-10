@@ -8,16 +8,34 @@ M.spec = {
   stall_window = "2m",
 }
 
-local function spawn_angle(proposal, angle)
-  return spawn_codex({
-    prompt = core.build_angle_prompt(proposal, angle),
-  })
+local function read_runtime_root()
+  local result = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
+  if result.exit_code ~= 0 then
+    error("consensus: FKST_RUNTIME_ROOT read failed: " .. tostring(result.stderr))
+  end
+  return result.stdout
 end
 
-local function spawn_meta_judge(proposal, angle_results)
-  return spawn_codex_sync({
-    prompt = core.build_meta_judge_prompt(proposal, angle_results),
-  })
+local function prepare_judgment_worktree(path)
+  local result = exec_sync({ cmd = core.mkdir_p_cmd(path), timeout = 30 })
+  if result.exit_code ~= 0 then
+    error("consensus: judgment scratch directory setup failed: " .. tostring(result.stderr))
+  end
+  return path
+end
+
+local function spawn_angle(proposal, angle, runtime_root)
+  local worktree = prepare_judgment_worktree(
+    core.judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
+  )
+  return spawn_codex(core.judgment_codex_opts(core.build_angle_prompt(proposal, angle), worktree))
+end
+
+local function spawn_meta_judge(proposal, angle_results, runtime_root)
+  local worktree = prepare_judgment_worktree(
+    core.judgment_scratch_worktree(runtime_root, "meta-judge", proposal.dedup_key)
+  )
+  return spawn_codex_sync(core.judgment_codex_opts(core.build_meta_judge_prompt(proposal, angle_results), worktree))
 end
 
 local function raise_converge(proposal, angle_results, narrowed_question)
@@ -42,13 +60,14 @@ function pipeline(event)
     if cache_get(cache_key) then
       return
     end
+    local runtime_root = read_runtime_root()
 
     local angle_results = {}
     local handles = {}
     local angles = core.angles(proposal)
     local verdict_mode = core.verdict_mode(proposal)
     for _, angle in ipairs(angles) do
-      table.insert(handles, spawn_angle(proposal, angle))
+      table.insert(handles, spawn_angle(proposal, angle, runtime_root))
     end
 
     local results = await_all(handles)
@@ -74,7 +93,7 @@ function pipeline(event)
       return
     end
 
-    local meta_result = spawn_meta_judge(proposal, angle_results)
+    local meta_result = spawn_meta_judge(proposal, angle_results, runtime_root)
     local parsed = nil
     if type(meta_result) == "table" and meta_result.exit_code == 0 then
       parsed = core.parse_meta_judge_output(meta_result.stdout, verdict_mode)

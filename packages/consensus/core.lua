@@ -18,6 +18,7 @@ local max_framing_len = 1000
 local max_narrowed_question_len = 2000
 local max_digest_len = 600
 local max_prior_round_digests = 12
+local max_scratch_slug_len = 120
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 
@@ -113,6 +114,42 @@ local function bounded(value, limit)
     return text:sub(1, limit)
   end
   return text
+end
+
+local function decimal_checksum(value)
+  local hash = 2166136261
+  local text = tostring(value or "")
+  for i = 1, #text do
+    hash = (hash * 16777619 + text:byte(i)) % 4294967291
+  end
+  return string.format("%010d", hash)
+end
+
+local function shell_single_quote(value)
+  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function runtime_root_path(runtime_root)
+  local root = trim(runtime_root)
+  if root == "" or root:find("[\r\n]") ~= nil then
+    error("consensus: invalid FKST_RUNTIME_ROOT")
+  end
+  return root:gsub("/+$", "")
+end
+
+local function scratch_segment(value)
+  local safe = tostring(value or ""):gsub("[^%w._-]", "-")
+  safe = safe:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
+  if safe == "" then
+    safe = "judgment"
+  end
+  if #safe > max_scratch_slug_len then
+    safe = safe:sub(1, max_scratch_slug_len):gsub("%-+$", ""):gsub("%.+$", "")
+  end
+  if safe == "" then
+    return "judgment"
+  end
+  return safe
 end
 
 local function is_verdict(value)
@@ -242,6 +279,32 @@ function M.reached_cache_key(dedup_key)
     error("consensus: invalid dedup_key")
   end
   return "consensus/reached/" .. tostring(dedup_key)
+end
+
+function M.read_runtime_root_cmd()
+  return 'printf %s "$FKST_RUNTIME_ROOT"'
+end
+
+function M.judgment_scratch_worktree(runtime_root, kind, identity)
+  local slug = scratch_segment(kind) .. "-" .. scratch_segment(identity)
+  local suffix = decimal_checksum(tostring(kind) .. "#" .. tostring(identity))
+  return runtime_root_path(runtime_root) .. "/judgment-worktrees/consensus-" .. slug .. "-" .. suffix
+end
+
+function M.judgment_codex_opts(prompt, worktree)
+  return {
+    prompt = prompt,
+    worktree = worktree,
+    sandbox = "read-only",
+  }
+end
+
+function M.mkdir_p_cmd(path)
+  local value = tostring(path or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("consensus: invalid directory path")
+  end
+  return "mkdir -p " .. shell_single_quote(value) .. " && chmod 0555 " .. shell_single_quote(value)
 end
 
 local function has_content_fetch(proposal)
