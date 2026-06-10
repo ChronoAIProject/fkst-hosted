@@ -451,17 +451,37 @@ function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sh
   return nil
 end
 
-function M.has_merged_marker(comments, issue_proposal_id, pr_number, version, head_sha)
+function M.merged_fact(comments, issue_proposal_id, pr_number, version)
   if type(comments) ~= "table" then
-    return false
+    return nil
   end
-  local marker = M.merged_marker(issue_proposal_id, pr_number, version, head_sha)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merged:v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    if M._comment_body(comment):find(marker, 1, true) ~= nil then
-      return true
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and tostring(marker_pr) == tostring(pr_number)
+        and (version == nil or tostring(marker_version) == tostring(version))
+        and M._is_git_sha(marker_head_sha) then
+        return {
+          proposal_id = marker_issue,
+          pr_number = tonumber(marker_pr),
+          version = marker_version,
+          head_sha = marker_head_sha,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
     end
   end
-  return false
+  return nil
+end
+
+function M.has_merged_marker(comments, issue_proposal_id, pr_number, version, head_sha)
+  local fact = M.merged_fact(comments, issue_proposal_id, pr_number, version)
+  return fact ~= nil and tostring(fact.head_sha) == tostring(head_sha)
 end
 
 function M.impl_failure_marker(proposal_id, dedup_key, reason)
