@@ -39,6 +39,16 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **迪米特法则**：一个对象应该对其他对象保持最少的了解。
 - **合成复用原则**：尽量使用对象组合，而不是继承来达到复用的目的。
 
+## 错误处理三级模型（codex-as-catch）
+
+任何流程 `A → func1 → B` 的失败处理分三级；**catch 的产出是「立项」而非「当场修」**（prior art：OTP 监督树要求快路径 supervisor 简单确定；AIOps 异常→工单；LLM 自愈模式的已知失败形态是不确定性与副作用越界）：
+
+- **L1 确定性热路径**（毫秒-秒，引擎职责，**禁 codex**）：fail-closed、retry+backoff、lease/fencing、DLQ；每个失败落结构化错误事实（`error_class`、`fingerprint`、`source_ref`、`attempt`、`terminal`），重放必须确定。
+- **L2 修复管线**（分钟-小时，包职责）：triage codex **只读**消费失败事实（dead_letter 事件、错误日志），按 fingerprint+时间窗去重后起草 issue（intent-before-create 防重）；修复一律经 issue→PR→review→merge——这是 codex「解决」错误的唯一合法形态。
+- **L3 周期巡检**（小时级，包职责）：log-patrol codex 聚合跨切面/低频异常与停滞嫌疑，同样只产出去重 issue，绝不直接改运行态。
+
+禁令：热路径不得 spawn codex；任何 catch 不得吞原始错误、不得改运行源码树、不得绕过 PR 门控、不得做 reconcile/CAS 级决策。「func1 与 codex 都是函数」的准确含义——`func1: event→effects`（快、确定、可重放）；`codex: facts→issue`（慢、只读输入、受控输出）。
+
 ## 先找 harness 再执行（harness-first）
 
 解决任何非平凡问题前，先识别支配这类问题的**成熟人类理论 / 工业最佳实践 / prior art**，把方案锚定在它之上，再动手：分布式投递 → at-least-once + 幂等 + DLQ + lease/fencing（Temporal/SQS 形态）；并发状态 → CAS / 乐观并发 / 版本总序；外部系统 → 最终一致假设 + 写前重导；测试 → fail-closed mock + 行为验收。产出（设计、实现、判断）要说明：套用了哪个成熟实践、在哪里**有意**偏离、为什么。最好的 harness 是让 AI 先自动找到 harness 然后再执行——判断管线（intake/consensus/review）同样据此审：无理据偏离成熟实践的方案应被质疑；声称新颖前先证明现有实践不适用。
