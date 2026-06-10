@@ -9,16 +9,17 @@ use mongodb::{Client, Collection, IndexModel};
 
 use crate::config::Config;
 use crate::error::AppError;
-use crate::models::{LeaseDoc, PackageDoc, SessionDoc};
+use crate::models::{LeaseDoc, SessionDoc};
 
-/// Collection names (single source of truth).
-pub const PACKAGES: &str = "packages";
+/// Collection names (single source of truth). The `packages` collection name
+/// is owned by `crate::packages::PACKAGES_COLLECTION`.
 pub const SESSIONS: &str = "sessions";
 pub const LEASES: &str = "leases";
 
 /// Stable index names (deterministic idempotency; asserted by integration
-/// tests). No index is declared for `packages._id` / `leases._id` — the
-/// implicit `_id` index already enforces uniqueness.
+/// tests). No index is declared for `leases._id` — the implicit `_id` index
+/// already enforces uniqueness. (`packages` indexes are owned by
+/// `crate::packages`.)
 pub const IDX_SESSIONS_PACKAGE_NAME: &str = "sessions_package_name";
 pub const IDX_SESSIONS_STATUS: &str = "sessions_status";
 pub const IDX_SESSIONS_POD_ID: &str = "sessions_pod_id";
@@ -92,11 +93,6 @@ impl Db {
     /// Typed collection accessor.
     pub fn collection<T: Send + Sync>(&self, name: &str) -> Collection<T> {
         self.database.collection::<T>(name)
-    }
-
-    /// The `packages` collection.
-    pub fn packages(&self) -> Collection<PackageDoc> {
-        self.collection(PACKAGES)
     }
 
     /// The `sessions` collection.

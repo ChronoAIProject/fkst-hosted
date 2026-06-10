@@ -729,6 +729,7 @@ dependencies = [
  "envy",
  "http-body-util",
  "mongodb",
+ "regex",
  "serde",
  "serde_json",
  "testcontainers",
