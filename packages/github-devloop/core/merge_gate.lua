@@ -39,6 +39,66 @@ function M.evaluate_ci_merge_gate(pr)
   return true, "merge-gate-ok"
 end
 
+function M.ci_missing_status_dispatch_eligible(pr, now_seconds, grace_seconds)
+  local green, green_reason = M.pr_rollup_green(pr)
+  if green or green_reason ~= "missing-status-rollup" then
+    return false, green_reason
+  end
+  local updated_at = tostring(type(pr) == "table" and pr.updated_at or "")
+  local updated_seconds = M.iso_timestamp_epoch_seconds(updated_at)
+  local current_seconds = tonumber(now_seconds)
+  local grace = tonumber(grace_seconds or 300)
+  if updated_seconds == nil or current_seconds == nil then
+    return false, "missing-status-age-unknown"
+  end
+  local age_seconds = current_seconds - updated_seconds
+  if age_seconds < grace then
+    return false, "missing-status-grace"
+  end
+  return true, "missing-status-rollup", age_seconds
+end
+
+function M.dispatch_ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds)
+  local green, green_reason = M.pr_rollup_green(pr)
+  if green or green_reason ~= "missing-status-rollup" then
+    return false, green_reason
+  end
+  local head_sha = tostring(pr and pr.head_sha or "")
+  local head_ref = tostring(pr and pr.head_ref_name or "")
+  local date_result = exec_sync({ cmd = M.gh_commit_date_cmd(repo, head_sha), timeout = 30 })
+  if date_result.exit_code ~= 0 then
+    return false, "missing-status-head-date-unavailable"
+  end
+  local head_pushed_at = tostring(date_result.stdout or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local eligible, reason, age_seconds = M.ci_missing_status_dispatch_eligible({
+    status_check_rollup = pr and pr.status_check_rollup,
+    updated_at = head_pushed_at,
+  }, now(), grace_seconds)
+  if not eligible then
+    return false, reason
+  end
+  local key = M.ci_dispatch_once_key(repo, pr_number, head_sha)
+  local ran = once(key, function()
+    local result = exec_sync({ cmd = M.gh_workflow_dispatch_ci_cmd(repo, head_ref), timeout = 30 })
+    if result.exit_code ~= 0 then
+      error("github-devloop: ci workflow dispatch failed: " .. tostring(result.stderr))
+    end
+    M.log_line("info", "merge", proposal_id, "ci-dispatch-selfheal", {
+      "repo=" .. tostring(repo),
+      "pr=" .. tostring(pr_number),
+      "head_sha=" .. head_sha,
+      "head_ref=" .. head_ref,
+      "head_pushed_at=" .. head_pushed_at,
+      "age_seconds=" .. tostring(age_seconds or ""),
+      "once_key=" .. key,
+    })
+  end)
+  if not ran then
+    return false, "ci-dispatch-selfheal-already-ran"
+  end
+  return true, "ci-dispatch-selfheal-dispatched"
+end
+
 function M.is_merged_pr(pr)
   return tostring(pr and pr.state or ""):upper() == "MERGED" and tostring(pr and pr.merged_at or "") ~= ""
 end

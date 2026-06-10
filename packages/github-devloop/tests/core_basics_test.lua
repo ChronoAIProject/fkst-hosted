@@ -462,6 +462,14 @@ return {
     for _, case in ipairs(cases) do
       t.eq(case[1]("owner/repo", 42), "gh issue view '42' --repo 'owner/repo' --json " .. case[2])
     end
+    t.eq(
+      core.gh_workflow_dispatch_ci_cmd("owner/repo", "devloop-owner-repo-42-01HY"),
+      "gh workflow run 'ci.yml' --repo 'owner/repo' --ref 'devloop-owner-repo-42-01HY'"
+    )
+    t.eq(
+      core.gh_commit_date_cmd("owner/repo", "def456"),
+      "gh api 'repos/owner/repo/commits/def456' --jq '.commit.committer.date'"
+    )
   end,
 
   test_intake_judge_parse_keeps_full_issue_body = function()

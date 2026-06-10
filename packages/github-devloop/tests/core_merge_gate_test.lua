@@ -85,4 +85,30 @@ return {
     t.eq(ok, false)
     t.eq(reason, "mergeable-conflicting")
   end,
+
+  test_missing_status_dispatch_eligibility_respects_grace_and_pending = function()
+    local eligible, reason, age = core.ci_missing_status_dispatch_eligible(pr({
+      updated_at = "2026-06-03T02:00:00Z",
+      status_check_rollup = {},
+    }), core.iso_timestamp_epoch_seconds("2026-06-03T02:06:00Z"), 300)
+    t.eq(eligible, true)
+    t.eq(reason, "missing-status-rollup")
+    t.eq(age, 360)
+
+    eligible, reason = core.ci_missing_status_dispatch_eligible(pr({
+      updated_at = "2026-06-03T02:02:00Z",
+      status_check_rollup = {},
+    }), core.iso_timestamp_epoch_seconds("2026-06-03T02:06:00Z"), 300)
+    t.eq(eligible, false)
+    t.eq(reason, "missing-status-grace")
+
+    eligible, reason = core.ci_missing_status_dispatch_eligible(pr({
+      updated_at = "2026-06-03T02:00:00Z",
+      status_check_rollup = {
+        { name = "ci", state = "IN_PROGRESS", conclusion = "" },
+      },
+    }), core.iso_timestamp_epoch_seconds("2026-06-03T02:06:00Z"), 300)
+    t.eq(eligible, false)
+    t.eq(reason, "rollup-pending")
+  end,
 }
