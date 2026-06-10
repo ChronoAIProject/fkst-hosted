@@ -81,6 +81,12 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 - A PR without a linked issue is not ready to merge.
 - Standard flow: **open an issue → create a branch → implement → open a PR linking the issue → review → merge**.
 
+### Auto-merge Policy (AI agents)
+
+- **Unless the user explicitly says otherwise, auto-merge every PR you open into `develop` as soon as CI passes** (all required checks green). Use GitHub auto-merge: `gh pr merge --auto --merge`.
+- **If any CI check fails, work on the resolution and auto-merge once CI passes.** Never leave a red PR open or hand it back unresolved.
+- Applies to PRs targeting `develop` (the unattended `develop-auto` loop follows the same auto-merge-on-green behavior). PRs into `main` are **releases** and still follow the review-gated release flow (1 approval).
+
 ### Flow
 
 ```mermaid
@@ -149,6 +155,7 @@ graph LR
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
 - All work goes through a pull request — no direct commits to shared branches.
+- For PRs into `develop`, auto-merge as soon as CI is green; if CI fails, fix it then auto-merge — unless told otherwise.
 - Every PR must have a corresponding GitHub issue and link it (`Closes #N`).
 - Use the issue/PR templates under `.github/`.
 - Use pull requests into `develop` or `develop-auto`; only `develop` merges into `main`.
