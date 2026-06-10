@@ -1,22 +1,12 @@
 local S = {}
 
 function S.install(M)
-local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
-local convergence_suffix = string.char(
-  32, 226, 128, 148, 32, 228, 184, 137, 230, 150, 185, 230, 156, 170, 232, 190,
-  190, 230, 136, 144, 229, 133, 177, 232, 175, 134, 239, 188, 140, 230, 148,
-  182, 231, 170, 132, 228, 184, 173
-)
-local display_separator = string.char(32, 226, 128, 148, 32)
-local narrowed_question_label = string.char(
-  230, 148, 182, 231, 170, 132, 233, 151, 174, 233, 162, 152, 58, 32
-)
-local angle_stances_label = string.char(
-  228, 184, 137, 230, 150, 185, 231, 171, 139, 229, 156, 186, 58
-)
-local verdict_summary_label = string.char(
-  228, 184, 137, 230, 150, 185, 232, 163, 129, 229, 134, 179, 58, 32
-)
+local ai_sentinel = "⟦AI:FKST⟧"
+local convergence_suffix = " — no three-angle consensus; narrowing"
+local display_separator = " — "
+local narrowed_question_label = "Narrowed question: "
+local angle_stances_label = "Angle stances:"
+local verdict_summary_label = "Three-angle verdicts: "
 local max_display_question_len = 2000
 local max_display_digest_len = 600
 local max_display_attr_len = 120
