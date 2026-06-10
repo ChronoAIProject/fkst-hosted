@@ -8,6 +8,7 @@ M.spec = {
     "consensus.proposal",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "devloop_ready",
     "devloop_reviewing",
     "devloop_fixing",
@@ -49,9 +50,15 @@ local function raise_pr_open_reviewing(issue, proposal_id, state, link, snapshot
         proposal_id = proposal_id,
         impl_version = state.version,
       }, link.pr_number, core.pr_source_ref(issue.repo, link.pr_number), state.version)
+      local reviewing_comment = core.build_reviewing_comment_request(issue.repo, issue.number, {
+        proposal_id = proposal_id,
+        impl_version = state.version,
+      }, link.pr_number, core.pr_source_ref(issue.repo, link.pr_number))
       core.log_apply("observe_issue", proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
+        "github-proxy.github_pr_comment_request",
         "devloop_reviewing",
       })
+      core.log_raise("observe_issue", proposal_id, "github-proxy.github_pr_comment_request", reviewing_comment)
       core.log_raise("observe_issue", proposal_id, "devloop_reviewing", reviewing_payload)
       return true
     end

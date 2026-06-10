@@ -7,8 +7,10 @@ local opts = h.opts
 local source_ref = h.source_ref
 local run_observe = h.run_observe
 local run_implement = h.run_implement
+local run_review_pr = h.run_review_pr
 local mock_issue_state = h.mock_issue_state
 local mock_issue_implement_raw = h.mock_issue_implement_raw
+local mock_issue_review = h.mock_issue_review
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 local render_comment = h.render_comment
@@ -168,7 +170,9 @@ return {
 
     local first = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-1"))
     t.eq(first.exit_code, 0)
-    t.eq(#first.raises, 1)
+    t.eq(#first.raises, 2)
+    local first_comment = find_raise(first.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(first_comment.payload.body:find(core.state_marker(event.proposal_id, "reviewing", ready_payload.dedup_key), 1, true) ~= nil)
     local first_reviewing = find_raise(first.raises, "devloop_reviewing")
     t.eq(first_reviewing.payload.schema, "github-devloop.reviewing.v1")
     t.eq(first_reviewing.payload.proposal_id, event.proposal_id)
@@ -176,11 +180,20 @@ return {
     t.eq(first_reviewing.payload.version, ready_payload.dedup_key)
     t.eq(first_reviewing.payload.source_ref.ref, "owner/repo#pr/7")
 
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      first_comment.payload.body,
+    })
+    local review = run_review_pr(first_reviewing.payload, opts("observe-issue-pr-open-review-kickoff-review-pr"))
+    t.eq(review.exit_code, 0)
+    t.eq(#review.raises, 1)
+    local proposal = find_raise(review.raises, "consensus.proposal").payload
+    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, ready_payload.dedup_key, "def456"))
+
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
     mock_linked_pr_state({})
     local second = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-2"))
     t.eq(second.exit_code, 0)
-    t.eq(#second.raises, 1)
+    t.eq(#second.raises, 2)
     local second_reviewing = find_raise(second.raises, "devloop_reviewing")
     t.eq(second_reviewing.payload.dedup_key, first_reviewing.payload.dedup_key)
   end,
