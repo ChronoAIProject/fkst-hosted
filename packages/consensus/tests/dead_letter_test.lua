@@ -106,6 +106,7 @@ return {
       wrapped({
         queue = "proposal",
         attempt = 6,
+        terminal = false,
         payload = {
           source_ref = { kind = "external", ref = "owner/repo#issue/42" },
         },

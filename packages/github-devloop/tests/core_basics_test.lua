@@ -156,6 +156,7 @@ return {
       wrapped({
         queue = "devloop_ready",
         attempt = 4,
+        terminal = false,
         payload = {
           proposal_id = "github-devloop/issue/owner/repo/42",
           source_ref = source_ref(),

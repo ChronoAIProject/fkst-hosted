@@ -284,6 +284,7 @@ return {
       wrapped({
         queue = "github_pr_open_request",
         attempt = 5,
+        terminal = false,
         payload = {
           source_ref = { kind = "external", ref = "owner/repo#issue/42" },
         },
