@@ -115,7 +115,8 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
     local thinking = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:thinking" } }), opts("observe-thinking"))
     t.eq(thinking.exit_code, 0)
-    t.eq(#thinking.raises, 0)
+    t.eq(#thinking.raises, 1)
+    t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)
     t.eq(count_calls("gh issue view"), 2)
     t.eq(count_calls("--json body"), 0)
   end,
@@ -278,7 +279,8 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
     local thinking = run_observe(issue(), run_opts)
     t.eq(thinking.exit_code, 0)
-    t.eq(#thinking.raises, 0)
+    t.eq(#thinking.raises, 1)
+    t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)
     t.eq(count_calls("--json labels,state"), 3)
     t.eq(count_calls("--json body"), 0)
   end,

@@ -13,6 +13,49 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 
 return {
+  test_observe_issue_reraises_thinking_proposal_for_poll_self_heal = function()
+    local event = issue()
+    local original = core.build_proposal(event)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      core.state_marker(original.proposal_id, "thinking", original.dedup_key),
+    })
+
+    local first = run_observe(event, opts("observe-issue-thinking-self-heal-1"))
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 1)
+    local first_proposal = find_raise(first.raises, "consensus.proposal").payload
+    t.eq(first_proposal.schema, "consensus.proposal.v1")
+    t.eq(first_proposal.proposal_id, original.proposal_id)
+    t.eq(first_proposal.dedup_key, original.dedup_key)
+    t.eq(first_proposal.source_ref.ref, "owner/repo#issue/42")
+
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      core.state_marker(original.proposal_id, "thinking", original.dedup_key),
+    })
+    local second = run_observe(event, opts("observe-issue-thinking-self-heal-2"))
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 1)
+    local second_proposal = find_raise(second.raises, "consensus.proposal").payload
+    t.eq(second_proposal.dedup_key, first_proposal.dedup_key)
+    t.eq(second_proposal.content_fetch, first_proposal.content_fetch)
+    t.eq(count_calls("--json labels,state"), 2)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
+  test_observe_issue_does_not_reconstruct_mid_loop_thinking_proposal = function()
+    local event = issue()
+    local original = core.build_proposal(event)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      core.state_marker(original.proposal_id, "thinking", original.dedup_key .. "/loop/1"),
+    })
+
+    local result = run_observe(event, opts("observe-issue-thinking-mid-loop-self-heal"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
   test_observe_issue_reraises_ready_for_poll_self_heal = function()
     local event = reached()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", {
