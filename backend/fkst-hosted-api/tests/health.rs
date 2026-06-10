@@ -1,28 +1,50 @@
 //! Integration tests for the built router, driven via `tower::ServiceExt::oneshot`
-//! (no real TCP bind).
+//! (no real TCP bind, no Docker).
+//!
+//! The Mongo handle points at an unreachable address with a short
+//! server-selection timeout, so both health paths must answer `503 degraded`
+//! quickly instead of hanging.
+
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_hosted_api::config::Config;
+use fkst_hosted_api::db::Db;
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
-fn test_router() -> axum::Router {
-    build_router(AppState {
-        config: Config::default(),
-    })
+/// Nothing listens on port 1; selection fails after ~200ms.
+const UNREACHABLE_URI: &str = "mongodb://127.0.0.1:1";
+
+async fn test_router() -> axum::Router {
+    let config = Config {
+        mongodb_uri: UNREACHABLE_URI.to_string(),
+        mongodb_server_selection_timeout_ms: 200,
+        ..Config::default()
+    };
+    let db = Db::from_config(&config)
+        .await
+        .expect("lazy handle must build without I/O");
+    build_router(AppState { config, db })
 }
 
-#[tokio::test]
-async fn health_returns_ok_envelope_with_request_id() {
-    let response = test_router()
-        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
-        .await
-        .expect("router must respond");
+async fn assert_degraded(path: &str) {
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        test_router().await.oneshot(
+            Request::get(path)
+                .body(Body::empty())
+                .expect("request builds"),
+        ),
+    )
+    .await
+    .expect("health must answer within 2s, not hang")
+    .expect("router must respond");
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     let content_type = response
         .headers()
@@ -45,25 +67,37 @@ async fn health_returns_ok_envelope_with_request_id() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
 
-    // Exact wire contract, including field order: status, version, checks.
+    // Exact wire contract, including field order: status, mongo, version.
     let expected = format!(
-        r#"{{"status":"ok","version":"{}","checks":{{"mongo":"unknown"}}}}"#,
+        r#"{{"status":"degraded","mongo":"down","version":"{}"}}"#,
         env!("CARGO_PKG_VERSION")
     );
     assert_eq!(std::str::from_utf8(&body).unwrap(), expected);
+}
 
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["status"], "ok");
-    assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(json["checks"]["mongo"], "unknown");
+#[tokio::test]
+async fn health_returns_503_degraded_when_mongo_is_down() {
+    assert_degraded("/health").await;
+}
+
+#[tokio::test]
+async fn api_v1_health_returns_503_degraded_when_mongo_is_down() {
+    assert_degraded("/api/v1/health").await;
 }
 
 #[tokio::test]
 async fn unknown_route_returns_404() {
-    let response = test_router()
-        .oneshot(Request::get("/does-not-exist").body(Body::empty()).unwrap())
-        .await
-        .expect("router must respond");
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        test_router().await.oneshot(
+            Request::get("/does-not-exist")
+                .body(Body::empty())
+                .expect("request builds"),
+        ),
+    )
+    .await
+    .expect("must answer within 2s")
+    .expect("router must respond");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

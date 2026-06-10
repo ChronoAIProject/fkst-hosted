@@ -4,6 +4,7 @@
 use std::process::ExitCode;
 
 use fkst_hosted_api::config::Config;
+use fkst_hosted_api::db::{redact_mongodb_uri, Db};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::state::AppState;
 use tracing_subscriber::EnvFilter;
@@ -41,15 +42,35 @@ async fn main() -> ExitCode {
         bind_addr = %config.bind_addr,
         request_timeout_secs = config.request_timeout_secs,
         log_level = %config.log_level,
+        mongodb_db = %config.mongodb_db,
+        // Redacted host only — the full URI may embed credentials.
+        mongodb_host = %redact_mongodb_uri(&config.mongodb_uri),
         "config loaded"
     );
 
-    // 3. Build the router.
+    // 3. Connect to MongoDB (fail-closed: never serve without the store).
+    let db = match Db::connect(&config).await {
+        Ok(db) => db,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to connect to mongodb");
+            return ExitCode::FAILURE;
+        }
+    };
+    tracing::info!("mongo connected");
+
+    // 4. Ensure indexes (idempotent; fail-closed on error).
+    if let Err(error) = db.ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure mongodb indexes");
+        return ExitCode::FAILURE;
+    }
+    tracing::info!("indexes ensured");
+
+    // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
-    let app = build_router(AppState { config });
+    let app = build_router(AppState { config, db });
     tracing::info!("router built");
 
-    // 4. Bind and serve with graceful shutdown.
+    // 6. Bind and serve with graceful shutdown.
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
         Err(error) => {

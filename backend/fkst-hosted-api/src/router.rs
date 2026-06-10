@@ -38,6 +38,7 @@ pub fn build_router(state: AppState) -> Router {
     let timeout = Duration::from_secs(state.config.request_timeout_secs);
     Router::new()
         .route("/health", get(routes::health::health))
+        .route("/api/v1/health", get(routes::health::health))
         .with_state(state)
         .layer(
             ServiceBuilder::new()
