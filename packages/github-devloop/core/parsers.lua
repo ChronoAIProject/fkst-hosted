@@ -291,6 +291,10 @@ end
 function M.parse_pr_view_merge(stdout)
   local decoded = json.decode(stdout or "{}")
   local result = M.parse_pr_view_origin(stdout)
+  result.is_draft = decoded.isDraft
+  if result.is_draft == nil then
+    result.is_draft = decoded.is_draft
+  end
   result.mergeable = decoded.mergeable
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
