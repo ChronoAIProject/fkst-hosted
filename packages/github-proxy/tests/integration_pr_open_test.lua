@@ -272,7 +272,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr list"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&head=owner%3A"), 2)
     t.eq(count_calls("gh pr create"), 1)
     local issue_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-issue-comment.md")
     t.is_true(issue_written:find("github-devloop PR opened: #11", 1, true) ~= nil)

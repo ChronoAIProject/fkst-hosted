@@ -309,6 +309,18 @@ def unguarded_graphql_first_connection_lines(text: str) -> list[int]:
     return lines
 
 
+def unguarded_rest_per_page_lines(text: str) -> list[int]:
+    lines: list[int] = []
+    source_lines = text.splitlines()
+    for index, line in enumerate(source_lines):
+        if "per_page=100" not in line:
+            continue
+        window = "\n".join(source_lines[max(0, index - 3) : index + 2])
+        if "gh api" not in window or "--paginate" not in window:
+            lines.append(index + 1)
+    return lines
+
+
 def hidden_text_string_char_lines(text: str) -> list[int]:
     stripped = strip_lua_comments_and_strings(text)
     lines: list[int] = []
@@ -596,6 +608,21 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
             )
 
 
+def check_rest_pagination_guards(root: Path, warnings: list[str]) -> None:
+    packages = root / "packages"
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file():
+            continue
+        for line in unguarded_rest_per_page_lines(read_text(path)):
+            add(
+                warnings,
+                "G5",
+                f"{rel(root, path)}:{line} REST per_page=100 read lacks gh api --paginate; possible fail-open truncation",
+            )
+
+
 def check_hidden_text_string_char(root: Path, warnings: list[str]) -> None:
     packages = root / "packages"
     if not packages.exists():
@@ -620,6 +647,7 @@ def main() -> int:
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
+    check_rest_pagination_guards(root, warnings)
     check_hidden_text_string_char(root, warnings)
 
     for warning in warnings:

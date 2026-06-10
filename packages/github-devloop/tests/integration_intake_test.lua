@@ -45,18 +45,18 @@ local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
     table.insert(rendered, string.format(
-      '{"number":%d,"title":"%s","updatedAt":"%s","labels":[%s]}',
+      '{"number":%d,"title":"%s","updated_at":"%s","labels":[%s]}',
       issue.number,
       json_string(issue.title or "Issue"),
       json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
       labels_json(issue.labels or {})
     ))
   end
-  return "[" .. table.concat(rendered, ",") .. "]"
+  return "[[" .. table.concat(rendered, ",") .. "]]"
 end
 
 local function mock_issue_list(issues)
-  t.mock_command("--state open --limit 100 --json number,title,updatedAt,labels", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'", {
     stdout = issue_list_json(issues) .. "\n",
     stderr = "",
     exit_code = 0,

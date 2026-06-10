@@ -7,17 +7,17 @@ end
 
 local function issue_list_json(updated_at, state)
   return string.format(
-    '[{"number":42,"title":"Bridge issue","url":"https://github.example/owner/x/issues/42","updatedAt":"%s","state":"%s","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]\n',
+    '[[{"number":42,"title":"Bridge issue","html_url":"https://github.example/owner/x/issues/42","updated_at":"%s","state":"%s","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]]\n',
     updated_at or "2026-06-03T01:02:03Z",
-    state or "OPEN"
+    state or "open"
   )
 end
 
 local function pr_list_json(updated_at, state)
   return string.format(
-    '[{"number":7,"title":"Bridge PR","url":"https://github.example/owner/x/pull/7","updatedAt":"%s","state":"%s","labels":[{"name":"review"}]}]\n',
+    '[[{"number":7,"title":"Bridge PR","html_url":"https://github.example/owner/x/pull/7","updated_at":"%s","state":"%s","labels":[{"name":"review"}]}]]\n',
     updated_at or "2026-06-03T02:03:04Z",
-    state or "OPEN"
+    state or "open"
   )
 end
 
@@ -55,7 +55,7 @@ local function mock_bot_env(value)
 end
 
 local function mock_issue_list(stdout, exit_code, stderr)
-  t.mock_command("gh issue list", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'", {
     stdout = stdout or issue_list_json(),
     stderr = stderr or "",
     exit_code = exit_code or 0,
@@ -63,7 +63,7 @@ local function mock_issue_list(stdout, exit_code, stderr)
 end
 
 local function mock_pr_list(stdout, exit_code, stderr)
-  t.mock_command("gh pr list", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'", {
     stdout = stdout or pr_list_json(),
     stderr = stderr or "",
     exit_code = exit_code or 0,
@@ -205,7 +205,7 @@ local function mock_label_write(labels)
 end
 
 local function mock_pr_head_list(stdout)
-  t.mock_command("gh pr list", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&head=owner%3A", {
     stdout = stdout or "[]\n",
     stderr = "",
     exit_code = 0,

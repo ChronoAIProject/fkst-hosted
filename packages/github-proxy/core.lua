@@ -29,6 +29,12 @@ local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+local function url_encode(value)
+  return (tostring(value or ""):gsub("([^%w%-%._~])", function(char) return string.format("%%%02X", string.byte(char)) end))
+end
+
+local function repo_owner(repo) return tostring(repo or ""):match("^([^/]+)/") end
+
 local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end
@@ -107,19 +113,9 @@ function M.log_line(level, dept, tag, fields)
   log[level or "info"](table.concat(parts, " "))
 end
 
-local function command_result_stderr(result)
-  if type(result) ~= "table" then
-    return ""
-  end
-  return tostring(result.stderr or "")
-end
+local function command_result_stderr(result) return type(result) == "table" and tostring(result.stderr or "") or "" end
 
-local function command_result_exit_code(result)
-  if type(result) ~= "table" then
-    return nil
-  end
-  return tonumber(result.exit_code)
-end
+local function command_result_exit_code(result) return type(result) == "table" and tonumber(result.exit_code) or nil end
 
 function M.is_gh_rate_limited(result)
   local stderr = command_result_stderr(result)
@@ -324,42 +320,34 @@ function M.has_trusted_comment_fragment(comments, fragment, bot_login)
   return false
 end
 
-function M.is_safe_branch(branch)
-  return is_git_ref_safe(branch)
-end
+function M.is_safe_branch(branch) return is_git_ref_safe(branch) end
 
-function M.is_safe_pr_number(pr_number)
-  return is_positive_number(pr_number)
-end
+function M.is_safe_pr_number(pr_number) return is_positive_number(pr_number) end
 
-function M.is_safe_head_sha(head_sha)
-  return is_git_sha(head_sha)
-end
+function M.is_safe_head_sha(head_sha) return is_git_sha(head_sha) end
 
--- Decodes gh --json output via the engine-provided json.decode; requires a json-capable substrate runtime.
-function M.parse_entity_list(gh_json_stdout)
+function M.parse_entity_list(gh_json_stdout, entity_type)
   local decoded = json.decode(gh_json_stdout or "[]")
   local entities = {}
-  for _, item in ipairs(decoded) do
-    -- Array-tagged so an empty labels list serializes as JSON [] (not {}) when
-    -- the event payload leaves the engine via raise. See SPEC: a bare Lua {} is
-    -- ambiguous and serializes as a JSON object; json.decode("[]") preserves [].
-    local labels = json.decode("[]")
-    for _, label in ipairs(item.labels or {}) do
-      if type(label) == "table" and label.name ~= nil then
-        table.insert(labels, tostring(label.name))
-      elseif type(label) == "string" then
-        table.insert(labels, label)
+  for _, page in ipairs(decoded) do
+    local items = (type(page) == "table" and page[1] ~= nil) and page or { page }
+    for _, item in ipairs(items) do
+      if type(item) == "table" and (entity_type ~= "issue" or item.pull_request == nil) then
+        local labels, item_state = json.decode("[]"), item.state
+        for _, label in ipairs(item.labels or {}) do
+          if type(label) == "table" and label.name ~= nil then
+            table.insert(labels, tostring(label.name))
+          elseif type(label) == "string" then
+            table.insert(labels, label)
+          end
+        end
+        if type(item_state) == "string" then
+          item_state = item_state:upper()
+        end
+        table.insert(entities, { number = item.number, title = item.title, url = item.url or item.html_url,
+          updated_at = item.updatedAt or item.updated_at, state = item_state, labels = labels })
       end
     end
-    table.insert(entities, {
-      number = item.number,
-      title = item.title,
-      url = item.url,
-      updated_at = item.updatedAt or item.updated_at,
-      state = item.state,
-      labels = labels,
-    })
   end
   return entities
 end
@@ -596,15 +584,15 @@ function M.has_devloop_pr_open_marker(comments, proposal_id, impl_version, bot_l
 end
 
 function M.parse_issue_list(gh_json_stdout)
-  return M.parse_entity_list(gh_json_stdout)
+  return M.parse_entity_list(gh_json_stdout, "issue")
 end
 
 function M.gh_issue_list_cmd(repo)
-  return "gh issue list --repo " .. shell_single_quote(repo) .. " --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
+  return "gh api --paginate --slurp " .. shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
 end
 
 function M.gh_pr_list_cmd(repo)
-  return "gh pr list --repo " .. shell_single_quote(repo) .. " --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
+  return "gh api --paginate --slurp " .. shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
 end
 
 function M.gh_pr_list_head_cmd(repo, branch, base_branch)
@@ -614,14 +602,13 @@ function M.gh_pr_list_head_cmd(repo, branch, base_branch)
   if base_branch ~= nil and not is_git_ref_safe(base_branch) then
     error("github-proxy: invalid base branch")
   end
-  local base_arg = ""
+  local owner = repo_owner(repo)
+  local head_filter = owner ~= nil and (owner .. ":" .. tostring(branch)) or tostring(branch)
+  local query = "repos/" .. tostring(repo) .. "/pulls?state=open&head=" .. url_encode(head_filter) .. "&per_page=100" -- gh api --paginate
   if base_branch ~= nil then
-    base_arg = " --base " .. shell_single_quote(base_branch)
+    query = query .. "&base=" .. url_encode(base_branch)
   end
-  return "gh pr list --repo " .. shell_single_quote(repo)
-    .. " --head " .. shell_single_quote(branch)
-    .. base_arg
-    .. " --state open --json number,url,headRefName,baseRefName,state"
+  return "gh api --paginate --slurp " .. shell_single_quote(query)
 end
 
 function M.gh_issue_view_pr_open_guard_cmd(repo, issue_number)
@@ -633,20 +620,31 @@ end
 function M.parse_pr_list_for_head(gh_json_stdout, branch)
   local decoded = json.decode(gh_json_stdout or "[]")
   for _, item in ipairs(decoded) do
-    local number = item.number
-    local head = item.headRefName or item.head_ref_name
-    local base = item.baseRefName or item.base_ref_name
-    local state = tostring(item.state or "")
-    if is_positive_number(number)
-      and tostring(head or "") == tostring(branch)
-      and state:lower() == "open" then
-      return {
-        number = tonumber(number),
-        url = item.url,
-        head_ref_name = head,
-        base_ref_name = base,
-        state = item.state,
-      }
+    local items = (type(item) == "table" and item[1] ~= nil) and item or { item }
+    for _, pr in ipairs(items) do
+      if type(pr) == "table" then
+        local number = pr.number
+        local head = pr.headRefName or pr.head_ref_name
+        if head == nil and type(pr.head) == "table" then
+          head = pr.head.ref
+        end
+        local base = pr.baseRefName or pr.base_ref_name
+        if base == nil and type(pr.base) == "table" then
+          base = pr.base.ref
+        end
+        local state = tostring(pr.state or "")
+        if is_positive_number(number)
+          and tostring(head or "") == tostring(branch)
+          and state:lower() == "open" then
+          return {
+            number = tonumber(number),
+            url = pr.url or pr.html_url,
+            head_ref_name = head,
+            base_ref_name = base,
+            state = pr.state,
+          }
+        end
+      end
     end
   end
   return nil
@@ -897,10 +895,7 @@ local max_runtime_id_len = 180
 local function safe_runtime_segment(value)
   local safe = tostring(value or ""):gsub("[^%w._-]", "_")
   safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
-  if safe == "" then
-    return "empty"
-  end
-  return safe
+  return safe == "" and "empty" or safe
 end
 
 local function comment_runtime_identity(repo, kind, number)

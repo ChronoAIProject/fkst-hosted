@@ -60,25 +60,6 @@ local function label_names(labels_json)
   return labels
 end
 
-function M.parse_issue_list_intake(stdout)
-  local decoded = json.decode(stdout or "[]")
-  local issues = {}
-  if type(decoded) ~= "table" then
-    return issues
-  end
-  for _, issue in ipairs(decoded) do
-    if type(issue) == "table" then
-      table.insert(issues, {
-        number = issue.number,
-        title = tostring(issue.title or ""),
-        updated_at = issue.updatedAt or issue.updated_at,
-        labels = label_names(issue.labels),
-      })
-    end
-  end
-  return issues
-end
-
 local function each_paginated_item(decoded, callback)
   if type(decoded) ~= "table" then
     return
@@ -94,6 +75,25 @@ local function each_paginated_item(decoded, callback)
       end
     end
   end
+end
+
+function M.parse_issue_list_intake(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local issues = {}
+  if type(decoded) ~= "table" then
+    return issues
+  end
+  each_paginated_item(decoded, function(issue)
+    if type(issue) == "table" and issue.pull_request == nil then
+      table.insert(issues, {
+        number = issue.number,
+        title = tostring(issue.title or ""),
+        updated_at = issue.updatedAt or issue.updated_at,
+        labels = label_names(issue.labels),
+      })
+    end
+  end)
+  return issues
 end
 
 local function parse_numbered_list(stdout)
@@ -308,17 +308,27 @@ function M.parse_pr_list_head_base(stdout)
   if type(decoded) ~= "table" then
     return prs
   end
-  for _, pr in ipairs(decoded) do
+  each_paginated_item(decoded, function(pr)
     if type(pr) == "table" then
+      local head_ref_name = pr.headRefName or pr.head_ref_name
+      local head_sha = pr.headRefOid or pr.head_ref_oid
+      if type(pr.head) == "table" then
+        head_ref_name = head_ref_name or pr.head.ref
+        head_sha = head_sha or pr.head.sha
+      end
+      local base_ref_name = pr.baseRefName or pr.base_ref_name
+      if base_ref_name == nil and type(pr.base) == "table" then
+        base_ref_name = pr.base.ref
+      end
       table.insert(prs, {
         number = pr.number,
-        head_sha = pr.headRefOid or pr.head_ref_oid,
-        head_ref_name = pr.headRefName or pr.head_ref_name,
-        base_ref_name = pr.baseRefName or pr.base_ref_name,
+        head_sha = head_sha,
+        head_ref_name = head_ref_name,
+        base_ref_name = base_ref_name,
         state = pr.state,
       })
     end
-  end
+  end)
   return prs
 end
 

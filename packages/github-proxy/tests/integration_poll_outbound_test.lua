@@ -41,12 +41,12 @@ local reviewing_marker = h.reviewing_marker
 
 local function pr_json(number, updated_at, state)
   return string.format(
-    '{"number":%d,"title":"PR %d","url":"https://github.example/owner/x/pull/%d","updatedAt":"%s","state":"%s","labels":[{"name":"review"}]}',
+    '{"number":%d,"title":"PR %d","html_url":"https://github.example/owner/x/pull/%d","updated_at":"%s","state":"%s","labels":[{"name":"review"}]}',
     number,
     number,
     number,
     updated_at,
-    state or "OPEN"
+    state or "open"
   )
 end
 
@@ -56,7 +56,7 @@ local function pr_list_many_json(count, target_number, target_updated_at)
     table.insert(parts, pr_json(100 + index, string.format("2026-06-03T03:%02d:00Z", index % 60), "OPEN"))
   end
   table.insert(parts, pr_json(target_number, target_updated_at, "OPEN"))
-  return "[" .. table.concat(parts, ",") .. "]\n"
+  return "[[" .. table.concat(parts, ",") .. "]]\n"
 end
 
 return {
@@ -96,8 +96,8 @@ return {
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 0)
-    t.eq(count_calls("gh issue list"), 2)
-    t.eq(count_calls("gh pr list"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 2)
   end,
 
   test_inbound_poll_re_raises_when_updated_at_changes = function()
@@ -142,8 +142,8 @@ return {
     local closed = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(closed.exit_code, 0)
     t.eq(#closed.raises, 0)
-    t.eq(count_calls("gh issue list"), 2)
-    t.eq(count_calls("gh pr list"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 2)
   end,
 
   test_inbound_poll_open_pr_coverage_is_not_limited_by_terminal_volume = function()
@@ -160,12 +160,12 @@ return {
     t.eq(result.raises[36].payload.number, 12)
     t.eq(result.raises[36].payload.updated_at, "2026-06-02T00:00:00Z")
     t.eq(result.raises[36].payload.dedup_key, "owner/x#pr#12@2026-06-02T00:00:00Z")
-    t.eq(core.gh_pr_list_cmd("owner/x"), "gh pr list --repo 'owner/x' --state open --limit 1000 --json number,title,updatedAt,url,state,labels")
-    t.is_true(core.gh_pr_list_cmd("owner/x"):find("--state open", 1, true) ~= nil)
-    t.is_true(core.gh_pr_list_cmd("owner/x"):find("--limit 1000", 1, true) ~= nil)
+    t.eq(core.gh_pr_list_cmd("owner/x"), "gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'")
+    t.is_true(core.gh_pr_list_cmd("owner/x"):find("state=open", 1, true) ~= nil)
+    t.is_true(core.gh_pr_list_cmd("owner/x"):find("per_page=100", 1, true) ~= nil)
     t.eq(core.gh_pr_list_cmd("owner/x"):find("--state all", 1, true), nil)
-    t.eq(count_calls("gh issue list"), 1)
-    t.eq(count_calls("gh pr list"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 1)
   end,
 
   test_inbound_poll_continues_when_issue_list_fails = function()
@@ -178,8 +178,8 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github_entity_changed")
     t.eq(result.raises[1].payload.type, "pr")
-    t.eq(count_calls("gh issue list"), 1)
-    t.eq(count_calls("gh pr list"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 1)
   end,
 
   test_inbound_poll_continues_when_pr_list_fails = function()
@@ -192,8 +192,8 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github_entity_changed")
     t.eq(result.raises[1].payload.type, "issue")
-    t.eq(count_calls("gh issue list"), 1)
-    t.eq(count_calls("gh pr list"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 1)
   end,
 
   test_inbound_poll_rate_limit_failure_errors_for_retry = function()
@@ -203,8 +203,8 @@ return {
 
     local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, opts("issue-list-rate-limit"))
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("gh issue list"), 1)
-    t.eq(count_calls("gh pr list"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 0)
   end,
 
   test_inbound_poll_no_raise_without_repo_env = function()
@@ -219,8 +219,8 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh issue list"), 0)
-    t.eq(count_calls("gh pr list"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 0)
   end,
 
   test_outbound_dry_run_write_and_marker_idempotency = function()
