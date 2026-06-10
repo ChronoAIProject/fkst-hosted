@@ -732,6 +732,9 @@ function M.parse_meta_judge_output(stdout, verdict_mode)
     if kind == nil then
       kind, value = line:match("^%s*([Cc][Oo][Nn][Vv][Ee][Rr][Gg][Ee])%s*:%s*(.+)%s*$")
     end
+    if kind == nil then
+      kind, value = line:match("^%s*(⟦FKST:PLAN⟧)%s+(.+)%s*$")
+    end
     if kind ~= nil then
       value = bounded(value, max_narrowed_question_len)
       if value ~= "" then
@@ -755,10 +758,18 @@ function M.parse_meta_judge_output(stdout, verdict_mode)
             parsed = nil
           end
         else
-          parsed = {
-            kind = "converge",
-            narrowed_question = value,
-          }
+          if kind == "⟦FKST:PLAN⟧" then
+            parsed = {
+              kind = "plan",
+              plan = value,
+              narrowed_question = value,
+            }
+          else
+            parsed = {
+              kind = "converge",
+              narrowed_question = value,
+            }
+          end
         end
       end
     end

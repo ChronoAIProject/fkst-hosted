@@ -160,7 +160,7 @@ local function has_value(values, expected)
 end
 
 local function is_review_meta_action(value)
-  return value == "fix" or value == "block"
+  return value == "fix" or value == "block" or value == "spec-amendment"
 end
 
 local function is_path_safe_key(value, limit)

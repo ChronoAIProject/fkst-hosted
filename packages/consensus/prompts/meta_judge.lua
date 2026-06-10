@@ -9,8 +9,9 @@ Execution boundary:
 Read the proposal and the three peer-invisible angle outputs. Decide exactly one outcome:
 {{reached_options}}
 - converge:<specific narrowed question> when another round should focus on a named disagreement.
+- ⟦FKST:PLAN⟧ <single bounded merged plan/framing line> when the angle positions are compatible but need a concrete merged framing for the next round.
 
-Do not propose a new implementation plan. Arbitrate the angle outputs only.
+Only use ⟦FKST:PLAN⟧ for close disagreement where the positions can be satisfied together. For true incompatibility, use converge with the blocking disagreement instead.
 Respond with exactly one line and no other text.
 
 Proposal:

@@ -121,6 +121,26 @@ return {
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
   end,
 
+  test_review_meta_spec_amendment_extra_line_blocks_fail_closed = function()
+    local event = review_meta_event()
+    mock_issue_review_meta({ "fkst-dev:review-meta" }, {
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+    })
+    h.mock_context_bundle()
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
+    t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("codex exec", {
+      stdout = action_label .. " spec-amendment\n" .. reason_label .. " The agreed framing is defective.\ngarbage",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_review_meta(event, opts("review-v2-meta-spec-extra-line"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+  end,
+
   test_observe_pr_fixing_self_heal_recovers_structured_gap = function()
     local impl_version = reviewing().version
     local fix_version = core.next_fix_version(impl_version)

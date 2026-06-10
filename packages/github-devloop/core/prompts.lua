@@ -199,77 +199,45 @@ function M.parse_review_meta_action(stdout)
       table.insert(lines, line)
     end
   end
-  if #lines ~= 2 and #lines ~= 3 then
+  if #lines < 2 or #lines > 3 then
     return nil
   end
 
-  local action = nil
-  local action_count = 0
-  local action_index = nil
-  local reason = nil
-  local reason_count = 0
-  local reason_index = nil
-  local gap = nil
-  local gap_count = 0
-  local gap_index = nil
-  local index = 0
-  for _, line in ipairs(lines) do
-    index = index + 1
-
-    if line:match("^%s*" .. M._action_label) ~= nil then
-      local token = line:match("^%s*" .. M._action_label .. "%s*(%a+)%s*$")
-      if token == nil or not M._is_review_meta_action(token:lower()) then
-        return nil
-      end
-      action = token:lower()
-      action_count = action_count + 1
-      action_index = index
-    end
-
-    if line:match("^%s*" .. M._reason_label) ~= nil then
-      local captured = line:match("^%s*" .. M._reason_label .. "%s*(.+)$")
-      if captured == nil or M._trim(captured) == "" then
-        return nil
-      end
-      reason = M._trim(captured)
-      reason_count = reason_count + 1
-      reason_index = index
-    end
-
-    if line:match("^%s*Blocking gap:") ~= nil then
-      local captured = line:match("^%s*Blocking gap:%s*(.+)$")
-      if captured == nil or M._trim(captured) == "" then
-        return nil
-      end
-      gap = M._trim(captured)
-      gap_count = gap_count + 1
-      gap_index = index
-    end
-  end
-
-  if action_count ~= 1 or reason_count ~= 1 then
+  local token = lines[1]:match("^%s*" .. M._action_label .. "%s+([%a%-]+)%s*$")
+  if token == nil then
     return nil
   end
-  if action == nil or reason == nil then
+  local action = token:lower()
+  if not M._is_review_meta_action(action) then
     return nil
   end
-  if reason_index ~= action_index + 1 then
+
+  local captured_reason = lines[2]:match("^%s*" .. M._reason_label .. "%s+(.+)$")
+  if captured_reason == nil or M._trim(captured_reason) == "" then
     return nil
   end
+  local reason = M._trim(captured_reason)
   if not M._is_bounded_string(reason, M._max_meta_reason_len) then
     return nil
   end
+
+  local gap = nil
   if action == "fix" then
-    if gap_count ~= 1 or gap_index ~= reason_index + 1 then
+    if #lines ~= 3 then
       return nil
     end
+    local captured_gap = lines[3]:match("^%s*Blocking gap:%s+(.+)$")
+    if captured_gap == nil or M._trim(captured_gap) == "" then
+      return nil
+    end
+    gap = M._trim(captured_gap)
     if not M._is_bounded_string(gap, M._max_blocking_gap_len)
       or gap:find("%c") ~= nil
       or gap:find("<!%-%- fkst:") ~= nil
       or gap:find("&lt;!%-%- fkst:") ~= nil then
       return nil
     end
-  elseif gap_count ~= 0 then
+  elseif #lines ~= 2 then
     return nil
   end
 

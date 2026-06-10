@@ -78,7 +78,7 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
 end
 
 function S.install(M)
-function M.review_meta_marker(issue_proposal_id, dedup_key, action, version, blocking_gap)
+function M.review_meta_marker(issue_proposal_id, dedup_key, action, version, blocking_gap, reason)
   local fields = ""
   if action ~= nil then
     if not M._is_review_meta_action(action) then
@@ -95,6 +95,8 @@ function M.review_meta_marker(issue_proposal_id, dedup_key, action, version, blo
       error("github-devloop: invalid review-meta gap")
     end
     fields = fields .. '" gap="' .. gap
+  elseif action == "spec-amendment" then
+    fields = fields .. '" reason="blocked-pending-spec'
   end
   return '<!-- fkst:github-devloop:review-meta:v1 proposal="' .. tostring(issue_proposal_id)
     .. '" dedup="' .. tostring(dedup_key)

@@ -599,6 +599,11 @@ return {
     local converge = core.parse_meta_judge_output("converge: Should the delete angle name the removable scope?")
     t.eq(converge.kind, "converge")
     t.eq(converge.narrowed_question, "Should the delete angle name the removable scope?")
+
+    local plan = core.parse_meta_judge_output("⟦FKST:PLAN⟧ Keep the adapter and remove duplicate retry wiring.")
+    t.eq(plan.kind, "plan")
+    t.eq(plan.plan, "Keep the adapter and remove duplicate retry wiring.")
+    t.eq(plan.narrowed_question, "Keep the adapter and remove duplicate retry wiring.")
   end,
 
   test_parse_meta_judge_output_accepts_reject_only_in_gate_mode = function()
@@ -620,6 +625,8 @@ return {
     t.is_nil(core.parse_meta_judge_output("reached:approve|reject framing"))
     -- a bare decision with no framing is malformed -> converge
     t.is_nil(core.parse_meta_judge_output("reached:approve"))
+    t.is_nil(core.parse_meta_judge_output("⟦FKST:PLAN⟧"))
+    t.is_nil(core.parse_meta_judge_output("⟦FKST:PLAN⟧ merge\nconverge: no"))
   end,
 
   test_build_meta_judge_prompt_contains_bounded_angle_outputs = function()

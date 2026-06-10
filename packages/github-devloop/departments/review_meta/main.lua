@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_create_request",
     "devloop_fixing",
   },
   stall_window = "2m",
@@ -61,6 +62,16 @@ function pipeline(event)
       body = "(PR-only review-meta context; issue backing is absent)",
       comments = current_pr.comments,
     }
+    if issue_number ~= nil then
+      local issue_view = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
+      if issue_view.exit_code ~= 0 then
+        error("github-devloop: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
+      end
+      local parsed_issue = core.parse_issue_view_fix(issue_view.stdout)
+      if parsed_issue.title ~= nil and parsed_issue.title ~= "" then
+        current_issue.title = parsed_issue.title
+      end
+    end
     core.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, review_meta.proposal_id)
     local transition = core.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
@@ -126,12 +137,26 @@ function pipeline(event)
     if issue_number ~= nil then
       label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
     end
+    local spec_issue_request = nil
+    if parsed.action == "spec-amendment" then
+      spec_issue_request = core.build_spec_amendment_issue_create_request(
+        repo,
+        issue_number,
+        review_meta,
+        current_issue.title,
+        parsed.reason,
+        current_pr.comments
+      )
+    end
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {
       "github-proxy.github_pr_comment_request",
     }
     if label_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_label_request")
+    end
+    if spec_issue_request ~= nil then
+      table.insert(raised, "github-proxy.github_issue_create_request")
     end
     local fix_payload = nil
     if parsed.action == "fix" then
@@ -152,6 +177,9 @@ function pipeline(event)
     core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     if label_request ~= nil then
       core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    end
+    if spec_issue_request ~= nil then
+      core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_create_request", spec_issue_request)
     end
     if fix_payload ~= nil then
       core.log_raise("review_meta", review_meta.proposal_id, "devloop_fixing", fix_payload)

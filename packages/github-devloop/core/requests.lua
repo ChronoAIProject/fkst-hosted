@@ -101,6 +101,19 @@ local function build_verdict_summary(angle_results)
   return summary
 end
 
+local function build_comment_evidence_digest(M, comments)
+  local text = table.concat(M.comment_bodies(comments), "\n\n")
+  text = text:gsub("%c", " "):gsub("%s+", " ")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then
+    return "(review rounds are recorded on the parent PR comments)"
+  end
+  if #text > max_verdict_summary_len then
+    text = text:sub(1, max_verdict_summary_len)
+  end
+  return text
+end
+
 local function bounded_blocking_gap(M, reached)
   local gap = reached and reached.blocking_gap
   if gap == nil and type(reached and reached.blocking_gaps) == "table" then
@@ -854,19 +867,58 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
   local to_state = action == "fix" and "fixing" or "blocked"
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   local state_version = version or review_meta.version
+  local action_text = tostring(action)
+  if action == "spec-amendment" then
+    action_text = "blocked-pending-spec"
+  end
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = review_meta.pr_number,
-  }, "github-devloop review-meta action: " .. tostring(action)
+  }, "github-devloop review-meta action: " .. action_text
     .. "\n\nReason:\n" .. safe_reason
     .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
-    .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version, blocking_gap), M._dedup_key({
+    .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version, blocking_gap, reason), M._dedup_key({
     "review-meta",
     "comment",
     tostring(review_meta.dedup_key),
     tostring(state_version),
   }), review_meta.source_ref)
+end
+
+function M.build_spec_amendment_issue_create_request(repo, issue_number, review_meta, title_brief, reason, comments)
+  local title = "Spec amendment needed: " .. tostring(title_brief or ("Issue #" .. tostring(issue_number or "unknown")))
+  if #title > M._max_title_len then
+    title = title:sub(1, M._max_title_len)
+  end
+  local evidence = build_comment_evidence_digest(M, comments)
+  local body = "Spec flaw statement:\n" .. M.neutralize_untrusted_comment_text(reason or "")
+    .. "\n\nEvidence digest:\n" .. M.neutralize_untrusted_comment_text(evidence)
+    .. "\n\nParent issue: #" .. tostring(issue_number or "unknown")
+    .. "\nParent PR: #" .. tostring(review_meta.pr_number)
+    .. "\nReview proposal: " .. tostring(review_meta.review_proposal_id)
+    .. "\nReview dedup: " .. tostring(review_meta.dedup_key)
+    .. "\n\nThis issue requests a spec revision only. Do not edit the human-authored parent issue text."
+  if #body > M._max_body_len then
+    body = body:sub(1, M._max_body_len)
+  end
+  return {
+    schema = "github-proxy.issue-create.v1",
+    repo = repo,
+    title = title,
+    body = body,
+    labels = json.decode("[]"),
+    dedup_key = M._dedup_key({
+      "spec-amendment",
+      tostring(review_meta.proposal_id),
+      tostring(review_meta.dedup_key),
+    }),
+    parent_comment_target = {
+      repo = repo,
+      pr_number = review_meta.pr_number,
+    },
+    source_ref = M.normalize_source_ref(review_meta.source_ref),
+  }
 end
 end
 

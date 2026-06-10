@@ -109,7 +109,7 @@ function pipeline(event)
       cache_set(cache_key, proposal.dedup_key)
       return
     end
-    if parsed ~= nil and parsed.kind == "converge" then
+    if parsed ~= nil and (parsed.kind == "converge" or parsed.kind == "plan") then
       raise_converge(proposal, angle_results, parsed.narrowed_question)
       return
     end

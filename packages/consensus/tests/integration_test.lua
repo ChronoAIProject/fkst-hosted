@@ -273,6 +273,36 @@ return {
     t.is_true(calls[4].stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
   end,
 
+  test_meta_plan_flows_into_next_converge_round = function()
+    mock_judgment_runtime()
+    mock_angle("approve", "Minimal angle accepts a small adapter.")
+    mock_angle("abstain", "Structural angle wants the retry boundary explicit.")
+    mock_angle("approve", "Delete angle accepts removing duplicate wiring.")
+    mock_meta("⟦FKST:PLAN⟧ Keep the adapter, make retry ownership explicit, and delete duplicate wiring.")
+
+    local result = run_decide(proposal(), opts("split-meta-plan"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_converge")
+    t.eq(result.raises[1].payload.narrowed_question, "Keep the adapter, make retry ownership explicit, and delete duplicate wiring.")
+    t.eq(#codex_calls(), 4)
+  end,
+
+  test_malformed_plan_falls_back_to_default_converge = function()
+    mock_judgment_runtime()
+    mock_angle("approve", "Minimal angle approves.")
+    mock_angle("abstain", "Structural angle needs framing.")
+    mock_angle("approve", "Delete angle approves.")
+    mock_meta("⟦FKST:PLAN⟧")
+
+    local result = run_decide(proposal(), opts("malformed-meta-plan"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_converge")
+    t.is_true(result.raises[1].payload.narrowed_question:find("Resolve the concrete disagreement", 1, true) ~= nil)
+    t.eq(#codex_calls(), 4)
+  end,
+
   test_converge_mode_reject_outputs_raise_consensus_converge = function()
     mock_judgment_runtime()
     mock_angle("reject", "Minimal angle rejects but converge mode cannot reject.")

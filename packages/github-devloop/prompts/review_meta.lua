@@ -9,11 +9,12 @@ Execution boundary:
 Choose the conservative next state. Pick exactly one action:
 - fix: the PR probably needs another fix pass before review.
 - block: the work should stop for human intervention.
+- spec-amendment: the implementation faithfully follows the agreed framing, but the framing/spec is defective and fixing the PR would violate it.
 
 Read the full local source context before deciding. If you cannot read the local context files (issue body / PR diff / comments) for ANY reason, choose `block`.
 
-Respond with exactly two lines for block, or exactly three lines for fix, and no other text.
-Line one: the marker named ⟦FKST:ACTION⟧ followed by one word from fix or block.
+Respond with exactly two lines for block or spec-amendment, or exactly three lines for fix, and no other text.
+Line one: the marker named ⟦FKST:ACTION⟧ followed by one word from fix, block, or spec-amendment.
 Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph.
 Line three for fix only: `Blocking gap:` followed by one concise, single-line gap that the next fix pass must close.
 
