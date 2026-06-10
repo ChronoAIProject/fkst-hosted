@@ -21,6 +21,32 @@ local max_prior_round_digests = 12
 local max_scratch_slug_len = 120
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
+local allowed_env = {
+  FKST_OUTPUT_LANG = true,
+}
+
+local function read_env_command(name)
+  if not allowed_env[name] then
+    error("consensus: env name is not allowed")
+  end
+  return 'printf %s "$' .. name .. '"'
+end
+
+function M.read_env_command(name)
+  return read_env_command(name)
+end
+
+function M.read_env(name, exec)
+  local run = exec or exec_sync
+  if type(run) ~= "function" then
+    return nil
+  end
+  local ok, out = pcall(run, read_env_command(name))
+  if not ok or type(out) ~= "table" or out.exit_code ~= 0 or out.stdout == "" then
+    return nil
+  end
+  return out.stdout
+end
 
 function M.verdict_mode(proposal)
   if type(proposal) == "table" and proposal.verdict_mode == "gate" then
@@ -95,6 +121,12 @@ local function has_source_ref(value)
   return type(value) == "table"
     and is_bounded_string(value.kind, max_key_len)
     and is_bounded_string(value.ref, max_key_len)
+end
+
+local function has_content_fetch(proposal)
+  return type(proposal) == "table"
+    and type(proposal.content_fetch) == "string"
+    and proposal.content_fetch ~= ""
 end
 
 local function normalize_round(value)
@@ -272,6 +304,38 @@ function M.render_template(template, vars)
   end))
 end
 
+function M.output_language(exec)
+  local lang = trim(M.read_env("FKST_OUTPUT_LANG", exec))
+  if lang == "zh" then
+    return "zh"
+  end
+  return "en"
+end
+
+function M.prompt_preamble(proposal, exec)
+  local language_line = "Write all output in English; quote code identifiers and cited originals verbatim."
+  if M.output_language(exec) == "zh" then
+    language_line = "Write all prose output in Simplified Chinese; quote code identifiers and cited originals verbatim."
+  end
+
+  -- Slots supersede GitHub issues #142 and #145: env-driven language selection plus
+  -- harness-first judgment are fixed context, not verdict/parser protocol.
+  local lines = {
+    language_line,
+    "Before judging, identify the established theory or industry best practice governing this problem class; treat unjustified deviation from established practice as grounds for rejection or narrowing; require proof that existing practice does not apply before accepting novelty.",
+  }
+
+  if has_content_fetch(proposal) then
+    table.insert(lines, "Before judging, fetch and read the complete prior history of this proposal via its source_ref; earlier rounds recorded there are your memory — judge what changed; do not re-litigate settled points.")
+  end
+
+  return table.concat(lines, "\n")
+end
+
+function M.render_prompt_template(template, vars, proposal, exec)
+  return M.prompt_preamble(proposal, exec) .. "\n\n" .. M.render_template(template, vars)
+end
+
 -- Keyed by dedup_key (which versions the proposal), not proposal_id, so an updated
 -- proposal re-derives consensus instead of being silently skipped.
 function M.reached_cache_key(dedup_key)
@@ -305,12 +369,6 @@ function M.mkdir_p_cmd(path)
     error("consensus: invalid directory path")
   end
   return "mkdir -p " .. shell_single_quote(value) .. " && chmod 0555 " .. shell_single_quote(value)
-end
-
-local function has_content_fetch(proposal)
-  return type(proposal) == "table"
-    and type(proposal.content_fetch) == "string"
-    and proposal.content_fetch ~= ""
 end
 
 local function render_content_fetch_block(proposal, verdict_mode)
@@ -363,7 +421,7 @@ function M.build_angle_prompt(proposal, angle)
   -- Belt-and-suspenders: angle is already rejected if multi-line above, but neutralize it
   -- too before it reaches the prompt (bias fallback + the Angle: line).
   local safe_angle = neutralize_untrusted_prompt_text(angle)
-  return M.render_template(prompt.template, {
+  return M.render_prompt_template(prompt.template, {
     bias = prompt.bias[angle] or ("Bias: " .. safe_angle .. ". Judge from this named perspective."),
     angle = safe_angle,
     title = neutralize_untrusted_prompt_text(proposal.title),
@@ -376,7 +434,7 @@ function M.build_angle_prompt(proposal, angle)
     readiness_instruction = verdict_mode == "gate"
       and "If the proposal should not proceed as-is, reject and state the concrete reason in the reply; abstain only when you genuinely cannot judge."
       or "If this angle is not ready to approve, abstain and state the concrete concern in the reply.",
-  })
+  }, proposal)
 end
 
 -- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean verdict line
@@ -527,7 +585,7 @@ function M.build_meta_judge_prompt(proposal, angle_results)
   end
   local verdict_mode = M.verdict_mode(proposal)
 
-  return M.render_template(prompt.template, {
+  return M.render_prompt_template(prompt.template, {
     title = neutralize_untrusted_prompt_text(proposal.title),
     body = neutralize_untrusted_prompt_text(proposal.body),
     content_fetch_block = render_content_fetch_block(proposal, verdict_mode),
@@ -538,7 +596,7 @@ function M.build_meta_judge_prompt(proposal, angle_results)
     reached_options = verdict_mode == "gate"
       and "- reached:approve <short framing> when the angles support approving the current framing.\n- reached:reject <short framing> when the angles support rejecting the current framing."
       or "- reached:approve <short framing> when the angles support approving the current framing.",
-  })
+  }, proposal)
 end
 
 function M.parse_meta_judge_output(stdout, verdict_mode)

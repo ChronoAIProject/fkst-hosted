@@ -8,6 +8,7 @@ local allowed_env = {
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
+  FKST_OUTPUT_LANG = true,
 }
 
 local function read_env_command(name)

@@ -12,6 +12,154 @@ local function bounded_framing(M, framing)
   return value
 end
 
+local function board_digest_issue_list_cmd(M, repo)
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
+local function board_digest_pr_list_cmd(M, repo)
+  return "gh pr list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
+local function label_names(labels_json)
+  local labels = {}
+  for _, label in ipairs(labels_json or {}) do
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(labels, tostring(label.name))
+    elseif type(label) == "string" then
+      table.insert(labels, label)
+    end
+  end
+  return labels
+end
+
+local function parse_board_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  if type(decoded) ~= "table" then
+    return items
+  end
+  for _, item in ipairs(decoded) do
+    if type(item) == "table" and tonumber(item.number) ~= nil then
+      table.insert(items, {
+        number = tonumber(item.number),
+        title = tostring(item.title or ""),
+        labels = label_names(item.labels),
+      })
+    end
+  end
+  return items
+end
+
+local function state_label(M, labels)
+  for _, label in ipairs(labels or {}) do
+    local text = tostring(label)
+    if M._state_labels[text] then
+      return text
+    end
+  end
+  return "open"
+end
+
+local function first_chars(value, limit)
+  local text = tostring(value or ""):gsub("[%s]+", " ")
+  if #text > limit then
+    return text:sub(1, limit)
+  end
+  return text
+end
+
+local function render_board_digest(M, issues, prs)
+  local lines = {
+    M._untrusted_issue_data_begin,
+    "Open items snapshot:",
+  }
+  for _, item in ipairs(issues or {}) do
+    if #lines >= 52 then
+      break
+    end
+    table.insert(lines, "#" .. tostring(item.number)
+      .. " [" .. state_label(M, item.labels) .. "] "
+      .. first_chars(item.title, 60))
+  end
+  for _, item in ipairs(prs or {}) do
+    if #lines >= 52 then
+      break
+    end
+    table.insert(lines, "#" .. tostring(item.number)
+      .. " [" .. state_label(M, item.labels) .. "] "
+      .. first_chars(item.title, 60))
+  end
+  table.insert(lines, M._untrusted_issue_data_end)
+  return table.concat(lines, "\n")
+end
+
+function M.board_digest_block(repo, tick)
+  if tick == nil or tostring(tick) == "" then
+    return ""
+  end
+  local key = "github-devloop/board-digest/" .. M.safe_repo(repo) .. "/" .. M.safe_updated_at(tick)
+  local cached = cache_get(key)
+  if cached ~= nil and cached ~= "" then
+    return cached
+  end
+
+  local ok_issue, issue_result = pcall(exec_sync, { cmd = board_digest_issue_list_cmd(M, repo), timeout = 30 })
+  local ok_pr, pr_result = pcall(exec_sync, { cmd = board_digest_pr_list_cmd(M, repo), timeout = 30 })
+  if not ok_issue or not ok_pr
+    or type(issue_result) ~= "table" or issue_result.exit_code ~= 0
+    or type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
+    return ""
+  end
+
+  local block = render_board_digest(M, parse_board_list(issue_result.stdout), parse_board_list(pr_result.stdout))
+  cache_set(key, block)
+  return block
+end
+
+function M.append_board_digest_to_proposal(proposal, repo, tick)
+  local block = M.board_digest_block(repo, tick)
+  if block == "" then
+    return proposal
+  end
+  local body = tostring(proposal.body or "")
+  local prefix = "\n\n"
+  local neutralized = M.neutralize_untrusted_prompt_text(block)
+  local remaining = M._max_body_len - #body - #prefix
+  if remaining <= 0 then
+    M.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
+      "outcome=drop",
+      "reason=body-budget-exhausted",
+      "repo=" .. tostring(repo or ""),
+      "tick=" .. tostring(tick or ""),
+    })
+    return proposal
+  end
+  if #neutralized > remaining then
+    M.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
+      "outcome=truncate",
+      "reason=body-budget",
+      "repo=" .. tostring(repo or ""),
+      "tick=" .. tostring(tick or ""),
+      "available=" .. tostring(remaining),
+      "needed=" .. tostring(#neutralized),
+    })
+    neutralized = neutralized:sub(1, remaining)
+  end
+  proposal.body = body .. prefix .. neutralized
+  if #proposal.body > M._max_body_len then
+    error("github-devloop: proposal board digest exceeds bounded body")
+  end
+  return proposal
+end
+
 function M.build_devloop_ready_payload(source)
   local payload = {
     schema = "github-devloop.ready.v1",
@@ -176,6 +324,10 @@ function M.build_proposal(issue)
   }
 end
 
+function M.build_board_proposal(issue, tick)
+  return M.append_board_digest_to_proposal(M.build_proposal(issue), issue.repo, tick)
+end
+
 -- Thread the meta-judge's narrowing onto a re-raised next-round proposal so the next
 -- angles converge instead of blindly re-judging the same question. The next round sees
 -- ONLY the bounded convergence_question + prior-round digests (verdict + short reply),
@@ -206,6 +358,10 @@ function M.build_loop_proposal(repo, issue_number, current, source_ref, n, conve
   local proposal = M.build_proposal(issue)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
+end
+
+function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n, converge, tick)
+  return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge), repo, tick)
 end
 
 function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
@@ -250,10 +406,18 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   }
 end
 
+function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick)
+  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref), repo, tick)
+end
+
 function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge)
   local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
+end
+
+function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick)
+  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge), repo, tick)
 end
 end
 

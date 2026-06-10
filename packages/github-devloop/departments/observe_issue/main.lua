@@ -103,7 +103,7 @@ function pipeline(event)
       if state.state == "thinking" then
         core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
         if core.version_loop_round(state.version) == 0 then
-          local proposal = core.build_proposal(issue)
+          local proposal = core.build_board_proposal(issue, event.ts)
           proposal.dedup_key = state.version
           if core.validate_proposal(proposal) then
             core.log_apply("observe_issue", proposal_id, "thinking", proposal.dedup_key, { add = {}, remove = {} }, {
@@ -195,7 +195,7 @@ function pipeline(event)
     end
     core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
 
-    local proposal = core.build_proposal(issue)
+    local proposal = core.build_board_proposal(issue, event.ts)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-build-valid-proposal")
       return

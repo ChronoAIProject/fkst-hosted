@@ -106,10 +106,10 @@ function pipeline(event)
     end
 
     local next_n = round + 1
-    local proposal = core.build_loop_proposal(repo, issue_number, current, unresolved.source_ref, next_n, {
+    local proposal = core.build_board_loop_proposal(repo, issue_number, current, unresolved.source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
-    })
+    }, event.ts)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")
       return

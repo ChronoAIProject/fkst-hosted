@@ -569,7 +569,7 @@ return {
     t.is_true(prompt:find("Respond with exactly two lines", 1, true) ~= nil)
     t.is_true(prompt:find("one word from fix or block", 1, true) ~= nil)
     t.is_nil(prompt:find("FETCH", 1, true))
-    t.is_nil(prompt:find("accept", 1, true))
+    t.is_nil(prompt:find("one word from fix, block, or accept", 1, true))
   end,
 
   test_parse_pr_view_origin_falls_back_on_empty_name_with_owner = function()
