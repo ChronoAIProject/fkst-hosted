@@ -796,10 +796,28 @@ function M.gh_label_list_cmd(repo)
   return "gh label list --repo " .. shell_single_quote(repo) .. " --limit 1000 --json name"
 end
 
+local fkst_dev_label_colors = {
+  ["fkst-dev:enabled"] = "1D76DB",
+  ["fkst-dev:thinking"] = "8250DF",
+  ["fkst-dev:ready"] = "0E8A16",
+  ["fkst-dev:implementing"] = "FBCA04",
+  ["fkst-dev:pr-open"] = "006B75",
+  ["fkst-dev:reviewing"] = "5319E7",
+  ["fkst-dev:fixing"] = "D93F0B",
+  ["fkst-dev:merge-ready"] = "2EA44F",
+  ["fkst-dev:merging"] = "C2E0C6",
+  ["fkst-dev:merged"] = "8957E5",
+  ["fkst-dev:impl-failed"] = "B60205",
+  ["fkst-dev:blocked"] = "1B1F23",
+  ["fkst-dev:blocked-on-dependency"] = "E99695",
+  ["fkst-dev:review-meta"] = "BFD4F2",
+}
+
 function M.gh_label_create_cmd(repo, label)
+  local color = fkst_dev_label_colors[label] or "ededed"
   return "gh label create " .. shell_single_quote(label)
     .. " --repo " .. shell_single_quote(repo)
-    .. " --color 'ededed'"
+    .. " --color " .. shell_single_quote(color)
 end
 
 function M.parse_issue_labels(gh_json_stdout)
