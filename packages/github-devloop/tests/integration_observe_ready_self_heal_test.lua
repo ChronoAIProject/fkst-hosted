@@ -7,8 +7,10 @@ local opts = h.opts
 local source_ref = h.source_ref
 local run_observe = h.run_observe
 local run_implement = h.run_implement
+local run_review_pr = h.run_review_pr
 local mock_issue_state = h.mock_issue_state
 local mock_issue_implement_raw = h.mock_issue_implement_raw
+local mock_issue_review = h.mock_issue_review
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 local render_comment = h.render_comment
@@ -154,6 +156,76 @@ return {
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"))
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
+  end,
+
+  test_observe_issue_pr_open_reraises_reviewing_for_poll_self_heal = function()
+    local event = reached()
+    local ready_payload = core.build_devloop_ready_payload(event)
+    local comments = {
+      core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
+      core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
+    mock_linked_pr_state({})
+
+    local first = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-1"))
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 2)
+    local first_comment = find_raise(first.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(first_comment.payload.body:find(core.state_marker(event.proposal_id, "reviewing", ready_payload.dedup_key), 1, true) ~= nil)
+    local first_reviewing = find_raise(first.raises, "devloop_reviewing")
+    t.eq(first_reviewing.payload.schema, "github-devloop.reviewing.v1")
+    t.eq(first_reviewing.payload.proposal_id, event.proposal_id)
+    t.eq(first_reviewing.payload.pr_number, 7)
+    t.eq(first_reviewing.payload.version, ready_payload.dedup_key)
+    t.eq(first_reviewing.payload.source_ref.ref, "owner/repo#pr/7")
+
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      first_comment.payload.body,
+    })
+    local review = run_review_pr(first_reviewing.payload, opts("observe-issue-pr-open-review-kickoff-review-pr"))
+    t.eq(review.exit_code, 0)
+    t.eq(#review.raises, 1)
+    local proposal = find_raise(review.raises, "consensus.proposal").payload
+    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, ready_payload.dedup_key, "def456"))
+
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
+    mock_linked_pr_state({})
+    local second = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-2"))
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 2)
+    local second_reviewing = find_raise(second.raises, "devloop_reviewing")
+    t.eq(second_reviewing.payload.dedup_key, first_reviewing.payload.dedup_key)
+  end,
+
+  test_observe_issue_pr_open_reraise_requires_matching_link_version = function()
+    local event = reached()
+    local ready_payload = core.build_devloop_ready_payload(event)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
+      core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key .. "/other"),
+      core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+    })
+    mock_linked_pr_state({})
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-version-mismatch"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+  end,
+
+  test_observe_issue_pr_open_does_not_reraise_after_pr_local_reviewing = function()
+    local event = reached()
+    local ready_payload = core.build_devloop_ready_payload(event)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
+      core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
+      core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+    })
+    mock_linked_pr_state({
+      core.state_marker(event.proposal_id, "reviewing", ready_payload.dedup_key),
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-reviewing-no-reraise"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
   end,
 
   test_observe_issue_missing_reviewing_label_does_not_change_pr_local_state = function()
