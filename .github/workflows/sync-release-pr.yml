@@ -1,0 +1,72 @@
+# On a release PR into `develop` (label: release-automation, containing a
+# release-note file), compute the next SemVer version from the pending
+# changesets, bump the unified version in package.json, and write the pending
+# CHANGELOG section from the release note. The commit is pushed back to the PR
+# head branch. GITHUB_TOKEN pushes do not retrigger workflows, so this never loops.
+name: Sync release PR
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, labeled]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync version and CHANGELOG
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      contains(github.event.pull_request.labels.*.name, 'release-automation')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Compute version, bump package.json, sync CHANGELOG
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          NOTE=$(ls release-notes/release-note-*.md 2>/dev/null | head -1 || true)
+          if [ -z "$NOTE" ]; then
+            echo "INFO: no release-note file present yet; nothing to sync."
+            exit 0
+          fi
+          echo "INFO: release note: $NOTE"
+
+          # Base version = latest release tag, or current package.json if no tags yet.
+          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            BASE=$(git describe --tags --abbrev=0 | sed 's/^v//')
+          else
+            BASE=$(node -p "require('./package.json').version")
+          fi
+          echo "INFO: base version: $BASE"
+
+          NEW=$(node scripts/release/next-version.mjs "$BASE" .changeset)
+          echo "INFO: next version: $NEW"
+
+          node -e "const fs=require('fs'),p=require('./package.json');p.version=process.argv[1];fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')" "$NEW"
+          node scripts/release/changelog.mjs set-pending "$NEW" "$(date -u +%Y-%m-%d)" "$NOTE"
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "INFO: version and CHANGELOG already in sync; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json CHANGELOG.md
+          git commit -m "chore(release): set version v$NEW and update CHANGELOG"
+          git push origin "HEAD:$HEAD_REF"
+          echo "INFO: pushed version + CHANGELOG sync for v$NEW."
