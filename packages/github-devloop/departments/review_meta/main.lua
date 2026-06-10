@@ -75,12 +75,20 @@ function pipeline(event)
     })
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr)
+      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr, {
+        queue = event.queue,
+        source_ref = review_meta.source_ref,
+        terminal = false,
+      })
       error("github-devloop: review-meta codex failed: " .. tostring(stderr))
     end
     local parsed = core.parse_review_meta_action(result.stdout)
     if parsed == nil then
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "parse-failed")
+      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "parse-failed", {
+        queue = event.queue,
+        source_ref = review_meta.source_ref,
+        terminal = false,
+      })
       parsed = {
         action = "block",
         reason = "Review-meta codex output was unparseable.",

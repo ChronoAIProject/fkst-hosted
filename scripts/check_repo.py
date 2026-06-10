@@ -51,6 +51,8 @@ GRAPHQL_FIRST_CONNECTION_RE = re.compile(
 LONG_STRING_CHAR_RE = re.compile(r"\bstring\s*\.\s*char\s*\((?P<args>[^)]*)\)", re.DOTALL)
 NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*\d+\s*(?=,|\Z)")
 HIDDEN_TEXT_STRING_CHAR_ARG_MIN = 6
+ERROR_CALL_STRING_RE = re.compile(r"\berror\s*\(\s*(?P<quote>['\"])(?P<message>[^'\"]*)(?P=quote)")
+ERROR_CLASS_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9-]*: [a-z0-9][a-z0-9-]*:")
 
 
 @dataclass(frozen=True)
@@ -315,6 +317,18 @@ def hidden_text_string_char_lines(text: str) -> list[int]:
     for match in LONG_STRING_CHAR_RE.finditer(stripped):
         numeric_args = NUMERIC_ARG_RE.findall(match.group("args"))
         if len(numeric_args) >= HIDDEN_TEXT_STRING_CHAR_ARG_MIN:
+            lines.append(text.count("\n", 0, match.start()) + 1)
+    return lines
+
+
+def unclassified_error_call_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = []
+    for match in ERROR_CALL_STRING_RE.finditer(text):
+        if not is_unmasked_range(text, stripped, match.start(), match.start("quote")):
+            continue
+        message = match.group("message")
+        if not ERROR_CLASS_PREFIX_RE.match(message):
             lines.append(text.count("\n", 0, match.start()) + 1)
     return lines
 
@@ -611,6 +625,21 @@ def check_hidden_text_string_char(root: Path, warnings: list[str]) -> None:
             )
 
 
+def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
+    packages = root / "packages"
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file() or "tests" in path.relative_to(packages).parts:
+            continue
+        for line in unclassified_error_call_lines(read_text(path)):
+            add(
+                warnings,
+                "G7",
+                f"{rel(root, path)}:{line} production error(...) string lacks a greppable class prefix",
+            )
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -621,6 +650,7 @@ def main() -> int:
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
     check_hidden_text_string_char(root, warnings)
+    check_error_class_prefixes(root, warnings)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

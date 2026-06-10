@@ -280,7 +280,11 @@ function pipeline(event)
     })
     if type(result) ~= "table" or result.exit_code ~= 0 then
       local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, stderr)
+      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, stderr, {
+        queue = event.queue,
+        source_ref = fix.source_ref,
+        terminal = false,
+      })
       error("github-devloop: fix codex failed: " .. tostring(stderr))
     end
     core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=completed", nil)
@@ -330,7 +334,11 @@ function pipeline(event)
         raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, existing_head_sha, "existing fix commit pushed and PR head verified")
         return
       end
-      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, "no-changes")
+      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, "no-changes", {
+        queue = event.queue,
+        source_ref = fix.source_ref,
+        terminal = false,
+      })
       raise_review_meta(repo, issue_number, fix, "no-fix", result.stdout or result.stderr)
       return
     end

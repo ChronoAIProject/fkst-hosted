@@ -61,5 +61,29 @@ local query = 'query { repository(owner:"o", name:"r") { issues(first:10) { tota
         self.assertEqual(self.warning_lines(source), [])
 
 
+class ErrorClassPrefixGuardTest(unittest.TestCase):
+    def warning_lines(self, source: str) -> list[int]:
+        return check_repo.unclassified_error_call_lines(source)
+
+    def test_warns_error_without_class_prefix(self) -> None:
+        source = """
+error("github-devloop: failed without narrow class")
+"""
+        self.assertEqual(self.warning_lines(source), [2])
+
+    def test_allows_error_with_class_prefix(self) -> None:
+        source = """
+error("github-devloop: gh-view-failed: details")
+"""
+        self.assertEqual(self.warning_lines(source), [])
+
+    def test_ignores_comments_and_dynamic_messages(self) -> None:
+        source = """
+-- error("github-devloop: failed without narrow class")
+error(prefix .. detail)
+"""
+        self.assertEqual(self.warning_lines(source), [])
+
+
 if __name__ == "__main__":
     unittest.main()

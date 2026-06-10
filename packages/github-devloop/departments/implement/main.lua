@@ -187,7 +187,11 @@ function pipeline(event)
 
     if type(result) ~= "table" or result.exit_code ~= 0 then
       local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr)
+      core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr, {
+        queue = event.queue,
+        source_ref = ready.source_ref,
+        terminal = false,
+      })
       raise_impl_failed(repo, issue_number, ready, "codex-failed", stderr)
       return
     end
@@ -214,7 +218,11 @@ function pipeline(event)
       if detail == "" then
         detail = tostring(result.stderr or "")
       end
-      core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes")
+      core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes", {
+        queue = event.queue,
+        source_ref = ready.source_ref,
+        terminal = false,
+      })
       raise_impl_failed(repo, issue_number, ready, "no-changes", detail)
       return
     end

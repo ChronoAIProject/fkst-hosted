@@ -1,5 +1,6 @@
 local M = {}
 
+require("core.error_facts").install(M)
 require("core.issue_create").install(M)
 
 local allowed_env = {

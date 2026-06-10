@@ -208,7 +208,11 @@ function pipeline(event)
       })
       if type(result) ~= "table" or result.exit_code ~= 0 then
         local stderr = type(result) == "table" and result.stderr or "nil result"
-        core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, stderr)
+        core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, stderr, {
+          queue = event.queue,
+          source_ref = conflict.source_ref,
+          terminal = false,
+        })
         error("github-devloop: sync conflict codex failed: " .. tostring(stderr))
       end
       core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, "result=completed", nil)

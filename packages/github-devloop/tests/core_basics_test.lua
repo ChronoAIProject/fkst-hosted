@@ -74,6 +74,72 @@ return {
     t.is_nil(core.parse_proposal_id("autochrono/issue/owner/repo/42"))
   end,
 
+  test_error_fact_fields_include_available_delivery_context = function()
+    local fields = core.error_fact_fields(
+      "codex-failed",
+      "devloop_ready",
+      "implement",
+      "codex failed at 2026-06-10T01:02:03Z on abcdef1234567890 in /tmp/fkst-a",
+      {
+        source_ref = source_ref(),
+        attempt = 4,
+        terminal = false,
+      }
+    )
+
+    t.eq(fields[1], "error_class=codex-failed")
+    t.eq(fields[2], "fingerprint=" .. core.error_fingerprint(
+      "codex-failed",
+      "devloop_ready",
+      "implement",
+      "codex failed at 2027-07-11T09:08:07Z on fedcba0987654321 in /tmp/fkst-b"
+    ))
+    t.eq(fields[3], "source_ref=external:owner/repo#issue/42")
+    t.eq(fields[4], "attempt=4")
+    t.eq(fields[5], "terminal=false")
+  end,
+
+  test_error_fact_fields_omit_unavailable_delivery_context = function()
+    local fields = core.error_fact_fields("codex-failed", "devloop_ready", "implement", "codex failed", {})
+
+    t.eq(#fields, 2)
+    t.eq(fields[1], "error_class=codex-failed")
+    t.is_true(fields[2]:find("^fingerprint=fp%-") ~= nil)
+  end,
+
+  test_log_codex_result_emits_structured_failure_line = function()
+    local captured = {}
+    local old_log = log
+    log = {
+      error = function(message)
+        table.insert(captured, tostring(message))
+      end,
+    }
+
+    core.log_codex_result(
+      "implement",
+      "github-devloop/issue/owner/repo/42",
+      "implement",
+      { exit_code = 1 },
+      nil,
+      "codex failed",
+      {
+        queue = "devloop_ready",
+        source_ref = source_ref(),
+        terminal = false,
+      }
+    )
+    log = old_log
+
+    t.eq(#captured, 1)
+    t.is_true(captured[1]:find("github-devloop dept=implement", 1, true) ~= nil)
+    t.is_true(captured[1]:find("tag=CODEX", 1, true) ~= nil)
+    t.is_true(captured[1]:find("error_class=codex-failed", 1, true) ~= nil)
+    t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(captured[1]:find("terminal=false", 1, true) ~= nil)
+  end,
+
   test_build_proposal = function()
     local proposal = core.build_proposal(issue())
     t.eq(proposal.schema, "consensus.proposal.v1")
