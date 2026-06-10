@@ -232,24 +232,24 @@ return {
     t.eq(count_calls("gh issue list --repo 'other/repo' --state open --limit 100 --json number,title,labels"), 1)
   end,
 
-  test_utf8_safe_truncate_handles_mixed_width_boundaries = function()
+  test_truncate_utf8_handles_mixed_width_boundaries = function()
     local cjk = cjk_char()
     local mixed = "ab" .. cjk .. "cd"
     local emoji = emoji_char()
 
-    t.eq(core._utf8_safe_truncate(mixed, 2), "ab")
-    t.eq(core._utf8_safe_truncate(mixed, 3), "ab")
-    t.eq(core._utf8_safe_truncate(mixed, 4), "ab")
-    t.eq(core._utf8_safe_truncate(mixed, 5), "ab" .. cjk)
-    t.eq(core._utf8_safe_truncate(mixed, 6), "ab" .. cjk .. "c")
-    t.eq(core._utf8_safe_truncate("", 3), "")
-    t.eq(core._utf8_safe_truncate(cjk, 2), "")
-    t.eq(core._utf8_safe_truncate(emoji .. "x", 3), "")
-    t.eq(core._utf8_safe_truncate("ab" .. emoji .. "x", 6), "ab" .. emoji)
-    assert_valid_utf8(core._utf8_safe_truncate(mixed, 1))
-    assert_valid_utf8(core._utf8_safe_truncate(mixed, 7))
-    assert_valid_utf8(core._utf8_safe_truncate("ab" .. emoji .. "x", 5))
-    assert_valid_utf8(core._utf8_safe_truncate("ab" .. emoji .. "x", 6))
+    t.eq(core.truncate_utf8(mixed, 2), "ab")
+    t.eq(core.truncate_utf8(mixed, 3), "ab")
+    t.eq(core.truncate_utf8(mixed, 4), "ab")
+    t.eq(core.truncate_utf8(mixed, 5), "ab" .. cjk)
+    t.eq(core.truncate_utf8(mixed, 6), "ab" .. cjk .. "c")
+    t.eq(core.truncate_utf8("", 3), "")
+    t.eq(core.truncate_utf8(cjk, 2), "")
+    t.eq(core.truncate_utf8(emoji .. "x", 3), "")
+    t.eq(core.truncate_utf8("ab" .. emoji .. "x", 6), "ab" .. emoji)
+    assert_valid_utf8(core.truncate_utf8(mixed, 1))
+    assert_valid_utf8(core.truncate_utf8(mixed, 7))
+    assert_valid_utf8(core.truncate_utf8("ab" .. emoji .. "x", 5))
+    assert_valid_utf8(core.truncate_utf8("ab" .. emoji .. "x", 6))
   end,
 
   test_board_digest_title_truncation_keeps_utf8_valid_before_cache_set = function()

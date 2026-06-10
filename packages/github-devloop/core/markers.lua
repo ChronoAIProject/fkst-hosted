@@ -23,7 +23,7 @@ local function safe_marker_attr(M, value, limit)
   text = text:gsub("^%s+", ""):gsub("%s+$", "")
   local cap = limit or max_attr_len
   if #text > cap then
-    text = M._utf8_safe_truncate(text, cap)
+    text = M.truncate_utf8(text, cap)
   end
   return text
 end
@@ -338,7 +338,7 @@ local function bounded_marker_line(M, value, limit)
   end
   local cap = limit or M._max_blocking_gap_len
   if #text > cap then
-    text = M._utf8_safe_truncate(text, cap)
+    text = M.truncate_utf8(text, cap)
   end
   return text
 end
@@ -401,7 +401,7 @@ function M.review_prior_round_ledger(comments, issue_proposal_id, issue_version)
   end
   local ledger = table.concat(lines, "\n")
   if #ledger > M._max_review_ledger_len then
-    ledger = M._utf8_safe_truncate(ledger, M._max_review_ledger_len)
+    ledger = M.truncate_utf8(ledger, M._max_review_ledger_len)
   end
   return M.neutralize_untrusted_prompt_text(ledger)
 end

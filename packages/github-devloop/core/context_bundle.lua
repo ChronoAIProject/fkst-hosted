@@ -209,7 +209,7 @@ local function truncate_if_needed(text, dept, proposal_id, file_name)
     "limit=" .. tostring(max_bundle_file_len),
     "actual=" .. tostring(#value),
   })
-  return M._utf8_safe_truncate(value, max_bundle_file_len)
+  return M.truncate_utf8(value, max_bundle_file_len)
 end
 
 local function fetch_cmd(cmd, label, exec)
