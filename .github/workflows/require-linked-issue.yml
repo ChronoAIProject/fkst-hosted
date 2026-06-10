@@ -1,6 +1,9 @@
 # Governance: every PR must have a corresponding GitHub issue.
-# Primary signal: GitHub's own closing-issue references (what auto-closes on merge).
-# Fallback: a closing keyword + #number in the PR body.
+# Primary signal: a closing keyword + #number in the PR body (zero API calls).
+# Fallback: GitHub's own closing-issue references (what auto-closes on merge),
+# queried with bounded retries — GitHub's API intermittently returns transient
+# 401/5xx errors and a single flaky call must not turn into a spurious red
+# required check.
 name: Require linked issue
 
 on:
@@ -35,28 +38,34 @@ jobs:
 
           echo "INFO: Checking PR #${NUMBER} for a linked/closing issue."
 
-          # 1) Primary: issues GitHub recognizes as auto-closing for this PR.
-          COUNT=$(gh api graphql \
-            -f query='
-              query($owner:String!, $repo:String!, $number:Int!) {
-                repository(owner:$owner, name:$repo) {
-                  pullRequest(number:$number) {
-                    closingIssuesReferences(first:10) { totalCount }
+          # 1) Zero-API signal: closing keyword + #number anywhere in the PR body.
+          if printf '%s' "${PR_BODY:-}" | grep -iEq '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+'; then
+            echo "INFO: Found a closing keyword referencing an issue (e.g. 'Closes #N') in the PR body. Check passed."
+            exit 0
+          fi
+
+          # 2) Issues GitHub recognizes as auto-closing for this PR, with bounded
+          #    retries against transient API failures.
+          COUNT=""
+          for attempt in 1 2 3 4 5; do
+            COUNT=$(gh api graphql \
+              -f query='
+                query($owner:String!, $repo:String!, $number:Int!) {
+                  repository(owner:$owner, name:$repo) {
+                    pullRequest(number:$number) {
+                      closingIssuesReferences(first:10) { totalCount }
+                    }
                   }
-                }
-              }' \
-            -F owner="${OWNER}" -F repo="${REPO}" -F number="${NUMBER}" \
-            --jq '.data.repository.pullRequest.closingIssuesReferences.totalCount')
+                }' \
+              -F owner="${OWNER}" -F repo="${REPO}" -F number="${NUMBER}" \
+              --jq '.data.repository.pullRequest.closingIssuesReferences.totalCount') && break
+            echo "WARN: GitHub API attempt ${attempt}/5 failed; retrying in 5s."
+            sleep 5
+          done
           echo "INFO: GitHub closing-issue references: ${COUNT:-0}"
 
           if [ "${COUNT:-0}" -gt 0 ]; then
             echo "INFO: PR is linked to ${COUNT} closing issue(s). Check passed."
-            exit 0
-          fi
-
-          # 2) Fallback: closing keyword + #number anywhere in the PR body.
-          if printf '%s' "${PR_BODY:-}" | grep -iEq '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+'; then
-            echo "INFO: Found a closing keyword referencing an issue (e.g. 'Closes #N') in the PR body. Check passed."
             exit 0
           fi
 
