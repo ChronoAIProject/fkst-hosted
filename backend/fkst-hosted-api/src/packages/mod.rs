@@ -8,9 +8,11 @@
 
 pub mod error;
 pub mod model;
+pub mod repository;
 
 pub use error::PackageError;
 pub use model::{
     NewPackage, Package, PackageFile, MAX_COMPOSED_DEPS, MAX_COMPOSED_DEP_LEN, MAX_FILES,
     MAX_FILE_CONTENT_BYTES, MAX_FILE_PATH_LEN, MAX_TOTAL_CONTENT_BYTES, PACKAGES_COLLECTION,
 };
+pub use repository::PackageRepository;

@@ -35,7 +35,6 @@ fn code_is_dup(code: i32) -> bool {
 /// (`ErrorKind::Write(WriteFailure::WriteError)` with code 11000); the
 /// `BulkWrite` and `Command` arms are defensive because driver versions
 /// differ in how they report the failure.
-#[allow(dead_code)] // consumed by PackageRepository::create (next commit)
 pub(crate) fn is_duplicate_key(err: &mongodb::error::Error) -> bool {
     match &*err.kind {
         ErrorKind::Write(WriteFailure::WriteError(write_error)) => code_is_dup(write_error.code),
