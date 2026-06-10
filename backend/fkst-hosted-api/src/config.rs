@@ -8,6 +8,7 @@ use std::fmt;
 
 use serde::Deserialize;
 
+use crate::db::redact_mongodb_uri;
 use crate::error::AppError;
 
 /// Prefix shared by every HTTP/server configuration environment variable.
@@ -123,21 +124,6 @@ impl Default for Config {
             mongodb_db: defaults::mongodb_db(),
             mongodb_server_selection_timeout_ms: defaults::mongodb_server_selection_timeout_ms(),
         }
-    }
-}
-
-/// Redact the userinfo (credentials) segment of a MongoDB URI for logging.
-///
-/// `mongodb://user:secret@host:27017` -> `mongodb://<redacted>@host:27017`;
-/// a URI without userinfo is returned unchanged.
-// NOTE: temporary home — moves to the `db` module when it lands.
-pub fn redact_mongodb_uri(uri: &str) -> String {
-    match uri.split_once('@') {
-        Some((before_at, rest)) => match before_at.split_once("://") {
-            Some((scheme, _userinfo)) => format!("{scheme}://<redacted>@{rest}"),
-            None => format!("<redacted>@{rest}"),
-        },
-        None => uri.to_string(),
     }
 }
 
