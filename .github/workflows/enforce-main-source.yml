@@ -1,0 +1,30 @@
+# Governance: enforce that only `develop` may be merged into `main`.
+# Branch protection cannot restrict a PR's source branch, so this check does.
+name: Enforce main source branch
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  enforce-main-source:
+    name: Only develop may merge into main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR source branch is develop
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          echo "INFO: PR targets base='${BASE_REF}' from head='${HEAD_REF}'."
+          if [ "${HEAD_REF}" = "develop" ]; then
+            echo "INFO: Source branch is 'develop' — allowed to merge into main."
+            exit 0
+          fi
+          echo "::error::Only the 'develop' branch may be merged into 'main'. This PR's source branch is '${HEAD_REF}'. Open the PR from 'develop' instead."
+          exit 1
