@@ -608,6 +608,32 @@ function M.dependency_cycle_marker(proposal_id, version)
     .. '" -->'
 end
 
+function M.dependency_wait_fact(comments, proposal_id)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local current = M.current_state(comments, proposal_id)
+  if type(current) ~= "table" or current.version == nil then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      if marker_proposal == tostring(proposal_id)
+        and marker_version == tostring(current.version) then
+        return {
+          proposal_id = marker_proposal,
+          version = marker_version,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
 function M.is_safe_branch(branch)
   return M._is_git_ref_safe(branch)
 end

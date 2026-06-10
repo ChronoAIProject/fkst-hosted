@@ -2,6 +2,15 @@ local S = {}
 
 function S.install(M)
 local dept = "observability"
+local stall_suspect_threshold_minutes = {
+  thinking = 30,
+  ready = 30,
+  implementing = 90,
+  ["pr-open"] = 30,
+  reviewing = 60,
+  fixing = 90,
+  merging = 30,
+}
 
 local function run_cmd(cmd, timeout, error_class)
   local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
@@ -62,12 +71,14 @@ local function put_issue_entity(entities, repo, issue_number, issue)
   local proposal_id = M.proposal_id(repo, issue_number)
   local issue_state = M.current_state(issue.comments, proposal_id)
   local link = M.pr_link_fact(issue.comments, proposal_id)
+  local dependency_wait = M.dependency_wait_fact(issue.comments, proposal_id)
   local entity = entities[proposal_id] or {
     proposal_id = proposal_id,
     issue_number = tonumber(issue_number),
     pr_number = nil,
     state = nil,
     marker_source = nil,
+    dependency_wait = nil,
   }
   entity.issue_number = tonumber(issue_number)
   if state_or_nil(issue_state) ~= nil then
@@ -77,6 +88,7 @@ local function put_issue_entity(entities, repo, issue_number, issue)
   if link ~= nil then
     entity.pr_number = link.pr_number
   end
+  entity.dependency_wait = dependency_wait
   entities[proposal_id] = entity
   return entity, link
 end
@@ -144,6 +156,93 @@ local function log_entity(entity)
   }))
 end
 
+local function timestamp_epoch_seconds(timestamp)
+  local year, month, day, hour, minute, second = tostring(timestamp or ""):match(
+    "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d)[%-:](%d%d)[%-:](%d%d)Z$"
+  )
+  if year == nil then
+    return nil
+  end
+  year = tonumber(year)
+  month = tonumber(month)
+  day = tonumber(day)
+  hour = tonumber(hour)
+  minute = tonumber(minute)
+  second = tonumber(second)
+  if month < 1 or month > 12
+    or day < 1 or day > 31
+    or hour > 23
+    or minute > 59
+    or second > 59 then
+    return nil
+  end
+
+  local adjusted_year = year
+  local adjusted_month = month
+  if adjusted_month <= 2 then
+    adjusted_year = adjusted_year - 1
+    adjusted_month = adjusted_month + 12
+  end
+  local era = math.floor(adjusted_year / 400)
+  local year_of_era = adjusted_year - era * 400
+  local day_of_year = math.floor((153 * (adjusted_month - 3) + 2) / 5) + day - 1
+  local day_of_era = year_of_era * 365
+    + math.floor(year_of_era / 4)
+    - math.floor(year_of_era / 100)
+    + day_of_year
+  local days_since_epoch = era * 146097 + day_of_era - 719468
+  return days_since_epoch * 86400 + hour * 3600 + minute * 60 + second
+end
+
+function M.stall_suspect_age_minutes(version, now_seconds)
+  local marker_updated_at = M.version_updated_at(version)
+  if marker_updated_at == "" then
+    return nil
+  end
+  local marker_seconds = timestamp_epoch_seconds(marker_updated_at)
+  local current_seconds = tonumber(now_seconds)
+  if marker_seconds == nil or current_seconds == nil then
+    return nil
+  end
+  local age_seconds = current_seconds - marker_seconds
+  if age_seconds < 0 then
+    return nil
+  end
+  return math.floor(age_seconds / 60)
+end
+
+function M.stall_suspect_threshold_minutes(state)
+  return stall_suspect_threshold_minutes[state]
+end
+
+function M.stall_suspect_log_line(proposal_id, state, age_minutes, threshold_minutes)
+  return table.concat({
+    "github-devloop",
+    "dept=" .. dept,
+    "tag=STALL_SUSPECT",
+    "proposal=" .. tostring(proposal_id or "unknown"),
+    "state=" .. tostring(state or "unknown"),
+    "age_minutes=" .. tostring(age_minutes or 0),
+    "threshold_minutes=" .. tostring(threshold_minutes or 0),
+  }, " ")
+end
+
+local function log_stall_suspect(entity, now_seconds)
+  local state = entity.state and entity.state.state or nil
+  local threshold = M.stall_suspect_threshold_minutes(state)
+  if threshold == nil then
+    return
+  end
+  if state == "ready" and entity.dependency_wait ~= nil then
+    return
+  end
+  local age = M.stall_suspect_age_minutes(entity.state.version, now_seconds)
+  if age == nil or age <= threshold then
+    return
+  end
+  log.info(M.stall_suspect_log_line(entity.proposal_id, state, age, threshold))
+end
+
 local function log_summary(counts, total)
   local fields = {
     "github-devloop",
@@ -206,10 +305,12 @@ function M.observe_devloop_entities()
   end)
 
   local counts = {}
+  local now_seconds = now()
   for _, entity in ipairs(list) do
     local state = entity.state and entity.state.state or "unmanaged"
     counts[state] = (counts[state] or 0) + 1
     log_entity(entity)
+    log_stall_suspect(entity, now_seconds)
   end
   log_summary(counts, #list)
 
