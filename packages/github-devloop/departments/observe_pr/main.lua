@@ -122,9 +122,7 @@ function pipeline(event)
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   core.assert_trusted_bot_configured()
   local branches = core.branch_config()
-  local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, {
-    cache_key = pr.view_cache_key,
-  })
+  local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end

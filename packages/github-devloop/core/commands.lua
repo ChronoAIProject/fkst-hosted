@@ -1,6 +1,14 @@
 local S = {}
 
 function S.install(M)
+function M.gh_exec(cmd, timeout, context)
+  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+  if result.exit_code ~= 0 then
+    error("github-devloop: " .. tostring(context or "gh command") .. " failed: " .. tostring(result.stderr))
+  end
+  return result
+end
+
 function M.gh_issue_list_intake_cmd(repo, limit)
   local bounded_limit = tonumber(limit or 100)
   if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then
