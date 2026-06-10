@@ -120,6 +120,49 @@ local function mock_blocker_issue(issue_number, state_name)
   })
 end
 
+local function mock_blocker_issue_with_pr_link(issue_number, pr_number, state_name)
+  local blocker_proposal_id = core.proposal_id(repo, issue_number)
+  local branch = "devloop-owner-repo-" .. tostring(issue_number) .. "-01HY"
+  local impl_version = "v-" .. tostring(issue_number)
+  local comments = {}
+  if state_name ~= nil then
+    table.insert(comments, core.state_marker(blocker_proposal_id, state_name, impl_version))
+  end
+  table.insert(comments, core.pr_link_marker(blocker_proposal_id, pr_number, branch, impl_version, "dev"))
+  t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
+    stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  return {
+    proposal_id = blocker_proposal_id,
+    branch = branch,
+    impl_version = impl_version,
+    base_branch = "dev",
+  }
+end
+
+local function mock_blocker_pr(issue_number, pr_number, link, comments)
+  local rendered_comments = comments or {
+    core.pr_origin_marker(link.proposal_id, issue_number, link.branch, link.impl_version, link.base_branch),
+  }
+  t.mock_command(core.gh_pr_view_observe_cmd(repo, pr_number), {
+    stdout = '{"headRefName":"' .. json_string(link.branch)
+      .. '","headRefOid":"abc123","baseRefName":"' .. json_string(link.base_branch)
+      .. '","state":"MERGED","comments":[' .. issue_comments_json(rendered_comments) .. ']}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_blocker_pr_failure(pr_number)
+  t.mock_command(core.gh_pr_view_observe_cmd(repo, pr_number), {
+    stdout = "",
+    stderr = "pr view failed",
+    exit_code = 1,
+  })
+end
+
 local function mock_result_issue(labels, comments)
   t.mock_command(core.gh_issue_view_result_cmd(repo, 42), {
     stdout = issue_view_json(labels or { "fkst-dev:thinking" }, comments or {
@@ -237,6 +280,45 @@ return {
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, true)
     t.eq(gate.kind, "satisfied")
+  end,
+
+  test_dependency_gate_satisfied_for_pr_stream_merged_blocker = function()
+    mock_blocked_by(42, { { number = 7 } })
+    mock_blocked_by(7, {})
+    local link = mock_blocker_issue_with_pr_link(7, 8, "pr-open")
+    mock_blocker_pr(7, 8, link, {
+      core.pr_origin_marker(link.proposal_id, 7, link.branch, link.impl_version, link.base_branch),
+      core.state_marker(link.proposal_id, "merged", "merge-version-7"),
+      core.merged_marker(link.proposal_id, 8, "merge-version-7", "def456"),
+    })
+    local gate = core.dependency_gate(repo, 42)
+    t.eq(gate.ok, true)
+    t.eq(gate.kind, "satisfied")
+  end,
+
+  test_dependency_gate_waits_when_linked_pr_has_no_merged_fact = function()
+    mock_blocked_by(42, { { number = 7 } })
+    mock_blocked_by(7, {})
+    local link = mock_blocker_issue_with_pr_link(7, 8, "pr-open")
+    mock_blocker_pr(7, 8, link, {
+      core.pr_origin_marker(link.proposal_id, 7, link.branch, link.impl_version, link.base_branch),
+      core.state_marker(link.proposal_id, "merge-ready", "merge-version-7"),
+    })
+    local gate = core.dependency_gate(repo, 42)
+    t.eq(gate.ok, false)
+    t.eq(gate.kind, "waiting")
+    t.eq(gate.unmet[1], 7)
+  end,
+
+  test_dependency_gate_pr_stream_fetch_failure_fails_closed = function()
+    mock_blocked_by(42, { { number = 7 } })
+    mock_blocked_by(7, {})
+    mock_blocker_issue_with_pr_link(7, 8, "pr-open")
+    mock_blocker_pr_failure(8)
+    local gate = core.dependency_gate(repo, 42)
+    t.eq(gate.ok, false)
+    t.eq(gate.kind, "unresolvable")
+    t.eq(gate.unmet[1], 7)
   end,
 
   test_dependency_gate_cycle = function()

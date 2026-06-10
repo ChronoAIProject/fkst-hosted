@@ -101,6 +101,7 @@ end
 
 local function blocker_merged(repo, blocker_number)
   local core = root()
+  local blocker_proposal_id = core.proposal_id(repo, blocker_number)
   local result = exec_sync({ cmd = core.gh_issue_view_observe_cmd(repo, blocker_number), timeout = 30 })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "gh-failed"
@@ -109,11 +110,44 @@ local function blocker_merged(repo, blocker_number)
   if not ok or type(current) ~= "table" then
     return nil, "malformed-json"
   end
-  local state = core.current_entity_state(current.comments, core.proposal_id(repo, blocker_number))
+  local state = core.current_entity_state(current.comments, blocker_proposal_id)
   if type(state) ~= "table" then
     return nil, "unknown-blocker"
   end
-  return state.state == "merged", nil
+  if state.state == "merged" then
+    return true, nil
+  end
+
+  local link = core.pr_link_fact(current.comments, blocker_proposal_id)
+  if link == nil then
+    return false, nil
+  end
+
+  local pr_result = exec_sync({ cmd = core.gh_pr_view_observe_cmd(repo, link.pr_number), timeout = 30 })
+  if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
+    return nil, "gh-pr-failed"
+  end
+  local pr_ok, pr_current = pcall(core.parse_pr_view_origin, pr_result.stdout)
+  if not pr_ok or type(pr_current) ~= "table" then
+    return nil, "malformed-pr-json"
+  end
+  local origin = core.pr_origin_fact(pr_current.comments)
+  if origin == nil
+    or tostring(origin.proposal_id or "") ~= blocker_proposal_id
+    or tostring(origin.repo or "") ~= tostring(repo)
+    or tostring(origin.issue_number or "") ~= tostring(blocker_number)
+    or tostring(origin.branch or "") ~= tostring(link.branch or "")
+    or tostring(origin.impl_version or "") ~= tostring(link.impl_version or "")
+    or tostring(origin.base_branch or "") ~= tostring(link.base_branch or "") then
+    return nil, "pr-origin-mismatch"
+  end
+
+  local pr_state = core.current_entity_state(pr_current.comments, blocker_proposal_id)
+  if type(pr_state) ~= "table" or pr_state.state ~= "merged" then
+    return false, nil
+  end
+  local merged = core.merged_fact(pr_current.comments, blocker_proposal_id, link.pr_number, pr_state.version)
+  return merged ~= nil, nil
 end
 
 local visit
