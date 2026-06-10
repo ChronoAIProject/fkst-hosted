@@ -39,19 +39,11 @@ return {
     local logs = capture_logs({
       queue = "dead_letter",
       payload = {
-        delivery = {
-          queue = "proposal",
-          dept = "decide",
-        },
-        event = {
-          payload = {
-            dedup_key = "github-devloop/issue/owner/repo/135/loop/2",
-            source_ref = {
-              kind = "external",
-              ref = "owner/repo#issue/135",
-            },
-          },
-        },
+        delivery_id = "delivery/v1/raised/queue/consensus.proposal/dept/consensus.decide/01HY",
+        queue = "consensus.proposal",
+        dept = "consensus.decide",
+        attempt = 3,
+        error = "codex timed out\nwhile running decide",
       },
     })
 
@@ -59,10 +51,11 @@ return {
     t.eq(
       logs[1],
       "consensus dept=dead_letter tag=DEAD_LETTER"
-        .. " queue=proposal"
-        .. " dead_dept=decide"
-        .. " source_ref=external:owner/repo#issue/135"
-        .. " dedup_key=github-devloop/issue/owner/repo/135/loop/2"
+        .. " delivery_id=delivery/v1/raised/queue/consensus.proposal/dept/consensus.decide/01HY"
+        .. " queue=consensus.proposal"
+        .. " dead_dept=consensus.decide"
+        .. " attempt=3"
+        .. " error=codex timed out while running decide"
     )
   end,
 }
