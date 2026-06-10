@@ -219,13 +219,26 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
     end
 
     if not cached_blocker_merged(repo, blocker.number) then
-      local nested = visit(repo, blocker.number, stack, visited, unmet, unmet_seen, depth + 1)
-      if nested.kind == "cycle" or nested.kind == "unresolvable" then
-        stack[key] = nil
-        return nested
+      local prefer_terminal_proof = blocker.state == "CLOSED"
+      local merged = nil
+      local merged_reason = nil
+
+      if prefer_terminal_proof then
+        merged, merged_reason = prove_blocker_merged(repo, blocker.number)
       end
 
-      local merged, merged_reason = prove_blocker_merged(repo, blocker.number)
+      if not prefer_terminal_proof or merged == false then
+        local nested = visit(repo, blocker.number, stack, visited, unmet, unmet_seen, depth + 1)
+        if nested.kind == "cycle" or nested.kind == "unresolvable" then
+          stack[key] = nil
+          return nested
+        end
+      end
+
+      if not prefer_terminal_proof then
+        merged, merged_reason = prove_blocker_merged(repo, blocker.number)
+      end
+
       if merged == nil then
         stack[key] = nil
         add_unmet(unmet, unmet_seen, blocker.number)

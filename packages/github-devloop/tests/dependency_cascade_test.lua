@@ -301,22 +301,23 @@ return {
   end,
 
   test_dependency_gate_caches_terminal_merged_blocker = function()
-    mock_blocked_by(42, { { number = 17 } })
-    mock_blocked_by(17, {})
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
+    mock_blocked_by_failure(17)
     mock_blocker_issue(17, "merged")
     local first = core.dependency_gate(repo, 42)
     t.eq(first.ok, true)
     t.eq(first.kind, "satisfied")
     local graphql_calls_after_first = count_calls("gh api graphql")
+    t.eq(graphql_calls_after_first, 1)
 
-    mock_blocked_by(42, { { number = 17 } })
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
     mock_blocked_by_failure(17)
     local second = core.dependency_gate(repo, 42)
     t.eq(second.ok, true)
     t.eq(second.kind, "satisfied")
     t.eq(count_calls("gh api graphql"), graphql_calls_after_first + 1)
 
-    mock_blocked_by(42, { { number = 17 }, { number = 18 } })
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" }, { number = 18 } })
     mock_blocked_by(18, {})
     mock_blocker_issue(18, "ready")
     local changed_root_edges = core.dependency_gate(repo, 42)
@@ -324,7 +325,7 @@ return {
     t.eq(changed_root_edges.kind, "waiting")
     t.eq(changed_root_edges.unmet[1], 18)
 
-    mock_blocked_by(42, { { number = 17 } })
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
     mock_blocked_by(17, {})
     mock_blocker_issue_failure(17)
     local third = core.dependency_gate(repo, 42)
@@ -357,8 +358,8 @@ return {
   end,
 
   test_dependency_gate_satisfied_for_pr_stream_merged_blocker = function()
-    mock_blocked_by(42, { { number = 31 } })
-    mock_blocked_by(31, {})
+    mock_blocked_by(42, { { number = 31, state = "CLOSED" } })
+    mock_blocked_by_failure(31)
     local link = mock_blocker_issue_with_pr_link(31, 32, "pr-open")
     mock_blocker_pr(31, 32, link, {
       core.pr_origin_marker(link.proposal_id, 31, link.branch, link.impl_version, link.base_branch),
