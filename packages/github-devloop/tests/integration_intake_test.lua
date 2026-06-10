@@ -206,6 +206,24 @@ return {
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
   end,
 
+  test_judge_declines_umbrella_tracker_without_codex = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "[umbrella] Fold the babysitter into the system",
+      body = "Tracks independent waves.\n\n- wave-1 stall watchdog\n- wave-2 DLQ triage\n\nSplit into independent wave proposals.",
+    })
+
+    local result = run_judge(payload, opts("intake-umbrella-static-decline"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    t.is_true(comment.body:find('decision="decline"', 1, true) ~= nil)
+    t.is_true(comment.body:find("not directly implementable", 1, true) ~= nil)
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_label_request"))
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
   test_judge_enables_ambiguous_cross_repo_and_insufficient_detail_tasks = function()
     local payload = candidate()
 
