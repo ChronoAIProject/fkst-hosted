@@ -68,7 +68,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package.json CHANGELOG.md
-          if [ -f backend/Cargo.toml ]; then git add backend/Cargo.toml; fi
+          if [ -f backend/Cargo.toml ]; then git add backend/Cargo.toml backend/Cargo.lock; fi
           git commit -m "chore(release): set version v$NEW and update CHANGELOG"
           git push origin "HEAD:$HEAD_REF"
           echo "INFO: pushed version + CHANGELOG sync for v$NEW."
