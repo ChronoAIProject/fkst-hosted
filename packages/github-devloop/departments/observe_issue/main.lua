@@ -49,6 +49,21 @@ function pipeline(event)
     if state.state ~= nil then
       if state.state == "thinking" then
         core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
+        if core.version_loop_round(state.version) == 0 then
+          local proposal = core.build_proposal(issue)
+          proposal.dedup_key = state.version
+          if core.validate_proposal(proposal) then
+            core.log_apply("observe_issue", proposal_id, "thinking", proposal.dedup_key, { add = {}, remove = {} }, {
+              "consensus.proposal",
+            })
+            core.log_raise("observe_issue", proposal_id, "consensus.proposal", proposal)
+          else
+            log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-rebuild-thinking-proposal")
+          end
+        else
+          -- Converge markers store bounded digests, not the full narrowed question, so
+          -- observe self-heal cannot reconstruct the exact mid-loop proposal.
+        end
       end
       if not core.state_label_hint_matches(current.labels, state.state) then
         local label_request = core.build_reconcile_state_label_request(issue.repo, issue.number, proposal_id, state.state, state.version, issue.source_ref)
