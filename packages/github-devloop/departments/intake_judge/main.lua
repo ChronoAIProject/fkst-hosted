@@ -56,27 +56,22 @@ function pipeline(event)
       return
     end
 
-    local parsed = core.static_intake_decision(current)
-    if parsed ~= nil then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", parsed.action, "static-decline(umbrella)", parsed.reason)
-    else
-      core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
-      local result = spawn_codex_sync({
-        prompt = core.build_intake_prompt(candidate.proposal_id, current),
-      })
-      if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
-        local stderr = type(result) == "table" and result.stderr or "nil result"
-        core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr)
-        error("github-devloop: intake codex failed: " .. tostring(stderr))
-      end
+    core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
+    local result = spawn_codex_sync({
+      prompt = core.build_intake_prompt(candidate.proposal_id, current),
+    })
+    if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
+      local stderr = type(result) == "table" and result.stderr or "nil result"
+      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr)
+      error("github-devloop: intake codex failed: " .. tostring(stderr))
+    end
 
-      parsed = core.parse_intake_action(result.stdout)
-      if parsed == nil then
-        parsed = decline_result()
-        core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
-      else
-        core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
-      end
+    local parsed = core.parse_intake_action(result.stdout)
+    if parsed == nil then
+      parsed = decline_result()
+      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
+    else
+      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
     end
 
     local comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason)
