@@ -89,10 +89,33 @@ local function mock_release_notes(body)
   })
 end
 
-local function rollup_body_path()
-  return "/tmp/fkst-github-devloop-rollup-"
-    .. core._decimal_checksum("owner/repo#dev#integration/dev")
-    .. ".md"
+local function rollup_body_path(name)
+  return "/tmp/fkst-github-devloop-rollup." .. tostring(name or "notes")
+end
+
+local function mock_rollup_body_file(name)
+  t.mock_command("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'", {
+    stdout = rollup_body_path(name) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_rollup_body_cleanup(name)
+  t.mock_command("rm -f -- '" .. rollup_body_path(name) .. "'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function find_call(needle)
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find(needle, 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
 end
 
 return {
@@ -122,7 +145,9 @@ return {
     mock_pr_list(nil)
     mock_integration_head("def456")
     mock_release_notes("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel)
+    mock_rollup_body_file("create")
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
+    mock_rollup_body_cleanup("create")
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-create", { FKST_GITHUB_WRITE = "1" }))
@@ -141,9 +166,10 @@ return {
     t.is_true(saw_prompt_issue_fetch)
     t.is_true(h.has_call("--head 'integration/dev'"))
     t.is_true(h.has_call("--base 'dev'"))
-    local written = file.read(rollup_body_path())
-    t.is_true(written:find("Release highlights", 1, true) ~= nil)
-    t.is_true(written:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
+    local create_call = find_call("gh pr create")
+    t.is_true(create_call.rendered:find("--body-file '" .. rollup_body_path("create") .. "'", 1, true) ~= nil)
+    t.eq(h.count_calls("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'"), 1)
+    t.eq(h.count_calls("rm -f -- '" .. rollup_body_path("create") .. "'"), 1)
   end,
 
   test_rollup_scan_codex_failure_fails_closed_before_create = function()
@@ -168,6 +194,8 @@ return {
     mock_integration_head("def456")
     t.mock_command("codex exec", { stdout = "", stderr = "model unavailable", exit_code = 1 })
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
+    mock_rollup_body_file("fallback")
+    mock_rollup_body_cleanup("fallback")
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
     local result = run_scan(opts("rollup-fallback", {
@@ -176,9 +204,26 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 1)
-    local written = file.read(rollup_body_path())
-    t.is_true(written:find("Automated rollup from `integration/dev` into `dev`.", 1, true) ~= nil)
-    t.is_true(written:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
+    local create_call = find_call("gh pr create")
+    t.is_true(create_call.rendered:find("--body-file '" .. rollup_body_path("fallback") .. "'", 1, true) ~= nil)
+    t.eq(h.count_calls("rm -f -- '" .. rollup_body_path("fallback") .. "'"), 1)
+  end,
+
+  test_rollup_scan_cleans_release_notes_body_file_when_pr_create_fails = function()
+    mock_env("1")
+    mock_fetches()
+    mock_ahead(3)
+    mock_content_diff(true)
+    mock_pr_list(nil)
+    mock_integration_head("def456")
+    mock_release_notes("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel)
+    mock_rollup_body_file("create-fail")
+    t.mock_command("gh pr create", { stdout = "", stderr = "create failed", exit_code = 1 })
+    mock_rollup_body_cleanup("create-fail")
+    local result = run_scan(opts("rollup-create-fail", { FKST_GITHUB_WRITE = "1" }))
+    t.is_true(result.exit_code ~= 0)
+    t.eq(h.count_calls("gh pr create"), 1)
+    t.eq(h.count_calls("rm -f -- '" .. rollup_body_path("create-fail") .. "'"), 1)
   end,
 
   test_rollup_scan_ahead_without_content_diff_skips_pr = function()
