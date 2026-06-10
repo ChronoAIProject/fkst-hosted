@@ -170,6 +170,17 @@ return {
     t.eq(#entities, 0)
   end,
 
+  test_parse_entity_list_empty_slurped_page = function()
+    local entities = core.parse_entity_list("[[]]")
+    t.eq(#entities, 0)
+  end,
+
+  test_parse_entity_list_skips_malformed_rest_items = function()
+    local entities = core.parse_entity_list('[[{},{"number":7,"title":"Fix","html_url":"https://example.test/7"}]]')
+    t.eq(#entities, 1)
+    t.eq(entities[1].number, 7)
+  end,
+
   test_parse_entity_list_accepts_updated_at = function()
     local entities = core.parse_entity_list('[{"number":8,"title":"Snake case","url":"https://example.test/8","updated_at":"2026-06-03T04:05:06Z","state":"OPEN"}]')
     t.eq(#entities, 1)

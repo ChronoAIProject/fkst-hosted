@@ -77,15 +77,19 @@ local function each_paginated_item(decoded, callback)
   end
 end
 
-function M.parse_issue_list_intake(stdout)
+function M.parse_issue_list_intake(stdout, limit)
   local decoded = json.decode(stdout or "[]")
   local issues = {}
   if type(decoded) ~= "table" then
     return issues
   end
+  local max_items = math.floor(tonumber(limit or 2147483647) or 2147483647)
+  if max_items < 1 then
+    return issues
+  end
   each_paginated_item(decoded, function(issue)
     local number = type(issue) == "table" and tonumber(issue.number) or nil
-    if number ~= nil and issue.pull_request == nil then
+    if number ~= nil and issue.pull_request == nil and #issues < max_items then
       table.insert(issues, {
         number = number,
         title = tostring(issue.title or ""),

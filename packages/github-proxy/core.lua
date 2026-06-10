@@ -329,12 +329,15 @@ function M.is_safe_head_sha(head_sha) return is_git_sha(head_sha) end
 function M.parse_entity_list(gh_json_stdout, entity_type)
   local decoded = json.decode(gh_json_stdout or "[]")
   local entities = {}
-  for _, page in ipairs(decoded) do
-    local items = (type(page) == "table" and page[1] ~= nil) and page or { page }
-    for _, item in ipairs(items) do
-      if type(item) == "table" and (entity_type ~= "issue" or item.pull_request == nil) then
-        local labels, item_state = json.decode("[]"), item.state
-        for _, label in ipairs(item.labels or {}) do
+  local function visit_items(value)
+    if type(value) ~= "table" then
+      return
+    end
+    if value.number ~= nil then
+      local number = tonumber(value.number)
+      if number ~= nil and (entity_type ~= "issue" or value.pull_request == nil) then
+        local labels, item_state = json.decode("[]"), value.state
+        for _, label in ipairs(value.labels or {}) do
           if type(label) == "table" and label.name ~= nil then
             table.insert(labels, tostring(label.name))
           elseif type(label) == "string" then
@@ -344,11 +347,16 @@ function M.parse_entity_list(gh_json_stdout, entity_type)
         if type(item_state) == "string" then
           item_state = item_state:upper()
         end
-        table.insert(entities, { number = item.number, title = item.title, url = item.url or item.html_url,
-          updated_at = item.updatedAt or item.updated_at, state = item_state, labels = labels })
+        table.insert(entities, { number = number, title = value.title, url = value.url or value.html_url,
+          updated_at = value.updatedAt or value.updated_at, state = item_state, labels = labels })
       end
+      return
+    end
+    for _, item in ipairs(value) do
+      visit_items(item)
     end
   end
+  visit_items(decoded)
   return entities
 end
 
@@ -586,7 +594,6 @@ end
 function M.parse_issue_list(gh_json_stdout)
   return M.parse_entity_list(gh_json_stdout, "issue")
 end
-
 function M.gh_issue_list_cmd(repo)
   return "gh api --paginate --slurp " .. shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
 end
