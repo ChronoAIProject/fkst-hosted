@@ -89,6 +89,29 @@ return {
     t.eq(current.state, "review-meta")
   end,
 
+  test_current_devloop_state_trailing_fix_suffix_keeps_loop_round = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local comments = core.parse_issue_comments(
+      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
+        .. proposal_id
+        .. '\\" state=\\"pr-open\\" version=\\"'
+        .. base
+        .. '/loop/2\\" stage_rank=\\"650\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
+        .. proposal_id
+        .. '\\" state=\\"reviewing\\" version=\\"'
+        .. base
+        .. '/loop/2\\" stage_rank=\\"675\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
+        .. proposal_id
+        .. '\\" state=\\"fixing\\" version=\\"'
+        .. base
+        .. '/loop/2/fix/1\\" stage_rank=\\"700\\" -->","author":{"login":"fkst-test-bot"}}]}'
+    )
+
+    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
+    t.eq(current.state, "fixing")
+  end,
+
   test_current_devloop_state_recognizes_merging = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"

@@ -414,8 +414,14 @@ local function version_updated_at(version)
 end
 
 local function version_loop_round(version)
-  local n = tostring(version or ""):match("/loop/(%d+)$")
-  return tonumber(n) or 0
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]loop[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
 end
 
 local function version_fix_round(version)
