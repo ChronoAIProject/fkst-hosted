@@ -17,7 +17,7 @@ function M.gh_issue_list_intake_cmd(repo, limit)
   if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then
     error("github-devloop: invalid intake issue list limit")
   end
-  return "gh api --paginate --slurp "
+  return "gh api "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=" .. tostring(math.floor(bounded_limit)))
 end
 

@@ -70,7 +70,7 @@ local function each_paginated_item(decoded, callback)
         for _, item in ipairs(value) do
           callback(item)
         end
-      else
+      elseif next(value) ~= nil then
         callback(value)
       end
     end
@@ -84,9 +84,10 @@ function M.parse_issue_list_intake(stdout)
     return issues
   end
   each_paginated_item(decoded, function(issue)
-    if type(issue) == "table" and issue.pull_request == nil then
+    local number = type(issue) == "table" and tonumber(issue.number) or nil
+    if number ~= nil and issue.pull_request == nil then
       table.insert(issues, {
-        number = issue.number,
+        number = number,
         title = tostring(issue.title or ""),
         updated_at = issue.updatedAt or issue.updated_at,
         labels = label_names(issue.labels),
@@ -309,7 +310,8 @@ function M.parse_pr_list_head_base(stdout)
     return prs
   end
   each_paginated_item(decoded, function(pr)
-    if type(pr) == "table" then
+    local number = type(pr) == "table" and tonumber(pr.number) or nil
+    if number ~= nil then
       local head_ref_name = pr.headRefName or pr.head_ref_name
       local head_sha = pr.headRefOid or pr.head_ref_oid
       if type(pr.head) == "table" then
@@ -321,7 +323,7 @@ function M.parse_pr_list_head_base(stdout)
         base_ref_name = pr.base.ref
       end
       table.insert(prs, {
-        number = pr.number,
+        number = number,
         head_sha = head_sha,
         head_ref_name = head_ref_name,
         base_ref_name = base_ref_name,

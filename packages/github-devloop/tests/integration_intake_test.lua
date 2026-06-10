@@ -56,7 +56,7 @@ local function issue_list_json(issues)
 end
 
 local function mock_issue_list(issues)
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'", {
+  t.mock_command(core.gh_issue_list_intake_cmd("owner/repo", 100), {
     stdout = issue_list_json(issues) .. "\n",
     stderr = "",
     exit_code = 0,
