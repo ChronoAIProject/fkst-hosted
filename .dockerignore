@@ -1,0 +1,7 @@
+target/
+backend/target/
+.git/
+node_modules/
+frontend/
+.auto/
+.claude/
