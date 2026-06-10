@@ -135,7 +135,7 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch)
   })
 end
 
-local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at)
+local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, is_draft)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   if input_comments == nil or #input_comments == 0 then
@@ -172,12 +172,13 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}]}\n',
+      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}]}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
       json_string(state or "OPEN"),
+      is_draft == true and "true" or "false",
       json_string(merged_at or ""),
       table.concat(rendered_comments, ","),
       json_string(head_repo or "owner/repo"),
@@ -195,7 +196,7 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
   end
 end
 
-local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, merged_at)
+local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, merged_at, is_draft)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   if input_comments == nil or #input_comments == 0 then
@@ -232,12 +233,13 @@ local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
+      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
       json_string(state or "OPEN"),
+      is_draft == true and "true" or "false",
       json_string(merged_at or ""),
       table.concat(rendered_comments, ","),
       json_string(head_repo or "owner/repo"),
@@ -263,6 +265,14 @@ local function mock_pr_merge_command(exit_code, stderr)
   mock_pr_merge(nil, "devloop-owner-repo-42-01HY", "def456", "OPEN")
   t.mock_command("gh pr merge '7' --repo 'owner/repo' --merge --match-head-commit 'def456'", {
     stdout = "merged\n",
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
+end
+
+local function mock_pr_ready(exit_code, stderr)
+  t.mock_command("gh pr ready '7' --repo 'owner/repo'", {
+    stdout = "ready\n",
     stderr = stderr or "",
     exit_code = exit_code or 0,
   })
@@ -460,6 +470,7 @@ return {
   mock_pr_merge_rollup = mock_pr_merge_rollup,
   mock_merging_comment = mock_merging_comment,
   mock_pr_merge_command = mock_pr_merge_command,
+  mock_pr_ready = mock_pr_ready,
   has_call = has_call,
   mock_issue_close = mock_issue_close,
   merge_comments_with_merging = merge_comments_with_merging,
