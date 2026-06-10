@@ -517,4 +517,40 @@ return {
     t.eq(count_calls("gh issue edit"), 0)
     t.eq(count_calls("--json labels,comments"), 2)
   end,
+
+  test_pr_open_retry_after_fixing_suffix_does_not_revert_issue_label = function()
+    local event = pr_open_event()
+    local base = "ready/consensus-github-devloop/issue/owner/x/42/2026-06-04T01-02-03Z"
+    event.payload.impl_version = base .. "/loop/2"
+    event.payload.expected_version = event.payload.impl_version
+    local comments = pr_open_visible_comments({
+      '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="'
+        .. base
+        .. '/loop/2" stage_rank="650" -->',
+      '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="fixing" version="'
+        .. base
+        .. '/loop/2/fix/1" stage_rank="700" -->',
+    })
+
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_open_guard({ "fkst-dev:pr-open" }, comments)
+    mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
+    mock_pr_head_state("abc123", "OPEN")
+    mock_pr_comment_view({ {
+      body = event.payload.body,
+      author_login = "fkst-test-bot",
+    } })
+    mock_pr_open_guard({ "fkst-dev:pr-open" }, comments)
+
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-fixing-suffix-no-label-regress", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git push -u origin"), 0)
+    t.eq(count_calls("gh pr create"), 0)
+    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("gh issue edit"), 0)
+    t.eq(count_calls("--json labels,comments"), 2)
+  end,
 }
