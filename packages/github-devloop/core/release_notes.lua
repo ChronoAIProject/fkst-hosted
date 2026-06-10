@@ -76,7 +76,21 @@ function M.build_release_notes_prompt(repo, upstream, integration, head_sha, ahe
   })
 end
 
+function M.release_notes_publish_policy(cfg)
+  if type(cfg) ~= "table" then
+    error("github-devloop: release notes publish policy requires config")
+  end
+  return {
+    allow_fallback = cfg.write_mode == "real",
+    write_mode = tostring(cfg.write_mode or ""),
+  }
+end
+
 function M.draft_release_notes(args)
+  local policy = args.publish_policy
+  if type(policy) ~= "table" then
+    error("github-devloop: release notes publish policy is required")
+  end
   local result = spawn_codex_sync({
     prompt = M.build_release_notes_prompt(
       args.repo,
@@ -88,7 +102,7 @@ function M.draft_release_notes(args)
     timeout = 3600,
   })
   if type(result) ~= "table" or result.exit_code ~= 0 then
-    if args.allow_fallback == true then
+    if policy.allow_fallback == true then
       return M.release_notes_fallback_body(args.upstream_branch, args.integration_branch, args.ahead), "fallback"
     end
     local stderr = type(result) == "table" and result.stderr or "missing codex result"

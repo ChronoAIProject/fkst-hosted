@@ -144,10 +144,11 @@ return {
     end
     t.is_true(codex_call ~= nil)
     t.is_true(codex_call.stdin:find("git log --format=", 1, true) ~= nil)
-    t.is_true(codex_call.stdin:find("refs/remotes/origin/dev..refs/remotes/origin/integration/dev", 1, true) ~= nil)
+    t.is_true(codex_call.stdin:find("refs/remotes/origin/dev..def456", 1, true) ~= nil)
+    t.is_true(codex_call.stdin:find("refs/remotes/origin/dev..refs/remotes/origin/integration/dev", 1, true) == nil)
     t.is_true(codex_call.stdin:find("gh issue view <referenced-number> --repo owner/repo --json title,body,comments,labels,state", 1, true) ~= nil)
     t.is_true(codex_call.stdin:find("Do not use delivery payload content as source material.", 1, true) ~= nil)
-    t.is_true(codex_call.stdin:find("Integration head: def456", 1, true) ~= nil)
+    t.is_true(codex_call.stdin:find("Captured integration head: def456", 1, true) ~= nil)
   end,
 
   test_rollup_scan_codex_failure_uses_minimal_notes_when_real_publish_allows_fallback = function()

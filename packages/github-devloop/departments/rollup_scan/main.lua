@@ -72,7 +72,7 @@ local function list_open_pr(repo, integration, upstream)
   return prs[1]
 end
 
-local function create_rollup_pr(repo, upstream, integration, ahead, head_sha)
+local function create_rollup_pr(repo, upstream, integration, ahead, head_sha, publish_policy)
   local body_file = "/tmp/fkst-github-devloop-rollup-"
     .. core._decimal_checksum(repo .. "#" .. upstream .. "#" .. integration)
     .. ".md"
@@ -82,7 +82,7 @@ local function create_rollup_pr(repo, upstream, integration, ahead, head_sha)
     integration_branch = integration,
     head_sha = head_sha,
     ahead = ahead,
-    allow_fallback = true,
+    publish_policy = publish_policy,
   })
   file.write(body_file, notes)
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
@@ -127,7 +127,14 @@ function pipeline(event)
         return
       end
       integration_head = remote_head(branches.integration)
-      create_rollup_pr(repo, branches.upstream, branches.integration, ahead, integration_head)
+      create_rollup_pr(
+        repo,
+        branches.upstream,
+        branches.integration,
+        ahead,
+        integration_head,
+        core.release_notes_publish_policy(cfg)
+      )
       pr = list_open_pr(repo, branches.integration, branches.upstream)
       if pr == nil then
         error("github-devloop: gh rollup PR create/list did not return an open PR")

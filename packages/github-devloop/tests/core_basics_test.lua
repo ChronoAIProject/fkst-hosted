@@ -113,7 +113,25 @@ return {
         integration_branch = "integration/dev",
         head_sha = "def456",
         ahead = 2,
-        allow_fallback = false,
+        publish_policy = { allow_fallback = false },
+      })
+    end)
+    spawn_codex_sync = old_spawn
+    t.eq(ok, false)
+  end,
+
+  test_release_notes_requires_explicit_publish_policy = function()
+    local old_spawn = spawn_codex_sync
+    spawn_codex_sync = function()
+      return { stdout = "", stderr = "codex down", exit_code = 1 }
+    end
+    local ok = pcall(function()
+      core.draft_release_notes({
+        repo = "owner/repo",
+        upstream_branch = "dev",
+        integration_branch = "integration/dev",
+        head_sha = "def456",
+        ahead = 2,
       })
     end)
     spawn_codex_sync = old_spawn
