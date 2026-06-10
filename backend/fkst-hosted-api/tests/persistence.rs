@@ -17,7 +17,7 @@ use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::ContainerAsync;
+use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
@@ -32,9 +32,17 @@ fn docker_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Mongo image tag — pinned to the same major as `backend/docker-compose.yml`
+/// so integration tests and local dev exercise the same server line.
+const MONGO_TAG: &str = "7";
+
 /// Start an ephemeral Mongo and build a connected `Db` over it.
 async fn mongo_db(selection_timeout_ms: u64) -> (ContainerAsync<Mongo>, Config, Db) {
-    let container = Mongo::default().start().await.expect("start mongo");
+    let container = Mongo::default()
+        .with_tag(MONGO_TAG)
+        .start()
+        .await
+        .expect("start mongo");
     let host = container.get_host().await.expect("container host");
     let port = container
         .get_host_port_ipv4(27017)
