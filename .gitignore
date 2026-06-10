@@ -1,0 +1,19 @@
+# Rust build artifacts
+backend/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+
+# Secrets and credentials — never commit these
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# OS noise
+.DS_Store
+
+# /auto engine working state
+.auto/

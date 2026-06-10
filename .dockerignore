@@ -1,0 +1,19 @@
+target/
+backend/target/
+.git/
+node_modules/
+frontend/
+.auto/
+.claude/
+
+# Secrets and credentials — never let these into build-context layers
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+**/*.pem
+*.key
+**/*.key
+credentials.json
+**/credentials.json
