@@ -1,0 +1,64 @@
+# Gate: every PR from `develop` into `main` must include a complete release note.
+# Skipped for automated release PRs (label: release-automation).
+name: Require release note
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  require-release-note:
+    name: Release note required
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release note present and complete
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          IS_AUTOMATION: ${{ contains(github.event.pull_request.labels.*.name, 'release-automation') }}
+        run: |
+          set -euo pipefail
+
+          if [ "$IS_AUTOMATION" = "true" ]; then
+            echo "INFO: 'release-automation' PR — release-note gate skipped."
+            exit 0
+          fi
+
+          NOTE=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path' \
+            | grep -E '^release-notes/release-note-[0-9]{8}-[0-9]{4}\.md$' | head -1 || true)
+
+          if [ -z "$NOTE" ]; then
+            echo "::error::A develop → main PR must add release-notes/release-note-YYYYMMDD-HHMM.md (copy .github/release-note-template.md and fill it in)."
+            exit 1
+          fi
+          echo "INFO: release note: $NOTE"
+
+          if [ ! -f "$NOTE" ]; then
+            echo "::error::Release note $NOTE was not found in the checkout."
+            exit 1
+          fi
+
+          for sec in '## Fixed' '## New Feature' '## Changed'; do
+            if ! grep -qF "$sec" "$NOTE"; then
+              echo "::error::Release note $NOTE is missing the '$sec' section."
+              exit 1
+            fi
+          done
+
+          if grep -qF '(write here)' "$NOTE"; then
+            echo "::error::Release note $NOTE still contains '(write here)' placeholders — fill them in."
+            exit 1
+          fi
+
+          echo "INFO: release note present with all three sections and no placeholders. Check passed."
