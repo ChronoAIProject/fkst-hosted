@@ -229,6 +229,20 @@ local function run_publish_unique_on_invalid(root)
   }
 end
 
+local function run_utf8_truncation(root)
+  local cjk = string.char(0xe6, 0xb5, 0x8b)
+  local fixtures = {
+    issue_outputs = {
+      string.rep("a", core._max_bundle_file_len - 1) .. cjk .. "tail",
+    },
+  }
+  local bundle = core.build_context_bundle(build_args(root, fixtures, { tick = nil }))
+  return {
+    issue_content = read_file(bundle.issue_path),
+    issue_bytes = bundle.issue_bytes,
+  }
+end
+
 function pipeline(event)
   local payload = event.payload or {}
   local root = payload.root
@@ -242,6 +256,8 @@ function pipeline(event)
     raise("context_bundle_probe_result", run_publish_reuse(root))
   elseif payload.mode == "publish_unique_on_invalid" then
     raise("context_bundle_probe_result", run_publish_unique_on_invalid(root))
+  elseif payload.mode == "utf8_truncation" then
+    raise("context_bundle_probe_result", run_utf8_truncation(root))
   else
     error("unknown context bundle probe mode")
   end

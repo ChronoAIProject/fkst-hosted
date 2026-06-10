@@ -7,7 +7,7 @@ local function bounded_framing(M, framing)
   end
   local value = tostring(framing)
   if #value > M._max_framing_len then
-    value = value:sub(1, M._max_framing_len)
+    value = M._utf8_safe_truncate(value, M._max_framing_len)
   end
   return value
 end
@@ -23,7 +23,7 @@ local function bounded_control_text(M, value, limit)
   end
   local cap = limit or M._max_blocking_gap_len
   if #text > cap then
-    text = text:sub(1, cap)
+    text = M._utf8_safe_truncate(text, cap)
   end
   return text
 end
@@ -84,10 +84,10 @@ local function state_label(M, labels)
   return "open"
 end
 
-local function first_chars(value, limit)
+local function first_chars(M, value, limit)
   local text = tostring(value or ""):gsub("[%s]+", " ")
   if #text > limit then
-    return text:sub(1, limit)
+    return M._utf8_safe_truncate(text, limit)
   end
   return text
 end
@@ -103,7 +103,7 @@ local function render_board_digest(M, issues, prs)
     end
     table.insert(lines, "#" .. tostring(item.number)
       .. " [" .. state_label(M, item.labels) .. "] "
-      .. first_chars(item.title, 60))
+      .. first_chars(M, item.title, 60))
   end
   for _, item in ipairs(prs or {}) do
     if #lines >= 52 then
@@ -111,7 +111,7 @@ local function render_board_digest(M, issues, prs)
     end
     table.insert(lines, "#" .. tostring(item.number)
       .. " [" .. state_label(M, item.labels) .. "] "
-      .. first_chars(item.title, 60))
+      .. first_chars(M, item.title, 60))
   end
   table.insert(lines, M._untrusted_issue_data_end)
   return table.concat(lines, "\n")
@@ -167,7 +167,7 @@ function M.append_board_digest_to_proposal(proposal, repo, tick)
       "available=" .. tostring(remaining),
       "needed=" .. tostring(#neutralized),
     })
-    neutralized = neutralized:sub(1, remaining)
+    neutralized = M._utf8_safe_truncate(neutralized, remaining)
   end
   proposal.body = body .. prefix .. neutralized
   if #proposal.body > M._max_body_len then
@@ -304,7 +304,7 @@ function M.build_proposal(issue)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
   if #title > M._max_title_len then
-    title = title:sub(1, M._max_title_len)
+    title = M._utf8_safe_truncate(title, M._max_title_len)
   end
   local body = "Judge the current GitHub issue from the full source content."
     .. "\nIssue: " .. tostring(issue.repo) .. "#" .. tostring(issue.number)
@@ -372,12 +372,12 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     title = "Review PR #" .. tostring(pr_number) .. ": " .. tostring(current_issue.title)
   end
   if #title > M._max_title_len then
-    title = title:sub(1, M._max_title_len)
+    title = M._utf8_safe_truncate(title, M._max_title_len)
   end
 
   local issue_title = type(current_issue) == "table" and tostring(current_issue.title or "") or ""
   if #issue_title > M._max_title_len then
-    issue_title = issue_title:sub(1, M._max_title_len)
+    issue_title = M._utf8_safe_truncate(issue_title, M._max_title_len)
   end
   issue_title = M.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
   local body = "Review the PR diff and decide whether it should advance to merge-ready."

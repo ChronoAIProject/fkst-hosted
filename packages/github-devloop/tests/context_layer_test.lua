@@ -47,6 +47,23 @@ local function pr_list_json(count)
   return "[" .. table.concat(items, ",") .. "]"
 end
 
+local function json_string(value)
+  return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
+end
+
+local function cjk_char()
+  return string.char(0xe6, 0xb5, 0x8b)
+end
+
+local function emoji_char()
+  return string.char(0xf0, 0x9f, 0x98, 0x80)
+end
+
+local function assert_valid_utf8(value)
+  local ok, len = pcall(utf8.len, tostring(value or ""))
+  t.is_true(ok and len ~= nil)
+end
+
 local function mock_board_lists(issue_count, pr_count, repo)
   repo = repo or "owner/repo"
   t.mock_command("gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
@@ -56,6 +73,20 @@ local function mock_board_lists(issue_count, pr_count, repo)
   })
   t.mock_command("gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
     stdout = pr_list_json(pr_count),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_board_title(title, repo)
+  repo = repo or "owner/repo"
+  t.mock_command("gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+    stdout = '[{"number":1,"title":"' .. json_string(title) .. '","labels":[{"name":"fkst-dev:thinking"}]}]',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+    stdout = "[]",
     stderr = "",
     exit_code = 0,
   })
@@ -199,6 +230,43 @@ return {
     t.is_true(second:find("#2 [fkst-dev:thinking] Issue title number 2", 1, true) ~= nil)
     t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 1)
     t.eq(count_calls("gh issue list --repo 'other/repo' --state open --limit 100 --json number,title,labels"), 1)
+  end,
+
+  test_utf8_safe_truncate_handles_mixed_width_boundaries = function()
+    local cjk = cjk_char()
+    local mixed = "ab" .. cjk .. "cd"
+    local emoji = emoji_char()
+
+    t.eq(core._utf8_safe_truncate(mixed, 2), "ab")
+    t.eq(core._utf8_safe_truncate(mixed, 3), "ab")
+    t.eq(core._utf8_safe_truncate(mixed, 4), "ab")
+    t.eq(core._utf8_safe_truncate(mixed, 5), "ab" .. cjk)
+    t.eq(core._utf8_safe_truncate(mixed, 6), "ab" .. cjk .. "c")
+    t.eq(core._utf8_safe_truncate("", 3), "")
+    t.eq(core._utf8_safe_truncate(cjk, 2), "")
+    t.eq(core._utf8_safe_truncate(emoji .. "x", 3), "")
+    t.eq(core._utf8_safe_truncate("ab" .. emoji .. "x", 6), "ab" .. emoji)
+    assert_valid_utf8(core._utf8_safe_truncate(mixed, 1))
+    assert_valid_utf8(core._utf8_safe_truncate(mixed, 7))
+    assert_valid_utf8(core._utf8_safe_truncate("ab" .. emoji .. "x", 5))
+    assert_valid_utf8(core._utf8_safe_truncate("ab" .. emoji .. "x", 6))
+  end,
+
+  test_board_digest_title_truncation_keeps_utf8_valid_before_cache_set = function()
+    local title = string.rep("a", 59) .. cjk_char() .. "tail"
+    mock_board_title(title)
+
+    local result = run_probe({
+      mode = "block",
+      repo = "owner/repo",
+      tick = "2026-06-10T02:12:03Z",
+    }, h.opts("board-digest-utf8-title"))
+
+    t.eq(result.exit_code, 0)
+    local body = probe_result(result).body
+    assert_valid_utf8(body)
+    t.is_true(body:find("#1 [fkst-dev:thinking] " .. string.rep("a", 59), 1, true) ~= nil)
+    t.is_nil(body:find(cjk_char(), 1, true))
   end,
 
   test_board_digest_overflow_truncates_optional_context = function()

@@ -56,8 +56,16 @@ local function run_optional(cmd, timeout, exec)
 end
 
 local function write_file(path, content, exec)
+  if exec ~= nil then
+    run_required("touch " .. M._shell_single_quote(path), 30, "write", exec)
+  end
+  local value = tostring(content or "")
+  local ok = pcall(file.write, path, value)
+  if ok then
+    return
+  end
   run_required(
-    "printf %s " .. M._shell_single_quote(content) .. " > " .. M._shell_single_quote(path),
+    "printf %s " .. M._shell_single_quote(value) .. " > " .. M._shell_single_quote(path),
     30,
     "write",
     exec
@@ -201,7 +209,7 @@ local function truncate_if_needed(text, dept, proposal_id, file_name)
     "limit=" .. tostring(max_bundle_file_len),
     "actual=" .. tostring(#value),
   })
-  return value:sub(1, max_bundle_file_len)
+  return M._utf8_safe_truncate(value, max_bundle_file_len)
 end
 
 local function fetch_cmd(cmd, label, exec)

@@ -38,7 +38,7 @@ end
 local function bounded_framing(M, framing)
   local value = M.neutralize_untrusted_prompt_text(framing)
   if #value > M._max_framing_len then
-    value = value:sub(1, M._max_framing_len)
+    value = M._utf8_safe_truncate(value, M._max_framing_len)
   end
   return value
 end
@@ -50,7 +50,7 @@ local function bounded_gap(M, gap)
     value = "the rejected review's named blocking gap"
   end
   if #value > M._max_blocking_gap_len then
-    value = value:sub(1, M._max_blocking_gap_len)
+    value = M._utf8_safe_truncate(value, M._max_blocking_gap_len)
   end
   return value
 end
@@ -120,7 +120,7 @@ function M.build_review_meta_prompt(review_meta, current_issue, content_manifest
   local prompt = require("prompts.review_meta")
   local comments = table.concat(M.comment_bodies(current_issue.comments), "\n\n--- comment ---\n\n")
   if #comments > M._max_comments_len then
-    comments = comments:sub(1, M._max_comments_len)
+    comments = M._utf8_safe_truncate(comments, M._max_comments_len)
   end
 
   return M.render_prompt_template(prompt.template, {

@@ -15,7 +15,7 @@ local function marker_attr(marker, name)
   return marker:match(name .. '="([^"]*)"')
 end
 
-local function safe_marker_attr(value, limit)
+local function safe_marker_attr(M, value, limit)
   local text = tostring(value or "")
   text = text:gsub("<!%-%- fkst:[^\n]*%-%->", " ")
   text = text:gsub("&lt;!%-%- fkst:[^\n]*%-%-&gt;", " ")
@@ -23,7 +23,7 @@ local function safe_marker_attr(value, limit)
   text = text:gsub("^%s+", ""):gsub("%s+$", "")
   local cap = limit or max_attr_len
   if #text > cap then
-    text = text:sub(1, cap)
+    text = M._utf8_safe_truncate(text, cap)
   end
   return text
 end
@@ -90,7 +90,7 @@ function M.review_meta_marker(issue_proposal_id, dedup_key, action, version, blo
     fields = fields .. '" version="' .. tostring(version)
   end
   if action == "fix" then
-    local gap = safe_marker_attr(blocking_gap, M._max_blocking_gap_len)
+    local gap = safe_marker_attr(M, blocking_gap, M._max_blocking_gap_len)
     if gap == "" or not M._is_bounded_string(gap, M._max_blocking_gap_len) then
       error("github-devloop: invalid review-meta gap")
     end
@@ -214,7 +214,7 @@ function M.review_result_marker(review_proposal_id, issue_proposal_id, decision,
       end
       fix_round_field = '" fix_round="' .. tostring(n)
     end
-    local gap = safe_marker_attr(blocking_gap, M._max_blocking_gap_len)
+    local gap = safe_marker_attr(M, blocking_gap, M._max_blocking_gap_len)
     if gap == "" or not M._is_bounded_string(gap, M._max_blocking_gap_len) then
       error("github-devloop: invalid review reject gap")
     end
@@ -338,7 +338,7 @@ local function bounded_marker_line(M, value, limit)
   end
   local cap = limit or M._max_blocking_gap_len
   if #text > cap then
-    text = text:sub(1, cap)
+    text = M._utf8_safe_truncate(text, cap)
   end
   return text
 end
@@ -401,7 +401,7 @@ function M.review_prior_round_ledger(comments, issue_proposal_id, issue_version)
   end
   local ledger = table.concat(lines, "\n")
   if #ledger > M._max_review_ledger_len then
-    ledger = ledger:sub(1, M._max_review_ledger_len)
+    ledger = M._utf8_safe_truncate(ledger, M._max_review_ledger_len)
   end
   return M.neutralize_untrusted_prompt_text(ledger)
 end

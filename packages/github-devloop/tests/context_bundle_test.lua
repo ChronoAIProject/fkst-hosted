@@ -32,6 +32,11 @@ local function run_probe(mode, root)
   error("missing context bundle probe result")
 end
 
+local function assert_valid_utf8(value)
+  local ok, len = pcall(utf8.len, tostring(value or ""))
+  t.is_true(ok and len ~= nil)
+end
+
 return {
   test_context_bundle_files_round_trip_from_different_cwd = function()
     local result = run_probe("round_trip", runtime_root("round-trip"))
@@ -86,5 +91,12 @@ return {
     t.is_true(result.rebuilt_issue:find("Rebuilt issue", 1, true) ~= nil)
     t.eq(result.has_notice, true)
     t.is_true(result.manifest:find("UNTRUSTED-NOTICE.txt", 1, true) ~= nil)
+  end,
+
+  test_context_bundle_file_cap_truncates_on_utf8_boundary = function()
+    local result = run_probe("utf8_truncation", runtime_root("utf8-truncation"))
+
+    t.eq(result.issue_bytes, core._max_bundle_file_len - 1)
+    assert_valid_utf8(result.issue_content)
   end,
 }

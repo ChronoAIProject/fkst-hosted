@@ -6,6 +6,15 @@ local function review_event(extra)
   return h.review_reached(extra)
 end
 
+local function cjk_char()
+  return string.char(0xe6, 0xb5, 0x8b)
+end
+
+local function assert_valid_utf8(value)
+  local ok, len = pcall(utf8.len, tostring(value or ""))
+  t.is_true(ok and len ~= nil)
+end
+
 return {
   test_review_result_approve_with_advisory_still_authorizes_merge_ready = function()
     local event = review_event({
@@ -187,6 +196,33 @@ return {
     t.is_true(ledger:find("Last named blocking gap: round three gap", 1, true) ~= nil)
     t.is_true(ledger:find("Latest fix-round summary: Closed round three.", 1, true) ~= nil)
     t.is_nil(ledger:find("round one", 1, true))
+  end,
+
+  test_prior_round_ledger_truncates_utf8_safely = function()
+    local base_version = h.reviewing().version
+    local fix_version = core.next_fix_version(base_version)
+    local review = core.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
+    local cjk = cjk_char()
+    local reject = {
+      body = core.review_result_marker(
+        review,
+        "github-devloop/issue/owner/repo/42",
+        "reject",
+        "consensus:" .. review .. "/review",
+        1,
+        string.rep("a", core._max_blocking_gap_len - 1) .. cjk
+      ),
+      author_login = "fkst-test-bot",
+    }
+    local fix = {
+      body = "Fix-round summary: " .. string.rep("b", core._max_review_ledger_len - 1) .. cjk
+        .. "\n" .. core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", fix_version),
+      author_login = "fkst-test-bot",
+    }
+
+    local ledger = core.review_prior_round_ledger({ reject, fix }, "github-devloop/issue/owner/repo/42", core.next_fix_version(fix_version))
+    assert_valid_utf8(ledger)
+    t.is_true(#ledger <= core._max_review_ledger_len)
   end,
 
   test_prior_round_ledger_reads_pr_stream_not_issue_stream = function()

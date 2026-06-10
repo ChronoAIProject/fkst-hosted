@@ -147,6 +147,49 @@ local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end
 
+local function utf8_safe_truncate(value, limit)
+  local text = tostring(value or "")
+  local cap = tonumber(limit)
+  if cap == nil then
+    return text
+  end
+  cap = math.floor(cap)
+  if cap <= 0 then
+    return ""
+  end
+  if #text <= cap then
+    return text
+  end
+
+  local cut = cap
+  while cut > 0 do
+    local byte = text:byte(cut)
+    if byte == nil or byte < 128 or byte > 191 then
+      break
+    end
+    cut = cut - 1
+  end
+  if cut <= 0 then
+    return ""
+  end
+
+  local lead = text:byte(cut)
+  local width = 1
+  if lead >= 194 and lead <= 223 then
+    width = 2
+  elseif lead >= 224 and lead <= 239 then
+    width = 3
+  elseif lead >= 240 and lead <= 244 then
+    width = 4
+  elseif lead >= 128 then
+    return text:sub(1, cut - 1)
+  end
+  if cut + width - 1 > cap then
+    return text:sub(1, cut - 1)
+  end
+  return text:sub(1, cap)
+end
+
 local function has_value(values, expected)
   if type(values) ~= "table" then
     return false
@@ -826,6 +869,7 @@ M._neutralize_fkst_markers = neutralize_fkst_markers
 M._one_line = one_line
 M._decimal_checksum = decimal_checksum
 M._is_bounded_string = is_bounded_string
+M._utf8_safe_truncate = utf8_safe_truncate
 M._has_value = has_value
 M._is_review_meta_action = is_review_meta_action
 M._is_path_safe_key = is_path_safe_key
