@@ -45,7 +45,7 @@ function pipeline(event)
       return
     end
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
-    local state = core.current_state(current.comments, proposal_id)
+    local state = core.current_linked_entity_state(issue.repo, proposal_id, current.comments)
     if state.state ~= nil then
       if state.state == "thinking" then
         core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
