@@ -155,6 +155,14 @@ impl Config {
             }
             other => AppError::Config(other.to_string()),
         })?;
+        // A zero selection timeout would make every Mongo operation fail
+        // instantly (or fall back to a driver default) — reject it loudly,
+        // mirroring the request-timeout guard above.
+        if mongo.mongodb_server_selection_timeout_ms == 0 {
+            return Err(AppError::Config(
+                "MONGODB_SERVER_SELECTION_TIMEOUT_MS must be at least 1".to_string(),
+            ));
+        }
 
         Ok(Config {
             port: http.port,
@@ -283,6 +291,18 @@ mod tests {
         ]))
         .expect_err("non-numeric timeout must fail");
         assert!(matches!(err, AppError::Config(_)));
+    }
+
+    #[test]
+    fn zero_mongodb_selection_timeout_is_a_config_error() {
+        let err = Config::from_vars(vars(&[URI, ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "0")]))
+            .expect_err("zero selection timeout must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string()
+                .contains("MONGODB_SERVER_SELECTION_TIMEOUT_MS"),
+            "error must name the env var, got: {err}"
+        );
     }
 
     #[test]
