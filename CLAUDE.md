@@ -42,6 +42,12 @@ These are **reference-only** dependencies. Do **not** modify them from within fk
 - **Every commit must be small and self-contained.** No large commits are allowed.
 - Each commit should represent one coherent, reviewable unit of change.
 
+### Commit Authorship & Identity
+
+- **Never include `Co-Authored-By`** — or any other AI / co-author trailer — in commit messages.
+- **Always use the user's own GitHub identity** for every git operation (commits) and GitHub operation (issues, PRs, reviews, merges). Never commit or act as a bot, shared, or AI/Claude identity.
+- Git is configured with the human maintainer's own name/email and the `gh` CLI is authenticated as that same person — keep the two consistent.
+
 ### Branch Model
 
 | Branch         | Role |
@@ -92,6 +98,7 @@ Every issue and pull request uses a standard template, stored under `.github/`:
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
 - Treat the upstream engine and packages repos as read-only references.
 - Keep commits small and self-contained.
+- Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
 - All work goes through a pull request — no direct commits to shared branches.
 - Every PR must have a corresponding GitHub issue and link it (`Closes #N`).
 - Use the issue/PR templates under `.github/`.
