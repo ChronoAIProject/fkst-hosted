@@ -1,4 +1,5 @@
 local h = require("tests.devloop_core_helpers")
+local fixtures = require("tests.production_fixture_helpers")
 require("tests.context_bundle_probe_helpers")
 local core = h.core
 local t = h.t
@@ -98,5 +99,23 @@ return {
 
     t.eq(result.issue_bytes, core._max_bundle_file_len - 1)
     assert_valid_utf8(result.issue_content)
+  end,
+
+  test_context_bundle_manifest_key_accepts_full_pr_review_proposal_id = function()
+    local repo = fixtures.long_repo()
+    local version = fixtures.full_review_issue_version(repo)
+    local proposal_id = core.pr_review_proposal_id(repo, 187, version, fixtures.review_head_sha())
+    local manifest_key = core.context_bundle_manifest_key(proposal_id, version)
+    local bundle_key = core.context_bundle_key(proposal_id, version)
+
+    t.is_true(#fixtures.unbounded_full_review_proposal_id() > core._max_key_len)
+    t.is_true(#proposal_id <= core._max_key_len)
+    t.is_true(core.context_bundle_key("github-devloop/issue/owner/repo/42", "owner/repo#issue#42@2026-06-03T01:02:03Z"):find("#", 1, true) == nil)
+    t.is_true(#manifest_key <= core._max_key_len)
+    t.is_true(#bundle_key <= core._max_key_len)
+    t.eq(core._is_path_safe_key(manifest_key, core._max_key_len), true)
+    t.eq(core._is_path_safe_key(bundle_key, core._max_key_len), true)
+    t.is_true(manifest_key:find("^github%-devloop/context%-bundle%-manifest/") ~= nil)
+    t.is_true(bundle_key:find("^github%-devloop/context%-bundle/") ~= nil)
   end,
 }

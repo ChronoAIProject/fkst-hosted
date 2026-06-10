@@ -37,6 +37,24 @@ local function context_dir(root, proposal_id, version)
   return root .. "/context/" .. bundle_segment(proposal_id, "proposal") .. "/" .. bundle_segment(version, "version")
 end
 
+local function cache_key_segment(value, fallback, limit)
+  local max_len = limit or 80
+  local segment = M.sanitize_key(tostring(value or ""), false)
+  segment = segment:gsub("#", "-")
+  segment = segment:gsub("^/+", ""):gsub("/+$", "")
+  if segment == "" then
+    segment = fallback or "context"
+  end
+  if #segment > max_len then
+    local suffix = "/" .. M._decimal_checksum(value)
+    segment = segment:sub(1, max_len - #suffix):gsub("/+$", "") .. suffix
+  end
+  if segment == "" then
+    return fallback or "context"
+  end
+  return segment
+end
+
 local function path_join(dir, name)
   return dir:gsub("/+$", "") .. "/" .. name
 end
@@ -222,11 +240,19 @@ local function fetch_cmd(cmd, label, exec)
 end
 
 function M.context_bundle_key(proposal_id, version)
-  return "github-devloop/context-bundle/" .. M.sanitize_key(tostring(proposal_id), false) .. "/" .. bundle_segment(version, "version")
+  local key = "github-devloop/context-bundle/" .. cache_key_segment(proposal_id, "proposal", 100) .. "/" .. cache_key_segment(version, "version", 60)
+  if not M._is_path_safe_key(key, M._max_key_len) then
+    error("github-devloop: context bundle cache key is invalid")
+  end
+  return key
 end
 
 function M.context_bundle_manifest_key(proposal_id, version)
-  return "github-devloop/context-bundle-manifest/" .. M.sanitize_key(tostring(proposal_id), false) .. "/" .. bundle_segment(version, "version")
+  local key = "github-devloop/context-bundle-manifest/" .. cache_key_segment(proposal_id, "proposal", 100) .. "/" .. cache_key_segment(version, "version", 60)
+  if not M._is_path_safe_key(key, M._max_key_len) then
+    error("github-devloop: context bundle manifest cache key is invalid")
+  end
+  return key
 end
 
 function M.context_bundle_manifest(bundle)

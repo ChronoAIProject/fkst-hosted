@@ -1,13 +1,10 @@
 local h = require("tests.devloop_helpers")
+local fixtures = require("tests.production_fixture_helpers")
 local core = h.core
 local t = h.t
 
 local function review_event(extra)
   return h.review_reached(extra)
-end
-
-local function cjk_char()
-  return string.char(0xe6, 0xb5, 0x8b)
 end
 
 local function assert_valid_utf8(value)
@@ -202,7 +199,7 @@ return {
     local base_version = h.reviewing().version
     local fix_version = core.next_fix_version(base_version)
     local review = core.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
-    local cjk = cjk_char()
+    local cjk = fixtures.cjk_char()
     local reject = {
       body = core.review_result_marker(
         review,
