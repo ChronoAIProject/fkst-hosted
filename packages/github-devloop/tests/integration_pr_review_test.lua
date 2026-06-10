@@ -17,9 +17,7 @@ local fixing = h.fixing
 local pr_link_marker_for_fix = h.pr_link_marker_for_fix
 local review_meta_event = h.review_meta_event
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
-local verdict_summary_label = string.char(
-  228, 184, 137, 230, 150, 185, 232, 163, 129, 229, 134, 179, 58, 32
-)
+local verdict_summary_label = "Three-angle verdicts: "
 local merge_ready = h.merge_ready
 local run_observe = h.run_observe
 local run_result = h.run_result
