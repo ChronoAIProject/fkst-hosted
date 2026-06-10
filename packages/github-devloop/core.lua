@@ -3,6 +3,7 @@ local M = {}
 require("core.base").install(M)
 require("core.config").install(M)
 require("core.commands").install(M)
+require("core.entity_view").install(M)
 require("core.branches").install(M)
 require("core.parsers").install(M)
 require("core.merge_gate").install(M)

@@ -63,18 +63,21 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   local options = opts or {}
   local cmd = entity_view_cmd(repo, selected_kind, number)
   if options.fresh == true or updated_at == nil or tostring(updated_at) == "" then
-    local result = M.gh_exec(cmd, 30, "gh " .. selected_kind .. " view")
-    return result.stdout or ""
+    return M.gh_exec(cmd, 30, "gh " .. selected_kind .. " view")
   end
 
   local key = entity_view_cache_key(repo, selected_kind, number, updated_at)
   local cached = cache_get(key)
   if cached ~= nil and cached ~= "" then
-    return cached
+    return {
+      stdout = cached,
+      stderr = "",
+      exit_code = 0,
+    }
   end
   local result = M.gh_exec(cmd, 30, "gh " .. selected_kind .. " view")
   cache_set(key, result.stdout or "")
-  return result.stdout or ""
+  return result
 end
 
 function M.entity_view_cache_key(repo, kind, number, updated_at)

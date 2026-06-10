@@ -81,7 +81,9 @@ function pipeline(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local state_view = core.fetch_issue_view_state(issue.repo, issue.number, issue.updated_at)
+    local state_view = core.fetch_issue_view_state(issue.repo, issue.number, {
+      cache_key = issue.view_cache_key,
+    })
     if state_view.exit_code ~= 0 then
       error("github-devloop: gh issue state view failed: " .. tostring(state_view.stderr))
     end

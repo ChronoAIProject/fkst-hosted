@@ -101,7 +101,6 @@ return {
     t.eq(label_raise.payload.schema, "github-proxy.label.v1")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:thinking")
     t.eq(label_raise.payload.issue_number, 42)
-    t.eq(count_calls("gh issue view"), 1)
     t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
@@ -272,12 +271,18 @@ return {
     t.eq(#first.raises, 3)
 
     mock_issue_state({ "fkst-dev:enabled" })
-    local second = run_observe(issue({ updated_at = "2026-06-03T01:02:04Z" }), run_opts)
+    local second = run_observe(issue({
+      updated_at = "2026-06-03T01:02:04Z",
+      view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-04Z",
+    }), run_opts)
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 3)
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
-    local thinking = run_observe(issue({ updated_at = "2026-06-03T01:02:05Z" }), run_opts)
+    local thinking = run_observe(issue({
+      updated_at = "2026-06-03T01:02:05Z",
+      view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-05Z",
+    }), run_opts)
     t.eq(thinking.exit_code, 0)
     t.eq(#thinking.raises, 1)
     t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)

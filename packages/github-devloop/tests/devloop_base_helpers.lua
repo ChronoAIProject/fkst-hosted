@@ -37,8 +37,7 @@ end
 
 local render_comment
 local take_pr_phase_comments
-local json_string
-local take_pending_pr_origin
+local json_string, take_pending_pr_origin
 local mock_pr_origin_from_cached
 
 local function source_ref()
@@ -54,7 +53,6 @@ local function pr_source_ref()
     ref = "owner/repo#pr/7",
   }
 end
-
 local function issue(extra)
   local value = {
     schema = "github-proxy.v1",
@@ -67,6 +65,7 @@ local function issue(extra)
     updated_at = "2026-06-03T01:02:03Z",
     labels = { "fkst-dev:enabled" },
     dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
+    view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-03Z",
     source_ref = source_ref(),
   }
   for key, field in pairs(extra or {}) do
