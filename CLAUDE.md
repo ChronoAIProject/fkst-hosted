@@ -28,6 +28,18 @@ These are **reference-only** dependencies. Do **not** modify them from within fk
 | Engine    | https://github.com/ChronoAIProject/fkst-substrate |
 | Packages  | https://github.com/ChronoAIProject/fkst-packages   |
 
+## Integrations & Platform
+
+fkst-hosted integrates with the following ChronoAI platform services. When doing related work, **always reference the latest `main` branch** of the corresponding repo for the current contracts and APIs.
+
+| Integration | Area | Reference (latest `main`) |
+|-------------|------|---------------------------|
+| **NyxID** | IAM (identity & access management). fkst-hosted is deployed **under NyxID as one of its downstream services**. | https://github.com/ChronoAIProject/NyxID |
+| **Ornn** | Agent-skill features. | https://github.com/ChronoAIProject/Ornn |
+
+- For any **NyxID / IAM**-related work, reference NyxID's latest `main`.
+- For any **Ornn / agent-skill**-related work, reference Ornn's latest `main`.
+
 ## Repository Layout
 
 | Area      | Stack | Responsibility |
@@ -104,3 +116,4 @@ Every issue and pull request uses a standard template, stored under `.github/`:
 - Use the issue/PR templates under `.github/`.
 - Use pull requests into `develop` or `develop-auto`; only `develop` merges into `main`.
 - Never force push `main`, `develop`, or `develop-auto`.
+- For NyxID / IAM work, reference NyxID's latest `main`; for Ornn / agent-skill work, reference Ornn's latest `main`.
