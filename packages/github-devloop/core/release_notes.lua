@@ -81,7 +81,7 @@ function M.release_notes_publish_policy(cfg)
     error("github-devloop: release notes publish policy requires config")
   end
   return {
-    allow_fallback = cfg.write_mode == "real",
+    allow_fallback = cfg.allow_release_notes_fallback == true,
     write_mode = tostring(cfg.write_mode or ""),
   }
 end

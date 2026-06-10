@@ -101,6 +101,16 @@ return {
     t.is_true(notes:sub(-#ai_sentinel) == ai_sentinel)
   end,
 
+  test_release_notes_prompt_fetches_from_git_and_gh_not_payload = function()
+    local prompt = core.build_release_notes_prompt("owner/repo", "dev", "integration/dev", "def456", 3)
+    t.is_true(prompt:find("git log --format=", 1, true) ~= nil)
+    t.is_true(prompt:find("refs/remotes/origin/dev..def456", 1, true) ~= nil)
+    t.is_true(prompt:find("refs/remotes/origin/dev..refs/remotes/origin/integration/dev", 1, true) == nil)
+    t.is_true(prompt:find("gh issue view <referenced-number> --repo owner/repo --json title,body,comments,labels,state", 1, true) ~= nil)
+    t.is_true(prompt:find("Do not use delivery payload content as source material.", 1, true) ~= nil)
+    t.is_true(prompt:find("Captured integration head: def456", 1, true) ~= nil)
+  end,
+
   test_release_notes_codex_failure_fails_closed_without_fallback = function()
     local old_spawn = spawn_codex_sync
     spawn_codex_sync = function()
@@ -118,6 +128,36 @@ return {
     end)
     spawn_codex_sync = old_spawn
     t.eq(ok, false)
+  end,
+
+  test_release_notes_codex_failure_fallback_requires_explicit_policy = function()
+    local old_spawn = spawn_codex_sync
+    spawn_codex_sync = function()
+      return { stdout = "", stderr = "codex down", exit_code = 1 }
+    end
+    local broad_policy = core.release_notes_publish_policy({ write_mode = "real" })
+    local broad_ok = pcall(function()
+      core.draft_release_notes({
+        repo = "owner/repo",
+        upstream_branch = "dev",
+        integration_branch = "integration/dev",
+        head_sha = "def456",
+        ahead = 2,
+        publish_policy = broad_policy,
+      })
+    end)
+    local explicit_notes, explicit_mode = core.draft_release_notes({
+      repo = "owner/repo",
+      upstream_branch = "dev",
+      integration_branch = "integration/dev",
+      head_sha = "def456",
+      ahead = 2,
+      publish_policy = { allow_fallback = true },
+    })
+    spawn_codex_sync = old_spawn
+    t.eq(broad_ok, false)
+    t.eq(explicit_mode, "fallback")
+    t.is_true(explicit_notes:sub(-#ai_sentinel) == ai_sentinel)
   end,
 
   test_release_notes_requires_explicit_publish_policy = function()
