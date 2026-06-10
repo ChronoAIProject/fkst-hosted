@@ -107,6 +107,7 @@ local function assert_decompose_judgment_call()
   t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
   t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
   t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
+  t.eq(count_calls("chmod 0555"), 1)
 end
 
 local two_issue_json = [[{"issues":[{"title":"Extract a minimal retry helper","body":"Smaller scope: implement only the retry helper used by the blocked PR.\nNon-goals: do not change the whole workflow.\nAcceptance: helper tests pass."},{"title":"Wire retry helper into one call site","body":"Smaller scope: apply the helper to one review-gate path.\nNon-goals: do not rewrite unrelated states.\nAcceptance: focused integration test passes."}]}]]

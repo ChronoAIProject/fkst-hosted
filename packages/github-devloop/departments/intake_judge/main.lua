@@ -70,10 +70,10 @@ function pipeline(event)
     end
 
     core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
-    local result = spawn_codex_sync({
-      prompt = core.build_intake_prompt(candidate.proposal_id, current),
-      worktree = judgment_worktree("intake", candidate.dedup_key),
-    })
+    local result = spawn_codex_sync(core.judgment_codex_opts(
+      core.build_intake_prompt(candidate.proposal_id, current),
+      judgment_worktree("intake", candidate.dedup_key)
+    ))
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
       core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr)

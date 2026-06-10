@@ -63,6 +63,18 @@ local function assert_judgment_worktree(call, role)
   t.is_nil(call.rendered:find("/worktrees/", 1, true))
 end
 
+local function assert_judgment_dir_read_only(count)
+  local seen = 0
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("mkdir -p", 1, true) ~= nil
+      and call.rendered:find("/judgment-worktrees/consensus-", 1, true) ~= nil then
+      seen = seen + 1
+      t.is_true(call.rendered:find("chmod 0555", 1, true) ~= nil)
+    end
+  end
+  t.eq(seen, count)
+end
+
 local function mock_judgment_runtime()
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/consensus/runtime",
@@ -124,6 +136,7 @@ return {
     assert_judgment_worktree(calls[1], "angle-minimal")
     assert_judgment_worktree(calls[2], "angle-structural")
     assert_judgment_worktree(calls[3], "angle-delete")
+    assert_judgment_dir_read_only(3)
     t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
     t.is_true(calls[1].stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
     t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)

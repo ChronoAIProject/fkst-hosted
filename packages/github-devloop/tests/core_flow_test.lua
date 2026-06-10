@@ -325,6 +325,10 @@ return {
     local judgment_path = core.judgment_worktree_path("/tmp/fkst-rt", "intake", ready.dedup_key)
     t.is_true(judgment_path:find("/tmp/fkst-rt/judgment-worktrees/github-devloop-intake-", 1, true) == 1)
     t.is_nil(judgment_path:find("/worktrees/", 1, true))
+    local judgment_opts = core.judgment_codex_opts("prompt", judgment_path)
+    t.eq(judgment_opts.prompt, "prompt")
+    t.eq(judgment_opts.worktree, judgment_path)
+    t.eq(judgment_opts.sandbox, "read-only")
     t.eq(
       core.gh_issue_view_implement_cmd("owner/repo", 42),
       "gh issue view '42' --repo 'owner/repo' --json title,labels,comments"

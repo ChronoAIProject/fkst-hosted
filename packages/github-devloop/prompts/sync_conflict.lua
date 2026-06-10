@@ -2,7 +2,8 @@ return {
   template = [[You are resolving a branch sync merge conflict for github-devloop.
 
 Repository state:
-- You are already running inside a temporary worktree checked out at the integration branch parent.
+- You are already running inside an isolated runtime branch-sync worktree, not the supervise source checkout.
+- Do not clone, checkout another branch, create branches, or modify any repository outside this worktree.
 - A merge from the upstream branch into the integration branch has already been started and has conflicts.
 - Resolve every conflict to a correct, buildable merged state that preserves both sides' intent.
 - Do not stage files.

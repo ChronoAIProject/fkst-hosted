@@ -651,6 +651,14 @@ function M.judgment_worktree_path(runtime_root, role, identity)
   return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
 end
 
+function M.judgment_codex_opts(prompt, worktree)
+  return {
+    prompt = prompt,
+    worktree = worktree,
+    sandbox = "read-only",
+  }
+end
+
 function M.max_body_len()
   return max_body_len
 end

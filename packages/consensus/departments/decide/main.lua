@@ -28,20 +28,14 @@ local function spawn_angle(proposal, angle, runtime_root)
   local worktree = prepare_judgment_worktree(
     core.judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
   )
-  return spawn_codex({
-    prompt = core.build_angle_prompt(proposal, angle),
-    worktree = worktree,
-  })
+  return spawn_codex(core.judgment_codex_opts(core.build_angle_prompt(proposal, angle), worktree))
 end
 
 local function spawn_meta_judge(proposal, angle_results, runtime_root)
   local worktree = prepare_judgment_worktree(
     core.judgment_scratch_worktree(runtime_root, "meta-judge", proposal.dedup_key)
   )
-  return spawn_codex_sync({
-    prompt = core.build_meta_judge_prompt(proposal, angle_results),
-    worktree = worktree,
-  })
+  return spawn_codex_sync(core.judgment_codex_opts(core.build_meta_judge_prompt(proposal, angle_results), worktree))
 end
 
 local function raise_converge(proposal, angle_results, narrowed_question)

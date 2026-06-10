@@ -129,6 +129,7 @@ local function assert_intake_judgment_call()
   t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
   t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
   t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
+  t.eq(count_calls("chmod 0555"), 1)
 end
 
 local function candidate(extra)

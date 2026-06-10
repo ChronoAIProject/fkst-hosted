@@ -291,12 +291,20 @@ function M.judgment_scratch_worktree(runtime_root, kind, identity)
   return runtime_root_path(runtime_root) .. "/judgment-worktrees/consensus-" .. slug .. "-" .. suffix
 end
 
+function M.judgment_codex_opts(prompt, worktree)
+  return {
+    prompt = prompt,
+    worktree = worktree,
+    sandbox = "read-only",
+  }
+end
+
 function M.mkdir_p_cmd(path)
   local value = tostring(path or "")
   if value == "" or value:find("[\r\n]") ~= nil then
     error("consensus: invalid directory path")
   end
-  return "mkdir -p " .. shell_single_quote(value)
+  return "mkdir -p " .. shell_single_quote(value) .. " && chmod 0555 " .. shell_single_quote(value)
 end
 
 local function has_content_fetch(proposal)

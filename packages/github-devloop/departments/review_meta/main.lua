@@ -83,10 +83,10 @@ function pipeline(event)
 
     core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
     core.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
-    local result = spawn_codex_sync({
-      prompt = core.build_review_meta_prompt(review_meta, current_issue),
-      worktree = judgment_worktree("review-meta", review_meta.dedup_key),
-    })
+    local result = spawn_codex_sync(core.judgment_codex_opts(
+      core.build_review_meta_prompt(review_meta, current_issue),
+      judgment_worktree("review-meta", review_meta.dedup_key)
+    ))
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
       core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr)
