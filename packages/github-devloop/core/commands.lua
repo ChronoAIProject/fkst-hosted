@@ -354,6 +354,21 @@ function M.git_fetch_branch_cmd(remote, branch)
   return "git fetch " .. M._shell_single_quote(remote) .. " " .. M._shell_single_quote(branch)
 end
 
+function M.git_fetch_pr_merge_ref_cmd(remote, pr_number)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pull request number")
+  end
+  return "git fetch " .. M._shell_single_quote(remote) .. " "
+    .. M._shell_single_quote("refs/pull/" .. tostring(pr_number) .. "/merge")
+end
+
+function M.git_fetch_head_commit_cmd()
+  return "git rev-parse --verify FETCH_HEAD^{commit}"
+end
+
 function M.git_remote_branch_head_cmd(remote, branch)
   if not M._is_git_ref_safe(remote) then
     error("github-devloop: invalid git remote")

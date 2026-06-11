@@ -61,13 +61,33 @@ local function branch_worktree(repo, issue_number, version, branch)
   return worktree
 end
 
-local function merge_integration_for_fix(worktree, integration_branch, expected_baseline_sha)
-  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
-  if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
+local function fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+  if expected_baseline_sha == nil then
+    return nil
   end
+  local fetch_result = exec_sync({ cmd = core.git_fetch_pr_merge_ref_cmd("origin", pr_number), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local head_result = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref head failed: " .. tostring(head_result.stderr))
+  end
+  local merge_product_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if merge_product_sha ~= expected_baseline_sha then
+    error("github-devloop: PR merge ref head does not match merge-gate baseline")
+  end
+  return merge_product_sha
+end
+
+local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha)
+  fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
   local base_head = expected_baseline_sha
   if base_head == nil then
+    local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
+    if fetch_result.exit_code ~= 0 then
+      error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
+    end
     local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", integration_branch), timeout = 30 })
     if base_result.exit_code ~= 0 then
       error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
@@ -346,7 +366,7 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    merge_integration_for_fix(worktree, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
+    merge_integration_for_fix(worktree, fix.pr_number, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "fix",

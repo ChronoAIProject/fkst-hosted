@@ -52,6 +52,8 @@ return {
       stderr = "CONFLICT (content): Merge conflict in packages/github-devloop/core.lua\n",
       unmerged_stdout = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
     })
+    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "abc123\n", stderr = "", exit_code = 0 })
     mock_implement_codex(0, "resolved merge product failure")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
@@ -81,7 +83,8 @@ return {
     t.is_true(merge_index ~= nil)
     t.is_true(codex_index ~= nil)
     t.is_true(merge_index < codex_index)
-    t.eq(count_calls("git fetch 'origin' 'dev'"), 1)
+    t.eq(count_calls("git fetch 'origin' 'dev'"), 0)
+    t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 1)
     t.eq(count_calls("refs/remotes/'origin'/'dev'^{commit}"), 0)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
   end,
