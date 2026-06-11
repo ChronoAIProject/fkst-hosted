@@ -335,11 +335,11 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:review-meta" }, "OPEN", {
       core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "review-meta", event.version),
-      core.review_meta_marker(event.proposal_id, event.review_dedup_key),
+      core.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard"),
     })
     set_pr_phase_comments({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
-      core.review_meta_marker(event.proposal_id, event.review_dedup_key),
+      core.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard"),
     })
     mock_pr_origin({ proposal_id = event.proposal_id, version = impl_version })
 

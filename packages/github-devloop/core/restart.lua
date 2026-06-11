@@ -171,6 +171,20 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
       end
     end
   end
+  local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+  local _, reject_pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
+  if reject_fact ~= nil
+    and tostring(reject_pr_number or "") == tostring(pr_number)
+    and tostring(reviewed_head_sha or "") == tostring(head_sha)
+    and M.is_safe_pr_review_result_ref(reject_fact.review_proposal_id, reject_fact.review_dedup_key) then
+    return {
+      proposal_id = reject_fact.review_proposal_id,
+      dedup_key = reject_fact.review_dedup_key,
+      source_ref = M.pr_source_ref(repo, pr_number),
+      pr_number = tonumber(pr_number),
+      n = tonumber(n) or 0,
+    }
+  end
   return nil
 end
 
