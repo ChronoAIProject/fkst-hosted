@@ -2,6 +2,7 @@ local t = fkst.test
 require("tests.cache_seed_helpers")
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
+local angle_roles = { minimal = true, structural = true, delete = true }
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -78,6 +79,15 @@ local function assert_judgment_worktree(call, role)
   t.is_nil(call.rendered:find("/worktrees/", 1, true))
 end
 
+local function codex_call_for_role(calls, role)
+  for _, call in ipairs(calls) do
+    if call.rendered:find("/judgment-worktrees/consensus-" .. role, 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
+end
+
 local function assert_judgment_dir_read_only(count)
   local seen = 0
   for _, call in ipairs(t.command_calls()) do
@@ -106,23 +116,36 @@ local function mock_judgment_dir()
   })
 end
 
-local function mock_angle(verdict, reply, exit_code)
-  mock_judgment_dir()
-  local gap = verdict == "reject" and "\n" .. "⟦FKST:GAP⟧ " .. tostring(reply):sub(1, 80) or ""
-  t.mock_command("codex exec", {
-    stdout = verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. gap .. "\n",
-    stderr = "",
+local function role_from_reply(reply)
+  local first = tostring(reply or ""):match("^%s*(%w+)")
+  local role = first and first:lower() or nil
+  if angle_roles[role] then
+    return "angle-" .. role
+  end
+  return "angle-minimal"
+end
+
+local function mock_codex_role(role, stdout, exit_code, stderr)
+  t.mock_command("/judgment-worktrees/consensus-" .. tostring(role), {
+    stdout = tostring(stdout or ""),
+    stderr = tostring(stderr or ""),
     exit_code = exit_code or 0,
   })
 end
 
+local function mock_angle(verdict, reply, exit_code)
+  mock_judgment_dir()
+  local gap = verdict == "reject" and "\n" .. "⟦FKST:GAP⟧ " .. tostring(reply):sub(1, 80) or ""
+  mock_codex_role(
+    role_from_reply(reply),
+    verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. gap .. "\n",
+    exit_code
+  )
+end
+
 local function mock_meta(line, exit_code)
   mock_judgment_dir()
-  t.mock_command("codex exec", {
-    stdout = tostring(line or "") .. "\n",
-    stderr = "",
-    exit_code = exit_code or 0,
-  })
+  mock_codex_role("meta-judge", tostring(line or "") .. "\n", exit_code)
 end
 
 return {
@@ -149,16 +172,22 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 3)
-    assert_judgment_worktree(calls[1], "angle-minimal")
-    assert_judgment_worktree(calls[2], "angle-structural")
-    assert_judgment_worktree(calls[3], "angle-delete")
+    local minimal_call = codex_call_for_role(calls, "angle-minimal")
+    local structural_call = codex_call_for_role(calls, "angle-structural")
+    local delete_call = codex_call_for_role(calls, "angle-delete")
+    t.is_true(minimal_call ~= nil)
+    t.is_true(structural_call ~= nil)
+    t.is_true(delete_call ~= nil)
+    assert_judgment_worktree(minimal_call, "angle-minimal")
+    assert_judgment_worktree(structural_call, "angle-structural")
+    assert_judgment_worktree(delete_call, "angle-delete")
     assert_judgment_dir_read_only(3)
-    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
-    t.is_true(calls[2].stdin:find("Angle: structural", 1, true) ~= nil)
-    t.is_true(calls[3].stdin:find("Angle: delete", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
+    t.is_true(structural_call.stdin:find("Angle: structural", 1, true) ~= nil)
+    t.is_true(delete_call.stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_codex_stdin_carries_fetch_instruction_not_full_body = function()
@@ -385,10 +414,7 @@ return {
     mock_judgment_runtime()
     mock_angle("approve", "Minimal angle approves.")
     mock_judgment_dir()
-    t.mock_command("codex exec", {
-      stderr = "forced failure",
-      exit_code = 7,
-    })
+    mock_codex_role("angle-structural", "", 7, "forced failure")
     mock_angle("approve", "Delete angle approves.")
     mock_meta("converge: Retry the failed structural angle with a concrete blocker.")
 
@@ -409,11 +435,11 @@ return {
   test_unparseable_output_raises_consensus_converge_with_default_question = function()
     mock_judgment_runtime()
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "no verdict here", exit_code = 0 })
+    mock_codex_role("angle-minimal", "no verdict here", 0)
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "still nothing useful", exit_code = 0 })
+    mock_codex_role("angle-structural", "still nothing useful", 0)
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "garbage output", exit_code = 0 })
+    mock_codex_role("angle-delete", "garbage output", 0)
     mock_meta("malformed")
 
     local result = run_decide(proposal(), opts("unparseable"))
@@ -445,8 +471,12 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 2)
-    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
-    t.is_true(calls[2].stdin:find("Angle: delete", 1, true) ~= nil)
+    local minimal_call = codex_call_for_role(calls, "angle-minimal")
+    local delete_call = codex_call_for_role(calls, "angle-delete")
+    t.is_true(minimal_call ~= nil)
+    t.is_true(delete_call ~= nil)
+    t.is_true(minimal_call.stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(delete_call.stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_same_dedup_key_skips_second_run = function()

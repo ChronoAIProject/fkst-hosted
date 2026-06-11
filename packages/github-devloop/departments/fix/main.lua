@@ -61,16 +61,19 @@ local function branch_worktree(repo, issue_number, version, branch)
   return worktree
 end
 
-local function merge_integration_for_fix(worktree, integration_branch)
+local function merge_integration_for_fix(worktree, integration_branch, expected_baseline_sha)
   local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
   if fetch_result.exit_code ~= 0 then
     error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
   end
-  local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", integration_branch), timeout = 30 })
-  if base_result.exit_code ~= 0 then
-    error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
+  local base_head = expected_baseline_sha
+  if base_head == nil then
+    local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", integration_branch), timeout = 30 })
+    if base_result.exit_code ~= 0 then
+      error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
+    end
+    base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
   end
-  local base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
   if not core.is_safe_head_sha(base_head) then
     error("github-devloop: unsafe integration head")
   end
@@ -278,6 +281,10 @@ function pipeline(event)
         core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
         return
       end
+      if merge_gate_fact.gate_baseline_sha ~= fix.gate_baseline_sha then
+        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-baseline-mismatch)", "fix event does not match canonical merge-gate baseline")
+        return
+      end
       feedback_reason = merge_gate_fact.review_reason
     end
 
@@ -339,7 +346,7 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    merge_integration_for_fix(worktree, branches.integration)
+    merge_integration_for_fix(worktree, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "fix",

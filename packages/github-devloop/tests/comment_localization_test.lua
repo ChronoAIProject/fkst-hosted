@@ -186,7 +186,7 @@ local function comment_cases()
     { id = "reviewing", request = core.build_reviewing_comment_request("owner/repo", "42", origin, 7, pr_source_ref) },
     { id = "review-result-approve", request = core.build_review_result_comment_request("owner/repo", "42", issue_proposal_id, issue_version, review_reached(), pr_source_ref) },
     { id = "review-result-reject", request = core.build_review_result_comment_request("owner/repo", "42", issue_proposal_id, issue_version .. "/fix/1", review_reached({ decision = "reject", blocking_gap = "missing guard" }), pr_source_ref) },
-    { id = "merge-gate", request = core.build_merge_gate_fix_comment_request("owner/repo", "42", merge_ready, issue_version .. "/fix/1", "rollup-red", pr_source_ref) },
+    { id = "merge-gate", request = core.build_merge_gate_fix_comment_request("owner/repo", "42", merge_ready, issue_version .. "/fix/1", "rollup-red", "abc123", pr_source_ref) },
     { id = "fix-reviewing", request = core.build_fix_reviewing_comment_request("owner/repo", "42", fix, "def456", "abc123", issue_version .. "/fix/1") },
     { id = "merge-head-reviewing", request = core.build_merge_head_reviewing_comment_request("owner/repo", "42", merge_ready, "def456", "abc123", issue_version .. "/head-advanced", pr_source_ref) },
     { id = "fix-review-meta", request = core.build_fix_review_meta_comment_request("owner/repo", "42", fix, "no-fix", "") },
@@ -309,7 +309,7 @@ return {
           .. core.review_result_marker(review_proposal_id, issue_proposal_id, "reject", review_dedup_key, 1, "missing guard")
           .. "\n" .. core.merge_ready_marker(issue_proposal_id, 7, issue_version, review_proposal_id, review_dedup_key, "def456")
           .. "\n" .. core.review_meta_marker(issue_proposal_id, review_dedup_key, "fix", issue_version .. "/fix/1", "missing guard")
-          .. "\n" .. core.merge_gate_marker(issue_proposal_id, 7, issue_version .. "/fix/1", review_proposal_id, review_dedup_key, "def456", "rollup-red"),
+          .. "\n" .. core.merge_gate_marker(issue_proposal_id, 7, issue_version .. "/fix/1", review_proposal_id, review_dedup_key, "def456", "abc123", "rollup-red"),
         author_login = core.trusted_bot_login(),
       },
     }
@@ -329,6 +329,7 @@ return {
     t.eq(core.review_reject_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
     t.eq(core.review_meta_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
     t.eq(core.merge_gate_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").reviewed_head_sha, "def456")
+    t.eq(core.merge_gate_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").gate_baseline_sha, "abc123")
     t.eq(core.merge_ready_fact(review_comments, issue_proposal_id, issue_version, 7).head_sha, "def456")
     t.eq(core.implementing_fact(implementation_comments, issue_proposal_id, "impl:v1").branch, "devloop-owner-repo-42")
     t.eq(core.pr_link_fact(implementation_comments, issue_proposal_id).pr_number, 7)

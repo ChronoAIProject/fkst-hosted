@@ -136,6 +136,16 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch)
 end
 
 local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, is_draft)
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   if input_comments == nil or #input_comments == 0 then
@@ -197,6 +207,16 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
 end
 
 local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, merged_at, is_draft)
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   if input_comments == nil or #input_comments == 0 then

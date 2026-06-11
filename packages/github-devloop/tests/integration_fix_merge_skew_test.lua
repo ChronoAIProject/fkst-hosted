@@ -18,23 +18,20 @@ local find_raise = h.find_raise
 
 return {
   test_fix_merges_current_integration_before_codex = function()
-    local event = fixing()
+    local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "rollup-red: test: COMPLETED/FAILURE" })
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
-      "owner/repo",
-      "42",
-      event.proposal_id,
-      event.version,
-      {
-        proposal_id = event.review_proposal_id,
-        decision = "reject",
-        body = "Reject because the merge product is red while the branch tip is green.",
-        blocking_gap = "branch green merged red regression guard",
-        dedup_key = event.review_dedup_key,
-        source_ref = { kind = "external", ref = "owner/repo#pr/7" },
-      },
-      event.source_ref
-    ).body
+    local reject_comment = "github-devloop merge gate failed: rollup-red: test: COMPLETED/FAILURE"
+      .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
+      .. "\n" .. core.merge_gate_marker(
+        event.proposal_id,
+        event.pr_number,
+        event.version,
+        event.review_proposal_id,
+        event.review_dedup_key,
+        event.reviewed_head_sha,
+        event.gate_baseline_sha,
+        "rollup-red"
+      )
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
@@ -49,6 +46,7 @@ return {
       exit_code = 0,
     })
     local worktree = mock_existing_fix_worktree(branch, "def456", nil, {
+      sha = "abc123",
       exit_code = 1,
       stdout = "",
       stderr = "CONFLICT (content): Merge conflict in packages/github-devloop/core.lua\n",
@@ -84,6 +82,7 @@ return {
     t.is_true(codex_index ~= nil)
     t.is_true(merge_index < codex_index)
     t.eq(count_calls("git fetch 'origin' 'dev'"), 1)
+    t.eq(count_calls("refs/remotes/'origin'/'dev'^{commit}"), 0)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
   end,
 }
