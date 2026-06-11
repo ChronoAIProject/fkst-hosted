@@ -326,6 +326,8 @@ return {
     t.eq(core.is_devloop_issue_branch("feature/unrelated"), false)
     local worktree_path = core.implement_worktree_path("/tmp/fkst-rt", "owner/repo", "42", ready.dedup_key)
     t.is_true(worktree_path:find("/tmp/fkst-rt/worktrees/devloop-owner-repo-42-", 1, true) == 1)
+    t.eq(core.path_under_runtime_root("/tmp/fkst-rt", worktree_path), true)
+    t.eq(core.path_under_runtime_root("/tmp/fkst-rt", "/tmp/fkst-rt-old/worktrees/devloop-owner-repo-42"), false)
     local judgment_path = core.judgment_worktree_path("/tmp/fkst-rt", "intake", ready.dedup_key)
     t.is_true(judgment_path:find("/tmp/fkst-rt/judgment-worktrees/github-devloop-intake-", 1, true) == 1)
     t.is_nil(judgment_path:find("/worktrees/", 1, true))
@@ -343,6 +345,7 @@ return {
     t.eq(core.git_remote_branch_head_cmd("origin", "dev"), "git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}")
     t.is_true(core.git_worktree_add_new_branch_cmd(worktree_path, deterministic_branch, "abc123"):find("git worktree add -b", 1, true) ~= nil)
     t.eq(core.git_worktree_list_cmd(), "git worktree list --porcelain")
+    t.is_true(core.git_worktree_add_remote_branch_cmd(worktree_path, "origin", deterministic_branch, true):find("git worktree add --force -B", 1, true) ~= nil)
     local list = "worktree /tmp/main\nHEAD abc123\nbranch refs/heads/dev\n\n"
       .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
     t.eq(core.find_worktree_for_branch(list, deterministic_branch), worktree_path)
