@@ -28,6 +28,40 @@ local function bounded_control_text(M, value, limit)
   return text
 end
 
+local function commit_subject_title(M, current)
+  if type(current) ~= "table" then
+    return nil
+  end
+  local title = tostring(current.title or "")
+    :gsub("%c", " ")
+    :gsub("%s+", " ")
+    :gsub("^%s+", "")
+    :gsub("%s+$", "")
+  if title == "" then
+    return nil
+  end
+  title = M._neutralize_fkst_markers(title)
+  return title
+end
+
+local function bounded_commit_subject(M, prefix, issue_number, current)
+  local subject = tostring(prefix) .. " #" .. tostring(issue_number)
+  local title = commit_subject_title(M, current)
+  if title ~= nil then
+    local title_prefix = subject .. ": "
+    local room = 200 - #title_prefix
+    if room > 0 then
+      if #title > room then
+        title = M.truncate_utf8(title, room)
+      end
+      if title ~= "" then
+        subject = title_prefix .. title
+      end
+    end
+  end
+  return subject
+end
+
 local function board_digest_issue_list_cmd(M, repo)
   return "gh issue list"
     .. " --repo " .. M._shell_single_quote(repo)
@@ -521,6 +555,14 @@ end
 
 function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch)
   return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch), repo, tick)
+end
+
+function M.implement_commit_subject(issue_number, current)
+  return bounded_commit_subject(M, "auto-implement", issue_number, current)
+end
+
+function M.fix_commit_subject(issue_number, current)
+  return bounded_commit_subject(M, "auto-fix", issue_number, current)
 end
 end
 
