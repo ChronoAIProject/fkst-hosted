@@ -130,6 +130,87 @@ pub fn signal_group(pgid: i32, signal: Signal) -> Result<(), nix::Error> {
     killpg(Pid::from_raw(pgid), signal)
 }
 
+/// SIGKILL a whole process group, tolerating `ESRCH` (already gone) and
+/// `EPERM` (the Darwin zombie-group quirk); any other errno is logged.
+pub fn kill_group_quiet(pgid: i32) {
+    if let Err(err) = signal_group(pgid, Signal::SIGKILL) {
+        if err != nix::Error::ESRCH && err != nix::Error::EPERM {
+            tracing::error!(pgid, errno = %err, "process group kill failed");
+        }
+    }
+}
+
+/// Cancellation guard for an in-flight child process group.
+///
+/// `start()` / `run_conformance()` futures can be dropped mid-flight (an
+/// axum client disconnect, an outer `select!`/timeout). With
+/// `kill_on_drop(false)` a plainly-dropped [`Child`] would orphan the whole
+/// spawned group, so every pre-return child is held armed by this guard:
+/// dropping it WITHOUT [`Self::defuse`] SIGKILLs the process group and
+/// best-effort reaps the child (a spawned task when a runtime is available,
+/// else a detached thread blocking on `waitpid`). Every normal completion
+/// path defuses the guard and takes ownership of the child back.
+#[derive(Debug)]
+pub struct ChildGroupGuard {
+    pgid: i32,
+    child: Option<Child>,
+}
+
+impl ChildGroupGuard {
+    /// Arm a guard over `child`, whose process group is `pgid`.
+    pub fn new(child: Child, pgid: i32) -> Self {
+        Self {
+            pgid,
+            child: Some(child),
+        }
+    }
+
+    /// Mutable child access (`wait`/`try_wait`) while the guard stays armed.
+    pub fn child_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("guard already defused")
+    }
+
+    /// Disarm the guard and take the child back (normal completion).
+    pub fn defuse(mut self) -> Child {
+        self.child.take().expect("guard already defused")
+    }
+}
+
+impl Drop for ChildGroupGuard {
+    fn drop(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return; // defused: ownership was handed back on a normal path
+        };
+        // An already-reaped child needs no signal — and its PGID may have
+        // been recycled, so killpg would be dangerous.
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        let pgid = self.pgid;
+        tracing::warn!(
+            pgid,
+            "in-flight engine future dropped; killing its process group"
+        );
+        kill_group_quiet(pgid);
+        // Best-effort reap (no zombies): Drop cannot await, so hand the
+        // SIGKILLed child to a spawned task, or — outside a runtime, where
+        // tokio's orphan reaper is not running — to a detached thread.
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(async move {
+                    let _ = child.wait().await;
+                });
+            }
+            Err(_) => {
+                std::thread::spawn(move || {
+                    let _ = nix::sys::wait::waitpid(Pid::from_raw(pgid), None);
+                    drop(child);
+                });
+            }
+        }
+    }
+}
+
 /// A spawned `supervise` child: the handle, its PID (== PGID, own process
 /// group), and the shared stderr ring buffer fed by the drain task.
 #[derive(Debug)]
@@ -250,8 +331,14 @@ pub async fn run_conformance(
     let stdout_task = tokio::spawn(collect_capped(stdout_pipe));
     let stderr_task = tokio::spawn(collect_capped(stderr_pipe));
 
-    match tokio::time::timeout(timeout, child.wait()).await {
+    // Cancellation safety: dropping this future mid-wait (client disconnect,
+    // outer timeout) must not orphan the conformance group — the armed guard
+    // group-kills and reaps on drop; every arm below defuses it explicitly.
+    let mut guard = ChildGroupGuard::new(child, pid);
+
+    match tokio::time::timeout(timeout, guard.child_mut().wait()).await {
         Ok(Ok(status)) => {
+            drop(guard.defuse()); // reaped by wait(); nothing left to kill
             let stderr_bytes = stderr_task.await.unwrap_or_default();
             let stdout_bytes = stdout_task.await.unwrap_or_default();
             let duration_ms = started.elapsed().as_millis() as u64;
@@ -267,16 +354,22 @@ pub async fn run_conformance(
             tracing::error!(duration_ms, exit_code = code, stderr = %stderr, "session.conformance failed");
             Err(RunnerError::ConformanceFailed { code, stderr })
         }
-        Ok(Err(io)) => Err(RunnerError::Io(io)),
+        Ok(Err(io)) => {
+            // wait() itself failed: group-kill, reap, and stop the capture
+            // tasks before surfacing the IO error (parity with the timeout
+            // arm — no orphans, no zombies, no leaked tasks).
+            let mut child = guard.defuse();
+            kill_group_quiet(pid);
+            let _ = child.wait().await;
+            stdout_task.abort();
+            stderr_task.abort();
+            Err(RunnerError::Io(io))
+        }
         Err(_elapsed) => {
             // Group-kill (conformance may have spawned its own children),
             // then ALWAYS reap our direct child — no zombies.
-            if let Err(err) = signal_group(pid, Signal::SIGKILL) {
-                // ESRCH = already gone; EPERM = Darwin zombie-group quirk.
-                if err != nix::Error::ESRCH && err != nix::Error::EPERM {
-                    tracing::error!(pid, errno = %err, "conformance group kill failed");
-                }
-            }
+            let mut child = guard.defuse();
+            kill_group_quiet(pid);
             let _ = child.wait().await;
             stdout_task.abort();
             stderr_task.abort();
@@ -824,6 +917,72 @@ exit 1"#,
             }
             Err(_) => eprintln!("NOTE: stub killed before writing its pid breadcrumb"),
         }
+    }
+
+    #[tokio::test]
+    async fn dropping_run_conformance_mid_wait_kills_and_reaps_the_group() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let pid_file = dir.path().join("conf.pid");
+        let script = stub(
+            dir.path(),
+            "conf-hang.sh",
+            &format!("echo $$ > {}\nsleep 60", pid_file.display()),
+        );
+
+        // Drop the in-flight future mid-wait (an outer select! racing it),
+        // exactly the axum-disconnect shape.
+        {
+            let fut = run_conformance(
+                &script,
+                pkg.path(),
+                rt.path(),
+                Duration::from_secs(60),
+                8192,
+            );
+            tokio::pin!(fut);
+            tokio::select! {
+                res = &mut fut => panic!("conformance must still be in flight, got {res:?}"),
+                _ = async {
+                    while !pid_file.exists() {
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                    }
+                } => {}
+            }
+        } // <- future (and its armed guard) dropped here
+
+        let conf_pid: i32 = fs::read_to_string(&pid_file)
+            .expect("pid breadcrumb")
+            .trim()
+            .parse()
+            .expect("pid");
+        // is_pid_alive turns false only once the child is REAPED (a zombie
+        // still answers kill(pid, 0)), so this asserts kill AND reap.
+        assert!(
+            wait_until(move || !is_pid_alive(conf_pid)).await,
+            "dropped conformance future must kill and reap its group"
+        );
+    }
+
+    #[tokio::test]
+    async fn defused_guard_never_kills_the_child() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(dir.path(), "sleeper.sh", "sleep 30");
+
+        let spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let pid = spawned.pid;
+        let guard = ChildGroupGuard::new(spawned.child, pid);
+        let mut child = guard.defuse(); // ownership handed back: drop is a no-op
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(is_pid_alive(pid), "defused guard must not kill the child");
+
+        reap_with_grace(&mut child, pid, Duration::from_secs(5))
+            .await
+            .expect("cleanup reap");
+        assert!(!is_pid_alive(pid));
     }
 
     #[tokio::test]

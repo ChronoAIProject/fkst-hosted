@@ -25,8 +25,8 @@ use crate::engine::error::RunnerError;
 use crate::engine::logs::tail_child_logs;
 use crate::engine::materialize::{materialize_package, write_fkst_env, PreparedPackage};
 use crate::engine::process::{
-    is_panicked, is_pid_alive, is_ready, reap_with_grace, run_conformance, signal_group,
-    spawn_supervise, SpawnedChild, StderrBuffer,
+    is_panicked, is_pid_alive, is_ready, kill_group_quiet, reap_with_grace, run_conformance,
+    spawn_supervise, ChildGroupGuard, SpawnedChild, StderrBuffer,
 };
 
 /// Poll interval of the post-spawn ready-wait loop.
@@ -267,21 +267,23 @@ impl SessionRunner {
 
         // 6. Bounded ready-wait. Every failure path group-kills, reaps, and
         //    (by dropping the guards still held here) cleans both dirs.
-        let SpawnedChild {
-            mut child,
-            pid,
-            stderr,
-        } = spawned;
+        //    Cancellation safety: the armed ChildGroupGuard ensures that
+        //    dropping THIS future mid-ready-wait (client disconnect, outer
+        //    select!/timeout) also group-kills and reaps the spawned engine;
+        //    it is defused when ownership moves to the RunningSession or to
+        //    fail_startup (which kills + reaps itself).
+        let SpawnedChild { child, pid, stderr } = spawned;
+        let mut guard = ChildGroupGuard::new(child, pid);
         let ready_timeout = Duration::from_secs(self.config.ready_timeout_secs);
         let started = Instant::now();
         loop {
             // Child-exit-first: an engine that dies (or finishes) before
             // emitting the ready markers is a startup failure.
-            let exited = match child.try_wait() {
+            let exited = match guard.child_mut().try_wait() {
                 Ok(maybe_exit) => maybe_exit,
                 Err(err) => {
                     return Err(fail_startup(
-                        child,
+                        guard.defuse(),
                         pid,
                         &stderr,
                         &format!("supervise wait failed: {err}"),
@@ -292,7 +294,7 @@ impl SessionRunner {
             };
             if let Some(exit) = exited {
                 return Err(fail_startup(
-                    child,
+                    guard.defuse(),
                     pid,
                     &stderr,
                     &format!("supervise exited before ready ({exit})"),
@@ -304,7 +306,7 @@ impl SessionRunner {
             let snapshot = stderr.snapshot();
             if is_panicked(&snapshot) {
                 return Err(fail_startup(
-                    child,
+                    guard.defuse(),
                     pid,
                     &stderr,
                     "supervise panicked during startup",
@@ -317,7 +319,7 @@ impl SessionRunner {
             }
             if started.elapsed() >= ready_timeout {
                 return Err(fail_startup(
-                    child,
+                    guard.defuse(),
                     pid,
                     &stderr,
                     &format!(
@@ -343,7 +345,7 @@ impl SessionRunner {
             pid,
             runtime_dir,
             package_dir,
-            child,
+            child: guard.defuse(),
             package_guard: Some(package_guard),
             runtime_guard: Some(runtime_guard),
             stderr,
@@ -362,12 +364,7 @@ async fn fail_startup(
     reason: &str,
     error_capture_bytes: usize,
 ) -> RunnerError {
-    if let Err(err) = signal_group(pid, nix::sys::signal::Signal::SIGKILL) {
-        // ESRCH = already gone; EPERM = Darwin zombie-group quirk.
-        if err != nix::Error::ESRCH && err != nix::Error::EPERM {
-            tracing::error!(pid, errno = %err, "session.start: startup group kill failed");
-        }
-    }
+    kill_group_quiet(pid);
     let _ = child.wait().await;
 
     let tail = stderr_tail(&stderr.snapshot(), error_capture_bytes);
@@ -400,6 +397,7 @@ mod tests {
     use nix::unistd::Pid;
 
     use super::*;
+    use crate::engine::process::signal_group;
     use crate::packages::model::PackageFile;
 
     /// Conformance branch that passes; supervise body is per-test.
@@ -781,6 +779,58 @@ esac
             Err(_) => eprintln!("NOTE: stub killed before writing its pid breadcrumb"),
         }
         assert_eq!(fkst_entries(temp_root.path()), 0);
+    }
+
+    // ---- cancellation safety ----------------------------------------------------------
+
+    #[tokio::test]
+    async fn dropping_start_mid_ready_wait_kills_and_reaps_the_spawned_group() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        // Never goes ready: start() can only leave the ready-wait via the
+        // timeout — or via being DROPPED, which is what this test does.
+        let bin = engine_stub(
+            stub_dir.path(),
+            r#"    echo $$ > "$FKST_RUNTIME_ROOT/../supervise.pid"
+    echo "event runtime running handles=3" >&2
+    sleep 30"#,
+        );
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+        let pkg = minimal_package();
+        let pid_file = temp_root.path().join("supervise.pid");
+
+        // Race start() against the stub's pid breadcrumb inside select!, so
+        // the future is dropped mid-ready-wait (the axum-disconnect shape).
+        {
+            let fut = runner.start(&pkg);
+            tokio::pin!(fut);
+            tokio::select! {
+                res = &mut fut => panic!("start must still be mid-ready-wait, got {res:?}"),
+                _ = async {
+                    while !pid_file.exists() {
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                    }
+                } => {}
+            }
+        } // <- start() future (armed guard + temp-dir guards) dropped here
+
+        let pid: i32 = fs::read_to_string(&pid_file)
+            .expect("pid breadcrumb")
+            .trim()
+            .parse()
+            .expect("pid");
+        // is_pid_alive turns false only once the child is REAPED (a zombie
+        // still answers kill(pid, 0)), so this asserts kill AND reap.
+        assert!(
+            wait_until(move || !is_pid_alive(pid)).await,
+            "dropped start() must kill and reap the supervise group"
+        );
+        fs::remove_file(&pid_file).expect("rm breadcrumb");
+        assert_eq!(
+            fkst_entries(temp_root.path()),
+            0,
+            "temp dirs cleaned when the start future is dropped"
+        );
     }
 
     // ---- status ---------------------------------------------------------------------
