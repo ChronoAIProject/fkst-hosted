@@ -28,7 +28,7 @@ function pipeline(_event)
       end
       log.warn(result_or_err.message)
     else
-      local entities = core.parse_entity_list(result_or_err.stdout)
+      local entities = core.parse_entity_list(result_or_err.stdout, entity_type.type)
       for _, entity in ipairs(entities) do
         local key = core.entity_cache_key(repo, entity_type.type, entity.number)
         with_lock(key, function()

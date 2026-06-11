@@ -41,6 +41,14 @@ local function full_issue_view(labels, comments, extra)
   })
 end
 
+local function issue_updated_at(value)
+  t.mock_command("gh api 'repos/owner/repo/issues/42' --jq '.updated_at // .updatedAt // \"\"'", {
+    stdout = tostring(value or "") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function shared_opts(name)
   return opts("entity-view-cache-" .. name)
 end
@@ -133,11 +141,35 @@ return {
     local event = issue({ labels = { "fkst-dev:ready" }, updated_at = "2026-06-03T01:02:03Z" })
 
     local observed = run_observe(event, run_opts)
+    issue_updated_at("2026-06-03T01:02:03Z")
     local opened = run_open_pr(event, run_opts)
 
     t.eq(observed.exit_code, 0)
     t.eq(opened.exit_code, 0)
     t.eq(count_calls("gh issue view"), 1)
+  end,
+
+  test_cross_consumer_delayed_retry_refetches_current_issue_truth = function()
+    local run_opts = shared_opts("cross-consumer-delayed-retry")
+    local event = issue({ labels = { "fkst-dev:ready" }, updated_at = "2026-06-03T01:02:03Z" })
+    full_issue_view({ "fkst-dev:ready" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "ready", "ready/version"),
+    }, {
+      updated_at = "2026-06-03T01:02:03Z",
+    })
+    local observed = run_observe(event, run_opts)
+    issue_updated_at("2026-06-03T01:02:04Z")
+    full_issue_view({ "fkst-dev:blocked" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "blocked", "blocked/version"),
+    }, {
+      updated_at = "2026-06-03T01:02:04Z",
+    })
+    local opened = run_open_pr(event, run_opts)
+
+    t.eq(observed.exit_code, 0)
+    t.eq(opened.exit_code, 0)
+    t.eq(count_calls("gh issue view"), 2)
+    t.eq(#opened.raises, 0)
   end,
 
   test_same_consumer_retry_refetches_current_issue_truth = function()

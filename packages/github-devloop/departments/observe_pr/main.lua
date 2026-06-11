@@ -159,24 +159,17 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
             reviewed_head_sha = feedback.reviewed_head_sha,
             source_ref = source_ref,
           }
-          local comment_request = core.build_fix_reviewing_comment_request(origin.repo, origin.issue_number, fix, feedback.reviewed_head_sha, current_pr.head_sha, reviewing_version)
-          local label_request = core.build_fix_reviewing_label_request(origin.repo, origin.issue_number, fix, current_pr.head_sha, reviewing_version)
-          local reviewing_payload = core.build_devloop_reviewing_payload({
-            proposal_id = origin.proposal_id,
-            impl_version = reviewing_version,
-          }, pr_number, source_ref)
-          local add_labels, remove_labels = core.state_label_changes("reviewing")
-          core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "applied", "push already visible; self-healing missing reviewing marker")
-          core.log_apply("observe_pr", origin.proposal_id, "reviewing", reviewing_version, { add = add_labels, remove = remove_labels }, {
-            "github-proxy.github_pr_comment_request",
-            "github-proxy.github_issue_label_request",
-            "devloop_reviewing",
+          core.raise_fix_reviewing({
+            dept = "observe_pr",
+            repo = origin.repo,
+            issue_number = origin.issue_number,
+            fix = fix,
+            old_head_sha = feedback.reviewed_head_sha,
+            new_head_sha = current_pr.head_sha,
+            new_version = reviewing_version,
+            reason = "push already visible; self-healing missing reviewing marker",
+            current_state = state,
           })
-          core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-          if origin.issue_number ~= nil then
-            core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
-          end
-          core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
           return
         end
         core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")

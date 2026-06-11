@@ -1,9 +1,15 @@
 local S = {}
 
 function S.install(M)
-function M.gh_exec(cmd_or_opts, timeout, context)
-  local run = type(context) == "function" and context or exec_sync
-  return run(M.gh_exec_opts(cmd_or_opts, timeout))
+local function url_encode(value)
+  local text = tostring(value or "")
+  return (text:gsub("([^%w%-%._~])", function(char)
+    return string.format("%%%02X", string.byte(char))
+  end))
+end
+
+local function repo_owner(repo)
+  return tostring(repo or ""):match("^([^/]+)/")
 end
 
 function M.gh_issue_list_intake_cmd(repo, limit)
@@ -254,12 +260,13 @@ function M.gh_pr_list_head_base_cmd(repo, head, base)
   if not M._is_git_ref_safe(base) then
     error("github-devloop: invalid PR base branch")
   end
-  return "gh pr list"
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --head " .. M._shell_single_quote(head)
-    .. " --base " .. M._shell_single_quote(base)
-    .. " --state open"
-    .. " --json number,headRefOid,headRefName,baseRefName,state"
+  local owner = repo_owner(repo)
+  local head_filter = owner ~= nil and (owner .. ":" .. tostring(head)) or tostring(head)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo)
+      .. "/pulls?state=open&head=" .. url_encode(head_filter)
+      .. "&base=" .. url_encode(base)
+      .. "&per_page=100") -- gh api --paginate
 end
 
 function M.gh_pr_create_cmd(repo, head, base, title, body_file)
