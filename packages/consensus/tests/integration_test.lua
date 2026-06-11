@@ -57,25 +57,6 @@ local function codex_calls()
   return calls
 end
 
-local function has_stdin_fragment(calls, fragment)
-  for _, call in ipairs(calls) do
-    if tostring(call.stdin or ""):find(fragment, 1, true) ~= nil then
-      return true
-    end
-  end
-  return false
-end
-
-local function count_digest_verdicts(digests, verdict)
-  local count = 0
-  for _, digest in ipairs(digests or {}) do
-    if digest.verdict == verdict then
-      count = count + 1
-    end
-  end
-  return count
-end
-
 local function mock_angle(verdict, reply, exit_code)
   t.mock_command("codex exec", {
     stdout = verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. "\n",
@@ -115,11 +96,11 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 3)
-    t.is_true(has_stdin_fragment(calls, "Angle: minimal"))
-    t.is_true(has_stdin_fragment(calls, "Angle: structural"))
-    t.is_true(has_stdin_fragment(calls, "Angle: delete"))
-    t.is_true(has_stdin_fragment(calls, "source_ref.ref: demo/consensus/42"))
-    t.is_true(has_stdin_fragment(calls, "fetch-source --ref demo/consensus/42 --full"))
+    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
+    t.is_true(calls[2].stdin:find("Angle: structural", 1, true) ~= nil)
+    t.is_true(calls[3].stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_codex_stdin_carries_fetch_instruction_not_full_body = function()
@@ -175,8 +156,8 @@ return {
     t.eq(result.raises[1].payload.source_ref.kind, "proposal")
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_digests, 3)
-    t.eq(count_digest_verdicts(result.raises[1].payload.angle_digests, "approve"), 2)
-    t.eq(count_digest_verdicts(result.raises[1].payload.angle_digests, "abstain"), 1)
+    t.eq(result.raises[1].payload.angle_digests[1].verdict, "approve")
+    t.eq(result.raises[1].payload.angle_digests[2].verdict, "abstain")
     t.is_nil(result.raises[1].payload.body)
     t.is_nil(result.raises[1].payload.angle_results)
     t.is_nil(result.raises[1].payload.decision)
@@ -195,7 +176,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.eq(count_digest_verdicts(result.raises[1].payload.angle_digests, "invalid"), 1)
+    t.eq(result.raises[1].payload.angle_digests[1].verdict, "invalid")
     t.eq(result.raises[1].payload.narrowed_question, "What concern prevents approval?")
     t.eq(#codex_calls(), 4)
   end,
@@ -316,8 +297,8 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 2)
-    t.is_true(has_stdin_fragment(calls, "Angle: minimal"))
-    t.is_true(has_stdin_fragment(calls, "Angle: delete"))
+    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(calls[2].stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_same_dedup_key_skips_second_run = function()
