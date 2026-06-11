@@ -798,7 +798,7 @@ function M.raise_fix_reviewing(opts)
   local new_version = opts.new_version or M.next_fix_version(fix.version)
   local reason = opts.reason
   local current_state = opts.current_state or { state = "fixing", version = fix.version }
-  if opts.fix_summary ~= nil then
+  if opts.fix_summary ~= nil or opts.clear_fix_summary == true then
     fix.fix_summary = opts.fix_summary
   end
 

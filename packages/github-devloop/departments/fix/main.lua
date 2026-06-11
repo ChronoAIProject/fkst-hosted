@@ -159,6 +159,7 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
     new_head_sha = new_head_sha,
     reason = reason,
     fix_summary = bounded_fix_summary(summary),
+    clear_fix_summary = true,
   })
 end
 
