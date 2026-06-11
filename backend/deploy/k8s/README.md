@@ -97,14 +97,16 @@ PW="$(openssl rand -hex 16)"
 kubectl --context docker-desktop -n fkst-hosted create secret generic fkst-hosted-secret \
   --from-literal=MONGO_INITDB_ROOT_USERNAME=root \
   --from-literal=MONGO_INITDB_ROOT_PASSWORD="$PW" \
-  --from-literal=MONGODB_URI="mongodb://root:${PW}@mongodb-0.mongodb.fkst-hosted.svc.cluster.local:27017/fkst_hosted?authSource=admin"
+  --from-literal=MONGODB_URI="mongodb://root:${PW}@mongodb-0.mongodb:27017/fkst_hosted?authSource=admin"
 ```
 
 **Consistency rule:** the `username:password` embedded in `MONGODB_URI` MUST
 equal `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD`, and the URI
 must keep `authSource=admin` (the root user lives in `admin`). A mismatch is
 the single most common bring-up failure: Mongo comes up fine, the API stays
-`NotReady` with auth errors.
+`NotReady` with auth errors. (Single-secret design: the API container also
+receives `MONGO_INITDB_ROOT_USERNAME`/`MONGO_INITDB_ROOT_PASSWORD` via the
+shared Secret's `envFrom` — harmless extras the API does not read.)
 
 *Filled-file alternative:* copy `secret.example.yaml` to
 `backend/deploy/k8s/secret.yaml` (git-ignored by the root `.gitignore`, as is

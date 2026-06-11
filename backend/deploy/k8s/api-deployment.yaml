@@ -55,7 +55,7 @@ spec:
           command:
             - sh
             - -c
-            - until nc -z mongodb-0.mongodb.fkst-hosted.svc.cluster.local 27017; do sleep 2; done
+            - until nc -z -w 2 mongodb-0.mongodb 27017; do sleep 2; done
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
