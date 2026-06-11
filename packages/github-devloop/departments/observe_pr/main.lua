@@ -3,7 +3,7 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "github-proxy.github_entity_changed" },
+  consumes = { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
@@ -17,6 +17,27 @@ M.spec = {
 
 local function pr_source_ref(repo, pr_number)
   return core.pr_source_ref(repo, pr_number)
+end
+
+local function pr_context(event)
+  local payload = event.payload or {}
+  if core.is_supported_pr(payload) then
+    return {
+      repo = payload.repo,
+      number = payload.number,
+      dedup_key = payload.dedup_key,
+      source_ref = payload.source_ref,
+    }
+  end
+  if core.is_supported_pr_opened(payload) then
+    return {
+      repo = payload.repo,
+      number = payload.pr_number,
+      dedup_key = payload.dedup_key,
+      source_ref = payload.source_ref,
+    }
+  end
+  return nil
 end
 
 local function origin_from_pr(repo, pr_number, current_pr)
@@ -89,13 +110,16 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
     end
     local issue_comments = issue_comments_for_origin(origin)
     local fact_comments = issue_comments or current_pr.comments
-    local reject_fact = core.review_reject_fact(fact_comments, origin.proposal_id, state.version)
-    if reject_fact == nil then
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(no-trusted-reject-fact)", "trusted reject review marker is not visible")
+    local feedback = core.fixing_replay_feedback_fact(fact_comments, origin.proposal_id, state.version)
+    if feedback == nil and issue_comments ~= nil then
+      feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version)
+    end
+    if feedback == nil then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(no-trusted-fix-feedback)", "trusted fix feedback marker is not visible")
       return
     end
-    if reject_fact ~= nil and reject_fact.review_proposal_id ~= nil and reject_fact.reviewed_head_sha ~= nil then
-      if tostring(current_pr.head_sha or "") ~= tostring(reject_fact.reviewed_head_sha or "") then
+    if feedback.review_proposal_id ~= nil and feedback.reviewed_head_sha ~= nil then
+      if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
         core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
         return
       end
@@ -105,10 +129,10 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
           proposal_id = origin.proposal_id,
           impl_version = state.version,
         }, pr_number, {
-          review_proposal_id = reject_fact.review_proposal_id,
-          review_dedup_key = reject_fact.review_dedup_key,
-          reviewed_head_sha = reject_fact.reviewed_head_sha,
-          blocking_gap = reject_fact.blocking_gap,
+          review_proposal_id = feedback.review_proposal_id,
+          review_dedup_key = feedback.review_dedup_key,
+          reviewed_head_sha = feedback.reviewed_head_sha,
+          blocking_gap = feedback.blocking_gap,
         }, source_ref)
         core.log_line("info", "observe_pr", origin.proposal_id, "SELFHEAL", {
           "state=fixing",
@@ -241,9 +265,10 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
 end
 
 function pipeline(event)
-  local pr = event.payload or {}
-  if not core.is_supported_pr(pr) then
-    core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
+  local pr = pr_context(event)
+  local raw = event.payload or {}
+  if pr == nil then
+    core.log_entry("observe_pr", event, "unknown", raw.dedup_key)
     core.log_cas_decision("observe_pr", "unknown", { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "unsupported event payload")
     return
   end

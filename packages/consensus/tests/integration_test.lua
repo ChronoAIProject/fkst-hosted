@@ -116,14 +116,6 @@ local function mock_judgment_dir()
   })
 end
 
-local function mock_codex_role(role, stdout, exit_code, stderr)
-  t.mock_command("/judgment-worktrees/consensus-" .. tostring(role), {
-    stdout = tostring(stdout or ""),
-    stderr = tostring(stderr or ""),
-    exit_code = exit_code or 0,
-  })
-end
-
 local function angle_mock_pattern(angle)
   if angle == nil then
     return "codex exec"
@@ -143,7 +135,11 @@ end
 
 local function mock_meta(line, exit_code)
   mock_judgment_dir()
-  mock_codex_role("meta-judge", tostring(line or "") .. "\n", exit_code)
+  t.mock_command("meta-judge", {
+    stdout = tostring(line or "") .. "\n",
+    stderr = "",
+    exit_code = exit_code or 0,
+  })
 end
 
 return {
@@ -297,9 +293,10 @@ return {
     t.is_nil(result.raises[1].payload.decision)
     local calls = codex_calls()
     t.eq(#calls, 4)
-    assert_judgment_worktree(calls[4], "meta-judge")
-    t.is_true(calls[4].stdin:find("Angle outputs:", 1, true) ~= nil)
-    t.is_true(calls[4].stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    local meta_call = judgment_call("meta-judge")
+    assert_judgment_worktree(meta_call, "meta-judge")
+    t.is_true(meta_call.stdin:find("Angle outputs:", 1, true) ~= nil)
+    t.is_true(meta_call.stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
   end,
 
   test_meta_plan_flows_into_next_converge_round = function()

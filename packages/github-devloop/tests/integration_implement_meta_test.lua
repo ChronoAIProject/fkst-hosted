@@ -78,6 +78,20 @@ local mock_issue_view_failure = h.mock_issue_view_failure
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 
+local function assert_open_pr_kickoff(raises, event, branch, head_sha)
+  local kickoff = find_raise(raises, "devloop_open_pr")
+  local _, expected_issue_number = core.parse_issue_source_ref(event.source_ref)
+  t.eq(kickoff.payload.schema, "github-devloop.open-pr.v1")
+  t.eq(kickoff.payload.proposal_id, event.proposal_id)
+  t.eq(kickoff.payload.repo, "owner/repo")
+  t.eq(tostring(kickoff.payload.issue_number), tostring(expected_issue_number))
+  t.eq(kickoff.payload.version, event.dedup_key)
+  t.eq(kickoff.payload.branch, branch)
+  t.eq(kickoff.payload.head_sha, head_sha)
+  t.eq(kickoff.payload.base_branch, "dev")
+  t.eq(kickoff.payload.source_ref.ref, event.source_ref.ref)
+end
+
 return {
   test_implement_ready_label_only_empty_comments_does_not_synthesize_marker = function()
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
@@ -204,12 +218,13 @@ return {
 
     local result = run_implement(event, opts("implement-existing-branch-reuse"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
     t.eq(count_calls("git worktree add"), 0)
     t.eq(count_calls("codex exec"), 1)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
@@ -238,7 +253,8 @@ return {
 
     local result = run_implement(event, opts("implement-boundary-worktree"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
     t.eq(count_calls("git worktree list"), 0)
     t.eq(count_calls("codex exec"), 1)
   end,
@@ -284,12 +300,13 @@ return {
 
     local result = run_implement(event, opts("implement-clean-ahead"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
     t.eq(count_calls("impl-failed"), 0)
     t.eq(count_calls("add -A"), 0)
     t.eq(count_calls("commit -m"), 0)
@@ -337,12 +354,13 @@ return {
 
     local result = run_implement(event, opts("implement-existing-worktree-reuse"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
     t.is_true(comment:find(worktree, 1, true) ~= nil)
     t.eq(count_calls("git worktree list --porcelain"), 1)
     t.eq(count_calls("git worktree add"), 0)
@@ -400,8 +418,9 @@ return {
 
     local visible = run_implement(ready(), opts("implement-ready-visible"))
     t.eq(visible.exit_code, 0)
-    t.eq(#visible.raises, 2)
+    t.eq(#visible.raises, 3)
     t.eq(find_raise(visible.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
+    assert_open_pr_kickoff(visible.raises, ready(), branch, "def456")
     t.eq(count_calls("codex exec"), 1)
   end,
 
