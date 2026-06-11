@@ -108,15 +108,19 @@ local function has_trusted_text(comments, needle)
   return false
 end
 
-local function has_approval_marker(comments, issue_proposal_id)
+local function has_approval_marker(comments, issue_proposal_id, pr_number, head_sha)
   if type(comments) ~= "table" then
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
   for _, comment in ipairs(core._trusted_marker_comments(comments)) do
     for marker in core._comment_body(comment):gmatch(marker_pattern) do
+      local review_proposal = marker:match('proposal="([^"]+)"')
+      local _, reviewed_pr_number, _, reviewed_head_sha = core.parse_pr_review_proposal_id(review_proposal)
       if marker:match('decision="([^"]+)"') == "approve"
-        and marker:match('issue_proposal="([^"]+)"') == tostring(issue_proposal_id) then
+        and marker:match('issue_proposal="([^"]+)"') == tostring(issue_proposal_id)
+        and tostring(reviewed_pr_number or "") == tostring(pr_number or "")
+        and tostring(reviewed_head_sha or "") == tostring(head_sha or "") then
         return true
       end
     end
@@ -145,7 +149,7 @@ local function is_imminently_mergeable(pr)
 end
 
 local function is_approved(pr, origin)
-  return has_approval_marker(pr.comments, origin.proposal_id)
+  return has_approval_marker(pr.comments, origin.proposal_id, pr.number, pr.head_sha)
 end
 
 local function candidate_reason(pr, origin, issue, state)

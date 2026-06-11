@@ -176,6 +176,26 @@ return {
     t.eq(h.count_calls("git fetch"), 0)
   end,
 
+  test_pr_freshness_skips_stale_review_approval_for_new_head = function()
+    local old_head_sha = branch_sha
+    local new_head_sha = "dddd4444"
+    local old_review_proposal = core.pr_review_proposal_id("owner/repo", 7, version, old_head_sha)
+    local old_review_dedup = "consensus:" .. old_review_proposal .. "/review"
+    mock_env("")
+    mock_pr_list(false)
+    mock_pr_view("reviewing", {
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", version .. "/fix/1"),
+      core.review_result_marker(old_review_proposal, "github-devloop/issue/owner/repo/42", "approve", old_review_dedup),
+    }, { head_sha = new_head_sha })
+    mock_issue_view({})
+
+    local result = run_scan()
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(h.count_calls("git fetch"), 0)
+  end,
+
   test_pr_freshness_conflict_raises_sync_conflict_for_pr_branch = function()
     mock_env("")
     mock_pr_list(false)
