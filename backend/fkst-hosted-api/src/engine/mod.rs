@@ -12,5 +12,7 @@
 //! build a [`PreparedPackage`], and persist whatever the runner returns.
 
 pub mod config;
+pub mod error;
 
 pub use config::EngineConfig;
+pub use error::RunnerError;
