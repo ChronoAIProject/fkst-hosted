@@ -34,9 +34,19 @@ function M.gh_dashboard_issue_create_cmd(repo, input_file)
     .. " --input " .. M._shell_single_quote(input_file)
 end
 
-function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file)
+function M.gh_dashboard_issue_get_cmd(repo, issue_number)
+  return "gh api --method GET --include "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+end
+
+function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file, etag)
+  local header = ""
+  if etag ~= nil and tostring(etag) ~= "" then
+    header = " --header " .. M._shell_single_quote("If-Match: " .. tostring(etag))
+  end
   return "gh api --method PATCH "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+    .. header
     .. " --input " .. M._shell_single_quote(input_file)
 end
 

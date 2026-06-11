@@ -478,12 +478,12 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]\n',
+    t.mock_command("gh api --method GET --include 'repos/owner/repo/issues/99'", {
+      stdout = 'HTTP/2.0 200 OK\netag: "dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}\n',
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --input '/tmp/fkst-github-devloop-dashboard-owner-repo.json'", {
+    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"' --input '/tmp/fkst-github-devloop-dashboard-owner-repo.json'", {
       stdout = '{"number":99}\n',
       stderr = "",
       exit_code = 0,
@@ -493,7 +493,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST"), 0)
-    t.eq(count_calls("gh api --method PATCH 'repos/owner/repo/issues/99'"), 1)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"'"), 1)
   end,
 
   test_dashboard_write_skips_update_when_version_cas_mismatches = function()
@@ -509,8 +509,8 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"newer\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:01:00Z\\" hash=\\"newer\\" generated_at=\\"2026-06-01T00:01:00Z\\" -->"}]\n',
+    t.mock_command("gh api --method GET --include 'repos/owner/repo/issues/99'", {
+      stdout = 'HTTP/2.0 200 OK\netag: "dashboard-newer-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"newer\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:01:00Z\\" hash=\\"newer\\" generated_at=\\"2026-06-01T00:01:00Z\\" -->"}\n',
       stderr = "",
       exit_code = 0,
     })
@@ -520,7 +520,39 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST"), 0)
     t.eq(count_calls("gh api --method PATCH"), 0)
-    t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 20"), 2)
+    t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 20"), 1)
+    t.eq(count_calls("gh api --method GET --include 'repos/owner/repo/issues/99'"), 1)
+  end,
+
+  test_dashboard_write_skips_update_when_etag_precondition_fails = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "reviewing", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
+    })
+    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
+      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --method GET --include 'repos/owner/repo/issues/99'", {
+      stdout = 'HTTP/2.0 200 OK\netag: "dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"' --input '/tmp/fkst-github-devloop-dashboard-owner-repo.json'", {
+      stdout = "",
+      stderr = "HTTP 412: Precondition Failed\n",
+      exit_code = 1,
+    })
+
+    local result = run_observability(opts("observability-dashboard-etag-precondition", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh api --method POST"), 0)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"'"), 1)
   end,
 
   test_dashboard_write_skips_stale_snapshot_when_current_version_is_newer = function()

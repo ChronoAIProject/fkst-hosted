@@ -91,6 +91,50 @@ local function dashboard_version_is_stale(target_version, current_version)
   return target <= current
 end
 
+local function split_included_headers(stdout)
+  local text = tostring(stdout or "")
+  local head, body = text:match("^(.-)\r?\n\r?\n(.*)$")
+  if head == nil then
+    return "", text
+  end
+  return head, body
+end
+
+local function header_value(headers, name)
+  local target = tostring(name or ""):lower()
+  for line in tostring(headers or ""):gmatch("[^\r\n]+") do
+    local key, value = line:match("^%s*([^:]+):%s*(.-)%s*$")
+    if key ~= nil and key:lower() == target then
+      return value
+    end
+  end
+  return nil
+end
+
+local function parse_dashboard_issue_get(stdout)
+  local headers, body = split_included_headers(stdout)
+  local decoded = json.decode(body or "{}")
+  if type(decoded) ~= "table" then
+    decoded = {}
+  end
+  local author_login = nil
+  if type(decoded.author) == "table" and decoded.author.login ~= nil then
+    author_login = tostring(decoded.author.login)
+  elseif decoded.author_login ~= nil then
+    author_login = tostring(decoded.author_login)
+  elseif type(decoded.user) == "table" and decoded.user.login ~= nil then
+    author_login = tostring(decoded.user.login)
+  end
+  return {
+    number = tonumber(decoded.number),
+    title = tostring(decoded.title or ""),
+    author_login = author_login,
+    body = tostring(decoded.body or ""),
+    updated_at = decoded.updated_at or decoded.updatedAt,
+    etag = header_value(headers, "etag"),
+  }
+end
+
 local function require_observe_repo()
   local repo = M.read_env("FKST_GITHUB_REPO")
   if repo == nil or M.safe_repo(repo) ~= tostring(repo) then
@@ -484,6 +528,17 @@ local function trusted_dashboard_issue(repo, bot_login)
   return nil
 end
 
+local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login)
+  local view = run_cmd(M.gh_dashboard_issue_get_cmd(repo, issue_number), 30, "gh dashboard issue get")
+  local issue = parse_dashboard_issue_get(view.stdout)
+  if issue.number == tonumber(issue_number)
+    and issue.author_login == bot_login
+    and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
+    return issue
+  end
+  return nil
+end
+
 local function write_dashboard_input(repo, title, body)
   local path = dashboard_input_path(repo)
   file.write(path, "{"
@@ -525,7 +580,7 @@ function M.publish_observability_dashboard(repo, dashboard)
     return "stale"
   end
 
-  local refreshed = trusted_dashboard_issue(repo, bot_login)
+  local refreshed = trusted_dashboard_issue_by_number(repo, current.number, bot_login)
   local refreshed_version = refreshed ~= nil and dashboard_version_from_body(refreshed.body) or nil
   local refreshed_hash = refreshed ~= nil and dashboard_hash_from_body(refreshed.body) or nil
   if refreshed ~= nil and tonumber(refreshed.number) == tonumber(current.number)
@@ -549,9 +604,29 @@ function M.publish_observability_dashboard(repo, dashboard)
       .. " hash=" .. tostring(dashboard.hash))
     return "stale"
   end
+  if refreshed.etag == nil or tostring(refreshed.etag) == "" then
+    log.info("github-devloop dept=observability tag=DASHBOARD_CAS_MISMATCH issue=" .. tostring(current.number)
+      .. " expected_version=" .. tostring(current_version or "")
+      .. " actual_version=" .. tostring(refreshed_version or "")
+      .. " reason=missing-etag"
+      .. " hash=" .. tostring(dashboard.hash))
+    return "cas-mismatch"
+  end
 
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-  run_cmd(M.gh_dashboard_issue_update_cmd(repo, current.number, path), 30, "gh dashboard issue update")
+  local updated = exec_sync({ cmd = M.gh_dashboard_issue_update_cmd(repo, current.number, path, refreshed.etag), timeout = 30 })
+  if updated.exit_code ~= 0 then
+    local stderr = tostring(updated.stderr or "")
+    if stderr:find("412", 1, true) ~= nil or stderr:find("Precondition Failed", 1, true) ~= nil then
+      log.info("github-devloop dept=observability tag=DASHBOARD_CAS_MISMATCH issue=" .. tostring(current.number)
+        .. " expected_version=" .. tostring(refreshed_version or "")
+        .. " actual_version=unknown"
+        .. " reason=etag-precondition"
+        .. " hash=" .. tostring(dashboard.hash))
+      return "cas-mismatch"
+    end
+    error("github-devloop: gh dashboard issue update failed: " .. stderr)
+  end
   log.info("github-devloop dept=observability tag=DASHBOARD_UPDATED issue=" .. tostring(current.number)
     .. " hash=" .. tostring(dashboard.hash))
   return "updated"
