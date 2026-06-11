@@ -354,8 +354,11 @@ async fn drive(
             return;
         }
         Err(error) => {
+            // The driver error (a Mongo failure) can carry internal
+            // topology/connection detail: log it, never persist it into the
+            // client-served `error` field.
             tracing::error!(session_id = %id, error = %error, "driver failed to load package");
-            fail_session(&inner, id, &format!("failed to load package: {error}")).await;
+            fail_session(&inner, id, "failed to load package").await;
             return;
         }
     };
@@ -446,6 +449,8 @@ async fn drive(
                         tracing::info!(session_id = %id, "session stopped");
                     }
                     Err(error) => {
+                        // Host-side detail (paths, signalling internals)
+                        // stays in the logs; the served field is generic.
                         tracing::error!(session_id = %id, error = %error, "engine stop failed");
                         let _ = inner
                             .repo
@@ -454,7 +459,7 @@ async fn drive(
                                 &[SessionStatus::Stopping, SessionStatus::Running],
                                 doc! {
                                     "status": status_bson(SessionStatus::Failed),
-                                    "error": truncate_error(&format!("engine stop failed: {error}")),
+                                    "error": "engine stop failed",
                                     "stopped_at": now(),
                                 },
                             )
