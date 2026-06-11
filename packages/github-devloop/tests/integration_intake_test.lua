@@ -41,6 +41,25 @@ local function comments_json(comments)
   return table.concat(rendered, ",")
 end
 
+local function trusted_reintake_command(id)
+  return {
+    id = id or "IC_reintake_1",
+    body = "fkst: reintake",
+    author_login = core.trusted_bot_login(),
+    created_at = "2026-06-04T03:00:00Z",
+  }
+end
+
+local function find_comment_body(raises, needle)
+  for _, raised in ipairs(raises or {}) do
+    if raised.queue == "github-proxy.github_issue_comment_request"
+      and raised.payload.body:find(needle, 1, true) ~= nil then
+      return raised.payload
+    end
+  end
+  return nil
+end
+
 local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
@@ -225,6 +244,23 @@ return {
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
   end,
 
+  test_scan_reintake_requeues_issue_with_trusted_intake_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_bot_env()
+    mock_repo_env()
+    mock_issue_list({ { number = 42, labels = {} } })
+    mock_intake_scan_view({}, {
+      core.intake_decision_marker(proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v1"),
+      trusted_reintake_command("IC_reintake_scan"),
+    }, "OPEN")
+
+    local result = run_scan(opts("intake-scan-reintake"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "devloop_intake_candidate")
+    t.eq(result.raises[1].payload.issue_number, "42")
+  end,
+
   test_scan_ignores_forged_marker = function()
     mock_bot_env()
     mock_repo_env()
@@ -284,7 +320,7 @@ return {
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
   end,
 
-  test_judge_escalate_to_class_writes_comment_without_enabled_label = function()
+  test_judge_escalate_to_class_files_class_issue_and_enables_pipeline = function()
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {}, {
@@ -295,11 +331,18 @@ return {
 
     local result = run_judge(payload, opts("intake-escalate-class"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 3)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local create = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find('decision="escalate-to-class"', 1, true) ~= nil)
     t.is_true(comment.body:find("Rule of Three", 1, true) ~= nil)
-    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_label_request"))
+    t.eq(create.schema, "github-proxy.issue-create.v1")
+    t.eq(create.parent_comment_target.issue_number, "42")
+    t.is_true(create.title:find("Class fix needed:", 1, true) == 1)
+    t.is_true(create.body:find("intent-before-create", 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:enabled")
+    t.eq(#label.remove_labels, 0)
   end,
 
   test_judge_declines_umbrella_tracker_through_codex_policy = function()
@@ -374,6 +417,28 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_judge_reintake_rejudges_after_trusted_intake_marker = function()
+    local payload = candidate()
+    local command = trusted_reintake_command("IC_reintake_judge")
+    mock_bot_env()
+    mock_intake_judge_view({}, {
+      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", payload.dedup_key),
+      command,
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Class-level carrier; reintake enables after calibration.")
+
+    local result = run_judge(payload, opts("intake-reintake"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    local command_comment = find_comment_body(result.raises, "operator command accepted: reintake")
+    local intake_comment = find_comment_body(result.raises, 'decision="enable"')
+    t.is_true(command_comment ~= nil)
+    t.is_true(intake_comment ~= nil)
+    t.is_true(command_comment.body:find('command="reintake"', 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+    t.eq(count_calls("codex exec"), 1)
   end,
 
   test_judge_prompt_neutralizes_sentinel_and_marker_injection = function()

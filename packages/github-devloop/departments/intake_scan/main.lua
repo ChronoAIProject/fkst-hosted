@@ -24,6 +24,11 @@ local function should_skip_known(labels)
   return core.is_opted_in(labels) or has_devloop_state_label(labels)
 end
 
+local function has_pending_reintake(comments)
+  local command = core.operator_command_fact(comments, "reintake")
+  return command ~= nil and not core.has_operator_command_response(comments, command)
+end
+
 local function read_repo()
   local repo = core.devloop_config().repo
   if repo == nil or not core.issue_ref_round_trips(repo, 1) then
@@ -57,9 +62,10 @@ function pipeline(event)
       end
       local current = core.parse_issue_view_intake_scan(view.stdout)
       core.log_forged_markers("intake_scan", proposal_id, current.comments)
+      local pending_reintake = has_pending_reintake(current.comments)
       if current.state == "OPEN"
         and not should_skip_known(current.labels)
-        and not core.has_intake_decision_marker(current.comments, proposal_id) then
+        and (pending_reintake or not core.has_intake_decision_marker(current.comments, proposal_id)) then
         local payload = core.build_devloop_intake_candidate_payload(repo, issue_number, issue.updated_at)
         core.log_apply("intake_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
           "devloop_intake_candidate",

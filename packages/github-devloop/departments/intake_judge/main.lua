@@ -6,6 +6,7 @@ M.spec = {
   consumes = { "devloop_intake_candidate" },
   produces = {
     "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_create_request",
     "github-proxy.github_issue_label_request",
   },
   stall_window = "2m",
@@ -16,6 +17,10 @@ local function decline_result(reason)
     action = "decline",
     reason = reason or "The intake decision output was malformed.",
   }
+end
+
+local function enables_pipeline(action)
+  return action == "enable" or action == "escalate-to-class"
 end
 
 local function judgment_worktree(role, identity)
@@ -64,7 +69,9 @@ function pipeline(event)
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
       return
     end
-    if core.has_intake_decision_marker(current.comments, candidate.proposal_id) then
+    local reintake_command = core.operator_command_fact(current.comments, "reintake")
+    local has_pending_reintake = reintake_command ~= nil and not core.has_operator_command_response(current.comments, reintake_command)
+    if core.has_intake_decision_marker(current.comments, candidate.proposal_id) and not has_pending_reintake then
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-idempotent(intake marker already visible)", "trusted intake decision marker exists")
       return
     end
@@ -97,17 +104,34 @@ function pipeline(event)
     end
 
     local comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason)
+    local command_comment_request = has_pending_reintake
+      and core.build_operator_issue_reintake_comment_request(repo, issue_number, reintake_command, candidate, candidate.source_ref)
+      or nil
+    local raised = {
+      "github-proxy.github_issue_comment_request",
+    }
+    if command_comment_request ~= nil then
+      table.insert(raised, "github-proxy.github_issue_comment_request")
+    end
+    if parsed.action == "escalate-to-class" then
+      table.insert(raised, "github-proxy.github_issue_create_request")
+    end
+    if enables_pipeline(parsed.action) then
+      table.insert(raised, "github-proxy.github_issue_label_request")
+    end
     core.log_apply("intake_judge", candidate.proposal_id, parsed.action, candidate.dedup_key, {
-      add = parsed.action == "enable" and { core._enabled_label } or {},
+      add = enables_pipeline(parsed.action) and { core._enabled_label } or {},
       remove = {},
-    }, parsed.action == "enable" and {
-      "github-proxy.github_issue_comment_request",
-      "github-proxy.github_issue_label_request",
-    } or {
-      "github-proxy.github_issue_comment_request",
-    })
+    }, raised)
+    if command_comment_request ~= nil then
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
+    end
     core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-    if parsed.action == "enable" then
+    if parsed.action == "escalate-to-class" then
+      local create_request = core.build_intake_class_issue_create_request(repo, issue_number, candidate, current, parsed.reason)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_create_request", create_request)
+    end
+    if enables_pipeline(parsed.action) then
       local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
     end

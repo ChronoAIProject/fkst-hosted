@@ -427,6 +427,41 @@ function M.build_intake_enabled_label_request(repo, issue_number, candidate)
   )
 end
 
+function M.build_intake_class_issue_create_request(repo, issue_number, candidate, current, reason)
+  local source_title = tostring(current and current.title or ("Issue #" .. tostring(issue_number or "unknown")))
+  local title = "Class fix needed: " .. source_title
+  if #title > M._max_title_len then
+    title = M.truncate_utf8(title, M._max_title_len)
+  end
+  local body = "Class escalation follow-through for instance issue #" .. tostring(issue_number or "unknown")
+    .. "\n\nReason:\n" .. M.neutralize_untrusted_comment_text(reason or "")
+    .. "\n\nRequired follow-through:\n"
+    .. "- Locate or create the class-level fix intent-before-create.\n"
+    .. "- Link this instance to the class issue through the parent ledger marker.\n"
+    .. "- Close the instance as folded only after the class carrier exists, or keep it enabled as the class carrier if it already states the class solution.\n"
+    .. "\nSource proposal: " .. tostring(candidate and candidate.proposal_id or "")
+  if #body > M._max_body_len then
+    body = M.truncate_utf8(body, M._max_body_len)
+  end
+  return {
+    schema = "github-proxy.issue-create.v1",
+    repo = repo,
+    title = title,
+    body = body,
+    labels = json.decode("[]"),
+    dedup_key = M._dedup_key({
+      "intake-class",
+      tostring(candidate and candidate.proposal_id or ""),
+      tostring(candidate and candidate.dedup_key or ""),
+    }),
+    parent_comment_target = {
+      repo = repo,
+      issue_number = issue_number,
+    },
+    source_ref = M.normalize_source_ref(candidate and candidate.source_ref),
+  }
+end
+
 function M.build_implementing_label_request(repo, issue_number, ready)
   return M.build_state_label_request(
     repo,
