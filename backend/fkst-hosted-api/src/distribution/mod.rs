@@ -47,5 +47,5 @@ pub mod distributor;
 pub mod health;
 
 pub use config::DistributionConfig;
-pub use distributor::select_pod;
+pub use distributor::{select_pod, Distributor, Placement, PlacementError};
 pub use health::{HealthView, PodLoad, SelfOnlyHealth};
