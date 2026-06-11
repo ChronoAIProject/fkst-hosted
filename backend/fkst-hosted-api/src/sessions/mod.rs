@@ -11,5 +11,7 @@
 //!   the shared models module; this module owns behavior.
 
 pub mod repo;
+pub mod service;
 
 pub use repo::SessionRepo;
+pub use service::SessionService;

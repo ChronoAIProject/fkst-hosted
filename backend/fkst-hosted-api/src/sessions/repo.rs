@@ -27,7 +27,7 @@ pub struct SessionRepo {
 
 /// Serialize a status to its BSON string form (infallible for a unit enum
 /// with `rename_all = "lowercase"`).
-fn status_bson(status: SessionStatus) -> Bson {
+pub(crate) fn status_bson(status: SessionStatus) -> Bson {
     bson::to_bson(&status).expect("SessionStatus serializes to a string")
 }
 
