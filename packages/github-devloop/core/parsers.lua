@@ -136,6 +136,7 @@ function M.parse_dashboard_issue_list(stdout)
         title = tostring(issue.title or ""),
         author_login = author_login,
         body = tostring(issue.body or ""),
+        labels = issue.labels,
         updated_at = issue.updated_at or issue.updatedAt,
       })
     end

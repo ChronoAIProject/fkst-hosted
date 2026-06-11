@@ -78,7 +78,11 @@ local function labels_list_command()
 end
 
 local function dashboard_issue_list_command()
-  return "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dashboard&per_page=100'"
+  return "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'"
+end
+
+local function dashboard_issue_add_label_command(issue_number)
+  return "gh api --method POST 'repos/owner/repo/issues/" .. tostring(issue_number) .. "/labels' -f 'labels[]=fkst-dashboard'"
 end
 
 local function dashboard_anchor_input_path()
@@ -97,12 +101,18 @@ local function mock_labels(labels)
   })
 end
 
-local function mock_dashboard_anchor(present)
+local function mock_dashboard_anchor(present, has_label)
   local stdout = "[[]]\n"
   if present then
+    local labels = ""
+    if has_label ~= false then
+      labels = ',"labels":[{"name":"fkst-dashboard"}]'
+    end
     stdout = '[[{"number":268,"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"'
       .. core.dashboard_marker("anchor", "1970-01-01T00:00:00Z"):gsub('"', '\\"')
-      .. '"}]]\n'
+      .. '"'
+      .. labels
+      .. "}]]\n"
   end
   t.mock_command(dashboard_issue_list_command(), {
     stdout = stdout,
@@ -115,7 +125,7 @@ local function mock_forged_dashboard_anchor()
   t.mock_command(dashboard_issue_list_command(), {
     stdout = '[[{"number":269,"title":"fkst-dev board","user":{"login":"someone-else"},"body":"'
       .. core.dashboard_marker("anchor", "1970-01-01T00:00:00Z"):gsub('"', '\\"')
-      .. '"}]]\n',
+      .. '","labels":[{"name":"fkst-dashboard"}]}]]\n',
     stderr = "",
     exit_code = 0,
   })
@@ -183,6 +193,31 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST 'repos/owner/repo/issues'"), 0)
+    t.eq(count_calls(dashboard_issue_list_command()), 1)
+  end,
+
+  test_real_mode_reuses_unlabeled_dashboard_anchor_and_adds_label = function()
+    local labels = canonical_labels()
+    table.insert(labels, {
+      name = core.dashboard_label(),
+      color = "ededed",
+      description = "fkst observability dashboard singleton",
+    })
+    mock_env("1")
+    mock_labels(labels)
+    mock_dashboard_anchor(true, false)
+    mock_topology(0)
+    t.mock_command(dashboard_issue_add_label_command(268), {
+      stdout = '{"labels":[{"name":"fkst-dashboard"}]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_ensure(opts("ensure-unlabeled-anchor-real", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh api --method POST 'repos/owner/repo/issues'"), 0)
+    t.eq(count_calls(dashboard_issue_add_label_command(268)), 1)
     t.eq(count_calls(dashboard_issue_list_command()), 1)
   end,
 

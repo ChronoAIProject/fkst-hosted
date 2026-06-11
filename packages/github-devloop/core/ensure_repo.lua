@@ -209,15 +209,50 @@ local function ensure_label(repo, mode, existing_labels, desired)
   return { missing = 1, drifted = 0, created = 1, updated = 0 }
 end
 
+local function issue_has_label(issue, name)
+  for _, label in ipairs(issue.labels or {}) do
+    local label_name = type(label) == "table" and label.name or label
+    if tostring(label_name or "") == tostring(name or "") then
+      return true
+    end
+  end
+  return false
+end
+
+local function ensure_dashboard_anchor_label(repo, mode, issue)
+  if issue_has_label(issue, dashboard_label) then
+    return false
+  end
+  if mode ~= "real" then
+    log_ensure("dashboard-anchor-label", "add-planned", {
+      "mode=" .. tostring(mode),
+      "repo=" .. repo,
+      "issue=" .. tostring(issue.number),
+      "name=" .. dashboard_label,
+    })
+    return false
+  end
+  run_gh(M.gh_dashboard_issue_add_label_cmd(repo, issue.number, dashboard_label), 30, "gh dashboard anchor label add")
+  log_ensure("dashboard-anchor-label", "added", {
+    "mode=real",
+    "repo=" .. repo,
+    "issue=" .. tostring(issue.number),
+    "name=" .. dashboard_label,
+  })
+  return true
+end
+
 local function ensure_dashboard_anchor(repo, mode, issues, bot_login)
   for _, issue in ipairs(issues or {}) do
     if tostring(issue.author_login or "") == tostring(bot_login or "")
+      and tostring(issue.title or "") == dashboard_title
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
+      local label_added = ensure_dashboard_anchor_label(repo, mode, issue)
       log_ensure("dashboard-anchor", "unchanged", {
         "repo=" .. repo,
         "issue=" .. tostring(issue.number),
       })
-      return { present = true, created = false }
+      return { present = true, created = false, label_added = label_added }
     end
   end
 
@@ -226,7 +261,7 @@ local function ensure_dashboard_anchor(repo, mode, issues, bot_login)
       "mode=" .. tostring(mode),
       "repo=" .. repo,
     })
-    return { present = false, created = false }
+    return { present = false, created = false, label_added = false }
   end
 
   local path = write_dashboard_anchor_input(repo)
@@ -235,7 +270,7 @@ local function ensure_dashboard_anchor(repo, mode, issues, bot_login)
     "mode=real",
     "repo=" .. repo,
   })
-  return { present = false, created = true }
+  return { present = false, created = true, label_added = false }
 end
 
 local function ensure_topology(branches)
@@ -310,7 +345,7 @@ function M.ensure_repo()
   end
   local labels = M.parse_repo_labels(run_gh(M.gh_repo_labels_list_cmd(repo), 30, "gh label list").stdout)
   local dashboard_issues = M.parse_dashboard_issue_list(
-    run_gh(M.gh_dashboard_issue_list_cmd(repo, dashboard_label), 30, "gh dashboard issue list").stdout
+    run_gh(M.gh_dashboard_issue_all_open_cmd(repo), 30, "gh dashboard issue list").stdout
   )
   local topology_result = ensure_topology({
     upstream = cfg.upstream_branch,

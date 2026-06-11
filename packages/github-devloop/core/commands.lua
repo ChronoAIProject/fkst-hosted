@@ -28,6 +28,21 @@ function M.gh_dashboard_issue_list_cmd(repo, label)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. selected_label:gsub(":", "%%3A") .. "&per_page=100")
 end
 
+function M.gh_dashboard_issue_all_open_cmd(repo)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
+end
+
+function M.gh_dashboard_issue_add_label_cmd(repo, issue_number, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard issue label is required")
+  end
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/labels")
+    .. " -f " .. M._shell_single_quote("labels[]=" .. selected_label)
+end
+
 function M.gh_dashboard_label_get_cmd(repo, label)
   local selected_label = tostring(label or "")
   if selected_label == "" then
