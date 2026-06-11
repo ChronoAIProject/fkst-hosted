@@ -9,6 +9,8 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
 use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost, SelfOnlyHealth};
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::journal::store::MongoProgressStore;
+use fkst_hosted_api::journal::JournalConfig;
 use fkst_hosted_api::leases::LeaseStore;
 use fkst_hosted_api::packages::PackageRepository;
 use fkst_hosted_api::router::build_router;
@@ -139,6 +141,13 @@ async fn main() -> ExitCode {
         packages.clone(),
         engine_config,
         distributor.clone(),
+    );
+    // Session-progress journaling (issue #25): Mongo floor always on;
+    // GitHub sync per the FKST_JOURNAL_* config (absent repo/token degrades
+    // to Mongo-only with a warn from the journaler).
+    sessions.enable_journaling(
+        JournalConfig::from_config(&config),
+        MongoProgressStore::new(&db.database),
     );
     match distributor.fail_orphans_at_boot().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),
