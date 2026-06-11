@@ -163,16 +163,24 @@ impl LeaseStore {
     }
 
     /// Become the holder of `package_name`'s lease iff there is currently no
-    /// *live* holder, or the live holder is already us (self-reacquire).
+    /// *live* holder, or the live holder is already us for the SAME session
+    /// (idempotent replay of our own acquire).
     ///
     /// One atomic `find_one_and_update` (upsert, post-image): the filter
-    /// matches only acquirable states (`holder_pod == us` OR
-    /// `expires_at <= now`), and an aggregation-pipeline update derives
-    /// `fencing_token = old + 1` (`$add`/`$ifNull`) inside the same atomic
-    /// operation — the token bumps by 1 on EVERY successful acquire, so
-    /// callers must re-read the returned token (the token-preserving path is
-    /// [`Self::renew`]). A self-reacquire rebinds `session_id` to the new
-    /// session; callers must not assume it is immutable.
+    /// matches only acquirable states (`holder_pod == us AND session_id ==
+    /// <this session>` OR `expires_at <= now`), and an aggregation-pipeline
+    /// update derives `fencing_token = old + 1` (`$add`/`$ifNull`) inside
+    /// the same atomic operation — the token bumps by 1 on EVERY successful
+    /// acquire, so callers must re-read the returned token (the
+    /// token-preserving path is [`Self::renew`]).
+    ///
+    /// The re-entrant arm is pinned to the session ON PURPOSE: a bare
+    /// same-holder match would let a SECOND session on the same pod steal
+    /// its sibling's LIVE lease (rebinding `session_id`, bumping the token)
+    /// — two engines for one package, with the superseded driver exiting on
+    /// `Lost` without converging its document. A different session — even on
+    /// the same pod — must wait for expiry like any other contender, so
+    /// `session_id` never changes while a lease is live.
     ///
     /// Duplicate-key handling (E11000): when the document exists but is not
     /// acquirable by us, the upsert's insert attempt collides with the
@@ -257,10 +265,13 @@ impl LeaseStore {
         holder_pod: &str,
     ) -> Result<Option<LeaseDoc>, mongodb::error::Error> {
         let (now, expires) = now_and_expiry(self.lease_ttl);
+        // The re-entrant arm pins BOTH the holder and the session: only an
+        // idempotent replay of the same acquire may win against a live
+        // lease (see the `acquire` doc for the same-pod steal this closes).
         let filter = doc! {
             "_id": package_name,
             "$or": [
-                { "holder_pod": holder_pod },
+                { "holder_pod": holder_pod, "session_id": session_id },
                 { "expires_at": { "$lte": now } },
             ],
         };

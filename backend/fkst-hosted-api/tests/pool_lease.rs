@@ -223,8 +223,10 @@ async fn acquire_after_expiry() {
     assert_eq!(lease_b.session_id, session_b);
 }
 
-/// AC6: a self-reacquire bumps the token, rebinds session_id, and extends
-/// the expiry — callers must re-read the returned token.
+/// AC6 (amended by the #24 review): a SAME-SESSION self-reacquire (the
+/// idempotent replay) bumps the token and extends the expiry — callers must
+/// re-read the returned token. `session_id` is unchanged: a live lease is
+/// only ever re-acquirable by the exact holder + session it is bound to.
 #[tokio::test]
 async fn self_reacquire_bumps_token() {
     if !docker_available() {
@@ -233,24 +235,63 @@ async fn self_reacquire_bumps_token() {
     }
     let (_container, db) = mongo_db().await;
     let pod_a = store(&db, "pod-a");
+    let session = bson::Uuid::new();
 
-    let first = acquired(
-        pod_a
-            .acquire("pkg", bson::Uuid::new())
-            .await
-            .expect("first"),
-    );
+    let first = acquired(pod_a.acquire("pkg", session).await.expect("first"));
     assert_eq!(first.fencing_token, 1);
 
     wait_clock_tick(first.renewed_at);
-    let session_2 = bson::Uuid::new();
-    let second = acquired(pod_a.acquire("pkg", session_2).await.expect("re-acquire"));
+    let second = acquired(pod_a.acquire("pkg", session).await.expect("re-acquire"));
 
     assert_eq!(second.fencing_token, 2, "self-reacquire bumps the token");
-    assert_eq!(second.session_id, session_2, "session_id is rebound");
+    assert_eq!(second.session_id, session, "session binding unchanged");
     assert!(second.expires_at > first.expires_at, "expiry extended");
     assert!(second.renewed_at > first.renewed_at);
     assert_eq!(second.holder_pod, "pod-a");
+}
+
+/// #24 review blocker regression: a DIFFERENT session on the SAME pod must
+/// NOT steal a live lease — it is contended like any other contender and
+/// the document is untouched (no token bump, no session rebind). Without
+/// the session pin in the re-entrant arm, two concurrent placements on one
+/// pod could both win and run two engines for one package.
+#[tokio::test]
+async fn same_holder_different_session_is_contended() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, db) = mongo_db().await;
+    let pod_a = store(&db, "pod-a");
+
+    let lease = acquired(
+        pod_a
+            .acquire("pkg", bson::Uuid::new())
+            .await
+            .expect("first session acquires"),
+    );
+
+    let outcome = pod_a
+        .acquire("pkg", bson::Uuid::new())
+        .await
+        .expect("sibling-session contention is an outcome, not an error");
+    assert_eq!(
+        outcome,
+        AcquireOutcome::NotAcquired,
+        "a sibling session on the same pod must wait for expiry"
+    );
+    assert_eq!(
+        raw_lease(&db, "pkg").await.expect("doc present"),
+        lease,
+        "the live lease must be byte-for-byte untouched"
+    );
+
+    // Once the lease expires, the sibling session takes over normally.
+    force_expires_at(&db, "pkg", past()).await;
+    let session_2 = bson::Uuid::new();
+    let taken = acquired(pod_a.acquire("pkg", session_2).await.expect("takeover"));
+    assert_eq!(taken.fencing_token, lease.fencing_token + 1);
+    assert_eq!(taken.session_id, session_2);
 }
 
 /// AC7: renew keeps the token (and session) and strictly advances
@@ -441,19 +482,12 @@ async fn release_resets_token() {
     }
     let (_container, db) = mongo_db().await;
     let pod_a = store(&db, "pod-a");
+    let session = bson::Uuid::new();
 
-    acquired(
-        pod_a
-            .acquire("pkg", bson::Uuid::new())
-            .await
-            .expect("acquire"),
-    );
-    let second = acquired(
-        pod_a
-            .acquire("pkg", bson::Uuid::new())
-            .await
-            .expect("re-acquire"),
-    );
+    acquired(pod_a.acquire("pkg", session).await.expect("acquire"));
+    // Same-session replay: the only acquire that can win against the live
+    // lease (raises the token to 2).
+    let second = acquired(pod_a.acquire("pkg", session).await.expect("re-acquire"));
     assert_eq!(second.fencing_token, 2);
 
     let outcome = pod_a
@@ -489,25 +523,12 @@ async fn stale_higher_token_after_release_renews_lost() {
     let (_container, db) = mongo_db().await;
     let pod_a = store(&db, "pod-a");
 
-    // Raise the token to 3, then release at 3.
-    acquired(
-        pod_a
-            .acquire("pkg", bson::Uuid::new())
-            .await
-            .expect("acquire 1"),
-    );
-    acquired(
-        pod_a
-            .acquire("pkg", bson::Uuid::new())
-            .await
-            .expect("acquire 2"),
-    );
-    let old = acquired(
-        pod_a
-            .acquire("pkg", bson::Uuid::new())
-            .await
-            .expect("acquire 3"),
-    );
+    // Raise the token to 3 via same-session replays (the only acquire that
+    // can win against a live lease), then release at 3.
+    let session = bson::Uuid::new();
+    acquired(pod_a.acquire("pkg", session).await.expect("acquire 1"));
+    acquired(pod_a.acquire("pkg", session).await.expect("acquire 2"));
+    let old = acquired(pod_a.acquire("pkg", session).await.expect("acquire 3"));
     assert_eq!(old.fencing_token, 3);
     assert_eq!(
         pod_a.release("pkg", 3).await.expect("release"),
@@ -625,9 +646,12 @@ async fn expiry_boundary_is_dead() {
 /// AC15/AC16 (CANON exactly-one): M >= 5 distinct-pod stores race concurrent
 /// acquires. Per round exactly ONE wins and nobody surfaces an Err (the
 /// E11000 insert race resolves to NotAcquired). The same package is raced
-/// over several rounds — the token increases strictly (by exactly 1) per
-/// round while the document lives — and the whole race is repeated on fresh
-/// packages to re-exercise the first-insert E11000 path.
+/// over several rounds — the previous round's lease is force-expired first
+/// (a LIVE lease is unstealable by design: the re-entrant arm is pinned to
+/// holder + session), so each later round races the expired-takeover path
+/// and the token increases strictly (by exactly 1) per round while the
+/// document lives. The whole race is repeated on fresh packages to
+/// re-exercise the first-insert E11000 path.
 #[tokio::test]
 async fn two_pods_exactly_one_wins() {
     if !docker_available() {
@@ -645,6 +669,11 @@ async fn two_pods_exactly_one_wins() {
     for package_index in 0..PACKAGES {
         let package = format!("race-pkg-{package_index}");
         for round in 1..=ROUNDS {
+            if round > 1 {
+                // The previous winner's lease is live and therefore
+                // unstealable; expire it so this round is a takeover race.
+                force_expires_at(&db, &package, past()).await;
+            }
             let mut join_set = JoinSet::new();
             for racer in &stores {
                 let racer = racer.clone();

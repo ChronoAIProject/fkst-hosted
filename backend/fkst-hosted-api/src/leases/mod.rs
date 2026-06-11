@@ -35,7 +35,9 @@
 //! # Fencing-token boundary (reset on release) and the equality-only rule
 //!
 //! `fencing_token` increases by exactly 1 on every successful `acquire`
-//! (fresh insert, self-reacquire, or takeover of an expired lease) and never
+//! (fresh insert, same-session self-reacquire — a LIVE lease can only be
+//! re-acquired by the exact holder + session it is bound to — or takeover
+//! of an expired lease) and never
 //! changes on `renew`. `release` *deletes* the lease document, so the next
 //! `acquire` starts a fresh document whose first token is `1`: monotonicity
 //! is guaranteed only for the lifetime of a continuous lease document, NOT

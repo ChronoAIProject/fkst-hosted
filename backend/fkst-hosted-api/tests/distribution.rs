@@ -336,6 +336,75 @@ async fn place_conflicts_on_live_lease() {
     );
 }
 
+/// #24 review blocker regression: two CONCURRENT placements for one
+/// package (two fresh sessions, same pod) must yield exactly one winner.
+/// The pre-read in `place` is a non-atomic fast path, so both calls can
+/// pass it; the atomic acquire filter (live lease winnable only by the same
+/// holder + session) is what prevents the second placement from stealing
+/// the first one's lease — without it both would "win", two engines would
+/// run one package, and the superseded driver would exit on `Lost` leaving
+/// its document stuck non-terminal forever.
+#[tokio::test]
+async fn concurrent_places_for_one_package_yield_one_winner() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, db) = mongo_db().await;
+    insert_package(&db, "pkg").await;
+    let session_1 = session_doc("pkg", SessionStatus::Pending);
+    let session_2 = session_doc("pkg", SessionStatus::Pending);
+    insert_session(&db, &session_1).await;
+    insert_session(&db, &session_2).await;
+
+    let dist = distributor(&db, "pod-a", vec![pod_load("pod-a", 0)], 0);
+    let (first, second) = tokio::join!(
+        dist.place("pkg", session_1.id),
+        dist.place("pkg", session_2.id),
+    );
+
+    // Exactly one Placement; the other is the AlreadyRunning conflict.
+    let (winner, loser_err) = match (first, second) {
+        (Ok(placement), Err(err)) => (placement, err),
+        (Err(err), Ok(placement)) => (placement, err),
+        (Ok(a), Ok(b)) => panic!("both placements won: {a:?} / {b:?}"),
+        (Err(a), Err(b)) => panic!("both placements failed: {a} / {b}"),
+    };
+    assert!(
+        matches!(loser_err, PlacementError::AlreadyRunning(_)),
+        "the loser must surface AlreadyRunning (the 409 the create path \
+         converges on), got: {loser_err}"
+    );
+
+    // Single lease document, bound to the winner's session at token 1 (no
+    // steal, no second bump).
+    let leases = db
+        .leases()
+        .count_documents(doc! {})
+        .await
+        .expect("count leases");
+    assert_eq!(leases, 1, "exactly one lease document");
+    let lease = raw_lease(&db, "pkg").await.expect("lease present");
+    assert_eq!(lease.session_id, winner.session_id);
+    assert_eq!(lease.fencing_token, winner.fencing_token);
+    assert_eq!(lease.fencing_token, 1, "no steal ever bumped the token");
+
+    // Only the winner's document carries ownership — only one driver would
+    // spawn. The loser's document stays unassigned (the create path then
+    // converges it to failed and answers 409).
+    let winner_doc = raw_session(&db, winner.session_id).await;
+    assert_eq!(winner_doc.pod_id.as_deref(), Some("pod-a"));
+    assert_eq!(winner_doc.fencing_token, Some(winner.fencing_token));
+    let loser_id = if winner.session_id == session_1.id {
+        session_2.id
+    } else {
+        session_1.id
+    };
+    let loser_doc = raw_session(&db, loser_id).await;
+    assert_eq!(loser_doc.pod_id, None, "the loser never gains ownership");
+    assert_eq!(loser_doc.fencing_token, None);
+}
+
 #[tokio::test]
 async fn place_idempotent() {
     if !docker_available() {

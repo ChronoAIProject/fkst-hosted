@@ -139,7 +139,10 @@ impl Distributor {
             return Err(PlacementError::InvalidPackageName);
         }
 
-        // 2. Live-lease lookup: idempotent replay or conflict.
+        // 2. Live-lease lookup: idempotent replay or conflict. FAST PATH
+        //    ONLY — this read can race a concurrent placement; the atomic
+        //    acquire filter in step 4 (live lease winnable only by the same
+        //    holder + session, or after expiry) is the real guard.
         if let Some(early) = self.check_live_lease(package_name, session_id).await? {
             return early;
         }
@@ -159,7 +162,9 @@ impl Distributor {
         let chosen_pod = chosen.pod_id.clone();
         let chosen_load = chosen.active_sessions;
 
-        // 4. Acquire the lease for the chosen pod; on a lost race re-read
+        // 4. Acquire the lease for the chosen pod — THE atomic
+        //    mutual-exclusion gate (a live lease cannot be stolen, not even
+        //    by a sibling session on the same pod); on a lost race re-read
         //    and resolve idempotently or as a conflict.
         let lease = match self
             .leases

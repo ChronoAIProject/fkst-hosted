@@ -35,6 +35,17 @@
 //!   it lives at `distribution/` beside the sibling `leases/` module (the
 //!   crate has no `pool_manager` umbrella module).
 //!
+//! # Mutual-exclusion guard (load-bearing)
+//!
+//! [`Distributor::place`]'s live-lease pre-read is a fast-path courtesy
+//! only (cheap idempotent replay / early conflict). The REAL guard is the
+//! atomic acquire filter inside [`crate::leases::LeaseStore`]: a live lease
+//! is winnable only by the exact `(holder_pod, session_id)` it is already
+//! bound to (idempotent replay) or after expiry. Two concurrent placements
+//! for one package — even on the same pod — therefore resolve to exactly
+//! one winner regardless of how the pre-reads interleave; the loser
+//! observes `NotAcquired`, re-reads, and surfaces `AlreadyRunning`.
+//!
 //! # Health posture (v1)
 //!
 //! The production [`HealthView`] is [`SelfOnlyHealth`]: the deployment is
