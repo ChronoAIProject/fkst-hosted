@@ -69,6 +69,7 @@ scripts/run.sh build
 - 组合 conformance：`scripts/run.sh test-composed` 收集所有带 `composed.deps` 的包及其递归依赖，以仓库根为 `--project-root`、收集到的包为 `--package-root` 验证 union graph。
 - CI 调 `scripts/run.sh test`，与本地标准测试走同一路径：先跑一次 `fkst-framework --self-test`，flat 包跑 `conformance + test`，composed 包跑 test，最后跑组合 conformance。
 - 新包清单：有逻辑就写 unit，有运行时行为就写 integration，布线靠 conformance。
+- Boundary tests for truncation and cache-key generation must use package-local production-shaped fixture helpers. Fixtures should include multibyte CJK/emoji titles and full-length PR-review proposal ids, so byte boundaries and the `max_key_len=200` contract are reachable in tests instead of only in production.
 
 ## 测试运行体系 / 守卫
 
