@@ -422,19 +422,19 @@ return {
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-wait:v1"))
   end,
 
-  test_dependency_hold_fact_reads_wait_failed_and_cycle_holds = function()
+  test_dependency_hold_fact_reads_marker_not_prose = function()
     local gh_failed = core.dependency_hold_fact({
       core.state_marker(proposal_id, "ready", version),
-      "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
+      "localized prose and arbitrary reason noise\n\n"
         .. core.dependency_wait_marker(proposal_id, version, { 42 }),
     }, proposal_id)
     t.eq(gh_failed.marker_kind, "dependency-wait")
-    t.eq(gh_failed.hold_kind, "unresolvable")
-    t.eq(gh_failed.reason, "gh-failed")
+    t.eq(gh_failed.hold_kind, "waiting")
+    t.eq(gh_failed.reason, "waiting-on-dependency")
 
     local cycle = core.dependency_hold_fact({
       core.state_marker(proposal_id, "ready", version),
-      "github-devloop dependency hold: cycle\n\nReason: dependency-cycle\n\n"
+      "localized prose and arbitrary reason noise\n\n"
         .. core.dependency_cycle_marker(proposal_id, version),
     }, proposal_id)
     t.eq(cycle.marker_kind, "dependency-cycle")
@@ -447,7 +447,7 @@ return {
     local held = run_observe()
     t.eq(held.exit_code, 0)
     t.eq(has_queue(held.raises, "devloop_ready"), false)
-    t.is_true(has_marker(held.raises, "Reason: gh-failed"))
+    t.is_true(has_marker(held.raises, "gh-failed"))
 
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
