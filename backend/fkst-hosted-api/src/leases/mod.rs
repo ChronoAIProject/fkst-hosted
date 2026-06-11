@@ -59,6 +59,8 @@
 
 pub mod config;
 pub mod error;
+pub mod store;
 
 pub use config::PoolConfig;
 pub use error::PoolError;
+pub use store::{AcquireOutcome, LeaseStore, ReleaseOutcome, RenewOutcome, IDX_LEASES_HOLDER_POD};
