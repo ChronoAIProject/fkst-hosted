@@ -112,12 +112,7 @@ function M.intake_class_identity(reason, current, issue_number, sibling_issues)
   if current_keys[1] ~= nil then
     return current_keys[1]
   end
-  local title_key = tostring(current and current.title or ("Issue #" .. tostring(issue_number or "unknown")))
-  title_key = title_key:lower():gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
-  if title_key == "" then
-    title_key = "issue-" .. tostring(issue_number or "unknown")
-  end
-  return "title:" .. title_key
+  return nil
 end
 
 local function class_identity_label(class_key)

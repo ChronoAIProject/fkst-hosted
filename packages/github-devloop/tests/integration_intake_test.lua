@@ -113,7 +113,7 @@ local function mock_intake_judge_view(labels, comments, extra)
   })
 end
 
-local function mock_intake_codex(stdout, exit_code, stderr)
+local function mock_intake_codex_with_closed_issues(stdout, closed_issues, exit_code, stderr)
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
     stderr = "",
@@ -135,7 +135,11 @@ local function mock_intake_codex(stdout, exit_code, stderr)
     exit_code = 0,
   })
   t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
-    stdout = '[{"number":80,"title":"Widget sync retry patch","closedAt":"2026-06-01T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]},{"number":81,"title":"Widget sync retry overflow fix","closedAt":"2026-06-02T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]},{"number":82,"title":"Widget sync timeout fix","closedAt":"2026-06-03T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]}]\n',
+    stdout = issue_list_json(closed_issues or {
+      { number = 80, title = "Widget sync retry patch", labels = { "fingerprint:widget-sync" } },
+      { number = 81, title = "Widget sync retry overflow fix", labels = { "fingerprint:widget-sync" } },
+      { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
+    }) .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -175,6 +179,10 @@ local function mock_intake_codex(stdout, exit_code, stderr)
     stderr = stderr or "",
     exit_code = exit_code or 0,
   })
+end
+
+local function mock_intake_codex(stdout, exit_code, stderr)
+  mock_intake_codex_with_closed_issues(stdout, nil, exit_code, stderr)
 end
 
 local function mock_intake_class_lookup(issues)
@@ -454,6 +462,41 @@ return {
     local followup = find_comment_body(result.raises, "intake class follow-up: folded")
     t.is_true(followup.body:find("Class carrier: #77", 1, true) ~= nil)
     t.is_true(followup.body:find('carrier="77"', 1, true) ~= nil)
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
+  end,
+
+  test_judge_escalate_to_class_without_stable_identity_enables_instead_of_title_carrier = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Repair widget sync timeout residual",
+      body = "Another instance after #80 and #81, but the siblings have no stable recurrence label.",
+    })
+    local sibling_issues = {
+      { number = 80, title = "Widget sync retry patch", labels = { "fkst-dev:merged" } },
+      { number = 81, title = "Widget sync timeout fix", labels = { "fkst-dev:merged" } },
+    }
+    mock_intake_codex_with_closed_issues(
+      "⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Prior occurrences #80 and #81 look related, but no structured fingerprint is available.",
+      sibling_issues
+    )
+    mock_recent_closed_class_siblings(sibling_issues)
+    t.is_nil(core.intake_class_identity(
+      "Prior occurrences #80 and #81 look related, but no structured fingerprint is available.",
+      { title = "Repair widget sync timeout residual" },
+      42,
+      sibling_issues
+    ))
+
+    local result = run_judge(payload, opts("intake-escalate-class-no-stable-key"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
+    t.is_true(comment.body:find("No stable recurring-class identity was found", 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:enabled")
+    t.is_nil(find_comment_body(result.raises, "intake class follow-up: folded"))
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 

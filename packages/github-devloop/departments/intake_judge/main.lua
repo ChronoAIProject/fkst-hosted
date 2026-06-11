@@ -118,13 +118,19 @@ function pipeline(event)
     if parsed.action == "escalate-to-class" then
       local sibling_issues = core.fetch_recent_closed_intake_class_issues(repo)
       class_key = core.intake_class_identity(parsed.reason, current, issue_number, sibling_issues)
-      class_carrier = core.find_open_intake_class_carrier(repo, issue_number, current, class_key)
-      table.insert(raised, "github-proxy.github_issue_comment_request")
-      table.insert(raised, "github-proxy.github_issue_label_request")
-      if class_carrier == nil then
-        table.insert(raised, "github-proxy.github_issue_create_request")
+      if class_key == nil then
+        parsed.action = "enable"
+        parsed.reason = tostring(parsed.reason or "") .. "\n\nNo stable recurring-class identity was found; enabling as an ordinary issue instead of creating a title-derived class carrier."
+      else
+        class_carrier = core.find_open_intake_class_carrier(repo, issue_number, current, class_key)
+        table.insert(raised, "github-proxy.github_issue_comment_request")
+        table.insert(raised, "github-proxy.github_issue_label_request")
+        if class_carrier == nil then
+          table.insert(raised, "github-proxy.github_issue_create_request")
+        end
       end
     end
+    comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason)
     if enables_pipeline(parsed.action) then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
