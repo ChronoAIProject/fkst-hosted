@@ -54,13 +54,41 @@ end
 
 local function dashboard_marker(hash, generated_at)
   return dashboard_marker_prefix
+    .. ' version="' .. tostring(generated_at or "")
     .. ' hash="' .. tostring(hash or "")
     .. '" generated_at="' .. tostring(generated_at or "")
     .. '" -->'
 end
 
+local function dashboard_marker_attr(body, name)
+  local marker = tostring(body or ""):match("<!%-%- fkst:dashboard:v1[^>]*%-%->")
+  if marker == nil then
+    return nil
+  end
+  return marker:match(tostring(name) .. "=\"([^\"]+)\"")
+end
+
 local function dashboard_hash_from_body(body)
-  return tostring(body or ""):match("<!%-%- fkst:dashboard:v1[^>]-hash=\"([^\"]+)\"[^>]*%-%->")
+  return dashboard_marker_attr(body, "hash")
+end
+
+local function dashboard_version_from_body(body)
+  return dashboard_marker_attr(body, "version") or dashboard_marker_attr(body, "generated_at")
+end
+
+local function dashboard_version_is_stale(target_version, current_version)
+  if target_version == nil or current_version == nil then
+    return false
+  end
+  local target = tostring(target_version)
+  local current = tostring(current_version)
+  if not target:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$") then
+    return false
+  end
+  if not current:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$") then
+    return false
+  end
+  return target <= current
 end
 
 local function require_observe_repo()
@@ -440,6 +468,7 @@ function M.render_observability_dashboard(args)
   return {
     body = body,
     hash = hash,
+    version = generated_at,
     generated_at = generated_at,
   }
 end
@@ -473,18 +502,55 @@ function M.publish_observability_dashboard(repo, dashboard)
 
   local bot_login = M.assert_trusted_bot_configured()
   local current = trusted_dashboard_issue(repo, bot_login)
-  if current ~= nil and dashboard_hash_from_body(current.body) == dashboard.hash then
+  local current_version = current ~= nil and dashboard_version_from_body(current.body) or nil
+  local current_hash = current ~= nil and dashboard_hash_from_body(current.body) or nil
+  if current ~= nil and current_hash == dashboard.hash then
     log.info("github-devloop dept=observability tag=DASHBOARD_UNCHANGED issue=" .. tostring(current.number)
       .. " hash=" .. tostring(dashboard.hash))
     return "unchanged"
   end
 
-  local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
   if current == nil then
+    local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
     run_cmd(M.gh_dashboard_issue_create_cmd(repo, path), 30, "gh dashboard issue create")
     log.info("github-devloop dept=observability tag=DASHBOARD_CREATED hash=" .. tostring(dashboard.hash))
     return "created"
   end
+
+  if dashboard_version_is_stale(dashboard.version, current_version) then
+    log.info("github-devloop dept=observability tag=DASHBOARD_STALE issue=" .. tostring(current.number)
+      .. " current_version=" .. tostring(current_version or "")
+      .. " target_version=" .. tostring(dashboard.version or "")
+      .. " hash=" .. tostring(dashboard.hash))
+    return "stale"
+  end
+
+  local refreshed = trusted_dashboard_issue(repo, bot_login)
+  local refreshed_version = refreshed ~= nil and dashboard_version_from_body(refreshed.body) or nil
+  local refreshed_hash = refreshed ~= nil and dashboard_hash_from_body(refreshed.body) or nil
+  if refreshed ~= nil and tonumber(refreshed.number) == tonumber(current.number)
+    and refreshed_hash == dashboard.hash then
+    log.info("github-devloop dept=observability tag=DASHBOARD_UNCHANGED issue=" .. tostring(current.number)
+      .. " hash=" .. tostring(dashboard.hash))
+    return "unchanged"
+  end
+  if refreshed == nil or tonumber(refreshed.number) ~= tonumber(current.number)
+    or refreshed_version ~= current_version then
+    log.info("github-devloop dept=observability tag=DASHBOARD_CAS_MISMATCH issue=" .. tostring(current.number)
+      .. " expected_version=" .. tostring(current_version or "")
+      .. " actual_version=" .. tostring(refreshed_version or "")
+      .. " hash=" .. tostring(dashboard.hash))
+    return "cas-mismatch"
+  end
+  if dashboard_version_is_stale(dashboard.version, refreshed_version) then
+    log.info("github-devloop dept=observability tag=DASHBOARD_STALE issue=" .. tostring(current.number)
+      .. " current_version=" .. tostring(refreshed_version or "")
+      .. " target_version=" .. tostring(dashboard.version or "")
+      .. " hash=" .. tostring(dashboard.hash))
+    return "stale"
+  end
+
+  local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
   run_cmd(M.gh_dashboard_issue_update_cmd(repo, current.number, path), 30, "gh dashboard issue update")
   log.info("github-devloop dept=observability tag=DASHBOARD_UPDATED issue=" .. tostring(current.number)
     .. " hash=" .. tostring(dashboard.hash))
