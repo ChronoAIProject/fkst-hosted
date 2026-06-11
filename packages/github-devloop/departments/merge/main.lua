@@ -54,26 +54,18 @@ local function require_consensus_review_approve(comments, merge_ready)
   return false
 end
 
-local function integration_gate_baseline_sha(branches)
-  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", branches.integration), timeout = 60 })
-  if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
-  end
-  local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", branches.integration), timeout = 30 })
-  if base_result.exit_code ~= 0 then
-    error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
-  end
-  local baseline_sha = tostring(base_result.stdout or ""):gsub("%s+$", "")
+local function gate_baseline_sha_from_pr(pr)
+  local baseline_sha = tostring(pr and pr.base_ref_oid or "")
   if not core.is_safe_head_sha(baseline_sha) then
-    error("github-devloop: unsafe integration baseline sha")
+    error("github-devloop: unsafe merge-gate baseline sha")
   end
   return baseline_sha
 end
 
-local function raise_fixing(repo, issue_number, merge_ready, current_state, reason, branches)
+local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason)
   local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
   local fix_version = core.fix_version_from_review_version(current_state.version)
-  local gate_baseline_sha = integration_gate_baseline_sha(branches)
+  local gate_baseline_sha = gate_baseline_sha_from_pr(current_pr)
   local comment_request = core.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref)
   local label_request = issue_number ~= nil and core.build_state_label_request(
     repo,
@@ -378,7 +370,7 @@ function pipeline(event)
       end
       if pr_reason == "head-sha-mismatch" and state.state == "merging" then
         log_gate(merge_ready, "fixing", "head-sha-mismatch")
-        raise_fixing(repo, issue_number, merge_ready, state, "head-sha-mismatch", branches)
+        raise_fixing(repo, issue_number, merge_ready, state, current_pr, "head-sha-mismatch")
         return
       end
       if pr_reason == "head-sha-mismatch" and state.state == "merge-ready" then
@@ -432,7 +424,7 @@ function pipeline(event)
       end
       local fix_reason = core.rollup_red_fix_reason(current_pr, rollup_reason)
       log_gate(merge_ready, "fixing", fix_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, fix_reason, branches)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, fix_reason)
       return
     end
     local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
@@ -442,7 +434,7 @@ function pipeline(event)
         error("github-devloop: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
       end
       log_gate(merge_ready, "fixing", mergeable_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, mergeable_reason, branches)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason)
       return
     end
 
@@ -512,12 +504,12 @@ function pipeline(event)
     if not merge_ok and core.is_ci_red_reason(merge_reason) then
       local fix_reason = core.rollup_red_fix_reason(merge_rechecked_pr, merge_reason)
       log_gate(merge_ready, "fixing", fix_reason)
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, fix_reason, branches)
+      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, fix_reason)
       return
     end
     if not merge_ok and core.is_not_mergeable_reason(merge_reason) then
       log_gate(merge_ready, "fixing", merge_reason)
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_reason, branches)
+      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason)
       return
     end
     if not merge_ok and (merge_reason == "rollup-pending" or merge_reason == "mergeable-unknown") then

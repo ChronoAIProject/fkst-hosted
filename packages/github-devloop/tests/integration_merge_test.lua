@@ -533,7 +533,7 @@ return {
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE"}]')
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "bca321")
 
     local result = run_merge(event, opts("merge-ci-red", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -542,7 +542,7 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     local fixing_payload = find_raise(result.raises, "devloop_fixing").payload
     t.eq(fixing_payload.schema, "github-devloop.fixing.v1")
-    t.eq(fixing_payload.gate_baseline_sha, "abc123")
+    t.eq(fixing_payload.gate_baseline_sha, "bca321")
     t.eq(fixing_payload.gate_failure_excerpt, "rollup-red: test: COMPLETED/FAILURE")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
@@ -550,7 +550,9 @@ return {
     t.is_true(comment_body:find("Reproduce locally with `scripts/run.sh test`", 1, true) ~= nil)
     local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
     t.is_true(fix_fact.review_reason:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
-    t.eq(fix_fact.gate_baseline_sha, "abc123")
+    t.eq(fix_fact.gate_baseline_sha, "bca321")
+    t.eq(count_calls("git fetch 'origin' 'dev'"), 0)
+    t.eq(count_calls("refs/remotes/'origin'/'dev'^{commit}"), 0)
     t.is_true(has_value(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.remove_labels, "fkst-dev:merge-ready"))
   end,
 
