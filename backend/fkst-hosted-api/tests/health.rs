@@ -11,6 +11,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
+use fkst_hosted_api::packages::PackageRepository;
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
@@ -28,7 +29,12 @@ async fn test_router() -> axum::Router {
     let db = Db::from_config(&config)
         .await
         .expect("lazy handle must build without I/O");
-    build_router(AppState { config, db })
+    let packages = PackageRepository::new(&db.database);
+    build_router(AppState {
+        config,
+        db,
+        packages,
+    })
 }
 
 async fn assert_degraded(path: &str) {

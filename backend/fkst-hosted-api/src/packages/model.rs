@@ -78,6 +78,16 @@ fn name_regex() -> &'static Regex {
     RE.get_or_init(|| Regex::new("^[A-Za-z0-9_-]+$").expect("static name regex"))
 }
 
+/// True when `name` is a valid package name (fully matches `[A-Za-z0-9_-]+`).
+///
+/// This is the single identity rule shared by `NewPackage::validate` and any
+/// edge that receives a package name outside a request body (e.g. a URL path
+/// parameter): a valid name is always ASCII, URL-path-safe, and Mongo-`_id`
+/// safe (no `/`, `.`, `$`, whitespace, or NUL can pass).
+pub fn is_valid_name(name: &str) -> bool {
+    name_regex().is_match(name)
+}
+
 /// Anchored department engine entry: `departments/<name>/main.lua`.
 fn department_entry_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -343,6 +353,39 @@ mod tests {
         assert_eq!(input.name, "demo");
         assert_eq!(input.files, vec![file("core.lua", "x")]);
         assert!(input.composed_deps.is_empty());
+    }
+
+    // ---- is_valid_name -----------------------------------------------------
+
+    #[test]
+    fn is_valid_name_accepts_engine_identity_names() {
+        for name in ["demo", "My-Pkg_01", "a", "0", "_", "-", "A-Za-z0-9_-"] {
+            assert!(is_valid_name(name), "must accept {name:?}");
+        }
+    }
+
+    #[test]
+    fn is_valid_name_rejects_invalid_names() {
+        for name in [
+            "a b", "a/b", "a.b", "a$b", "../x", "a\nb", "a\u{0}b", " demo", "demo ", "héllo",
+        ] {
+            assert!(!is_valid_name(name), "must reject {name:?}");
+        }
+    }
+
+    #[test]
+    fn is_valid_name_rejects_the_empty_string() {
+        assert!(!is_valid_name(""));
+    }
+
+    #[test]
+    fn is_valid_name_agrees_with_new_package_validation() {
+        // Single source of truth: a name rejected here is rejected by
+        // `NewPackage::validate` (rule 1) and vice versa.
+        for name in ["ok-name", "a b", "", "a.b"] {
+            let validated = pkg(name, vec![entry()]).validate().is_ok();
+            assert_eq!(is_valid_name(name), validated, "diverged on {name:?}");
+        }
     }
 
     // ---- validate: accepts -----------------------------------------------

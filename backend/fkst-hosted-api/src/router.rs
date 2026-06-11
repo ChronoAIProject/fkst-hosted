@@ -38,7 +38,11 @@ pub fn build_router(state: AppState) -> Router {
     let timeout = Duration::from_secs(state.config.request_timeout_secs);
     Router::new()
         .route("/health", get(routes::health::health))
+        // The literal /api/v1/health route coexists with the /api/v1 nest:
+        // axum nesting registers the inner routes individually (no catch-all),
+        // so /api/v1/health keeps answering (asserted by integration test).
         .route("/api/v1/health", get(routes::health::health))
+        .nest("/api/v1", routes::packages::router())
         .with_state(state)
         .layer(
             ServiceBuilder::new()

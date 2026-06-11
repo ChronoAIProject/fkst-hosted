@@ -67,17 +67,21 @@ async fn main() -> ExitCode {
     tracing::info!("indexes ensured");
 
     // 4b. Ensure the packages-collection indexes via the domain repository's
-    //     own startup hook (idempotent; fail-closed on error). The repository
-    //     joins AppState in a later issue; only the hook is wired here.
-    let package_repository = PackageRepository::new(&db.database);
-    if let Err(error) = package_repository.ensure_indexes().await {
+    //     own startup hook (idempotent; fail-closed on error). The same
+    //     repository instance then joins AppState for the HTTP handlers.
+    let packages = PackageRepository::new(&db.database);
+    if let Err(error) = packages.ensure_indexes().await {
         tracing::error!(error = %error, "failed to ensure packages indexes");
         return ExitCode::FAILURE;
     }
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
-    let app = build_router(AppState { config, db });
+    let app = build_router(AppState {
+        config,
+        db,
+        packages,
+    });
     tracing::info!("router built");
 
     // 6. Bind and serve with graceful shutdown.
