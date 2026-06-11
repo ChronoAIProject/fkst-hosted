@@ -4,6 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "github_pr_open_request" },
+  produces = { "github_entity_changed" },
   stall_window = "2m",
 }
 
@@ -164,6 +165,23 @@ local function can_apply_pr_open_labels(state, impl_version)
   return state.state == "implementing" or state.state == "pr-open"
 end
 
+local function raise_pr_entity_changed(repo, pr, payload)
+  local updated_at = tostring(payload.dedup_key or "") .. "/pr/" .. tostring(pr.number)
+  raise("github_entity_changed", {
+    schema = "github-proxy.v1",
+    type = "pr",
+    repo = repo,
+    number = pr.number,
+    title = tostring(payload.title or "PR #" .. tostring(pr.number)),
+    url = pr.url,
+    state = pr.state or "OPEN",
+    updated_at = updated_at,
+    dedup_key = core.entity_dedup_key(repo, "pr", pr.number, updated_at),
+    source = "github_pr_open",
+    source_ref = core.entity_source_ref(repo, "pr", pr.number),
+  })
+end
+
 local function current_issue_state_for_label_edit(repo, payload, bot_login)
   local view = core.gh_exec(
     core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number),
@@ -304,6 +322,8 @@ function pipeline(event)
         core.apply_issue_labels(repo, payload.issue_number, add_labels, remove_labels)
       end)
     end
+
+    raise_pr_entity_changed(repo, pr, payload)
   end)
 end
 
