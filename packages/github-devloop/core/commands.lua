@@ -338,8 +338,38 @@ function M.git_worktree_add_existing_branch_cmd(worktree, branch)
     .. " " .. M._shell_single_quote(branch)
 end
 
+function M.git_worktree_add_remote_branch_cmd(worktree, remote, branch, force)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  local force_arg = ""
+  if force then
+    force_arg = " --force"
+  end
+  return "mkdir -p " .. M._shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
+    .. " && git worktree add" .. force_arg
+    .. " -B " .. M._shell_single_quote(branch)
+    .. " " .. M._shell_single_quote(worktree)
+    .. " refs/remotes/" .. M._shell_single_quote(remote) .. "/" .. M._shell_single_quote(branch)
+end
+
 function M.git_worktree_list_cmd()
   return "git worktree list --porcelain"
+end
+
+function M.git_worktree_prune_cmd()
+  return "git worktree prune"
+end
+
+function M.path_is_directory_cmd(path)
+  local value = tostring(path or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid directory path")
+  end
+  return "[ -d " .. M._shell_single_quote(value) .. " ]"
 end
 
 function M.find_worktree_for_branch(stdout, branch)

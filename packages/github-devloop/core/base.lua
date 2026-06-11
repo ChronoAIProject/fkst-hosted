@@ -736,6 +736,20 @@ function M.implement_worktree_path(runtime_root, repo, issue_number, impl_versio
   return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
 end
 
+function M.path_under_runtime_root(runtime_root, path)
+  local root = trim(runtime_root)
+  local target = trim(path)
+  if root == "" or root:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid FKST_RUNTIME_ROOT")
+  end
+  if target == "" or target:find("[\r\n]") ~= nil then
+    return false
+  end
+  root = root:gsub("/+$", "")
+  target = target:gsub("/+$", "")
+  return target == root or target:sub(1, #root + 1) == root .. "/"
+end
+
 function M.judgment_worktree_path(runtime_root, role, identity)
   local root = trim(runtime_root)
   if root == "" or root:find("[\r\n]") ~= nil then
