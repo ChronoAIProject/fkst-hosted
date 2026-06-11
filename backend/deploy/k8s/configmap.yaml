@@ -1,0 +1,20 @@
+# Non-secret runtime configuration for fkst-hosted-api.
+#
+# Keys mirror the API's env contract (backend/fkst-hosted-api/src/config.rs):
+#   - MONGODB_DB                          logical database name
+#   - MONGODB_SERVER_SELECTION_TIMEOUT_MS bounds the startup ping and /health
+#   - FKST_HOSTED_LOG_LEVEL               tracing-subscriber EnvFilter directive
+# MONGODB_URI is a credential and lives in the Secret (fkst-hosted-secret).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fkst-hosted-config
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-hosted-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fkst-hosted
+data:
+  MONGODB_DB: "fkst_hosted"
+  MONGODB_SERVER_SELECTION_TIMEOUT_MS: "5000"
+  FKST_HOSTED_LOG_LEVEL: "info,fkst_hosted_api=debug,tower_http=info"
