@@ -47,7 +47,7 @@ local function bounded_cache_segment(value, fallback, limit, keep_slashes)
   end
   if #segment > limit then
     local suffix = "-" .. M._decimal_checksum(value)
-    segment = M._utf8_safe_truncate(segment, limit - #suffix):gsub("[/%-]+$", "") .. suffix
+    segment = M.truncate_utf8(segment, limit - #suffix):gsub("[/%-]+$", "") .. suffix
   end
   if segment == "" then
     return fallback or "context"
@@ -231,7 +231,7 @@ local function truncate_if_needed(text, dept, proposal_id, file_name)
     "limit=" .. tostring(max_bundle_file_len),
     "actual=" .. tostring(#value),
   })
-  return M._utf8_safe_truncate(value, max_bundle_file_len)
+  return M.truncate_utf8(value, max_bundle_file_len)
 end
 
 local function fetch_cmd(cmd, label, exec)
