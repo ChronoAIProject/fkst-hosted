@@ -28,6 +28,72 @@ local function bounded_control_text(M, value, limit)
   return text
 end
 
+local gate_owned_gap_patterns = {
+  "ci%s+green",
+  "ci%s+status",
+  "green%s+ci",
+  "green%s+gate",
+  "statuscheckrollup",
+  "status%s+check",
+  "merge%s+gate",
+  "mergeability",
+  "mergeable",
+  "merge%s+state",
+  "branch%s+protection",
+  "head%-bound",
+  "head%s+bound",
+  "same%s+head",
+  "required%s+checks",
+  "check%s+runs",
+}
+
+local implementation_gap_patterns = {
+  "bug",
+  "broken",
+  "crash",
+  "regression",
+  "missing%s+test",
+  "missing%s+guard",
+  "missing%s+implementation",
+  "missing%s+parser",
+  "missing%s+validation",
+  "incorrect",
+  "wrong",
+  "unsafe",
+  "leak",
+  "race",
+  "idempot",
+  "retry",
+  "payload",
+  "contract",
+  "diff",
+  "code",
+  "logic",
+}
+
+function M.is_gate_owned_review_gap(gap)
+  local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
+  if text == "" then
+    return false
+  end
+  local has_gate_fact = false
+  for _, pattern in ipairs(gate_owned_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      has_gate_fact = true
+      break
+    end
+  end
+  if not has_gate_fact then
+    return false
+  end
+  for _, pattern in ipairs(implementation_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      return false
+    end
+  end
+  return true
+end
+
 local function commit_subject_title(M, current)
   if type(current) ~= "table" then
     return nil
@@ -515,6 +581,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
+    .. "\n" .. M.short_review_observation_boundary_clause()
     .. "\nRead the local context bundle before judging."
   local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
   local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
@@ -522,7 +589,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     body = body
       .. "\nPrior review ledger:\n"
       .. ledger
-      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix."
+      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix. For rollup-red or failing-check re-review, scope the question to the diff change and the named failing check, not to restoration of gate state."
   end
   if #body > M._max_body_len then
     error("github-devloop: PR review proposal exceeds bounded body")

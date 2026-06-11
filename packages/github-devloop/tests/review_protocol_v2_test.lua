@@ -38,6 +38,123 @@ return {
     t.is_true(comment:find("Advisory (non-blocking):", 1, true) ~= nil)
   end,
 
+  test_review_prompts_state_gate_owned_facts_are_out_of_scope = function()
+    local version = h.reviewing().version
+    local proposal = core.build_pr_review_proposal(
+      "owner/repo",
+      "42",
+      7,
+      version,
+      "def456",
+      { title = "Rollup red fix" },
+      h.pr_source_ref(),
+      {}
+    )
+    t.is_true(proposal.body:find("Review boundary:", 1, true) ~= nil)
+    t.is_true(proposal.body:find("CI/mergeability/head-binding are later merge-gate facts", 1, true) ~= nil)
+    t.is_true(#proposal.body < 512)
+
+    local reject_comment = core.build_review_result_comment_request(
+      "owner/repo",
+      "42",
+      "github-devloop/issue/owner/repo/42",
+      version,
+      {
+        proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456"),
+        decision = "reject",
+        body = "Reject body.",
+        blocking_gap = "CI green evidence is missing for the current head.",
+        dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, version, "def456") .. "/review",
+        source_ref = h.pr_source_ref(),
+      },
+      h.pr_source_ref()
+    ).body
+    local fix_comment = core.build_fix_reviewing_comment_request(
+      "owner/repo",
+      "42",
+      {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        pr_number = 7,
+        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456"),
+        review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, version, "def456") .. "/review",
+        source_ref = h.pr_source_ref(),
+        fix_summary = "Reproduced the failing check locally and changed the diff.",
+      },
+      "def456",
+      "feedface",
+      core.next_fix_version(version)
+    ).body
+    local rereview = core.build_pr_review_proposal(
+      "owner/repo",
+      "42",
+      7,
+      core.next_fix_version(version),
+      "feedface",
+      { title = "Rollup red fix" },
+      h.pr_source_ref(),
+      {
+        { body = reject_comment, author_login = "fkst-test-bot" },
+        { body = fix_comment, author_login = "fkst-test-bot" },
+      }
+    )
+    t.is_true(rereview.body:find("named failing check, not to restoration of gate state", 1, true) ~= nil)
+
+    local fix_prompt = core.build_fix_prompt(h.fixing({
+      blocking_gap = "CI green evidence is missing for the current head.",
+    }), { title = "Rollup red fix" }, "Reject prose.", "Approved framing.")
+    t.is_true(fix_prompt:find("OUT OF REVIEW SCOPE", 1, true) ~= nil)
+
+    local meta_prompt = core.build_review_meta_prompt(h.review_meta_event(), {
+      title = "Rollup red fix",
+      comments = {},
+    })
+    t.is_true(meta_prompt:find("gate-owned fact", 1, true) ~= nil)
+    t.is_true(meta_prompt:find("not as a reason for another fix pass", 1, true) ~= nil)
+  end,
+
+  test_gate_owned_reject_is_advisory_and_does_not_enter_fixing = function()
+    local event = review_event({
+      decision = "reject",
+      body = "Reject: current head has no green merge-gate evidence.",
+      blocking_gap = "CI green evidence is missing for the current head.",
+    })
+    local impl_version = h.reviewing().version
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    h.mock_issue_result({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = h.run_review_result(event, h.opts("review-v2-gate-gap-advisory"))
+    t.eq(result.exit_code, 0)
+    t.is_nil(h.find_raise(result.raises, "devloop_fixing"))
+    t.is_true(h.find_raise(result.raises, "devloop_merge_ready") ~= nil)
+    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(comment:find("github-devloop PR review decision: approve", 1, true) ~= nil)
+    t.is_true(comment:find("Advisory (out-of-contract): rejected only for gate-owned fact", 1, true) ~= nil)
+  end,
+
+  test_gate_fact_plus_implementation_gap_still_enters_fixing = function()
+    local event = review_event({
+      decision = "reject",
+      body = "Reject: test guard is missing.",
+      blocking_gap = "Missing test guard; CI green evidence is also absent.",
+    })
+    local impl_version = h.reviewing().version
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    h.mock_issue_result({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = h.run_review_result(event, h.opts("review-v2-gate-plus-code-gap"))
+    t.eq(result.exit_code, 0)
+    t.is_true(h.find_raise(result.raises, "devloop_fixing") ~= nil)
+    t.is_nil(h.find_raise(result.raises, "devloop_merge_ready"))
+  end,
+
   test_reject_without_blocking_gap_fails_closed_before_fixing = function()
     local event = review_event({
       decision = "reject",

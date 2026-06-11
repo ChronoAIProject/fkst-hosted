@@ -23,6 +23,14 @@ function M.prompt_preamble(exec)
   }, "\n")
 end
 
+function M.review_observation_boundary_clause()
+  return "Review observation boundary: CI status, mergeability, branch protection, and head-binding are enforced by a later deterministic merge gate and are OUT OF REVIEW SCOPE. Do not demand or verify those gate-owned facts during review; judge whether the PR diff correctly addresses the named failing check, blocking gap, and agreed issue bounds."
+end
+
+function M.short_review_observation_boundary_clause()
+  return "Review boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review."
+end
+
 local function github_entity_history_line()
   return "Before judging, read the local context files named below. They may be large, so read them in segments as needed. They contain the complete fetched GitHub history for this delivery; prior review verdicts, fix notes, and convergence rounds recorded there are your memory of earlier rounds. Judge what changed relative to them; do not re-litigate settled points."
 end
@@ -104,6 +112,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     test_command = M.test_command(),
     content_fetch_block = local_context_block(M, content_manifest),
     review_feedback = M.neutralize_untrusted_prompt_text(review_reason),
+    review_observation_boundary = M.review_observation_boundary_clause(),
   }, nil, { entity_history = true })
 end
 
@@ -131,6 +140,7 @@ function M.build_review_meta_prompt(review_meta, current_issue, content_manifest
     title = M.neutralize_untrusted_prompt_text(current_issue.title),
     content_fetch_block = local_context_block(M, content_manifest),
     comments = M.neutralize_untrusted_prompt_text(comments),
+    review_observation_boundary = M.review_observation_boundary_clause(),
   }, nil, { entity_history = true })
 end
 
