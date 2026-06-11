@@ -7,6 +7,7 @@ edition.workspace = true
 async-trait = "0.1"
 axum = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "fs"] }
+tokio-util = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "request-id", "util"] }
 serde = { version = "1", features = ["derive"] }
