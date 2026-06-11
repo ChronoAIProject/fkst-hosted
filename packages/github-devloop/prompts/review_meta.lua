@@ -13,6 +13,10 @@ Choose the conservative next state. Pick exactly one action:
 
 Read the full local source context before deciding. If you cannot read the local context files (issue body / PR diff / comments) for ANY reason, choose `block`.
 
+Review boundary:
+- {{review_observation_boundary}}
+- If the only named blocking gap is a gate-owned fact from that boundary, treat it as out-of-contract review feedback, not as a reason for another fix pass.
+
 Respond with exactly two lines for block or spec-amendment, or exactly three lines for fix, and no other text.
 Line one: the marker named ⟦FKST:ACTION⟧ followed by one word from fix, block, or spec-amendment.
 Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph.
