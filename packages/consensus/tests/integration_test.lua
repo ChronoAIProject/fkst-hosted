@@ -78,6 +78,15 @@ local function assert_judgment_worktree(call, role)
   t.is_nil(call.rendered:find("/worktrees/", 1, true))
 end
 
+local function codex_call_for_role(calls, role)
+  for _, call in ipairs(calls) do
+    if call.rendered:find("/judgment-worktrees/consensus-" .. role, 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
+end
+
 local function assert_judgment_dir_read_only(count)
   local seen = 0
   for _, call in ipairs(t.command_calls()) do
@@ -90,7 +99,11 @@ local function assert_judgment_dir_read_only(count)
   t.eq(seen, count)
 end
 
+local default_angle_order = { "minimal", "structural", "delete" }
+local next_angle_index = 1
+
 local function mock_judgment_runtime()
+  next_angle_index = 1
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/consensus/runtime",
     stderr = "",
@@ -106,19 +119,25 @@ local function mock_judgment_dir()
   })
 end
 
-local function mock_angle(verdict, reply, exit_code)
+local function mock_angle_for(angle, verdict, reply, exit_code)
   mock_judgment_dir()
   local gap = verdict == "reject" and "\n" .. "⟦FKST:GAP⟧ " .. tostring(reply):sub(1, 80) or ""
-  t.mock_command("codex exec", {
+  t.mock_command("angle-" .. tostring(angle), {
     stdout = verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. gap .. "\n",
     stderr = "",
     exit_code = exit_code or 0,
   })
 end
 
+local function mock_angle(verdict, reply, exit_code)
+  local angle = default_angle_order[next_angle_index]
+  next_angle_index = next_angle_index + 1
+  mock_angle_for(angle or "minimal", verdict, reply, exit_code)
+end
+
 local function mock_meta(line, exit_code)
   mock_judgment_dir()
-  t.mock_command("codex exec", {
+  t.mock_command("meta-judge", {
     stdout = tostring(line or "") .. "\n",
     stderr = "",
     exit_code = exit_code or 0,
@@ -149,16 +168,19 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 3)
-    assert_judgment_worktree(calls[1], "angle-minimal")
-    assert_judgment_worktree(calls[2], "angle-structural")
-    assert_judgment_worktree(calls[3], "angle-delete")
+    local minimal_call = codex_call_for_role(calls, "angle-minimal")
+    local structural_call = codex_call_for_role(calls, "angle-structural")
+    local delete_call = codex_call_for_role(calls, "angle-delete")
+    assert_judgment_worktree(minimal_call, "angle-minimal")
+    assert_judgment_worktree(structural_call, "angle-structural")
+    assert_judgment_worktree(delete_call, "angle-delete")
     assert_judgment_dir_read_only(3)
-    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
-    t.is_true(calls[2].stdin:find("Angle: structural", 1, true) ~= nil)
-    t.is_true(calls[3].stdin:find("Angle: delete", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
+    t.is_true(structural_call.stdin:find("Angle: structural", 1, true) ~= nil)
+    t.is_true(delete_call.stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_codex_stdin_carries_fetch_instruction_not_full_body = function()
@@ -268,9 +290,10 @@ return {
     t.is_nil(result.raises[1].payload.decision)
     local calls = codex_calls()
     t.eq(#calls, 4)
-    assert_judgment_worktree(calls[4], "meta-judge")
-    t.is_true(calls[4].stdin:find("Angle outputs:", 1, true) ~= nil)
-    t.is_true(calls[4].stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    local meta_call = codex_call_for_role(calls, "meta-judge")
+    assert_judgment_worktree(meta_call, "meta-judge")
+    t.is_true(meta_call.stdin:find("Angle outputs:", 1, true) ~= nil)
+    t.is_true(meta_call.stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
   end,
 
   test_meta_plan_flows_into_next_converge_round = function()
@@ -385,11 +408,11 @@ return {
     mock_judgment_runtime()
     mock_angle("approve", "Minimal angle approves.")
     mock_judgment_dir()
-    t.mock_command("codex exec", {
+    t.mock_command("angle-structural", {
       stderr = "forced failure",
       exit_code = 7,
     })
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle_for("delete", "approve", "Delete angle approves.")
     mock_meta("converge: Retry the failed structural angle with a concrete blocker.")
 
     local result = run_decide(proposal(), opts("codex-fails"))
@@ -409,11 +432,11 @@ return {
   test_unparseable_output_raises_consensus_converge_with_default_question = function()
     mock_judgment_runtime()
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "no verdict here", exit_code = 0 })
+    t.mock_command("angle-minimal", { stdout = "no verdict here", exit_code = 0 })
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "still nothing useful", exit_code = 0 })
+    t.mock_command("angle-structural", { stdout = "still nothing useful", exit_code = 0 })
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "garbage output", exit_code = 0 })
+    t.mock_command("angle-delete", { stdout = "garbage output", exit_code = 0 })
     mock_meta("malformed")
 
     local result = run_decide(proposal(), opts("unparseable"))
@@ -434,8 +457,8 @@ return {
 
   test_angles_override_runs_only_named_angles = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle_for("minimal", "approve", "Minimal angle approves.")
+    mock_angle_for("delete", "approve", "Delete angle approves.")
 
     local result = run_decide(proposal({ angles = { "minimal", "delete" } }), opts("angles-override"))
     t.eq(result.exit_code, 0)
@@ -445,8 +468,8 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 2)
-    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
-    t.is_true(calls[2].stdin:find("Angle: delete", 1, true) ~= nil)
+    t.is_true(codex_call_for_role(calls, "angle-minimal").stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(codex_call_for_role(calls, "angle-delete").stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_same_dedup_key_skips_second_run = function()

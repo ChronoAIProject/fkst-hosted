@@ -29,7 +29,7 @@ local function spawn_angle(proposal, angle, runtime_root)
   local worktree = prepare_judgment_worktree(
     core.judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
   )
-  return spawn_codex_sync(core.judgment_codex_opts(prompt, worktree))
+  return spawn_codex(core.judgment_codex_opts(prompt, worktree))
 end
 
 local function spawn_meta_judge(proposal, angle_results, runtime_root)
@@ -65,11 +65,17 @@ function pipeline(event)
     local runtime_root = read_runtime_root()
 
     local angle_results = {}
+    local handles = {}
     local angles = core.angles(proposal)
     local verdict_mode = core.verdict_mode(proposal)
     for _, angle in ipairs(angles) do
+      table.insert(handles, spawn_angle(proposal, angle, runtime_root))
+    end
+
+    local results = await_all(handles)
+    for index, angle in ipairs(angles) do
       local parsed = nil
-      local result = spawn_angle(proposal, angle, runtime_root)
+      local result = results[index]
       if type(result) == "table" and result.exit_code == 0 then
         parsed = core.parse_angle_output(result.stdout, verdict_mode)
       end
