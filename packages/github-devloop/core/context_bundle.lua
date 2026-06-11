@@ -47,7 +47,7 @@ local function bounded_cache_segment(value, fallback, limit, keep_slashes)
   end
   if #segment > limit then
     local suffix = "-" .. M._decimal_checksum(value)
-    segment = M._utf8_safe_truncate(segment, limit - #suffix):gsub("[/%-]+$", "") .. suffix
+    segment = M.truncate_utf8(segment, limit - #suffix):gsub("[/%-]+$", "") .. suffix
   end
   if segment == "" then
     return fallback or "context"

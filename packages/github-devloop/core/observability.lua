@@ -334,7 +334,7 @@ local function compact_title(value)
     title = "(untitled)"
   end
   if #title > max_dashboard_title_len then
-    title = M._utf8_safe_truncate(title, max_dashboard_title_len - 3):gsub("%s+$", "") .. "..."
+    title = M.truncate_utf8(title, max_dashboard_title_len - 3):gsub("%s+$", "") .. "..."
   end
   return title
 end
@@ -565,7 +565,7 @@ function M.render_observability_dashboard(args)
   local body = stable .. "\n\n" .. marker .. "\n"
   if #body > max_dashboard_body_len then
     local marker_suffix = "\n\n" .. marker .. "\n"
-    body = M._utf8_safe_truncate(body, max_dashboard_body_len - #marker_suffix) .. marker_suffix
+    body = M.truncate_utf8(body, max_dashboard_body_len - #marker_suffix) .. marker_suffix
   end
   return {
     body = body,

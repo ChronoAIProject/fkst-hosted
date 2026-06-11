@@ -293,7 +293,7 @@ local function dedup_key(parts)
   local key = M.sanitize_key(table.concat(parts, "/"), false)
   if #key > max_dedup_len then
     local suffix = "-" .. decimal_checksum(key)
-    key = utf8_safe_truncate(key, max_dedup_len - #suffix):gsub("[/%-]+$", "") .. suffix
+    key = sdk_truncate_utf8(key, max_dedup_len - #suffix):gsub("[/%-]+$", "") .. suffix
   end
   if not is_path_safe_key(key, max_dedup_len) then
     error("github-devloop: invalid dedup_key")
