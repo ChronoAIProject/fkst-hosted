@@ -16,8 +16,10 @@ pub mod error;
 pub mod logs;
 pub mod materialize;
 pub mod process;
+pub mod runner;
 
 pub use config::EngineConfig;
 pub use error::RunnerError;
 pub use materialize::PreparedPackage;
 pub use process::is_pid_alive;
+pub use runner::{LiveStatus, RunningSession, SessionRunner};
