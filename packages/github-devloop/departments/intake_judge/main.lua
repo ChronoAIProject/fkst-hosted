@@ -49,7 +49,7 @@ function pipeline(event)
   with_lock(core.observe_lock_key(repo, issue_number), function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_intake_judge_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_issue_view_intake_judge_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue intake judge view failed: " .. tostring(view.stderr))
     end

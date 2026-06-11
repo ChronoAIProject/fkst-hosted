@@ -61,5 +61,15 @@ local query = 'query { repository(owner:"o", name:"r") { issues(first:10) { tota
         self.assertEqual(self.warning_lines(source), [])
 
 
+class RunScriptContractTest(unittest.TestCase):
+    def test_supervise_requires_shared_rate_pool_root(self) -> None:
+        source = Path(__file__).with_name("run.sh").read_text(encoding="utf-8")
+
+        self.assertIn('if [ -z "${FKST_RATE_POOL_ROOT:-}" ]; then', source)
+        self.assertIn("FKST_RATE_POOL_ROOT is required for supervise", source)
+        self.assertIn("FKST_RATE_POOL_ROOT must be an absolute host-stable directory path", source)
+        self.assertIn('echo "FKST_RATE_POOL_ROOT=$FKST_RATE_POOL_ROOT"', source)
+
+
 if __name__ == "__main__":
     unittest.main()

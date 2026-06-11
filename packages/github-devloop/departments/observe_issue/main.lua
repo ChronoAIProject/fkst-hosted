@@ -276,7 +276,7 @@ function pipeline(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local state_view = exec_sync({ cmd = core.gh_issue_view_state_cmd(issue.repo, issue.number), timeout = 30 })
+    local state_view = core.gh_exec({ cmd = core.gh_issue_view_state_cmd(issue.repo, issue.number), timeout = 30 })
     if state_view.exit_code ~= 0 then
       error("github-devloop: gh issue state view failed: " .. tostring(state_view.stderr))
     end
