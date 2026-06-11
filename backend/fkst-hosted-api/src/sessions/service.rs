@@ -24,7 +24,9 @@ use std::time::Duration;
 use bson::doc;
 use tokio::sync::watch;
 
-use crate::engine::{EngineConfig, LiveStatus, PreparedPackage, RunningSession, SessionRunner};
+use crate::engine::{
+    EngineConfig, LiveStatus, PreparedPackage, RunnerError, RunningSession, SessionRunner,
+};
 use crate::error::AppError;
 use crate::models::{SessionDoc, SessionStatus};
 use crate::packages::{is_valid_name, PackageRepository};
@@ -261,6 +263,18 @@ fn truncate_error(text: &str) -> String {
     format!("{} [truncated]", &text[..end])
 }
 
+/// Render a start failure for the persisted `error` field: the captured
+/// stderr detail matters more than the bare variant name.
+fn describe_runner_error(error: &RunnerError) -> String {
+    match error {
+        RunnerError::ConformanceFailed { code, stderr } => {
+            format!("conformance failed (exit {code}): {stderr}")
+        }
+        RunnerError::StartupFailed { stderr } => format!("engine startup failed: {stderr}"),
+        other => other.to_string(),
+    }
+}
+
 /// Describe a terminal [`LiveStatus`] for the persisted `error` field.
 fn describe_exit(status: LiveStatus, session: &RunningSession) -> String {
     let exit = match status {
@@ -353,7 +367,7 @@ async fn drive(
         Ok(session) => session,
         Err(error) => {
             tracing::warn!(session_id = %id, error = %error, "engine start failed");
-            fail_session(&inner, id, &error.to_string()).await;
+            fail_session(&inner, id, &describe_runner_error(&error)).await;
             return;
         }
     };
