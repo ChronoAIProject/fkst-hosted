@@ -3,13 +3,18 @@
 
 use std::process::ExitCode;
 
+use std::sync::Arc;
+
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
+use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost, SelfOnlyHealth};
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::leases::LeaseStore;
 use fkst_hosted_api::packages::PackageRepository;
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -101,18 +106,54 @@ async fn main() -> ExitCode {
         "engine config loaded"
     );
 
-    // 4d. Build the session service and sweep orphans BEFORE binding: any
-    //     pre-terminal session in Mongo refers to an engine process that
-    //     died with the previous pod (v1 single-pod posture) and must be
-    //     failed before clients can observe stale "running" state.
-    let sessions = SessionService::new(SessionRepo::new(&db), packages.clone(), engine_config);
-    match sessions.repo().fail_orphans().await {
+    // 4d. Load the distribution configuration (fail-closed: a bad cadence
+    //     or pod identity must never reach the lease layer).
+    let distribution_config = match DistributionConfig::load_from_env() {
+        Ok(distribution_config) => distribution_config,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to load distribution configuration");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // 4e. Lease store + its indexes (idempotent; fail-closed on error), then
+    //     the distributor over the self-only health view.
+    let lease_store = LeaseStore::new(&db, &distribution_config.pool);
+    if let Err(error) = lease_store.ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure lease indexes");
+        return ExitCode::FAILURE;
+    }
+    let health = Arc::new(SelfOnlyHealth::new(
+        db.clone(),
+        distribution_config.pool.pod_id.clone(),
+    ));
+    let distributor = Distributor::new(db.clone(), lease_store, health, distribution_config);
+
+    // 4f. Build the session service (lease-fenced drivers) and sweep
+    //     orphans BEFORE binding: any pre-terminal session in Mongo refers
+    //     to an engine process that died with the previous pod and must be
+    //     failed — and its lease released — before clients can observe
+    //     stale "running" state.
+    let sessions = SessionService::with_distribution(
+        SessionRepo::new(&db),
+        packages.clone(),
+        engine_config,
+        distributor.clone(),
+    );
+    match distributor.fail_orphans_at_boot().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),
         Err(error) => {
             tracing::error!(error = %error, "orphan sweep failed");
             return ExitCode::FAILURE;
         }
     }
+
+    // 4g. Spawn the takeover reaper, cancelled on shutdown.
+    let reaper_shutdown = CancellationToken::new();
+    let reaper_handle = tokio::spawn(Arc::new(distributor).run_reaper(
+        Arc::new(sessions.clone()) as Arc<dyn DriverHost>,
+        reaper_shutdown.clone(),
+    ));
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
@@ -139,13 +180,18 @@ async fn main() -> ExitCode {
         .await
     {
         tracing::error!(error = %error, "server error");
-        // Still drain the session drivers: a serve error must not orphan
-        // live engine processes without a SIGTERM.
+        // Still stop the reaper and drain the session drivers: a serve
+        // error must not orphan live engine processes without a SIGTERM.
+        reaper_shutdown.cancel();
+        let _ = reaper_handle.await;
         sessions.shutdown().await;
         return ExitCode::FAILURE;
     }
 
-    // 7. Drain the session drivers (SIGTERM live engines, bounded wait).
+    // 7. Stop the reaper, then drain the session drivers (SIGTERM live
+    //    engines, bounded wait).
+    reaper_shutdown.cancel();
+    let _ = reaper_handle.await;
     sessions.shutdown().await;
 
     tracing::info!("server stopped");

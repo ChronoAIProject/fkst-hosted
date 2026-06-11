@@ -78,13 +78,27 @@ impl SessionRepo {
         from: &[SessionStatus],
         set: Document,
     ) -> Result<Option<SessionDoc>, AppError> {
+        self.transition_guarded(id, from, Document::new(), set)
+            .await
+    }
+
+    /// [`Self::transition`] with extra equality guards merged into the CAS
+    /// filter (e.g. `pod_id` + `fencing_token` ownership pins, so a write
+    /// from a superseded pod can never land after a takeover). An empty
+    /// `extra` is exactly `transition`.
+    pub async fn transition_guarded(
+        &self,
+        id: bson::Uuid,
+        from: &[SessionStatus],
+        extra: Document,
+        set: Document,
+    ) -> Result<Option<SessionDoc>, AppError> {
         let from_bson: Vec<Bson> = from.iter().map(|status| status_bson(*status)).collect();
+        let mut filter = doc! { "_id": id, "status": { "$in": from_bson } };
+        filter.extend(extra);
         let updated = self
             .coll
-            .find_one_and_update(
-                doc! { "_id": id, "status": { "$in": from_bson } },
-                doc! { "$set": set },
-            )
+            .find_one_and_update(filter, doc! { "$set": set })
             .return_document(ReturnDocument::After)
             .await
             .map_err(|error| {

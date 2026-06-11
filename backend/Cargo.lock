@@ -764,6 +764,7 @@ name = "fkst-hosted-api"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
  "base64",
  "bson",
@@ -782,6 +783,7 @@ dependencies = [
  "testcontainers-modules",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",

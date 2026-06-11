@@ -13,6 +13,7 @@ use fkst_hosted_api::db::{
     Db, IDX_LEASES_EXPIRES_AT, IDX_SESSIONS_PACKAGE_NAME, IDX_SESSIONS_POD_ID, IDX_SESSIONS_STATUS,
 };
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::leases::{LeaseStore, PoolConfig, IDX_LEASES_HOLDER_POD};
 use fkst_hosted_api::models::{SessionDoc, SessionStatus};
 use fkst_hosted_api::packages::{Package, PackageFile, PackageRepository, PACKAGES_COLLECTION};
 use fkst_hosted_api::router::build_router;
@@ -135,7 +136,20 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
     }
     let (_container, _config, db) = mongo_db(5000).await;
 
+    // Mirror the startup path exactly: the base ensure plus the lease
+    // store's own ensure (main.rs runs both before binding).
+    let lease_store = LeaseStore::new(
+        &db,
+        &PoolConfig {
+            pod_id: "pod-test".to_string(),
+            lease_ttl: Duration::from_secs(30),
+        },
+    );
     db.ensure_indexes().await.expect("first ensure_indexes");
+    lease_store
+        .ensure_indexes()
+        .await
+        .expect("first lease ensure_indexes");
 
     // The wire-level names are asserted as STRING LITERALS (not only via the
     // IDX_* constants) so a constant rename or a key swap fails this test;
@@ -144,6 +158,7 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
     assert_eq!(IDX_SESSIONS_STATUS, "sessions_status");
     assert_eq!(IDX_SESSIONS_POD_ID, "sessions_pod_id");
     assert_eq!(IDX_LEASES_EXPIRES_AT, "leases_expires_at");
+    assert_eq!(IDX_LEASES_HOLDER_POD, "leases_holder_pod");
 
     // EXACTLY the implicit `_id` plus the declared secondaries, with their
     // exact key documents (sorted by name).
@@ -159,6 +174,7 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
     let expected_leases = vec![
         ("_id_".to_string(), doc! { "_id": 1 }),
         ("leases_expires_at".to_string(), doc! { "expires_at": 1 }),
+        ("leases_holder_pod".to_string(), doc! { "holder_pod": 1 }),
     ];
 
     assert_eq!(index_specs(&db.sessions()).await, expected_sessions);
@@ -194,6 +210,10 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
 
     // Second run: Ok, identical specs (idempotency, no duplicates).
     db.ensure_indexes().await.expect("second ensure_indexes");
+    lease_store
+        .ensure_indexes()
+        .await
+        .expect("second lease ensure_indexes");
     assert_eq!(index_specs(&db.sessions()).await, expected_sessions);
     assert_eq!(index_specs(&db.leases()).await, expected_leases);
 
