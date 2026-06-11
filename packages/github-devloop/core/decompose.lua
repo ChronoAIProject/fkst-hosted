@@ -170,7 +170,7 @@ function M.fallback_decompose_plan(decompose)
 end
 
 function M.decomposed_comment_body(decompose, count)
-  return "github-devloop decomposed blocked PR into " .. tostring(count) .. " follow-up issue(s)"
+  return M.comment_string("decomposed_prefix") .. tostring(count) .. M.comment_string("decomposed_suffix")
     .. "\n\n" .. M.decomposed_marker(decompose.proposal_id, decompose.version, decompose.pr_number, count)
 end
 

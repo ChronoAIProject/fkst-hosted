@@ -749,9 +749,13 @@ local function dependency_unmet_field(unmet_numbers)
   return table.concat(parts, ",")
 end
 
-function M.dependency_wait_marker(proposal_id, version, unmet_numbers)
+function M.dependency_wait_marker(proposal_id, version, unmet_numbers, hold_kind, reason)
+  local encoded_hold_kind = safe_marker_attr(M, hold_kind or "waiting", max_attr_len)
+  local encoded_reason = safe_marker_attr(M, reason or "waiting-on-dependency", max_attr_len)
   return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
+    .. '" hold_kind="' .. encoded_hold_kind
+    .. '" reason="' .. encoded_reason
     .. '" unmet="' .. dependency_unmet_field(unmet_numbers)
     .. '" -->'
 end
@@ -774,8 +778,6 @@ function M.dependency_hold_fact(comments, proposal_id)
   local cycle_pattern = "<!%-%- fkst:github%-devloop:dependency%-cycle:v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     local body = M._comment_body(comment)
-    local hold_kind = body:match("github%-devloop dependency hold:%s*([^\n]+)")
-    local reason = body:match("Reason:%s*([^\n]+)")
     for marker in body:gmatch(wait_pattern) do
       if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
         and marker:match('version="([^"]*)"') == tostring(current.version) then
@@ -783,8 +785,8 @@ function M.dependency_hold_fact(comments, proposal_id)
           proposal_id = tostring(proposal_id),
           version = tostring(current.version),
           marker_kind = "dependency-wait",
-          hold_kind = hold_kind or "waiting",
-          reason = reason or "waiting-on-dependency",
+          hold_kind = decode_marker_attr(marker_attr(marker, "hold_kind")) or "waiting",
+          reason = decode_marker_attr(marker_attr(marker, "reason")) or "waiting-on-dependency",
           comment_created_at = M._comment_created_at(comment),
         }
       end
@@ -796,8 +798,8 @@ function M.dependency_hold_fact(comments, proposal_id)
           proposal_id = tostring(proposal_id),
           version = tostring(current.version),
           marker_kind = "dependency-cycle",
-          hold_kind = hold_kind or "cycle",
-          reason = reason or "dependency-cycle",
+          hold_kind = "cycle",
+          reason = "dependency-cycle",
           comment_created_at = M._comment_created_at(comment),
         }
       end
