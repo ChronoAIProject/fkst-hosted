@@ -37,11 +37,15 @@
 //!
 //! # Health posture (v1)
 //!
-//! The production `HealthView` is `SelfOnlyHealth`: the deployment is
+//! The production [`HealthView`] is [`SelfOnlyHealth`]: the deployment is
 //! single-replica, so the healthy-pod set is exactly this pod. The trait
 //! seam is the integration point for the real pod registry / heartbeat
 //! source of truth (`pm-health`), which is downstream work.
 
 pub mod config;
+pub mod distributor;
+pub mod health;
 
 pub use config::DistributionConfig;
+pub use distributor::select_pod;
+pub use health::{HealthView, PodLoad, SelfOnlyHealth};
