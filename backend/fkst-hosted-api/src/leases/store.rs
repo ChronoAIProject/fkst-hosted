@@ -32,6 +32,11 @@ use crate::models::LeaseDoc;
 /// downstream issue.
 pub const IDX_LEASES_HOLDER_POD: &str = "leases_holder_pod";
 
+/// [`LeaseStore::reap_expired`] deletes only documents expired for at least
+/// `lease_ttl * REAP_EXPIRY_MARGIN_FACTOR`. See the method doc for the
+/// same-pod ABA hazard this margin closes.
+pub const REAP_EXPIRY_MARGIN_FACTOR: u32 = 2;
+
 /// Result of [`LeaseStore::acquire`]. There are exactly two variants: the
 /// contended case is `NotAcquired` — any current-holder detail belongs only
 /// in the diagnostic log line, never the return type.
@@ -387,15 +392,34 @@ impl LeaseStore {
         Ok(held)
     }
 
-    /// Housekeeping: physically delete all expired lease documents
-    /// (`expires_at <= now`); returns the deleted count. Correctness never
-    /// depends on this — `acquire` already treats expired docs as acquirable.
-    /// Never invoked automatically by this module (scheduling is downstream).
+    /// Housekeeping: physically delete LONG-expired lease documents — only
+    /// those with `expires_at <= now - margin`, where
+    /// `margin = lease_ttl * `[`REAP_EXPIRY_MARGIN_FACTOR`] — and return the
+    /// deleted count. Correctness never depends on this — `acquire` already
+    /// treats expired docs as acquirable. Never invoked automatically by
+    /// this module (scheduling is downstream).
+    ///
+    /// # Why the margin (same-pod ABA hazard)
+    ///
+    /// Reap is garbage collection, NOT takeover (takeover happens via
+    /// `acquire`, which preserves the counter by updating the surviving
+    /// document). Deleting a *barely* expired document would reset the
+    /// fencing counter: the next `acquire` starts a fresh doc at token `1`,
+    /// and a stale holder's delayed `renew(pkg, 1)` from the previous lease
+    /// generation could then match again — same pod, same token — wrongly
+    /// extending a lease its session no longer legitimately holds (ABA).
+    /// A generous margin of `2 x lease_ttl` past expiry guarantees any
+    /// in-flight heartbeat from the old generation has long since fired and
+    /// returned `Lost` before the document (and with it the counter) can be
+    /// destroyed.
     pub async fn reap_expired(&self) -> Result<u64, PoolError> {
-        let now = bson::DateTime::now();
+        let margin = self.lease_ttl * REAP_EXPIRY_MARGIN_FACTOR;
+        let cutoff = bson::DateTime::from_millis(
+            bson::DateTime::now().timestamp_millis() - margin.as_millis() as i64,
+        );
         let result = self
             .coll
-            .delete_many(doc! { "expires_at": { "$lte": now } })
+            .delete_many(doc! { "expires_at": { "$lte": cutoff } })
             .await
             .map_err(|error| self.log_mongo_error("reap_expired", LEASES, error))?;
         if result.deleted_count > 0 {

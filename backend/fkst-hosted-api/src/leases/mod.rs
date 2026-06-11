@@ -48,6 +48,14 @@
 //! released has stopped acting, so no stale consumer can be confused by the
 //! counter restarting.
 //!
+//! # Clock and cross-pod skew
+//!
+//! All expiries (`expires_at = now + lease_ttl`) are computed from the
+//! application clock (`bson::DateTime::now()`), accepting bounded cross-pod
+//! clock skew under a generously chosen TTL; deployments assume NTP-synced
+//! nodes. A server-time variant (`$expr` with `$$NOW` so MongoDB evaluates
+//! "now" itself) is the known follow-up for cross-pod clock independence.
+//!
 //! # Error mapping (deferred, documented intent)
 //!
 //! No HTTP endpoint surfaces leases in this issue, so [`PoolError`] is NOT
@@ -63,4 +71,7 @@ pub mod store;
 
 pub use config::PoolConfig;
 pub use error::PoolError;
-pub use store::{AcquireOutcome, LeaseStore, ReleaseOutcome, RenewOutcome, IDX_LEASES_HOLDER_POD};
+pub use store::{
+    AcquireOutcome, LeaseStore, ReleaseOutcome, RenewOutcome, IDX_LEASES_HOLDER_POD,
+    REAP_EXPIRY_MARGIN_FACTOR,
+};

@@ -97,6 +97,21 @@ fn past() -> bson::DateTime {
     bson::DateTime::from_millis(bson::DateTime::now().timestamp_millis() - 60_000)
 }
 
+/// A timestamp expired for far longer than reap_expired's safety margin of
+/// `REAP_EXPIRY_MARGIN_FACTOR x TTL` past expiry (3 x TTL ago), so the doc
+/// is unambiguously reapable.
+fn far_past() -> bson::DateTime {
+    bson::DateTime::from_millis(
+        bson::DateTime::now().timestamp_millis() - 3 * TTL.as_millis() as i64,
+    )
+}
+
+/// A timestamp that is expired (dead for acquire) but well WITHIN the reap
+/// margin — reap_expired must leave it alone.
+fn barely_past() -> bson::DateTime {
+    bson::DateTime::from_millis(bson::DateTime::now().timestamp_millis() - 1_000)
+}
+
 /// Busy-wait until the millisecond clock has strictly advanced past `after`,
 /// so strict `>` assertions on stored timestamps are deterministic even when
 /// two operations land within the same millisecond. This is NOT a TTL wait
@@ -722,8 +737,10 @@ async fn ensure_indexes_idempotent() {
     );
 }
 
-/// Helper AC: reap_expired deletes exactly the dead leases, leaves live ones,
-/// and is idempotent (second run deletes nothing).
+/// Helper AC: reap_expired deletes exactly the LONG-expired leases (past the
+/// `2 x TTL` safety margin), leaves live AND barely-expired ones (the ABA
+/// guard: a barely-expired doc still carries the fencing counter for the
+/// `acquire` takeover path), and is idempotent (second run deletes nothing).
 #[tokio::test]
 async fn reap_expired_counts() {
     if !docker_available() {
@@ -751,18 +768,32 @@ async fn reap_expired_counts() {
             .await
             .expect("acquire c"),
     );
+    acquired(
+        pod_a
+            .acquire("pkg-d", bson::Uuid::new())
+            .await
+            .expect("acquire d"),
+    );
 
-    force_expires_at(&db, "pkg-a", past()).await;
-    force_expires_at(&db, "pkg-b", past()).await;
+    // a + b: dead for far longer than the reap margin -> reapable.
+    force_expires_at(&db, "pkg-a", far_past()).await;
+    force_expires_at(&db, "pkg-b", far_past()).await;
+    // d: expired (acquirable by takeover) but within the margin -> NOT
+    // reapable; deleting it would reset the fencing counter (ABA hazard).
+    force_expires_at(&db, "pkg-d", barely_past()).await;
 
     let reaped = pod_a.reap_expired().await.expect("reap");
-    assert_eq!(reaped, 2, "exactly the two dead leases are reaped");
+    assert_eq!(reaped, 2, "exactly the two long-dead leases are reaped");
     assert!(raw_lease(&db, "pkg-a").await.is_none());
     assert!(raw_lease(&db, "pkg-b").await.is_none());
     assert_eq!(
         raw_lease(&db, "pkg-c").await.expect("live doc remains"),
         live
     );
+    let barely = raw_lease(&db, "pkg-d")
+        .await
+        .expect("barely-expired doc must survive the reap");
+    assert_eq!(barely.fencing_token, 1, "counter preserved for takeover");
 
     let reaped_again = pod_a.reap_expired().await.expect("second reap");
     assert_eq!(reaped_again, 0, "idempotent: nothing left to reap");
