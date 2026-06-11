@@ -332,6 +332,52 @@ local function capture_comment_department_logs(department_path, event, write_env
   return captured, write_requests
 end
 
+local function capture_label_department_logs(department_path, event, write_env, apply_result)
+  mock_write_env(write_env)
+
+  local captured = {}
+  local old_log = log
+  local old_apply_issue_labels = core.apply_issue_labels
+  local old_with_lock = with_lock
+  local write_requests = 0
+
+  log = {
+    info = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    warn = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    error = function(message)
+      table.insert(captured, tostring(message))
+    end,
+  }
+  core.apply_issue_labels = function(_repo, _issue_number, _add_labels, _remove_labels)
+    write_requests = write_requests + 1
+    if apply_result == false then
+      return false
+    end
+    return true
+  end
+  with_lock = function(_key, fn)
+    return fn()
+  end
+
+  local ok, err = pcall(function()
+    dofile(package_root() .. "/" .. department_path)
+    pipeline(event)
+  end)
+
+  core.apply_issue_labels = old_apply_issue_labels
+  with_lock = old_with_lock
+  log = old_log
+  if not ok then
+    error(err)
+  end
+
+  return captured, write_requests
+end
+
 local function long_dedup(suffix, total_len)
   local prefix = "github-devloop/issue/owner/x/42/result/"
   return prefix .. string.rep("v", total_len - #prefix - #suffix) .. suffix
@@ -426,6 +472,7 @@ return {
   calls_matching = calls_matching,
   count_calls = count_calls,
   capture_comment_department_logs = capture_comment_department_logs,
+  capture_label_department_logs = capture_label_department_logs,
   long_dedup = long_dedup,
   pr_open_event = pr_open_event,
   pr_open_guard_comments = pr_open_guard_comments,

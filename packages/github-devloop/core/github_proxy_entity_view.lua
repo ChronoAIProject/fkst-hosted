@@ -43,7 +43,7 @@ end
 local function issue_view_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,comments,labels,state"
+    .. " --json title,body,comments,labels,state,updatedAt"
 end
 
 local function pr_view_cmd(repo, pr_number)
@@ -59,6 +59,35 @@ local function entity_view_cmd(repo, kind, number)
   return issue_view_cmd(repo, number)
 end
 
+local function decode_cached_view(encoded)
+  local ok, decoded = pcall(json.decode, encoded or "")
+  if not ok or type(decoded) ~= "table" then
+    return nil
+  end
+  if type(decoded.stdout) ~= "string" then
+    return nil
+  end
+  return decoded
+end
+
+local function json_string(value)
+  local text = tostring(value or "")
+  text = text:gsub("\\", "\\\\")
+  text = text:gsub('"', '\\"')
+  text = text:gsub("\b", "\\b")
+  text = text:gsub("\f", "\\f")
+  text = text:gsub("\n", "\\n")
+  text = text:gsub("\r", "\\r")
+  text = text:gsub("\t", "\\t")
+  return '"' .. text .. '"'
+end
+
+local function encode_cached_view(stdout, producer)
+  return '{"producer":' .. json_string(producer)
+    .. ',"stdout":' .. json_string(stdout or "")
+    .. "}"
+end
+
 local function fetch_entity_view(repo, kind, number, updated_at, opts)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
@@ -67,22 +96,26 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
 
   local cmd = entity_view_cmd(repo, selected_kind, number)
   local options = opts or {}
+  local consumer = tostring(options.consumer or "")
   if options.fresh == true or updated_at == nil or tostring(updated_at) == "" then
     return M.gh_exec(cmd, 30, "gh " .. selected_kind .. " view")
   end
 
   local key = entity_view_cache_key(repo, selected_kind, number, updated_at)
-  local cached = cache_get(key)
-  if cached ~= nil and cached ~= "" then
+  local cached = decode_cached_view(cache_get(key))
+  if cached ~= nil and cached.producer ~= consumer then
+    cache_set(key, "")
     return {
-      stdout = cached,
+      stdout = cached.stdout,
       stderr = "",
       exit_code = 0,
     }
   end
 
   local result = M.gh_exec(cmd, 30, "gh " .. selected_kind .. " view")
-  cache_set(key, result.stdout or "")
+  if type(result) == "table" and result.exit_code == 0 then
+    cache_set(key, encode_cached_view(result.stdout or "", consumer))
+  end
   return result
 end
 
@@ -111,15 +144,21 @@ function M.fetch_pr_view(repo, pr_number, updated_at, opts)
 end
 
 function M.fetch_issue_view_state(repo, issue_number, updated_at, opts)
-  return M.fetch_issue_view(repo, issue_number, updated_at, opts)
+  local options = opts or {}
+  options.consumer = options.consumer or "observe_issue"
+  return M.fetch_issue_view(repo, issue_number, updated_at, options)
 end
 
 function M.fetch_issue_view_open_pr(repo, issue_number, updated_at, opts)
-  return M.fetch_issue_view(repo, issue_number, updated_at, opts)
+  local options = opts or {}
+  options.consumer = options.consumer or "open_pr"
+  return M.fetch_issue_view(repo, issue_number, updated_at, options)
 end
 
 function M.fetch_pr_view_origin(repo, pr_number, updated_at, opts)
-  return M.fetch_pr_view(repo, pr_number, updated_at, opts)
+  local options = opts or {}
+  options.consumer = options.consumer or "observe_pr"
+  return M.fetch_pr_view(repo, pr_number, updated_at, options)
 end
 
 end

@@ -1,12 +1,9 @@
 local S = {}
 
 function S.install(M)
-function M.gh_exec(cmd, timeout, context)
-  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
-  if result.exit_code ~= 0 then
-    error("github-devloop: " .. tostring(context or "gh command") .. " failed: " .. tostring(result.stderr))
-  end
-  return result
+function M.gh_exec(cmd_or_opts, timeout, context)
+  local run = type(context) == "function" and context or exec_sync
+  return run(M.gh_exec_opts(cmd_or_opts, timeout))
 end
 
 function M.gh_issue_list_intake_cmd(repo, limit)
@@ -21,13 +18,133 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --json number,title,updatedAt,labels"
 end
 
+function M.gh_issue_list_recent_closed_cmd(repo, limit)
+  local bounded_limit = tonumber(limit or 30)
+  if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then
+    error("github-devloop: invalid closed issue list limit")
+  end
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state closed"
+    .. " --limit " .. tostring(math.floor(bounded_limit))
+    .. " --json number,title,closedAt,labels"
+end
+
 function M.gh_issue_list_observe_cmd(repo, label)
   local selected_label = label or M._enabled_label
   return "gh api --paginate --slurp "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
 
+function M.gh_dashboard_issue_list_cmd(repo, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard issue label is required")
+  end
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. selected_label:gsub(":", "%%3A") .. "&per_page=100")
+end
+
+function M.gh_dashboard_issue_all_open_cmd(repo)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
+end
+
+function M.gh_dashboard_issue_add_label_cmd(repo, issue_number, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard issue label is required")
+  end
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/labels")
+    .. " -f " .. M._shell_single_quote("labels[]=" .. selected_label)
+end
+
+function M.gh_dashboard_label_get_cmd(repo, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard label is required")
+  end
+  return "gh api --method GET "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels/" .. selected_label:gsub(":", "%%3A"))
+end
+
+function M.gh_dashboard_label_create_cmd(repo, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard label is required")
+  end
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels")
+    .. " -f " .. M._shell_single_quote("name=" .. selected_label)
+    .. " -f " .. M._shell_single_quote("color=ededed")
+    .. " -f " .. M._shell_single_quote("description=fkst observability dashboard singleton")
+end
+
+function M.gh_repo_labels_list_cmd(repo)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels?per_page=100")
+end
+
+function M.gh_repo_label_create_cmd(repo, name, color, description)
+  local selected_label = tostring(name or "")
+  if selected_label == "" then
+    error("github-devloop: label name is required")
+  end
+  local selected_color = tostring(color or "")
+  if selected_color:find("^%x%x%x%x%x%x$") == nil then
+    error("github-devloop: label color is invalid")
+  end
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels")
+    .. " -f " .. M._shell_single_quote("name=" .. selected_label)
+    .. " -f " .. M._shell_single_quote("color=" .. selected_color)
+    .. " -f " .. M._shell_single_quote("description=" .. tostring(description or ""))
+end
+
+function M.gh_repo_label_update_cmd(repo, name, color, description)
+  local selected_label = tostring(name or "")
+  if selected_label == "" then
+    error("github-devloop: label name is required")
+  end
+  local selected_color = tostring(color or "")
+  if selected_color:find("^%x%x%x%x%x%x$") == nil then
+    error("github-devloop: label color is invalid")
+  end
+  return "gh api --method PATCH "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels/" .. selected_label:gsub(":", "%%3A"))
+    .. " -f " .. M._shell_single_quote("color=" .. selected_color)
+    .. " -f " .. M._shell_single_quote("description=" .. tostring(description or ""))
+end
+
+function M.gh_dashboard_issue_create_cmd(repo, input_file)
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues")
+    .. " --input " .. M._shell_single_quote(input_file)
+end
+
+function M.gh_dashboard_issue_get_cmd(repo, issue_number)
+  return "gh api --method GET --include "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+end
+
+function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file, etag)
+  local header = ""
+  if etag ~= nil and tostring(etag) ~= "" then
+    header = " --header " .. M._shell_single_quote("If-Match: " .. tostring(etag))
+  end
+  return "gh api --method PATCH "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+    .. header
+    .. " --input " .. M._shell_single_quote(input_file)
+end
+
 function M.gh_pr_list_observe_cmd(repo)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
+end
+
+function M.gh_pr_list_freshness_cmd(repo)
   return "gh api --paginate --slurp "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
 end
@@ -99,7 +216,7 @@ function M.gh_issue_view_merge_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_observe_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "comments,state")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state")
 end
 
 function M.gh_pr_view_origin_cmd(repo, pr_number)
@@ -121,7 +238,13 @@ end
 function M.gh_pr_view_merge_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,headRefOid,baseRefName,state,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
+    .. " --json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
+end
+
+function M.gh_pr_view_freshness_cmd(repo, pr_number)
+  return "gh pr view " .. M._shell_single_quote(pr_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 end
 
 function M.gh_pr_list_head_base_cmd(repo, head, base)
@@ -163,9 +286,25 @@ function M.gh_pr_merge_cmd(repo, pr_number, head_sha)
     .. " --match-head-commit " .. M._shell_single_quote(head_sha)
 end
 
+function M.gh_commit_check_runs_cmd(repo, head_sha)
+  if not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid commit check-runs head sha")
+  end
+  return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/commits/" .. tostring(head_sha) .. "/check-runs")
+end
+
 function M.gh_pr_ready_cmd(repo, pr_number)
   return "gh pr ready " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
+end
+
+function M.gh_workflow_dispatch_ci_cmd(repo, ref)
+  if not M._is_git_ref_safe(ref) then
+    error("github-devloop: invalid workflow dispatch ref")
+  end
+  return "gh workflow run " .. M._shell_single_quote("ci.yml")
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --ref " .. M._shell_single_quote(ref)
 end
 
 function M.gh_issue_comment_cmd(repo, issue_number, body_file)
@@ -178,6 +317,11 @@ function M.gh_pr_comment_cmd(repo, pr_number, body_file)
   return "gh pr comment " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
     .. " --body-file " .. M._shell_single_quote(body_file)
+end
+
+function M.gh_pr_close_cmd(repo, pr_number)
+  return "gh pr close " .. M._shell_single_quote(pr_number)
+    .. " --repo " .. M._shell_single_quote(repo)
 end
 
 function M.gh_issue_close_cmd(repo, issue_number)
@@ -194,6 +338,12 @@ function M.gh_pr_view_head_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
     .. " --json headRefName,baseRefName,state"
+end
+
+function M.gh_pr_view_context_cmd(repo, pr_number)
+  return "gh pr view " .. M._shell_single_quote(pr_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --json title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"
 end
 
 function M.git_status_cmd(worktree)
@@ -237,6 +387,21 @@ function M.git_fetch_branch_cmd(remote, branch)
   return "git fetch " .. M._shell_single_quote(remote) .. " " .. M._shell_single_quote(branch)
 end
 
+function M.git_fetch_pr_merge_ref_cmd(remote, pr_number)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pull request number")
+  end
+  return "git fetch " .. M._shell_single_quote(remote) .. " "
+    .. M._shell_single_quote("refs/pull/" .. tostring(pr_number) .. "/merge")
+end
+
+function M.git_fetch_head_commit_cmd()
+  return "git rev-parse --verify FETCH_HEAD^{commit}"
+end
+
 function M.git_remote_branch_head_cmd(remote, branch)
   if not M._is_git_ref_safe(remote) then
     error("github-devloop: invalid git remote")
@@ -245,6 +410,15 @@ function M.git_remote_branch_head_cmd(remote, branch)
     error("github-devloop: invalid remote branch")
   end
   return "git rev-parse --verify refs/remotes/" .. M._shell_single_quote(remote) .. "/" .. M._shell_single_quote(branch) .. "^{commit}"
+end
+
+function M.git_worktree_merge_no_edit_cmd(worktree, sha)
+  if not M._is_git_sha(sha) then
+    error("github-devloop: invalid merge sha")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " merge --no-edit "
+    .. M._shell_single_quote(sha)
 end
 
 function M.git_ahead_count_cmd(upstream, integration)
@@ -294,6 +468,14 @@ function M.read_runtime_root_cmd()
   return 'printf %s "$FKST_RUNTIME_ROOT"'
 end
 
+function M.mkdir_p_cmd(path)
+  local value = tostring(path or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid directory path")
+  end
+  return "mkdir -p " .. M._shell_single_quote(value) .. " && chmod 0555 " .. M._shell_single_quote(value)
+end
+
 function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
@@ -316,8 +498,38 @@ function M.git_worktree_add_existing_branch_cmd(worktree, branch)
     .. " " .. M._shell_single_quote(branch)
 end
 
+function M.git_worktree_add_remote_branch_cmd(worktree, remote, branch, force)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  local force_arg = ""
+  if force then
+    force_arg = " --force"
+  end
+  return "mkdir -p " .. M._shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
+    .. " && git worktree add" .. force_arg
+    .. " -B " .. M._shell_single_quote(branch)
+    .. " " .. M._shell_single_quote(worktree)
+    .. " refs/remotes/" .. M._shell_single_quote(remote) .. "/" .. M._shell_single_quote(branch)
+end
+
 function M.git_worktree_list_cmd()
   return "git worktree list --porcelain"
+end
+
+function M.git_worktree_prune_cmd()
+  return "git worktree prune"
+end
+
+function M.path_is_directory_cmd(path)
+  local value = tostring(path or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid directory path")
+  end
+  return "[ -d " .. M._shell_single_quote(value) .. " ]"
 end
 
 function M.find_worktree_for_branch(stdout, branch)

@@ -27,7 +27,7 @@ return {
     t.eq(key, "github-proxy/view/owner/repo/issue/12/2026-06-03T01-02-03Z")
     t.eq(
       core.gh_issue_view_entity_cmd("owner/repo", 12),
-      "gh issue view '12' --repo 'owner/repo' --json title,body,comments,labels,state"
+      "gh issue view '12' --repo 'owner/repo' --json title,body,comments,labels,state,updatedAt"
     )
     t.eq(
       core.gh_pr_view_entity_cmd("owner/repo", 7),
@@ -194,10 +194,21 @@ return {
     local result = core.gh_exec("gh issue list", 30, "gh issue list", function(spec)
       t.eq(spec.cmd, "gh issue list")
       t.eq(spec.timeout, 30)
+      t.eq(spec.rate_pool.name, "gh")
+      t.eq(spec.rate_pool.burst, nil)
+      t.eq(spec.rate_pool.refill_per_hour, nil)
       return { stdout = "[]\n", stderr = "", exit_code = 0 }
     end)
 
     t.eq(result.stdout, "[]\n")
+  end,
+
+  test_gh_exec_opts_preserves_options = function()
+    local spec = core.gh_exec_opts({ cmd = "gh pr list", timeout = 60, cwd = "/tmp" })
+    t.eq(spec.cmd, "gh pr list")
+    t.eq(spec.timeout, 60)
+    t.eq(spec.cwd, "/tmp")
+    t.eq(spec.rate_pool.name, "gh")
   end,
 
   test_gh_error_classifies_rate_limit_and_abuse = function()

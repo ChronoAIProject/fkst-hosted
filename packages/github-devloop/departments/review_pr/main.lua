@@ -37,7 +37,7 @@ function pipeline(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, reviewing.pr_number), timeout = 30 })
+    local pr_view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, reviewing.pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr review head view failed: " .. tostring(pr_view.stderr))
     end
@@ -74,13 +74,23 @@ function pipeline(event)
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = exec_sync({ cmd = core.gh_issue_view_review_cmd(repo, issue_number), timeout = 30 })
+      local issue_view = core.gh_exec({ cmd = core.gh_issue_view_review_cmd(repo, issue_number), timeout = 30 })
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue review view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = core.parse_issue_view_review(issue_view.stdout)
     end
-    local proposal = core.build_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref)
+    local review_id = core.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
+    local content_fetch = core.context_fetch_ref_from_bundle({
+      dept = "review_pr",
+      repo = repo,
+      issue_number = issue_number,
+      pr_number = reviewing.pr_number,
+      proposal_id = review_id,
+      version = core._dedup_key({ review_id, "review" }),
+      tick = event.ts,
+    })
+    local proposal = core.build_board_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return

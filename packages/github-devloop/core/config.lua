@@ -8,6 +8,13 @@ local allowed_env = {
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
+  FKST_DEVLOOP_TEST_COMMAND = true,
+  FKST_OUTPUT_LANG = true,
+}
+
+local allowed_presence_env = {
+  GH_TOKEN = true,
+  GITHUB_TOKEN = true,
 }
 
 local function read_env_command(name)
@@ -17,8 +24,19 @@ local function read_env_command(name)
   return 'printf %s "$' .. name .. '"'
 end
 
+local function env_present_command(name)
+  if not allowed_presence_env[name] then
+    error("github-devloop: env name is not allowed")
+  end
+  return 'if [ -n "${' .. name .. ':-}" ]; then printf present; fi'
+end
+
 function M.read_env_command(name)
   return read_env_command(name)
+end
+
+function M.env_present_command(name)
+  return env_present_command(name)
 end
 
 function M.read_env(name, exec)
@@ -33,6 +51,15 @@ function M.read_env(name, exec)
   return out.stdout
 end
 
+function M.env_present(name, exec)
+  local run = exec or exec_sync
+  if type(run) ~= "function" then
+    return false
+  end
+  local ok, out = pcall(run, env_present_command(name))
+  return ok and type(out) == "table" and out.exit_code == 0 and out.stdout ~= ""
+end
+
 function M.write_mode(exec)
   return M.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
 end
@@ -43,6 +70,18 @@ end
 
 function M.max_converge_rounds()
   return 8
+end
+
+function M.default_test_command()
+  return "scripts/run.sh test"
+end
+
+function M.test_command(exec)
+  local command = M.read_env("FKST_DEVLOOP_TEST_COMMAND", exec)
+  if command == nil then
+    return M.default_test_command()
+  end
+  return command
 end
 
 local function current_checkout_branch(exec)

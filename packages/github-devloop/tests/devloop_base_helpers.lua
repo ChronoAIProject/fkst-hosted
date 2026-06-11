@@ -71,6 +71,7 @@ local function issue(extra)
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
+  if value.decision == "reject" and value.blocking_gap == nil then value.blocking_gap = "missing regression guard" end
   return value
 end
 
@@ -188,7 +189,7 @@ local function fixing(extra)
     version = core.fix_version_from_review_version(review_version),
     review_proposal_id = event.proposal_id,
     review_dedup_key = event.dedup_key,
-    reviewed_head_sha = "def456",
+    reviewed_head_sha = "def456", blocking_gap = "missing regression guard",
     dedup_key = "fixing/github-devloop/issue/owner/repo/42/v1",
     source_ref = pr_source_ref(),
   }
@@ -481,16 +482,17 @@ json_string = function(value)
 end
 
 render_comment = function(comment)
-  local body = comment
-  local author = "fkst-test-bot"
-  local created_at = "2026-06-03T01:00:00Z"
+  local body, author, created_at = comment, "fkst-test-bot", "2026-06-03T01:00:00Z"
   if type(comment) == "table" then
     body = comment.body
     author = comment.author_login or author
     created_at = comment.created_at or created_at
   end
+  local id = type(comment) == "table" and comment.id or nil
+  local id_field = id ~= nil and tostring(id) ~= "" and string.format('"id":"%s",', json_string(id)) or ""
   return string.format(
-    '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
+    '{%s"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
+    id_field,
     json_string(body or ""),
     json_string(author),
     json_string(created_at)
@@ -930,7 +932,6 @@ local function mock_issue_merge(labels, comments, extra)
     exit_code = 0,
   })
 end
-
 
 return {
   t = t,

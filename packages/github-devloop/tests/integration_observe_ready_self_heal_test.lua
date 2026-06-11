@@ -75,16 +75,27 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_does_not_reconstruct_mid_loop_thinking_proposal = function()
+  test_observe_issue_replays_mid_loop_thinking_proposal_from_converge_marker = function()
     local event = issue()
     local original = core.build_proposal(event)
+    local base_version = original.dedup_key
+    local sr_digest = core.source_ref_digest(event.source_ref)
+    local angle_digests = {
+      { angle = "minimal", verdict = "abstain", digest = "needs-narrower-scope" },
+    }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(original.proposal_id, "thinking", original.dedup_key .. "/loop/1"),
+      core.state_marker(original.proposal_id, "thinking", base_version),
+      core.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests),
     })
 
     local result = run_observe(event, opts("observe-issue-thinking-mid-loop-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    local proposal = find_raise(result.raises, "consensus.proposal").payload
+    t.eq(proposal.dedup_key, base_version .. "/loop/1")
+    t.eq(proposal.round, 1)
+    t.eq(proposal.convergence_question, "Narrow the question")
+    t.eq(proposal.prior_round_digests[1].digest, "needs-narrower-scope")
     t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
@@ -210,6 +221,51 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-version-mismatch"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
+  end,
+
+  test_observe_issue_fixing_replay_accepts_premigration_pr_link_lineage = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/185/2026-06-10T13-45-26Z"
+    local issue_version = base .. "/fix/1/fix/2/fix/3/fix/4/fix/5"
+    local link_version = base .. "/fix/1/review-loop/2/rereview/2/feedface"
+    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, core._strip_latest_fix_version_suffix(issue_version), "def456")
+    local review_dedup = "consensus:" .. review_proposal .. "/review"
+    local feedback = core.build_review_result_comment_request("owner/repo", 42, proposal_id, issue_version, {
+      proposal_id = review_proposal,
+      decision = "reject",
+      body = "Review consensus rejects the diff.",
+      blocking_gap = "missing regression guard",
+      dedup_key = review_dedup,
+      source_ref = core.pr_source_ref("owner/repo", 7),
+    }, core.pr_source_ref("owner/repo", 7)).body
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", link_version, "dev"),
+      core.state_marker(proposal_id, "fixing", issue_version),
+      feedback,
+    })
+    mock_linked_pr_state({})
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-premigration-link"))
+    t.eq(result.exit_code, 0)
+    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    t.eq(fixing_raise.payload.version, issue_version)
+    t.eq(fixing_raise.payload.review_proposal_id, review_proposal)
+  end,
+
+  test_observe_issue_fixing_replay_refuses_cross_proposal_pr_link = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local other_proposal_id = "github-devloop/issue/owner/repo/43"
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/185/2026-06-10T13-45-26Z"
+    local issue_version = base .. "/fix/1/fix/2"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.pr_link_marker(other_proposal_id, 7, "devloop-owner-repo-43-01HY", base, "dev"),
+      core.state_marker(proposal_id, "fixing", issue_version),
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-cross-proposal-link"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
   end,
 
   test_observe_issue_pr_open_does_not_reraise_after_pr_local_reviewing = function()

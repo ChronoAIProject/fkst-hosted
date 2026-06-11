@@ -33,6 +33,7 @@ local mock_pr_comment_write = h.mock_pr_comment_write
 local calls_matching = h.calls_matching
 local count_calls = h.count_calls
 local capture_comment_department_logs = h.capture_comment_department_logs
+local capture_label_department_logs = h.capture_label_department_logs
 local long_dedup = h.long_dedup
 local pr_open_event = h.pr_open_event
 local pr_open_guard_comments = h.pr_open_guard_comments
@@ -571,6 +572,14 @@ return {
     }
 
     mock_write_env("")
+    local dry_logs, dry_write_requests = capture_label_department_logs(
+      "departments/github_issue_label/main.lua",
+      event,
+      ""
+    )
+    t.eq(dry_write_requests, 0)
+    t.eq(dry_logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=dry-run repo=owner/x issue=42 add=fkst-dev:ready remove=fkst-dev:thinking dedup_key=github-devloop/issue/owner/x/42/result reason=FKST_GITHUB_WRITE!=1")
+
     local dry = t.run_department("departments/github_issue_label/main.lua", event, opts("label-dry-run"))
     t.eq(dry.exit_code, 0)
     t.eq(count_calls("gh issue edit"), 0)
@@ -578,6 +587,14 @@ return {
     local write_opts = opts("label-write", {
       FKST_GITHUB_WRITE = "1",
     })
+    local real_logs, real_write_requests = capture_label_department_logs(
+      "departments/github_issue_label/main.lua",
+      event,
+      "1"
+    )
+    t.eq(real_write_requests, 1)
+    t.eq(real_logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=real repo=owner/x issue=42 add=fkst-dev:ready remove=fkst-dev:thinking dedup_key=github-devloop/issue/owner/x/42/result")
+
     mock_write_env("1")
     mock_label_write()
     local write = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
@@ -661,6 +678,16 @@ return {
     t.eq(count_calls("gh label list"), 1)
     t.eq(count_calls("gh label create"), 0)
     t.eq(count_calls("gh issue edit"), 0)
+
+    local logs, write_requests = capture_label_department_logs(
+      "departments/github_issue_label/main.lua",
+      event,
+      "1",
+      false
+    )
+    t.eq(write_requests, 1)
+    t.eq(logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=real repo=owner/x issue=42 add= remove=fkst-dev:gone dedup_key=github-devloop/issue/owner/x/42/remove-gone-label")
+    t.eq(logs[2], "github-proxy dept=github_issue_label tag=SKIP reason=no-effective-label-change repo=owner/x issue=42 add= remove=fkst-dev:gone dedup_key=github-devloop/issue/owner/x/42/remove-gone-label")
   end,
 
   test_long_label_dedup_uses_bounded_lock_key = function()

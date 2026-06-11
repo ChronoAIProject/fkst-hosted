@@ -51,6 +51,11 @@ local function mock_fresh_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("merge --no-edit 'abc123'", {
+    stdout = "Already up to date.\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_existing_empty_implement_worktree(path)
@@ -89,9 +94,14 @@ local function mock_existing_empty_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("merge --no-edit 'abc123'", {
+    stdout = "Already up to date.\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
-local function mock_existing_empty_implement_worktree_reuse(path, branch)
+local function mock_existing_empty_implement_worktree_reuse(path, branch, ahead_count)
   local worktree = (path or "/tmp/fkst-packages-test/github-devloop/runtime")
     .. "/worktrees/devloop-owner-repo-42-01HY"
   t.mock_command("git fetch 'origin' 'dev'", {
@@ -110,7 +120,7 @@ local function mock_existing_empty_implement_worktree_reuse(path, branch)
     exit_code = 0,
   })
   t.mock_command("rev-list --count", {
-    stdout = "0\n",
+    stdout = tostring(ahead_count or "0") .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -121,6 +131,11 @@ local function mock_existing_empty_implement_worktree_reuse(path, branch)
   })
   t.mock_command("git worktree list --porcelain", {
     stdout = "worktree " .. worktree .. "\nHEAD abc123\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("merge --no-edit 'abc123'", {
+    stdout = "Already up to date.\n",
     stderr = "",
     exit_code = 0,
   })
@@ -140,16 +155,6 @@ local function mock_existing_implement_branch(head)
   })
   t.mock_command("show-ref --verify --quiet", {
     stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("rev-list --count", {
-    stdout = "1\n",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("rev-parse --verify refs/heads/", {
-    stdout = (head or "def456") .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -212,6 +217,136 @@ local function mock_git_status(stdout, exit_code, stderr)
     stderr = stderr or "",
     exit_code = exit_code or 0,
   })
+end
+
+local function mock_existing_fix_worktree(branch, head, path, merge)
+  local worktree = path or "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/fix-worktree"
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree " .. worktree .. "\nHEAD " .. tostring(head or "def456")
+      .. "\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("[ -d '" .. worktree .. "' ]", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = tostring(merge and merge.sha or "abc123") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("merge --no-edit '" .. tostring(merge and merge.sha or "abc123") .. "'", {
+    stdout = merge and merge.stdout or "Already up to date.\n",
+    stderr = merge and merge.stderr or "",
+    exit_code = merge and merge.exit_code or 0,
+  })
+  if merge ~= nil and merge.exit_code ~= nil and merge.exit_code ~= 0 then
+    t.mock_command("ls-files -u", {
+      stdout = merge.unmerged_stdout or "100644 abc123 1\tpackages/github-devloop/core.lua\n",
+      stderr = merge.unmerged_stderr or "",
+      exit_code = merge.unmerged_exit_code or 0,
+    })
+  end
+  return worktree
+end
+
+local function mock_missing_fix_worktree(branch, head, path)
+  local worktree = path or "/tmp/fkst-packages-test/github-devloop/old-runtime/worktrees/fix-worktree"
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree " .. worktree .. "\nHEAD " .. tostring(head or "def456")
+      .. "\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("[ -d '" .. worktree .. "' ]", {
+    stdout = "",
+    stderr = "",
+    exit_code = 1,
+  })
+  t.mock_command("git worktree prune", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git fetch 'origin' '" .. tostring(branch) .. "'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add --force -B", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("merge --no-edit 'abc123'", {
+    stdout = "Already up to date.\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  return worktree
+end
+
+local function mock_outside_runtime_fix_worktree(branch, head, path)
+  local worktree = path or "/tmp/fkst-packages-test/github-devloop/old-runtime/worktrees/fix-worktree"
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree " .. worktree .. "\nHEAD " .. tostring(head or "def456")
+      .. "\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("[ -d '" .. worktree .. "' ]", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git fetch 'origin' '" .. tostring(branch) .. "'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add --force -B", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("merge --no-edit 'abc123'", {
+    stdout = "Already up to date.\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  return worktree
 end
 
 local function mock_write_env(value)
@@ -297,6 +432,9 @@ return {
   mock_existing_devloop_worktree = mock_existing_devloop_worktree,
   mock_implement_codex = mock_implement_codex,
   mock_git_status = mock_git_status,
+  mock_existing_fix_worktree = mock_existing_fix_worktree,
+  mock_missing_fix_worktree = mock_missing_fix_worktree,
+  mock_outside_runtime_fix_worktree = mock_outside_runtime_fix_worktree,
   mock_write_env = mock_write_env,
   mock_bot_env = mock_bot_env,
   mock_issue_view_failure = mock_issue_view_failure,

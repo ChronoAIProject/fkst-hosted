@@ -8,6 +8,7 @@ local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
 local mock_git_commit = h.mock_git_commit
 local mock_git_push = h.mock_git_push
+local mock_existing_fix_worktree = h.mock_existing_fix_worktree
 local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
@@ -21,6 +22,7 @@ local function pr_native_review_reached(extra)
     proposal_id = proposal_id,
     decision = "reject",
     body = "Review consensus rejects the PR-native diff.",
+    blocking_gap = "missing regression guard",
     dedup_key = "consensus:" .. proposal_id .. "/review",
     source_ref = h.pr_source_ref(),
   }
@@ -63,6 +65,7 @@ return {
         proposal_id = event.review_proposal_id,
         decision = "reject",
         body = "Reject because the PR-native parser must fail closed.",
+        blocking_gap = "missing regression guard",
         dedup_key = event.review_dedup_key,
         source_ref = h.pr_source_ref(),
       },
@@ -75,11 +78,7 @@ return {
       reject_comment,
     }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD def456\nbranch refs/heads/" .. branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(branch, "def456")
     mock_implement_codex(0, "fixed PR-native review feedback")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)

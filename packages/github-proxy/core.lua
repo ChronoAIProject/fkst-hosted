@@ -2,6 +2,7 @@ local M = {}
 
 require("core.issue_create").install(M)
 require("core.entity_view").install(M)
+require("core.gh_rate").install(M)
 
 local allowed_env = {
   FKST_GITHUB_REPO = true,
@@ -166,29 +167,13 @@ function M.gh_error(context, result)
   return {
     class = class,
     retryable = class == "gh-rate-limited",
+    result = result,
     message = prefix .. " failed: " .. class .. ": " .. command_result_stderr(result),
   }
 end
 
 function M.gh_error_message(context, result)
   return M.gh_error(context, result).message
-end
-
-function M.gh_exec_result(cmd, timeout, context, exec)
-  local run = exec or exec_sync
-  local result = run({ cmd = cmd, timeout = timeout or 30 })
-  if command_result_exit_code(result) ~= 0 then
-    return false, M.gh_error(context or "gh command", result)
-  end
-  return true, result
-end
-
-function M.gh_exec(cmd, timeout, context, exec)
-  local ok, result_or_error = M.gh_exec_result(cmd, timeout, context, exec)
-  if not ok then
-    error(result_or_error.message)
-  end
-  return result_or_error
 end
 
 function M.configure_trusted_bot_login(login)
@@ -879,9 +864,12 @@ function M.ensure_repo_label(repo, label, existing_labels)
     return true
   end
 
-  local result = exec_sync({ cmd = M.gh_label_create_cmd(repo, label), timeout = 30 })
-  if command_result_exit_code(result) ~= 0 and not M.is_gh_label_already_exists(result) then
-    error(M.gh_error_message("gh label create", result))
+  local ok, result_or_error = M.gh_exec_result(M.gh_label_create_cmd(repo, label), 30, "gh label create")
+  if not ok then
+    local raw_result = result_or_error.result
+    if raw_result == nil or not M.is_gh_label_already_exists(raw_result) then
+      error(result_or_error.message)
+    end
   end
   existing_labels[label] = true
   return true

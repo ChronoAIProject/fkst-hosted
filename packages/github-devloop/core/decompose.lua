@@ -11,7 +11,7 @@ local function bounded_text(value, limit, fallback)
     text = fallback or "(empty)"
   end
   if #text > limit then
-    text = text:sub(1, limit)
+    text = M.truncate_utf8(text, limit)
   end
   return text
 end
@@ -102,6 +102,35 @@ function M.has_decomposed_marker(comments, proposal_id, version, pr_number)
   return false
 end
 
+function M.decomposed_fact(comments, proposal_id)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:decomposed:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id) then
+        local pr_number = marker:match('pr="([^"]+)"')
+        local count = tonumber(marker:match('count="([^"]+)"'))
+        if M._is_positive_pr_number(pr_number)
+          and count ~= nil
+          and count >= 1
+          and count <= max_decompose_issues
+          and count % 1 == 0 then
+          return {
+            proposal_id = tostring(proposal_id),
+            version = marker:match('version="([^"]*)"'),
+            pr_number = tonumber(pr_number),
+            count = count,
+            comment_created_at = M._comment_created_at(comment),
+          }
+        end
+      end
+    end
+  end
+  return nil
+end
+
 function M.decompose_child_marker(proposal_id, version, pr_number, index)
   return '<!-- fkst:github-devloop:decompose-child:v1 parent="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
@@ -170,7 +199,7 @@ function M.fallback_decompose_plan(decompose)
 end
 
 function M.decomposed_comment_body(decompose, count)
-  return "github-devloop decomposed blocked PR into " .. tostring(count) .. " follow-up issue(s)"
+  return M.comment_string("decomposed_prefix") .. tostring(count) .. M.comment_string("decomposed_suffix")
     .. "\n\n" .. M.decomposed_marker(decompose.proposal_id, decompose.version, decompose.pr_number, count)
 end
 
@@ -187,7 +216,7 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     .. "\n\n" .. M.decompose_lineage_marker(decompose.proposal_id, M.decompose_lineage_depth(decompose.current_issue_body) + 1)
     .. "\n\n" .. M.decompose_child_marker(decompose.proposal_id, decompose.version, decompose.pr_number, index)
   if #body > M._max_body_len then
-    body = body:sub(1, M._max_body_len)
+    body = M.truncate_utf8(body, M._max_body_len)
   end
   local fingerprint = issue_fingerprint(decompose, index)
   return {

@@ -5,11 +5,16 @@ local opts = h.opts
 local issue = h.issue
 local reviewing = h.reviewing
 local run_observe_pr = h.run_observe_pr
+local source_ref = h.source_ref
 local run_open_pr = h.run_open_pr
 local mock_issue_open_pr = h.mock_issue_open_pr
+local mock_branch_exists = h.mock_branch_exists
+local mock_write_env = h.mock_write_env
+local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 local render_comment = h.render_comment
 local run_observe = h.run_observe
+local find_raise = h.find_raise
 
 local function full_issue_view(labels, comments, extra)
   local rendered_labels = {}
@@ -23,10 +28,11 @@ local function full_issue_view(labels, comments, extra)
   local fields = extra or {}
   t.mock_command("--json title,body,comments,labels,state", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","body":"%s","state":"%s","updatedAt":"%s","labels":[%s],"comments":[%s]}\n',
       h.json_string(fields.title or "Implement decision recorder"),
       h.json_string(fields.body or ""),
       h.json_string(fields.state or "OPEN"),
+      h.json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
     ),
@@ -48,6 +54,35 @@ local function assert_clean_open_pr_skip(result)
 end
 
 return {
+  test_open_pr_direct_kickoff_raises_pr_open_request = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local event = core.build_devloop_open_pr_payload("owner/repo", 42, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      dedup_key = impl_version,
+      source_ref = source_ref(),
+    }, "devloop-owner-repo-42-01HY", "abc123", "dev")
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+
+    local result = run_open_pr(event, opts("open-pr-direct-write", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local pr_raise = find_raise(result.raises, "github-proxy.github_pr_open_request")
+    t.eq(pr_raise.payload.schema, "github-proxy.pr-open.v1")
+    t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
+    t.eq(pr_raise.payload.head_sha, "abc123")
+    t.eq(pr_raise.payload.impl_version, impl_version)
+  end,
+
   test_open_pr_skips_entity_changed_with_no_state_marker = function()
     mock_issue_open_pr({ "fkst-dev:enabled" }, {})
 
@@ -105,6 +140,28 @@ return {
     t.eq(count_calls("gh issue view"), 1)
   end,
 
+  test_same_consumer_retry_refetches_current_issue_truth = function()
+    local run_opts = shared_opts("same-consumer-retry")
+    local event = issue({ labels = { "fkst-dev:ready" }, updated_at = "2026-06-03T01:02:03Z" })
+    full_issue_view({ "fkst-dev:ready" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "ready", "ready/version"),
+    }, {
+      updated_at = "2026-06-03T01:02:03Z",
+    })
+    local first = run_observe(event, run_opts)
+    full_issue_view({ "fkst-dev:blocked" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "blocked", "blocked/version"),
+    }, {
+      updated_at = "2026-06-03T01:02:04Z",
+    })
+    local retry = run_observe(event, run_opts)
+
+    t.eq(first.exit_code, 0)
+    t.eq(retry.exit_code, 0)
+    t.eq(count_calls("gh issue view"), 2)
+    t.eq(#retry.raises, 0)
+  end,
+
   test_issue_entity_view_cache_misses_on_different_updated_at = function()
     local run_opts = shared_opts("different-updated-at")
     full_issue_view({ "fkst-dev:ready" }, {
@@ -125,8 +182,8 @@ return {
     t.eq(count_calls("gh issue view"), 2)
   end,
 
-  test_pr_entity_view_is_shared_across_event_driven_observe_runs = function()
-    local run_opts = shared_opts("pr-same-updated-at")
+  test_pr_entity_view_refetches_same_consumer_retry = function()
+    local run_opts = shared_opts("pr-same-consumer-retry")
     local event = {
       schema = "github-proxy.v1",
       type = "pr",
@@ -147,10 +204,14 @@ return {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", reviewing().version),
     }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev")
     local first = run_observe_pr(event, run_opts)
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", reviewing().version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", reviewing().version),
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev")
     local second = run_observe_pr(event, run_opts)
 
     t.eq(first.exit_code, 0)
     t.eq(second.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 1)
+    t.eq(count_calls("gh pr view"), 2)
   end,
 }
