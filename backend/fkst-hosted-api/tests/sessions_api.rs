@@ -670,25 +670,48 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         started_at: None,
         stopped_at: None,
     };
-    let running = mk(SessionStatus::Running);
+    // Every pre-terminal status must be swept. The `stopping` row is the
+    // durable backstop for a stop request that was acknowledged but whose
+    // driver died (with the pod) before completing it.
+    let pre_terminal = [
+        mk(SessionStatus::Pending),
+        mk(SessionStatus::Validating),
+        mk(SessionStatus::Running),
+        mk(SessionStatus::Stopping),
+    ];
     let stopped = mk(SessionStatus::Stopped);
-    repo.insert(&running).await.expect("insert running");
+    let failed = mk(SessionStatus::Failed);
+    for doc in &pre_terminal {
+        repo.insert(doc).await.expect("insert pre-terminal");
+    }
     repo.insert(&stopped).await.expect("insert stopped");
+    repo.insert(&failed).await.expect("insert failed");
 
     let swept = repo.fail_orphans().await.expect("sweep");
-    assert_eq!(swept, 1, "only the pre-terminal session is swept");
+    assert_eq!(swept, 4, "exactly the pre-terminal sessions are swept");
 
-    let (status, _headers, body) =
-        get_path(&app.router, &format!("/api/v1/sessions/{}", running.id)).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["status"], "failed");
-    assert_eq!(body["error"], "orphaned by pod restart");
-    assert!(body["stopped_at"].as_str().is_some());
+    for doc in &pre_terminal {
+        let (status, _headers, body) =
+            get_path(&app.router, &format!("/api/v1/sessions/{}", doc.id)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], "failed", "seeded {:?}: {body}", doc.status);
+        assert_eq!(body["error"], "orphaned by pod restart");
+        assert!(body["stopped_at"].as_str().is_some());
+    }
 
     let (status, _headers, body) =
         get_path(&app.router, &format!("/api/v1/sessions/{}", stopped.id)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "stopped", "terminal sessions untouched");
+
+    let (status, _headers, body) =
+        get_path(&app.router, &format!("/api/v1/sessions/{}", failed.id)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "failed", "already-failed left alone");
+    assert!(
+        body["error"].is_null(),
+        "an already-failed session must not be re-stamped: {body}"
+    );
 
     let again = repo.fail_orphans().await.expect("second sweep");
     assert_eq!(again, 0, "sweep is idempotent");
