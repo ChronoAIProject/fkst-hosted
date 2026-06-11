@@ -37,6 +37,15 @@ return {
     t.eq(config.rollup_merge, "auto")
     t.eq(core.test_command(exec), "scripts/run.sh test")
 
+    t.eq(core.env_present_command("GH_TOKEN"), 'if [ -n "${GH_TOKEN:-}" ]; then printf present; fi')
+    responses[core.env_present_command("GH_TOKEN")] = { stdout = "present", exit_code = 0 }
+    responses[core.env_present_command("GITHUB_TOKEN")] = { stdout = "", exit_code = 0 }
+    t.eq(core.env_present("GH_TOKEN", exec), true)
+    t.eq(core.env_present("GITHUB_TOKEN", exec), false)
+    t.raises(function()
+      core.read_env_command("GH_TOKEN")
+    end)
+
     responses['printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"'] = { stdout = "main", exit_code = 0 }
     responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "integration/dev", exit_code = 0 }
     responses['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "manual", exit_code = 0 }

@@ -12,6 +12,11 @@ local allowed_env = {
   FKST_OUTPUT_LANG = true,
 }
 
+local allowed_presence_env = {
+  GH_TOKEN = true,
+  GITHUB_TOKEN = true,
+}
+
 local function read_env_command(name)
   if not allowed_env[name] then
     error("github-devloop: env name is not allowed")
@@ -19,8 +24,19 @@ local function read_env_command(name)
   return 'printf %s "$' .. name .. '"'
 end
 
+local function env_present_command(name)
+  if not allowed_presence_env[name] then
+    error("github-devloop: env name is not allowed")
+  end
+  return 'if [ -n "${' .. name .. ':-}" ]; then printf present; fi'
+end
+
 function M.read_env_command(name)
   return read_env_command(name)
+end
+
+function M.env_present_command(name)
+  return env_present_command(name)
 end
 
 function M.read_env(name, exec)
@@ -33,6 +49,15 @@ function M.read_env(name, exec)
     return nil
   end
   return out.stdout
+end
+
+function M.env_present(name, exec)
+  local run = exec or exec_sync
+  if type(run) ~= "function" then
+    return false
+  end
+  local ok, out = pcall(run, env_present_command(name))
+  return ok and type(out) == "table" and out.exit_code == 0 and out.stdout ~= ""
 end
 
 function M.write_mode(exec)
