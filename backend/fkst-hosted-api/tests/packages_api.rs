@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
-use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::packages::{PackageRepository, MAX_FILE_CONTENT_BYTES};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::routes::packages::MAX_REQUEST_BODY_BYTES;
 use fkst_hosted_api::state::AppState;
@@ -481,6 +481,47 @@ async fn over_limit_body_is_400_request_body_too_large_not_413() {
     let envelope = parse(&raw);
     assert_eq!(envelope["error"], "invalid_request");
     assert_eq!(envelope["message"], "request body too large");
+}
+
+#[tokio::test]
+async fn large_legal_package_above_the_axum_default_limit_is_accepted() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, router) = app().await;
+
+    // Three 1 MiB files of escape-free ASCII (wire size ~ content size) push
+    // the request body to ~3 MiB: above axum's built-in 2 MiB body-limit
+    // default, well under MAX_REQUEST_BODY_BYTES. A 201 here pins that the
+    // raised `DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES)` layer is
+    // actually applied to the packages routes — if that layer were dropped,
+    // axum's default would reject this exact legal request.
+    let blob = "x".repeat(MAX_FILE_CONTENT_BYTES);
+    let body = serde_json::to_string(&json!({
+        "name": "big-pkg",
+        "files": [
+            { "path": "departments/big/main.lua", "content": "return {}" },
+            { "path": "blob0.lua", "content": blob },
+            { "path": "blob1.lua", "content": blob },
+            { "path": "blob2.lua", "content": blob }
+        ]
+    }))
+    .expect("serialize body");
+    assert!(
+        body.len() > 2 * 1024 * 1024,
+        "premise: body ({} bytes) must exceed axum's 2 MiB default",
+        body.len()
+    );
+    assert!(
+        body.len() <= MAX_REQUEST_BODY_BYTES,
+        "premise: body ({} bytes) must stay under the route cap",
+        body.len()
+    );
+
+    let (status, _headers, raw) = post_raw(&router, body).await;
+    assert_eq!(status, StatusCode::CREATED, "body: {raw}");
+    assert_eq!(raw, r#"{"name":"big-pkg"}"#);
 }
 
 // ---- (10) nest precedence ---------------------------------------------------

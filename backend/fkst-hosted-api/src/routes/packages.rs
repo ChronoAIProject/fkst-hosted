@@ -20,15 +20,17 @@ use crate::state::AppState;
 
 /// Request-body cap for the packages routes (16 MiB).
 ///
-/// Derivation: the domain caps total file *content* at
-/// `MAX_TOTAL_CONTENT_BYTES` (12 MiB); the JSON body around it additionally
-/// carries every path (up to 128 KiB), `composed_deps`, the name, and JSON
-/// framing/escaping overhead (an escaped content byte can take several wire
-/// bytes, but a body whose raw size already exceeds content cap + headroom
-/// can never decode into a *valid* package). 4 MiB of headroom is generous
-/// for all non-content weight, so anything larger is rejected before
-/// deserialization. Over-limit bodies surface as `400 "request body too
-/// large"` via [`AppJson`] (deliberately not `413`).
+/// This is a *wire-size* DoS guard, not the authoritative size rule. The
+/// domain caps total *decoded* file content at `MAX_TOTAL_CONTENT_BYTES`
+/// (12 MiB), and it is that decoded-size cap — not this one — that keeps the
+/// stored document under MongoDB's 16 MiB BSON limit. The 4 MiB headroom
+/// covers paths (up to 128 KiB), `composed_deps`, the name, and typical JSON
+/// framing. Note that JSON escaping can inflate wire size well beyond raw
+/// content size (`\n` is 2 wire bytes, `\uXXXX` is 6), so an escape-dense
+/// package that is *legal* by the decoded-size rules CAN exceed this cap and
+/// be rejected — an accepted v1 trade-off in exchange for bounding request
+/// memory before deserialization. Over-limit bodies surface as `400 "request
+/// body too large"` via [`AppJson`] (deliberately not `413`).
 pub const MAX_REQUEST_BODY_BYTES: usize = MAX_TOTAL_CONTENT_BYTES + 4 * 1024 * 1024;
 
 /// Request body for `POST /api/v1/packages`. Unlike the forgiving domain
