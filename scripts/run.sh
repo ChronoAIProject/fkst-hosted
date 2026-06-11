@@ -5,7 +5,9 @@
 #       Run fkst-framework --self-test once, then conformance + test for flat
 #       packages. Composed packages skip single-package conformance and still
 #       run tests. Full test also runs composed graph conformance. This is the
-#       single CI and local test entrypoint.
+#       single CI and local test entrypoint. Test mode is hermetic: ambient
+#       FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT are overridden with fresh temp
+#       directories, and FKST_GITHUB_WRITE is cleared, so local runs predict CI.
 #
 #   scripts/run.sh check
 #       Run hermetic repository checks only. Does not resolve or execute BIN.
@@ -238,20 +240,21 @@ LUA
 
 cmd_test() {
   local target="${1:-}" ran=0 fail=0 pkg name
-  local self_rt report_dir report_file
+  local report_dir report_file
+
+  trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}"' EXIT
+  TEST_HERMETIC_RUNTIME_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-rt.XXXXXX")"
+  TEST_HERMETIC_DURABLE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-durable.XXXXXX")"
+  export FKST_RUNTIME_ROOT="$TEST_HERMETIC_RUNTIME_ROOT"
+  export FKST_DURABLE_ROOT="$TEST_HERMETIC_DURABLE_ROOT"
+  unset FKST_GITHUB_WRITE
+  echo "test hermetic: FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT (ambient overridden)"
 
   report_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-reports.XXXXXX")"
 
   echo "=== self-test ==="
-  if [ -n "${FKST_RUNTIME_ROOT:-}" ]; then
-    if ! "$BIN" --self-test; then
-      fail=$((fail + 1))
-    fi
-  else
-    self_rt="$(mktemp -d "${TMPDIR:-/tmp}/fkst-self-test.XXXXXX")"
-    if ! FKST_RUNTIME_ROOT="$self_rt" "$BIN" --self-test; then
-      fail=$((fail + 1))
-    fi
+  if ! "$BIN" --self-test; then
+    fail=$((fail + 1))
   fi
 
   echo "=== sdk-primitives ==="
