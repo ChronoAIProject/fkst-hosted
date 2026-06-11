@@ -85,7 +85,7 @@ end
 
 local function fetch_blocked_by(repo, issue_number)
   local core = root()
-  local result = exec_sync({ cmd = core.gh_blocked_by_cmd(repo, issue_number), timeout = 30 })
+  local result = core.gh_exec({ cmd = core.gh_blocked_by_cmd(repo, issue_number), timeout = 30 })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "gh-failed"
   end
@@ -102,7 +102,7 @@ end
 local function blocker_merged(repo, blocker_number)
   local core = root()
   local blocker_proposal_id = core.proposal_id(repo, blocker_number)
-  local result = exec_sync({ cmd = core.gh_issue_view_observe_cmd(repo, blocker_number), timeout = 30 })
+  local result = core.gh_exec({ cmd = core.gh_issue_view_observe_cmd(repo, blocker_number), timeout = 30 })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "gh-failed"
   end
@@ -123,7 +123,7 @@ local function blocker_merged(repo, blocker_number)
     return false, nil
   end
 
-  local pr_result = exec_sync({ cmd = core.gh_pr_view_observe_cmd(repo, link.pr_number), timeout = 30 })
+  local pr_result = core.gh_exec({ cmd = core.gh_pr_view_observe_cmd(repo, link.pr_number), timeout = 30 })
   if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return nil, "gh-pr-failed"
   end

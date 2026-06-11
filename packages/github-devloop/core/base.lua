@@ -893,6 +893,32 @@ function M.normalize_source_ref(source_ref)
   }
 end
 
+function M.gh_rate_pool()
+  return { name = "gh", burst = 50, refill_per_hour = 3250 }
+end
+
+function M.gh_exec_opts(cmd_or_opts, timeout)
+  local opts = {}
+  if type(cmd_or_opts) == "table" then
+    for key, value in pairs(cmd_or_opts) do
+      opts[key] = value
+    end
+  else
+    opts.cmd = cmd_or_opts
+  end
+  opts.timeout = opts.timeout or timeout or 30
+  opts.rate_pool = M.gh_rate_pool()
+  return opts
+end
+
+function M.gh_exec(cmd_or_opts, timeout, exec)
+  local run = exec or exec_sync
+  if type(run) ~= "function" then
+    error("github-devloop: gh exec requires exec_sync")
+  end
+  return run(M.gh_exec_opts(cmd_or_opts, timeout))
+end
+
 
 function M.trusted_bot_login()
   return trusted_bot_login or test_bot_login

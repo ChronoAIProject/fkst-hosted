@@ -63,7 +63,7 @@ local function issue_comments_for_origin(origin)
   if origin.issue_number == nil then
     return nil
   end
-  local issue_view = exec_sync({ cmd = core.gh_issue_view_result_cmd(origin.repo, origin.issue_number), timeout = 30 })
+  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_result_cmd(origin.repo, origin.issue_number), timeout = 30 })
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue result view failed: " .. tostring(issue_view.stderr))
   end
@@ -150,7 +150,7 @@ function pipeline(event)
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   core.assert_trusted_bot_configured()
   local branches = core.branch_config()
-  local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(pr.repo, pr.number), timeout = 30 })
+  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(pr.repo, pr.number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end

@@ -56,6 +56,15 @@ return {
     end)
   end,
 
+  test_gh_exec_opts_uses_shared_rate_pool = function()
+    local spec = core.gh_exec_opts({ cmd = "gh issue list", timeout = 45 })
+    t.eq(spec.cmd, "gh issue list")
+    t.eq(spec.timeout, 45)
+    t.eq(spec.rate_pool.name, "gh")
+    t.eq(spec.rate_pool.burst, 50)
+    t.eq(spec.rate_pool.refill_per_hour, 3250)
+  end,
+
   test_opt_in_detection = function()
     t.eq(core.is_opted_in({ "fkst-dev:enabled" }), true)
     t.eq(core.is_opted_in({ "bug" }), false)

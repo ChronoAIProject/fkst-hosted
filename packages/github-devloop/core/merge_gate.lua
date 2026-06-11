@@ -42,7 +42,7 @@ local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
 end
 
 function M.commit_check_runs_merge_gate(repo, head_sha, opts)
-  local result = exec_sync({ cmd = M.gh_commit_check_runs_cmd(repo, head_sha), timeout = 30 })
+  local result = M.gh_exec({ cmd = M.gh_commit_check_runs_cmd(repo, head_sha), timeout = 30 })
   if result.exit_code ~= 0 then
     error("github-devloop: gh commit check-runs failed: " .. tostring(result.stderr))
   end
@@ -118,7 +118,7 @@ function M.dispatch_ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_sec
   end
   local key = M.ci_dispatch_once_key(repo, pr_number, head_sha)
   local ran = once(key, function()
-    local result = exec_sync({ cmd = M.gh_workflow_dispatch_ci_cmd(repo, head_ref), timeout = 30 })
+    local result = M.gh_exec({ cmd = M.gh_workflow_dispatch_ci_cmd(repo, head_ref), timeout = 30 })
     if result.exit_code ~= 0 then
       error("github-devloop: ci workflow dispatch failed: " .. tostring(result.stderr))
     end
@@ -152,7 +152,7 @@ function M.run_verified_pr_merge(request)
     base_branch = request and request.base_branch,
   }
 
-  local pr_recheck = exec_sync({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
+  local pr_recheck = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
   if pr_recheck.exit_code ~= 0 then
     error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
   end
@@ -179,12 +179,12 @@ function M.run_verified_pr_merge(request)
     request.before_merge(rechecked_pr)
   end
 
-  local merge_result = exec_sync({ cmd = M.gh_pr_merge_cmd(repo, pr_number, request.head_sha), timeout = 120 })
+  local merge_result = M.gh_exec({ cmd = M.gh_pr_merge_cmd(repo, pr_number, request.head_sha), timeout = 120 })
   if merge_result.exit_code ~= 0 then
     error("github-devloop: gh pr merge failed: " .. tostring(merge_result.stderr))
   end
 
-  local merged_view = exec_sync({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
+  local merged_view = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
   if merged_view.exit_code ~= 0 then
     error("github-devloop: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
   end

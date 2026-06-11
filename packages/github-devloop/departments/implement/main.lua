@@ -87,7 +87,7 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue implement view failed: " .. tostring(view.stderr))
     end
