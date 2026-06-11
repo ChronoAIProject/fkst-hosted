@@ -30,6 +30,19 @@ local merge_comments = h.merge_comments
 local find_raise = h.find_raise
 local count_calls = h.count_calls
 
+local function mock_branch_config_env()
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function find_pr_comment_with(raises, needle)
   for _, raised in ipairs(raises or {}) do
     if raised.queue == "github-proxy.github_pr_comment_request"
@@ -60,6 +73,21 @@ local function mock_issue_result_view(labels, comments)
   })
 end
 
+local function run_observe_pr_direct(run_opts)
+  mock_branch_config_env()
+  return t.run_department("departments/observe_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = {
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:04Z",
+      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+    },
+  }, run_opts)
+end
+
 local function reject_comment(fix)
   return core.build_review_result_comment_request(
     "owner/repo",
@@ -76,6 +104,62 @@ local function reject_comment(fix)
     },
     fix.source_ref
   ).body
+end
+
+local function advanced_fixing_fixture(extra)
+  local event = fixing()
+  local branch = "devloop-owner-repo-42-01HY"
+  local previous_version = event.version
+  local version = core.next_fix_version(previous_version)
+  local reviewed_head = "def456"
+  local current_head = extra and extra.current_head or "feedface"
+  local branch_head = extra and extra.branch_head or current_head
+  local review_proposal = core.pr_review_proposal_id("owner/repo", 7, previous_version, reviewed_head)
+  local review_dedup = "consensus:" .. review_proposal .. "/review"
+  local feedback = core.build_review_result_comment_request("owner/repo", 42, event.proposal_id, version, {
+    proposal_id = review_proposal,
+    decision = "reject",
+    body = "Review consensus rejects the diff.",
+    blocking_gap = "missing regression guard",
+    dedup_key = review_dedup,
+    source_ref = event.source_ref,
+  }, event.source_ref).body
+  local comments = {
+    core.pr_origin_marker(event.proposal_id, "42", branch, previous_version, "dev"),
+    core.state_marker(event.proposal_id, "fixing", version),
+    feedback,
+  }
+  local issue_comments = {}
+  for _, comment in ipairs(comments) do
+    table.insert(issue_comments, comment)
+  end
+  if extra and extra.reviewing_marker then
+    table.insert(issue_comments, core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(version)))
+  end
+  mock_bot_env()
+  mock_pr_origin(comments, branch, current_head)
+  mock_issue_result_view({ "fkst-dev:fixing" }, issue_comments)
+  if branch_head ~= false then
+    t.mock_command("git fetch 'origin' '" .. branch .. "'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+      stdout = tostring(branch_head) .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  return {
+    event = event,
+    version = version,
+    reviewed_head = reviewed_head,
+    current_head = current_head,
+    branch_head = branch_head,
+    review_proposal = review_proposal,
+    review_dedup = review_dedup,
+  }
 end
 
 return {
@@ -129,6 +213,41 @@ return {
     local recovered_reviewing = find_raise(recovered.raises, "devloop_reviewing")
     t.eq(recovered_reviewing.payload.dedup_key, direct_reviewing.payload.dedup_key)
     t.eq(recovered_reviewing.payload.version, direct_reviewing.payload.version)
+  end,
+
+  test_observe_pr_fixing_head_advanced_to_branch_head_self_heals_reviewing = function()
+    local fixture = advanced_fixing_fixture()
+    local result = run_observe_pr_direct(opts("observe-pr-fixing-advanced-branch-head"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    t.eq(reviewing_raise.payload.version, core.next_fix_version(fixture.version))
+    t.eq(reviewing_raise.payload.pr_number, 7)
+    t.eq(reviewing_raise.payload.source_ref.ref, "owner/repo#pr/7")
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(comment_raise.payload.body:find(core.state_marker(fixture.event.proposal_id, "reviewing", core.next_fix_version(fixture.version)), 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('new_head_sha="' .. fixture.current_head .. '"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('review_proposal="' .. fixture.review_proposal .. '"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('review_dedup="' .. fixture.review_dedup .. '"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('review_proposal="nil"', 1, true) == nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
+  end,
+
+  test_observe_pr_fixing_head_advanced_reviewing_marker_idempotent_skip = function()
+    advanced_fixing_fixture({ reviewing_marker = true })
+    local result = run_observe_pr_direct(opts("observe-pr-fixing-advanced-idempotent"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
+  end,
+
+  test_observe_pr_fixing_head_advanced_not_branch_head_stays_stale = function()
+    advanced_fixing_fixture({ current_head = "feedface", branch_head = "cafebabe" })
+    local result = run_observe_pr_direct(opts("observe-pr-fixing-advanced-not-branch-head"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
   end,
 
   test_review_result_direct_raise_and_poll_recovery_cover_merge_ready_and_fixing = function()
@@ -200,17 +319,17 @@ return {
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
-    mock_pr_merge_rollup(merge_comments(event), '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]')
-    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "bca321\n", stderr = "", exit_code = 0 })
+    mock_pr_merge_rollup(merge_comments(event), '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
 
     local red = run_merge(event, opts("internal-chain-merge-red-direct", { FKST_GITHUB_WRITE = "1" }))
     t.eq(red.exit_code, 0)
     local direct_fix = find_raise(red.raises, "devloop_fixing")
     t.eq(direct_fix.payload.schema, "github-devloop.fixing.v1")
+    t.eq(direct_fix.payload.gate_baseline_sha, nil)
     t.eq(count_calls("gh pr merge"), 0)
 
     local merge_gate_comment = find_raise(red.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(merge_gate_comment:find("gate_baseline_sha", 1, true) == nil)
     mock_pr_origin({ origin_marker, merge_gate_comment })
     mock_issue_result_view({ "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", direct_fix.payload.version),

@@ -14,16 +14,14 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 
 return {
-  test_merge_ci_red_uses_pr_merge_product_as_fix_baseline = function()
+  test_merge_ci_red_without_rollup_sha_degrades_to_current_integration_fix = function()
     local event = merge_ready()
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "base999")
-    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "bca321\n", stderr = "", exit_code = 0 })
+    mock_pr_merge_rollup({ origin_marker }, '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "base999")
 
     local result = run_merge(event, opts("merge-ci-red", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -32,19 +30,59 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     local fixing_payload = find_raise(result.raises, "devloop_fixing").payload
     t.eq(fixing_payload.schema, "github-devloop.fixing.v1")
-    t.eq(fixing_payload.gate_baseline_sha, "bca321")
+    t.eq(fixing_payload.gate_baseline_sha, nil)
     t.eq(fixing_payload.gate_failure_excerpt, "rollup-red: test: COMPLETED/FAILURE")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
+    t.is_true(comment_body:find("gate_baseline_sha", 1, true) == nil)
     t.is_true(comment_body:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
     t.is_true(comment_body:find("Reproduce locally with `scripts/run.sh test`", 1, true) ~= nil)
     local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
     t.is_true(fix_fact.review_reason:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
-    t.eq(fix_fact.gate_baseline_sha, "bca321")
+    t.eq(fix_fact.gate_baseline_sha, nil)
     t.eq(count_calls("git fetch 'origin' 'dev'"), 0)
-    t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 1)
+    t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 0)
     t.eq(count_calls("refs/remotes/'origin'/'dev'^{commit}"), 0)
     t.is_true(has_value(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.remove_labels, "fkst-dev:merge-ready"))
+  end,
+
+  test_merge_gate_marker_without_baseline_round_trips_nil = function()
+    local event = merge_ready()
+    local fix_version = core.fix_version_from_review_version(event.version)
+    local request = core.build_merge_gate_fix_comment_request(
+      "owner/repo",
+      "42",
+      event,
+      fix_version,
+      "rollup-red: test: COMPLETED/FAILURE",
+      nil,
+      event.source_ref
+    )
+    t.is_true(request.body:find("gate_baseline_sha", 1, true) == nil)
+    local fix_fact = core.merge_gate_fix_fact({ request.body }, event.proposal_id, fix_version)
+    t.eq(fix_fact.gate_baseline_sha, nil)
+  end,
+
+  test_synthetic_rollup_sha_still_cross_verifies_against_pr_merge_product = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    -- Synthetic verify-branch coverage: live CheckRun rollup entries do not carry headSha.
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "base999")
+    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "bca321\n", stderr = "", exit_code = 0 })
+
+    local result = run_merge(event, opts("merge-ci-red-synthetic-rollup-sha", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local fixing_payload = find_raise(result.raises, "devloop_fixing").payload
+    t.eq(fixing_payload.gate_baseline_sha, "bca321")
+    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    t.eq(fix_fact.gate_baseline_sha, "bca321")
+    t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 1)
   end,
 
   test_merge_ci_red_rejects_rollup_sha_that_is_not_pr_merge_product = function()
@@ -54,6 +92,7 @@ return {
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    -- Synthetic verify-branch coverage: live CheckRun rollup entries do not carry headSha.
     mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]')
     t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "feedface\n", stderr = "", exit_code = 0 })

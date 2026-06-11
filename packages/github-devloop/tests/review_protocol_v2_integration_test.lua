@@ -260,6 +260,16 @@ return {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
       core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "missing retry guard"),
     })
+    t.mock_command("git fetch 'origin' 'devloop-owner-repo-42-01HY'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+      stdout = "cafebabe\n",
+      stderr = "",
+      exit_code = 0,
+    })
 
     local result = run_observe_pr(pr_event(), opts("review-v2-fixing-self-heal-head-advanced"))
     t.eq(result.exit_code, 0)

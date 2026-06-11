@@ -28,6 +28,107 @@ local function bounded_control_text(M, value, limit)
   return text
 end
 
+local gate_owned_gap_patterns = {
+  "ci%s+green",
+  "ci%s+status",
+  "green%s+ci",
+  "green%s+gate",
+  "statuscheckrollup",
+  "status%s+check",
+  "merge%s+gate",
+  "mergeability",
+  "mergeable",
+  "merge%s+state",
+  "branch%s+protection",
+  "head%-bound",
+  "head%s+bound",
+  "%f[%w]head%f[%W]",
+  "same%s+head",
+  "required%s+checks",
+  "check%s+runs",
+}
+
+local implementation_gap_patterns = {
+  "bug",
+  "broken",
+  "crash",
+  "regression",
+  "missing%s+test",
+  "missing%s+guard",
+  "missing%s+implementation",
+  "missing%s+parser",
+  "missing%s+validation",
+  "incorrect",
+  "wrong",
+  "unsafe",
+  "leak",
+  "race",
+  "idempot",
+  "retry",
+  "payload",
+  "contract",
+  "diff",
+  "code",
+  "logic",
+}
+
+function M.is_gate_owned_review_gap(gap)
+  local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
+  if text == "" then
+    return false
+  end
+  local has_gate_fact = false
+  for _, pattern in ipairs(gate_owned_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      has_gate_fact = true
+      break
+    end
+  end
+  if not has_gate_fact then
+    return false
+  end
+  for _, pattern in ipairs(implementation_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      return false
+    end
+  end
+  return true
+end
+
+local function commit_subject_title(M, current)
+  if type(current) ~= "table" then
+    return nil
+  end
+  local title = tostring(current.title or "")
+    :gsub("%c", " ")
+    :gsub("%s+", " ")
+    :gsub("^%s+", "")
+    :gsub("%s+$", "")
+  if title == "" then
+    return nil
+  end
+  title = M._neutralize_fkst_markers(title)
+  return title
+end
+
+local function bounded_commit_subject(M, prefix, issue_number, current)
+  local subject = tostring(prefix) .. " #" .. tostring(issue_number)
+  local title = commit_subject_title(M, current)
+  if title ~= nil then
+    local title_prefix = subject .. ": "
+    local room = 200 - #title_prefix
+    if room > 0 then
+      if #title > room then
+        title = M.truncate_utf8(title, room)
+      end
+      if title ~= "" then
+        subject = title_prefix .. title
+      end
+    end
+  end
+  return subject
+end
+
 local function board_digest_issue_list_cmd(M, repo)
   return "gh issue list"
     .. " --repo " .. M._shell_single_quote(repo)
@@ -481,6 +582,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
+    .. "\n" .. M.short_review_observation_boundary_clause()
     .. "\nRead the local context bundle before judging."
   local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
   local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
@@ -488,7 +590,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     body = body
       .. "\nPrior review ledger:\n"
       .. ledger
-      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix."
+      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix. For rollup-red or failing-check re-review, scope the question to the diff change and the named failing check, not to restoration of gate state."
   end
   if #body > M._max_body_len then
     error("github-devloop: PR review proposal exceeds bounded body")
@@ -521,6 +623,14 @@ end
 
 function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch)
   return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch), repo, tick)
+end
+
+function M.implement_commit_subject(issue_number, current)
+  return bounded_commit_subject(M, "auto-implement", issue_number, current)
+end
+
+function M.fix_commit_subject(issue_number, current)
+  return bounded_commit_subject(M, "auto-fix", issue_number, current)
 end
 end
 
