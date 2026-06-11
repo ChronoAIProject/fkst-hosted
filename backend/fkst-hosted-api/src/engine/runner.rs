@@ -116,15 +116,20 @@ impl RunningSession {
     /// Idempotent: an already-dead/absent group (`ESRCH`, out-of-band kill,
     /// double stop) is a no-op success; the temp-dir guards are taken
     /// exactly once. A pre-existing terminal `Failed` observation is kept
-    /// (stop does not rewrite history); otherwise the cached status becomes
-    /// `Stopped`.
+    /// (stop does not rewrite history). When the reap observed an exit that
+    /// PREDATES its own signalling (a crash racing this stop), that exit is
+    /// classified — a crash must surface as the crash, never as `Stopped`;
+    /// an exit caused by our SIGTERM/SIGKILL is the normal `Stopped`.
     pub async fn stop(&mut self, grace: Duration) -> Result<(), RunnerError> {
         tracing::info!(pid = self.pid, "session.stopping");
         let result = reap_with_grace(&mut self.child, self.pid, grace).await;
         match result {
-            Ok(_escalated) => {
+            Ok(outcome) => {
                 if self.terminal_status.is_none() {
-                    self.terminal_status = Some(LiveStatus::Stopped);
+                    self.terminal_status = Some(match outcome.pre_signal_exit {
+                        Some(exit) => classify_exit(exit),
+                        None => LiveStatus::Stopped,
+                    });
                 }
                 self.cleanup();
                 Ok(())
@@ -899,6 +904,39 @@ esac
                 code: None,
                 signal: Some(9)
             }
+        );
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn stop_racing_a_crash_surfaces_the_crash_not_stopped() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        // Goes ready, then crashes with code 7 — BEFORE stop() is called and
+        // WITHOUT any status() poll observing it first.
+        let bin = engine_stub(
+            stub_dir.path(),
+            r#"    echo "event runtime running handles=3" >&2
+    echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+    sleep 2
+    exit 7"#,
+        );
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let mut session = runner.start(&minimal_package()).await.expect("start");
+        // Let the stub crash; deliberately NO status() call (which would
+        // cache the terminal state) — stop() itself must classify the exit
+        // it finds already waiting.
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+
+        runner.stop(&mut session).await.expect("stop");
+        assert_eq!(
+            runner.status(&mut session),
+            LiveStatus::Failed {
+                code: Some(7),
+                signal: None
+            },
+            "a crash racing stop() must surface as the crash, not Stopped"
         );
         assert_eq!(fkst_entries(temp_root.path()), 0);
     }

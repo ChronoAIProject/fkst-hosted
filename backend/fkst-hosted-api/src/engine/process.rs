@@ -457,25 +457,43 @@ where
     collected
 }
 
+/// Result of [`reap_with_grace`].
+#[derive(Debug, Clone, Copy)]
+pub struct ReapOutcome {
+    /// True when escalation to SIGKILL was needed.
+    pub escalated: bool,
+    /// Exit status observed BEFORE any stop signal was sent: the child was
+    /// already terminal when the reap began (e.g. a crash racing `stop()`),
+    /// so the caller must CLASSIFY this exit instead of assuming a clean
+    /// stop. `None` when the exit was caused by the reap's own signalling.
+    pub pre_signal_exit: Option<std::process::ExitStatus>,
+}
+
 /// Stop and reap a process group: SIGTERM the group, poll `try_wait` every
 /// 100 ms up to `grace`, escalate to SIGKILL, bounded re-poll, and ALWAYS
 /// reap the held child (no zombies).
 ///
-/// Returns `Ok(escalated)` once the direct child is reaped (`escalated` is
-/// true when SIGKILL was needed). An already-dead group (`ESRCH`) is a no-op
-/// success. `Err(Signal)` only when even SIGKILL leaves the child unreaped.
+/// Returns `Ok(ReapOutcome)` once the direct child is reaped. An
+/// already-dead group (`ESRCH`) is a no-op success carrying the observed
+/// exit as `pre_signal_exit`. `Err(Signal)` only when even SIGKILL leaves
+/// the child unreaped.
 pub async fn reap_with_grace(
     child: &mut Child,
     pgid: i32,
     grace: Duration,
-) -> Result<bool, RunnerError> {
+) -> Result<ReapOutcome, RunnerError> {
     let started = Instant::now();
 
     // Already exited (self-exit, out-of-band kill, or a previous reap —
-    // tokio's Child caches the exit status): no signal needed at all.
+    // tokio's Child caches the exit status): no signal needed at all. The
+    // observed exit predates our signalling, so it is surfaced for the
+    // caller to classify (a crash racing stop must stay a crash).
     if let Some(status) = child.try_wait().map_err(RunnerError::Io)? {
         tracing::debug!(pgid, exit = ?status, "session.stop: child already exited");
-        return Ok(false);
+        return Ok(ReapOutcome {
+            escalated: false,
+            pre_signal_exit: Some(status),
+        });
     }
 
     match signal_group(pgid, Signal::SIGTERM) {
@@ -498,7 +516,10 @@ pub async fn reap_with_grace(
                 escalated_to_sigkill = false,
                 "session.stop"
             );
-            return Ok(false);
+            return Ok(ReapOutcome {
+                escalated: false,
+                pre_signal_exit: None,
+            });
         }
         if started.elapsed() >= grace {
             break;
@@ -520,7 +541,10 @@ pub async fn reap_with_grace(
                 escalated_to_sigkill = true,
                 "session.stop"
             );
-            return Ok(true);
+            return Ok(ReapOutcome {
+                escalated: true,
+                pre_signal_exit: None,
+            });
         }
         tokio::time::sleep(REAP_POLL_INTERVAL).await;
     }
@@ -713,10 +737,14 @@ sleep 30"#,
             "FKST_PACKAGE_ROOTS must be removed from the child env"
         );
 
-        let escalated = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+        let outcome = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
             .await
             .expect("reap");
-        assert!(!escalated, "sh dies on SIGTERM without escalation");
+        assert!(!outcome.escalated, "sh dies on SIGTERM without escalation");
+        assert!(
+            outcome.pre_signal_exit.is_none(),
+            "exit was caused by the reap's own SIGTERM"
+        );
         assert!(!is_pid_alive(spawned.pid));
     }
 
@@ -843,11 +871,10 @@ while true; do sleep 1; done"#,
             "stub must confirm its trap before the test signals"
         );
 
-        let escalated =
-            reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_millis(300))
-                .await
-                .expect("reap must escalate, not fail");
-        assert!(escalated, "TERM-ignoring child requires SIGKILL");
+        let outcome = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_millis(300))
+            .await
+            .expect("reap must escalate, not fail");
+        assert!(outcome.escalated, "TERM-ignoring child requires SIGKILL");
         assert!(!is_pid_alive(spawned.pid));
     }
 
@@ -863,16 +890,22 @@ while true; do sleep 1; done"#,
         // try_wait yet), which on Darwin makes its group EPERM-unsignalable.
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        let escalated = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+        let outcome = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
             .await
             .expect("already-dead group is a no-op success");
-        assert!(!escalated);
+        assert!(!outcome.escalated);
 
-        // Second reap on the already-reaped child is still Ok (idempotent).
+        // Second reap on the already-reaped child is still Ok (idempotent),
+        // and the cached exit — which predates this reap's (non-)signalling —
+        // is surfaced deterministically for the caller to classify.
         let again = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(1))
             .await
             .expect("double reap must stay Ok");
-        assert!(!again);
+        assert!(!again.escalated);
+        assert!(
+            again.pre_signal_exit.is_some(),
+            "an exit observed before signalling must be surfaced"
+        );
     }
 
     // ---- run_conformance -------------------------------------------------------------
