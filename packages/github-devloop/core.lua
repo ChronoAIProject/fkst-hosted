@@ -19,6 +19,7 @@ require("core.dependencies").install(M)
 require("core.validators").install(M)
 require("core.decompose").install(M)
 require("core.observability").install(M)
+require("core.ensure_repo").install(M)
 require("core.context_bundle").install(M)
 
 return M

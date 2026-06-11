@@ -136,7 +136,23 @@ function M.parse_dashboard_issue_list(stdout)
         title = tostring(issue.title or ""),
         author_login = author_login,
         body = tostring(issue.body or ""),
+        labels = issue.labels,
         updated_at = issue.updated_at or issue.updatedAt,
+      })
+    end
+  end)
+  return items
+end
+
+function M.parse_repo_labels(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  each_paginated_item(decoded, function(label)
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(items, {
+        name = tostring(label.name),
+        color = label.color and tostring(label.color) or nil,
+        description = label.description and tostring(label.description) or nil,
       })
     end
   end)
