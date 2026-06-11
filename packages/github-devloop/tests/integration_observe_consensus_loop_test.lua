@@ -175,8 +175,9 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_does_not_reraise_fixing_after_pr_handoff = function()
+  test_observe_issue_reraises_fixing_after_restart = function()
     local event = fixing()
+    local impl_version = core._strip_latest_fix_version_suffix(event.version)
     local reject_comment = core.build_review_result_comment_request(
       "owner/repo",
       "42",
@@ -193,13 +194,23 @@ return {
       event.source_ref
     ).body
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+    })
+    mock_pr_origin({
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       reject_comment,
     })
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.is_true(#result.raises >= 1)
+    local fix_raise = find_raise(result.raises, "devloop_fixing").payload
+    t.eq(fix_raise.schema, "github-devloop.fixing.v1")
+    t.eq(fix_raise.proposal_id, event.proposal_id)
+    t.eq(fix_raise.version, event.version)
+    t.eq(fix_raise.review_dedup_key, event.review_dedup_key)
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
@@ -210,7 +221,7 @@ return {
       "owner/repo",
       "42",
       event.proposal_id,
-      event.version,
+      core._strip_latest_fix_version_suffix(event.version),
       {
         proposal_id = event.review_proposal_id,
         decision = "reject",
@@ -222,7 +233,13 @@ return {
       event.source_ref
     ).body
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", core._strip_latest_fix_version_suffix(event.version), "dev"),
       core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+      core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(event.version)),
+    })
+    mock_pr_origin({
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", core._strip_latest_fix_version_suffix(event.version), "dev"),
       reject_comment,
       core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(event.version)),
     })
@@ -234,17 +251,73 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_skips_fixing_self_heal_without_fix_fact = function()
+  test_observe_issue_renormalizes_fixing_without_parseable_feedback_to_reviewing = function()
     local event = fixing()
+    local impl_version = core._strip_latest_fix_version_suffix(event.version)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker(event.proposal_id, "fixing", event.version),
+    })
+    mock_pr_origin({
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "fixing", event.version),
     })
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-no-fact"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 3)
+    local reviewing_raise = find_raise(result.raises, "devloop_reviewing").payload
+    t.eq(reviewing_raise.schema, "github-devloop.reviewing.v1")
+    t.eq(reviewing_raise.version, core.next_fix_version(event.version))
+    t.eq(reviewing_raise.pr_number, event.pr_number)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(label_raise.add_labels[1], "fkst-dev:reviewing")
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
+  end,
+
+  test_observe_issue_reraises_review_meta_after_restart = function()
+    local event = review_meta_event()
+    local impl_version = reviewing().version
+    local review_unresolved_event = review_unresolved({
+      dedup_key = event.review_dedup_key,
+      narrowed_question = "Review needs meta resolution",
+      angle_digests = {
+        { angle = "minimal", verdict = "comment", digest = "no fix produced" },
+      },
+    })
+    local marker = core.review_converge_round_marker(
+      event.review_proposal_id,
+      event.proposal_id,
+      event.version,
+      "def456",
+      core.source_ref_digest(event.source_ref),
+      event.n - 1,
+      event.review_dedup_key,
+      review_unresolved_event.narrowed_question,
+      review_unresolved_event.angle_digests
+    )
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:review-meta" }, "OPEN", {
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+      marker,
+    })
+    mock_pr_origin({
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+      marker,
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-self-heal"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local meta_raise = find_raise(result.raises, "devloop_review_meta").payload
+    t.eq(meta_raise.schema, "github-devloop.review-meta.v1")
+    t.eq(meta_raise.proposal_id, event.proposal_id)
+    t.eq(meta_raise.review_proposal_id, event.review_proposal_id)
+    t.eq(meta_raise.review_dedup_key, event.review_dedup_key)
+    t.eq(meta_raise.version, event.version)
+    t.eq(meta_raise.pr_number, event.pr_number)
   end,
 
   test_observe_uses_current_github_state_not_payload_state = function()
