@@ -9,6 +9,8 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
 use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost, SelfOnlyHealth};
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::journal::store::MongoProgressStore;
+use fkst_hosted_api::journal::JournalConfig;
 use fkst_hosted_api::leases::LeaseStore;
 use fkst_hosted_api::packages::PackageRepository;
 use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
@@ -73,6 +75,16 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     tracing::info!("indexes ensured");
+
+    // 4a. Ensure the journal-collection indexes (idempotent; fail-closed on
+    //     error) — `session_progress` + `run_journals`, incl. the unique
+    //     partial `sp_run_idem_uniq` idempotency index.
+    if let Err(error) = fkst_hosted_api::journal::index::ensure_journal_indexes(&db.database).await
+    {
+        tracing::error!(error = %error, "failed to ensure journal indexes");
+        return ExitCode::FAILURE;
+    }
+    tracing::info!("journal indexes ensured");
 
     // 4b. Ensure the packages-collection indexes via the domain repository's
     //     own startup hook (idempotent; fail-closed on error). The same
@@ -144,6 +156,13 @@ async fn main() -> ExitCode {
         packages.clone(),
         engine_config,
         distributor.clone(),
+    );
+    // Session-progress journaling (issue #25): Mongo floor always on;
+    // GitHub sync per the FKST_JOURNAL_* config (absent repo/token degrades
+    // to Mongo-only with a warn from the journaler).
+    sessions.enable_journaling(
+        JournalConfig::from_config(&config),
+        MongoProgressStore::new(&db.database),
     );
     match distributor.fail_orphans_at_boot().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),

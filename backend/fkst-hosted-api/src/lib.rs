@@ -9,6 +9,7 @@ pub mod db;
 pub mod distribution;
 pub mod engine;
 pub mod error;
+pub mod journal;
 pub mod leases;
 pub mod models;
 pub mod packages;
