@@ -11,9 +11,16 @@
 //! 3. Linux with Docker: extract the binary from the engine image
 //!    (`FKST_ENGINE_IMAGE`, default `fkst-hosted-api:engine-dev`) into a
 //!    cached temp path via `docker create` + `docker cp`.
-//! 4. Otherwise skip. NOTE: the docker-extracted binary is a LINUX binary —
-//!    on macOS it cannot run on the host, so without `FKST_ENGINE_BIN` the
-//!    suite self-skips there; CI (ubuntu + Docker) exercises path 3.
+//! 4. Otherwise skip. The docker-extracted binary is a LINUX binary — on
+//!    macOS it cannot run on the host, so without `FKST_ENGINE_BIN` the
+//!    suite self-skips there.
+//!
+//! NOTE: no CI job currently exercises this suite against a real engine —
+//! rust-ci's runner has no engine image, and docker-build.yml never runs
+//! `cargo test`. The suite engages only when `FKST_ENGINE_BIN` is set, a
+//! runnable `/usr/local/bin/fkst-framework` is present, or on Linux with
+//! Docker and the engine image available (override via `FKST_ENGINE_IMAGE`,
+//! default `fkst-hosted-api:engine-dev`).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
