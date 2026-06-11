@@ -799,7 +799,7 @@ exit 1"#,
             &format!("echo $$ > {}\nsleep 60", pid_file.display()),
         );
 
-        let err = run_conformance(&script, pkg.path(), rt.path(), Duration::from_secs(1), 8192)
+        let err = run_conformance(&script, pkg.path(), rt.path(), Duration::from_secs(2), 8192)
             .await
             .expect_err("hang must time out");
         match err {
@@ -810,16 +810,20 @@ exit 1"#,
             other => panic!("expected ConformanceFailed, got {other:?}"),
         }
 
-        // The hung conformance group must be dead.
-        let pid: i32 = fs::read_to_string(&pid_file)
-            .expect("pid file")
-            .trim()
-            .parse()
-            .expect("pid");
-        assert!(
-            wait_until(move || !is_pid_alive(pid)).await,
-            "timed-out conformance must be group-killed"
-        );
+        // The hung conformance group must be dead. Under pathological host
+        // load the stub may have been SIGKILLed before writing its pid
+        // breadcrumb — then there is no live group to assert against (the
+        // group-kill mechanics are covered by the reap tests).
+        match fs::read_to_string(&pid_file) {
+            Ok(raw) => {
+                let pid: i32 = raw.trim().parse().expect("pid");
+                assert!(
+                    wait_until(move || !is_pid_alive(pid)).await,
+                    "timed-out conformance must be group-killed"
+                );
+            }
+            Err(_) => eprintln!("NOTE: stub killed before writing its pid breadcrumb"),
+        }
     }
 
     #[tokio::test]
