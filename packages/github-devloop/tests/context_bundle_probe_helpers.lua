@@ -37,6 +37,15 @@ local function exec_with_env(root, fixtures)
     if rendered:find("gh pr diff", 1, true) ~= nil then
       return { stdout = state.diff_output, stderr = "", exit_code = 0 }
     end
+    if rendered:find("gh issue list", 1, true) ~= nil then
+      if rendered:find("--state closed", 1, true) ~= nil then
+        return { stdout = state.closed_issue_list_output or "[]\n", stderr = "", exit_code = 0 }
+      end
+      return { stdout = state.open_issue_list_output or "[]\n", stderr = "", exit_code = 0 }
+    end
+    if rendered:find("gh pr list", 1, true) ~= nil then
+      return { stdout = state.open_pr_list_output or "[]\n", stderr = "", exit_code = 0 }
+    end
     local with_env = "FKST_RUNTIME_ROOT=" .. shell_single_quote(root) .. " " .. rendered
     local handle = io.popen(with_env .. " 2>&1")
     local stdout = handle:read("*a")
