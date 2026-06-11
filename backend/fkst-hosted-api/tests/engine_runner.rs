@@ -5,15 +5,9 @@
 //! never silently passes without the real engine NOR fails on hosts that
 //! cannot run it.
 //!
-//! Resolution order:
-//! 1. `FKST_ENGINE_BIN` (path to a runnable `fkst-framework`).
-//! 2. `/usr/local/bin/fkst-framework` when executable (the engine image).
-//! 3. Linux with Docker: extract the binary from the engine image
-//!    (`FKST_ENGINE_IMAGE`, default `fkst-hosted-api:engine-dev`) into a
-//!    cached temp path via `docker create` + `docker cp`.
-//! 4. Otherwise skip. The docker-extracted binary is a LINUX binary — on
-//!    macOS it cannot run on the host, so without `FKST_ENGINE_BIN` the
-//!    suite self-skips there.
+//! Resolution order: see `tests/support/mod.rs` (shared with the e2e suite) —
+//! `FKST_ENGINE_BIN`, then `/usr/local/bin/fkst-framework`, then (Linux only)
+//! Docker extraction from `FKST_ENGINE_IMAGE`, else skip.
 //!
 //! NOTE: no CI job currently exercises this suite against a real engine —
 //! rust-ci's runner has no engine image, and docker-build.yml never runs
@@ -22,8 +16,9 @@
 //! Docker and the engine image available (override via `FKST_ENGINE_IMAGE`,
 //! default `fkst-hosted-api:engine-dev`).
 
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+mod support;
+
+use std::path::Path;
 use std::time::Duration;
 
 use fkst_hosted_api::engine::process::signal_group;
@@ -33,133 +28,7 @@ use fkst_hosted_api::engine::{
 use fkst_hosted_api::packages::PackageFile;
 use nix::sys::signal::Signal;
 use nix::unistd::Pid;
-
-/// Default binary location inside the engine image / engine-based pods.
-const IMAGE_ENGINE_BIN: &str = "/usr/local/bin/fkst-framework";
-
-/// Default engine image for the Docker extraction path (overridable via
-/// `FKST_ENGINE_IMAGE`). Only the Linux extraction path consumes it.
-#[cfg(target_os = "linux")]
-const DEFAULT_ENGINE_IMAGE: &str = "fkst-hosted-api:engine-dev";
-
-fn engine_bin() -> Option<PathBuf> {
-    static ENGINE: OnceLock<Option<PathBuf>> = OnceLock::new();
-    ENGINE.get_or_init(resolve_engine).clone()
-}
-
-fn resolve_engine() -> Option<PathBuf> {
-    if let Ok(custom) = std::env::var("FKST_ENGINE_BIN") {
-        let path = PathBuf::from(custom);
-        if is_executable(&path) {
-            return Some(path);
-        }
-        eprintln!(
-            "FKST_ENGINE_BIN is set but not an executable file: {}",
-            path.display()
-        );
-        return None;
-    }
-    let image_bin = Path::new(IMAGE_ENGINE_BIN);
-    if is_executable(image_bin) {
-        return Some(image_bin.to_path_buf());
-    }
-    extract_from_docker()
-}
-
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-/// Linux-only: pull the engine binary out of the Docker image into a cached
-/// temp path. The extracted binary is a Linux ELF, so this path is gated to
-/// Linux hosts (macOS cannot exec it; see the module docs).
-#[cfg(target_os = "linux")]
-fn extract_from_docker() -> Option<PathBuf> {
-    use std::process::Command;
-
-    let image =
-        std::env::var("FKST_ENGINE_IMAGE").unwrap_or_else(|_| DEFAULT_ENGINE_IMAGE.to_string());
-    let docker_ok = Command::new("docker")
-        .arg("version")
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false);
-    if !docker_ok {
-        eprintln!("docker not available; cannot extract the engine binary");
-        return None;
-    }
-
-    let cache_dir = std::env::temp_dir().join("fkst-engine-it");
-    let target = cache_dir.join("fkst-framework");
-    if is_executable(&target) {
-        return Some(target); // cached from a previous run
-    }
-    std::fs::create_dir_all(&cache_dir).ok()?;
-
-    let create = Command::new("docker")
-        .args(["create", &image])
-        .output()
-        .ok()?;
-    if !create.status.success() {
-        eprintln!(
-            "docker create {image} failed: {}",
-            String::from_utf8_lossy(&create.stderr)
-        );
-        return None;
-    }
-    let cid = String::from_utf8_lossy(&create.stdout).trim().to_string();
-
-    let cp = Command::new("docker")
-        .args([
-            "cp",
-            &format!("{cid}:{IMAGE_ENGINE_BIN}"),
-            &target.to_string_lossy(),
-        ])
-        .output();
-    let _ = Command::new("docker").args(["rm", "-f", &cid]).output();
-
-    match cp {
-        Ok(out) if out.status.success() && is_executable(&target) => Some(target),
-        Ok(out) => {
-            eprintln!(
-                "docker cp of the engine binary failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            None
-        }
-        Err(err) => {
-            eprintln!("docker cp of the engine binary failed: {err}");
-            None
-        }
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn extract_from_docker() -> Option<PathBuf> {
-    eprintln!(
-        "non-Linux host: the docker-extracted engine binary cannot run here; \
-         set FKST_ENGINE_BIN to a runnable fkst-framework to enable this suite"
-    );
-    None
-}
-
-macro_rules! require_engine {
-    () => {
-        match engine_bin() {
-            Some(bin) => bin,
-            None => {
-                eprintln!(
-                    "SKIP: no real fkst-framework available \
-                     (FKST_ENGINE_BIN / {IMAGE_ENGINE_BIN} / Linux+Docker image)"
-                );
-                return;
-            }
-        }
-    };
-}
+use support::require_engine;
 
 fn config(bin: &Path, temp_root: &Path) -> EngineConfig {
     EngineConfig {

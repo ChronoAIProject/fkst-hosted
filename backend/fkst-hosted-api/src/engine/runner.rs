@@ -26,7 +26,7 @@ use crate::engine::logs::tail_child_logs;
 use crate::engine::materialize::{materialize_package, write_fkst_env, PreparedPackage};
 use crate::engine::process::{
     is_panicked, is_pid_alive, is_ready, kill_group_quiet, reap_with_grace, run_conformance,
-    spawn_supervise, ChildGroupGuard, SpawnedChild, StderrBuffer,
+    spawn_supervise, ChildGroupGuard, OutputBuffer, SpawnedChild,
 };
 
 /// Poll interval of the post-spawn ready-wait loop.
@@ -62,8 +62,11 @@ pub struct RunningSession {
     child: Child,
     package_guard: Option<TempDir>,
     runtime_guard: Option<TempDir>,
-    stderr: StderrBuffer,
-    /// Line-framed stdout stream (the journaling layer's `RAISED:` source),
+    /// Merged stdout+stderr ring buffer fed by the spawn drains (issue #50):
+    /// ready markers come from stdout, panics/exit reasons from stderr.
+    output: OutputBuffer,
+    /// Line-framed stdout stream (the journaling layer's `RAISED:` source,
+    /// issue #25), fanned out from the same stdout drain that feeds `output`;
     /// taken at most once via [`Self::take_stdout`].
     stdout_lines: Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
     /// First terminal observation, cached so repeated `status()` calls are
@@ -106,11 +109,11 @@ impl RunningSession {
         tail_child_logs(&self.runtime_dir, self.log_tail_lines)
     }
 
-    /// Snapshot of the engine's recent stderr (the bounded ring buffer the
-    /// drain task feeds) — the place to look when a ready session later
-    /// turns `Failed`.
+    /// Snapshot of the engine's recent output (the bounded ring buffer the
+    /// stdout+stderr drain tasks feed) — the place to look when a ready
+    /// session later turns `Failed`.
     pub fn engine_stderr(&self) -> String {
-        self.stderr.snapshot()
+        self.output.snapshot()
     }
 
     /// Take ownership of the engine's line-framed stdout stream (at most
@@ -293,7 +296,13 @@ impl SessionRunner {
         let SpawnedChild {
             child,
             pid,
-            stderr,
+            output,
+            // The drain tasks run for the child's lifetime; reaping the group
+            // EOFs both pipes, ending them. They are not aborted here on the
+            // success path because the merged buffer must stay readable via
+            // engine_stderr() for the whole session, and the stdout fan-out
+            // must keep feeding the journal stream.
+            drains: _drains,
             stdout_lines,
         } = spawned;
         let mut guard = ChildGroupGuard::new(child, pid);
@@ -308,7 +317,7 @@ impl SessionRunner {
                     return Err(fail_startup(
                         guard.defuse(),
                         pid,
-                        &stderr,
+                        &output,
                         &format!("supervise wait failed: {err}"),
                         self.config.error_capture_bytes,
                     )
@@ -320,28 +329,28 @@ impl SessionRunner {
                 // markers and then exited within one poll tick is a
                 // successful start whose exit `status()` will report — not
                 // a StartupFailed. Give the drain task one tick to flush
-                // the remaining buffered stderr to EOF before judging.
+                // the remaining buffered output to EOF before judging.
                 tokio::time::sleep(READY_POLL_INTERVAL).await;
-                let snapshot = stderr.snapshot();
+                let snapshot = output.snapshot();
                 if is_ready(&snapshot) && !is_panicked(&snapshot) {
                     break;
                 }
                 return Err(fail_startup(
                     guard.defuse(),
                     pid,
-                    &stderr,
+                    &output,
                     &format!("supervise exited before ready ({exit})"),
                     self.config.error_capture_bytes,
                 )
                 .await);
             }
 
-            let snapshot = stderr.snapshot();
+            let snapshot = output.snapshot();
             if is_panicked(&snapshot) {
                 return Err(fail_startup(
                     guard.defuse(),
                     pid,
-                    &stderr,
+                    &output,
                     "supervise panicked during startup",
                     self.config.error_capture_bytes,
                 )
@@ -354,7 +363,7 @@ impl SessionRunner {
                 return Err(fail_startup(
                     guard.defuse(),
                     pid,
-                    &stderr,
+                    &output,
                     &format!(
                         "supervise not ready after {}s",
                         self.config.ready_timeout_secs
@@ -381,7 +390,7 @@ impl SessionRunner {
             child: guard.defuse(),
             package_guard: Some(package_guard),
             runtime_guard: Some(runtime_guard),
-            stderr,
+            output,
             stdout_lines: Some(stdout_lines),
             terminal_status: None,
             log_tail_lines: self.config.log_tail_lines,
@@ -394,14 +403,14 @@ impl SessionRunner {
 async fn fail_startup(
     mut child: Child,
     pid: i32,
-    stderr: &StderrBuffer,
+    output: &OutputBuffer,
     reason: &str,
     error_capture_bytes: usize,
 ) -> RunnerError {
     kill_group_quiet(pid);
     let _ = child.wait().await;
 
-    let tail = stderr_tail(&stderr.snapshot(), error_capture_bytes);
+    let tail = stderr_tail(&output.snapshot(), error_capture_bytes);
     tracing::error!(pid, reason, stderr = %tail, "session.start: startup failed");
     RunnerError::StartupFailed {
         stderr: format!("{reason}\n{tail}"),
@@ -480,6 +489,13 @@ esac
     echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
     sleep 30"#;
 
+    /// Issue #50: the REAL `supervise` emits its readiness markers on STDOUT
+    /// (not stderr). This is the wiring the runner must handle for production
+    /// to work; the stderr variant above is kept only for back-compat.
+    const READY_SUPERVISE_STDOUT: &str = r#"    echo "event runtime running handles=3"
+    echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]"
+    sleep 30"#;
+
     fn config(bin: &Path, temp_root: &Path) -> EngineConfig {
         EngineConfig {
             framework_bin: bin.to_path_buf(),
@@ -523,8 +539,11 @@ esac
             .count()
     }
 
+    // ~20 s budget: real-engine-stub tests poll a spawned `sh` child's drained
+    // output, which can lag well past a few seconds under a saturated
+    // full-workspace run (many parallel spawns + containers).
     async fn wait_until(mut predicate: impl FnMut() -> bool) -> bool {
-        for _ in 0..160 {
+        for _ in 0..800 {
             if predicate() {
                 return true;
             }
@@ -581,6 +600,73 @@ esac
         assert!(!session.package_dir.exists());
         assert!(!session.runtime_dir.exists());
         assert_eq!(fkst_entries(temp_root.path()), 0, "no leaked fkst-* dirs");
+    }
+
+    /// Issue #50 regression: the readiness markers are written to STDOUT by
+    /// the real engine. With the original stderr-only piping the markers were
+    /// discarded and `start()` always timed out into `StartupFailed`. This
+    /// test FAILS before the stdout-drain fix and PASSES after: `start()` must
+    /// reach a live `RunningSession`, and `stop()` must reap it cleanly.
+    #[tokio::test]
+    async fn start_reaches_ready_when_markers_are_on_stdout() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        let bin = engine_stub(stub_dir.path(), READY_SUPERVISE_STDOUT);
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let mut session = runner
+            .start(&minimal_package())
+            .await
+            .expect("start must reach ready from STDOUT markers");
+
+        // A genuinely running session: alive, leading its own group.
+        assert_eq!(runner.status(&mut session), LiveStatus::Running);
+        assert!(SessionRunner::is_pid_alive(session.pid));
+        let pgid = nix::unistd::getpgid(Some(Pid::from_raw(session.pid))).expect("getpgid");
+        assert_eq!(pgid.as_raw(), session.pid, "child must lead its own group");
+
+        // The merged buffer surfaces the STDOUT-emitted markers.
+        let engine_output = session.engine_stderr();
+        assert!(engine_output.contains("event runtime running handles="));
+        assert!(engine_output.contains("consumer started dept=hello"));
+
+        let pid = session.pid;
+        runner.stop(&mut session).await.expect("stop reaps cleanly");
+        assert_eq!(runner.status(&mut session), LiveStatus::Stopped);
+        assert_eq!(signal_group(pid, Signal::SIGTERM), Err(nix::Error::ESRCH));
+        assert_eq!(fkst_entries(temp_root.path()), 0, "no leaked fkst-* dirs");
+    }
+
+    /// A3 half-alive guard at the runner level across the stream split:
+    /// `event runtime running` on STDOUT with NO `consumer started` anywhere
+    /// must NOT reach ready — `start()` must time out into `StartupFailed`,
+    /// not spuriously succeed now that stdout is drained.
+    #[tokio::test]
+    async fn start_times_out_when_consumer_marker_is_absent_across_streams() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        // runtime-running on stdout; a decoy on stderr; consumer line nowhere.
+        let bin = engine_stub(
+            stub_dir.path(),
+            r#"    echo "event runtime running handles=3"
+    echo "WARN consumer thread exited" >&2
+    sleep 30"#,
+        );
+        let mut cfg = config(&bin, temp_root.path());
+        cfg.ready_timeout_secs = 1;
+        let runner = SessionRunner::new(cfg);
+
+        let err = runner
+            .start(&minimal_package())
+            .await
+            .expect_err("half-alive must not reach ready");
+        match err {
+            RunnerError::StartupFailed { stderr } => {
+                assert!(stderr.contains("not ready after"), "{stderr}");
+            }
+            other => panic!("expected StartupFailed, got {other:?}"),
+        }
+        assert_eq!(fkst_entries(temp_root.path()), 0, "dirs cleaned on timeout");
     }
 
     #[tokio::test]
