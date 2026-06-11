@@ -3,24 +3,72 @@ local S = {}
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
 
-function M.intake_class_issue_title(current, issue_number)
+function M.intake_class_identity(reason, current, issue_number)
+  local seen = {}
+  local siblings = {}
+  for number in tostring(reason or ""):gmatch("#(%d+)") do
+    local normalized = tostring(tonumber(number))
+    if normalized ~= "nil"
+      and normalized ~= tostring(issue_number or "")
+      and seen[normalized] == nil then
+      seen[normalized] = true
+      table.insert(siblings, tonumber(normalized))
+    end
+  end
+  table.sort(siblings)
+  if #siblings >= 2 then
+    local parts = {}
+    for _, number in ipairs(siblings) do
+      table.insert(parts, tostring(number))
+    end
+    return "siblings:" .. table.concat(parts, ",")
+  end
+  local title_key = tostring(current and current.title or ("Issue #" .. tostring(issue_number or "unknown")))
+  title_key = title_key:lower():gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+  if title_key == "" then
+    title_key = "issue-" .. tostring(issue_number or "unknown")
+  end
+  return "title:" .. title_key
+end
+
+local function class_identity_label(class_key)
+  local siblings = tostring(class_key or ""):match("^siblings:(.+)$")
+  if siblings ~= nil and siblings ~= "" then
+    return "recurring class #" .. siblings:gsub(",", " #")
+  end
+  local title = tostring(class_key or ""):match("^title:(.+)$")
+  return title or tostring(class_key or "unknown")
+end
+
+function M.intake_class_carrier_marker(class_key)
+  if class_key == nil or tostring(class_key) == "" then
+    error("github-devloop: invalid intake class key")
+  end
+  return '<!-- fkst:github-devloop:intake-class-carrier:v1 class_key="' .. tostring(class_key) .. '" -->'
+end
+
+function M.intake_class_issue_title(current, issue_number, class_key)
   local source_title = tostring(current and current.title or ("Issue #" .. tostring(issue_number or "unknown")))
-  local title = "Class fix needed: " .. source_title
+  local title = "Class fix needed: " .. class_identity_label(class_key or ("title:" .. source_title))
   if #title > M._max_title_len then
     title = M.truncate_utf8(title, M._max_title_len)
   end
   return title
 end
 
-function M.find_open_intake_class_carrier(repo, issue_number, current)
-  local wanted_title = M.intake_class_issue_title(current, issue_number)
+function M.find_open_intake_class_carrier(repo, issue_number, current, class_key)
+  local wanted_marker = M.intake_class_carrier_marker(class_key)
+  local wanted_title = M.intake_class_issue_title(current, issue_number, class_key)
+  local fallback_title = M.intake_class_issue_title(current, issue_number)
   local listed = M.gh_exec({ cmd = M.gh_issue_list_intake_cmd(repo, 100), timeout = 30 })
   if listed.exit_code ~= 0 then
     error("github-devloop: gh issue intake class lookup failed: " .. tostring(listed.stderr))
   end
   for _, issue in ipairs(M.parse_issue_list_intake(listed.stdout)) do
     if tostring(issue.number) ~= tostring(issue_number)
-      and tostring(issue.title or "") == wanted_title then
+      and (tostring(issue.body or ""):find(wanted_marker, 1, true) ~= nil
+        or tostring(issue.title or "") == wanted_title
+        or tostring(issue.title or "") == fallback_title) then
       return issue
     end
   end

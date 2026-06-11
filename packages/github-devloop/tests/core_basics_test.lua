@@ -472,7 +472,7 @@ return {
   test_gh_issue_view_state_command_and_parse = function()
     t.eq(
       core.gh_issue_list_intake_cmd("owner/repo", 50),
-      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,updatedAt,labels"
+      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels"
     )
     t.eq(
       core.gh_pr_list_head_base_cmd("owner/repo", "integration/dev", "dev"),
@@ -480,6 +480,7 @@ return {
     )
     local intake = core.parse_issue_list_intake('[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
     t.eq(intake[1].number, 42)
+    t.eq(intake[1].body, "")
     t.eq(intake[1].updated_at, "2026-06-03T01:02:03Z")
     t.eq(intake[1].labels[1], "bug")
     local mixed = core.parse_issue_list_intake('[[{"number":1,"pull_request":{"url":"https://api.example.test/pulls/1"}}],[{"number":2,"title":"Issue","updated_at":"2026-06-03T01:02:04Z","labels":[]}]]', 1)

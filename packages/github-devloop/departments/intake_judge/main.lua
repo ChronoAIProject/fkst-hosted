@@ -114,8 +114,10 @@ function pipeline(event)
       table.insert(raised, "github-proxy.github_issue_comment_request")
     end
     local class_carrier = nil
+    local class_key = nil
     if parsed.action == "escalate-to-class" then
-      class_carrier = core.find_open_intake_class_carrier(repo, issue_number, current)
+      class_key = core.intake_class_identity(parsed.reason, current, issue_number)
+      class_carrier = core.find_open_intake_class_carrier(repo, issue_number, current, class_key)
       table.insert(raised, "github-proxy.github_issue_comment_request")
       table.insert(raised, "github-proxy.github_issue_label_request")
       if class_carrier == nil then
@@ -146,7 +148,7 @@ function pipeline(event)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", followup_comment)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", folded_label)
       if class_carrier == nil then
-        local create_request = core.build_intake_class_issue_create_request(repo, issue_number, candidate, current, parsed.reason)
+        local create_request = core.build_intake_class_issue_create_request(repo, issue_number, candidate, current, parsed.reason, class_key)
         core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_create_request", create_request)
       end
     end

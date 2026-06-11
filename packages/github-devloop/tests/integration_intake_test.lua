@@ -64,9 +64,10 @@ local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
     table.insert(rendered, string.format(
-      '{"number":%d,"title":"%s","updatedAt":"%s","labels":[%s]}',
+      '{"number":%d,"title":"%s","body":"%s","updatedAt":"%s","labels":[%s]}',
       issue.number,
       json_string(issue.title or "Issue"),
+      json_string(issue.body or ""),
       json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
       labels_json(issue.labels or {})
     ))
@@ -177,7 +178,7 @@ local function mock_intake_codex(stdout, exit_code, stderr)
 end
 
 local function mock_intake_class_lookup(issues)
-  t.mock_command("--state open --limit 100 --json number,title,updatedAt,labels", {
+  t.mock_command("--state open --limit 100 --json number,title,body,updatedAt,labels", {
     stdout = issue_list_json(issues or {}) .. "\n",
     stderr = "",
     exit_code = 0,
@@ -377,6 +378,32 @@ return {
     t.is_true(followup.body:find("Class carrier: #77", 1, true) ~= nil)
     t.is_true(followup.body:find('carrier="77"', 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
+  end,
+
+  test_judge_escalate_to_class_reuses_carrier_by_recurring_class_identity = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Repair widget sync timeout residual",
+      body = "Another instance after #80 and #81; this title differs from the class carrier.",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_intake_class_lookup({
+      {
+        number = 77,
+        title = "Class fix needed: recurring class #80 #81",
+        body = core.intake_class_carrier_marker("siblings:80,81"),
+        labels = {},
+      },
+    })
+
+    local result = run_judge(payload, opts("intake-escalate-class-reuse-by-class-key"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    local followup = find_comment_body(result.raises, "intake class follow-up: folded")
+    t.is_true(followup.body:find("Class carrier: #77", 1, true) ~= nil)
+    t.is_true(followup.body:find('carrier="77"', 1, true) ~= nil)
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 
