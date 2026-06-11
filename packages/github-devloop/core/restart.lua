@@ -105,7 +105,7 @@ function M.latest_complete_converge_round(comments, proposal_id, base_version, s
   return latest
 end
 
-function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version)
+local function review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
   end
@@ -139,6 +139,36 @@ function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version)
     end
   end
   return best
+end
+
+function M.review_meta_replay_fact_from_state(issue_proposal_id, issue_version, pr_number, head_sha, n)
+  local repo = M.parse_proposal_id(issue_proposal_id)
+  if repo == nil
+    or not M._is_positive_pr_number(pr_number)
+    or not M._is_git_sha(head_sha)
+    or not M._is_bounded_string(issue_version, M._max_dedup_len) then
+    return nil
+  end
+  local review_proposal = M.pr_review_proposal_id(repo, pr_number, issue_version, head_sha)
+  local review_dedup = "consensus:" .. review_proposal .. "/review"
+  if not M.is_safe_pr_review_result_ref(review_proposal, review_dedup) then
+    return nil
+  end
+  return {
+    proposal_id = review_proposal,
+    dedup_key = review_dedup,
+    source_ref = M.pr_source_ref(repo, pr_number),
+    pr_number = tonumber(pr_number),
+    n = tonumber(n) or 0,
+  }
+end
+
+function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
+  local converge_fact = review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
+  if converge_fact ~= nil then
+    return converge_fact
+  end
+  return M.review_meta_replay_fact_from_state(issue_proposal_id, issue_version, pr_number, head_sha, 0)
 end
 
 function M.fixing_replay_feedback_fact(comments, issue_proposal_id, issue_version)
