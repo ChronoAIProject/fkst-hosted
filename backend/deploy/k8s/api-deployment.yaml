@@ -30,6 +30,13 @@ spec:
         app.kubernetes.io/component: api
         app.kubernetes.io/part-of: fkst-hosted
     spec:
+      # Docker-link-style service env injection MUST stay off: the Service is
+      # named fkst-hosted, so Kubernetes would inject FKST_HOSTED_PORT =
+      # "tcp://<clusterIP>:80" into the pod — colliding with the API's
+      # FKST_HOSTED_* env prefix (parsed as PORT) and failing the fail-closed
+      # config loader at startup. The API's env comes exclusively from the
+      # image, the ConfigMap, and the Secret.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
