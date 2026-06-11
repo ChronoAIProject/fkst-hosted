@@ -94,15 +94,22 @@ return {
 
     local result = run_implement(event, opts("implement-success"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local open_pr_raise = find_raise(result.raises, "devloop_open_pr")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:implementing")
     t.is_true(#label_raise.payload.remove_labels >= 10)
     t.is_true(comment_raise.payload.body:find("github-devloop implementation started", 1, true) ~= nil)
     local fact = core.implementing_fact({ comment_raise.payload.body }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
+    t.eq(open_pr_raise.payload.schema, "github-devloop.open-pr.v1")
+    t.eq(open_pr_raise.payload.proposal_id, event.proposal_id)
+    t.eq(open_pr_raise.payload.version, event.dedup_key)
+    t.eq(open_pr_raise.payload.branch, branch)
+    t.eq(open_pr_raise.payload.head_sha, "def456")
+    t.eq(open_pr_raise.payload.base_branch, "dev")
 
     local calls = t.command_calls()
     local saw_worktree_prefix = false

@@ -134,7 +134,7 @@ end
 
 local function mock_meta(line, exit_code)
   mock_judgment_dir()
-  t.mock_command("codex exec", {
+  t.mock_command("meta-judge", {
     stdout = tostring(line or "") .. "\n",
     stderr = "",
     exit_code = exit_code or 0,
@@ -289,9 +289,10 @@ return {
     t.is_nil(result.raises[1].payload.decision)
     local calls = codex_calls()
     t.eq(#calls, 4)
-    assert_judgment_worktree(calls[4], "meta-judge")
-    t.is_true(calls[4].stdin:find("Angle outputs:", 1, true) ~= nil)
-    t.is_true(calls[4].stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    local meta_call = judgment_call("meta-judge")
+    assert_judgment_worktree(meta_call, "meta-judge")
+    t.is_true(meta_call.stdin:find("Angle outputs:", 1, true) ~= nil)
+    t.is_true(meta_call.stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
   end,
 
   test_meta_plan_flows_into_next_converge_round = function()

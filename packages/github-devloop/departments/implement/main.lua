@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "devloop_open_pr",
   },
   stall_window = "10m",
 }
@@ -30,9 +31,18 @@ local function raise_implementing(repo, issue_number, ready, worktree, branch, h
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
+    "devloop_open_pr",
   })
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  core.log_raise("implement", ready.proposal_id, "devloop_open_pr", core.build_devloop_open_pr_payload(
+    repo,
+    issue_number,
+    ready,
+    branch,
+    head_sha,
+    base_branch
+  ))
 end
 
 local function implemented_branch_head(base_head, branch)
