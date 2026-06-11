@@ -183,6 +183,24 @@ return {
     local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready" })
     mock_existing_implement_branch("def456")
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+      stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_existing_empty_implement_worktree_reuse(nil, branch, "1")
+    mock_implement_codex()
+    mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("rev-parse --verify refs/heads/", {
+      stdout = "def456\n",
+      stderr = "",
+      exit_code = 0,
+    })
 
     local result = run_implement(event, opts("implement-existing-branch-reuse"))
     t.eq(result.exit_code, 0)
@@ -193,8 +211,9 @@ return {
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
     t.eq(count_calls("git worktree add"), 0)
-    t.eq(count_calls("codex exec"), 0)
-    t.eq(count_calls("status --porcelain"), 0)
+    t.eq(count_calls("codex exec"), 1)
+    t.eq(count_calls("merge --no-edit 'abc123'"), 1)
+    t.eq(count_calls("status --porcelain"), 1)
     t.eq(count_calls("impl-failed"), 0)
   end,
 
@@ -302,7 +321,7 @@ return {
     local event = ready()
     local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready" })
-    local worktree = mock_existing_empty_implement_worktree_reuse(nil, branch)
+    local worktree = mock_existing_empty_implement_worktree_reuse(nil, branch, "1")
     mock_implement_codex(0, "Committed implementation directly.")
     mock_git_status("")
     t.mock_command("rev-list --count", {

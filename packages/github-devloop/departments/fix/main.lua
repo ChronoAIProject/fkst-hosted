@@ -61,6 +61,37 @@ local function branch_worktree(repo, issue_number, version, branch)
   return worktree
 end
 
+local function merge_integration_for_fix(worktree, integration_branch)
+  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", integration_branch), timeout = 30 })
+  if base_result.exit_code ~= 0 then
+    error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
+  end
+  local base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
+  if not core.is_safe_head_sha(base_head) then
+    error("github-devloop: unsafe integration head")
+  end
+  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
+  if merge_result.exit_code ~= 0 then
+    local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+    if unmerged_result.exit_code ~= 0 then
+      error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    end
+    if tostring(unmerged_result.stdout or "") == "" then
+      error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+    end
+    core.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
+      "integration_branch=" .. tostring(integration_branch),
+      "integration_sha=" .. tostring(base_head),
+      "reason=integration merge requires codex conflict resolution",
+    })
+  end
+  return base_head
+end
+
 local function raise_review_meta(repo, issue_number, fix, reason, detail)
   local comment_request = core.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
   local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
@@ -308,6 +339,7 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
+    merge_integration_for_fix(worktree, branches.integration)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "fix",

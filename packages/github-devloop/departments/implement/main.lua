@@ -56,6 +56,24 @@ local function implemented_branch_head(base_head, branch)
   return head_sha
 end
 
+local function merge_integration_for_implementation(worktree, integration_branch, base_head)
+  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
+  if merge_result.exit_code ~= 0 then
+    local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+    if unmerged_result.exit_code ~= 0 then
+      error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    end
+    if tostring(unmerged_result.stdout or "") == "" then
+      error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+    end
+    core.log_line("info", "implement", "merge-target", "MERGE_SKEW", {
+      "integration_branch=" .. tostring(integration_branch),
+      "integration_sha=" .. tostring(base_head),
+      "reason=integration merge requires codex conflict resolution",
+    })
+  end
+end
+
 function pipeline(event)
   local ready = event.payload or {}
   if not core.is_supported_ready(ready) then
@@ -133,18 +151,7 @@ function pipeline(event)
 
     local branch_ref = exec_sync({ cmd = core.git_show_ref_branch_cmd(branch), timeout = 30 })
     local branch_exists = branch_ref.exit_code == 0
-    if branch_exists then
-      local head_sha = implemented_branch_head(base_head, branch)
-      if head_sha ~= nil then
-        core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
-          "branch=" .. tostring(branch),
-          "head_sha=" .. tostring(head_sha),
-          "reason=reusing existing implementation branch",
-        })
-        raise_implementing(repo, issue_number, ready, "(existing deterministic branch)", branch, head_sha, branches.integration, base_head)
-        return
-      end
-    elseif branch_ref.exit_code ~= 1 then
+    if branch_ref.exit_code ~= 0 and branch_ref.exit_code ~= 1 then
       error("github-devloop: git branch ref check failed: " .. tostring(branch_ref.stderr))
     end
 
@@ -178,6 +185,8 @@ function pipeline(event)
         error("github-devloop: git worktree add failed: " .. tostring(worktree_result.stderr))
       end
     end
+
+    merge_integration_for_implementation(worktree, branches.integration, base_head)
 
     core.log_codex_start("implement", ready.proposal_id, "implement")
     local content_fetch = core.context_fetch_from_bundle({

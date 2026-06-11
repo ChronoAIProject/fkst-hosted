@@ -364,6 +364,15 @@ function M.git_remote_branch_head_cmd(remote, branch)
   return "git rev-parse --verify refs/remotes/" .. M._shell_single_quote(remote) .. "/" .. M._shell_single_quote(branch) .. "^{commit}"
 end
 
+function M.git_worktree_merge_no_edit_cmd(worktree, sha)
+  if not M._is_git_sha(sha) then
+    error("github-devloop: invalid merge sha")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " merge --no-edit "
+    .. M._shell_single_quote(sha)
+end
+
 function M.git_ahead_count_cmd(upstream, integration)
   if not M._is_git_ref_safe(upstream) then
     error("github-devloop: invalid upstream branch")
