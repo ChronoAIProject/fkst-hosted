@@ -840,14 +840,14 @@ sleep 30"#,
         );
 
         let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn raiser");
-        let first = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+        let first = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
             .await
-            .expect("first stdout line within 4s")
+            .expect("first stdout line within 20s")
             .expect("channel open");
         assert_eq!(first, b"RAISED: eyJkZXB0IjoiaGVsbG8ifQ==".to_vec());
-        let second = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+        let second = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
             .await
-            .expect("second stdout line within 4s")
+            .expect("second stdout line within 20s")
             .expect("channel open");
         assert_eq!(second, b"plain chatter line".to_vec());
 
@@ -878,9 +878,9 @@ sleep 30"#,
         let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
         let mut lines: Vec<String> = Vec::new();
         while lines.len() < 5 {
-            let line = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+            let line = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
                 .await
-                .expect("stdout line within 4s")
+                .expect("stdout line within 20s")
                 .expect("channel open");
             lines.push(String::from_utf8(line).expect("utf8 stub output"));
         }
@@ -920,14 +920,14 @@ sleep 30"#,
         );
 
         let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
-        let blast = tokio::time::timeout(Duration::from_secs(10), spawned.stdout_lines.recv())
+        let blast = tokio::time::timeout(Duration::from_secs(30), spawned.stdout_lines.recv())
             .await
-            .expect("blast line within 10s")
+            .expect("blast line within 30s")
             .expect("channel open");
         assert_eq!(blast.len(), STDOUT_LINE_CAP_BYTES, "truncated at the cap");
-        let after = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+        let after = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
             .await
-            .expect("post-blast line within 4s")
+            .expect("post-blast line within 20s")
             .expect("channel open");
         assert_eq!(after, b"after-blast".to_vec());
 

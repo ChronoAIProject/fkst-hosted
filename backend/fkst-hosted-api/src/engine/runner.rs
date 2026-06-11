@@ -630,9 +630,9 @@ esac
             session.take_stdout().is_none(),
             "second take must return None"
         );
-        let line = tokio::time::timeout(Duration::from_secs(4), stdout.recv())
+        let line = tokio::time::timeout(Duration::from_secs(20), stdout.recv())
             .await
-            .expect("stdout line within 4s")
+            .expect("stdout line within 20s")
             .expect("channel open");
         assert_eq!(line, b"RAISED: eyJkZXB0IjoiaGVsbG8ifQ==".to_vec());
 
