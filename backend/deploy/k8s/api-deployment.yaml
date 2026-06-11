@@ -47,6 +47,20 @@ spec:
       # config loader at startup. The API's env comes exclusively from the
       # image, the ConfigMap, and the Secret.
       enableServiceLinks: false
+      # PREFERRED (soft) anti-affinity: spread replicas across nodes when the
+      # cluster is multi-node. Intentionally NOT required — docker-desktop is
+      # single-node, and a required rule would leave replicas 2..N Pending
+      # forever. On a real multi-node cluster this nudges spreading for fault
+      # tolerance without ever blocking scheduling.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: fkst-hosted-api
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -85,11 +99,31 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # Pod identity is an INTENTIONAL contract, not the ambient HOSTNAME
+          # coincidence: FKST_POD_ID is sourced explicitly from the downward
+          # API (metadata.name) so the distribution layer's holder_pod / pod_id
+          # is the pod's stable, unique name. (The config loader's fallback is
+          # FKST_POD_ID -> HOSTNAME -> local-<uuid>; wiring it explicitly here
+          # is defense-in-depth so identity never silently degrades.)
+          env:
+            - name: FKST_POD_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           envFrom:
             - configMapRef:
                 name: fkst-hosted-config
             - secretRef:
                 name: fkst-hosted-secret
+          # Belt-and-suspenders drain: sleep before SIGTERM so the Service /
+          # endpoints controller deregisters this pod (readiness still passing
+          # at this instant) and in-flight requests stop arriving BEFORE the
+          # process begins its graceful-shutdown (self-fence + lease release).
+          # Bounded well under terminationGracePeriodSeconds (30s).
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 2"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
