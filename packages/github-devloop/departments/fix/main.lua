@@ -150,26 +150,16 @@ local function bounded_fix_summary(value)
 end
 
 local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
-  local new_version = core.next_fix_version(fix.version)
-  fix.fix_summary = bounded_fix_summary(summary)
-  core.log_cas_decision("fix", fix.proposal_id, { state = "fixing", version = fix.version }, "fixing", "reviewing", "applied", reason)
-  local comment_request = core.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
-  local label_request = core.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
-  local add_labels, remove_labels = core.state_label_changes("reviewing")
-  local reviewing_payload = core.build_devloop_reviewing_payload({
-    proposal_id = fix.proposal_id,
-    impl_version = new_version,
-  }, fix.pr_number, fix.source_ref)
-  core.log_apply("fix", fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_reviewing",
+  core.raise_fix_reviewing({
+    dept = "fix",
+    repo = repo,
+    issue_number = issue_number,
+    fix = fix,
+    old_head_sha = old_head_sha,
+    new_head_sha = new_head_sha,
+    reason = reason,
+    fix_summary = bounded_fix_summary(summary),
   })
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  if issue_number ~= nil then
-    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  end
-  core.log_raise("fix", fix.proposal_id, "devloop_reviewing", reviewing_payload)
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)
