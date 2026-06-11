@@ -2110,6 +2110,134 @@ mod tests {
         );
     }
 
+    // ---- secret hygiene: tracing capture --------------------------------------------------------
+
+    /// A shared, in-memory sink that captures every byte a tracing subscriber
+    /// writes. Hand-rolled so this stays dependency-free (no `tracing-test`).
+    #[derive(Clone, Default)]
+    struct CaptureBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl CaptureBuffer {
+        fn contents(&self) -> Vec<u8> {
+            self.0.lock().expect("capture lock poisoned").clone()
+        }
+    }
+
+    impl std::io::Write for CaptureBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("capture lock poisoned")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl tracing_subscriber::fmt::MakeWriter<'_> for CaptureBuffer {
+        type Writer = CaptureBuffer;
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Drive a flush against one GitHub error path with a canary token; the
+    /// caller wraps this in a capturing subscriber. `status = None` forces a
+    /// raw reqwest network error (a closed port).
+    async fn flush_canary(status: Option<u16>, token: &str) {
+        let api_base = match status {
+            Some(code) => {
+                let server = MockServer::start().await;
+                Mock::given(method("GET"))
+                    .respond_with(ResponseTemplate::new(404))
+                    .mount(&server)
+                    .await;
+                let put = if code == 403 {
+                    // 403 WITH rate-limit headers => GithubRateLimited.
+                    ResponseTemplate::new(403)
+                        .insert_header("x-ratelimit-remaining", "0")
+                        .insert_header("retry-after", "30")
+                } else {
+                    ResponseTemplate::new(code)
+                };
+                Mock::given(method("PUT"))
+                    .respond_with(put)
+                    .mount(&server)
+                    .await;
+                let uri = server.uri();
+                // Keep the mock alive across the flush; the test process is
+                // short-lived so leaking it is harmless and avoids a borrow.
+                std::mem::forget(server);
+                uri
+            }
+            None => "http://127.0.0.1:1".to_string(),
+        };
+        let cfg = JournalConfig {
+            github_repo: Some("owner/name".to_string()),
+            github_api_base: api_base,
+            github_token: Some(SecretString::from(token.to_string())),
+            cas_max_retries: 2,
+            ..JournalConfig::default()
+        };
+        let mut journaler = Journaler::start(ctx(1), cfg, MemStore::default())
+            .await
+            .expect("start");
+        journaler.record(raised("d", "e1")).await.expect("record");
+        // Every arm is an error/fenced path; we only care that whatever it
+        // logs is token-free, so swallow the outcome.
+        let _ = journaler.flush(true).await;
+    }
+
+    /// Spec §Testing: "tracing capture for a flush never contains the token".
+    /// Capture ALL tracing output at TRACE level while flushes traverse every
+    /// GitHub error path (auth 401, rate-limit 403, a transient 500 with
+    /// retries, and a raw network failure) with a canary token installed, and
+    /// assert the captured bytes contain neither the token value nor the
+    /// `Bearer`/`Authorization` markers an accidental header-or-token
+    /// interpolation would leak. Deterministic: wiremock + a closed port, no
+    /// real network. A plain `#[test]` with its own runtime so the subscriber
+    /// can be thread-scoped via `with_default`.
+    #[test]
+    fn tracing_capture_for_a_flush_never_contains_the_token() {
+        const CANARY: &str = "ghp_tracing_canary_value";
+
+        let capture = CaptureBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(capture.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .finish();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        tracing::subscriber::with_default(subscriber, || {
+            runtime.block_on(async {
+                flush_canary(Some(401), CANARY).await; // auth
+                flush_canary(Some(403), CANARY).await; // rate limit
+                flush_canary(Some(500), CANARY).await; // transient 5xx + retries
+                flush_canary(None, CANARY).await; // raw network error
+            });
+        });
+
+        let bytes = capture.contents();
+        assert!(
+            !bytes.is_empty(),
+            "the flush error paths must have logged SOMETHING"
+        );
+        let text = String::from_utf8_lossy(&bytes);
+        for needle in [CANARY, "Bearer", "Authorization", "authorization"] {
+            assert!(
+                !text.contains(needle),
+                "tracing output leaked {needle:?}:\n{text}"
+            );
+        }
+    }
+
     // ---- config hygiene -----------------------------------------------------------------------
 
     #[test]

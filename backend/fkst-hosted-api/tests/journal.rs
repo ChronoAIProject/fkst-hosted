@@ -547,3 +547,230 @@ async fn driver_journals_raised_lines_lifecycle_and_run_key_end_to_end() {
     assert_eq!(head.package_name, "demo");
     assert!(head.github.repo.is_none(), "github disabled => no repo");
 }
+
+// ---------------------------------------------------------------------------
+// Driver-level invariant: a failing journal sink NEVER fails/alters a session
+// ---------------------------------------------------------------------------
+
+/// Stub engine whose `conformance` exits non-zero (a 400-class package error)
+/// so the driver fails the session BEFORE the engine ever runs.
+fn write_conformance_failing_stub(dir: &Path) -> PathBuf {
+    let path = dir.join("stub-conf-fail.sh");
+    let script = r#"#!/bin/sh
+case "$1" in
+  conformance)
+    echo "FAIL graph-scan department broken missing M.spec" >&2
+    exit 1
+    ;;
+  supervise)
+    echo "supervise must not run after a conformance failure" >&2
+    exit 97
+    ;;
+esac
+"#;
+    fs::write(&path, script).expect("write stub");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod stub");
+    path
+}
+
+/// A journaling config whose GitHub sink is ENABLED but always fails: every
+/// Contents PUT is rejected so each lifecycle/terminal flush takes an error
+/// path. `api_base` points at the caller's wiremock server.
+fn always_failing_github_cfg(api_base: &str) -> JournalConfig {
+    JournalConfig {
+        github_enabled: true,
+        github_repo: Some("owner/name".to_string()),
+        github_api_base: api_base.to_string(),
+        github_token: Some(SecretString::from("test-token".to_string())),
+        // Keep the CAS budget tiny so a forced flush returns quickly rather
+        // than retrying for a long time on each lifecycle transition.
+        cas_max_retries: 1,
+        ..JournalConfig::default()
+    }
+}
+
+/// Build the materialize-able package + a single-pod service whose journaling
+/// is enabled against `github` (a failing GitHub sink) and a REAL Mongo store.
+async fn service_with_failing_github(
+    db: &Db,
+    engine: EngineConfig,
+    github_api_base: &str,
+) -> (SessionService, PackageRepository) {
+    let packages = PackageRepository::new(&db.database);
+    packages.ensure_indexes().await.expect("package indexes");
+    packages
+        .create(NewPackage {
+            name: "demo".to_string(),
+            files: vec![PackageFile {
+                path: "departments/hello/main.lua".to_string(),
+                content: "return {}".to_string(),
+            }],
+            composed_deps: vec![],
+        })
+        .await
+        .expect("create package");
+
+    let sessions = SessionService::new(SessionRepo::new(db), packages.clone(), engine);
+    sessions.enable_journaling(
+        always_failing_github_cfg(github_api_base),
+        MongoProgressStore::new(&db.database),
+    );
+    (sessions, packages)
+}
+
+#[tokio::test]
+async fn failing_journal_sink_never_blocks_a_normal_stop() {
+    if !docker_available() {
+        eprintln!("SKIP: docker unavailable");
+        return;
+    }
+    let (_container, db) = mongo_db().await;
+
+    // Every GitHub call fails: GET 500, PUT 401 — so each lifecycle flush and
+    // the terminal flush traverse an error path the WHOLE session long.
+    let github = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&github)
+        .await;
+    Mock::given(method("PUT"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&github)
+        .await;
+
+    let stub_dir = tempfile::tempdir().expect("stub dir");
+    let temp_root = tempfile::tempdir().expect("temp root");
+    let engine = EngineConfig {
+        framework_bin: write_stub(stub_dir.path()),
+        temp_root: temp_root.path().to_path_buf(),
+        stop_grace_secs: 5,
+        conformance_timeout_secs: 10,
+        ready_timeout_secs: 10,
+        ..EngineConfig::default()
+    };
+    let (sessions, _packages) = service_with_failing_github(&db, engine, &github.uri()).await;
+
+    let created = sessions.create("demo").await.expect("create session");
+    let id = created.id;
+
+    // Despite the failing journal sink, the session reaches `running`...
+    assert!(
+        wait_until(|| async {
+            matches!(
+                sessions.get(id).await.expect("get"),
+                Some(SessionDoc {
+                    status: SessionStatus::Running,
+                    ..
+                })
+            )
+        })
+        .await,
+        "a failing journal sink must not block the session reaching running"
+    );
+
+    // ...and a normal stop converges to `stopped` with the error field UNSET.
+    sessions.request_stop(id).await.expect("stop");
+    assert!(
+        wait_until(|| async {
+            matches!(
+                sessions.get(id).await.expect("get"),
+                Some(SessionDoc {
+                    status: SessionStatus::Stopped,
+                    ..
+                })
+            )
+        })
+        .await,
+        "a failing journal sink must not block a normal stop"
+    );
+
+    let session = sessions.get(id).await.expect("get").expect("present");
+    assert_eq!(session.status, SessionStatus::Stopped);
+    assert!(
+        session.error.is_none(),
+        "journal failure must not write the session error field: {:?}",
+        session.error
+    );
+
+    // The Mongo floor still journaled the lifecycle CAS transitions (the
+    // session state machine ran to completion regardless of the GitHub sink).
+    let docs = progress_docs(&db).await;
+    let transitions: Vec<&str> = docs
+        .iter()
+        .filter_map(|d| d.lifecycle.as_ref())
+        .map(|l| l.transition.as_str())
+        .collect();
+    for expected in ["validating", "running", "stopping", "stopped"] {
+        assert!(
+            transitions.contains(&expected),
+            "lifecycle CAS transition {expected} missing despite the failing sink: {transitions:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn failing_journal_sink_preserves_a_conformance_failure_disposition() {
+    if !docker_available() {
+        eprintln!("SKIP: docker unavailable");
+        return;
+    }
+    let (_container, db) = mongo_db().await;
+
+    // The journal sink fails on every call, as above.
+    let github = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&github)
+        .await;
+    Mock::given(method("PUT"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&github)
+        .await;
+
+    let stub_dir = tempfile::tempdir().expect("stub dir");
+    let temp_root = tempfile::tempdir().expect("temp root");
+    let engine = EngineConfig {
+        framework_bin: write_conformance_failing_stub(stub_dir.path()),
+        temp_root: temp_root.path().to_path_buf(),
+        stop_grace_secs: 5,
+        conformance_timeout_secs: 10,
+        ready_timeout_secs: 10,
+        ..EngineConfig::default()
+    };
+    let (sessions, _packages) = service_with_failing_github(&db, engine, &github.uri()).await;
+
+    let created = sessions.create("demo").await.expect("create session");
+    let id = created.id;
+
+    // The conformance failure (not the journal failure) decides disposition:
+    // the session reaches `failed` carrying the ENGINE's conformance error.
+    assert!(
+        wait_until(|| async {
+            matches!(
+                sessions.get(id).await.expect("get"),
+                Some(SessionDoc {
+                    status: SessionStatus::Failed,
+                    ..
+                })
+            )
+        })
+        .await,
+        "a conformance failure must still fail the session despite the failing sink"
+    );
+
+    let session = sessions.get(id).await.expect("get").expect("present");
+    assert_eq!(session.status, SessionStatus::Failed);
+    let error = session.error.expect("failed session carries an error");
+    assert!(
+        error.contains("conformance failed"),
+        "the session error must be the ENGINE conformance failure, not a journal error: {error}"
+    );
+    // The journal sink's own failures (auth/network) must never appear in the
+    // client-served error field.
+    for journal_leak in ["github", "journal", "401", "Bearer"] {
+        assert!(
+            !error.contains(journal_leak),
+            "journal-sink failure leaked into the session error ({journal_leak:?}): {error}"
+        );
+    }
+}
