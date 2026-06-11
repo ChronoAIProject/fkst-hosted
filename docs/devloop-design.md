@@ -127,6 +127,7 @@ marker 带 `narrowed_question` 收窄重审同一 head，true-stall 时产生 `d
 - converge-round / 真停滞计数**只能用 GitHub trusted-bot marker**（不用 `<RT>`/cache）。
 - 同一 issue 的 version 排序是 `(updated_at ISO, loop round N, stage_rank)`；同 timestamp 下较大的 `/loop/N`（PR 侧 `/review-loop/N`）胜过无 loop 或较小 loop，即使后者阶段更靠后。reconcile 是确定性 `drop` 判（无 codex 非确定性），同 round 重放按 reconcile / review-reconcile marker 幂等收敛，避免 GitHub 评论返回顺序影响当前态。
 - PR diff / issue body 可能超 **64 KiB payload** → payload 只带 `source_ref`、短 brief 和控制字段；codex / department 需要内容时回源读取完整内容。
+- Restart-completeness follows crash-only / event-sourcing replay: every non-terminal state must have a marker-only kickoff derivation. `observe_issue` replays initial `thinking`, complete `thinking` convergence rounds, `ready`, `pr-open`, `fixing`, and `review-meta` from trusted markers; PR-side observe/merge departments cover `reviewing`, `review-converge`, `merge-ready`, and `merging`. A manual PR head nudge is only a `reviewing`-state lever; `fixing` and `review-meta` recovery is observe-driven. 中文补注：恢复不依赖存活中的 delivery；`fixing` 无可解析反馈 marker 时由 observe 确定性重进当前 head 的 `reviewing`，而不是等人工 head-nudge。
 - 自动 child-issue / PR / merge 有 **runaway + 权限**风险 → 只能用 `FKST_GITHUB_WRITE` 在 dry-run 与真实自治之间切换，并保留严格 budget 与 merge deterministic backstop。
 - Phase 3 的 implement no-push/no-PR 约束目前由 prompt 表达；host-level sandbox 是后续 hardening。
 - label 可被人改 → 下次转移 set-exclusive 自愈；状态事实仍以最新 state marker 为准。

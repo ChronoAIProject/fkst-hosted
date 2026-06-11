@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 import sys
+import base64
+import binascii
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,10 +51,22 @@ GRAPHQL_FIRST_CONNECTION_RE = re.compile(
     re.DOTALL,
 )
 LONG_STRING_CHAR_RE = re.compile(r"\bstring\s*\.\s*char\s*\((?P<args>[^)]*)\)", re.DOTALL)
-NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*\d+\s*(?=,|\Z)")
+NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*(?:0x[0-9A-Fa-f]+|\d+)\s*(?=,|\Z)")
 HIDDEN_TEXT_STRING_CHAR_ARG_MIN = 6
 ERROR_CALL_STRING_RE = re.compile(r"\berror\s*\(\s*(?P<quote>['\"])(?P<message>[^'\"]*)(?P=quote)")
 ERROR_CLASS_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9-]*: [a-z0-9][a-z0-9-]*:")
+HELPER_STRING_ARG_RE = re.compile(
+    r"\b(?P<func>(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?[A-Za-z_][A-Za-z0-9_]*)"
+    r"\s*\(\s*(?P<quote>[\"'])"
+)
+GH_RATE_POOL_FUNCTION_RE = re.compile(
+    r"\bfunction\b[^\n]*\bgh_rate_pool\b|\bgh_rate_pool\b\s*=\s*function\b"
+)
+GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
+HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
+BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
+BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
+ENCODED_LITERAL_MIN_BYTES = 6
 
 
 @dataclass(frozen=True)
@@ -333,6 +347,86 @@ def unclassified_error_call_lines(text: str) -> list[int]:
     return lines
 
 
+def helper_name(value: str) -> str:
+    return re.sub(r"\s+", "", value).lower()
+
+
+def looks_like_decode_helper(func: str) -> bool:
+    normalized = helper_name(func)
+    base_name = normalized.rsplit(".", 1)[-1]
+    if base_name in {"h", "b", "u", "hex", "base64", "b64", "bytes", "byte"}:
+        return True
+    helper_tokens = (
+        "decode",
+        "fromhex",
+        "from_hex",
+        "unhex",
+        "unescape",
+    )
+    return any(token in normalized for token in helper_tokens)
+
+
+def byte_escape_count(content: str) -> int:
+    return len(BYTE_ESCAPE_RE.findall(content))
+
+
+def is_printable_utf8(data: bytes) -> bool:
+    if len(data) < ENCODED_LITERAL_MIN_BYTES:
+        return False
+    try:
+        decoded = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not decoded:
+        return False
+    printable = sum(1 for char in decoded if char.isprintable() or char in "\n\r\t")
+    return printable / len(decoded) >= 0.8
+
+
+def encoded_literal_kind(content: str) -> str | None:
+    if (
+        len(content) >= ENCODED_LITERAL_MIN_BYTES * 2
+        and len(content) % 2 == 0
+        and HEX_LITERAL_RE.fullmatch(content) is not None
+    ):
+        return "hex"
+
+    if byte_escape_count(content) >= ENCODED_LITERAL_MIN_BYTES:
+        return "byte-escape"
+
+    if (
+        len(content) >= ENCODED_LITERAL_MIN_BYTES * 2
+        and len(content) % 4 == 0
+        and BASE64_LITERAL_RE.fullmatch(content) is not None
+    ):
+        try:
+            decoded = base64.b64decode(content, validate=True)
+        except (binascii.Error, ValueError):
+            decoded = b""
+        if is_printable_utf8(decoded):
+            return "base64"
+
+    return None
+
+
+def hidden_text_encoded_literal_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = hidden_text_string_char_lines(text)
+    for match in HELPER_STRING_ARG_RE.finditer(text):
+        quote_start = match.start("quote")
+        if not is_unmasked_range(text, stripped, match.start(), quote_start):
+            continue
+        string_end = end_of_quoted_string(text, quote_start)
+        if string_end > len(text) or text[string_end - 1] != match.group("quote"):
+            continue
+        if not looks_like_decode_helper(match.group("func")):
+            continue
+        content = text[quote_start + 1 : string_end - 1]
+        if encoded_literal_kind(content) is not None:
+            lines.append(text.count("\n", 0, match.start()) + 1)
+    return sorted(set(lines))
+
+
 def check_line_limit(root: Path, violations: list[str]) -> None:
     for scan_root_name in ("packages", "scripts"):
         scan_root = root / scan_root_name
@@ -610,18 +704,49 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
             )
 
 
-def check_hidden_text_string_char(root: Path, warnings: list[str]) -> None:
+def check_hidden_text_encoded_literals(root: Path, violations: list[str]) -> None:
     packages = root / "packages"
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
         if not path.is_file() or "tests" in path.relative_to(packages).parts:
             continue
-        for line in hidden_text_string_char_lines(read_text(path)):
+        for line in hidden_text_encoded_literal_lines(read_text(path)):
             add(
-                warnings,
+                violations,
                 "G6",
-                f"{rel(root, path)}:{line} string.char call uses a long numeric byte sequence; use a plain English literal instead",
+                f"{rel(root, path)}:{line} hidden text uses an encoded literal decode helper; use a plain source literal instead",
+            )
+
+
+def gh_rate_pool_sizing_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = []
+    in_gh_rate_pool = False
+    for index, line in enumerate(stripped.splitlines(), start=1):
+        if not in_gh_rate_pool and GH_RATE_POOL_FUNCTION_RE.search(line):
+            in_gh_rate_pool = True
+
+        if in_gh_rate_pool and GH_RATE_POOL_SIZING_FIELD_RE.search(line):
+            lines.append(index)
+
+        if in_gh_rate_pool and re.match(r"^\s*end\s*[,;]?\s*$", line):
+            in_gh_rate_pool = False
+    return lines
+
+
+def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
+    packages = root / "packages"
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file() or "tests" in path.relative_to(packages).parts:
+            continue
+        for line in gh_rate_pool_sizing_lines(read_text(path)):
+            add(
+                violations,
+                "G7",
+                f"{rel(root, path)}:{line} gh rate pool sizing belongs to FKST_RATE_POOL_GH host posture; package code may declare only the pool name",
             )
 
 
@@ -649,7 +774,8 @@ def main() -> int:
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
-    check_hidden_text_string_char(root, warnings)
+    check_hidden_text_encoded_literals(root, violations)
+    check_gh_rate_pool_sizing(root, violations)
     check_error_class_prefixes(root, warnings)
 
     for warning in warnings:

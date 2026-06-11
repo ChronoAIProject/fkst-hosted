@@ -4,6 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "github_pr_open_request" },
+  produces = { "github_entity_changed", "github_pr_opened" },
   stall_window = "2m",
 }
 
@@ -164,6 +165,49 @@ local function can_apply_pr_open_labels(state, impl_version)
   return state.state == "implementing" or state.state == "pr-open"
 end
 
+local function raise_pr_entity_changed(repo, pr, payload)
+  local updated_at = tostring(payload.dedup_key or "") .. "/pr/" .. tostring(pr.number)
+  local entity_payload = {
+    schema = "github-proxy.v1",
+    type = "pr",
+    repo = repo,
+    number = pr.number,
+    title = tostring(payload.title or "PR #" .. tostring(pr.number)),
+    url = pr.url,
+    state = pr.state or "OPEN",
+    updated_at = updated_at,
+    dedup_key = core.entity_dedup_key(repo, "pr", pr.number, updated_at),
+    source = "github_pr_open",
+    source_ref = core.entity_source_ref(repo, "pr", pr.number),
+  }
+  raise("github_entity_changed", {
+    schema = entity_payload.schema,
+    type = entity_payload.type,
+    repo = entity_payload.repo,
+    number = entity_payload.number,
+    title = entity_payload.title,
+    url = entity_payload.url,
+    state = entity_payload.state,
+    updated_at = entity_payload.updated_at,
+    dedup_key = entity_payload.dedup_key,
+    source = entity_payload.source,
+    source_ref = entity_payload.source_ref,
+  })
+  raise("github_pr_opened", {
+    schema = "github-proxy.pr-opened.v1",
+    repo = repo,
+    issue_number = payload.issue_number,
+    proposal_id = payload.proposal_id,
+    impl_version = payload.impl_version,
+    pr_number = pr.number,
+    branch = payload.branch,
+    head_sha = payload.head_sha,
+    base_branch = payload.base_branch,
+    dedup_key = tostring(payload.dedup_key or "") .. "/opened/" .. tostring(pr.number),
+    source_ref = entity_payload.source_ref,
+  })
+end
+
 local function current_issue_state_for_label_edit(repo, payload, bot_login)
   local view = core.gh_exec(
     core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number),
@@ -304,6 +348,8 @@ function pipeline(event)
         core.apply_issue_labels(repo, payload.issue_number, add_labels, remove_labels)
       end)
     end
+
+    raise_pr_entity_changed(repo, pr, payload)
   end)
 end
 

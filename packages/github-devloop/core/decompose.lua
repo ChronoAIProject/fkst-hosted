@@ -11,7 +11,7 @@ local function bounded_text(value, limit, fallback)
     text = fallback or "(empty)"
   end
   if #text > limit then
-    text = text:sub(1, limit)
+    text = M.truncate_utf8(text, limit)
   end
   return text
 end
@@ -170,7 +170,7 @@ function M.fallback_decompose_plan(decompose)
 end
 
 function M.decomposed_comment_body(decompose, count)
-  return "github-devloop decomposed blocked PR into " .. tostring(count) .. " follow-up issue(s)"
+  return M.comment_string("decomposed_prefix") .. tostring(count) .. M.comment_string("decomposed_suffix")
     .. "\n\n" .. M.decomposed_marker(decompose.proposal_id, decompose.version, decompose.pr_number, count)
 end
 
@@ -187,7 +187,7 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     .. "\n\n" .. M.decompose_lineage_marker(decompose.proposal_id, M.decompose_lineage_depth(decompose.current_issue_body) + 1)
     .. "\n\n" .. M.decompose_child_marker(decompose.proposal_id, decompose.version, decompose.pr_number, index)
   if #body > M._max_body_len then
-    body = body:sub(1, M._max_body_len)
+    body = M.truncate_utf8(body, M._max_body_len)
   end
   local fingerprint = issue_fingerprint(decompose, index)
   return {

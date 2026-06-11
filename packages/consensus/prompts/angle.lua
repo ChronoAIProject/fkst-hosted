@@ -2,7 +2,12 @@ return {
   template = [[Judge this proposal from one consensus angle.
 {{bias}}
 
-Respond with exactly two lines and no other text.
+Execution boundary:
+- You are running in an empty runtime scratch directory, not a repository checkout.
+- Do not clone, checkout, fetch with git, create branches, or modify any repository.
+- Read required source content only from the context manifest below.
+
+Respond with exactly the requested marker lines and no other text.
 Line one: the marker ⟦FKST:VERDICT⟧ followed by one word - {{verdict_options}}.
 Line two: the marker ⟦FKST:REPLY⟧ followed by one concise paragraph.
 {{readiness_instruction}}

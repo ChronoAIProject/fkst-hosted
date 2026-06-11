@@ -43,7 +43,7 @@ function pipeline(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_result_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_issue_view_result_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue result view failed: " .. tostring(view.stderr))
     end
@@ -72,15 +72,18 @@ function pipeline(event)
       local version = tostring(reached.dedup_key)
       local marker = gate.kind == "cycle"
         and core.dependency_cycle_marker(reached.proposal_id, version)
-        or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet)
-      dependency_comment_request = {
-        schema = "github-proxy.v1",
-        repo = repo,
-        issue_number = issue_number,
-        body = "github-devloop dependency hold: " .. tostring(gate.kind) .. "\n\nReason: " .. tostring(gate.reason) .. "\n\n" .. marker,
-        dedup_key = core._dedup_key({ "dependency", "comment", tostring(reached.proposal_id), version, tostring(gate.kind) }),
-        source_ref = core.normalize_source_ref(reached.source_ref),
-      }
+        or (gate.kind == "unresolvable"
+          and core.dependency_unresolvable_marker(reached.proposal_id, version, gate.unmet, gate.kind, gate.reason)
+          or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet, gate.kind, gate.reason))
+      dependency_comment_request = core.build_dependency_hold_comment_request(
+        repo,
+        issue_number,
+        reached.proposal_id,
+        version,
+        gate,
+        marker,
+        reached.source_ref
+      )
       dependency_label_request = core.build_label_request(
         repo,
         issue_number,

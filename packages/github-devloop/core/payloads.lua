@@ -7,9 +7,235 @@ local function bounded_framing(M, framing)
   end
   local value = tostring(framing)
   if #value > M._max_framing_len then
-    value = value:sub(1, M._max_framing_len)
+    value = M.truncate_utf8(value, M._max_framing_len)
   end
   return value
+end
+
+local function bounded_control_text(M, value, limit)
+  if value == nil then
+    return nil
+  end
+  local text = tostring(value):gsub("%c", " "):gsub("%s+", " ")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then
+    return nil
+  end
+  local cap = limit or M._max_blocking_gap_len
+  if #text > cap then
+    text = M.truncate_utf8(text, cap)
+  end
+  return text
+end
+
+local function board_digest_issue_list_cmd(M, repo)
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
+local function board_digest_pr_list_cmd(M, repo)
+  return "gh pr list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
+local function recent_closed_issue_list_cmd(M, repo)
+  if type(M.gh_issue_list_recent_closed_cmd) == "function" then
+    return M.gh_issue_list_recent_closed_cmd(repo, 30)
+  end
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state closed"
+    .. " --limit 30"
+    .. " --json number,title,closedAt,labels"
+end
+
+local function label_names(labels_json)
+  local labels = {}
+  for _, label in ipairs(labels_json or {}) do
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(labels, tostring(label.name))
+    elseif type(label) == "string" then
+      table.insert(labels, label)
+    end
+  end
+  return labels
+end
+
+local function parse_board_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  if type(decoded) ~= "table" then
+    return items
+  end
+  for _, item in ipairs(decoded) do
+    if type(item) == "table" and tonumber(item.number) ~= nil then
+      table.insert(items, {
+        number = tonumber(item.number),
+        title = tostring(item.title or ""),
+        labels = label_names(item.labels),
+      })
+    end
+  end
+  return items
+end
+
+local function first_chars(M, value, limit)
+  local text = tostring(value or ""):gsub("[%s]+", " ")
+  if #text > limit then
+    return M.truncate_utf8(text, limit)
+  end
+  return text
+end
+
+local function recurrence_label_digest(M, labels)
+  local selected = {}
+  for _, label in ipairs(labels or {}) do
+    local text = tostring(label)
+    if text:find("^error%-class:", 1) ~= nil
+      or text:find("^fingerprint:", 1) ~= nil
+      or text:find("^fkst%-dev:", 1) ~= nil then
+      table.insert(selected, text)
+    end
+    if #selected >= 4 then
+      break
+    end
+  end
+  if #selected == 0 then
+    return "labels=none"
+  end
+  return "labels=" .. first_chars(M, table.concat(selected, ","), 120)
+end
+
+local function state_label(M, labels)
+  for _, label in ipairs(labels or {}) do
+    local text = tostring(label)
+    if M._state_labels[text] then
+      return text
+    end
+  end
+  return "open"
+end
+
+local function render_closed_issue_line(M, item)
+  return "#" .. tostring(item.number)
+    .. " [closed] "
+    .. first_chars(M, item.title, 80)
+    .. " (" .. recurrence_label_digest(M, item.labels) .. ")"
+end
+
+local function render_board_digest(M, issues, prs, closed_issues)
+  local lines = {
+    M._untrusted_issue_data_begin,
+    "Open items snapshot:",
+  }
+  for _, item in ipairs(issues or {}) do
+    if #lines >= 52 then
+      break
+    end
+    table.insert(lines, "#" .. tostring(item.number)
+      .. " [" .. state_label(M, item.labels) .. "] "
+      .. first_chars(M, item.title, 60))
+  end
+  for _, item in ipairs(prs or {}) do
+    if #lines >= 52 then
+      break
+    end
+    table.insert(lines, "#" .. tostring(item.number)
+      .. " [" .. state_label(M, item.labels) .. "] "
+      .. first_chars(M, item.title, 60))
+  end
+  table.insert(lines, "")
+  table.insert(lines, "Recent closed issues for recurrence judgment:")
+  for _, item in ipairs(closed_issues or {}) do
+    if #lines >= 84 then
+      break
+    end
+    table.insert(lines, render_closed_issue_line(M, item))
+  end
+  if type(closed_issues) ~= "table" or #closed_issues == 0 then
+    table.insert(lines, "(none fetched)")
+  end
+  table.insert(lines, M._untrusted_issue_data_end)
+  return table.concat(lines, "\n")
+end
+
+function M.board_digest_block(repo, tick)
+  if tick == nil or tostring(tick) == "" then
+    return ""
+  end
+  local key = "github-devloop/board-digest/" .. M.safe_repo(repo) .. "/" .. M.safe_updated_at(tick)
+  local cached = cache_get(key)
+  if cached ~= nil and cached ~= "" then
+    return cached
+  end
+
+  local ok_issue, issue_result = pcall(M.gh_exec, { cmd = board_digest_issue_list_cmd(M, repo), timeout = 30 })
+  local ok_pr, pr_result = pcall(M.gh_exec, { cmd = board_digest_pr_list_cmd(M, repo), timeout = 30 })
+  local ok_closed, closed_result = pcall(M.gh_exec, { cmd = recent_closed_issue_list_cmd(M, repo), timeout = 30 })
+  if not ok_issue or not ok_pr
+    or type(issue_result) ~= "table" or issue_result.exit_code ~= 0
+    or type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
+    return ""
+  end
+
+  local closed_issues = nil
+  if ok_closed and type(closed_result) == "table" and closed_result.exit_code == 0 then
+    local ok_parse, parsed = pcall(parse_board_list, closed_result.stdout)
+    if ok_parse then
+      closed_issues = parsed
+    end
+  end
+
+  local block = render_board_digest(
+    M,
+    parse_board_list(issue_result.stdout),
+    parse_board_list(pr_result.stdout),
+    closed_issues
+  )
+  cache_set(key, block)
+  return block
+end
+
+function M.append_board_digest_to_proposal(proposal, repo, tick)
+  local block = M.board_digest_block(repo, tick)
+  if block == "" then
+    return proposal
+  end
+  local body = tostring(proposal.body or "")
+  local prefix = "\n\n"
+  local neutralized = M.neutralize_untrusted_prompt_text(block)
+  local remaining = M._max_body_len - #body - #prefix
+  if remaining <= 0 then
+    M.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
+      "outcome=drop",
+      "reason=body-budget-exhausted",
+      "repo=" .. tostring(repo or ""),
+      "tick=" .. tostring(tick or ""),
+    })
+    return proposal
+  end
+  if #neutralized > remaining then
+    M.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
+      "outcome=truncate",
+      "reason=body-budget",
+      "repo=" .. tostring(repo or ""),
+      "tick=" .. tostring(tick or ""),
+      "available=" .. tostring(remaining),
+      "needed=" .. tostring(#neutralized),
+    })
+    neutralized = M.truncate_utf8(neutralized, remaining)
+  end
+  proposal.body = body .. prefix .. neutralized
+  if #proposal.body > M._max_body_len then
+    error("github-devloop: proposal board digest exceeds bounded body")
+  end
+  return proposal
 end
 
 function M.build_devloop_ready_payload(source)
@@ -46,6 +272,30 @@ function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, versio
   }
 end
 
+function M.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
+  local proposal_id = ready.proposal_id
+  if proposal_id == nil then
+    proposal_id = M.proposal_id(repo, issue_number)
+  end
+  return {
+    schema = "github-devloop.open-pr.v1",
+    proposal_id = proposal_id,
+    repo = repo,
+    issue_number = issue_number,
+    version = ready.dedup_key,
+    branch = branch,
+    head_sha = head_sha,
+    base_branch = base_branch,
+    dedup_key = M._dedup_key({
+      "open-pr-kickoff",
+      tostring(proposal_id),
+      tostring(ready.dedup_key),
+      tostring(branch),
+    }),
+    source_ref = M.normalize_source_ref(ready.source_ref),
+  }
+end
+
 function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_ref)
   local version = origin.impl_version
   if review_fact.fix_version ~= nil then
@@ -71,6 +321,20 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   local framing = bounded_framing(M, review_fact.framing or origin.framing)
   if framing ~= nil then
     payload.framing = framing
+  end
+  local blocking_gap = bounded_control_text(M, review_fact.blocking_gap, M._max_blocking_gap_len)
+  if blocking_gap ~= nil then
+    payload.blocking_gap = blocking_gap
+  end
+  if review_fact.gate_baseline_sha ~= nil then
+    if not M._is_git_sha(review_fact.gate_baseline_sha) then
+      error("github-devloop: invalid gate baseline sha")
+    end
+    payload.gate_baseline_sha = tostring(review_fact.gate_baseline_sha)
+  end
+  local gate_failure_excerpt = bounded_control_text(M, review_fact.gate_failure_excerpt, M._max_rollup_failure_summary_len)
+  if gate_failure_excerpt ~= nil then
+    payload.gate_failure_excerpt = gate_failure_excerpt
   end
   return payload
 end
@@ -132,37 +396,15 @@ function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
   }
 end
 
-function M.issue_fetch_instruction(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,comments,labels,state"
-end
-
-local function pr_review_fetch_instruction(M, repo, pr_number, head_sha, issue_number)
-  local lines = {
-    "gh pr view " .. M._shell_single_quote(pr_number)
-      .. " --repo " .. M._shell_single_quote(repo)
-      .. " --json headRefOid,headRefName,baseRefName,state",
-    "Confirm headRefOid equals reviewed head " .. tostring(head_sha) .. " before judging.",
-    "gh pr diff " .. M._shell_single_quote(pr_number)
-      .. " --repo " .. M._shell_single_quote(repo),
-  }
-  if issue_number ~= nil then
-    table.insert(lines, "gh issue view " .. M._shell_single_quote(issue_number)
-      .. " --repo " .. M._shell_single_quote(repo)
-      .. " --json title,body,comments,labels,state")
-  end
-  return table.concat(lines, "\n")
-end
-
 function M.build_proposal(issue)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
   if #title > M._max_title_len then
-    title = title:sub(1, M._max_title_len)
+    title = M.truncate_utf8(title, M._max_title_len)
   end
   local body = "Judge the current GitHub issue from the full source content."
     .. "\nIssue: " .. tostring(issue.repo) .. "#" .. tostring(issue.number)
+    .. "\nRecurrence: read recent closed issues in context; if this is the third same-class instance, reframe to a class solution or give an explicit waiver."
 
   return {
     schema = "consensus.proposal.v1",
@@ -170,10 +412,14 @@ function M.build_proposal(issue)
     proposal_id = proposal_id,
     title = title,
     body = body,
-    content_fetch = M.issue_fetch_instruction(issue.repo, issue.number),
+    content_fetch = issue.content_fetch,
     dedup_key = M.proposal_dedup_key(proposal_id, issue.updated_at),
     source_ref = M.normalize_source_ref(issue.source_ref),
   }
+end
+
+function M.build_board_proposal(issue, tick)
+  return M.append_board_digest_to_proposal(M.build_proposal(issue), issue.repo, tick)
 end
 
 -- Thread the meta-judge's narrowing onto a re-raised next-round proposal so the next
@@ -195,20 +441,25 @@ local function apply_converge_fields(proposal, n, converge)
   return proposal
 end
 
-function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge)
+function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch)
   local issue = {
     repo = repo,
     number = issue_number,
     title = current.title,
     updated_at = current.updated_at,
     source_ref = source_ref,
+    content_fetch = content_fetch,
   }
   local proposal = M.build_proposal(issue)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
+function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n, converge, tick, content_fetch)
+  return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch), repo, tick)
+end
+
+function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
   local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
@@ -218,19 +469,27 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     title = "Review PR #" .. tostring(pr_number) .. ": " .. tostring(current_issue.title)
   end
   if #title > M._max_title_len then
-    title = title:sub(1, M._max_title_len)
+    title = M.truncate_utf8(title, M._max_title_len)
   end
 
   local issue_title = type(current_issue) == "table" and tostring(current_issue.title or "") or ""
   if #issue_title > M._max_title_len then
-    issue_title = issue_title:sub(1, M._max_title_len)
+    issue_title = M.truncate_utf8(issue_title, M._max_title_len)
   end
   issue_title = M.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
   local body = "Review the PR diff and decide whether it should advance to merge-ready."
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
-    .. "\nFetch the current PR diff and backing issue content before judging."
+    .. "\nRead the local context bundle before judging."
+  local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
+  local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
+  if ledger ~= nil and ledger ~= "" then
+    body = body
+      .. "\nPrior review ledger:\n"
+      .. ledger
+      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix."
+  end
   if #body > M._max_body_len then
     error("github-devloop: PR review proposal exceeds bounded body")
   end
@@ -241,7 +500,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     proposal_id = review_id,
     title = M.neutralize_untrusted_prompt_text(title),
     body = body,
-    content_fetch = pr_review_fetch_instruction(M, repo, pr_number, head_sha, issue_number),
+    content_fetch = content_fetch,
     dedup_key = M._dedup_key({
       review_id,
       "review",
@@ -250,10 +509,18 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   }
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge)
-  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref)
+function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch)
+  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch), repo, tick)
+end
+
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch)
+  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
   proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
   return apply_converge_fields(proposal, n, converge)
+end
+
+function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch)
+  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch), repo, tick)
 end
 end
 

@@ -25,6 +25,14 @@ local function run_cmd(cmd, timeout, error_class)
   return result
 end
 
+local function run_gh_cmd(cmd, timeout, error_class)
+  local result = core.gh_exec({ cmd = cmd, timeout = timeout or 30 })
+  if result.exit_code ~= 0 then
+    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
+  end
+  return result
+end
+
 local function trim_stdout(result)
   return tostring(result.stdout or ""):gsub("%s+$", "")
 end
@@ -64,7 +72,7 @@ local function has_content_diff(upstream, integration)
 end
 
 local function list_open_pr(repo, integration, upstream)
-  local listed = run_cmd(core.gh_pr_list_head_base_cmd(repo, integration, upstream), 30, "gh rollup PR list")
+  local listed = run_gh_cmd(core.gh_pr_list_head_base_cmd(repo, integration, upstream), 30, "gh rollup PR list")
   local prs = core.parse_pr_list_head_base(listed.stdout)
   if #prs == 0 then
     return nil
@@ -84,7 +92,7 @@ local function create_rollup_pr(repo, upstream, integration, ahead)
     .. ".md"
   file.write(body_file, rollup_body(upstream, integration, ahead))
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
-  run_cmd(core.gh_pr_create_cmd(repo, integration, upstream, title, body_file), 60, "gh rollup PR create")
+  run_gh_cmd(core.gh_pr_create_cmd(repo, integration, upstream, title, body_file), 60, "gh rollup PR create")
 end
 
 function pipeline(event)

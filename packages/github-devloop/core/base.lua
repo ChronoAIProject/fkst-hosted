@@ -10,6 +10,8 @@ local max_comments_len = 12000
 local max_meta_reason_len = 2000
 local max_framing_len = 1000
 local max_impl_output_len = 2000
+local max_blocking_gap_len = 240
+local max_review_ledger_len = 1200
 local max_pr_issue_context_len = 3000
 local max_repo_key_len = 100
 local max_issue_key_len = 30
@@ -19,6 +21,7 @@ local max_worktree_prefix_len = 90
 local max_branch_len = 160
 local max_sha_len = 64
 local max_pr_title_len = 240
+local max_judgment_prefix_len = 120
 local action_label = "⟦FKST:ACTION⟧"
 local intake_label = "⟦FKST:INTAKE⟧"
 local reason_label = "⟦FKST:REASON⟧"
@@ -85,7 +88,7 @@ local state_graph = {
   implementing = { "pr-open", "impl-failed" },
   ["pr-open"] = { "reviewing" },
   reviewing = { "merge-ready", "fixing", "review-meta" },
-  ["merge-ready"] = { "merging", "fixing", "blocked" },
+  ["merge-ready"] = { "reviewing", "merging", "fixing", "blocked" },
   merging = { "merged", "fixing", "blocked" },
   merged = {},
   fixing = { "reviewing", "review-meta" },
@@ -144,6 +147,13 @@ local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end
 
+local function sdk_truncate_utf8(value, limit)
+  if type(truncate_utf8) ~= "function" then
+    error("github-devloop: truncate_utf8 SDK primitive is required")
+  end
+  return truncate_utf8(value, limit)
+end
+
 local function has_value(values, expected)
   if type(values) ~= "table" then
     return false
@@ -157,7 +167,7 @@ local function has_value(values, expected)
 end
 
 local function is_review_meta_action(value)
-  return value == "fix" or value == "block"
+  return value == "fix" or value == "block" or value == "spec-amendment"
 end
 
 local function is_path_safe_key(value, limit)
@@ -281,6 +291,10 @@ end
 
 local function dedup_key(parts)
   local key = M.sanitize_key(table.concat(parts, "/"), false)
+  if #key > max_dedup_len then
+    local suffix = "-" .. decimal_checksum(key)
+    key = sdk_truncate_utf8(key, max_dedup_len - #suffix):gsub("[/%-]+$", "") .. suffix
+  end
   if not is_path_safe_key(key, max_dedup_len) then
     error("github-devloop: invalid dedup_key")
   end
@@ -544,6 +558,66 @@ function M.intake_dedup_key(proposal_id, updated_at)
   })
 end
 
+function M.ci_dispatch_once_key(repo, pr_number, head_sha)
+  return M._dedup_key({
+    "github-devloop",
+    "ci-dispatch-selfheal",
+    M.safe_repo(repo),
+    "pr",
+    M.safe_issue(pr_number),
+    M.safe_head_segment(head_sha),
+  })
+end
+
+function M.ci_missing_status_first_observed_key(repo, pr_number, head_sha)
+  return M._dedup_key({
+    "github-devloop",
+    "ci-missing-status-observed",
+    M.safe_repo(repo),
+    "pr",
+    M.safe_issue(pr_number),
+    M.safe_head_segment(head_sha),
+  })
+end
+
+function M.iso_timestamp_epoch_seconds(timestamp)
+  local year, month, day, hour, minute, second = tostring(timestamp or ""):match(
+    "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d)[%-:](%d%d)[%-:](%d%d)Z$"
+  )
+  if year == nil then
+    return nil
+  end
+  year = tonumber(year)
+  month = tonumber(month)
+  day = tonumber(day)
+  hour = tonumber(hour)
+  minute = tonumber(minute)
+  second = tonumber(second)
+  if month < 1 or month > 12
+    or day < 1 or day > 31
+    or hour > 23
+    or minute > 59
+    or second > 59 then
+    return nil
+  end
+
+  local adjusted_year = year
+  local adjusted_month = month
+  if adjusted_month <= 2 then
+    adjusted_year = adjusted_year - 1
+    adjusted_month = adjusted_month + 12
+  end
+  local era = math.floor(adjusted_year / 400)
+  local year_of_era = adjusted_year - era * 400
+  local day_of_year = math.floor((153 * (adjusted_month - 3) + 2) / 5) + day - 1
+  local day_of_era = year_of_era * 365
+    + math.floor(year_of_era / 4)
+    - math.floor(year_of_era / 100)
+    + day_of_year
+  local days_since_epoch = era * 146097 + day_of_era - 719468
+  return days_since_epoch * 86400 + hour * 3600 + minute * 60 + second
+end
+
 function M.observe_lock_key(repo, issue_number)
   return "github-devloop/transition/" .. M.safe_repo(repo) .. "/issue/" .. M.safe_issue(issue_number)
 end
@@ -628,6 +702,48 @@ function M.implement_worktree_path(runtime_root, repo, issue_number, impl_versio
   local slug = M.safe_issue_slug(repo, issue_number)
   local suffix = decimal_checksum(tostring(repo) .. "#" .. tostring(issue_number) .. "#" .. tostring(impl_version))
   return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
+end
+
+function M.path_under_runtime_root(runtime_root, path)
+  local root = trim(runtime_root)
+  local target = trim(path)
+  if root == "" or root:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid FKST_RUNTIME_ROOT")
+  end
+  if target == "" or target:find("[\r\n]") ~= nil then
+    return false
+  end
+  root = root:gsub("/+$", "")
+  target = target:gsub("/+$", "")
+  return target == root or target:sub(1, #root + 1) == root .. "/"
+end
+
+function M.judgment_worktree_path(runtime_root, role, identity)
+  local root = trim(runtime_root)
+  if root == "" or root:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid FKST_RUNTIME_ROOT")
+  end
+  local slug = M.sanitize_key(tostring(role or "") .. "-" .. tostring(identity or ""), false):gsub("/", "-")
+  slug = slug:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
+  if slug == "" then
+    slug = "judgment"
+  end
+  if #slug > max_judgment_prefix_len then
+    slug = slug:sub(1, max_judgment_prefix_len):gsub("%-+$", ""):gsub("%.+$", "")
+  end
+  if slug == "" then
+    slug = "judgment"
+  end
+  local suffix = decimal_checksum(tostring(role) .. "#" .. tostring(identity))
+  return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
+end
+
+function M.judgment_codex_opts(prompt, worktree)
+  return {
+    prompt = prompt,
+    worktree = worktree,
+    sandbox = "read-only",
+  }
 end
 
 function M.max_body_len()
@@ -745,6 +861,32 @@ function M.normalize_source_ref(source_ref)
   }
 end
 
+function M.gh_rate_pool()
+  return { name = "gh" }
+end
+
+function M.gh_exec_opts(cmd_or_opts, timeout)
+  local opts = {}
+  if type(cmd_or_opts) == "table" then
+    for key, value in pairs(cmd_or_opts) do
+      opts[key] = value
+    end
+  else
+    opts.cmd = cmd_or_opts
+  end
+  opts.timeout = opts.timeout or timeout or 30
+  opts.rate_pool = M.gh_rate_pool()
+  return opts
+end
+
+function M.gh_exec(cmd_or_opts, timeout, exec)
+  local run = exec or exec_sync
+  if type(run) ~= "function" then
+    error("github-devloop: gh exec requires exec_sync")
+  end
+  return run(M.gh_exec_opts(cmd_or_opts, timeout))
+end
+
 
 function M.trusted_bot_login()
   return trusted_bot_login or test_bot_login
@@ -758,6 +900,8 @@ M._max_comments_len = max_comments_len
 M._max_meta_reason_len = max_meta_reason_len
 M._max_framing_len = max_framing_len
 M._max_impl_output_len = max_impl_output_len
+M._max_blocking_gap_len = max_blocking_gap_len
+M._max_review_ledger_len = max_review_ledger_len
 M._max_pr_issue_context_len = max_pr_issue_context_len
 M._max_pr_title_len = max_pr_title_len
 M._action_label = action_label
@@ -793,6 +937,7 @@ M._neutralize_fkst_markers = neutralize_fkst_markers
 M._one_line = one_line
 M._decimal_checksum = decimal_checksum
 M._is_bounded_string = is_bounded_string
+M.truncate_utf8 = sdk_truncate_utf8
 M._has_value = has_value
 M._is_review_meta_action = is_review_meta_action
 M._is_path_safe_key = is_path_safe_key

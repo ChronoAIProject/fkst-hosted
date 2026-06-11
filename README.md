@@ -43,8 +43,9 @@ scripts/run.sh test-composed        # 只跑 composed 包及其递归 deps 的�
 FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/run.sh run github-proxy github_poll
 
 # 真实前台事件循环：脚本创建临时 FKST_RUNTIME_ROOT 和独立 FKST_DURABLE_ROOT。
+# FKST_RATE_POOL_ROOT 必须由 host 设置为所有 supervise 实例共享的绝对路径。
 # 可用 FKST_PROJECT_ROOT 覆盖默认 project-root（packages/<pkg>）。
-FKST_GITHUB_REPO=owner/repo scripts/run.sh supervise github-proxy
+FKST_GITHUB_REPO=owner/repo FKST_RATE_POOL_ROOT=/var/lib/fkst/rate-pools scripts/run.sh supervise github-proxy
 
 # 本地 test/run/supervise 会对可溯源到 ../fkst-substrate 的 BIN 做 freshness 自动构建；
 # CI 不自动 build，FKST_NO_AUTOBUILD=1 可跳过。显式 build 仍会 git pull && cargo build。
@@ -53,7 +54,7 @@ scripts/run.sh build
 
 `run` 用临时（或复用已设的）`FKST_RUNTIME_ROOT`、绝不设 `FKST_GITHUB_WRITE`，所以只读 dogfood 保持只读；同一 `FKST_RUNTIME_ROOT` 连跑两次可看去重。脚本对任何 `packages/<pkg>/departments/<dept>` 通用，不写死 github-proxy。
 
-`supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并设置彼此不同的临时 `FKST_RUNTIME_ROOT` / `FKST_DURABLE_ROOT`。
+`supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并设置彼此不同的临时 `FKST_RUNTIME_ROOT` / `FKST_DURABLE_ROOT`。真实 supervise 还会 fail-closed 要求 `FKST_RATE_POOL_ROOT` 是 host 提供的绝对路径；每个消耗同一 GitHub 配额的实例必须指向同一个目录。
 
 本库不做版本化 manifest、root-list 或 override DSL。图由固定的 `departments/` 和 `raisers/` 目录扫描得到。flat 包可独立加载；composed 包显式承担跨包 wiring，并用 `composed.deps` 告诉测试脚本组合 conformance 需要一起加载哪些兄弟包。
 
@@ -69,6 +70,7 @@ scripts/run.sh build
 - 组合 conformance：`scripts/run.sh test-composed` 收集所有带 `composed.deps` 的包及其递归依赖，以仓库根为 `--project-root`、收集到的包为 `--package-root` 验证 union graph。
 - CI 调 `scripts/run.sh test`，与本地标准测试走同一路径：先跑一次 `fkst-framework --self-test`，flat 包跑 `conformance + test`，composed 包跑 test，最后跑组合 conformance。
 - 新包清单：有逻辑就写 unit，有运行时行为就写 integration，布线靠 conformance。
+- Boundary tests for truncation and cache-key generation must use package-local production-shaped fixture helpers. Fixtures should include multibyte CJK/emoji titles and full-length PR-review proposal ids, so byte boundaries and the `max_key_len=200` contract are reachable in tests instead of only in production.
 
 ## 测试运行体系 / 守卫
 
@@ -82,6 +84,7 @@ scripts/run.sh build
 - 对单个 `*_test.lua` 内 best-effort 识别到的 top-level `test_<name>` key 做重复检查；常见 assignment form（如 `test_x = ...`、`["test_x"] = ...`、`M.test_x = ...`、`M["test_x"] = ...`）与常见 function-definition form（如 `function test_x() ... end`、`function M.test_x() ... end`、`function M:test_x() ... end`）都会归一到同一个 key，重复即 G2 失败，避免 Lua table 覆盖导致早期测试静默丢失。
 - `*_helpers.lua` 不能定义可被该 lint 识别的任何 `test_<name>` entry，无论 RHS 是什么；常见 assignment 与 function-definition form 都会被识别，避免测试漏进 helper。
 - 每个 helper 模块 `tests.<stem>` 必须被同包 tests 目录下至少一个其他 Lua 文件 `require("tests.<stem>")`；`require("tests.<x>")` 必须指向存在的 `tests/<x>.lua`，且测试文件和 helper 都不能 require 另一个 `*_test.lua` 模块。
+- `gh_rate_pool` in package source may only declare the named pool `gh`; sizing belongs to host posture via `FKST_RATE_POOL_GH`.
 
 G5 是全量测试的引擎真实输出覆盖检查：无参 `scripts/run.sh test` 会在全量测试结束后，从引擎 stdout 中锚定提取 `PASS <relfile>::<test_name>` 行，并要求每个 `packages/*/tests/*_test.lua` 文件至少产生一行被接受的 engine-format `PASS <relfile>::...`，否则说明该文件没有贡献任何引擎实际运行的测试，测试会失败并列出文件名。提取只接受整行精确匹配 `PASS <relfile>::test_<name>` 的行，其中 `<relfile>` 必须是本次实际扫描到的 `packages/*/tests/*_test.lua`，`<name>` 必须匹配 `test_[A-Za-z0-9_]+`；中间夹杂文本或 malformed `PASS ...` 不会计入。`scripts/run.sh test <pkg>` 是局部运行，会跳过 G5。
 
@@ -113,6 +116,7 @@ engine-PR backlog：
 - `FKST_GITHUB_REPO=owner/repo` 必填；缺失时 fail-closed。
 - `FKST_RUNTIME_ROOT=/path/to/runtime` 必填；引擎用它管理 cache / lock 状态，缺失时入站 poll fail-closed。
 - `FKST_GITHUB_WRITE=1` 是唯一写入姿态开关；未设置或不等于 `1` 时只 dry-run，不调用 mutate GitHub 的 `gh` 命令；设为 `1` 时 `github-devloop` 直接自治执行真实写入。
+- `gh` traffic from `github-proxy` and `github-devloop` is tagged with the engine named rate pool `gh`; host posture owns sizing via `FKST_RATE_POOL_GH=<burst>,<refill_per_minute>`. Real supervise runs fail closed unless `FKST_RATE_POOL_ROOT` is an absolute host-stable shared path, so package and website supervisors spend one GitHub budget instead of separate local budgets. 中文补充：这是集中令牌桶/共享速率池治理，不是 package 侧 sleep。
 - `gh` auth、PATH、权限和 repo 当前 git 工作区都是 host 责任。
 
 本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试用 `fkst.test.mock_command` mock `gh issue list` / `gh pr list` / `gh issue view` / `gh issue comment` / `gh issue edit`，并用 `fkst.test.command_calls` 断言发出的命令；不生成 fake `gh` 二进制。测试由 `fkst-framework test` 自动运行：

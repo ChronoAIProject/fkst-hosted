@@ -2,7 +2,7 @@
 
 ## 工作语言
 
-源文件内部一律英文：`.lua`、`.sh`、`.py`、`.rs` 等里的注释、docstring、log/error 文本、模板字符串和标识符都保持英文，与 fkst-substrate 引擎、命令行工具和 LLM 语料一致。源文件之外的对外产物（文档、issue/PR/comment、commit message、变更说明）**英文为主、中英双语**：英文是准绳文本，中文可作辅助补注。代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。对话回复跟随用户语言。不要中英混杂凑句子。存量中文文档（含本文件）可保留中文，新增规范性文本英文优先。
+源文件内部一律英文：`.lua`、`.sh`、`.py`、`.rs` 等里的注释、docstring、log/error 文本、模板字符串和标识符都保持英文，与 fkst-substrate 引擎、命令行工具和 LLM 语料一致。例外：明确作为本地化资源表保存的 outward text values 可以使用目标语言的 UTF-8 字面量；这些文本必须保持源码可读、可 grep，禁止用 hex/base64/byte-escape/`string.char` 等 decode helper 隐藏。源文件之外的对外产物（文档、issue/PR/comment、commit message、变更说明）**英文为主、中英双语**：英文是准绳文本，中文可作辅助补注。代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。对话回复跟随用户语言。不要中英混杂凑句子。存量中文文档（含本文件）可保留中文，新增规范性文本英文优先。
 
 ## 这个仓库是什么
 
@@ -56,6 +56,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 ## 设计模式原则
 
 - **模式服务当前问题**：只有当重复形状已经出现、边界已经稳定、测试能证明收益时才引入设计模式；不要为了命名完整而提前套 Factory、Strategy、Observer 等模板。
+- **三次法则（Rule of Three，与上条互为两半）**：等重复出现的前提是**数得到重复**。同类问题第 1 次点状修复；第 2 次点状修复并显式登记模式关联（链接兄弟案）；第 3 次**必须**升维到类级成熟方案（或留下显式豁免理由）——不数重复的「等重复」等于永远点状修复。判断管线须能看见近期已关闭案摘要，使「第 N 次」对新生 codex 可见。
 - **显式优先**：Lua package 中优先使用普通函数、table 和清晰数据流表达模式；避免隐藏控制流的全局注册表、自动发现、动态 monkey patch 和深层 metatable。
 - **边界模式固定**：外部系统接入优先用 Adapter，把 `gh`、`codex exec`、文件和网络形态转成包内稳定结构；副作用边界集中，业务函数保持可单测。
 - **分支策略清晰**：当同一流程因类型、来源或目标变化产生分支时，优先用 Strategy 形态的小函数表或显式 dispatch table；每个分支要有窄测试，不把条件散落在 `pipeline` 多处。
@@ -82,6 +83,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 ## 纪律（沿用 fkst-substrate）
 
+- **永不手改程序状态（program-state is program-only）**：系统状态（state/converge/review-result 等 marker、runtime/durable 内容）只能由程序产生，任何人（含运营者/babysitter agent）不得手写或直接修改——即使身份可信、语法正确。需要干预时的固定顺序：**先改程序**（自驱管线优先；程序自身瘫痪才走 out-of-band 修程序），再通过 GitHub 面的合法接口操作（issue、评论指令、push 提交、关闭自己立的 issue）。人的干预必须是程序定义的合法输入，不是代行程序的状态写权。
 - 源文件内部英文；对外产物英文为主、中英双语。错误分类要窄（避免 `general error`）；日志/commit/event payload 可 grep。AI 生成的对外文本末尾保留 `⟦AI:FKST⟧`。
 - 单个源代码文件不得超过 1000 行（范围含生产源码、测试源码、脚本源码，.lua/.sh/.py/.rs 等），硬上限、不设豁免；先删死码/重复代码，再按稳定职责拆成包内子模块或多个 `*_test.lua`；不得用无职责边界的碎片化、空转发文件或 compat/legacy/shim 壳凑行数。
 - 不留 deprecated shim / compat layer / `.old` / `_legacy`；改契约就改完整，旧形态从当前态删除。文档描述当前态，历史留 git。
