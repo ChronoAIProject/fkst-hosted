@@ -13,6 +13,18 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --json number,title,updatedAt,labels"
 end
 
+function M.gh_issue_list_recent_closed_cmd(repo, limit)
+  local bounded_limit = tonumber(limit or 30)
+  if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then
+    error("github-devloop: invalid closed issue list limit")
+  end
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state closed"
+    .. " --limit " .. tostring(math.floor(bounded_limit))
+    .. " --json number,title,closedAt,labels"
+end
+
 function M.gh_issue_list_observe_cmd(repo, label)
   local selected_label = label or M._enabled_label
   return "gh api --paginate --slurp "

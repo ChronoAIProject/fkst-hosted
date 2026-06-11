@@ -44,6 +44,17 @@ local function board_digest_pr_list_cmd(M, repo)
     .. " --json number,title,labels"
 end
 
+local function recent_closed_issue_list_cmd(M, repo)
+  if type(M.gh_issue_list_recent_closed_cmd) == "function" then
+    return M.gh_issue_list_recent_closed_cmd(repo, 30)
+  end
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state closed"
+    .. " --limit 30"
+    .. " --json number,title,closedAt,labels"
+end
+
 local function label_names(labels_json)
   local labels = {}
   for _, label in ipairs(labels_json or {}) do
@@ -74,6 +85,33 @@ local function parse_board_list(stdout)
   return items
 end
 
+local function first_chars(M, value, limit)
+  local text = tostring(value or ""):gsub("[%s]+", " ")
+  if #text > limit then
+    return M.truncate_utf8(text, limit)
+  end
+  return text
+end
+
+local function recurrence_label_digest(M, labels)
+  local selected = {}
+  for _, label in ipairs(labels or {}) do
+    local text = tostring(label)
+    if text:find("^error%-class:", 1) ~= nil
+      or text:find("^fingerprint:", 1) ~= nil
+      or text:find("^fkst%-dev:", 1) ~= nil then
+      table.insert(selected, text)
+    end
+    if #selected >= 4 then
+      break
+    end
+  end
+  if #selected == 0 then
+    return "labels=none"
+  end
+  return "labels=" .. first_chars(M, table.concat(selected, ","), 120)
+end
+
 local function state_label(M, labels)
   for _, label in ipairs(labels or {}) do
     local text = tostring(label)
@@ -84,15 +122,14 @@ local function state_label(M, labels)
   return "open"
 end
 
-local function first_chars(M, value, limit)
-  local text = tostring(value or ""):gsub("[%s]+", " ")
-  if #text > limit then
-    return M.truncate_utf8(text, limit)
-  end
-  return text
+local function render_closed_issue_line(M, item)
+  return "#" .. tostring(item.number)
+    .. " [closed] "
+    .. first_chars(M, item.title, 80)
+    .. " (" .. recurrence_label_digest(M, item.labels) .. ")"
 end
 
-local function render_board_digest(M, issues, prs)
+local function render_board_digest(M, issues, prs, closed_issues)
   local lines = {
     M._untrusted_issue_data_begin,
     "Open items snapshot:",
@@ -113,6 +150,17 @@ local function render_board_digest(M, issues, prs)
       .. " [" .. state_label(M, item.labels) .. "] "
       .. first_chars(M, item.title, 60))
   end
+  table.insert(lines, "")
+  table.insert(lines, "Recent closed issues for recurrence judgment:")
+  for _, item in ipairs(closed_issues or {}) do
+    if #lines >= 84 then
+      break
+    end
+    table.insert(lines, render_closed_issue_line(M, item))
+  end
+  if type(closed_issues) ~= "table" or #closed_issues == 0 then
+    table.insert(lines, "(none fetched)")
+  end
   table.insert(lines, M._untrusted_issue_data_end)
   return table.concat(lines, "\n")
 end
@@ -129,13 +177,27 @@ function M.board_digest_block(repo, tick)
 
   local ok_issue, issue_result = pcall(M.gh_exec, { cmd = board_digest_issue_list_cmd(M, repo), timeout = 30 })
   local ok_pr, pr_result = pcall(M.gh_exec, { cmd = board_digest_pr_list_cmd(M, repo), timeout = 30 })
+  local ok_closed, closed_result = pcall(M.gh_exec, { cmd = recent_closed_issue_list_cmd(M, repo), timeout = 30 })
   if not ok_issue or not ok_pr
     or type(issue_result) ~= "table" or issue_result.exit_code ~= 0
     or type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return ""
   end
 
-  local block = render_board_digest(M, parse_board_list(issue_result.stdout), parse_board_list(pr_result.stdout))
+  local closed_issues = nil
+  if ok_closed and type(closed_result) == "table" and closed_result.exit_code == 0 then
+    local ok_parse, parsed = pcall(parse_board_list, closed_result.stdout)
+    if ok_parse then
+      closed_issues = parsed
+    end
+  end
+
+  local block = render_board_digest(
+    M,
+    parse_board_list(issue_result.stdout),
+    parse_board_list(pr_result.stdout),
+    closed_issues
+  )
   cache_set(key, block)
   return block
 end
@@ -308,6 +370,7 @@ function M.build_proposal(issue)
   end
   local body = "Judge the current GitHub issue from the full source content."
     .. "\nIssue: " .. tostring(issue.repo) .. "#" .. tostring(issue.number)
+    .. "\nRecurrence: read recent closed issues in context; if this is the third same-class instance, reframe to a class solution or give an explicit waiver."
 
   return {
     schema = "consensus.proposal.v1",
