@@ -12,6 +12,7 @@ pub mod error;
 pub mod leases;
 pub mod models;
 pub mod packages;
+pub mod reconcile;
 pub mod router;
 pub mod routes;
 pub mod sessions;

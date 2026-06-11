@@ -11,6 +11,7 @@ use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost,
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::leases::LeaseStore;
 use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -96,6 +97,20 @@ async fn main() -> ExitCode {
         "engine config loaded"
     );
 
+    // 4c-bis. Load the orphan-reconcile configuration (fail-closed on a
+    //     malformed value — the SWEEP itself is fail-open later, but a bad
+    //     env value is a misconfiguration that should be caught loudly).
+    //     A clone of the engine config carries `temp_root` into the sweep,
+    //     since `engine_config` is later moved into the session service.
+    let reconcile_config = match ReconcileConfig::load_from_env() {
+        Ok(reconcile_config) => reconcile_config,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to load reconcile configuration");
+            return ExitCode::FAILURE;
+        }
+    };
+    let reconcile_engine_config = engine_config.clone();
+
     // 4d. Load the distribution configuration (fail-closed: a bad cadence
     //     or pod identity must never reach the lease layer).
     let distribution_config = match DistributionConfig::load_from_env() {
@@ -136,6 +151,31 @@ async fn main() -> ExitCode {
             tracing::error!(error = %error, "orphan sweep failed");
             return ExitCode::FAILURE;
         }
+    }
+
+    // 4f-bis. Sweep orphan engine RUNTIME dirs (fkst-rt-*) left by a prior
+    //     HARD-KILLED incarnation of THIS pod (TempDir RAII cleans every
+    //     normal path; only a kill -9 / OOM leaks them — issue #26 reduced
+    //     scope). Runtime dirs are fenced against live sessions' runtime_dir
+    //     values and an mtime safety threshold. Package dirs (fkst-pkg-*) are
+    //     NOT deleted — their path is not persisted, so they cannot be fenced
+    //     (counted as skipped_unfenceable). FAIL-OPEN: a sweep error logs WARN
+    //     and never blocks startup — cleaning is best-effort, unlike the
+    //     fail-closed config/index steps above.
+    match reconcile_orphans(&db, &reconcile_engine_config, &reconcile_config).await {
+        Ok(report) => tracing::info!(
+            scanned = report.scanned,
+            swept = report.swept_count(),
+            skipped_live = report.skipped_live,
+            skipped_too_new = report.skipped_too_new,
+            skipped_unfenceable = report.skipped_unfenceable,
+            errors = report.error_count(),
+            "orphan temp-dir reconciliation completed"
+        ),
+        Err(error) => tracing::warn!(
+            error = %error,
+            "orphan temp-dir reconciliation failed (non-fatal, continuing startup)"
+        ),
     }
 
     // 4g. Spawn the takeover reaper, cancelled on shutdown.
