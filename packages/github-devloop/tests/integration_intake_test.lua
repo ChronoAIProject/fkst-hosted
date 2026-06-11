@@ -176,6 +176,14 @@ local function mock_intake_codex(stdout, exit_code, stderr)
   })
 end
 
+local function mock_intake_class_lookup(issues)
+  t.mock_command("--state open --limit 100 --json number,title,updatedAt,labels", {
+    stdout = issue_list_json(issues or {}) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function codex_calls()
   local calls = {}
   for _, call in ipairs(t.command_calls()) do
@@ -320,7 +328,7 @@ return {
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
   end,
 
-  test_judge_escalate_to_class_files_class_issue_and_folds_instance = function()
+  test_judge_escalate_to_class_creates_carrier_links_and_folds_instance = function()
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {}, {
@@ -328,19 +336,65 @@ return {
       body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
     })
     mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_intake_class_lookup({})
 
     local result = run_judge(payload, opts("intake-escalate-class"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    t.eq(#result.raises, 4)
+    local comment = find_comment_body(result.raises, 'decision="escalate-to-class"')
+    local followup = find_comment_body(result.raises, "intake class follow-up: folded")
     local create = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find('decision="escalate-to-class"', 1, true) ~= nil)
     t.is_true(comment.body:find("Rule of Three", 1, true) ~= nil)
+    t.is_true(followup.body:find('outcome="folded"', 1, true) ~= nil)
+    t.is_true(followup.body:find('carrier="pending-create"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(create.schema, "github-proxy.issue-create.v1")
     t.eq(create.parent_comment_target.issue_number, "42")
     t.is_true(create.title:find("Class fix needed:", 1, true) == 1)
     t.is_true(create.body:find("intent-before-create", 1, true) ~= nil)
-    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_label_request"))
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_judge_escalate_to_class_reuses_existing_carrier_without_create = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Fix widget sync retry overflow again",
+      body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_intake_class_lookup({
+      { number = 77, title = "Class fix needed: Fix widget sync retry overflow again", labels = {} },
+    })
+
+    local result = run_judge(payload, opts("intake-escalate-class-reuse"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    local followup = find_comment_body(result.raises, "intake class follow-up: folded")
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(followup.body:find("Class carrier: #77", 1, true) ~= nil)
+    t.is_true(followup.body:find('carrier="77"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
+  end,
+
+  test_judge_class_carrier_enables_without_escalation_followup = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Recurrence-aware widget sync policy",
+      body = "This issue cites #80 and #81 and proposes the class-level retry policy.",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ This issue is the class carrier, so Rule of Three is satisfied in-pipeline.")
+
+    local result = run_judge(payload, opts("intake-class-carrier-enable"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 
   test_judge_declines_umbrella_tracker_through_codex_policy = function()

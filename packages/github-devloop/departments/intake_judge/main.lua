@@ -113,8 +113,14 @@ function pipeline(event)
     if command_comment_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_comment_request")
     end
+    local class_carrier = nil
     if parsed.action == "escalate-to-class" then
-      table.insert(raised, "github-proxy.github_issue_create_request")
+      class_carrier = core.find_open_intake_class_carrier(repo, issue_number, current)
+      table.insert(raised, "github-proxy.github_issue_comment_request")
+      table.insert(raised, "github-proxy.github_issue_label_request")
+      if class_carrier == nil then
+        table.insert(raised, "github-proxy.github_issue_create_request")
+      end
     end
     if enables_pipeline(parsed.action) then
       table.insert(raised, "github-proxy.github_issue_label_request")
@@ -128,8 +134,21 @@ function pipeline(event)
     end
     core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     if parsed.action == "escalate-to-class" then
-      local create_request = core.build_intake_class_issue_create_request(repo, issue_number, candidate, current, parsed.reason)
-      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_create_request", create_request)
+      local followup_comment = core.build_intake_class_followup_comment_request(
+        repo,
+        issue_number,
+        candidate,
+        class_carrier,
+        "folded",
+        parsed.reason
+      )
+      local folded_label = core.build_intake_class_folded_label_request(repo, issue_number, candidate)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", followup_comment)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", folded_label)
+      if class_carrier == nil then
+        local create_request = core.build_intake_class_issue_create_request(repo, issue_number, candidate, current, parsed.reason)
+        core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_create_request", create_request)
+      end
     end
     if enables_pipeline(parsed.action) then
       local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
