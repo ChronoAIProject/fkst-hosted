@@ -90,6 +90,10 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
     local issue_comments = issue_comments_for_origin(origin)
     local fact_comments = issue_comments or current_pr.comments
     local reject_fact = core.review_reject_fact(fact_comments, origin.proposal_id, state.version)
+    if reject_fact == nil then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(no-trusted-reject-fact)", "trusted reject review marker is not visible")
+      return
+    end
     if reject_fact ~= nil and reject_fact.review_proposal_id ~= nil and reject_fact.reviewed_head_sha ~= nil then
       if tostring(current_pr.head_sha or "") ~= tostring(reject_fact.reviewed_head_sha or "") then
         core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
