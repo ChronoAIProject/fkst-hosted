@@ -8,6 +8,7 @@ local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"
 local max_dashboard_body_len = 12000
 local max_dashboard_section_items = 40
 local max_dashboard_title_len = 80
+local max_reap_reason_len = 180
 local stall_suspect_threshold_minutes = {
   thinking = 30,
   ready = 30,
@@ -233,6 +234,20 @@ local function fetch_pr(repo, pr_number)
   return M.parse_pr_view_origin(view.stdout)
 end
 
+local function reaper_body_path(repo, pr_number, proposal_id)
+  local safe_repo = M.safe_repo(repo):gsub("[/%s]+", "-")
+  local safe_issue = M.sanitize_key(tostring(proposal_id or "unknown"), false):gsub("[/%s]+", "-")
+  local identity = safe_repo .. "-pr-" .. tostring(pr_number) .. "-" .. safe_issue
+  identity = identity:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+  if identity == "" then
+    identity = "orphan-pr"
+  end
+  if #identity > 180 then
+    identity = identity:sub(1, 180):gsub("%-+$", "")
+  end
+  return "/tmp/fkst-github-devloop-reap-" .. identity .. ".md"
+end
+
 local function state_or_nil(state)
   if type(state) ~= "table" or state.state == nil then
     return nil
@@ -255,6 +270,7 @@ local function put_issue_entity(entities, repo, issue_number, issue)
   }
   entity.issue_number = tonumber(issue_number)
   entity.title = issue.title
+  entity.parent_issue = issue
   if state_or_nil(issue_state) ~= nil then
     entity.state = issue_state
     entity.marker_source = "issue"
@@ -283,12 +299,166 @@ local function put_pr_entity(entities, repo, pr_number, pr)
   }
   entity.issue_number = origin.issue_number
   entity.pr_number = tonumber(pr_number)
+  entity.pr_origin = origin
+  entity.pr = pr
   if state_or_nil(pr_state) ~= nil then
     entity.state = pr_state
     entity.marker_source = "pr-comment"
   end
   entities[proposal_id] = entity
   return entity
+end
+
+local function orphan_reap_log_line(repo, pr_number, proposal_id, action, reason)
+  return table.concat({
+    "github-devloop",
+    "dept=" .. dept,
+    "tag=REAP",
+    "repo=" .. tostring(repo or ""),
+    "pr=" .. tostring(pr_number or ""),
+    "proposal_id=" .. tostring(proposal_id or "unknown"),
+    "action=" .. tostring(action or "skip"),
+    "reason=" .. tostring(reason or ""),
+  }, " ")
+end
+
+local function successor_issue_numbers(comments, proposal_id)
+  local successors = {}
+  local seen = {}
+  local dedup_prefix = "decompose/" .. tostring(proposal_id) .. "/"
+  local marker_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local dedup = marker:match('dedup="([^"]+)"')
+      local issue = marker:match('issue="([^"]+)"')
+      if tostring(dedup or ""):sub(1, #dedup_prefix) == dedup_prefix
+        and M._is_positive_pr_number(issue)
+        and not seen[tostring(issue)] then
+        seen[tostring(issue)] = true
+        table.insert(successors, tonumber(issue))
+      end
+    end
+  end
+  table.sort(successors)
+  return successors
+end
+
+local function successor_summary(successors, fallback_count)
+  if #successors == 0 then
+    return tostring(fallback_count or 0) .. " successor issue(s)"
+  end
+  local refs = {}
+  for _, issue in ipairs(successors) do
+    table.insert(refs, "#" .. tostring(issue))
+  end
+  return table.concat(refs, ", ")
+end
+
+local function terminal_parent_reason(parent_issue, entity)
+  local proposal_id = entity.proposal_id
+  local pr_comments = entity.pr and entity.pr.comments or {}
+  local successors = successor_issue_numbers(pr_comments, proposal_id)
+  if tostring(parent_issue and parent_issue.state or ""):upper() == "CLOSED" then
+    return {
+      code = "parent-closed",
+      text = "Parent issue #" .. tostring(select(2, M.parse_proposal_id(proposal_id)) or "unknown") .. " is closed.",
+      successors = successors,
+    }
+  end
+  local decomposed = M.decomposed_fact(pr_comments, proposal_id)
+    or M.decomposed_fact(parent_issue and parent_issue.comments or {}, proposal_id)
+  if decomposed ~= nil
+    and tostring(decomposed.pr_number or "") == tostring(entity.pr_number or "")
+    and #successors >= decomposed.count then
+    return {
+      code = "parent-decomposed",
+      text = "Parent issue #"
+        .. tostring(select(2, M.parse_proposal_id(proposal_id)) or "unknown")
+        .. " has a trusted decomposed marker with successors: "
+        .. successor_summary(successors, decomposed.count),
+      successors = successors,
+    }
+  end
+  return nil
+end
+
+local function reaper_comment_body(proposal_id, pr_number, reason)
+  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  local parent_ref = "#" .. tostring(issue_number or "unknown")
+  local reason_text = tostring(reason and reason.text or "")
+  if #reason_text > max_reap_reason_len then
+    reason_text = M.truncate_utf8(reason_text, max_reap_reason_len)
+  end
+  return "github-devloop reaped this managed PR because its parent issue is terminal.\n\n"
+    .. "Parent: " .. parent_ref .. "\n"
+    .. "Reason: " .. reason_text .. "\n"
+    .. "Successors: " .. successor_summary(reason and reason.successors or {}, nil) .. "\n"
+    .. "Branch cleanup is intentionally left to a separate manual or managed path.\n\n"
+    .. M.orphan_reaped_marker(proposal_id, pr_number, reason and reason.code or "parent-terminal")
+    .. "\n"
+end
+
+local function reap_orphan_pr(repo, entity)
+  if entity == nil or entity.pr_origin == nil or entity.pr == nil then
+    return
+  end
+  local origin = entity.pr_origin
+  local proposal_id = origin.proposal_id
+  local pr_number = entity.pr_number
+  if not M.is_devloop_issue_branch(origin.branch) then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "non-devloop-branch"))
+    return
+  end
+  if tostring(entity.pr.head_ref_name or "") ~= tostring(origin.branch or "") then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "branch-mismatch"))
+    return
+  end
+  if tostring(entity.pr.state or ""):upper() ~= "OPEN" then
+    return
+  end
+  if M.has_orphan_reaped_marker(entity.pr.comments, proposal_id, pr_number) then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip-idempotent", "orphan-reaped-marker-visible"))
+    return
+  end
+
+  local parent = entity.parent_issue or fetch_issue(repo, origin.issue_number)
+  local parent_state = M.current_state(parent.comments, proposal_id)
+  local reason = terminal_parent_reason(parent, entity)
+  if reason == nil then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "parent-active"))
+    return
+  end
+  if reason.code ~= "parent-decomposed"
+    and tostring(parent.state or ""):upper() ~= "CLOSED"
+    and parent_state.state ~= "blocked"
+    and parent_state.state ~= "impl-failed"
+    and parent_state.state ~= "merged" then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "parent-marker-not-terminal"))
+    return
+  end
+
+  if M.write_mode() ~= "real" then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "dry-run", reason.code))
+    return
+  end
+
+  local closed = M.gh_exec({ cmd = M.gh_pr_close_cmd(repo, pr_number), timeout = 30 })
+  if closed.exit_code ~= 0 then
+    error("github-devloop: gh orphan PR close failed: " .. tostring(closed.stderr))
+  end
+  local path = reaper_body_path(repo, pr_number, proposal_id)
+  file.write(path, reaper_comment_body(proposal_id, pr_number, reason))
+  local commented = M.gh_exec({ cmd = M.gh_pr_comment_cmd(repo, pr_number, path), timeout = 30 })
+  if commented.exit_code ~= 0 then
+    error("github-devloop: gh orphan PR reaper comment failed: " .. tostring(commented.stderr))
+  end
+  log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "closed", reason.code))
+end
+
+local function reap_orphan_prs(repo, entities)
+  for _, entity in ipairs(entities or {}) do
+    reap_orphan_pr(repo, entity)
+  end
 end
 
 local function observe_issue_candidates(repo, issue_numbers, entities, seen_prs)
@@ -759,6 +929,7 @@ function M.observe_devloop_entities()
     end
   end
   log_summary(counts, #list)
+  reap_orphan_prs(repo, list)
   local dashboard = M.render_observability_dashboard({
     entities = list,
     counts = counts,
