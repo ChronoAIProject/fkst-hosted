@@ -14,11 +14,11 @@ local function bounded_neutralized_text(value, limit)
   local text = tostring(value or "")
   local cap = limit or max_display_digest_len
   if #text > cap then
-    text = M._utf8_safe_truncate(text, cap)
+    text = M.truncate_utf8(text, cap)
   end
   text = M.neutralize_untrusted_comment_text(text)
   if #text > cap then
-    text = M._utf8_safe_truncate(text, cap)
+    text = M.truncate_utf8(text, cap)
   end
   return text
 end
@@ -67,7 +67,7 @@ local function build_convergence_display(header, unresolved, round)
   end
   local body = table.concat(lines, "\n")
   if #body > max_display_block_len then
-    body = M._utf8_safe_truncate(body, max_display_block_len)
+    body = M.truncate_utf8(body, max_display_block_len)
   end
   return body
 end
@@ -92,7 +92,7 @@ local function build_verdict_summary(angle_results)
   end
   local summary = M.comment_string("verdict_summary_label") .. table.concat(parts, " ")
   if #summary > max_verdict_summary_len then
-    summary = M._utf8_safe_truncate(summary, max_verdict_summary_len)
+    summary = M.truncate_utf8(summary, max_verdict_summary_len)
   end
   return summary
 end
@@ -105,7 +105,7 @@ local function build_comment_evidence_digest(M, comments)
     return M.comment_string("comment_evidence_empty")
   end
   if #text > max_verdict_summary_len then
-    text = M._utf8_safe_truncate(text, max_verdict_summary_len)
+    text = M.truncate_utf8(text, max_verdict_summary_len)
   end
   return text
 end
@@ -121,7 +121,7 @@ local function bounded_blocking_gap(M, reached)
     return nil
   end
   if #text > M._max_blocking_gap_len then
-    text = M._utf8_safe_truncate(text, M._max_blocking_gap_len)
+    text = M.truncate_utf8(text, M._max_blocking_gap_len)
   end
   return text
 end
@@ -392,7 +392,7 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
     safe_reason = M.comment_string("no_reason_provided")
   end
   if #safe_reason > M._max_meta_reason_len then
-    safe_reason = M._utf8_safe_truncate(safe_reason, M._max_meta_reason_len)
+    safe_reason = M.truncate_utf8(safe_reason, M._max_meta_reason_len)
   end
   return {
     schema = "github-proxy.v1",
@@ -499,7 +499,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
   local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
-    text = M._utf8_safe_truncate(text, M._max_impl_output_len)
+    text = M.truncate_utf8(text, M._max_impl_output_len)
   end
   if text == "" then
     text = M.comment_string("no_implementation_output")
@@ -545,7 +545,7 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
     bounded_title = "github-devloop implementation for #" .. tostring(issue_number)
   end
   if #bounded_title > M._max_pr_title_len then
-    bounded_title = M._utf8_safe_truncate(bounded_title, M._max_pr_title_len)
+    bounded_title = M.truncate_utf8(bounded_title, M._max_pr_title_len)
   end
   local body = "github-devloop implementation PR for issue #" .. tostring(issue_number)
     .. "\n\n" .. M.pr_origin_marker(proposal_id, issue_number, branch, current.version, base_branch)
@@ -839,7 +839,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
   local safe_reason = M.sanitize_key(reason or "no-fix"):gsub("/", "-")
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
-    text = M._utf8_safe_truncate(text, M._max_impl_output_len)
+    text = M.truncate_utf8(text, M._max_impl_output_len)
   end
   if text == "" then
     text = M.comment_string("no_fix_output")
@@ -919,7 +919,7 @@ end
 function M.build_spec_amendment_issue_create_request(repo, issue_number, review_meta, title_brief, reason, comments)
   local title = "Spec amendment needed: " .. tostring(title_brief or ("Issue #" .. tostring(issue_number or "unknown")))
   if #title > M._max_title_len then
-    title = M._utf8_safe_truncate(title, M._max_title_len)
+    title = M.truncate_utf8(title, M._max_title_len)
   end
   local evidence = build_comment_evidence_digest(M, comments)
   local body = "Spec flaw statement:\n" .. M.neutralize_untrusted_comment_text(reason or "")
@@ -930,7 +930,7 @@ function M.build_spec_amendment_issue_create_request(repo, issue_number, review_
     .. "\nReview dedup: " .. tostring(review_meta.dedup_key)
     .. "\n\nThis issue requests a spec revision only. Do not edit the human-authored parent issue text."
   if #body > M._max_body_len then
-    body = M._utf8_safe_truncate(body, M._max_body_len)
+    body = M.truncate_utf8(body, M._max_body_len)
   end
   return {
     schema = "github-proxy.issue-create.v1",

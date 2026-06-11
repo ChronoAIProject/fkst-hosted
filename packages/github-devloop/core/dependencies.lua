@@ -65,7 +65,7 @@ local function safe_dependency_attr(value)
   text = text:gsub("%c", " "):gsub('"', "'"):gsub("[<>]", ""):gsub("%s+", " ")
   text = text:gsub("^%s+", ""):gsub("%s+$", "")
   if #text > 240 then
-    text = core._utf8_safe_truncate(text, 240)
+    text = core.truncate_utf8(text, 240)
   end
   return text
 end
