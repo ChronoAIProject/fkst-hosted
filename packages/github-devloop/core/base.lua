@@ -2,10 +2,6 @@ local S = {}
 
 function S.install(M)
 
-if type(truncate_utf8) ~= "function" then
-  error("github-devloop: truncate_utf8 SDK primitive is required")
-end
-
 local max_key_len = 200
 local max_dedup_len = 512
 local max_title_len = 240
@@ -149,6 +145,13 @@ end
 
 local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
+end
+
+local function sdk_truncate_utf8(value, limit)
+  if type(truncate_utf8) ~= "function" then
+    error("github-devloop: truncate_utf8 SDK primitive is required")
+  end
+  return truncate_utf8(value, limit)
 end
 
 local function has_value(values, expected)
@@ -830,7 +833,7 @@ M._neutralize_fkst_markers = neutralize_fkst_markers
 M._one_line = one_line
 M._decimal_checksum = decimal_checksum
 M._is_bounded_string = is_bounded_string
-M.truncate_utf8 = truncate_utf8
+M.truncate_utf8 = sdk_truncate_utf8
 M._has_value = has_value
 M._is_review_meta_action = is_review_meta_action
 M._is_path_safe_key = is_path_safe_key
