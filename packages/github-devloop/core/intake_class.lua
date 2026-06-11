@@ -3,6 +3,19 @@ local S = {}
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
 
+local function normalized_class_reason(reason)
+  local text = tostring(reason or ""):lower()
+  text = text:gsub("#%d+", " ")
+  text = text:gsub("%f[%w]cites?%f[^%w]", " ")
+  text = text:gsub("%f[%w]prior%f[^%w]", " ")
+  text = text:gsub("%f[%w]siblings?%f[^%w]", " ")
+  text = text:gsub("%f[%w]rule%f[^%w]%s+%f[%w]of%f[^%w]%s+%f[%w]three%f[^%w]", " ")
+  text = text:gsub("%f[%w]requires?%f[^%w]", " ")
+  text = text:gsub("%f[%w]class%f[^%w]%s*%-?%s*%f[%w]level%f[^%w]", "class-level")
+  text = text:gsub("[^%w%-]+", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+  return text
+end
+
 function M.intake_class_identity(reason, current, issue_number)
   local seen = {}
   local siblings = {}
@@ -17,11 +30,10 @@ function M.intake_class_identity(reason, current, issue_number)
   end
   table.sort(siblings)
   if #siblings >= 2 then
-    local parts = {}
-    for _, number in ipairs(siblings) do
-      table.insert(parts, tostring(number))
+    local reason_key = normalized_class_reason(reason)
+    if reason_key ~= "" then
+      return "class:" .. reason_key
     end
-    return "siblings:" .. table.concat(parts, ",")
   end
   local title_key = tostring(current and current.title or ("Issue #" .. tostring(issue_number or "unknown")))
   title_key = title_key:lower():gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
@@ -32,9 +44,9 @@ function M.intake_class_identity(reason, current, issue_number)
 end
 
 local function class_identity_label(class_key)
-  local siblings = tostring(class_key or ""):match("^siblings:(.+)$")
-  if siblings ~= nil and siblings ~= "" then
-    return "recurring class #" .. siblings:gsub(",", " #")
+  local class = tostring(class_key or ""):match("^class:(.+)$")
+  if class ~= nil and class ~= "" then
+    return "recurring class " .. class:gsub("%-", " ")
   end
   local title = tostring(class_key or ""):match("^title:(.+)$")
   return title or tostring(class_key or "unknown")
@@ -137,6 +149,38 @@ function M.build_intake_class_folded_label_request(repo, issue_number, candidate
     }),
     candidate.source_ref
   )
+end
+
+function M.build_intake_class_issue_create_request(repo, issue_number, candidate, current, reason, class_key)
+  local title = M.intake_class_issue_title(current, issue_number, class_key)
+  local body = "Class escalation follow-through for instance issue #" .. tostring(issue_number or "unknown")
+    .. "\n\nReason:\n" .. M.neutralize_untrusted_comment_text(reason or "")
+    .. "\n\nClass identity: " .. tostring(class_key or "")
+    .. "\n\nRequired follow-through:\n"
+    .. "- Locate or create the class-level fix intent-before-create.\n"
+    .. "- Link this instance to the class issue through the parent ledger marker.\n"
+    .. "- Close the instance as folded only after the class carrier exists, or keep it enabled as the class carrier if it already states the class solution.\n"
+    .. "\nSource proposal: " .. tostring(candidate and candidate.proposal_id or "")
+    .. "\n\n" .. M.intake_class_carrier_marker(class_key)
+  if #body > M._max_body_len then
+    body = M.truncate_utf8(body, M._max_body_len)
+  end
+  return {
+    schema = "github-proxy.issue-create.v1",
+    repo = repo,
+    title = title,
+    body = body,
+    labels = json.decode("[]"),
+    dedup_key = M._dedup_key({
+      "intake-class",
+      tostring(class_key or ""),
+    }),
+    parent_comment_target = {
+      repo = repo,
+      issue_number = issue_number,
+    },
+    source_ref = M.normalize_source_ref(candidate and candidate.source_ref),
+  }
 end
 
 end

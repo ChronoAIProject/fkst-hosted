@@ -388,15 +388,25 @@ return {
       title = "Repair widget sync timeout residual",
       body = "Another instance after #80 and #81; this title differs from the class carrier.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    local class_key = core.intake_class_identity(
+      "Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.",
+      { title = "Earlier instance" },
+      99
+    )
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #82 as prior siblings; Rule of Three requires class-level retry policy.")
     mock_intake_class_lookup({
       {
         number = 77,
-        title = "Class fix needed: recurring class #80 #81",
-        body = core.intake_class_carrier_marker("siblings:80,81"),
+        title = "Class fix needed: recurring class retry policy",
+        body = core.intake_class_carrier_marker(class_key),
         labels = {},
       },
     })
+    t.eq(class_key, core.intake_class_identity(
+      "Cites #80 and #82 as prior siblings; Rule of Three requires class-level retry policy.",
+      { title = "Current instance" },
+      42
+    ))
 
     local result = run_judge(payload, opts("intake-escalate-class-reuse-by-class-key"))
     t.eq(result.exit_code, 0)
