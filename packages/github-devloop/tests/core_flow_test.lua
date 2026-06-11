@@ -47,6 +47,28 @@ local function copy_table(value, extra)
 end
 
 return {
+  test_restart_completeness_audit_covers_non_terminal_states = function()
+    local expected = {
+      "thinking",
+      "ready",
+      "implementing",
+      "pr-open",
+      "reviewing",
+      "review-converge",
+      "fixing",
+      "review-meta",
+      "merge-ready",
+      "merging",
+    }
+    for _, state in ipairs(expected) do
+      local row = core.restart_completeness_audit_for_state(state)
+      t.is_true(row ~= nil)
+      t.is_true(row.marker_facts ~= nil and row.marker_facts ~= "")
+      t.is_true(row.kickoff ~= nil and row.kickoff ~= "")
+      t.is_true(row.replay ~= nil and row.replay ~= "")
+    end
+  end,
+
   test_same_issue_transition_lock_key_is_shared = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local expected = "github-devloop/transition/owner/repo/issue/42"

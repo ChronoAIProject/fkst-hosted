@@ -19,6 +19,37 @@ function M.gh_issue_list_observe_cmd(repo, label)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
 
+function M.gh_dashboard_issue_search_cmd(repo)
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 20"
+    .. " --search " .. M._shell_single_quote("fkst:dashboard:v1 in:body")
+    .. " --json number,title,author,body,updatedAt"
+end
+
+function M.gh_dashboard_issue_create_cmd(repo, input_file)
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues")
+    .. " --input " .. M._shell_single_quote(input_file)
+end
+
+function M.gh_dashboard_issue_get_cmd(repo, issue_number)
+  return "gh api --method GET --include "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+end
+
+function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file, etag)
+  local header = ""
+  if etag ~= nil and tostring(etag) ~= "" then
+    header = " --header " .. M._shell_single_quote("If-Match: " .. tostring(etag))
+  end
+  return "gh api --method PATCH "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+    .. header
+    .. " --input " .. M._shell_single_quote(input_file)
+end
+
 function M.gh_pr_list_observe_cmd(repo)
   return "gh api --paginate --slurp "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
@@ -91,7 +122,7 @@ function M.gh_issue_view_merge_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_observe_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "comments,state")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state")
 end
 
 function M.gh_pr_view_origin_cmd(repo, pr_number)
