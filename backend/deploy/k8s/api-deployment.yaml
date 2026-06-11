@@ -1,10 +1,17 @@
-# fkst-hosted-api: single replica, Recreate strategy.
+# fkst-hosted-api: 3 replicas, safe-takeover RollingUpdate.
 #
-# Recreate is the single-instance contract: the engine has ZERO cross-host
-# fencing, so two API pods (old + new during a RollingUpdate) could run two
-# engine instances for the same package. Recreate guarantees the old pod is
-# fully terminated before the new one starts. #27 (pool-manager epic) flips
-# this to RollingUpdate once safe takeover exists.
+# Cross-pod execution is serialized by the distribution layer's MongoDB lease +
+# fencing token, NOT by the deployment strategy: at most one pod holds a given
+# package's lease at a time, and every engine spawn / session write is tagged
+# with the holder's fencing token so a stale (taken-over) holder is fenced out.
+# That makes a RollingUpdate safe where the old single-instance contract needed
+# Recreate — a terminating pod self-fences its own engine and releases its
+# leases on graceful shutdown (SIGTERM), so a surviving pod takes over without
+# two engines ever running the same package concurrently.
+#
+# maxUnavailable: 0 keeps full capacity during a rollout (no request gap);
+# maxSurge: 1 rolls one extra pod at a time. The replica operating range is
+# 3..5 — adjust via the `replicas:` edit-point in kustomization.yaml.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,9 +22,12 @@ metadata:
     app.kubernetes.io/component: api
     app.kubernetes.io/part-of: fkst-hosted
 spec:
-  replicas: 1
+  replicas: 3
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   # Selector is immutable after creation — keep it minimal (name only) so
   # label additions never force a Deployment recreate.
   selector:
