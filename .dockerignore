@@ -1,0 +1,26 @@
+target/
+backend/target/
+.git/
+node_modules/
+frontend/
+.auto/
+.claude/
+
+# Engine checkouts must never enter the build context — the engine is built
+# from a pinned ref inside the engine-builder stage, never vendored.
+fkst-substrate/
+fkst-packages/
+release-notes/
+.changeset/
+
+# Secrets and credentials — never let these into build-context layers
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+**/*.pem
+*.key
+**/*.key
+credentials.json
+**/credentials.json

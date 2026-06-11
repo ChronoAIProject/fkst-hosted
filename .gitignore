@@ -1,0 +1,24 @@
+# Rust build artifacts
+backend/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+
+# Secrets and credentials — never commit these
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Local, filled Kubernetes secrets — never commit (template stays tracked)
+backend/deploy/k8s/secret.yaml
+backend/deploy/k8s/secret.*.local.yaml
+!backend/deploy/k8s/secret.example.yaml
+
+# OS noise
+.DS_Store
+
+# /auto engine working state
+.auto/

@@ -1,0 +1,20 @@
+# Headless governing Service for the mongodb StatefulSet: gives the pod the
+# stable DNS name mongodb-0.mongodb.fkst-hosted.svc.cluster.local that the
+# API's MONGODB_URI points at.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: mongodb
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: 27017

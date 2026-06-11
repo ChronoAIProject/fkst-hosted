@@ -1,0 +1,7 @@
+{
+  "buildCheck": {
+    "commands": [
+      "sh -c 'if [ -f backend/Cargo.toml ]; then cargo check --workspace --locked --manifest-path backend/Cargo.toml; else echo \"INFO: backend absent; skipping\"; fi'"
+    ]
+  }
+}
