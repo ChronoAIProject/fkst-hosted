@@ -916,6 +916,54 @@ esac
     }
 
     #[tokio::test]
+    async fn post_ready_nonzero_exit_reports_failed_with_the_code() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        // Goes ready, runs briefly, then crashes with a non-zero code: the
+        // session must turn Failed carrying that exact code (never Stopped).
+        let bin = engine_stub(
+            stub_dir.path(),
+            r#"    echo "event runtime running handles=3" >&2
+    echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+    sleep 2
+    exit 3"#,
+        );
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let mut session = runner.start(&minimal_package()).await.expect("start");
+        assert!(
+            wait_until(|| session.status() != LiveStatus::Running).await,
+            "stub must self-exit"
+        );
+        assert_eq!(
+            session.status(),
+            LiveStatus::Failed {
+                code: Some(3),
+                signal: None
+            }
+        );
+        // Cached: stable on repeat.
+        assert_eq!(
+            session.status(),
+            LiveStatus::Failed {
+                code: Some(3),
+                signal: None
+            }
+        );
+
+        // stop() keeps the earlier Failed observation (no history rewrite).
+        runner.stop(&mut session).await.expect("stop after crash");
+        assert_eq!(
+            session.status(),
+            LiveStatus::Failed {
+                code: Some(3),
+                signal: None
+            }
+        );
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+    }
+
+    #[tokio::test]
     async fn out_of_band_kill_reports_failed_signal_and_stop_stays_ok() {
         let stub_dir = tempfile::tempdir().expect("stub dir");
         let temp_root = tempfile::tempdir().expect("temp root");
