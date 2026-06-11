@@ -49,6 +49,42 @@ function M.gh_dashboard_label_create_cmd(repo, label)
     .. " -f " .. M._shell_single_quote("description=fkst observability dashboard singleton")
 end
 
+function M.gh_repo_labels_list_cmd(repo)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels?per_page=100")
+end
+
+function M.gh_repo_label_create_cmd(repo, name, color, description)
+  local selected_label = tostring(name or "")
+  if selected_label == "" then
+    error("github-devloop: label name is required")
+  end
+  local selected_color = tostring(color or "")
+  if selected_color:find("^%x%x%x%x%x%x$") == nil then
+    error("github-devloop: label color is invalid")
+  end
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels")
+    .. " -f " .. M._shell_single_quote("name=" .. selected_label)
+    .. " -f " .. M._shell_single_quote("color=" .. selected_color)
+    .. " -f " .. M._shell_single_quote("description=" .. tostring(description or ""))
+end
+
+function M.gh_repo_label_update_cmd(repo, name, color, description)
+  local selected_label = tostring(name or "")
+  if selected_label == "" then
+    error("github-devloop: label name is required")
+  end
+  local selected_color = tostring(color or "")
+  if selected_color:find("^%x%x%x%x%x%x$") == nil then
+    error("github-devloop: label color is invalid")
+  end
+  return "gh api --method PATCH "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels/" .. selected_label:gsub(":", "%%3A"))
+    .. " -f " .. M._shell_single_quote("color=" .. selected_color)
+    .. " -f " .. M._shell_single_quote("description=" .. tostring(description or ""))
+end
+
 function M.gh_dashboard_issue_create_cmd(repo, input_file)
   return "gh api --method POST "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues")
