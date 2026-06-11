@@ -224,7 +224,8 @@ local function strip_transition_version_suffixes(version)
   return text
 end
 
-M._strip_transition_version_suffixes = strip_transition_version_suffixes
+-- Normalize a transition version to its stable lineage base.
+M.strip_transition_version_suffixes = strip_transition_version_suffixes
 
 local function strip_latest_fix_version_suffix(version)
   return tostring(version or "")
@@ -260,8 +261,8 @@ local function compare_transition_versions(incoming_version, current_version)
   if current_version == nil then
     return 1
   end
-  local incoming_base = strip_transition_version_suffixes(incoming_version)
-  local current_base = strip_transition_version_suffixes(current_version)
+  local incoming_base = M.strip_transition_version_suffixes(incoming_version)
+  local current_base = M.strip_transition_version_suffixes(current_version)
   if versions_equivalent(incoming_base, current_base) then
     return compare_same_base_transition_versions(incoming_version, current_version)
   end

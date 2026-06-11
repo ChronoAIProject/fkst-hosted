@@ -61,6 +61,24 @@ local query = 'query { repository(owner:"o", name:"r") { issues(first:10) { tota
         self.assertEqual(self.warning_lines(source), [])
 
 
+class RestPaginationGuardTest(unittest.TestCase):
+    def warning_lines(self, source: str) -> list[int]:
+        return check_repo.unguarded_rest_per_page_lines(source)
+
+    def test_warns_fixed_rest_page_without_paginate(self) -> None:
+        source = """
+local cmd = "gh api 'repos/o/r/issues?state=open&per_page=100'"
+"""
+        self.assertEqual(self.warning_lines(source), [2])
+
+    def test_allows_paginated_rest_read(self) -> None:
+        source = """
+local cmd = "gh api --paginate --slurp "
+  .. shell_quote("repos/o/r/issues?state=open&per_page=100")
+"""
+        self.assertEqual(self.warning_lines(source), [])
+
+
 class HiddenTextGuardTest(unittest.TestCase):
     def hidden_lines(self, source: str) -> list[int]:
         return check_repo.hidden_text_encoded_literal_lines(source)
