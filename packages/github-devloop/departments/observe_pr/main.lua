@@ -139,6 +139,25 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
   end
 end
 
+local function is_stalled_reviewing(current_pr, origin, pr_number, state)
+  if state.state ~= "reviewing" or not core._is_git_sha(current_pr.head_sha) then
+    return false
+  end
+  local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  local review_version = core.safe_version_segment(state.version)
+  local sr_digest = core.source_ref_digest(core.pr_source_ref(origin.repo, pr_number))
+  local facts = core.review_converge_round_facts(
+    current_pr.comments,
+    review_proposal_id,
+    origin.proposal_id,
+    review_version,
+    current_pr.head_sha,
+    sr_digest
+  )
+  local round = core.max_converge_round(facts)
+  return core.is_true_stall(facts, round)
+end
+
 local function maybe_apply_rereview_command(origin, pr_number, current_pr, state, source_ref)
   local command = core.operator_command_fact(current_pr.comments, "rereview")
   if command == nil then
@@ -150,6 +169,18 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if state.state ~= "blocked" and state.state ~= "review-meta" and state.state ~= "reviewing" then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(invalid-state)", "operator rereview precondition failed")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires blocked, review-meta, or stalled reviewing state",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+  if state.state == "reviewing" and not is_stalled_reviewing(current_pr, origin, pr_number, state) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|stalled-reviewing", "reviewing", "refused(active-reviewing)", "operator rereview requires stalled reviewing")
     local refusal = core.build_operator_command_refusal_request(
       origin.repo,
       pr_number,

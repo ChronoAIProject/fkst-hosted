@@ -116,6 +116,51 @@ return {
     t.eq(find_raise(replay.raises, "github-proxy.github_pr_comment_request"), nil)
   end,
 
+  test_rereview_command_active_reviewing_refuses = function()
+    local impl_version = reviewing().version
+    local command = trusted_command("IC_rereview_active_reviewing")
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+      command,
+    }, "devloop-owner-repo-42-01HY", "feedface")
+
+    local result = run_observe_pr(pr_event(), opts("operator-rereview-active-reviewing"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(comment_raise.payload.body:find("operator command refused", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('outcome="refused"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("stalled reviewing state", 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+  end,
+
+  test_rereview_command_stalled_reviewing_reenters_reviewing = function()
+    local impl_version = reviewing().version
+    local command = trusted_command("IC_rereview_stalled_reviewing")
+    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, impl_version, "feedface")
+    local review_version = core.safe_version_segment(impl_version)
+    local sr_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
+    local angle_digests = {
+      { angle = "minimal", verdict = "abstain", digest = "same-review-digest" },
+    }
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+      core.review_converge_round_marker(review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 1, "base", "Same review question", angle_digests),
+      core.review_converge_round_marker(review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 2, "loop1", "Same review question", angle_digests),
+      core.review_converge_round_marker(review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 3, "loop2", "Same review question", angle_digests),
+      command,
+    }, "devloop-owner-repo-42-01HY", "feedface")
+
+    local result = run_observe_pr(pr_event(), opts("operator-rereview-stalled-reviewing"))
+    t.eq(result.exit_code, 0)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    t.is_true(comment_raise.payload.body:find("operator command accepted: rereview", 1, true) ~= nil)
+    t.eq(reviewing_raise.payload.version, impl_version .. "/review-loop/1/rereview/1/feedface")
+  end,
+
   test_rereview_command_duplicate_response_is_idempotent = function()
     local impl_version = reviewing().version
     local command = trusted_command("IC_rereview_duplicate")
