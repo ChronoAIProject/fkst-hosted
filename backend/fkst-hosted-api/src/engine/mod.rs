@@ -14,7 +14,9 @@
 pub mod config;
 pub mod error;
 pub mod materialize;
+pub mod process;
 
 pub use config::EngineConfig;
 pub use error::RunnerError;
 pub use materialize::PreparedPackage;
+pub use process::is_pid_alive;
