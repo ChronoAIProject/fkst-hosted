@@ -8,6 +8,7 @@ local allowed_env = {
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
+  FKST_DEVLOOP_TEST_COMMAND = true,
   FKST_OUTPUT_LANG = true,
 }
 
@@ -44,6 +45,18 @@ end
 
 function M.max_converge_rounds()
   return 8
+end
+
+function M.default_test_command()
+  return "scripts/run.sh test"
+end
+
+function M.test_command(exec)
+  local command = M.read_env("FKST_DEVLOOP_TEST_COMMAND", exec)
+  if command == nil then
+    return M.default_test_command()
+  end
+  return command
 end
 
 local function current_checkout_branch(exec)

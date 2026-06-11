@@ -7,10 +7,10 @@ Repository state:
 - Do not push.
 - Do not open, close, or edit pull requests.
 - Do not modify labels, comments, or GitHub state.
-- After applying the fix, run `scripts/run.sh test` from the repository root with no package argument so it matches CI across all packages.
-- If any test fails, treat that failing test as the primary signal to fix: fix the failures and rerun `scripts/run.sh test` until it exits 0.
+- After applying the fix, run `{{test_command}}` from the repository root.
+- If any test fails, treat that failing test as the primary signal to fix: fix the failures and rerun `{{test_command}}` until it exits 0.
 - Do not finish with failing tests. If the suite cannot run because the engine BIN is unreachable, report that environment failure explicitly instead of claiming success.
-- For merge-gate CI failures such as failing CI checks or rollup-red feedback, first reproduce the failure locally with `scripts/run.sh test`, then fix it to green.
+- For merge-gate CI failures such as failing CI checks or rollup-red feedback, first reproduce the failure locally with `{{test_command}}`, then fix it to green.
 - Apply the SMALLEST change that closes the named blocking gap: {{blocking_gap}}.
 - Do not address advisory comments.
 - Do not broaden scope.
