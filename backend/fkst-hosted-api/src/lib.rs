@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod db;
+pub mod distribution;
 pub mod engine;
 pub mod error;
 pub mod leases;
