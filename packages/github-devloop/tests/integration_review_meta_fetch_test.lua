@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local fixtures = require("tests.production_fixture_helpers")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -145,5 +146,48 @@ return {
     local replay = run_review_meta(event, opts("review-meta-spec-amendment-replay"))
     t.eq(replay.exit_code, 0)
     t.eq(#replay.raises, 0)
+  end,
+
+  test_review_meta_replayed_entity_writes_bounded_outbound_dedup = function()
+    local long_repo = fixtures.long_repo()
+    local version = fixtures.full_review_issue_version(long_repo) .. "/fix/1/review-loop/2/review-meta-action/1"
+    local review_proposal_id = core.pr_review_proposal_id(long_repo, 187, version, fixtures.review_head_sha())
+    local review_meta = review_meta_event({
+      review_proposal_id = review_proposal_id,
+      review_dedup_key = "consensus:" .. review_proposal_id .. "/review/loop/3/review-meta",
+      version = version,
+      dedup_key = core._dedup_key({
+        "review-meta",
+        "github-devloop/issue/owner/repo/42",
+        version,
+        "7",
+        "3",
+        "consensus:" .. review_proposal_id .. "/review/loop/3/review-meta",
+      }),
+    })
+    local exit_version = core.next_review_meta_action_version(review_meta.version)
+    t.is_true(#table.concat({
+      "review-meta",
+      "comment",
+      tostring(review_meta.dedup_key),
+      tostring(exit_version),
+    }, "/") > core._max_dedup_len)
+
+    mock_issue_review_meta({ "fkst-dev:review-meta" }, {
+      core.state_marker(review_meta.proposal_id, "review-meta", review_meta.version),
+    })
+    mock_meta_codex(action_label .. " block\n" .. reason_label .. " Replay population should be writable.")
+    local result = run_review_meta(review_meta, opts("review-meta-replayed-bounded-dedup"))
+
+    t.eq(result.exit_code, 0)
+    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(comment ~= nil)
+    t.is_true(label ~= nil)
+    t.is_true(#comment.payload.dedup_key <= core._max_dedup_len)
+    t.is_true(#label.payload.dedup_key <= core._max_dedup_len)
+    t.eq(core._is_path_safe_key(comment.payload.dedup_key, core._max_dedup_len), true)
+    t.eq(core._is_path_safe_key(label.payload.dedup_key, core._max_dedup_len), true)
+    t.is_true(comment.payload.body:find('dedup="' .. review_meta.dedup_key .. '"', 1, true) ~= nil)
   end,
 }
