@@ -3,7 +3,7 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "github-proxy.github_entity_changed" },
+  consumes = { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
@@ -17,6 +17,27 @@ M.spec = {
 
 local function pr_source_ref(repo, pr_number)
   return core.pr_source_ref(repo, pr_number)
+end
+
+local function pr_context(event)
+  local payload = event.payload or {}
+  if core.is_supported_pr(payload) then
+    return {
+      repo = payload.repo,
+      number = payload.number,
+      dedup_key = payload.dedup_key,
+      source_ref = payload.source_ref,
+    }
+  end
+  if core.is_supported_pr_opened(payload) then
+    return {
+      repo = payload.repo,
+      number = payload.pr_number,
+      dedup_key = payload.dedup_key,
+      source_ref = payload.source_ref,
+    }
+  end
+  return nil
 end
 
 local function origin_from_pr(repo, pr_number, current_pr)
@@ -241,9 +262,10 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
 end
 
 function pipeline(event)
-  local pr = event.payload or {}
-  if not core.is_supported_pr(pr) then
-    core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
+  local pr = pr_context(event)
+  local raw = event.payload or {}
+  if pr == nil then
+    core.log_entry("observe_pr", event, "unknown", raw.dedup_key)
     core.log_cas_decision("observe_pr", "unknown", { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "unsupported event payload")
     return
   end
