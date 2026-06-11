@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 import sys
+import base64
+import binascii
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,8 +51,16 @@ GRAPHQL_FIRST_CONNECTION_RE = re.compile(
     re.DOTALL,
 )
 LONG_STRING_CHAR_RE = re.compile(r"\bstring\s*\.\s*char\s*\((?P<args>[^)]*)\)", re.DOTALL)
-NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*\d+\s*(?=,|\Z)")
+NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*(?:0x[0-9A-Fa-f]+|\d+)\s*(?=,|\Z)")
 HIDDEN_TEXT_STRING_CHAR_ARG_MIN = 6
+HELPER_STRING_ARG_RE = re.compile(
+    r"\b(?P<func>(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?[A-Za-z_][A-Za-z0-9_]*)"
+    r"\s*\(\s*(?P<quote>[\"'])"
+)
+HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
+BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
+BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
+ENCODED_LITERAL_MIN_BYTES = 6
 
 
 @dataclass(frozen=True)
@@ -317,6 +327,86 @@ def hidden_text_string_char_lines(text: str) -> list[int]:
         if len(numeric_args) >= HIDDEN_TEXT_STRING_CHAR_ARG_MIN:
             lines.append(text.count("\n", 0, match.start()) + 1)
     return lines
+
+
+def helper_name(value: str) -> str:
+    return re.sub(r"\s+", "", value).lower()
+
+
+def looks_like_decode_helper(func: str) -> bool:
+    normalized = helper_name(func)
+    base_name = normalized.rsplit(".", 1)[-1]
+    if base_name in {"h", "b", "u", "hex", "base64", "b64", "bytes", "byte"}:
+        return True
+    helper_tokens = (
+        "decode",
+        "fromhex",
+        "from_hex",
+        "unhex",
+        "unescape",
+    )
+    return any(token in normalized for token in helper_tokens)
+
+
+def byte_escape_count(content: str) -> int:
+    return len(BYTE_ESCAPE_RE.findall(content))
+
+
+def is_printable_utf8(data: bytes) -> bool:
+    if len(data) < ENCODED_LITERAL_MIN_BYTES:
+        return False
+    try:
+        decoded = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not decoded:
+        return False
+    printable = sum(1 for char in decoded if char.isprintable() or char in "\n\r\t")
+    return printable / len(decoded) >= 0.8
+
+
+def encoded_literal_kind(content: str) -> str | None:
+    if (
+        len(content) >= ENCODED_LITERAL_MIN_BYTES * 2
+        and len(content) % 2 == 0
+        and HEX_LITERAL_RE.fullmatch(content) is not None
+    ):
+        return "hex"
+
+    if byte_escape_count(content) >= ENCODED_LITERAL_MIN_BYTES:
+        return "byte-escape"
+
+    if (
+        len(content) >= ENCODED_LITERAL_MIN_BYTES * 2
+        and len(content) % 4 == 0
+        and BASE64_LITERAL_RE.fullmatch(content) is not None
+    ):
+        try:
+            decoded = base64.b64decode(content, validate=True)
+        except (binascii.Error, ValueError):
+            decoded = b""
+        if is_printable_utf8(decoded):
+            return "base64"
+
+    return None
+
+
+def hidden_text_encoded_literal_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = hidden_text_string_char_lines(text)
+    for match in HELPER_STRING_ARG_RE.finditer(text):
+        quote_start = match.start("quote")
+        if not is_unmasked_range(text, stripped, match.start(), quote_start):
+            continue
+        string_end = end_of_quoted_string(text, quote_start)
+        if string_end > len(text) or text[string_end - 1] != match.group("quote"):
+            continue
+        if not looks_like_decode_helper(match.group("func")):
+            continue
+        content = text[quote_start + 1 : string_end - 1]
+        if encoded_literal_kind(content) is not None:
+            lines.append(text.count("\n", 0, match.start()) + 1)
+    return sorted(set(lines))
 
 
 def check_line_limit(root: Path, violations: list[str]) -> None:
@@ -596,18 +686,18 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
             )
 
 
-def check_hidden_text_string_char(root: Path, warnings: list[str]) -> None:
+def check_hidden_text_encoded_literals(root: Path, violations: list[str]) -> None:
     packages = root / "packages"
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
         if not path.is_file() or "tests" in path.relative_to(packages).parts:
             continue
-        for line in hidden_text_string_char_lines(read_text(path)):
+        for line in hidden_text_encoded_literal_lines(read_text(path)):
             add(
-                warnings,
+                violations,
                 "G6",
-                f"{rel(root, path)}:{line} string.char call uses a long numeric byte sequence; use a plain English literal instead",
+                f"{rel(root, path)}:{line} hidden text uses an encoded literal decode helper; use a plain source literal instead",
             )
 
 
@@ -620,7 +710,7 @@ def main() -> int:
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
-    check_hidden_text_string_char(root, warnings)
+    check_hidden_text_encoded_literals(root, violations)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
