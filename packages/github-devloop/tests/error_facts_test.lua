@@ -12,6 +12,16 @@ return {
     t.eq(core.error_fact_class({ message = err("exit 1") }), "codex-failed")
   end,
 
+  test_unknown_message_does_not_leak_into_error_class = function()
+    local message = "worker exploded for issue 329 at /tmp/fkst-a/run 32f61109d97927c09eb63835f63e0f1d52d8a370"
+    t.eq(core.error_fact_class(message), "unknown-error")
+    t.eq(core.error_fact_class({ message = message }), "unknown-error")
+    t.eq(core.build_error_fact({
+      queue = "devloop_fixing",
+      message = message,
+    }).error_class, "unknown-error")
+  end,
+
   test_fingerprint_is_stable_across_timestamp_sha_and_tmp_path_noise = function()
     local first = core.error_fact_fingerprint({
       queue = "devloop_fixing",

@@ -128,7 +128,7 @@ function M.error_fact_class(value)
       if wrapped ~= nil then
         return wrapped
       end
-      return normalize_error_class(value.message)
+      return "unknown-error"
     end
   end
 
@@ -136,7 +136,7 @@ function M.error_fact_class(value)
   if wrapped ~= nil then
     return wrapped
   end
-  return normalize_error_class(value)
+  return "unknown-error"
 end
 
 function M.error_fact_source_ref_digest(source_ref)
@@ -149,7 +149,12 @@ function M.error_fact_fingerprint(fields)
     error("github-devloop: error fact fingerprint fields are required")
   end
   local queue = normalize_queue(fields.queue)
-  local error_class = M.error_fact_class(fields.error_class or fields.class or fields.error or fields.message)
+  local error_class
+  if fields.error_class ~= nil or fields.class ~= nil then
+    error_class = M.error_fact_class({ error_class = fields.error_class or fields.class })
+  else
+    error_class = M.error_fact_class({ message = fields.message or fields.error })
+  end
   local material = table.concat({
     "queue=" .. normalize_fingerprint_text(queue),
     "error_class=" .. normalize_fingerprint_text(error_class),
@@ -164,7 +169,12 @@ function M.build_error_fact(opts)
     error("github-devloop: error fact options are required")
   end
   local queue = normalize_queue(opts.queue)
-  local error_class = M.error_fact_class(opts.error_class or opts.class or opts.error or opts.message)
+  local error_class
+  if opts.error_class ~= nil or opts.class ~= nil then
+    error_class = M.error_fact_class({ error_class = opts.error_class or opts.class })
+  else
+    error_class = M.error_fact_class({ message = opts.message or opts.error })
+  end
   local fact = {
     schema = "github-devloop.error-fact.v1",
     queue = queue,
