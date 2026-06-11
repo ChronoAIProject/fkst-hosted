@@ -837,7 +837,8 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
     number = fix.pr_number,
   }, "github-devloop fix escalated to review-meta: " .. safe_reason
     .. "\n\n" .. text
-    .. "\n\n" .. state_marker, M._dedup_key({
+    .. "\n\n" .. state_marker
+    .. "\n" .. M.review_meta_marker(fix.proposal_id, fix.review_dedup_key), M._dedup_key({
     "fix",
     "comment",
     "review-meta",

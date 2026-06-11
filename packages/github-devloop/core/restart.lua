@@ -105,7 +105,7 @@ function M.latest_complete_converge_round(comments, proposal_id, base_version, s
   return latest
 end
 
-function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version)
+local function review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
   end
@@ -139,6 +139,61 @@ function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version)
     end
   end
   return best
+end
+
+function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, n)
+  local repo = M.parse_proposal_id(issue_proposal_id)
+  if repo == nil
+    or not M._is_positive_pr_number(pr_number)
+    or not M._is_git_sha(head_sha)
+    or not M._is_bounded_string(issue_version, M._max_dedup_len) then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
+      local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      if marker_issue == tostring(issue_proposal_id)
+        and tostring(review_pr_number or "") == tostring(pr_number)
+        and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
+        and tostring(reviewed_head_sha or "") == tostring(head_sha)
+        and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
+        return {
+          proposal_id = review_proposal,
+          dedup_key = marker_dedup,
+          source_ref = M.pr_source_ref(repo, pr_number),
+          pr_number = tonumber(pr_number),
+          n = tonumber(n) or 0,
+        }
+      end
+    end
+  end
+  local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+  local _, reject_pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
+  if reject_fact ~= nil
+    and tostring(reject_pr_number or "") == tostring(pr_number)
+    and tostring(reviewed_head_sha or "") == tostring(head_sha)
+    and M.is_safe_pr_review_result_ref(reject_fact.review_proposal_id, reject_fact.review_dedup_key) then
+    return {
+      proposal_id = reject_fact.review_proposal_id,
+      dedup_key = reject_fact.review_dedup_key,
+      source_ref = M.pr_source_ref(repo, pr_number),
+      pr_number = tonumber(pr_number),
+      n = tonumber(n) or 0,
+    }
+  end
+  return nil
+end
+
+function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
+  local converge_fact = review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
+  if converge_fact ~= nil then
+    return converge_fact
+  end
+  return M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, 0)
 end
 
 function M.fixing_replay_feedback_fact(comments, issue_proposal_id, issue_version)
