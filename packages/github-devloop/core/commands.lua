@@ -28,6 +28,27 @@ function M.gh_dashboard_issue_list_cmd(repo, label)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. selected_label:gsub(":", "%%3A") .. "&per_page=100")
 end
 
+function M.gh_dashboard_label_get_cmd(repo, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard label is required")
+  end
+  return "gh api --method GET "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels/" .. selected_label:gsub(":", "%%3A"))
+end
+
+function M.gh_dashboard_label_create_cmd(repo, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard label is required")
+  end
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/labels")
+    .. " -f " .. M._shell_single_quote("name=" .. selected_label)
+    .. " -f " .. M._shell_single_quote("color=ededed")
+    .. " -f " .. M._shell_single_quote("description=fkst observability dashboard singleton")
+end
+
 function M.gh_dashboard_issue_create_cmd(repo, input_file)
   return "gh api --method POST "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues")

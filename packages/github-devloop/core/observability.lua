@@ -55,6 +55,40 @@ local function gh_auth_mode()
   return "gh-auth"
 end
 
+local function command_indicates_not_found(result)
+  local stderr = tostring(result and result.stderr or "")
+  return stderr:find("404", 1, true) ~= nil
+    or stderr:lower():find("not found", 1, true) ~= nil
+end
+
+local function command_indicates_already_exists(result)
+  local stderr = tostring(result and result.stderr or ""):lower()
+  return stderr:find("already exists", 1, true) ~= nil
+    or stderr:find("name already exists", 1, true) ~= nil
+    or stderr:find("422", 1, true) ~= nil
+    or stderr:find("409", 1, true) ~= nil
+end
+
+local function ensure_dashboard_label(repo)
+  local existing = M.gh_exec({ cmd = M.gh_dashboard_label_get_cmd(repo, dashboard_label), timeout = 30 })
+  if existing.exit_code == 0 then
+    return "exists"
+  end
+  if not command_indicates_not_found(existing) then
+    error("github-devloop: gh dashboard label get failed: " .. tostring(existing.stderr))
+  end
+
+  local created = M.gh_exec({ cmd = M.gh_dashboard_label_create_cmd(repo, dashboard_label), timeout = 30 })
+  if created.exit_code == 0 then
+    log.info("github-devloop dept=observability tag=DASHBOARD_LABEL_CREATED label=" .. dashboard_label)
+    return "created"
+  end
+  if command_indicates_already_exists(created) then
+    return "exists"
+  end
+  error("github-devloop: gh dashboard label create failed: " .. tostring(created.stderr))
+end
+
 local function dashboard_input_path(repo, version, hash)
   local safe = M.sanitize_key(tostring(repo or "repo"), false):gsub("[/%s]+", "-")
   safe = safe:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
@@ -590,6 +624,7 @@ function M.publish_observability_dashboard(repo, dashboard)
   end
 
   local bot_login = M.assert_trusted_bot_configured()
+  ensure_dashboard_label(repo)
   local current = trusted_dashboard_issue(repo, bot_login)
   local current_version = current ~= nil and dashboard_version_from_body(current.body) or nil
   local current_hash = current ~= nil and dashboard_hash_from_body(current.body) or nil

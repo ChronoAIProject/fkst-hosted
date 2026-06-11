@@ -9,6 +9,9 @@ local allowed_env = {
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
   FKST_OUTPUT_LANG = true,
+}
+
+local allowed_presence_env = {
   GH_TOKEN = true,
   GITHUB_TOKEN = true,
 }
@@ -21,7 +24,7 @@ local function read_env_command(name)
 end
 
 local function env_present_command(name)
-  if not allowed_env[name] then
+  if not allowed_presence_env[name] then
     error("github-devloop: env name is not allowed")
   end
   return 'if [ -n "${' .. name .. ':-}" ]; then printf present; fi'

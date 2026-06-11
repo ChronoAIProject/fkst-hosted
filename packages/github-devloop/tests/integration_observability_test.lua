@@ -251,7 +251,24 @@ local function dashboard_issue_list_command()
   return "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dashboard&per_page=100'"
 end
 
+local function dashboard_label_get_command()
+  return "gh api --method GET 'repos/owner/repo/labels/fkst-dashboard'"
+end
+
+local function dashboard_label_create_command()
+  return "gh api --method POST 'repos/owner/repo/labels' -f 'name=fkst-dashboard' -f 'color=ededed' -f 'description=fkst observability dashboard singleton'"
+end
+
+local function mock_dashboard_label_exists()
+  t.mock_command(dashboard_label_get_command(), {
+    stdout = '{"name":"fkst-dashboard"}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_dashboard_issue_list(stdout, exit_code, stderr)
+  mock_dashboard_label_exists()
   t.mock_command(dashboard_issue_list_command(), {
     stdout = stdout or "[[]]\n",
     stderr = stderr or "",
@@ -503,6 +520,7 @@ return {
     local result = run_observability(opts("observability-dashboard-create", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
+    t.eq(count_calls(dashboard_label_get_command()), 1)
     t.eq(count_calls("gh api --method POST 'repos/owner/repo/issues'"), 1)
     t.eq(count_calls("gh api --method PATCH"), 0)
     local input_path = command_input_path(first_call("gh api --method POST 'repos/owner/repo/issues'"))
@@ -570,6 +588,39 @@ return {
     t.eq(count_calls("gh api --method PATCH"), 0)
     t.eq(count_calls(dashboard_issue_list_command()), 1)
     t.eq(count_calls("gh api --method GET --include 'repos/owner/repo/issues/99'"), 1)
+  end,
+
+  test_dashboard_write_bootstraps_missing_dashboard_label_before_create = function()
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({})
+    t.mock_command(dashboard_label_get_command(), {
+      stdout = "",
+      stderr = "HTTP 404: Not Found\n",
+      exit_code = 1,
+    })
+    t.mock_command(dashboard_label_create_command(), {
+      stdout = '{"name":"fkst-dashboard"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(dashboard_issue_list_command(), {
+      stdout = "[[]]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+      stdout = '{"number":99}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_observability(opts("observability-dashboard-label-bootstrap", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(dashboard_label_get_command()), 1)
+    t.eq(count_calls(dashboard_label_create_command()), 1)
+    t.eq(count_calls("gh api --method POST 'repos/owner/repo/issues'"), 1)
   end,
 
   test_dashboard_write_skips_update_when_etag_precondition_fails = function()
