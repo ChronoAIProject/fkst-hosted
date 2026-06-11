@@ -19,6 +19,12 @@ use crate::engine::error::RunnerError;
 use crate::packages::model::PackageFile;
 use crate::packages::{is_valid_name, Package};
 
+/// Host-owned files at the package root that a package may never supply:
+/// `composed.deps` is rendered from `composed_deps` (an empty list means NO
+/// file, so a package-supplied one would land verbatim) and `fkst.env` is
+/// written by [`write_fkst_env`] with the configured HostFacts.
+const RESERVED_HOST_PATHS: [&str; 2] = ["composed.deps", "fkst.env"];
+
 /// Validated runner input, derived from the stored package document. The
 /// runner stays Mongo-agnostic: the caller loads the [`Package`] and converts
 /// it (the `From` impl below) or builds one by hand.
@@ -52,7 +58,9 @@ impl PreparedPackage {
     /// - `files` is empty,
     /// - no entry matches `departments/<name>/main.lua` (the engine's
     ///   conformance pre-flight requires at least one department; a
-    ///   raiser-only package fails it with exit 1 — spike Q4).
+    ///   raiser-only package fails it with exit 1 — spike Q4),
+    /// - any file is pathed exactly at a [`RESERVED_HOST_PATHS`] entry
+    ///   (`composed.deps` / `fkst.env` are host-owned).
     ///
     /// Per-path traversal safety is enforced separately by [`safe_join`]
     /// during materialization (defense in depth).
@@ -71,6 +79,14 @@ impl PreparedPackage {
             return Err(RunnerError::InvalidPackage(
                 "no department entry file: need departments/<name>/main.lua".to_string(),
             ));
+        }
+        for file in &self.files {
+            if RESERVED_HOST_PATHS.contains(&file.path.as_str()) {
+                return Err(RunnerError::InvalidPackage(format!(
+                    "reserved host-owned path: {:?}",
+                    file.path
+                )));
+            }
         }
         for dep in &self.composed_deps {
             if !is_valid_name(dep) {
@@ -308,6 +324,43 @@ mod tests {
             };
             assert!(pkg.validate().is_err(), "must reject {path:?}");
         }
+    }
+
+    #[test]
+    fn validate_rejects_package_supplied_composed_deps_file() {
+        // With an empty composed_deps list the host writes NO composed.deps,
+        // so a package-supplied one would land verbatim — forbidden.
+        let mut pkg = minimal();
+        pkg.files.push(file("composed.deps", "evil-dep\n"));
+        let err = pkg.validate().expect_err("composed.deps must be rejected");
+        assert!(matches!(err, RunnerError::InvalidPackage(_)));
+        assert!(
+            err.to_string().contains("reserved host-owned path"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_package_supplied_fkst_env_file() {
+        let mut pkg = minimal();
+        pkg.files
+            .push(file("fkst.env", "FKST_CANDIDATE_PREFIX=evil/\n"));
+        let err = pkg.validate().expect_err("fkst.env must be rejected");
+        assert!(matches!(err, RunnerError::InvalidPackage(_)));
+        assert!(
+            err.to_string().contains("reserved host-owned path"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn validate_allows_reserved_names_in_subdirectories() {
+        // Only the exact root paths are host-owned; nested files of the same
+        // name are ordinary package content.
+        let mut pkg = minimal();
+        pkg.files.push(file("departments/hello/fkst.env", "x"));
+        pkg.files.push(file("config/composed.deps", "y"));
+        assert!(pkg.validate().is_ok());
     }
 
     #[test]
