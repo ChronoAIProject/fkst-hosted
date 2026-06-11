@@ -208,16 +208,6 @@ end
 
 local function raise_review_meta_replay(issue, proposal_id, state, link, snapshot)
   local fact = core.review_meta_replay_fact(snapshot.comments, proposal_id, state.version)
-  if fact == nil and link ~= nil then
-    local review_proposal_id = core.pr_review_proposal_id(issue.repo, link.pr_number, state.version, (find_linked_pr(snapshot, link.pr_number) or {}).head_sha)
-    fact = {
-      proposal_id = review_proposal_id,
-      dedup_key = core._dedup_key({ review_proposal_id, "review" }) .. "/loop/1",
-      source_ref = core.pr_source_ref(issue.repo, link.pr_number),
-      pr_number = tonumber(link.pr_number),
-      n = 1,
-    }
-  end
   if fact == nil then
     core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(review-meta)", "review-meta recovery facts are not visible")
     return

@@ -320,6 +320,26 @@ return {
     t.eq(meta_raise.pr_number, event.pr_number)
   end,
 
+  test_observe_issue_does_not_synthesize_review_meta_replay_without_marker = function()
+    local event = review_meta_event()
+    local impl_version = reviewing().version
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:review-meta" }, "OPEN", {
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+    })
+    mock_pr_origin({
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-no-original-marker"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_review_meta"), nil)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
   test_observe_uses_current_github_state_not_payload_state = function()
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN")
     mock_issue_body("Body from GitHub")
