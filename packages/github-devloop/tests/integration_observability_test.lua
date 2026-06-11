@@ -25,7 +25,7 @@ local function run_observability(run_opts)
 end
 
 local function mock_env(bot_login, write_mode)
-  for _ = 1, 4 do
+  for _ = 1, 8 do
     t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
       stdout = bot_login == nil and "fkst-test-bot" or bot_login,
       stderr = "",
@@ -37,7 +37,7 @@ local function mock_env(bot_login, write_mode)
     stderr = "",
     exit_code = 0,
   })
-  for _ = 1, 4 do
+  for _ = 1, 8 do
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
       stdout = write_mode or "",
       stderr = "",
@@ -102,17 +102,20 @@ local function mock_pr_list(items)
   })
 end
 
-local function mock_issue_view(comments)
+local function mock_issue_view(comments, state)
   t.mock_command("--json title,comments,state", {
-    stdout = '{"title":"Observed issue","state":"OPEN","comments":[' .. table.concat(comments or {}, ",") .. "]}\n",
+    stdout = '{"title":"Observed issue","state":"' .. json_string(state or "OPEN") .. '","comments":[' .. table.concat(comments or {}, ",") .. "]}\n",
     stderr = "",
     exit_code = 0,
   })
 end
 
-local function mock_pr_view(comments)
+local function mock_pr_view(comments, extra)
+  extra = extra or {}
+  local head = extra.head_ref_name or "devloop-owner-repo-42"
+  local state = extra.state or "OPEN"
   t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
-    stdout = '{"headRefName":"devloop-owner-repo-42","headRefOid":"def456","baseRefName":"integration/dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":['
+    stdout = '{"headRefName":"' .. json_string(head) .. '","headRefOid":"def456","baseRefName":"integration/dev","state":"' .. json_string(state) .. '","updatedAt":"2026-06-03T02:03:04Z","comments":['
       .. table.concat(comments or {}, ",") .. "]}\n",
     stderr = "",
     exit_code = 0,
@@ -259,6 +262,38 @@ local function dashboard_label_create_command()
   return "gh api --method POST 'repos/owner/repo/labels' -f 'name=fkst-dashboard' -f 'color=ededed' -f 'description=fkst observability dashboard singleton'"
 end
 
+local function devloop_branch(issue_number)
+  return "devloop/issue/owner/repo/" .. tostring(issue_number) .. "/v1-1234567890"
+end
+
+local function mock_reaper_pr(proposal_id, issue_number, pr_number, comments)
+  local branch = devloop_branch(issue_number)
+  local all_comments = {
+    render_comment(core.pr_origin_marker(proposal_id, tostring(issue_number), branch, "v1", "integration/dev"), "fkst-test-bot"),
+  }
+  for _, comment in ipairs(comments or {}) do
+    table.insert(all_comments, comment)
+  end
+  mock_pr_view(all_comments, { head_ref_name = branch })
+  return branch
+end
+
+local function mock_pr_comment_write()
+  t.mock_command("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_pr_close()
+  t.mock_command("gh pr close '7' --repo 'owner/repo'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_dashboard_label_exists()
   t.mock_command(dashboard_label_get_command(), {
     stdout = '{"name":"fkst-dashboard"}\n',
@@ -392,6 +427,158 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr view"), 1)
+  end,
+
+  test_orphan_reaper_closes_managed_pr_when_parent_issue_is_closed = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({ 7 })
+    mock_reaper_pr(proposal_id, 42, 7)
+    mock_issue_view({}, "CLOSED")
+    mock_pr_comment_write()
+    mock_pr_close()
+    mock_dashboard_issue_list()
+    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+      stdout = '{"number":99}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_observability(opts("observability-reap-closed-parent", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-"), 1)
+    t.eq(count_calls("gh pr close '7' --repo 'owner/repo'"), 1)
+    local input_path = first_call("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-"):match("%-%-body%-file '([^']+)'")
+    local written = file.read(input_path)
+    t.is_true(written:find("Parent: #42", 1, true) ~= nil)
+    t.is_true(written:find("Reason: Parent issue #42 is closed.", 1, true) ~= nil)
+    t.is_true(written:find('orphan-reaped:v1 proposal="' .. proposal_id .. '" pr="7" reason="parent-closed"', 1, true) ~= nil)
+  end,
+
+  test_orphan_reaper_dry_run_does_not_close_closed_parent_pr_without_write = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({})
+    mock_pr_list({ 7 })
+    mock_reaper_pr(proposal_id, 42, 7)
+    mock_issue_view({}, "CLOSED")
+
+    local logs = capture_observability_logs()
+
+    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("gh pr close"), 0)
+    t.is_true(table.concat(logs, "\n"):find("tag=REAP", 1, true) ~= nil)
+    t.is_true(table.concat(logs, "\n"):find("action=dry-run", 1, true) ~= nil)
+  end,
+
+  test_orphan_reaper_leaves_managed_pr_when_parent_issue_is_open = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({ 7 })
+    mock_reaper_pr(proposal_id, 42, 7, {
+      render_comment(core.state_marker(proposal_id, "fixing", "v1/fix/11"), "fkst-test-bot"),
+    })
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "fixing", "v1/fix/11"), "fkst-test-bot"),
+    }, "OPEN")
+    mock_dashboard_issue_list()
+    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+      stdout = '{"number":99}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_observability(opts("observability-reap-open-parent", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("gh pr close"), 0)
+  end,
+
+  test_orphan_reaper_is_idempotent_when_reaped_marker_is_visible = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({ 7 })
+    mock_reaper_pr(proposal_id, 42, 7, {
+      render_comment(core.orphan_reaped_marker(proposal_id, 7, "parent-closed"), "fkst-test-bot"),
+    })
+    mock_dashboard_issue_list()
+    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+      stdout = '{"number":99}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_observability(opts("observability-reap-idempotent", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("gh pr close"), 0)
+  end,
+
+  test_orphan_reaper_closes_managed_pr_when_parent_is_decomposed_with_successors = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "v1/fix/12"
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({ 7 })
+    mock_reaper_pr(proposal_id, 42, 7, {
+      render_comment(core.decomposed_marker(proposal_id, version, 7, 2), "fkst-test-bot"),
+      render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/1/aaa" issue="132" -->', "fkst-test-bot"),
+      render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/2/bbb" issue="146" -->', "fkst-test-bot"),
+    })
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "blocked", version), "fkst-test-bot"),
+    }, "OPEN")
+    mock_pr_comment_write()
+    mock_pr_close()
+    mock_dashboard_issue_list()
+    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+      stdout = '{"number":99}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_observability(opts("observability-reap-decomposed-parent", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr close '7' --repo 'owner/repo'"), 1)
+    local input_path = first_call("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-"):match("%-%-body%-file '([^']+)'")
+    local written = file.read(input_path)
+    t.is_true(written:find("Successors: #132, #146", 1, true) ~= nil)
+    t.is_true(written:find('reason="parent-decomposed"', 1, true) ~= nil)
+  end,
+
+  test_orphan_reaper_waits_for_decomposed_successor_facts = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "v1/fix/12"
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({ 7 })
+    mock_reaper_pr(proposal_id, 42, 7, {
+      render_comment(core.decomposed_marker(proposal_id, version, 7, 2), "fkst-test-bot"),
+      render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/1/aaa" issue="132" -->', "fkst-test-bot"),
+    })
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "blocked", version), "fkst-test-bot"),
+    }, "OPEN")
+    mock_dashboard_issue_list()
+    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+      stdout = '{"number":99}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_observability(opts("observability-reap-decomposed-waits-successors", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("gh pr close"), 0)
   end,
 
   test_stall_suspect_logs_once_when_entity_exceeds_state_threshold = function()

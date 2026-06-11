@@ -102,6 +102,35 @@ function M.has_decomposed_marker(comments, proposal_id, version, pr_number)
   return false
 end
 
+function M.decomposed_fact(comments, proposal_id)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:decomposed:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id) then
+        local pr_number = marker:match('pr="([^"]+)"')
+        local count = tonumber(marker:match('count="([^"]+)"'))
+        if M._is_positive_pr_number(pr_number)
+          and count ~= nil
+          and count >= 1
+          and count <= max_decompose_issues
+          and count % 1 == 0 then
+          return {
+            proposal_id = tostring(proposal_id),
+            version = marker:match('version="([^"]*)"'),
+            pr_number = tonumber(pr_number),
+            count = count,
+            comment_created_at = M._comment_created_at(comment),
+          }
+        end
+      end
+    end
+  end
+  return nil
+end
+
 function M.decompose_child_marker(proposal_id, version, pr_number, index)
   return '<!-- fkst:github-devloop:decompose-child:v1 parent="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
