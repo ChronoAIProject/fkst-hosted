@@ -78,6 +78,15 @@ local function assert_judgment_worktree(call, role)
   t.is_nil(call.rendered:find("/worktrees/", 1, true))
 end
 
+local function judgment_call(role)
+  for _, call in ipairs(codex_calls()) do
+    if call.rendered:find("/judgment-worktrees/consensus-" .. role, 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
+end
+
 local function assert_judgment_dir_read_only(count)
   local seen = 0
   for _, call in ipairs(t.command_calls()) do
@@ -106,10 +115,17 @@ local function mock_judgment_dir()
   })
 end
 
-local function mock_angle(verdict, reply, exit_code)
+local function angle_mock_pattern(angle)
+  if angle == nil then
+    return "codex exec"
+  end
+  return "consensus-angle-" .. tostring(angle)
+end
+
+local function mock_angle(angle, verdict, reply, exit_code)
   mock_judgment_dir()
   local gap = verdict == "reject" and "\n" .. "⟦FKST:GAP⟧ " .. tostring(reply):sub(1, 80) or ""
-  t.mock_command("codex exec", {
+  t.mock_command(angle_mock_pattern(angle), {
     stdout = verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply .. gap .. "\n",
     stderr = "",
     exit_code = exit_code or 0,
@@ -128,9 +144,9 @@ end
 return {
   test_all_angles_approve_raises_consensus_reached = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
 
     local result = run_decide(proposal(), opts("all-approve"))
     t.eq(result.exit_code, 0)
@@ -149,24 +165,27 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 3)
-    assert_judgment_worktree(calls[1], "angle-minimal")
-    assert_judgment_worktree(calls[2], "angle-structural")
-    assert_judgment_worktree(calls[3], "angle-delete")
+    local minimal_call = judgment_call("angle-minimal")
+    local structural_call = judgment_call("angle-structural")
+    local delete_call = judgment_call("angle-delete")
+    assert_judgment_worktree(minimal_call, "angle-minimal")
+    assert_judgment_worktree(structural_call, "angle-structural")
+    assert_judgment_worktree(delete_call, "angle-delete")
     assert_judgment_dir_read_only(3)
-    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
-    t.is_true(calls[2].stdin:find("Angle: structural", 1, true) ~= nil)
-    t.is_true(calls[3].stdin:find("Angle: delete", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
+    t.is_true(structural_call.stdin:find("Angle: structural", 1, true) ~= nil)
+    t.is_true(delete_call.stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_codex_stdin_carries_fetch_instruction_not_full_body = function()
     local full_tail = "FULL_BODY_TAIL_MUST_NOT_REACH_CODEX"
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
 
     local result = run_decide(proposal({
       body = "Brief only.",
@@ -178,16 +197,17 @@ return {
     t.eq(result.exit_code, 0)
     local calls = codex_calls()
     t.eq(#calls, 3)
-    t.is_true(calls[1].stdin:find("Brief only.", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
-    t.is_nil(calls[1].stdin:find(full_tail, 1, true))
+    local minimal_call = judgment_call("angle-minimal")
+    t.is_true(minimal_call.stdin:find("Brief only.", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
+    t.is_nil(minimal_call.stdin:find(full_tail, 1, true))
   end,
 
   test_codex_stdin_resolves_runtime_cache_context_manifest = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
     local run_opts = opts("stdin-runtime-cache-context")
     local root = run_opts.env.FKST_RUNTIME_ROOT
     os.execute("mkdir -p " .. shell_single_quote(root .. "/ctx"))
@@ -209,9 +229,10 @@ return {
     t.eq(result.exit_code, 0)
     local calls = codex_calls()
     t.eq(#calls, 3)
-    t.is_true(calls[1].stdin:find(root .. "/ctx/issue.json", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find(root .. "/ctx/diff.patch", 1, true) ~= nil)
-    t.is_nil(calls[1].stdin:find("runtime-cache:consensus-test/context", 1, true))
+    local minimal_call = judgment_call("angle-minimal")
+    t.is_true(minimal_call.stdin:find(root .. "/ctx/issue.json", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find(root .. "/ctx/diff.patch", 1, true) ~= nil)
+    t.is_nil(minimal_call.stdin:find("runtime-cache:consensus-test/context", 1, true))
   end,
 
   test_runtime_cache_context_manifest_missing_file_fails_closed = function()
@@ -229,9 +250,9 @@ return {
 
   test_unanimous_abstain_raises_consensus_converge = function()
     mock_judgment_runtime()
-    mock_angle("abstain", "Minimal angle needs narrower scope.")
-    mock_angle("abstain", "Structural angle needs clearer boundaries.")
-    mock_angle("abstain", "Delete angle needs proof the scope is necessary.")
+    mock_angle("minimal", "abstain", "Minimal angle needs narrower scope.")
+    mock_angle("structural", "abstain", "Structural angle needs clearer boundaries.")
+    mock_angle("delete", "abstain", "Delete angle needs proof the scope is necessary.")
     mock_meta("converge: What concrete evidence would make the narrowed scope approvable?")
 
     local result = run_decide(proposal(), opts("all-abstain"))
@@ -244,9 +265,9 @@ return {
 
   test_split_verdicts_spawn_meta_and_raise_consensus_converge = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("abstain", "Structural angle needs one blocker resolved.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "abstain", "Structural angle needs one blocker resolved.")
+    mock_angle("delete", "approve", "Delete angle approves.")
     mock_meta("converge: Should structural concerns block this proposal?")
 
     local result = run_decide(proposal(), opts("split"))
@@ -275,9 +296,9 @@ return {
 
   test_meta_plan_flows_into_next_converge_round = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle accepts a small adapter.")
-    mock_angle("abstain", "Structural angle wants the retry boundary explicit.")
-    mock_angle("approve", "Delete angle accepts removing duplicate wiring.")
+    mock_angle("minimal", "approve", "Minimal angle accepts a small adapter.")
+    mock_angle("structural", "abstain", "Structural angle wants the retry boundary explicit.")
+    mock_angle("delete", "approve", "Delete angle accepts removing duplicate wiring.")
     mock_meta("⟦FKST:PLAN⟧ Keep the adapter, make retry ownership explicit, and delete duplicate wiring.")
 
     local result = run_decide(proposal(), opts("split-meta-plan"))
@@ -290,9 +311,9 @@ return {
 
   test_malformed_plan_falls_back_to_default_converge = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("abstain", "Structural angle needs framing.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "abstain", "Structural angle needs framing.")
+    mock_angle("delete", "approve", "Delete angle approves.")
     mock_meta("⟦FKST:PLAN⟧")
 
     local result = run_decide(proposal(), opts("malformed-meta-plan"))
@@ -305,9 +326,9 @@ return {
 
   test_converge_mode_reject_outputs_raise_consensus_converge = function()
     mock_judgment_runtime()
-    mock_angle("reject", "Minimal angle rejects but converge mode cannot reject.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "reject", "Minimal angle rejects but converge mode cannot reject.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
     mock_meta("converge: What concern prevents approval?")
 
     local result = run_decide(proposal({ verdict_mode = "converge" }), opts("converge-reject-output"))
@@ -321,9 +342,9 @@ return {
 
   test_gate_mode_any_reject_raises_consensus_reached_reject_with_gap = function()
     mock_judgment_runtime()
-    mock_angle("reject", "Minimal angle rejects the diff.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("comment", "Delete angle has advisory feedback.")
+    mock_angle("minimal", "reject", "Minimal angle rejects the diff.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "comment", "Delete angle has advisory feedback.")
 
     local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-any-reject"))
     t.eq(result.exit_code, 0)
@@ -336,9 +357,9 @@ return {
 
   test_gate_mode_approve_with_comment_raises_consensus_reached_approve = function()
     mock_judgment_runtime()
-    mock_angle("comment", "Minimal angle notes naming could improve.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("abstain", "Delete angle cannot judge.")
+    mock_angle("minimal", "comment", "Minimal angle notes naming could improve.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "abstain", "Delete angle cannot judge.")
 
     local result = run_decide(proposal({ verdict_mode = "gate" }), opts("gate-approve-comment"))
     t.eq(result.exit_code, 0)
@@ -351,9 +372,9 @@ return {
 
   test_meta_reached_after_split_raises_consensus_reached = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("abstain", "Structural angle abstains but accepts the narrowed framing.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "abstain", "Structural angle abstains but accepts the narrowed framing.")
+    mock_angle("delete", "approve", "Delete angle approves.")
     mock_meta("reached:approve approve the narrowed framing")
 
     local result = run_decide(proposal(), opts("split-meta-reached"))
@@ -369,9 +390,9 @@ return {
 
   test_abstain_raises_consensus_converge = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("abstain", "Structural angle abstains.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "abstain", "Structural angle abstains.")
+    mock_angle("delete", "approve", "Delete angle approves.")
     mock_meta("converge: Ask structural to name the one blocker that prevents approval.")
 
     local result = run_decide(proposal(), opts("abstain"))
@@ -383,13 +404,13 @@ return {
 
   test_failed_codex_call_raises_consensus_converge = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
     mock_judgment_dir()
-    t.mock_command("codex exec", {
+    t.mock_command("consensus-angle-structural", {
       stderr = "forced failure",
       exit_code = 7,
     })
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
     mock_meta("converge: Retry the failed structural angle with a concrete blocker.")
 
     local result = run_decide(proposal(), opts("codex-fails"))
@@ -409,11 +430,11 @@ return {
   test_unparseable_output_raises_consensus_converge_with_default_question = function()
     mock_judgment_runtime()
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "no verdict here", exit_code = 0 })
+    t.mock_command("consensus-angle-minimal", { stdout = "no verdict here", exit_code = 0 })
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "still nothing useful", exit_code = 0 })
+    t.mock_command("consensus-angle-structural", { stdout = "still nothing useful", exit_code = 0 })
     mock_judgment_dir()
-    t.mock_command("codex exec", { stdout = "garbage output", exit_code = 0 })
+    t.mock_command("consensus-angle-delete", { stdout = "garbage output", exit_code = 0 })
     mock_meta("malformed")
 
     local result = run_decide(proposal(), opts("unparseable"))
@@ -434,8 +455,8 @@ return {
 
   test_angles_override_runs_only_named_angles = function()
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
 
     local result = run_decide(proposal({ angles = { "minimal", "delete" } }), opts("angles-override"))
     t.eq(result.exit_code, 0)
@@ -445,16 +466,16 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 2)
-    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
-    t.is_true(calls[2].stdin:find("Angle: delete", 1, true) ~= nil)
+    t.is_true(judgment_call("angle-minimal").stdin:find("Angle: minimal", 1, true) ~= nil)
+    t.is_true(judgment_call("angle-delete").stdin:find("Angle: delete", 1, true) ~= nil)
   end,
 
   test_same_dedup_key_skips_second_run = function()
     local run_opts = opts("cache-hit")
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
 
     local first = run_decide(proposal(), run_opts)
     t.eq(first.exit_code, 0)
@@ -470,9 +491,9 @@ return {
   test_new_version_reruns_consensus = function()
     local run_opts = opts("new-version")
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves.")
-    mock_angle("approve", "Structural angle approves.")
-    mock_angle("approve", "Delete angle approves.")
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
 
     local first = run_decide(proposal(), run_opts)
     t.eq(first.exit_code, 0)
@@ -481,9 +502,9 @@ return {
 
     -- a new version (different dedup_key) re-derives consensus instead of being skipped
     mock_judgment_runtime()
-    mock_angle("approve", "Minimal angle approves again.")
-    mock_angle("approve", "Structural angle approves again.")
-    mock_angle("approve", "Delete angle approves again.")
+    mock_angle("minimal", "approve", "Minimal angle approves again.")
+    mock_angle("structural", "approve", "Structural angle approves again.")
+    mock_angle("delete", "approve", "Delete angle approves again.")
 
     local second = run_decide(proposal({ dedup_key = "proposal-42-v2" }), run_opts)
     t.eq(second.exit_code, 0)
