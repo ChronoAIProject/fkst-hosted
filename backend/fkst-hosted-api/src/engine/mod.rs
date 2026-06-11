@@ -13,6 +13,8 @@
 
 pub mod config;
 pub mod error;
+pub mod materialize;
 
 pub use config::EngineConfig;
 pub use error::RunnerError;
+pub use materialize::PreparedPackage;
