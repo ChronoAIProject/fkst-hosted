@@ -1,0 +1,19 @@
+# ClusterIP only — nothing is exposed outside the cluster in v1; local
+# access is `kubectl -n fkst-hosted port-forward svc/fkst-hosted 8080:80`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fkst-hosted
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-hosted-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: fkst-hosted-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

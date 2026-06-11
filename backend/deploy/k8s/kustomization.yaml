@@ -1,0 +1,19 @@
+# `kubectl apply -k backend/deploy/k8s` brings up the whole local stack.
+#
+# secret.example.yaml is DELIBERATELY excluded: the real Secret is created by
+# the operator first (see secret.example.yaml header), and an apply must never
+# overwrite it with placeholders.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: fkst-hosted
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - mongodb-service.yaml
+  - mongodb-statefulset.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+# Image-tag seam: change the deployed tag in one place.
+images:
+  - name: fkst-hosted
+    newTag: dev

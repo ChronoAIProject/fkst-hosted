@@ -1,0 +1,131 @@
+# fkst-hosted-api: single replica, Recreate strategy.
+#
+# Recreate is the single-instance contract: the engine has ZERO cross-host
+# fencing, so two API pods (old + new during a RollingUpdate) could run two
+# engine instances for the same package. Recreate guarantees the old pod is
+# fully terminated before the new one starts. #27 (pool-manager epic) flips
+# this to RollingUpdate once safe takeover exists.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fkst-hosted-api
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-hosted-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  # Selector is immutable after creation — keep it minimal (name only) so
+  # label additions never force a Deployment recreate.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-hosted-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fkst-hosted-api
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: fkst-hosted
+    spec:
+      # Docker-link-style service env injection MUST stay off: the Service is
+      # named fkst-hosted, so Kubernetes would inject FKST_HOSTED_PORT =
+      # "tcp://<clusterIP>:80" into the pod — colliding with the API's
+      # FKST_HOSTED_* env prefix (parsed as PORT) and failing the fail-closed
+      # config loader at startup. The API's env comes exclusively from the
+      # image, the ConfigMap, and the Secret.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      # The server is FAIL-CLOSED at startup (it pings Mongo and exits if the
+      # store is unreachable), so first-boot ordering would otherwise
+      # crash-loop the API while Mongo initializes. Waiting for the TCP port
+      # absorbs that ordering without weakening the fail-closed contract.
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - until nc -z -w 2 mongodb-0.mongodb 27017; do sleep 2; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+      containers:
+        - name: fkst-hosted-api
+          image: fkst-hosted:dev # tag managed by kustomization.yaml images
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: fkst-hosted-config
+            - secretRef:
+                name: fkst-hosted-secret
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Root FS is read-only, so every writable path is an explicit
+          # emptyDir. Engine runtime state is LOCAL and intentionally
+          # ephemeral (redo-from-GitHub-truth model) — never a PVC.
+          volumeMounts:
+            - name: runtime
+              mountPath: /var/lib/fkst/runtime # = FKST_RUNTIME_ROOT (image env)
+            - name: tmp
+              mountPath: /tmp
+          # /health pings Mongo (bounded by MONGODB_SERVER_SELECTION_TIMEOUT_MS
+          # = 5s), so probe timeouts are 7s to let a degraded 503 arrive
+          # instead of timing out. Liveness is TCP-only: it MUST NOT depend on
+          # Mongo, or a DB blip would restart-loop the API.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 7
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 7
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
