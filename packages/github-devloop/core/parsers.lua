@@ -115,6 +115,50 @@ function M.parse_issue_list_observe(stdout)
   return parse_numbered_list(stdout)
 end
 
+function M.parse_dashboard_issue_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  if type(decoded) ~= "table" then
+    return items
+  end
+  each_paginated_item(decoded, function(issue)
+    if type(issue) == "table" and tonumber(issue.number) ~= nil then
+      local author_login = nil
+      if type(issue.author) == "table" and issue.author.login ~= nil then
+        author_login = tostring(issue.author.login)
+      elseif issue.author_login ~= nil then
+        author_login = tostring(issue.author_login)
+      elseif type(issue.user) == "table" and issue.user.login ~= nil then
+        author_login = tostring(issue.user.login)
+      end
+      table.insert(items, {
+        number = tonumber(issue.number),
+        title = tostring(issue.title or ""),
+        author_login = author_login,
+        body = tostring(issue.body or ""),
+        labels = issue.labels,
+        updated_at = issue.updated_at or issue.updatedAt,
+      })
+    end
+  end)
+  return items
+end
+
+function M.parse_repo_labels(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  each_paginated_item(decoded, function(label)
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(items, {
+        name = tostring(label.name),
+        color = label.color and tostring(label.color) or nil,
+        description = label.description and tostring(label.description) or nil,
+      })
+    end
+  end)
+  return items
+end
+
 function M.parse_pr_list_observe(stdout)
   return parse_numbered_list(stdout)
 end
@@ -219,6 +263,7 @@ end
 function M.parse_issue_view_observe(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
+    title = tostring(decoded.title or ""),
     state = decoded.state,
     comments = M.comments_from_json(decoded.comments),
   }
@@ -322,6 +367,31 @@ function M.parse_pr_list_head_base(stdout)
   return prs
 end
 
+local function check_run_entries(value)
+  if type(value) ~= "table" then
+    return {}
+  end
+  if type(value.check_runs) == "table" then
+    return value.check_runs
+  end
+  return value
+end
+
+function M.parse_commit_check_runs(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local runs = {}
+  for _, run in ipairs(check_run_entries(decoded)) do
+    if type(run) == "table" then
+      table.insert(runs, {
+        name = run.name,
+        status = run.status,
+        conclusion = run.conclusion,
+      })
+    end
+  end
+  return runs
+end
+
 function M.parse_pr_view_head_state(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
@@ -409,10 +479,25 @@ local green_status_states = {
   SUCCESS = true,
 }
 
+local green_check_run_conclusions = {
+  SUCCESS = true,
+  NEUTRAL = true,
+  SKIPPED = true,
+}
+
 local red_status_states = {
   ERROR = true,
   FAILURE = true,
 }
+
+local required_check_run_names = {
+  "test",
+}
+
+local required_check_run_name_set = {}
+for _, name in ipairs(required_check_run_names) do
+  required_check_run_name_set[name] = true
+end
 
 local max_rollup_check_name_len = 80
 local max_rollup_failure_summary_len = 200
@@ -437,6 +522,13 @@ local function safe_rollup_check_name(M, entry)
   return name
 end
 
+local function check_name(entry)
+  if type(entry) ~= "table" then
+    return ""
+  end
+  return tostring(entry.name or entry.context or entry.workflowName or entry.workflow_name or "")
+end
+
 function M.pr_rollup_green(pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
@@ -454,6 +546,33 @@ function M.pr_rollup_green(pr)
       return false, "rollup-red"
     else
       return false, "rollup-pending"
+    end
+  end
+  return true, "rollup-green"
+end
+
+function M.commit_check_runs_green(runs)
+  if type(runs) ~= "table" or #runs == 0 then
+    return false, "missing-status-rollup"
+  end
+  local seen_required = {}
+  for _, run in ipairs(runs) do
+    local name = check_name(run)
+    if required_check_run_name_set[name] then
+      seen_required[name] = true
+      local state, conclusion = check_entry_state(run)
+      if state == "COMPLETED" then
+        if not green_check_run_conclusions[conclusion] then
+          return false, "rollup-red"
+        end
+      else
+        return false, "rollup-pending"
+      end
+    end
+  end
+  for _, name in ipairs(required_check_run_names) do
+    if not seen_required[name] then
+      return false, "missing-status-rollup"
     end
   end
   return true, "rollup-green"
@@ -518,6 +637,7 @@ end
 
 M._max_rollup_check_name_len = max_rollup_check_name_len
 M._max_rollup_failure_summary_len = max_rollup_failure_summary_len
+M._required_check_run_names = required_check_run_names
 
 function M.pr_mergeable(pr)
   if type(pr) ~= "table" then

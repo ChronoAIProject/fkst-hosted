@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local fixtures = require("tests.production_fixture_helpers")
 require("tests.board_digest_probe_helpers")
 local core = h.core
 local t = h.t
@@ -49,14 +50,6 @@ end
 
 local function json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
-end
-
-local function cjk_char()
-  return string.char(0xe6, 0xb5, 0x8b)
-end
-
-local function emoji_char()
-  return string.char(0xf0, 0x9f, 0x98, 0x80)
 end
 
 local function assert_valid_utf8(value)
@@ -233,9 +226,9 @@ return {
   end,
 
   test_truncate_utf8_handles_mixed_width_boundaries = function()
-    local cjk = cjk_char()
+    local cjk = fixtures.cjk_char()
     local mixed = "ab" .. cjk .. "cd"
-    local emoji = emoji_char()
+    local emoji = fixtures.emoji_char()
 
     t.eq(core.truncate_utf8(mixed, 2), "ab")
     t.eq(core.truncate_utf8(mixed, 3), "ab")
@@ -253,7 +246,7 @@ return {
   end,
 
   test_board_digest_title_truncation_keeps_utf8_valid_before_cache_set = function()
-    local title = string.rep("a", 59) .. cjk_char() .. "tail"
+    local title = fixtures.board_digest_boundary_title()
     mock_board_title(title)
 
     local result = run_probe({
@@ -266,7 +259,7 @@ return {
     local body = probe_result(result).body
     assert_valid_utf8(body)
     t.is_true(body:find("#1 [fkst-dev:thinking] " .. string.rep("a", 59), 1, true) ~= nil)
-    t.is_nil(body:find(cjk_char(), 1, true))
+    t.is_nil(body:find(fixtures.cjk_char(), 1, true))
   end,
 
   test_board_digest_overflow_truncates_optional_context = function()

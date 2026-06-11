@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local fixtures = require("tests.production_fixture_helpers")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -656,12 +657,10 @@ return {
   end,
 
   test_review_pr_long_repo_proposal_id_is_bounded_and_review_runs = function()
-    local owner = string.rep("o", 45)
-    local name = string.rep("r", 46)
-    local repo = owner .. "/" .. name
+    local repo = fixtures.long_repo()
     t.eq(#repo, 92)
     local issue_proposal_id = "github-devloop/issue/" .. repo .. "/42"
-    local version = "ready/consensus-github-devloop/issue/" .. repo .. "/42/2026-06-03T01-02-03Z"
+    local version = fixtures.full_review_issue_version(repo)
     local event = reviewing({
       proposal_id = issue_proposal_id,
       version = version,

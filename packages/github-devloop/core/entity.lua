@@ -90,7 +90,7 @@ function M.linked_entity_snapshot(repo, proposal_id, issue_comments)
   }
   copy_comments(snapshot.comments, issue_comments)
   for _, pr_number in ipairs(linked_pr_numbers(issue_comments, proposal_id)) do
-    local pr_view = exec_sync({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
+    local pr_view = M.gh_exec({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
       error("github-devloop: linked PR state view failed: " .. tostring(pr_view.stderr))
     end

@@ -2,11 +2,7 @@ local S = {}
 
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
-local convergence_suffix = " — no three-angle consensus; narrowing"
 local display_separator = " — "
-local narrowed_question_label = "Narrowed question: "
-local angle_stances_label = "Angle stances:"
-local verdict_summary_label = "Three-angle verdicts: "
 local max_display_question_len = 2000
 local max_display_digest_len = 600
 local max_display_attr_len = 120
@@ -46,12 +42,12 @@ end
 
 local function build_convergence_display(header, unresolved, round)
   local lines = {
-    header .. " " .. tostring(round) .. convergence_suffix,
+    header .. tostring(round) .. M.comment_string("convergence_suffix"),
   }
   local question = bounded_neutralized_text(unresolved and unresolved.narrowed_question or "", max_display_question_len)
   if question ~= "" then
     table.insert(lines, "")
-    table.insert(lines, narrowed_question_label .. question)
+    table.insert(lines, M.comment_string("narrowed_question_label") .. question)
   end
   local angle_lines = {}
   if type(unresolved) == "table" and type(unresolved.angle_digests) == "table" then
@@ -64,7 +60,7 @@ local function build_convergence_display(header, unresolved, round)
   end
   if #angle_lines > 0 then
     table.insert(lines, "")
-    table.insert(lines, angle_stances_label)
+    table.insert(lines, M.comment_string("angle_stances_label"))
     for _, line in ipairs(angle_lines) do
       table.insert(lines, line)
     end
@@ -94,7 +90,7 @@ local function build_verdict_summary(angle_results)
   if #parts == 0 then
     return nil
   end
-  local summary = verdict_summary_label .. table.concat(parts, " ")
+  local summary = M.comment_string("verdict_summary_label") .. table.concat(parts, " ")
   if #summary > max_verdict_summary_len then
     summary = M.truncate_utf8(summary, max_verdict_summary_len)
   end
@@ -106,7 +102,7 @@ local function build_comment_evidence_digest(M, comments)
   text = text:gsub("%c", " "):gsub("%s+", " ")
   text = text:gsub("^%s+", ""):gsub("%s+$", "")
   if text == "" then
-    return "(review rounds are recorded on the parent PR comments)"
+    return M.comment_string("comment_evidence_empty")
   end
   if #text > max_verdict_summary_len then
     text = M.truncate_utf8(text, max_verdict_summary_len)
@@ -162,7 +158,7 @@ function M.build_observe_comment_request(issue, proposal)
     schema = "github-proxy.v1",
     repo = issue.repo,
     issue_number = issue.number,
-    body = "github-devloop thinking: consensus started\n\n"
+    body = M.comment_string("thinking_started") .. "\n\n"
       .. M.state_marker(proposal.proposal_id, "thinking", proposal.dedup_key),
     dedup_key = M._dedup_key({
       tostring(proposal.proposal_id),
@@ -189,7 +185,7 @@ function M.build_result_comment_request(repo, issue_number, reached)
   local state_marker = M.state_marker(reached.proposal_id, "ready", reached.dedup_key)
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = build_verdict_summary(reached.angle_results)
-  local body = "github-devloop decision: " .. tostring(reached.decision)
+  local body = M.comment_string("decision_prefix") .. tostring(reached.decision)
   if verdict_summary ~= nil then
     body = body .. "\n" .. verdict_summary
   end
@@ -216,7 +212,7 @@ function M.build_converge_round_comment_request(repo, issue_number, unresolved, 
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = build_convergence_display("github-devloop convergence round", unresolved, round)
+    body = build_convergence_display(M.comment_string("convergence_round_prefix"), unresolved, round)
       .. "\n\n" .. tostring(marker_body)
       .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
@@ -235,7 +231,7 @@ function M.build_review_converge_round_comment_request(repo, issue_number, unres
     kind = "pr",
     repo = repo,
     number = unresolved.pr_number or select(2, M.parse_pr_source_ref(unresolved.source_ref)),
-  }, build_convergence_display("github-devloop PR review convergence round", unresolved, round)
+  }, build_convergence_display(M.comment_string("pr_review_convergence_round_prefix"), unresolved, round)
     .. "\n\n" .. tostring(marker_body)
     .. "\n" .. ai_sentinel, M._dedup_key({
     "review-converge-round",
@@ -251,7 +247,7 @@ function M.build_issue_review_converge_round_comment_request(repo, issue_number,
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = build_convergence_display("github-devloop PR review convergence round", unresolved, round)
+    body = build_convergence_display(M.comment_string("pr_review_convergence_round_prefix"), unresolved, round)
       .. "\n\n" .. tostring(marker_body)
       .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
@@ -307,6 +303,23 @@ function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
   )
 end
 
+function M.build_dependency_hold_comment_request(repo, issue_number, proposal_id, version, gate, marker, source_ref)
+  local reason = M.neutralize_untrusted_comment_text(gate and gate.reason or "")
+  if reason == "" then
+    reason = gate and gate.kind or "dependency-hold"
+  end
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = M.comment_string("dependency_hold_prefix") .. tostring(gate and gate.kind or "unknown")
+      .. "\n\n" .. M.comment_string("reason_inline_label") .. reason
+      .. "\n\n" .. tostring(marker),
+    dedup_key = M._dedup_key({ "dependency", "comment", tostring(proposal_id), tostring(version), tostring(gate and gate.kind or "unknown") }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
 function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
   local version = M.reconcile_state_version(reconcile.base_version, reconcile.round)
   local marker = M.reconcile_marker(reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
@@ -316,8 +329,8 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop reconcile action: " .. tostring(action)
-      .. "\n\nReason:\n" .. safe_reason
+    body = M.comment_string("reconcile_action_prefix") .. tostring(action)
+      .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
       .. "\n\n"
       .. state_marker .. "\n" .. marker
       .. "\n" .. ai_sentinel,
@@ -340,8 +353,8 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
     kind = "pr",
     repo = repo,
     number = pr_number,
-  }, "github-devloop fix reconcile action: " .. tostring(action)
-    .. "\n\nReason:\n" .. safe_reason
+  }, M.comment_string("fix_reconcile_action_prefix") .. tostring(action)
+    .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
     .. "\n" .. ai_sentinel, M._dedup_key({
@@ -361,8 +374,8 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
     kind = "pr",
     repo = repo,
     number = pr_number,
-  }, "github-devloop review reconcile action: " .. tostring(action)
-    .. "\n\nReason:\n" .. safe_reason
+  }, M.comment_string("review_reconcile_action_prefix") .. tostring(action)
+    .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
     .. "\n" .. ai_sentinel, M._dedup_key({
@@ -376,7 +389,7 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
   local marker = M.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
-    safe_reason = "(no reason provided)"
+    safe_reason = M.comment_string("no_reason_provided")
   end
   if #safe_reason > M._max_meta_reason_len then
     safe_reason = M.truncate_utf8(safe_reason, M._max_meta_reason_len)
@@ -385,8 +398,8 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop intake decision: " .. tostring(decision)
-      .. "\n\nReason:\n" .. safe_reason
+    body = M.comment_string("intake_decision_prefix") .. tostring(decision)
+      .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
       .. "\n\n" .. marker,
     dedup_key = M._dedup_key({
       "intake",
@@ -464,12 +477,12 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop implementation started"
-      .. "\n\nWorktree: " .. tostring(worktree)
-      .. "\nBranch: " .. tostring(branch)
-      .. "\nHead: " .. tostring(head_sha)
-      .. "\nBase branch: " .. tostring(base_branch)
-      .. "\nBase head: " .. tostring(base_sha)
+    body = M.comment_string("implementation_started")
+      .. "\n\n" .. M.comment_string("worktree_label") .. tostring(worktree)
+      .. "\n" .. M.comment_string("branch_label") .. tostring(branch)
+      .. "\n" .. M.comment_string("head_label") .. tostring(head_sha)
+      .. "\n" .. M.comment_string("base_branch_label") .. tostring(base_branch)
+      .. "\n" .. M.comment_string("base_head_label") .. tostring(base_sha)
       .. "\n\n" .. state_marker
       .. "\n" .. marker,
     dedup_key = M._dedup_key({
@@ -489,7 +502,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
     text = M.truncate_utf8(text, M._max_impl_output_len)
   end
   if text == "" then
-    text = "(no implementation output)"
+    text = M.comment_string("no_implementation_output")
   end
   text = M.neutralize_untrusted_comment_text(text)
 
@@ -499,7 +512,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop implementation failed: " .. safe_reason
+    body = M.comment_string("implementation_failed_prefix") .. safe_reason
       .. "\n\n" .. text
       .. "\n\n" .. state_marker
       .. "\n" .. marker,
@@ -550,7 +563,7 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
     base_branch = base_branch,
     title = bounded_title,
     body = body,
-    issue_comment_body_template = "github-devloop PR opened: #{{pr_number}}"
+    issue_comment_body_template = M.comment_string("pr_opened_prefix") .. "{{pr_number}}"
       .. "\n\n" .. M.state_marker(proposal_id, "pr-open", current.version)
       .. "\n" .. M.pr_link_marker_template(proposal_id, branch, current.version, base_branch),
     issue_label_add = add_labels,
@@ -575,7 +588,7 @@ function M.build_pr_open_comment_request(repo, issue_number, proposal_id, curren
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = "github-devloop PR opened: #" .. tostring(pr_number)
+    body = M.comment_string("pr_opened_prefix") .. tostring(pr_number)
       .. "\n\n" .. state_marker
       .. "\n" .. link_marker,
     dedup_key = M._dedup_key({
@@ -610,7 +623,7 @@ function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number
     kind = "pr",
     repo = repo,
     number = pr_number,
-  }, "github-devloop PR is ready for review"
+  }, M.comment_string("pr_ready_for_review")
     .. "\n\n" .. state_marker, M._dedup_key({
     "observe-pr",
     "comment",
@@ -669,12 +682,12 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
   end
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = build_verdict_summary(reached.angle_results)
-  local body = "github-devloop PR review decision: " .. tostring(reached.decision)
+  local body = M.comment_string("pr_review_decision_prefix") .. tostring(reached.decision)
   if verdict_summary ~= nil then
     body = body .. "\n" .. verdict_summary
   end
   if reached.decision == "reject" and blocking_gap ~= nil then
-    body = body .. "\nBlocking gap: " .. M.neutralize_untrusted_comment_text(blocking_gap)
+    body = body .. "\n" .. M.comment_string("blocking_gap_label") .. M.neutralize_untrusted_comment_text(blocking_gap)
   end
   local _, pr_number = M.parse_pr_source_ref(source_ref)
   return M.build_entity_comment_request({
@@ -701,6 +714,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
   if display_reason == "" then
     display_reason = "gate-failed"
   end
+  local test_command = M.neutralize_untrusted_comment_text(M.test_command())
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
   local marker = M.merge_gate_marker(
     merge_ready.proposal_id,
@@ -715,7 +729,8 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
-  }, "github-devloop merge gate failed: " .. display_reason
+  }, M.comment_string("merge_gate_failed_prefix") .. display_reason
+    .. "\n" .. M.comment_string("reproduce_locally_prefix") .. test_command .. M.comment_string("reproduce_locally_suffix")
     .. "\n\n" .. state_marker
     .. "\n" .. marker, M._dedup_key({
     "merge",
@@ -748,15 +763,15 @@ function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head
   local marker = M.fix_marker(fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
   local summary = ""
   if fix.fix_summary ~= nil and tostring(fix.fix_summary) ~= "" then
-    summary = "\nFix-round summary: " .. M.neutralize_untrusted_comment_text(fix.fix_summary)
+    summary = "\n" .. M.comment_string("fix_round_summary_label") .. M.neutralize_untrusted_comment_text(fix.fix_summary)
   end
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = fix.pr_number,
-  }, "github-devloop fix pushed for re-review"
-    .. "\n\nPrevious reviewed head: " .. tostring(old_head_sha)
-    .. "\nNew head: " .. tostring(new_head_sha)
+  }, M.comment_string("fix_pushed_for_rereview")
+    .. "\n\n" .. M.comment_string("previous_reviewed_head_label") .. tostring(old_head_sha)
+    .. "\n" .. M.comment_string("new_head_label") .. tostring(new_head_sha)
     .. summary
     .. "\n\n" .. state_marker
     .. "\n" .. marker, M._dedup_key({
@@ -791,9 +806,9 @@ function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
-  }, "github-devloop PR head advanced after merge approval; re-entering review"
-    .. "\n\nPrevious reviewed head: " .. tostring(old_head_sha)
-    .. "\nCurrent head: " .. tostring(new_head_sha)
+  }, M.comment_string("pr_head_advanced")
+    .. "\n\n" .. M.comment_string("previous_reviewed_head_label") .. tostring(old_head_sha)
+    .. "\n" .. M.comment_string("current_head_label") .. tostring(new_head_sha)
     .. "\n\n" .. state_marker, M._dedup_key({
     "merge",
     "comment",
@@ -827,7 +842,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
     text = M.truncate_utf8(text, M._max_impl_output_len)
   end
   if text == "" then
-    text = "(no fix output)"
+    text = M.comment_string("no_fix_output")
   end
   text = M.neutralize_untrusted_comment_text(text)
   local state_marker = M.state_marker(fix.proposal_id, "review-meta", fix.version)
@@ -835,9 +850,10 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
     kind = "pr",
     repo = repo,
     number = fix.pr_number,
-  }, "github-devloop fix escalated to review-meta: " .. safe_reason
+  }, M.comment_string("fix_escalated_to_review_meta_prefix") .. safe_reason
     .. "\n\n" .. text
-    .. "\n\n" .. state_marker, M._dedup_key({
+    .. "\n\n" .. state_marker
+    .. "\n" .. M.review_meta_marker(fix.proposal_id, fix.review_dedup_key), M._dedup_key({
     "fix",
     "comment",
     "review-meta",
@@ -875,8 +891,8 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     kind = "pr",
     repo = repo,
     number = review_meta.pr_number,
-  }, "github-devloop review-meta action: " .. action_text
-    .. "\n\nReason:\n" .. safe_reason
+  }, M.comment_string("review_meta_action_prefix") .. action_text
+    .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
     .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
     .. "\n" .. M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version, blocking_gap, reason), M._dedup_key({
     "review-meta",
@@ -884,6 +900,20 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     tostring(review_meta.dedup_key),
     tostring(state_version),
   }), review_meta.source_ref)
+end
+
+function M.build_merging_comment_body(merge_ready)
+  return M.comment_string("is_merging_pr_prefix") .. tostring(merge_ready.pr_number)
+    .. "\n\n" .. M.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)
+    .. "\n" .. M.merging_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+end
+
+function M.build_merged_comment_body(merge_ready)
+  return M.comment_string("merged_pr_prefix") .. tostring(merge_ready.pr_number)
+    .. "\n\n" .. M.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)
+    .. "\n" .. M.merging_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+    .. "\n" .. M.state_marker(merge_ready.proposal_id, "merged", merge_ready.version)
+    .. "\n" .. M.merged_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
 end
 
 function M.build_spec_amendment_issue_create_request(repo, issue_number, review_meta, title_brief, reason, comments)

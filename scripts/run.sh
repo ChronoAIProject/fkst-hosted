@@ -27,8 +27,10 @@
 #   scripts/run.sh supervise <package>
 #       Start the real fkst-framework supervise event loop for one package.
 #       Uses fresh temporary FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT directories
-#       and runs in the foreground until Ctrl-C. FKST_PROJECT_ROOT can override
-#       the default project root of packages/<package>.
+#       and requires FKST_RATE_POOL_ROOT from the host so named external-command
+#       rate pools are shared across supervise instances. Runs in the foreground
+#       until Ctrl-C. FKST_PROJECT_ROOT can override the default project root of
+#       packages/<package>.
 #
 #   scripts/run.sh build
 #       Local-only helper: update the fkst-substrate dev checkout and build
@@ -451,6 +453,18 @@ cmd_supervise() {
   if [ -z "$pkg" ]; then
     echo "usage: scripts/run.sh supervise <package>" >&2; exit 1
   fi
+  if [ -z "${FKST_RATE_POOL_ROOT:-}" ]; then
+    echo "error: FKST_RATE_POOL_ROOT is required for supervise so gh rate pools share one host-stable budget" >&2
+    echo "  set FKST_RATE_POOL_ROOT to the same host-stable directory for every supervise instance that spends the GitHub quota" >&2
+    exit 1
+  fi
+  case "$FKST_RATE_POOL_ROOT" in
+    /*) ;;
+    *)
+      echo "error: FKST_RATE_POOL_ROOT must be an absolute host-stable directory path" >&2
+      exit 1
+      ;;
+  esac
   local pkgdir="$ROOT/packages/$pkg"
   [ -d "$pkgdir" ] || { echo "error: no package at $pkgdir" >&2; exit 1; }
 
@@ -468,6 +482,7 @@ cmd_supervise() {
   echo "BIN=$BIN"
   echo "FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT"
   echo "FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT"
+  echo "FKST_RATE_POOL_ROOT=$FKST_RATE_POOL_ROOT"
   echo "This starts the real supervise event loop in the foreground. Press Ctrl-C to stop."
   echo "exec: \"$BIN\" supervise --project-root \"$project_root\" --package-root \"$pkgdir\" --framework-bin \"$BIN\""
   exec "$BIN" supervise --project-root "$project_root" --package-root "$pkgdir" --framework-bin "$BIN"

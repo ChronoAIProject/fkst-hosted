@@ -124,8 +124,29 @@ return {
     t.eq(facts[1].dedup, consensus_dedup)
     t.eq(facts[1].question, core.converge_question_digest(question))
     t.eq(facts[1].verdicts, core.converge_verdicts_digest(angle_digests))
+    t.eq(facts[1].narrowed_question, "Which boundary should narrow?")
+    t.eq(facts[1].angle_digests[1].digest, "Small enough.")
     t.eq(core.has_converge_round_marker({ trusted(first) }, proposal_id, base_version, source_digest, 3), true)
     t.eq(core.max_converge_round(facts), 3)
+  end,
+
+  test_converge_marker_replay_fields_escape_delimiters = function()
+    local source_digest = core.source_ref_digest(source_ref)
+    local marker = core.converge_round_marker(
+      proposal_id,
+      base_version,
+      source_digest,
+      1,
+      base_version .. "/loop/1",
+      "Which boundary should narrow?",
+      {
+        { angle = "minimal", verdict = "abstain", digest = "contains | pipe; semicolon % percent" },
+      }
+    )
+
+    local facts = core.converge_round_facts({ trusted(marker) }, proposal_id, base_version, source_digest)
+    t.eq(#facts, 1)
+    t.eq(facts[1].angle_digests[1].digest, "contains | pipe; semicolon % percent")
   end,
 
   test_converge_round_facts_keep_last_marker_for_same_round = function()

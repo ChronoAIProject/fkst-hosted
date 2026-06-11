@@ -1,4 +1,5 @@
 local core = require("core")
+local fixtures = require("tests.production_fixture_helpers")
 
 M = {}
 
@@ -230,13 +231,12 @@ local function run_publish_unique_on_invalid(root)
 end
 
 local function run_utf8_truncation(root)
-  local cjk = string.char(0xe6, 0xb5, 0x8b)
-  local fixtures = {
+  local fixture_data = {
     issue_outputs = {
-      string.rep("a", core._max_bundle_file_len - 1) .. cjk .. "tail",
+      string.rep("a", core._max_bundle_file_len - 1) .. fixtures.cjk_char() .. "tail",
     },
   }
-  local bundle = core.build_context_bundle(build_args(root, fixtures, { tick = nil }))
+  local bundle = core.build_context_bundle(build_args(root, fixture_data, { tick = nil }))
   return {
     issue_content = read_file(bundle.issue_path),
     issue_bytes = bundle.issue_bytes,

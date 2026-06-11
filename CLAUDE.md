@@ -82,6 +82,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 ## 纪律（沿用 fkst-substrate）
 
+- **永不手改程序状态（program-state is program-only）**：系统状态（state/converge/review-result 等 marker、runtime/durable 内容）只能由程序产生，任何人（含运营者/babysitter agent）不得手写或直接修改——即使身份可信、语法正确。需要干预时的固定顺序：**先改程序**（自驱管线优先；程序自身瘫痪才走 out-of-band 修程序），再通过 GitHub 面的合法接口操作（issue、评论指令、push 提交、关闭自己立的 issue）。人的干预必须是程序定义的合法输入，不是代行程序的状态写权。
 - 源文件内部英文；对外产物英文为主、中英双语。错误分类要窄（避免 `general error`）；日志/commit/event payload 可 grep。AI 生成的对外文本末尾保留 `⟦AI:FKST⟧`。
 - 单个源代码文件不得超过 1000 行（范围含生产源码、测试源码、脚本源码，.lua/.sh/.py/.rs 等），硬上限、不设豁免；先删死码/重复代码，再按稳定职责拆成包内子模块或多个 `*_test.lua`；不得用无职责边界的碎片化、空转发文件或 compat/legacy/shim 壳凑行数。
 - 不留 deprecated shim / compat layer / `.old` / `_legacy`；改契约就改完整，旧形态从当前态删除。文档描述当前态，历史留 git。

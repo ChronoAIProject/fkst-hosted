@@ -30,7 +30,7 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_open_pr_cmd(issue.repo, issue.number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_issue_view_open_pr_cmd(issue.repo, issue.number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue open-pr view failed: " .. tostring(view.stderr))
     end

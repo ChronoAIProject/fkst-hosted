@@ -127,8 +127,8 @@ function M.board_digest_block(repo, tick)
     return cached
   end
 
-  local ok_issue, issue_result = pcall(exec_sync, { cmd = board_digest_issue_list_cmd(M, repo), timeout = 30 })
-  local ok_pr, pr_result = pcall(exec_sync, { cmd = board_digest_pr_list_cmd(M, repo), timeout = 30 })
+  local ok_issue, issue_result = pcall(M.gh_exec, { cmd = board_digest_issue_list_cmd(M, repo), timeout = 30 })
+  local ok_pr, pr_result = pcall(M.gh_exec, { cmd = board_digest_pr_list_cmd(M, repo), timeout = 30 })
   if not ok_issue or not ok_pr
     or type(issue_result) ~= "table" or issue_result.exit_code ~= 0
     or type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then

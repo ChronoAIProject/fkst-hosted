@@ -544,9 +544,32 @@ return {
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
     t.is_true(comment_body:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
+    t.is_true(comment_body:find("Reproduce locally with `scripts/run.sh test`", 1, true) ~= nil)
     local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
     t.is_true(fix_fact.review_reason:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
     t.is_true(has_value(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.remove_labels, "fkst-dev:merge-ready"))
+  end,
+
+  test_merge_gate_feedback_uses_custom_test_command_host_fact = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    t.mock_command('printf %s "$FKST_DEVLOOP_TEST_COMMAND"', {
+      stdout = "cargo build && cargo test",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE"}]')
+
+    local result = run_merge(event, opts("merge-custom-test-command", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(comment_body:find("Reproduce locally with `cargo build && cargo test`", 1, true) ~= nil)
+    local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    t.is_true(fix_fact.review_reason:find("cargo build && cargo test", 1, true) ~= nil)
   end,
 
   test_merge_ci_red_uses_bounded_safe_rollup_summary = function()

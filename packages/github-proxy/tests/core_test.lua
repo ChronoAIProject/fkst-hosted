@@ -181,10 +181,21 @@ return {
     local result = core.gh_exec("gh issue list", 30, "gh issue list", function(spec)
       t.eq(spec.cmd, "gh issue list")
       t.eq(spec.timeout, 30)
+      t.eq(spec.rate_pool.name, "gh")
+      t.eq(spec.rate_pool.burst, 50)
+      t.eq(spec.rate_pool.refill_per_hour, 3250)
       return { stdout = "[]\n", stderr = "", exit_code = 0 }
     end)
 
     t.eq(result.stdout, "[]\n")
+  end,
+
+  test_gh_exec_opts_preserves_options = function()
+    local spec = core.gh_exec_opts({ cmd = "gh pr list", timeout = 60, cwd = "/tmp" })
+    t.eq(spec.cmd, "gh pr list")
+    t.eq(spec.timeout, 60)
+    t.eq(spec.cwd, "/tmp")
+    t.eq(spec.rate_pool.name, "gh")
   end,
 
   test_gh_error_classifies_rate_limit_and_abuse = function()

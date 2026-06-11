@@ -77,7 +77,7 @@ local function decompose_plan(decompose, current_issue, content_fetch)
 end
 
 local function read_current_pr(repo, pr_number)
-  local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr decompose view failed: " .. tostring(pr_view.stderr))
   end
@@ -87,7 +87,7 @@ end
 local function write_decomposed_marker(repo, decompose, count)
   local path = marker_body_file(repo, decompose.pr_number)
   file.write(path, core.decomposed_comment_body(decompose, count))
-  local result = exec_sync({ cmd = core.gh_pr_comment_cmd(repo, decompose.pr_number, path), timeout = 30 })
+  local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, decompose.pr_number, path), timeout = 30 })
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr decomposed marker comment failed: " .. tostring(result.stderr))
   end
@@ -144,7 +144,7 @@ function pipeline(event)
       return
     end
 
-    local issue_view = exec_sync({ cmd = core.gh_issue_view_decompose_cmd(repo, issue_number), timeout = 30 })
+    local issue_view = core.gh_exec({ cmd = core.gh_issue_view_decompose_cmd(repo, issue_number), timeout = 30 })
     if issue_view.exit_code ~= 0 then
       error("github-devloop: gh issue decompose view failed: " .. tostring(issue_view.stderr))
     end

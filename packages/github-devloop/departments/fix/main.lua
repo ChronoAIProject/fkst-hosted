@@ -18,17 +18,43 @@ local function branch_worktree(repo, issue_number, version, branch)
   if runtime_result.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
-  local worktree = core.implement_worktree_path(runtime_result.stdout, repo, issue_number, version)
+  local runtime_root = runtime_result.stdout
+  local worktree = core.implement_worktree_path(runtime_root, repo, issue_number, version)
   local list_result = exec_sync({ cmd = core.git_worktree_list_cmd(), timeout = 30 })
   if list_result.exit_code ~= 0 then
     error("github-devloop: git worktree list failed: " .. tostring(list_result.stderr))
   end
   local existing = core.find_worktree_for_branch(list_result.stdout, branch)
   if existing ~= nil then
-    return existing
+    local dir_result = exec_sync({ cmd = core.path_is_directory_cmd(existing), timeout = 30 })
+    if dir_result.exit_code ~= 0 and dir_result.exit_code ~= 1 then
+      error("github-devloop: git worktree path check failed: " .. tostring(dir_result.stderr))
+    end
+    if dir_result.exit_code == 0 and core.path_under_runtime_root(runtime_root, existing) then
+      return existing
+    end
+    if dir_result.exit_code == 1 then
+      local prune_result = exec_sync({ cmd = core.git_worktree_prune_cmd(), timeout = 60 })
+      if prune_result.exit_code ~= 0 then
+        error("github-devloop: git worktree prune failed: " .. tostring(prune_result.stderr))
+      end
+    else
+      local remove_result = exec_sync({ cmd = core.git_worktree_remove_cmd(existing), timeout = 60 })
+      if remove_result.exit_code ~= 0 then
+        error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
+      end
+    end
   end
 
-  local add_result = exec_sync({ cmd = core.git_worktree_add_existing_branch_cmd(worktree, branch), timeout = 60 })
+  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", branch), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR head branch fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local add_cmd = core.git_worktree_add_remote_branch_cmd(worktree, "origin", branch, false)
+  if existing ~= nil then
+    add_cmd = core.git_worktree_add_remote_branch_cmd(worktree, "origin", branch, true)
+  end
+  local add_result = exec_sync({ cmd = add_cmd, timeout = 60 })
   if add_result.exit_code ~= 0 then
     error("github-devloop: git worktree add failed: " .. tostring(add_result.stderr))
   end
@@ -157,7 +183,7 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local pr_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    local pr_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
@@ -274,7 +300,7 @@ function pipeline(event)
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
+      local issue_view = core.gh_exec({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue fix view failed: " .. tostring(issue_view.stderr))
       end
@@ -311,7 +337,7 @@ function pipeline(event)
       local existing_head_sha = branch_head_if_ahead(fix.reviewed_head_sha, branch)
       if existing_head_sha ~= nil then
         core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
-        local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+        local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
         if pr_recheck.exit_code ~= 0 then
           error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
         end
@@ -333,7 +359,7 @@ function pipeline(event)
         if push.exit_code ~= 0 then
           error("github-devloop: git push failed: " .. tostring(push.stderr))
         end
-        local pushed_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+        local pushed_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
         if pushed_view.exit_code ~= 0 then
           error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
         end
@@ -381,7 +407,7 @@ function pipeline(event)
       return
     end
 
-    local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pr_recheck.exit_code ~= 0 then
       error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
     end
@@ -403,7 +429,7 @@ function pipeline(event)
     if push.exit_code ~= 0 then
       error("github-devloop: git push failed: " .. tostring(push.stderr))
     end
-    local pushed_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    local pushed_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pushed_view.exit_code ~= 0 then
       error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
     end

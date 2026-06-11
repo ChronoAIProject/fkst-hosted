@@ -7,8 +7,8 @@ Repository state:
 - Do not push.
 - Do not open a pull request.
 - Do not modify labels, comments, or GitHub state.
-- Before finishing, run `scripts/run.sh test` from the repository root with no package argument so it matches CI across all packages.
-- If any test fails, treat that as a blocking failure: fix the failures and rerun `scripts/run.sh test` until it exits 0.
+- Before finishing, run `{{test_command}}` from the repository root.
+- If any test fails, treat that as a blocking failure: fix the failures and rerun `{{test_command}}` until it exits 0.
 - Do not finish with failing tests. If the suite cannot run because the engine BIN is unreachable, report that environment failure explicitly instead of claiming success.
 
 Security:
