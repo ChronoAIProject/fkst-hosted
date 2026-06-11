@@ -684,6 +684,58 @@ async fn two_pods_exactly_one_wins() {
     }
 }
 
+/// `acquire_for` parameterizes the holder: a coordinator pod can assign the
+/// lease to ANOTHER pod. The assigned holder (at its own store identity)
+/// renews fine; the coordinator itself holds nothing.
+#[tokio::test]
+async fn acquire_for_assigns_another_holder() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, db) = mongo_db().await;
+    let coordinator = store(&db, "pod-coord");
+    let pod_b = store(&db, "pod-b");
+    let session = bson::Uuid::new();
+
+    let lease = acquired(
+        coordinator
+            .acquire_for("pkg", session, "pod-b")
+            .await
+            .expect("acquire for pod-b"),
+    );
+    assert_eq!(lease.holder_pod, "pod-b", "the CHOSEN pod holds the lease");
+    assert_eq!(lease.fencing_token, 1);
+    assert_eq!(lease.session_id, session);
+
+    // The assigned holder renews at its own identity + the token.
+    renewed(
+        pod_b
+            .renew("pkg", lease.fencing_token)
+            .await
+            .expect("holder renews"),
+    );
+
+    // The coordinator does NOT hold the lease: its renew is Lost and the
+    // document is untouched (equality pins on holder_pod).
+    let outcome = coordinator
+        .renew("pkg", lease.fencing_token)
+        .await
+        .expect("coordinator renew is an outcome");
+    assert_eq!(outcome, RenewOutcome::Lost);
+    let stored = raw_lease(&db, "pkg").await.expect("doc present");
+    assert_eq!(stored.holder_pod, "pod-b");
+    assert_eq!(stored.fencing_token, 1);
+
+    // Delegation sanity: plain acquire is acquire_for(self) — contended
+    // here because pod-b's lease is live.
+    let outcome = coordinator
+        .acquire("pkg", bson::Uuid::new())
+        .await
+        .expect("self acquire is an outcome");
+    assert_eq!(outcome, AcquireOutcome::NotAcquired);
+}
+
 /// AC2: LeaseStore::ensure_indexes is idempotent, creates the stable-named
 /// holder_pod + expires_at secondaries with exact key specs, never a TTL
 /// option, and coexists with the startup path's identical expires_at spec.

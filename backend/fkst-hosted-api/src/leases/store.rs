@@ -188,14 +188,37 @@ impl LeaseStore {
         package_name: &str,
         session_id: bson::Uuid,
     ) -> Result<AcquireOutcome, PoolError> {
-        let result = match self.acquire_attempt(package_name, session_id).await {
+        self.acquire_for(package_name, session_id, &self.pod_id.clone())
+            .await
+    }
+
+    /// [`Self::acquire`] with the holder parameterized: become — or make
+    /// `holder_pod` — the holder of `package_name`'s lease. The distribution
+    /// layer uses this to assign a lease to the *chosen* pod (which may not
+    /// be this process); the filter, pipeline, retry, and outcome semantics
+    /// are IDENTICAL to `acquire` (which delegates here with this pod's own
+    /// identity). The acquired lease is subsequently renewable/releasable
+    /// only by a store bound to `holder_pod`'s identity (equality pins).
+    pub async fn acquire_for(
+        &self,
+        package_name: &str,
+        session_id: bson::Uuid,
+        holder_pod: &str,
+    ) -> Result<AcquireOutcome, PoolError> {
+        let result = match self
+            .acquire_attempt(package_name, session_id, holder_pod)
+            .await
+        {
             Err(error) if is_dup_key(&error) => {
                 tracing::debug!(
                     package = package_name,
-                    pod = %self.pod_id,
+                    pod = holder_pod,
                     "lease acquire hit duplicate _id; retrying once"
                 );
-                match self.acquire_attempt(package_name, session_id).await {
+                match self
+                    .acquire_attempt(package_name, session_id, holder_pod)
+                    .await
+                {
                     Err(retry_error) if is_dup_key(&retry_error) => Ok(None),
                     other => other,
                 }
@@ -206,7 +229,7 @@ impl LeaseStore {
             Ok(Some(lease)) => {
                 tracing::info!(
                     package = package_name,
-                    pod = %self.pod_id,
+                    pod = holder_pod,
                     token = lease.fencing_token,
                     session = %lease.session_id,
                     expires_at = %lease.expires_at,
@@ -217,7 +240,7 @@ impl LeaseStore {
             Ok(None) => {
                 tracing::info!(
                     package = package_name,
-                    wanted_by = %self.pod_id,
+                    wanted_by = holder_pod,
                     "lease contended"
                 );
                 Ok(AcquireOutcome::NotAcquired)
@@ -231,12 +254,13 @@ impl LeaseStore {
         &self,
         package_name: &str,
         session_id: bson::Uuid,
+        holder_pod: &str,
     ) -> Result<Option<LeaseDoc>, mongodb::error::Error> {
         let (now, expires) = now_and_expiry(self.lease_ttl);
         let filter = doc! {
             "_id": package_name,
             "$or": [
-                { "holder_pod": &self.pod_id },
+                { "holder_pod": holder_pod },
                 { "expires_at": { "$lte": now } },
             ],
         };
@@ -248,7 +272,7 @@ impl LeaseStore {
         let update = vec![doc! {
             "$set": {
                 "session_id": session_id,
-                "holder_pod": { "$literal": &self.pod_id },
+                "holder_pod": { "$literal": holder_pod },
                 "fencing_token": { "$add": [{ "$ifNull": ["$fencing_token", 0] }, 1] },
                 "expires_at": expires,
                 "renewed_at": now,
