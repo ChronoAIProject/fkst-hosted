@@ -100,6 +100,29 @@ impl SessionRepo {
         Ok(updated)
     }
 
+    /// Stamp the journaling layer's logical-run key onto a session. A
+    /// DELIBERATELY narrow write: it sets ONLY `run_key` and never touches
+    /// `status` (every status change stays inside [`Self::transition`]).
+    /// Best-effort by contract — an absent document is a no-op, not an
+    /// error (the driver may race a concurrent terminal sweep).
+    pub async fn set_run_key(&self, id: bson::Uuid, run_key: &str) -> Result<(), AppError> {
+        let result = self
+            .coll
+            .update_one(doc! { "_id": id }, doc! { "$set": { "run_key": run_key } })
+            .await
+            .map_err(|error| {
+                tracing::error!(session_id = %id, error = %error, "run_key stamp failed");
+                AppError::Mongo(error)
+            })?;
+        tracing::debug!(
+            session_id = %id,
+            run_key = %run_key,
+            matched = result.matched_count,
+            "run_key stamped"
+        );
+        Ok(())
+    }
+
     /// Mark every pre-terminal session `failed` with [`ORPHANED_ERROR`].
     ///
     /// v1 single-pod stopgap: this binary supervises engine processes only

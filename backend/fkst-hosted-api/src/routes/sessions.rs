@@ -194,6 +194,7 @@ mod tests {
             pid: None,
             runtime_dir: None,
             error: None,
+            run_key: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: None,
             stopped_at: None,

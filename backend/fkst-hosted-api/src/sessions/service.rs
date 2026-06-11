@@ -125,6 +125,7 @@ impl SessionService {
             pid: None,
             runtime_dir: None,
             error: None,
+            run_key: None,
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,

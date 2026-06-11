@@ -91,6 +91,7 @@ fn sample_session() -> SessionDoc {
         pid: Some(4242),
         runtime_dir: Some("/tmp/run".to_string()),
         error: None,
+        run_key: None,
         created_at: bson::DateTime::from_millis(1_700_000_000_000),
         started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
         stopped_at: None,
