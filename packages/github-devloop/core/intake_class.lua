@@ -3,20 +3,37 @@ local S = {}
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
 
-local function normalized_class_reason(reason)
-  local text = tostring(reason or ""):lower()
-  text = text:gsub("#%d+", " ")
-  text = text:gsub("%f[%w]cites?%f[^%w]", " ")
-  text = text:gsub("%f[%w]prior%f[^%w]", " ")
-  text = text:gsub("%f[%w]siblings?%f[^%w]", " ")
-  text = text:gsub("%f[%w]rule%f[^%w]%s+%f[%w]of%f[^%w]%s+%f[%w]three%f[^%w]", " ")
-  text = text:gsub("%f[%w]requires?%f[^%w]", " ")
-  text = text:gsub("%f[%w]class%f[^%w]%s*%-?%s*%f[%w]level%f[^%w]", "class-level")
+local stable_class_label_prefixes = {
+  { prefix = "fingerprint:", rank = 1 },
+  { prefix = "root-cause:", rank = 2 },
+  { prefix = "problem:", rank = 3 },
+  { prefix = "error-class:", rank = 4 },
+}
+
+local function slug_label_value(value)
+  local text = tostring(value or ""):lower()
   text = text:gsub("[^%w%-]+", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+  if text == "" then
+    return nil
+  end
   return text
 end
 
-function M.intake_class_identity(reason, current, issue_number)
+local function stable_class_label_key(label)
+  local text = tostring(label or "")
+  local lower = text:lower()
+  for _, entry in ipairs(stable_class_label_prefixes) do
+    if lower:sub(1, #entry.prefix) == entry.prefix then
+      local value = slug_label_value(text:sub(#entry.prefix + 1))
+      if value ~= nil then
+        return entry.prefix .. value, entry.rank
+      end
+    end
+  end
+  return nil, nil
+end
+
+local function cited_sibling_set(reason, issue_number)
   local seen = {}
   local siblings = {}
   for number in tostring(reason or ""):gmatch("#(%d+)") do
@@ -29,11 +46,71 @@ function M.intake_class_identity(reason, current, issue_number)
     end
   end
   table.sort(siblings)
-  if #siblings >= 2 then
-    local reason_key = normalized_class_reason(reason)
-    if reason_key ~= "" then
-      return "class:" .. reason_key
+  return seen, siblings
+end
+
+local function sorted_stable_label_keys(labels)
+  local by_key = {}
+  local keys = {}
+  for _, label in ipairs(labels or {}) do
+    local key, rank = stable_class_label_key(label)
+    if key ~= nil and by_key[key] == nil then
+      by_key[key] = rank
+      table.insert(keys, key)
     end
+  end
+  table.sort(keys, function(a, b)
+    if by_key[a] ~= by_key[b] then
+      return by_key[a] < by_key[b]
+    end
+    return a < b
+  end)
+  return keys
+end
+
+local function shared_sibling_class_key(reason, issue_number, sibling_issues)
+  local cited, siblings = cited_sibling_set(reason, issue_number)
+  if #siblings < 2 or type(sibling_issues) ~= "table" then
+    return nil
+  end
+  local counts = {}
+  local ranks = {}
+  for _, issue in ipairs(sibling_issues) do
+    if cited[tostring(issue.number)] then
+      local seen_for_issue = {}
+      for _, key in ipairs(sorted_stable_label_keys(issue.labels)) do
+        if not seen_for_issue[key] then
+          local _, rank = stable_class_label_key(key)
+          counts[key] = (counts[key] or 0) + 1
+          ranks[key] = rank or 999
+          seen_for_issue[key] = true
+        end
+      end
+    end
+  end
+  local candidates = {}
+  for key, count in pairs(counts) do
+    if count >= 2 then
+      table.insert(candidates, key)
+    end
+  end
+  table.sort(candidates, function(a, b)
+    if ranks[a] ~= ranks[b] then
+      return ranks[a] < ranks[b]
+    end
+    return a < b
+  end)
+  return candidates[1]
+end
+
+function M.intake_class_identity(reason, current, issue_number, sibling_issues)
+  local shared_key = shared_sibling_class_key(reason, issue_number, sibling_issues)
+  if shared_key ~= nil then
+    return shared_key
+  end
+  local current_keys = sorted_stable_label_keys(current and current.labels)
+  if current_keys[1] ~= nil then
+    return current_keys[1]
   end
   local title_key = tostring(current and current.title or ("Issue #" .. tostring(issue_number or "unknown")))
   title_key = title_key:lower():gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
@@ -48,8 +125,21 @@ local function class_identity_label(class_key)
   if class ~= nil and class ~= "" then
     return "recurring class " .. class:gsub("%-", " ")
   end
+  local stable_key = stable_class_label_key(class_key)
+  local stable = stable_key and stable_key:match("^[%w%-]+:(.+)$")
+  if stable ~= nil and stable ~= "" then
+    return "recurring class " .. stable:gsub("%-", " ")
+  end
   local title = tostring(class_key or ""):match("^title:(.+)$")
   return title or tostring(class_key or "unknown")
+end
+
+function M.fetch_recent_closed_intake_class_issues(repo)
+  local listed = M.gh_exec({ cmd = M.gh_issue_list_recent_closed_cmd(repo, 30), timeout = 30 })
+  if listed.exit_code ~= 0 then
+    error("github-devloop: gh issue intake class sibling lookup failed: " .. tostring(listed.stderr))
+  end
+  return M.parse_issue_list_intake(listed.stdout)
 end
 
 function M.intake_class_carrier_marker(class_key)

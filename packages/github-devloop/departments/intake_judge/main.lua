@@ -116,7 +116,8 @@ function pipeline(event)
     local class_carrier = nil
     local class_key = nil
     if parsed.action == "escalate-to-class" then
-      class_key = core.intake_class_identity(parsed.reason, current, issue_number)
+      local sibling_issues = core.fetch_recent_closed_intake_class_issues(repo)
+      class_key = core.intake_class_identity(parsed.reason, current, issue_number, sibling_issues)
       class_carrier = core.find_open_intake_class_carrier(repo, issue_number, current, class_key)
       table.insert(raised, "github-proxy.github_issue_comment_request")
       table.insert(raised, "github-proxy.github_issue_label_request")

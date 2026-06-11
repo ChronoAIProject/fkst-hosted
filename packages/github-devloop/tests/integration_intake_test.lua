@@ -135,7 +135,7 @@ local function mock_intake_codex(stdout, exit_code, stderr)
     exit_code = 0,
   })
   t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
-    stdout = '[{"number":80,"title":"Widget sync retry patch","closedAt":"2026-06-01T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]},{"number":81,"title":"Widget sync retry overflow fix","closedAt":"2026-06-02T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]}]\n',
+    stdout = '[{"number":80,"title":"Widget sync retry patch","closedAt":"2026-06-01T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]},{"number":81,"title":"Widget sync retry overflow fix","closedAt":"2026-06-02T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]},{"number":82,"title":"Widget sync timeout fix","closedAt":"2026-06-03T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]}]\n',
     stderr = "",
     exit_code = 0,
   })
@@ -180,6 +180,18 @@ end
 local function mock_intake_class_lookup(issues)
   t.mock_command("--state open --limit 100 --json number,title,body,updatedAt,labels", {
     stdout = issue_list_json(issues or {}) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_recent_closed_class_siblings(issues)
+  t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
+    stdout = issue_list_json(issues or {
+      { number = 80, title = "Widget sync retry patch", labels = { "fingerprint:widget-sync" } },
+      { number = 81, title = "Widget sync retry overflow fix", labels = { "fingerprint:widget-sync" } },
+      { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
+    }) .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -337,6 +349,7 @@ return {
       body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
     })
     mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_recent_closed_class_siblings()
     mock_intake_class_lookup({})
 
     local result = run_judge(payload, opts("intake-escalate-class"))
@@ -366,8 +379,14 @@ return {
       body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
     })
     mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_recent_closed_class_siblings()
     mock_intake_class_lookup({
-      { number = 77, title = "Class fix needed: Fix widget sync retry overflow again", labels = {} },
+      {
+        number = 77,
+        title = "Class fix needed: recurring class widget sync",
+        body = core.intake_class_carrier_marker("fingerprint:widget-sync"),
+        labels = {},
+      },
     })
 
     local result = run_judge(payload, opts("intake-escalate-class-reuse"))
@@ -391,9 +410,15 @@ return {
     local class_key = core.intake_class_identity(
       "Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.",
       { title = "Earlier instance" },
-      99
+      99,
+      {
+        { number = 80, title = "Widget sync retry patch", labels = { "fingerprint:widget-sync" } },
+        { number = 81, title = "Widget sync retry overflow fix", labels = { "fingerprint:widget-sync" } },
+        { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
+      }
     )
-    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #82 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Prior occurrences #80 and #82 share the widget-sync failure fingerprint; open a broader timeout/backoff fix.")
+    mock_recent_closed_class_siblings()
     mock_intake_class_lookup({
       {
         number = 77,
@@ -405,7 +430,22 @@ return {
     t.eq(class_key, core.intake_class_identity(
       "Cites #80 and #82 as prior siblings; Rule of Three requires class-level retry policy.",
       { title = "Current instance" },
-      42
+      42,
+      {
+        { number = 80, title = "Widget sync retry patch", labels = { "fingerprint:widget-sync" } },
+        { number = 81, title = "Widget sync retry overflow fix", labels = { "fingerprint:widget-sync" } },
+        { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
+      }
+    ))
+    t.eq(class_key, core.intake_class_identity(
+      "Prior occurrences #80 and #82 share the widget-sync failure fingerprint; open a broader timeout/backoff fix.",
+      { title = "Current instance" },
+      42,
+      {
+        { number = 80, title = "Widget sync retry patch", labels = { "fingerprint:widget-sync" } },
+        { number = 81, title = "Widget sync retry overflow fix", labels = { "fingerprint:widget-sync" } },
+        { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
+      }
     ))
 
     local result = run_judge(payload, opts("intake-escalate-class-reuse-by-class-key"))
