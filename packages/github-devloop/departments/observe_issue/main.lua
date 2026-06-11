@@ -67,6 +67,24 @@ local function raise_pr_open_reviewing(issue, proposal_id, state, link, snapshot
   return false
 end
 
+local function raise_stale_dependency_label_clear(issue, proposal_id, state, labels)
+  if state.state == "ready" or not core.has_label(labels, core._blocked_on_dependency_label) then
+    return false
+  end
+  core.log_apply("observe_issue", proposal_id, state.state, state.version, { add = {}, remove = { core._blocked_on_dependency_label } }, {
+    "github-proxy.github_issue_label_request",
+  })
+  core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
+    issue.repo,
+    issue.number,
+    {},
+    { core._blocked_on_dependency_label },
+    core._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version or "unversioned") }),
+    issue.source_ref
+  ))
+  return true
+end
+
 function pipeline(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
@@ -134,6 +152,7 @@ function pipeline(event)
         })
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
       end
+      raise_stale_dependency_label_clear(issue, proposal_id, state, current.labels)
       if state.state == "ready" then
         local ready_payload = core.build_devloop_ready_payload({
           proposal_id = proposal_id,
