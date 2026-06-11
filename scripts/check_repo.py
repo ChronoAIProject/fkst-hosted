@@ -57,6 +57,10 @@ HELPER_STRING_ARG_RE = re.compile(
     r"\b(?P<func>(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?[A-Za-z_][A-Za-z0-9_]*)"
     r"\s*\(\s*(?P<quote>[\"'])"
 )
+GH_RATE_POOL_FUNCTION_RE = re.compile(
+    r"\bfunction\b[^\n]*\bgh_rate_pool\b|\bgh_rate_pool\b\s*=\s*function\b"
+)
+GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
 HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
 BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
@@ -701,6 +705,37 @@ def check_hidden_text_encoded_literals(root: Path, violations: list[str]) -> Non
             )
 
 
+def gh_rate_pool_sizing_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = []
+    in_gh_rate_pool = False
+    for index, line in enumerate(stripped.splitlines(), start=1):
+        if not in_gh_rate_pool and GH_RATE_POOL_FUNCTION_RE.search(line):
+            in_gh_rate_pool = True
+
+        if in_gh_rate_pool and GH_RATE_POOL_SIZING_FIELD_RE.search(line):
+            lines.append(index)
+
+        if in_gh_rate_pool and re.match(r"^\s*end\s*[,;]?\s*$", line):
+            in_gh_rate_pool = False
+    return lines
+
+
+def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
+    packages = root / "packages"
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file() or "tests" in path.relative_to(packages).parts:
+            continue
+        for line in gh_rate_pool_sizing_lines(read_text(path)):
+            add(
+                violations,
+                "G7",
+                f"{rel(root, path)}:{line} gh rate pool sizing belongs to FKST_RATE_POOL_GH host posture; package code may declare only the pool name",
+            )
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -711,6 +746,7 @@ def main() -> int:
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
     check_hidden_text_encoded_literals(root, violations)
+    check_gh_rate_pool_sizing(root, violations)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

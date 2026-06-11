@@ -74,8 +74,8 @@ return {
     t.eq(spec.cmd, "gh issue list")
     t.eq(spec.timeout, 45)
     t.eq(spec.rate_pool.name, "gh")
-    t.eq(spec.rate_pool.burst, 50)
-    t.eq(spec.rate_pool.refill_per_hour, 3250)
+    t.eq(spec.rate_pool.burst, nil)
+    t.eq(spec.rate_pool.refill_per_hour, nil)
   end,
 
   test_opt_in_detection = function()
