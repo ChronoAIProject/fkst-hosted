@@ -322,20 +322,21 @@ function pipeline(event)
         if not gate.ok then
           local marker = gate.kind == "cycle"
             and core.dependency_cycle_marker(proposal_id, state.version)
-            or core.dependency_wait_marker(proposal_id, state.version, gate.unmet)
+            or core.dependency_wait_marker(proposal_id, state.version, gate.unmet, gate.kind, gate.reason)
           core.log_cas_decision("observe_issue", proposal_id, state, "ready", "implementing", "hold-dependency", gate.reason)
           core.log_apply("observe_issue", proposal_id, nil, nil, { add = { core._blocked_on_dependency_label }, remove = {} }, {
             "github-proxy.github_issue_comment_request",
             "github-proxy.github_issue_label_request",
           })
-          core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", {
-            schema = "github-proxy.v1",
-            repo = issue.repo,
-            issue_number = issue.number,
-            body = "github-devloop dependency hold: " .. tostring(gate.kind) .. "\n\nReason: " .. tostring(gate.reason) .. "\n\n" .. marker,
-            dedup_key = core._dedup_key({ "dependency", "comment", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }),
-            source_ref = core.normalize_source_ref(issue.source_ref),
-          })
+          core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", core.build_dependency_hold_comment_request(
+            issue.repo,
+            issue.number,
+            proposal_id,
+            state.version,
+            gate,
+            marker,
+            issue.source_ref
+          ))
           core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
             issue.repo,
             issue.number,

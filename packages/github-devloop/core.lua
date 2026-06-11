@@ -2,6 +2,7 @@ local M = {}
 
 require("core.base").install(M)
 require("core.config").install(M)
+require("core.strings").install(M)
 require("core.commands").install(M)
 require("core.branches").install(M)
 require("core.parsers").install(M)

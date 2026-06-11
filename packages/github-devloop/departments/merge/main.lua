@@ -200,9 +200,7 @@ local function is_merged_pr(pr)
 end
 
 local function build_merging_body(merge_ready)
-  return "github-devloop is merging PR #" .. tostring(merge_ready.pr_number)
-    .. "\n\n" .. core.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)
-    .. "\n" .. core.merging_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+  return core.build_merging_comment_body(merge_ready)
 end
 
 local function write_merging_marker(repo, merge_ready, comments)
@@ -219,11 +217,7 @@ end
 
 local function build_merged_requests(repo, issue_number, merge_ready)
   local merged_source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
-  local merged_body = "github-devloop merged PR #" .. tostring(merge_ready.pr_number)
-    .. "\n\n" .. core.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)
-    .. "\n" .. core.merging_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
-    .. "\n" .. core.state_marker(merge_ready.proposal_id, "merged", merge_ready.version)
-    .. "\n" .. core.merged_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+  local merged_body = core.build_merged_comment_body(merge_ready)
   local comment_request = core.build_entity_comment_request({
     kind = "pr",
     repo = repo,
