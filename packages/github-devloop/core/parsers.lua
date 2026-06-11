@@ -94,6 +94,7 @@ function M.parse_issue_list_intake(stdout, limit)
       table.insert(issues, {
         number = number,
         title = tostring(issue.title or ""),
+        body = tostring(issue.body or ""),
         updated_at = issue.updatedAt or issue.updated_at,
         labels = label_names(issue.labels),
       })

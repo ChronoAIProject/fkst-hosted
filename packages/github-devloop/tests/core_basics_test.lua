@@ -472,7 +472,7 @@ return {
   test_gh_issue_view_state_command_and_parse = function()
     t.eq(
       core.gh_issue_list_intake_cmd("owner/repo", 50),
-      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,updatedAt,labels"
+      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels"
     )
     t.eq(
       core.gh_pr_list_head_base_cmd("owner/repo", "integration/dev", "dev"),
@@ -480,6 +480,7 @@ return {
     )
     local intake = core.parse_issue_list_intake('[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
     t.eq(intake[1].number, 42)
+    t.eq(intake[1].body, "")
     t.eq(intake[1].updated_at, "2026-06-03T01:02:03Z")
     t.eq(intake[1].labels[1], "bug")
     local mixed = core.parse_issue_list_intake('[[{"number":1,"pull_request":{"url":"https://api.example.test/pulls/1"}}],[{"number":2,"title":"Issue","updated_at":"2026-06-03T01:02:04Z","labels":[]}]]', 1)
@@ -917,6 +918,10 @@ return {
     t.is_true(prompt:find("Recurrence check is mandatory", 1, true) ~= nil)
     t.is_true(prompt:find("escalate-to-class", 1, true) ~= nil)
     t.is_true(prompt:find("Fowler's Rule of Three", 1, true) ~= nil)
+    t.is_true(prompt:find("Use escalate-to-class ONLY when this issue is an instance", 1, true) ~= nil)
+    t.is_true(prompt:find("at least two identifiable sibling issues", 1, true) ~= nil)
+    t.is_true(prompt:find("ENABLE that issue because it is the class carrier", 1, true) ~= nil)
+    t.is_true(prompt:find("must never leave an escalation parked with no follow-through", 1, true) ~= nil)
     t.is_true(prompt:find("credentials", 1, true) ~= nil)
     t.is_true(prompt:find("destructive or irreversible", 1, true) ~= nil)
     t.is_true(prompt:find("Do NOT decline for unclear scope", 1, true) ~= nil)
