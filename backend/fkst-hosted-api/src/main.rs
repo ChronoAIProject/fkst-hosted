@@ -153,11 +153,13 @@ async fn main() -> ExitCode {
         }
     }
 
-    // 4f-bis. Sweep orphan engine temp dirs (fkst-rt-* / fkst-pkg-*) left by
-    //     a prior HARD-KILLED incarnation of THIS pod (TempDir RAII cleans
-    //     every normal path; only a kill -9 / OOM leaks them — issue #26
-    //     reduced scope). Fenced against live sessions' runtime_dir values
-    //     and an mtime safety threshold. FAIL-OPEN: a sweep error logs WARN
+    // 4f-bis. Sweep orphan engine RUNTIME dirs (fkst-rt-*) left by a prior
+    //     HARD-KILLED incarnation of THIS pod (TempDir RAII cleans every
+    //     normal path; only a kill -9 / OOM leaks them — issue #26 reduced
+    //     scope). Runtime dirs are fenced against live sessions' runtime_dir
+    //     values and an mtime safety threshold. Package dirs (fkst-pkg-*) are
+    //     NOT deleted — their path is not persisted, so they cannot be fenced
+    //     (counted as skipped_unfenceable). FAIL-OPEN: a sweep error logs WARN
     //     and never blocks startup — cleaning is best-effort, unlike the
     //     fail-closed config/index steps above.
     match reconcile_orphans(&db, &reconcile_engine_config, &reconcile_config).await {
@@ -166,6 +168,7 @@ async fn main() -> ExitCode {
             swept = report.swept_count(),
             skipped_live = report.skipped_live,
             skipped_too_new = report.skipped_too_new,
+            skipped_unfenceable = report.skipped_unfenceable,
             errors = report.error_count(),
             "orphan temp-dir reconciliation completed"
         ),

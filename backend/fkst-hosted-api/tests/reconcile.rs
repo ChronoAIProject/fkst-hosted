@@ -110,13 +110,17 @@ async fn boot_sweep_removes_orphans_and_spares_live_and_fresh_dirs() {
         .await
         .expect("insert stopped session");
 
-    // 3. A planted dir with NO session at all -> swept.
-    let no_session_dir = plant_dir(root, "fkst-pkg-demo-orphan", 600);
+    // 3. A runtime dir with NO session at all -> swept (fenceable, orphan).
+    let no_session_rt = plant_dir(root, "fkst-rt-orphan", 600);
 
-    // 4. A too-new planted dir with no session -> survives (mtime fence).
+    // 4. A PACKAGE dir with NO session at all -> survives: package dirs are
+    //    unfenceable (their path is not persisted) and are NEVER deleted.
+    let no_session_pkg = plant_dir(root, "fkst-pkg-demo-orphan", 600);
+
+    // 5. A too-new runtime dir with no session -> survives (mtime fence).
     let fresh_dir = plant_dir(root, "fkst-rt-fresh", 5);
 
-    // 5. A non-fkst dir -> never even scanned, always survives.
+    // 6. A non-fkst dir -> never even scanned, always survives.
     let unrelated = root.join("unrelated");
     fs::create_dir(&unrelated).expect("unrelated dir");
 
@@ -133,27 +137,32 @@ async fn boot_sweep_removes_orphans_and_spares_live_and_fresh_dirs() {
         .await
         .expect("reconcile pass");
 
-    // Counts: scanned the 4 fkst-* dirs; swept the 2 genuine orphans; spared
-    // the live one and the too-new one.
-    assert_eq!(report.scanned, 4, "four fkst-* dirs scanned");
-    assert_eq!(report.swept_count(), 2, "two genuine orphans swept");
+    // Counts: scanned the 5 fkst-* dirs; swept the 2 genuine RUNTIME orphans;
+    // spared the live runtime dir, the too-new one, and the package dir.
+    assert_eq!(report.scanned, 5, "five fkst-* dirs scanned");
+    assert_eq!(report.swept_count(), 2, "two genuine runtime orphans swept");
     assert_eq!(
         report.skipped_live, 1,
-        "the running session's dir is spared"
+        "the running session's runtime dir is spared"
     );
-    assert_eq!(report.skipped_too_new, 1, "the fresh dir is spared");
+    assert_eq!(report.skipped_too_new, 1, "the fresh runtime dir is spared");
+    assert_eq!(
+        report.skipped_unfenceable, 1,
+        "the unfenceable package dir is spared"
+    );
     assert!(report.errors.is_empty(), "no per-entry errors");
 
     // Disk reality matches the report.
-    assert!(live_dir.exists(), "live session's dir survives");
-    assert!(fresh_dir.exists(), "too-new dir survives");
+    assert!(live_dir.exists(), "live session's runtime dir survives");
+    assert!(fresh_dir.exists(), "too-new runtime dir survives");
+    assert!(no_session_pkg.exists(), "unfenceable package dir survives");
     assert!(unrelated.exists(), "non-fkst dir untouched");
-    assert!(!stopped_dir.exists(), "stopped session's dir swept");
-    assert!(!no_session_dir.exists(), "session-less orphan swept");
+    assert!(!stopped_dir.exists(), "stopped session's runtime dir swept");
+    assert!(!no_session_rt.exists(), "session-less runtime orphan swept");
 
     let swept: HashSet<PathBuf> = report.swept.into_iter().collect();
     assert!(swept.contains(&stopped_dir));
-    assert!(swept.contains(&no_session_dir));
+    assert!(swept.contains(&no_session_rt));
 }
 
 #[tokio::test]
@@ -201,7 +210,9 @@ async fn boot_sweep_dry_run_records_but_deletes_nothing() {
     db.ensure_indexes().await.expect("ensure indexes");
 
     let temp_root = tempfile::tempdir().expect("temp_root");
-    let orphan = plant_dir(temp_root.path(), "fkst-pkg-demo-dry", 600);
+    // A runtime orphan (the swept class) plus a package dir (never swept).
+    let rt_orphan = plant_dir(temp_root.path(), "fkst-rt-dry", 600);
+    let pkg_orphan = plant_dir(temp_root.path(), "fkst-pkg-demo-dry", 600);
 
     let engine_config = EngineConfig {
         temp_root: temp_root.path().to_path_buf(),
@@ -215,6 +226,18 @@ async fn boot_sweep_dry_run_records_but_deletes_nothing() {
     let report = reconcile_orphans(&db, &engine_config, &reconcile_config)
         .await
         .expect("dry-run pass");
-    assert_eq!(report.swept_count(), 1, "dry-run records the would-sweep");
-    assert!(orphan.exists(), "dry-run must NOT delete");
+    assert_eq!(
+        report.swept_count(),
+        1,
+        "dry-run records the would-sweep runtime orphan"
+    );
+    assert_eq!(
+        report.skipped_unfenceable, 1,
+        "the package dir is never a sweep candidate"
+    );
+    assert!(
+        rt_orphan.exists(),
+        "dry-run must NOT delete the runtime dir"
+    );
+    assert!(pkg_orphan.exists(), "package dir is never deleted");
 }

@@ -32,8 +32,33 @@
 //! *this same pod*: RAII never runs, and the next boot of the same pod inherits
 //! the orphaned dirs under the same `temp_root`.
 //!
-//! This module sweeps exactly those leftovers at boot, **fenced** against two
-//! independent facts so an in-flight session's dir is never removed:
+//! # The sweep targets ONLY runtime dirs (`fkst-rt-*`) — the fenceable class
+//!
+//! The sweep deletes **only `fkst-rt-*` runtime dirs**, because they are the
+//! only class it can fence safely: a session's `runtime_dir` is the exact value
+//! persisted on the Mongo `SessionDoc.runtime_dir` field, so a live session's
+//! runtime dir is always in the live set and is never removed. Each runtime dir
+//! holds the engine's `durable/` (redb) state and the child logs — the real
+//! disk weight — so reclaiming it captures ~all of the disk value.
+//!
+//! **`fkst-pkg-*` package dirs are intentionally NOT deleted.** The package dir
+//! path is *not* persisted anywhere on the session document (only the runtime
+//! dir is), so it **cannot be mapped back to a live session** and therefore
+//! cannot be fenced. Deleting a package dir on mtime alone would be a
+//! wrong-deletion bug: a session that has been running longer than `min_age`
+//! still has its package dir on disk older than `min_age`, and the engine
+//! **re-reads the materialized package tree during the run** (it re-invokes
+//! `fkst-framework run --package-root <pkg>` per event), so removing it
+//! mid-run would break the live session. Package dirs are KB-scale and bounded,
+//! so leaking them on a hard kill is an accepted, minor cost. They are counted
+//! as `skipped_unfenceable` and logged, never removed.
+//!
+//! A future change that persists the package-dir path on the session doc (or
+//! nests the package dir *under* the runtime dir so one fence covers both) can
+//! lift package dirs into the swept class; until then they are left alone.
+//!
+//! The runtime-dir sweep is **fenced** against two independent facts so an
+//! in-flight session's dir is never removed:
 //!  1. the dir's canonical path is **not** in the live set (the `runtime_dir`
 //!     values of non-terminal sessions in Mongo), and
 //!  2. the dir's mtime is older than a configurable `min_age` safety threshold.
@@ -60,10 +85,17 @@ use crate::db::Db;
 use crate::engine::EngineConfig;
 use crate::error::AppError;
 
-/// Temp-dir name prefixes the engine uses (kept in sync with
-/// [`crate::engine::materialize`] / [`crate::engine::runner`] — this module
-/// only READS those naming conventions, it never changes them).
-const ENGINE_DIR_PREFIXES: [&str; 2] = ["fkst-rt-", "fkst-pkg-"];
+/// Runtime-dir prefix — the ONLY class the sweep deletes. A runtime dir's path
+/// is persisted on `SessionDoc.runtime_dir`, so it is fully fenceable against
+/// the live set. (Kept in sync with [`crate::engine::runner`] — this module
+/// only READS that naming convention, it never changes it.)
+const RUNTIME_DIR_PREFIX: &str = "fkst-rt-";
+
+/// Package-dir prefix — scanned and counted but **never deleted**: the package
+/// dir path is not persisted on the session doc, so it cannot be fenced, and
+/// the engine re-reads the package tree during a run (see the module doc).
+/// (Kept in sync with [`crate::engine::materialize`].)
+const PACKAGE_DIR_PREFIX: &str = "fkst-pkg-";
 
 /// A single entry that could not be removed during the sweep (per-entry error
 /// isolation: a failed `remove_dir_all` is recorded here, never aborts the
@@ -81,13 +113,19 @@ pub struct SweepError {
 pub struct SweepReport {
     /// How many candidate `fkst-*` entries were scanned.
     pub scanned: usize,
-    /// Dirs that were swept (or, in dry-run, that WOULD be swept).
+    /// Runtime dirs (`fkst-rt-*`) that were swept (or, in dry-run, that WOULD
+    /// be swept).
     pub swept: Vec<PathBuf>,
-    /// Skipped because the dir belongs to a live (non-terminal) session.
+    /// Skipped because the runtime dir belongs to a live (non-terminal)
+    /// session.
     pub skipped_live: usize,
-    /// Skipped because the dir's mtime is within `min_age` (an in-flight dir
-    /// that the safety threshold protects).
+    /// Skipped because the runtime dir's mtime is within `min_age` (an
+    /// in-flight dir that the safety threshold protects).
     pub skipped_too_new: usize,
+    /// Skipped because the entry is a package dir (`fkst-pkg-*`), which cannot
+    /// be mapped to a live session via Mongo (its path is not persisted) and
+    /// so is never deleted. See the module doc.
+    pub skipped_unfenceable: usize,
     /// Per-entry removal failures (isolated, non-fatal).
     pub errors: Vec<SweepError>,
 }
@@ -105,12 +143,15 @@ impl SweepReport {
 }
 
 /// Pure, testable core: scan `temp_root` for engine orphan temp dirs and remove
-/// each one that is (a) not in `live_runtime_dirs` (the fencing set of
-/// canonical `runtime_dir` paths held by non-terminal sessions) AND (b) older
-/// than `min_age` relative to `now`.
+/// each **runtime dir** (`fkst-rt-*`) that is (a) not in `live_runtime_dirs`
+/// (the fencing set of canonical `runtime_dir` paths held by non-terminal
+/// sessions) AND (b) older than `min_age` relative to `now`.
 ///
-/// - Only entries whose name starts with `fkst-rt-` or `fkst-pkg-` are
-///   considered; everything else under `temp_root` is ignored.
+/// - Both `fkst-rt-*` and `fkst-pkg-*` entries are scanned, but **only
+///   runtime dirs are eligible for deletion**. Package dirs (`fkst-pkg-*`)
+///   cannot be fenced (their path is not persisted on the session doc) and are
+///   counted as `skipped_unfenceable`, never removed — see the module doc.
+/// - Everything else under `temp_root` is ignored.
 /// - Per-entry error isolation: a directory that fails to canonicalize, stat,
 ///   or remove is recorded in [`SweepReport::errors`] and the pass continues.
 /// - `dry_run` records what WOULD be swept without removing anything.
@@ -155,15 +196,27 @@ pub fn sweep_orphan_runtime_dirs(
 
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if !ENGINE_DIR_PREFIXES
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        {
+        let is_runtime = name.starts_with(RUNTIME_DIR_PREFIX);
+        let is_package = name.starts_with(PACKAGE_DIR_PREFIX);
+        if !is_runtime && !is_package {
             continue; // not an engine temp dir — ignore.
         }
 
         let path = entry.path();
         report.scanned += 1;
+
+        // Package dirs are unfenceable: their path is not persisted on the
+        // session doc, so they can never be mapped back to a live session.
+        // Count and log, but NEVER delete (deleting a live session's package
+        // dir mid-run would break it — see the module doc).
+        if is_package {
+            report.skipped_unfenceable += 1;
+            tracing::debug!(
+                path = %path.display(),
+                "reconcile.sweep.skip: not mappable to a live session via Mongo (fkst-pkg dir)"
+            );
+            continue;
+        }
 
         // Fence 1: skip anything a live (non-terminal) session still owns.
         // Compare on the canonical path; a candidate that cannot canonicalize
@@ -277,6 +330,7 @@ pub async fn reconcile_orphans(
         swept = report.swept_count(),
         skipped_live = report.skipped_live,
         skipped_too_new = report.skipped_too_new,
+        skipped_unfenceable = report.skipped_unfenceable,
         errors = report.error_count(),
         dry_run = cfg.dry_run,
         "reconcile.done"
@@ -391,7 +445,11 @@ mod tests {
     }
 
     #[test]
-    fn sweeps_the_pkg_prefix_too() {
+    fn never_sweeps_a_pkg_dir_it_cannot_fence() {
+        // A package dir's path is not persisted on the session doc, so it
+        // cannot be mapped to a live session. Even an OLD orphan fkst-pkg dir
+        // must be SKIPPED (skipped_unfenceable), never deleted — deleting a
+        // live session's package dir mid-run would break it.
         let root = tempfile::tempdir().expect("root");
         let pkg = make_dir(root.path(), "fkst-pkg-demo-xyz");
         age_dir(&pkg, 600);
@@ -403,8 +461,32 @@ mod tests {
             SystemTime::now(),
             false,
         );
-        assert_eq!(report.swept_count(), 1);
-        assert!(!pkg.exists());
+        assert_eq!(report.scanned, 1);
+        assert_eq!(report.swept_count(), 0, "package dirs are never swept");
+        assert_eq!(report.skipped_unfenceable, 1);
+        assert!(pkg.exists(), "an unfenceable package dir must survive");
+    }
+
+    #[test]
+    fn pkg_dir_is_skipped_even_in_dry_run() {
+        let root = tempfile::tempdir().expect("root");
+        let pkg = make_dir(root.path(), "fkst-pkg-demo-dry");
+        age_dir(&pkg, 600);
+
+        let report = sweep_orphan_runtime_dirs(
+            root.path(),
+            &empty_live(),
+            Duration::from_secs(300),
+            SystemTime::now(),
+            true, // dry-run
+        );
+        assert_eq!(
+            report.swept_count(),
+            0,
+            "package dirs never appear in swept"
+        );
+        assert_eq!(report.skipped_unfenceable, 1);
+        assert!(pkg.exists());
     }
 
     #[test]
@@ -494,12 +576,13 @@ mod tests {
     #[test]
     fn per_entry_error_does_not_abort_the_pass() {
         let root = tempfile::tempdir().expect("root");
-        // A removable orphan.
+        // A removable runtime orphan.
         let good = make_dir(root.path(), "fkst-rt-good");
         age_dir(&good, 600);
-        // An un-removable orphan: a non-empty dir whose PARENT is made
-        // read-only so remove_dir_all fails on the contained entry.
-        let bad_parent = make_dir(root.path(), "fkst-pkg-bad");
+        // An un-removable runtime orphan: a non-empty dir made read-only so
+        // remove_dir_all fails on the contained entry. (Must be a RUNTIME dir
+        // — package dirs are skipped before any removal is attempted.)
+        let bad_parent = make_dir(root.path(), "fkst-rt-bad");
         // Put a child in, then strip write perms on bad_parent so the child
         // cannot be unlinked.
         fs::write(bad_parent.join("locked"), b"y").expect("child");
@@ -521,7 +604,7 @@ mod tests {
         perms.set_mode(0o755);
         let _ = fs::set_permissions(&bad_parent, perms);
 
-        assert_eq!(report.scanned, 2, "both fkst dirs scanned");
+        assert_eq!(report.scanned, 2, "both runtime dirs scanned");
         assert_eq!(report.swept_count(), 1, "the good orphan is still swept");
         assert_eq!(report.error_count(), 1, "the bad orphan is isolated");
         assert!(!good.exists(), "the good orphan was removed");
