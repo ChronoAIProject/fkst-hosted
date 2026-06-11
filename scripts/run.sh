@@ -231,7 +231,7 @@ LUA
     return 1
   fi
   rm -rf "$probe_dir"
-  echo "OK: SDK primitive truncate_utf8 is available in BIN"
+  echo "OK: SDK primitive truncate_utf8 is available in BIN: $BIN"
 }
 
 cmd_test() {
