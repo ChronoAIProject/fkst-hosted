@@ -164,6 +164,25 @@ function M.parse_pr_list_observe(stdout)
   return parse_numbered_list(stdout)
 end
 
+function M.parse_pr_list_freshness(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local prs = {}
+  each_paginated_item(decoded, function(pr)
+    if type(pr) == "table" and tonumber(pr.number) ~= nil then
+      table.insert(prs, {
+        number = tonumber(pr.number),
+        state = pr.state,
+        updated_at = pr.updated_at or pr.updatedAt,
+        head_sha = pr.headRefOid or pr.head_ref_oid,
+        head_ref_name = pr.headRefName or pr.head_ref_name,
+        base_ref_name = pr.baseRefName or pr.base_ref_name,
+        is_draft = pr.isDraft or pr.is_draft,
+      })
+    end
+  end)
+  return prs
+end
+
 function M.parse_issue_view_result(stdout)
   local decoded = json.decode(stdout or "{}")
   local state = M.issue_state_from_json(decoded)
@@ -345,6 +364,7 @@ function M.parse_pr_view_merge(stdout)
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
   result.merged_at = decoded.mergedAt or decoded.merged_at
+  result.labels = label_names(decoded.labels)
   return result
 end
 
