@@ -207,7 +207,32 @@ local function raise_fixing_replay(issue, proposal_id, state, link, snapshot)
 end
 
 local function raise_review_meta_replay(issue, proposal_id, state, link, snapshot)
-  local fact = core.review_meta_replay_fact(snapshot.comments, proposal_id, state.version)
+  if link == nil then
+    core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(pr-link)", "review-meta recovery requires a pr-link marker")
+    return
+  end
+  local current_pr = find_linked_pr(snapshot, link.pr_number)
+  if current_pr == nil then
+    core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(pr-link)", "linked PR fact is not visible")
+    return
+  end
+  if tostring(current_pr.state or ""):lower() ~= "open" then
+    core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-stale(pr-closed)", "linked PR is not open")
+    return
+  end
+  if tostring(current_pr.head_ref_name or "") ~= tostring(link.branch or "") then
+    core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(head)", "linked PR head branch does not match pr-link marker")
+    return
+  end
+  if tostring(current_pr.base_ref_name or "") ~= tostring(link.base_branch or "") then
+    core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(base)", "linked PR base branch does not match pr-link marker")
+    return
+  end
+  if not core._is_git_sha(current_pr.head_sha) then
+    core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(head)", "linked PR head sha is missing")
+    return
+  end
+  local fact = core.review_meta_replay_fact(snapshot.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
   if fact == nil then
     core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(review-meta)", "review-meta recovery facts are not visible")
     return

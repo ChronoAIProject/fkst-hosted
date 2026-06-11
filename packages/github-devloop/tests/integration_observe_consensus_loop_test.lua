@@ -28,6 +28,7 @@ local run_observe_pr = h.run_observe_pr
 local run_review_pr = h.run_review_pr
 local run_review_result = h.run_review_result
 local run_fix = h.run_fix
+local set_pr_phase_comments = h.set_pr_phase_comments
 local run_review_loop = h.run_review_loop
 local run_review_meta = h.run_review_meta
 local run_merge = h.run_merge
@@ -320,7 +321,52 @@ return {
     t.eq(meta_raise.pr_number, event.pr_number)
   end,
 
-  test_observe_issue_does_not_synthesize_review_meta_replay_without_marker = function()
+  test_observe_issue_reraises_fix_escalation_review_meta_after_restart = function()
+    local fix = fixing()
+    local event = review_meta_event({
+      review_proposal_id = fix.review_proposal_id,
+      review_dedup_key = fix.review_dedup_key,
+      version = fix.version,
+      n = 0,
+      dedup_key = fix.dedup_key,
+      source_ref = fix.source_ref,
+    })
+    local impl_version = reviewing().version
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:review-meta" }, "OPEN", {
+      core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+      core.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard"),
+    })
+    set_pr_phase_comments({ "fkst-dev:review-meta" }, {
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+      core.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard"),
+    })
+    mock_pr_origin({ proposal_id = event.proposal_id, version = impl_version })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-fix-escalation"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local meta_raise = find_raise(result.raises, "devloop_review_meta").payload
+    t.eq(meta_raise.schema, "github-devloop.review-meta.v1")
+    t.eq(meta_raise.proposal_id, event.proposal_id)
+    t.eq(meta_raise.review_proposal_id, event.review_proposal_id)
+    t.eq(meta_raise.review_dedup_key, event.review_dedup_key)
+    t.eq(meta_raise.version, event.version)
+    t.eq(meta_raise.pr_number, event.pr_number)
+    t.eq(meta_raise.n, 0)
+    t.eq(meta_raise.dedup_key, core._dedup_key({
+      "review-meta",
+      tostring(event.proposal_id),
+      tostring(event.version),
+      tostring(event.pr_number),
+      "0",
+      tostring(event.review_dedup_key),
+    }))
+    t.eq(count_calls("--json labels,state"), 1)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
+  test_observe_issue_skips_review_meta_replay_with_unparseable_state_fact = function()
     local event = review_meta_event()
     local impl_version = reviewing().version
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:review-meta" }, "OPEN", {
@@ -330,9 +376,9 @@ return {
     mock_pr_origin({
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "review-meta", event.version),
-    })
+    }, nil, "not-a-sha")
 
-    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-no-original-marker"))
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-unparseable-state-fact"))
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_review_meta"), nil)
     t.eq(#result.raises, 0)
