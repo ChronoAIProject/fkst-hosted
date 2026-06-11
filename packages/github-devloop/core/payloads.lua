@@ -326,6 +326,16 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   if blocking_gap ~= nil then
     payload.blocking_gap = blocking_gap
   end
+  if review_fact.gate_baseline_sha ~= nil then
+    if not M._is_git_sha(review_fact.gate_baseline_sha) then
+      error("github-devloop: invalid gate baseline sha")
+    end
+    payload.gate_baseline_sha = tostring(review_fact.gate_baseline_sha)
+  end
+  local gate_failure_excerpt = bounded_control_text(M, review_fact.gate_failure_excerpt, M._max_rollup_failure_summary_len)
+  if gate_failure_excerpt ~= nil then
+    payload.gate_failure_excerpt = gate_failure_excerpt
+  end
   return payload
 end
 

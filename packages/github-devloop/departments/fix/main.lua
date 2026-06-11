@@ -61,6 +61,60 @@ local function branch_worktree(repo, issue_number, version, branch)
   return worktree
 end
 
+local function fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+  if expected_baseline_sha == nil then
+    return nil
+  end
+  local fetch_result = exec_sync({ cmd = core.git_fetch_pr_merge_ref_cmd("origin", pr_number), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local head_result = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref head failed: " .. tostring(head_result.stderr))
+  end
+  local merge_product_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if merge_product_sha ~= expected_baseline_sha then
+    error("github-devloop: PR merge ref head does not match merge-gate baseline")
+  end
+  return merge_product_sha
+end
+
+local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha)
+  fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+  local base_head = expected_baseline_sha
+  if base_head == nil then
+    local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
+    if fetch_result.exit_code ~= 0 then
+      error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
+    end
+    local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", integration_branch), timeout = 30 })
+    if base_result.exit_code ~= 0 then
+      error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
+    end
+    base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
+  end
+  if not core.is_safe_head_sha(base_head) then
+    error("github-devloop: unsafe integration head")
+  end
+  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
+  if merge_result.exit_code ~= 0 then
+    local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+    if unmerged_result.exit_code ~= 0 then
+      error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    end
+    if tostring(unmerged_result.stdout or "") == "" then
+      error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+    end
+    core.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
+      "integration_branch=" .. tostring(integration_branch),
+      "integration_sha=" .. tostring(base_head),
+      "reason=integration merge requires codex conflict resolution",
+    })
+  end
+  return base_head
+end
+
 local function raise_review_meta(repo, issue_number, fix, reason, detail)
   local comment_request = core.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
   local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
@@ -247,6 +301,10 @@ function pipeline(event)
         core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
         return
       end
+      if merge_gate_fact.gate_baseline_sha ~= fix.gate_baseline_sha then
+        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-baseline-mismatch)", "fix event does not match canonical merge-gate baseline")
+        return
+      end
       feedback_reason = merge_gate_fact.review_reason
     end
 
@@ -308,6 +366,7 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
+    merge_integration_for_fix(worktree, fix.pr_number, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "fix",

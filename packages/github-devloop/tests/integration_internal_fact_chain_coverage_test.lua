@@ -200,7 +200,9 @@ return {
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
-    mock_pr_merge_rollup(merge_comments(event), '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE"}]')
+    mock_pr_merge_rollup(merge_comments(event), '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]')
+    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "bca321\n", stderr = "", exit_code = 0 })
 
     local red = run_merge(event, opts("internal-chain-merge-red-direct", { FKST_GITHUB_WRITE = "1" }))
     t.eq(red.exit_code, 0)

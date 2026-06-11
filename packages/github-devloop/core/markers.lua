@@ -116,8 +116,8 @@ function M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, o
     .. '" -->'
 end
 
-function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, reason)
-  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, gate_baseline_sha, reason)
+  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) or not M._is_git_sha(gate_baseline_sha) then
     error("github-devloop: invalid merge-gate marker")
   end
   return '<!-- fkst:github-devloop:merge-gate:v1 proposal="' .. tostring(issue_proposal_id)
@@ -126,6 +126,7 @@ function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_propo
     .. '" review_proposal="' .. tostring(review_proposal_id)
     .. '" review_dedup="' .. tostring(review_dedup_key)
     .. '" head_sha="' .. tostring(head_sha)
+    .. '" gate_baseline_sha="' .. tostring(gate_baseline_sha)
     .. '" reason="' .. tostring(M.sanitize_key(reason or "gate-failed", false):gsub("/", "-"))
     .. '" -->'
 end
@@ -450,15 +451,18 @@ function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
       local marker_review_proposal = marker:match('review_proposal="([^"]+)"')
       local marker_review_dedup = marker:match('review_dedup="([^"]*)"')
       local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      local marker_gate_baseline_sha = marker:match('gate_baseline_sha="([^"]+)"')
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(issue_version)
         and M._is_bounded_string(marker_review_proposal, M._max_key_len)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
-        and M._is_git_sha(marker_head_sha) then
+        and M._is_git_sha(marker_head_sha)
+        and M._is_git_sha(marker_gate_baseline_sha) then
         return {
           review_proposal_id = marker_review_proposal,
           review_dedup_key = marker_review_dedup,
           reviewed_head_sha = marker_head_sha,
+          gate_baseline_sha = marker_gate_baseline_sha,
           review_reason = M._comment_body(comment),
         }
       end

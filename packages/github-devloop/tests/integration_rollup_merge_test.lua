@@ -31,9 +31,9 @@ local function mock_write_mode(value)
 end
 
 local function mock_pr(head_sha, base, rollup_state, rollup_conclusion, mergeable, merge_state, state, merged_at)
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"integration/dev","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"%s","comments":[],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}]}\n',
+      '{"headRefName":"integration/dev","headRefOid":"%s","baseRefName":"%s","baseRefOid":"abc123","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"%s","comments":[],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}]}\n',
       h.json_string(head_sha or "def456"),
       h.json_string(base or "dev"),
       h.json_string(state or "OPEN"),

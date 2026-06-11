@@ -2,6 +2,7 @@ local t = fkst.test
 require("tests.cache_seed_helpers")
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
+local angle_roles = { minimal = true, structural = true, delete = true }
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -168,6 +169,9 @@ return {
     local minimal_call = judgment_call("angle-minimal")
     local structural_call = judgment_call("angle-structural")
     local delete_call = judgment_call("angle-delete")
+    t.is_true(minimal_call ~= nil)
+    t.is_true(structural_call ~= nil)
+    t.is_true(delete_call ~= nil)
     assert_judgment_worktree(minimal_call, "angle-minimal")
     assert_judgment_worktree(structural_call, "angle-structural")
     assert_judgment_worktree(delete_call, "angle-delete")

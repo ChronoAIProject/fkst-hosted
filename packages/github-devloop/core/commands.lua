@@ -233,7 +233,7 @@ end
 function M.gh_pr_view_merge_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
+    .. " --json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 end
 
 function M.gh_pr_view_freshness_cmd(repo, pr_number)
@@ -377,6 +377,21 @@ function M.git_fetch_branch_cmd(remote, branch)
   return "git fetch " .. M._shell_single_quote(remote) .. " " .. M._shell_single_quote(branch)
 end
 
+function M.git_fetch_pr_merge_ref_cmd(remote, pr_number)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pull request number")
+  end
+  return "git fetch " .. M._shell_single_quote(remote) .. " "
+    .. M._shell_single_quote("refs/pull/" .. tostring(pr_number) .. "/merge")
+end
+
+function M.git_fetch_head_commit_cmd()
+  return "git rev-parse --verify FETCH_HEAD^{commit}"
+end
+
 function M.git_remote_branch_head_cmd(remote, branch)
   if not M._is_git_ref_safe(remote) then
     error("github-devloop: invalid git remote")
@@ -385,6 +400,15 @@ function M.git_remote_branch_head_cmd(remote, branch)
     error("github-devloop: invalid remote branch")
   end
   return "git rev-parse --verify refs/remotes/" .. M._shell_single_quote(remote) .. "/" .. M._shell_single_quote(branch) .. "^{commit}"
+end
+
+function M.git_worktree_merge_no_edit_cmd(worktree, sha)
+  if not M._is_git_sha(sha) then
+    error("github-devloop: invalid merge sha")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " merge --no-edit "
+    .. M._shell_single_quote(sha)
 end
 
 function M.git_ahead_count_cmd(upstream, integration)

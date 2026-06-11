@@ -708,11 +708,14 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
   }), source_ref)
 end
 
-function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, source_ref)
+function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref)
   local safe_reason = M.sanitize_key(reason or "gate-failed", false):gsub("/", "-")
   local display_reason = M.neutralize_untrusted_comment_text(reason or "gate-failed")
   if display_reason == "" then
     display_reason = "gate-failed"
+  end
+  if not M._is_git_sha(gate_baseline_sha) then
+    error("github-devloop: invalid merge-gate baseline sha")
   end
   local test_command = M.neutralize_untrusted_comment_text(M.test_command())
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
@@ -723,6 +726,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     merge_ready.review_proposal_id,
     merge_ready.review_dedup_key,
     merge_ready.reviewed_head_sha,
+    gate_baseline_sha,
     safe_reason
   )
   return M.build_entity_comment_request({
