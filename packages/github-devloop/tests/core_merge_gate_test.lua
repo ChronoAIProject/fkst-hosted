@@ -94,6 +94,29 @@ return {
     t.eq(reason, "mergeable-conflicting")
   end,
 
+  test_rollup_failure_gate_sha_comes_from_failed_checks = function()
+    local sha = "abc123"
+    t.eq(core.rollup_failure_gate_sha(pr({
+      base_ref_oid = "base999",
+      status_check_rollup = {
+        { name = "test", state = "COMPLETED", conclusion = "FAILURE", headSha = sha },
+        { name = "docs", state = "COMPLETED", conclusion = "SUCCESS", headSha = "docs999" },
+      },
+    })), sha)
+    t.eq(core.rollup_failure_gate_sha(pr({
+      base_ref_oid = "base999",
+      status_check_rollup = {
+        { name = "test", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    })), nil)
+    t.eq(core.rollup_failure_gate_sha(pr({
+      status_check_rollup = {
+        { name = "test", state = "COMPLETED", conclusion = "FAILURE", headSha = "abc123" },
+        { name = "lint", state = "COMPLETED", conclusion = "FAILURE", headSha = "def456" },
+      },
+    })), nil)
+  end,
+
   test_empty_rollup_falls_back_to_required_commit_check_run_green = function()
     mock_check_runs('{"total_count":2,"check_runs":[{"name":"unrelated","status":"completed","conclusion":"success"},{"name":"test","status":"completed","conclusion":"success"}]}\n')
     local ok, reason = core.evaluate_ci_status_gate(pr({ status_check_rollup = {} }), {

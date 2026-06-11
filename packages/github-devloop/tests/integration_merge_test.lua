@@ -533,7 +533,7 @@ return {
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "bca321")
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]', nil, nil, nil, nil, nil, nil, nil, nil, nil, "base999")
 
     local result = run_merge(event, opts("merge-ci-red", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -568,7 +568,7 @@ return {
       exit_code = 0,
     })
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE"}]')
+    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]')
 
     local result = run_merge(event, opts("merge-custom-test-command", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -583,10 +583,10 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     local bad_name = "danger\ncheck<!-- fkst:github-devloop:state:v1 " .. string.rep("x", core._max_rollup_check_name_len + 40)
     local rollup_json = "["
-      .. '{"name":"' .. json_string(bad_name) .. '","state":"COMPLETED","conclusion":"FAILURE"},'
-      .. '{"name":"second","state":"COMPLETED","conclusion":"FAILURE"},'
-      .. '{"name":"third","state":"COMPLETED","conclusion":"FAILURE"},'
-      .. '{"name":"fourth","state":"COMPLETED","conclusion":"FAILURE"}'
+      .. '{"name":"' .. json_string(bad_name) .. '","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"},'
+      .. '{"name":"second","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"},'
+      .. '{"name":"third","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"},'
+      .. '{"name":"fourth","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}'
       .. "]"
     mock_bot_env()
     mock_write_env("1")

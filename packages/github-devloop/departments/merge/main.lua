@@ -62,10 +62,26 @@ local function gate_baseline_sha_from_pr(pr)
   return baseline_sha
 end
 
+local function is_rollup_red_fix_reason(reason)
+  local text = tostring(reason or "")
+  return core.is_ci_red_reason(text) or text:find("^rollup%-red:", 1) ~= nil
+end
+
+local function gate_baseline_sha_for_reason(pr, reason)
+  if is_rollup_red_fix_reason(reason) then
+    local gate_sha = tostring(core.rollup_failure_gate_sha(pr) or "")
+    if not core.is_safe_head_sha(gate_sha) then
+      error("github-devloop: unsafe merge-gate rollup sha")
+    end
+    return gate_sha
+  end
+  return gate_baseline_sha_from_pr(pr)
+end
+
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason)
   local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
   local fix_version = core.fix_version_from_review_version(current_state.version)
-  local gate_baseline_sha = gate_baseline_sha_from_pr(current_pr)
+  local gate_baseline_sha = gate_baseline_sha_for_reason(current_pr, reason)
   local comment_request = core.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref)
   local label_request = issue_number ~= nil and core.build_state_label_request(
     repo,
