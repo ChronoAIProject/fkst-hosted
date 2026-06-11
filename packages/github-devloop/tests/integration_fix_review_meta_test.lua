@@ -566,6 +566,36 @@ return {
     t.eq(count_calls("git push origin"), 1)
   end,
 
+  test_fix_reviewing_clears_stale_fix_summary_when_codex_summary_is_empty = function()
+    local event = fixing({ fix_summary = "stale summary from a prior round" })
+    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local review = { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } }
+    local reject_comment = core.build_review_result_comment_request("owner/repo", "42", event.proposal_id, event.version, review, event.source_ref).body
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    local comments = { core.state_marker(event.proposal_id, "fixing", event.version), reject_comment }
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, comments, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, "def456")
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
+    mock_existing_fix_worktree(branch, "feedface")
+    mock_implement_codex(0, "")
+    mock_git_status("")
+    t.mock_command("rev-list --count", { stdout = "1\n", stderr = "", exit_code = 0 })
+    t.mock_command("rev-parse --verify refs/heads/", { stdout = "feedface\n", stderr = "", exit_code = 0 })
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, comments, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, "def456")
+    mock_git_push(branch)
+    mock_pr_fix({ origin_marker }, branch, "feedface")
+
+    local result = run_fix(event, opts("fix-summary-cleared", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.eq(body:find("stale summary from a prior round", 1, true), nil)
+    t.eq(body:find("Fix-round summary:", 1, true), nil)
+  end,
+
   test_review_loop_unresolved_under_budget_reraises_review_proposal = function()
     local event = review_unresolved()
     local impl_version = reviewing().version

@@ -819,6 +819,41 @@ function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head
   }), fix.source_ref)
 end
 
+function M.raise_fix_reviewing(opts)
+  opts = opts or {}
+  local dept = tostring(opts.dept or "unknown")
+  local repo = opts.repo
+  local issue_number = opts.issue_number
+  local fix = opts.fix or {}
+  local old_head_sha = opts.old_head_sha
+  local new_head_sha = opts.new_head_sha
+  local new_version = opts.new_version or M.next_fix_version(fix.version)
+  local reason = opts.reason
+  local current_state = opts.current_state or { state = "fixing", version = fix.version }
+  if opts.fix_summary ~= nil or opts.clear_fix_summary == true then
+    fix.fix_summary = opts.fix_summary
+  end
+
+  M.log_cas_decision(dept, fix.proposal_id, current_state, "fixing", "reviewing", "applied", reason)
+  local comment_request = M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
+  local label_request = M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
+  local add_labels, remove_labels = M.state_label_changes("reviewing")
+  local reviewing_payload = M.build_devloop_reviewing_payload({
+    proposal_id = fix.proposal_id,
+    impl_version = new_version,
+  }, fix.pr_number, fix.source_ref)
+  M.log_apply(dept, fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_reviewing",
+  })
+  M.log_raise(dept, fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if issue_number ~= nil then
+    M.log_raise(dept, fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  M.log_raise(dept, fix.proposal_id, "devloop_reviewing", reviewing_payload)
+end
+
 function M.build_merge_head_reviewing_label_request(repo, issue_number, merge_ready, new_head_sha, new_version, source_ref)
   return M.build_state_label_request(
     repo,
