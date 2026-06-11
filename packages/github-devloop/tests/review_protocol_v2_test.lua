@@ -116,7 +116,7 @@ return {
     local event = review_event({
       decision = "reject",
       body = "Reject: current head has no green merge-gate evidence.",
-      blocking_gap = "CI green evidence is missing for the current head.",
+      blocking_gap = "缺少当前 head 的权威绿色合并门证据",
     })
     local impl_version = h.reviewing().version
     h.mock_pr_origin({

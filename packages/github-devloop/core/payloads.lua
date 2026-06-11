@@ -42,6 +42,7 @@ local gate_owned_gap_patterns = {
   "branch%s+protection",
   "head%-bound",
   "head%s+bound",
+  "%f[%w]head%f[%W]",
   "same%s+head",
   "required%s+checks",
   "check%s+runs",
