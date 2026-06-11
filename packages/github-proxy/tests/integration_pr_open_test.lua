@@ -290,7 +290,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr list"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&head=owner%3A"), 2)
     t.eq(count_calls("gh pr create"), 1)
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "github_entity_changed")
