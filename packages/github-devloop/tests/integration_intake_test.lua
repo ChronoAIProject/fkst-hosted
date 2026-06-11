@@ -109,6 +109,21 @@ local function mock_intake_codex(stdout, exit_code, stderr)
     exit_code = 0,
   })
   mock_intake_judge_view({}, {})
+  t.mock_command("--state open --limit 100 --json number,title,labels", {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
+    stdout = '[{"number":80,"title":"Widget sync retry patch","closedAt":"2026-06-01T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]},{"number":81,"title":"Widget sync retry overflow fix","closedAt":"2026-06-02T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]}]\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr list", {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
   for _ = 1, 3 do
     t.mock_command(" > ", { stdout = "", stderr = "", exit_code = 0 })
   end
@@ -267,6 +282,24 @@ return {
     t.eq(#malformed.raises, 1)
     t.is_true(find_raise(malformed.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="decline"', 1, true) ~= nil)
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
+  end,
+
+  test_judge_escalate_to_class_writes_comment_without_enabled_label = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Fix widget sync retry overflow again",
+      body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+
+    local result = run_judge(payload, opts("intake-escalate-class"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    t.is_true(comment.body:find('decision="escalate-to-class"', 1, true) ~= nil)
+    t.is_true(comment.body:find("Rule of Three", 1, true) ~= nil)
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_label_request"))
   end,
 
   test_judge_declines_umbrella_tracker_through_codex_policy = function()
