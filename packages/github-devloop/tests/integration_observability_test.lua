@@ -294,6 +294,14 @@ local function mock_pr_close()
   })
 end
 
+local function mock_pr_close_failure()
+  t.mock_command("gh pr close '7' --repo 'owner/repo'", {
+    stdout = "",
+    stderr = "close failed",
+    exit_code = 1,
+  })
+end
+
 local function mock_dashboard_label_exists()
   t.mock_command(dashboard_label_get_command(), {
     stdout = '{"name":"fkst-dashboard"}\n',
@@ -436,8 +444,8 @@ return {
     mock_pr_list({ 7 })
     mock_reaper_pr(proposal_id, 42, 7)
     mock_issue_view({}, "CLOSED")
-    mock_pr_comment_write()
     mock_pr_close()
+    mock_pr_comment_write()
     mock_dashboard_issue_list()
     t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
       stdout = '{"number":99}\n',
@@ -455,6 +463,22 @@ return {
     t.is_true(written:find("Parent: #42", 1, true) ~= nil)
     t.is_true(written:find("Reason: Parent issue #42 is closed.", 1, true) ~= nil)
     t.is_true(written:find('orphan-reaped:v1 proposal="' .. proposal_id .. '" pr="7" reason="parent-closed"', 1, true) ~= nil)
+  end,
+
+  test_orphan_reaper_does_not_write_reaped_marker_before_close_succeeds = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({ 7 })
+    mock_reaper_pr(proposal_id, 42, 7)
+    mock_issue_view({}, "CLOSED")
+    mock_pr_close_failure()
+
+    local result = run_observability(opts("observability-reap-close-fails", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("gh pr close '7' --repo 'owner/repo'"), 1)
+    t.eq(count_calls("gh pr comment"), 0)
   end,
 
   test_orphan_reaper_dry_run_does_not_close_closed_parent_pr_without_write = function()
@@ -535,8 +559,8 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "blocked", version), "fkst-test-bot"),
     }, "OPEN")
-    mock_pr_comment_write()
     mock_pr_close()
+    mock_pr_comment_write()
     mock_dashboard_issue_list()
     t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
       stdout = '{"number":99}\n',
