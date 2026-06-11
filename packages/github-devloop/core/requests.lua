@@ -701,6 +701,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
   if display_reason == "" then
     display_reason = "gate-failed"
   end
+  local test_command = M.neutralize_untrusted_comment_text(M.test_command())
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
   local marker = M.merge_gate_marker(
     merge_ready.proposal_id,
@@ -716,6 +717,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     repo = repo,
     number = merge_ready.pr_number,
   }, "github-devloop merge gate failed: " .. display_reason
+    .. "\nReproduce locally with `" .. test_command .. "` from the repository root."
     .. "\n\n" .. state_marker
     .. "\n" .. marker, M._dedup_key({
     "merge",

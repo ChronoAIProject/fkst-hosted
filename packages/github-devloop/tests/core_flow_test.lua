@@ -505,6 +505,20 @@ return {
     t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
   end,
 
+  test_implement_prompt_uses_custom_test_command_host_fact = function()
+    t.mock_command('printf %s "$FKST_DEVLOOP_TEST_COMMAND"', {
+      stdout = "cargo build && cargo test",
+      stderr = "",
+      exit_code = 0,
+    })
+    local prompt = core.build_implement_prompt("github-devloop/issue/owner/repo/42", {
+      title = "Fix parser",
+    }, "Approved framing.")
+    t.is_true(prompt:find("run `cargo build && cargo test`", 1, true) ~= nil)
+    t.is_true(prompt:find("rerun `cargo build && cargo test` until it exits 0", 1, true) ~= nil)
+    t.is_nil(prompt:find("run `scripts/run.sh test`", 1, true))
+  end,
+
   test_implement_prompt_handles_nil_framing = function()
     local prompt = core.build_implement_prompt("github-devloop/issue/owner/repo/42", {
       title = "Fix parser",
@@ -574,6 +588,35 @@ return {
     t.is_true(prompt:find("Do not finish with failing tests.", 1, true) ~= nil)
     t.is_true(prompt:find("rollup-red feedback", 1, true) ~= nil)
     t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
+  end,
+
+  test_fix_prompt_uses_custom_test_command_host_fact = function()
+    t.mock_command('printf %s "$FKST_DEVLOOP_TEST_COMMAND"', {
+      stdout = "cargo build && cargo test",
+      stderr = "",
+      exit_code = 0,
+    })
+    local fix = core.build_devloop_fixing_payload({
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    }, 7, {
+      review_proposal_id = core.pr_review_proposal_id(
+        "owner/repo",
+        7,
+        "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        "def456"
+      ),
+      review_dedup_key = "consensus:github-devloop/review/owner/repo/7/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/def456/review",
+      reviewed_head_sha = "def456",
+      framing = "Fix the bounded source_ref migration only.",
+    }, source_ref())
+    local prompt = core.build_fix_prompt(fix, {
+      title = "Fix parser",
+    }, "Review says tests are red.", fix.framing)
+    t.is_true(prompt:find("run `cargo build && cargo test`", 1, true) ~= nil)
+    t.is_true(prompt:find("rerun `cargo build && cargo test` until it exits 0", 1, true) ~= nil)
+    t.is_true(prompt:find("locally with `cargo build && cargo test`", 1, true) ~= nil)
+    t.is_nil(prompt:find("run `scripts/run.sh test`", 1, true))
   end,
 
   test_review_meta_action_parser_fails_closed_like_meta_parser = function()
