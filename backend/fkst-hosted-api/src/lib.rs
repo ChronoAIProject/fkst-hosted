@@ -7,6 +7,7 @@
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod leases;
 pub mod models;
 pub mod packages;
 pub mod router;
