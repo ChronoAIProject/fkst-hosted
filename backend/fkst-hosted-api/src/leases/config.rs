@@ -18,6 +18,11 @@ pub const ENV_LEASE_TTL_SECS: &str = "FKST_LEASE_TTL_SECS";
 /// Default lease TTL when [`ENV_LEASE_TTL_SECS`] is unset.
 const DEFAULT_LEASE_TTL_SECS: u64 = 30;
 
+/// Sanity ceiling for [`ENV_LEASE_TTL_SECS`] (24 hours). Anything larger is
+/// a misconfiguration: it would defeat expired-lease takeover and opens an
+/// unchecked-overflow corner in millisecond arithmetic.
+const MAX_LEASE_TTL_SECS: u64 = 86_400;
+
 /// Configuration for the lease coordination layer.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
@@ -41,8 +46,10 @@ impl PoolConfig {
     /// 3. `local-<uuid v4>` fallback, WARN-logged (no stable K8s identity).
     ///
     /// The lease TTL comes from `FKST_LEASE_TTL_SECS` (default 30) and must
-    /// be `>= 1`: a zero TTL would make every lease instantly dead, so `0`
-    /// and non-numeric values fail closed with [`PoolError::Config`].
+    /// be within `1..=86_400` seconds: a zero TTL would make every lease
+    /// instantly dead and a multi-day TTL would defeat takeover, so `0`,
+    /// non-numeric, and over-bound values fail closed with
+    /// [`PoolError::Config`].
     pub fn from_vars(
         vars: impl IntoIterator<Item = (String, String)>,
     ) -> Result<PoolConfig, PoolError> {
@@ -97,7 +104,11 @@ fn resolve_pod_id(pod_id: Option<String>, hostname: Option<String>) -> String {
 }
 
 /// Parse the lease TTL, defaulting to [`DEFAULT_LEASE_TTL_SECS`]; rejects
-/// zero and non-numeric values with an error naming the variable.
+/// zero, non-numeric, and absurdly large values (> [`MAX_LEASE_TTL_SECS`])
+/// with an error naming the variable. The upper bound keeps every downstream
+/// millis computation (`now + ttl`, reap margins) trivially within `i64` —
+/// no unchecked-overflow corner — and a multi-day "lease" would defeat
+/// takeover anyway.
 fn parse_lease_ttl(raw: Option<String>) -> Result<Duration, PoolError> {
     let Some(raw) = raw else {
         return Ok(Duration::from_secs(DEFAULT_LEASE_TTL_SECS));
@@ -110,6 +121,11 @@ fn parse_lease_ttl(raw: Option<String>) -> Result<Duration, PoolError> {
     if secs == 0 {
         return Err(PoolError::Config(format!(
             "{ENV_LEASE_TTL_SECS} must be at least 1 second"
+        )));
+    }
+    if secs > MAX_LEASE_TTL_SECS {
+        return Err(PoolError::Config(format!(
+            "{ENV_LEASE_TTL_SECS} must be at most {MAX_LEASE_TTL_SECS} seconds (24h), got {secs}"
         )));
     }
     Ok(Duration::from_secs(secs))
@@ -182,6 +198,21 @@ mod tests {
         // error names the variable.
         let err = PoolConfig::from_vars(vars(&[("FKST_LEASE_TTL_SECS", "0")]))
             .expect_err("zero TTL must fail");
+        assert!(matches!(err, PoolError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_LEASE_TTL_SECS"),
+            "error must name the env var, got: {err}"
+        );
+
+        // The 24h ceiling itself is accepted...
+        let config = PoolConfig::from_vars(vars(&[("FKST_LEASE_TTL_SECS", "86400")]))
+            .expect("max TTL loads");
+        assert_eq!(config.lease_ttl, Duration::from_secs(86_400));
+
+        // ...but anything above it is rejected and the error names the
+        // variable (closes the unchecked-millis-overflow corner).
+        let err = PoolConfig::from_vars(vars(&[("FKST_LEASE_TTL_SECS", "86401")]))
+            .expect_err("over-bound TTL must fail");
         assert!(matches!(err, PoolError::Config(_)));
         assert!(
             err.to_string().contains("FKST_LEASE_TTL_SECS"),
