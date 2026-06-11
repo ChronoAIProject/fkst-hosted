@@ -52,7 +52,7 @@ function pipeline(event)
     error("github-devloop: gh issue intake list failed: " .. tostring(list.stderr))
   end
 
-  for _, issue in ipairs(core.parse_issue_list_intake(list.stdout)) do
+  for _, issue in ipairs(core.parse_issue_list_intake(list.stdout, INTAKE_LIMIT)) do
     local issue_number = tostring(issue.number or "")
     if core.issue_ref_round_trips(repo, issue_number) and not should_skip_known(issue.labels) then
       local proposal_id = core.proposal_id(repo, issue_number)

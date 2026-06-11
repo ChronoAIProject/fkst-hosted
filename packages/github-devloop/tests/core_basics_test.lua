@@ -471,6 +471,31 @@ return {
 
   test_gh_issue_view_state_command_and_parse = function()
     t.eq(
+      core.gh_issue_list_intake_cmd("owner/repo", 50),
+      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,updatedAt,labels"
+    )
+    t.eq(
+      core.gh_pr_list_head_base_cmd("owner/repo", "integration/dev", "dev"),
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&base=dev&per_page=100'"
+    )
+    local intake = core.parse_issue_list_intake('[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
+    t.eq(intake[1].number, 42)
+    t.eq(intake[1].updated_at, "2026-06-03T01:02:03Z")
+    t.eq(intake[1].labels[1], "bug")
+    local mixed = core.parse_issue_list_intake('[[{"number":1,"pull_request":{"url":"https://api.example.test/pulls/1"}}],[{"number":2,"title":"Issue","updated_at":"2026-06-03T01:02:04Z","labels":[]}]]', 1)
+    t.eq(#mixed, 1)
+    t.eq(mixed[1].number, 2)
+    t.eq(#core.parse_issue_list_intake("[[]]"), 0)
+    t.eq(#core.parse_issue_list_observe("[[]]"), 0)
+    t.eq(#core.parse_pr_list_observe("[[]]"), 0)
+    t.eq(#core.parse_pr_list_head_base("[[]]"), 0)
+    local rollup_prs = core.parse_pr_list_head_base('[[{"number":9,"head":{"sha":"abc123","ref":"integration/dev"},"base":{"ref":"dev"},"state":"open"}]]')
+    t.eq(rollup_prs[1].number, 9)
+    t.eq(rollup_prs[1].head_sha, "abc123")
+    t.eq(rollup_prs[1].head_ref_name, "integration/dev")
+    t.eq(rollup_prs[1].base_ref_name, "dev")
+
+    t.eq(
       core.gh_issue_view_state_cmd("owner/repo", 42),
       "gh issue view '42' --repo 'owner/repo' --json labels,state,comments"
     )
