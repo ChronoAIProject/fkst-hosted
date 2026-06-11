@@ -44,6 +44,13 @@ local function mock_env(bot_login, write_mode)
       exit_code = 0,
     })
   end
+  for _, name in ipairs({ "GH_TOKEN", "GITHUB_TOKEN" }) do
+    t.mock_command('if [ -n "${' .. name .. ':-}" ]; then printf present; fi', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function json_string(value)
@@ -170,6 +177,33 @@ local function capture_observability_logs(event)
   return captured
 end
 
+local function try_capture_observability_logs(event)
+  local captured = {}
+  local old_log = log
+  log = {
+    info = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    warn = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    error = function(message)
+      table.insert(captured, tostring(message))
+    end,
+  }
+
+  local ok, err = pcall(function()
+    dofile(package_root() .. "/departments/observability/main.lua")
+    pipeline(event or {
+      queue = "devloop_observe_tick",
+      payload = { schema = "github-devloop.observe-tick.v1" },
+    })
+  end)
+
+  log = old_log
+  return ok, captured, err
+end
+
 local function summary_log(logs)
   for _, line in ipairs(logs or {}) do
     if line:find("tag=OBSERVE_SUMMARY", 1, true) ~= nil then
@@ -211,6 +245,18 @@ end
 
 local function command_input_path(command)
   return tostring(command or ""):match("%-%-input '([^']+)'")
+end
+
+local function dashboard_issue_list_command()
+  return "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dashboard&per_page=100'"
+end
+
+local function mock_dashboard_issue_list(stdout, exit_code, stderr)
+  t.mock_command(dashboard_issue_list_command(), {
+    stdout = stdout or "[[]]\n",
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
 end
 
 return {
@@ -447,11 +493,7 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "implementing", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
     })
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = "[]\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_issue_list()
     t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
       stdout = '{"number":99}\n',
       stderr = "",
@@ -469,8 +511,10 @@ return {
     t.is_true(input_path ~= "/tmp/fkst-github-devloop-dashboard-owner-repo.json")
     local written = file.read(input_path)
     t.is_true(written:find('"title":"fkst-dev board"', 1, true) ~= nil)
+    t.is_true(written:find('"labels":["fkst-dashboard"]', 1, true) ~= nil)
     t.is_true(written:find("fkst:dashboard:v1", 1, true) ~= nil)
     t.is_true(written:find("implementing", 1, true) ~= nil)
+    t.eq(count_calls("--search"), 0)
   end,
 
   test_dashboard_write_updates_existing_trusted_issue_when_hash_changes = function()
@@ -481,11 +525,7 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "reviewing", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
     })
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_issue_list('[[{"number":99,"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]]\n')
     t.mock_command("gh api --method GET --include 'repos/owner/repo/issues/99'", {
       stdout = 'HTTP/2.0 200 OK\netag: "dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}\n',
       stderr = "",
@@ -516,11 +556,7 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "reviewing", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
     })
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_issue_list('[[{"number":99,"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]]\n')
     t.mock_command("gh api --method GET --include 'repos/owner/repo/issues/99'", {
       stdout = 'HTTP/2.0 200 OK\netag: "dashboard-newer-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"newer\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:01:00Z\\" hash=\\"newer\\" generated_at=\\"2026-06-01T00:01:00Z\\" -->"}\n',
       stderr = "",
@@ -532,7 +568,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST"), 0)
     t.eq(count_calls("gh api --method PATCH"), 0)
-    t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 20"), 1)
+    t.eq(count_calls(dashboard_issue_list_command()), 1)
     t.eq(count_calls("gh api --method GET --include 'repos/owner/repo/issues/99'"), 1)
   end,
 
@@ -544,11 +580,7 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "reviewing", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
     })
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_issue_list('[[{"number":99,"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]]\n')
     t.mock_command("gh api --method GET --include 'repos/owner/repo/issues/99'", {
       stdout = 'HTTP/2.0 200 OK\netag: "dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}\n',
       stderr = "",
@@ -575,18 +607,14 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "reviewing", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
     })
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"newer\\n<!-- fkst:dashboard:v1 version=\\"2099-01-01T00:00:00Z\\" hash=\\"newer\\" generated_at=\\"2099-01-01T00:00:00Z\\" -->"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_issue_list('[[{"number":99,"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"newer\\n<!-- fkst:dashboard:v1 version=\\"2099-01-01T00:00:00Z\\" hash=\\"newer\\" generated_at=\\"2099-01-01T00:00:00Z\\" -->"}]]\n')
 
     local result = run_observability(opts("observability-dashboard-stale", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST"), 0)
     t.eq(count_calls("gh api --method PATCH"), 0)
-    t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 20"), 1)
+    t.eq(count_calls(dashboard_issue_list_command()), 1)
   end,
 
   test_dashboard_write_skips_existing_trusted_issue_when_hash_matches = function()
@@ -600,17 +628,31 @@ return {
     mock_env("fkst-test-bot", "1")
     mock_all_issue_lists({})
     mock_pr_list({})
-    t.mock_command("gh issue list --repo 'owner/repo' --state open --limit 20 --search 'fkst:dashboard:v1 in:body' --json number,title,author,body,updatedAt", {
-      stdout = '[{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"' .. dashboard_hash(rendered.body) .. '\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_issue_list('[[{"number":99,"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"' .. dashboard_hash(rendered.body) .. '\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]]\n')
 
     local result = run_observability(opts("observability-dashboard-unchanged", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST"), 0)
     t.eq(count_calls("gh api --method PATCH"), 0)
-    t.is_true(first_call("gh issue list --repo 'owner/repo' --state open --limit 20") ~= nil)
+    t.is_true(first_call(dashboard_issue_list_command()) ~= nil)
+  end,
+
+  test_dashboard_locator_failure_logs_auth_mode_and_http_status = function()
+    mock_env("fkst-test-bot", "1")
+    mock_all_issue_lists({})
+    mock_pr_list({})
+    mock_dashboard_issue_list("", 1, "GraphQL: API rate limit already exceeded (HTTP 403)\n")
+
+    local ok, logs = try_capture_observability_logs()
+
+    t.eq(ok, false)
+    t.eq(count_calls(dashboard_issue_list_command()), 1)
+    t.eq(count_calls("--search"), 0)
+    local body = table.concat(logs, "\n")
+    t.is_true(body:find("tag=DASHBOARD_LOCATOR_FAILED", 1, true) ~= nil)
+    t.is_true(body:find("locator=label-list", 1, true) ~= nil)
+    t.is_true(body:find("auth_mode=gh-auth", 1, true) ~= nil)
+    t.is_true(body:find("http_status=403", 1, true) ~= nil)
   end,
 }

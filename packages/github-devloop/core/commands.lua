@@ -19,13 +19,13 @@ function M.gh_issue_list_observe_cmd(repo, label)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
 
-function M.gh_dashboard_issue_search_cmd(repo)
-  return "gh issue list"
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --state open"
-    .. " --limit 20"
-    .. " --search " .. M._shell_single_quote("fkst:dashboard:v1 in:body")
-    .. " --json number,title,author,body,updatedAt"
+function M.gh_dashboard_issue_list_cmd(repo, label)
+  local selected_label = tostring(label or "")
+  if selected_label == "" then
+    error("github-devloop: dashboard issue label is required")
+  end
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. selected_label:gsub(":", "%%3A") .. "&per_page=100")
 end
 
 function M.gh_dashboard_issue_create_cmd(repo, input_file)

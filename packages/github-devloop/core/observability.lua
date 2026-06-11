@@ -3,6 +3,7 @@ local S = {}
 function S.install(M)
 local dept = "observability"
 local dashboard_title = "fkst-dev board"
+local dashboard_label = "fkst-dashboard"
 local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"
 local max_dashboard_body_len = 12000
 local max_dashboard_section_items = 40
@@ -38,6 +39,20 @@ local function json_string(value)
     return string.format("\\u%04x", char:byte())
   end)
   return '"' .. text .. '"'
+end
+
+local function stderr_http_status(stderr)
+  local text = tostring(stderr or "")
+  local status = text:match("[Hh][Tt][Tt][Pp][^%d]*(%d%d%d)")
+    or text:match("status[^\n%d]*(%d%d%d)")
+  return status or "unknown"
+end
+
+local function gh_auth_mode()
+  if M.env_present("GH_TOKEN") or M.env_present("GITHUB_TOKEN") then
+    return "env-token"
+  end
+  return "gh-auth"
 end
 
 local function dashboard_input_path(repo, version, hash)
@@ -527,8 +542,17 @@ function M.render_observability_dashboard(args)
 end
 
 local function trusted_dashboard_issue(repo, bot_login)
-  local search = run_cmd(M.gh_dashboard_issue_search_cmd(repo), 30, "gh dashboard issue search")
-  for _, issue in ipairs(M.parse_dashboard_issue_search(search.stdout)) do
+  local listed = M.gh_exec({ cmd = M.gh_dashboard_issue_list_cmd(repo, dashboard_label), timeout = 30 })
+  if listed.exit_code ~= 0 then
+    log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED"
+      .. " locator=label-list"
+      .. " label=" .. dashboard_label
+      .. " auth_mode=" .. gh_auth_mode()
+      .. " http_status=" .. stderr_http_status(listed.stderr)
+      .. " exit_code=" .. tostring(listed.exit_code))
+    error("github-devloop: gh dashboard issue list failed: " .. tostring(listed.stderr))
+  end
+  for _, issue in ipairs(M.parse_dashboard_issue_list(listed.stdout)) do
     if issue.author_login == bot_login
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
       return issue
@@ -553,6 +577,7 @@ local function write_dashboard_input(repo, title, body)
   file.write(path, "{"
     .. '"title":' .. json_string(title)
     .. ',"body":' .. json_string(body)
+    .. ',"labels":[' .. json_string(dashboard_label) .. "]"
     .. "}\n")
   return path
 end
