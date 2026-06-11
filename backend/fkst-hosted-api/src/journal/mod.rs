@@ -9,12 +9,51 @@
 //! redo on a different pod. Correctness never depends on timestamps or on the
 //! engine's LOCAL `once()` marks / `with_lock` / codex-permits.
 
+pub mod github;
 pub mod model;
 pub mod parse;
 
 use sha2::{Digest, Sha256};
 
 use crate::packages::model::PackageFile;
+
+/// Journaling failures. Secret hygiene is load-bearing: no variant ever
+/// carries the GitHub token (asserted by tests in [`github`]); HTTP errors
+/// are reduced to status/context strings before they enter the chain.
+#[derive(thiserror::Error, Debug)]
+pub enum JournalError {
+    /// The optimistic-concurrency loop exhausted its retry budget.
+    #[error("github contents conflict after {0} retries")]
+    CasExhausted(u32),
+    /// One PUT lost the CAS race (409 / sha mismatch / concurrent create):
+    /// the caller's CAS loop re-reads and retries.
+    #[error("github contents sha conflict")]
+    CasConflict,
+    /// 404 on the update path (remote file deleted mid-run): the caller
+    /// falls back to create.
+    #[error("remote journal file missing on update")]
+    RemoteMissing,
+    /// Stale writer fenced off (strict `<`; equality is the rightful holder).
+    #[error("stale fencing token {got} < {known}")]
+    Fenced { got: i64, known: i64 },
+    /// 401, or 403 without rate-limit headers: bad/expired token.
+    #[error("github auth failed")]
+    GithubAuth,
+    /// 403 carrying rate-limit headers; the value is seconds until reset.
+    #[error("github rate limited; reset in {0}s")]
+    GithubRateLimited(u64),
+    /// Remote progress record declares a schema we must not overwrite.
+    #[error("remote progress record schema unsupported: {0}")]
+    UnsupportedSchema(String),
+    #[error(transparent)]
+    Mongo(#[from] mongodb::error::Error),
+    /// Network / 5xx / unexpected-status failures, reduced to a string that
+    /// never contains credentials.
+    #[error("github http error: {0}")]
+    Http(String),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
 
 /// ASCII Unit Separator: joins key-derivation parts (never appears in
 /// validated package names or lowercase hex).
