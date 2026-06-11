@@ -12,7 +12,7 @@ hypotheses disagreed with the observed behavior, the logs win.
 | Binaries | `/usr/local/bin/fkst-framework` (6,069,624 bytes) — the key binary (`run`, `supervise`, `conformance`, `config`, `test`, `--self-test`); `/usr/local/bin/fkst-supervisor` (2,184,616 bytes) — thin wrapper, **never to be used by the runner** (see Q7) (E0-image-selftest.log) |
 | Self-test | `fkst-framework --self-test` → exit `0` (E0-image-selftest.log) |
 | Experiment date | 2026-06-11 (UTC) |
-| Reproducibility | The full ladder (E2–E11) bundled as one script (`spike.sh`, see Reproduction recipe) was run **twice, each in a fresh `--rm` container**; all **45 normalized verdicts** (exit codes + error strings) were byte-identical across both passes: `IDENTICAL - no hidden host dependency` (REPRO.log) |
+| Reproducibility | The full ladder (E2–E11) bundled as one script (`spike.sh`, see Reproduction recipe) was run **twice, each in a fresh `--rm` container**; all **45 normalized verdicts** (exit codes + error strings) were byte-identical across both passes: `IDENTICAL - no hidden host dependency` (REPRO.log). One caveat: the consolidated E6 non-writable-runtime-root rung re-observed only "keeps running" — `logpath-none=no` in both passes, likely because no dispatch landed in its 3 s window; the logs-silently-dropped observable is evidenced by the dedicated transcripts (E6-runtime-root.log:79-99,137-142; E11-negative-cases.log:171). A re-runner should treat `logpath-none=no` as the expected baseline for that rung |
 
 > Notation: `supervise` log lines are emitted via `tracing` on stderr with ANSI colors; quoted
 > lines below have the color codes stripped but are otherwise verbatim. `exit=124` means the
@@ -67,6 +67,7 @@ package (which has **no** `fkst.env` at all) also ran under `supervise` with 4 s
 (E5-minimal-tree.log).
 
 - **Operational keys confirmed NOT required** — every run used defaults only (E1-config-registry.log, E3-hostfacts-ladder.log).
+- Note: the lazy fail-closed mechanism itself is **source-derived** (`config_registry.rs`) — no experiment actually triggered a missing-HostFact failure. With default reliable retry, such a failure at first event would presumably re-dispatch like error-table case 5'; mitigated by always materializing the 2-key `fkst.env`.
 - Recommended runner posture: still materialize a 2-key `fkst.env` (`FKST_CANDIDATE_PREFIX=candidate/`, `FKST_CANDIDATE_FROM_SEP=::`) so packages that *do* call the git/candidate SDK do not fail at runtime — but it is **not** a start-up precondition.
 
 ## Q2 — git repo: NOT required
@@ -94,6 +95,12 @@ exit=0
 `grep -ci git` over the full supervise log = **0** — zero git-related output
 (E4-git-ladder.log). **No `git init`, no commit, no `git config user.*` is needed by the runner.**
 Git is only reachable via the Lua `sdk_git` API if a package uses it.
+
+**Scope of this verdict:** E4 only exercised packages that never touch `sdk_git`. A production
+package invoking the Lua `sdk_git` API against a non-git materialized dir is **UNTESTED** and
+would fail at runtime. The runner should either treat runtime `sdk_git` failures as an accepted
+500-class error or `git init` defensively if/when `sdk_git`-using packages appear — mirroring the
+defensive 2-key `fkst.env` posture in Q1.
 
 ## Q3 — git runtime dependency: ship it, but the engine never calls it in this flow
 
@@ -222,7 +229,7 @@ only a hazard for PID-table-scanning health checks — match on state != `Z`.
 
 - `--project-root` is **mandatory** for every subcommand: exit **2**, `[framework] startup error: missing --project-root` (also E1-config-registry.log for `config`).
 - A package root is **mandatory** for every subcommand (even `config`): exit **2**, `[framework] startup error: FKST_PACKAGE_ROOTS, FKST_PACKAGE_ROOT, or --package-root is required` (E1-config-registry.log, E11-negative-cases.log case 3a).
-- **`FKST_PACKAGE_ROOT` env DOES substitute for `--package-root`** (the "likely NO" prior is refuted) — both `conformance` and `supervise` ran clean with env-only package-root wiring; the plural `FKST_PACKAGE_ROOTS` also works (E8-flags.log). `--project-root` and `--framework-bin` remain flag-only.
+- **`FKST_PACKAGE_ROOT` env DOES substitute for `--package-root`** (the "likely NO" prior is refuted) — both `conformance` and `supervise` ran clean with env-only package-root wiring; the plural `FKST_PACKAGE_ROOTS` also works (E8-flags.log). `--project-root` and `--framework-bin` remain flag-only. **Untested:** the precedence when BOTH the env var and `--package-root` are set was not exercised (only env-only wiring was; `FKST_PACKAGE_ROOTS` was exercised on `conformance` only) — the runner must pick exactly one wiring until precedence is pinned.
 - `fkst-supervisor` parses no args: project root = **cwd**, framework bin = `FKST_FRAMEWORK_BIN` env or the binary next to its own exe (E8-flags.log; informational only — see Q7 for why the runner never uses it).
 
 ## Q9 — liveness / ready markers
@@ -237,8 +244,8 @@ INFO fkst_framework::supervise::consumer: consumer started dept=producer reliabl
 INFO fkst_framework::supervise::source_runner: cron raiser starting raiser=tick interval_s=1
 ```
 
-- `event runtime running handles=<n>` — runtime fully wired (one line, after graph scan/validation): **the ready marker**.
-- `consumer started dept=<name> reliable_queues=[...] ephemeral_queues=[...]` — per department.
+- `event runtime running handles=<n>` — runtime wired (one line, after graph scan/validation). **Caution: this line alone does NOT imply health** — it is emitted even in the unset-`FKST_RUNTIME_ROOT` half-alive run, where the per-department `consumer started` lines are ABSENT (E6-runtime-root.log:47-55).
+- `consumer started dept=<name> reliable_queues=[...] ephemeral_queues=[...]` — per department. **Readiness should require this line for every department** (and/or treat any `panicked at` on supervise stderr as startup failure).
 - `cron raiser starting raiser=<name> interval_s=<n>` — per raiser.
 - Per-dispatch: `framework spawned pid=<n> lua=<path>` / `framework ok dept=... log_path=Some(...)` / `delivery acked ...` (E3-hostfacts-ladder.log, E9-supervise-block.log).
 
@@ -272,7 +279,7 @@ runtime = only observable under `supervise` (runner maps to `500` or must pre-va
 | 6 | `git` + `bash` stripped from `PATH` | `conformance` / `supervise` | — (no error; engine has no shell-outs in this flow) | 0 / runs | n/a | **not an error** | E11-negative-cases.log |
 | 7a | `FKST_RUNTIME_ROOT` unset | `conformance` | `PASS runtime-layout FKST_RUNTIME_ROOT not set; runtime scratch unused by conformance` | 0 | — | — | E6-runtime-root.log, E11-negative-cases.log |
 | 7b | `FKST_RUNTIME_ROOT` unset | `supervise` | `thread 'main' (236) panicked at crates/fkst-framework/src/supervise/consumer.rs:59:14:` / `runtime layout should be valid: FKST_RUNTIME_ROOT must be set` — **process keeps running** | runs (half-alive) | runtime | 500 + runner must pre-validate | E6-runtime-root.log, E11-negative-cases.log |
-| 7c | `FKST_RUNTIME_ROOT` non-writable | `supervise` | — runs; every dispatch `log_path=None` (child logs silently dropped) | runs | runtime | none surfaced — runner must pre-validate writability | E6-runtime-root.log, E11-negative-cases.log |
+| 7c | `FKST_RUNTIME_ROOT` non-writable | `supervise` | — runs; every dispatch `log_path=None` (child logs silently dropped) | runs | runtime | none surfaced — runner must pre-validate writability | E6-runtime-root.log:79-99,137-142, E11-negative-cases.log:171 — note: the consolidated spike.sh rung re-observed only "keeps running" (`logpath-none=no` in both passes; likely no dispatch in its 3 s window) |
 | 8 | missing `FKST_DURABLE_ROOT` (reliable graph) | `supervise` | `[framework] startup error: FKST_DURABLE_ROOT must be set` + `ERROR fkst_framework::supervise: durable layout required for reliable subscriptions error=FKST_DURABLE_ROOT must be set` | 2 | startup (fail-fast) | 500 (config) | E3-hostfacts-ladder.log, E7-durable-root.log |
 
 Exit-code legend (observed): `0` ok, `1` lua/pipeline/conformance-check failure, `2`
@@ -567,7 +574,7 @@ The contract the session-runner (#18) and engine-Dockerfile (#21) issues consume
 | Materialize | **Plain directory** (tempfile-style) — **NO git repo, no `git init`/commit/identity** (E4-git-ladder.log); git ships in the image only for the Lua `sdk_git` API. Layout: `departments/<name>/main.lua` (+ optional `raisers/*.lua`). Fresh `FKST_RUNTIME_ROOT` and `FKST_DURABLE_ROOT` per session attempt — a stale `delivery.redb` replays lease state (E7-durable-root.log). |
 | Pre-flight | `fkst-framework conformance --project-root $PKG --package-root $PKG` → exit 0 required. **Mandatory** — `supervise` is not a validator: it idles on an empty package (E11-negative-cases.log case 3d) and misses the missing-`pipeline` case entirely (runtime-only, E11-negative-cases.log case 5'). |
 | Spawn | Own session/PGID (`setsid`-equivalent): `fkst-framework supervise --project-root <pkg> --package-root <pkg> --framework-bin $(command -v fkst-framework)`, stdout+stderr captured. `FKST_PACKAGE_ROOT` (or `FKST_PACKAGE_ROOTS`) env substitutes for `--package-root`; `--project-root` and `--framework-bin` are flag-only (E8-flags.log). **NEVER spawn the `fkst-supervisor` wrapper — it orphans its child by design (`process_group(0)`); even a group-kill of the wrapper's group cannot reach the child** (E10-stop.log). |
-| Liveness / ready | PID liveness of the supervise process + stderr markers: `event runtime running handles=<n>` (ready), then `consumer started dept=...` per department (E9-supervise-block.log). Child logs `<RT>/logs/framework-child/<dept>-<secs>-<nanos>-<seq>.log` appear **only after the first dispatched event** (E5-minimal-tree.log, E9-supervise-block.log). |
+| Liveness / ready | PID liveness of the supervise process + stderr markers. **Readiness requires `consumer started dept=...` for every department** (and/or no `panicked at` on stderr); `event runtime running handles=<n>` alone is NOT sufficient — it is emitted even in the unset-`FKST_RUNTIME_ROOT` half-alive run while the `consumer started` lines are absent (E6-runtime-root.log:47-55, E9-supervise-block.log). Child logs `<RT>/logs/framework-child/<dept>-<secs>-<nanos>-<seq>.log` appear **only after the first dispatched event** (E5-minimal-tree.log, E9-supervise-block.log). |
 | Stop | SIGTERM to the process **GROUP** (spawn via setsid, then `kill -TERM -- -<PGID>`); observed settle ≈ **58 ms** (PID-only TERM also clean at 60 ms, but group-kill stays the safe recipe) (E10-stop.log). Bound with a 2–5 s grace then SIGKILL the group. Zombie-aware reaping: the runner must `waitpid`; PID-table health checks must exclude state `Z` (E10-stop.log, E10-stop-INVALID-zombie-artifact.log). |
 | Runtime deps | Any glibc base (`ldd`: only `libgcc_s`, `libm`, `libc`, `ld-linux`) (E12-runtime-deps.log). `git 2.39.5` only for the Lua git SDK; `bash` NOT needed for the minimal flow (E11-negative-cases.log case 6); Lua statically vendored — no system `lua*`/`liblua*` anywhere (E12-runtime-deps.log); the image has **no `ps`/procps** — probe `/proc` directly (E0-image-selftest.log). |
 
@@ -585,7 +592,7 @@ sequenceDiagram
     R->>C: conformance --project-root PKG --package-root PKG
     C-->>R: exit 0 (else map FAIL/exit to 400 and stop)
     R->>S: setsid spawn supervise --project-root PKG --package-root PKG --framework-bin fkst-framework
-    S-->>R: stderr "event runtime running handles=n" (ready marker)
+    S-->>R: stderr "event runtime running" + "consumer started dept=..." per dept (ready; runtime-running alone is not health)
     S-->>FS: child logs under RT/logs/framework-child/ (after first event)
     R->>S: kill -TERM -- -PGID (stop)
     S-->>R: clean exit ~58 ms, 0 live survivors; runner waitpid-reaps
@@ -597,8 +604,8 @@ sequenceDiagram
 
 Findings that **change the session-runner / Dockerfile design** relative to canon assumptions:
 
-1. **No-git-repo finding contradicts the canon's "host must be a git repo" assumption.** Neither `conformance` nor `supervise` ever touches git; the runner's planned `git init` + commit + identity step is dropped entirely (E4-git-ladder.log, E11-negative-cases.log case 6).
-2. **HostFacts are NOT required at start (lazy SDK resolution) — contradicts fail-closed-at-boot.** `fkst.env` can be absent for both commands; the fail-closed path only triggers inside SDK code that resolves those keys, so the runner's planned 400-mapping for missing HostFacts is unreachable in pre-flight (E1-config-registry.log, E3-hostfacts-ladder.log, E5-minimal-tree.log).
+1. **No-git-repo finding contradicts the canon's "host must be a git repo" assumption.** Neither `conformance` nor `supervise` ever touches git; the runner's planned `git init` + commit + identity step is dropped entirely (E4-git-ladder.log, E11-negative-cases.log case 6). Scope caveat: this is pinned only for packages that never call `sdk_git` (all E4/E11 subjects); an `sdk_git`-using package on a non-git dir is untested and would fail at runtime — accept that as a 500-class error or git-init defensively when such packages appear.
+2. **HostFacts are NOT required at start (lazy SDK resolution) — contradicts fail-closed-at-boot.** `fkst.env` can be absent for both commands; the fail-closed path only triggers inside SDK code that resolves those keys, so the runner's planned 400-mapping for missing HostFacts is unreachable in pre-flight (E1-config-registry.log, E3-hostfacts-ladder.log, E5-minimal-tree.log). The lazy-fail mechanism is source-derived — no experiment triggered it; under default reliable retry a missing-HostFact failure at first event would presumably re-dispatch like case 5', mitigated by always materializing the 2-key `fkst.env`.
 3. **`FKST_DURABLE_ROOT` is required to start for default reliable consumes** — this settles the source conflict: both code comments are true, the condition is the subscription mode (`M.spec.ephemeral`). Effectively required in v1; fail-fast exit 2; redb at `$FKST_DURABLE_ROOT/delivery.redb`; sessions data model should record `durable_dir` alongside `runtime_dir` (E3-hostfacts-ladder.log, E7-durable-root.log).
 4. **The `fkst-supervisor` wrapper must not be used by the runner** — SIGTERM to it abandons the running framework child in a separate process group (reparented to PID 1, still running), and group-kill of the wrapper's group cannot reach it (E10-stop.log).
 5. **`FKST_PACKAGE_ROOT` env substitution exists** (plus plural `FKST_PACKAGE_ROOTS`) — the runner may prefer pure-env wiring for the package root; `--project-root` and `--framework-bin` remain flag-only (E8-flags.log).
