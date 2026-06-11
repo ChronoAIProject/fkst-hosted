@@ -211,7 +211,15 @@ end
 function M.fixing_version_matches_link(issue_version, link_version)
   local current = tostring(issue_version or "")
   local linked = tostring(link_version or "")
-  return current == linked or M._strip_latest_fix_version_suffix(current) == linked
+  if current == linked or M._strip_latest_fix_version_suffix(current) == linked then
+    return true
+  end
+  local current_base = M._strip_transition_version_suffixes(current)
+  local linked_base = M._strip_transition_version_suffixes(linked)
+  if current_base == "" or linked_base == "" then
+    return false
+  end
+  return M.safe_version_segment(current_base) == M.safe_version_segment(linked_base)
 end
 
 end

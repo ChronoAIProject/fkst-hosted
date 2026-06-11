@@ -206,15 +206,25 @@ local function strip_transition_version_suffixes(version)
   while previous ~= text do
     previous = text
     text = text
+      :gsub("/rereview/%d+/[0-9A-Fa-f]+$", "")
+      :gsub("%-rereview%-%d+%-[0-9A-Fa-f]+$", "")
+      :gsub("/review%-meta/%d+$", "")
+      :gsub("%-review%-meta%-%d+$", "")
       :gsub("/review%-meta%-action/%d+$", "")
       :gsub("%-review%-meta%-action%-%d+$", "")
       :gsub("/review%-loop/%d+$", "")
       :gsub("%-review%-loop%-%d+$", "")
+      :gsub("/review/%d+$", "")
+      :gsub("%-review%-%d+$", "")
       :gsub("/fix/%d+$", "")
       :gsub("%-fix%-%d+$", "")
+      :gsub("/loop/%d+$", "")
+      :gsub("%-loop%-%d+$", "")
   end
   return text
 end
+
+M._strip_transition_version_suffixes = strip_transition_version_suffixes
 
 local function strip_latest_fix_version_suffix(version)
   return tostring(version or "")

@@ -91,6 +91,15 @@ local function issue_comments_for_origin(origin)
   return core.parse_issue_view_result(issue_view.stdout).comments
 end
 
+local function has_reviewing_marker_for_comments(comments, proposal_id, version)
+  return core.has_state_marker(comments, proposal_id, "reviewing", version)
+end
+
+local function has_reviewing_marker(issue_comments, pr_comments, proposal_id, version)
+  return has_reviewing_marker_for_comments(issue_comments, proposal_id, version)
+    or has_reviewing_marker_for_comments(pr_comments, proposal_id, version)
+end
+
 local function raise_current_state(origin, pr_number, current_pr, state, source_ref)
   if state.state == "reviewing" then
     local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
@@ -120,6 +129,51 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
     end
     if feedback.review_proposal_id ~= nil and feedback.reviewed_head_sha ~= nil then
       if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
+        local branch_head = exec_sync({ cmd = core.git_branch_head_cmd(origin.branch), timeout = 30 })
+        if branch_head.exit_code ~= 0 then
+          core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
+          error("github-devloop: PR head changed before fix replay and deterministic branch head is not readable")
+        end
+        local intended_head_sha = tostring(branch_head.stdout or ""):gsub("%s+$", "")
+        if not core.is_safe_head_sha(intended_head_sha) then
+          error("github-devloop: unsafe PR origin branch head sha")
+        end
+        if tostring(current_pr.head_sha or "") == intended_head_sha
+          and tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
+          local reviewing_version = core.next_fix_version(state.version)
+          if has_reviewing_marker(fact_comments, current_pr.comments, origin.proposal_id, reviewing_version) then
+            core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "skip-idempotent(reviewing marker already visible)", "reviewing state marker for recovered head is already visible")
+            return
+          end
+          local fix = {
+            proposal_id = origin.proposal_id,
+            pr_number = pr_number,
+            version = state.version,
+            review_proposal_id = feedback.review_proposal_id,
+            review_dedup_key = feedback.review_dedup_key,
+            reviewed_head_sha = feedback.reviewed_head_sha,
+            source_ref = source_ref,
+          }
+          local comment_request = core.build_fix_reviewing_comment_request(origin.repo, origin.issue_number, fix, feedback.reviewed_head_sha, current_pr.head_sha, reviewing_version)
+          local label_request = core.build_fix_reviewing_label_request(origin.repo, origin.issue_number, fix, current_pr.head_sha, reviewing_version)
+          local reviewing_payload = core.build_devloop_reviewing_payload({
+            proposal_id = origin.proposal_id,
+            impl_version = reviewing_version,
+          }, pr_number, source_ref)
+          local add_labels, remove_labels = core.state_label_changes("reviewing")
+          core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "applied", "push already visible; self-healing missing reviewing marker")
+          core.log_apply("observe_pr", origin.proposal_id, "reviewing", reviewing_version, { add = add_labels, remove = remove_labels }, {
+            "github-proxy.github_pr_comment_request",
+            "github-proxy.github_issue_label_request",
+            "devloop_reviewing",
+          })
+          core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+          if origin.issue_number ~= nil then
+            core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+          end
+          core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
+          return
+        end
         core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
         return
       end
