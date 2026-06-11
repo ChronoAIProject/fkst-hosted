@@ -359,7 +359,9 @@ function pipeline(event)
           if dependency_hold == nil then
             local marker = gate.kind == "cycle"
               and core.dependency_cycle_marker(proposal_id, state.version)
-              or core.dependency_wait_marker(proposal_id, state.version, gate.unmet)
+              or (gate.kind == "unresolvable"
+                and core.dependency_unresolvable_marker(proposal_id, state.version, gate.unmet)
+                or core.dependency_wait_marker(proposal_id, state.version, gate.unmet))
             core.log_apply("observe_issue", proposal_id, nil, nil, { add = { core._blocked_on_dependency_label }, remove = {} }, {
               "github-proxy.github_issue_comment_request",
               "github-proxy.github_issue_label_request",

@@ -260,6 +260,13 @@ function M.dependency_cycle_marker(proposal_id, version)
     .. '" -->'
 end
 
+function M.dependency_unresolvable_marker(proposal_id, version, unmet_numbers)
+  return '<!-- fkst:github-devloop:dependency-unresolvable:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" unmet="' .. dependency_unmet_field(unmet_numbers)
+    .. '" -->'
+end
+
 function M.dependency_release_marker(proposal_id, version)
   return '<!-- fkst:github-devloop:dependency-release:v1 proposal="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
@@ -277,6 +284,7 @@ function M.dependency_hold_fact(comments, proposal_id)
   end
   local wait_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
   local cycle_pattern = "<!%-%- fkst:github%-devloop:dependency%-cycle:v1.-%-%->"
+  local unresolvable_pattern = "<!%-%- fkst:github%-devloop:dependency%-unresolvable:v1.-%-%->"
   for _, comment in ipairs(core._trusted_marker_comments(comments)) do
     local body = core._comment_body(comment)
     local hold_kind = body:match("github%-devloop dependency hold:%s*([^\n]+)")
@@ -303,6 +311,19 @@ function M.dependency_hold_fact(comments, proposal_id)
           marker_kind = "dependency-cycle",
           hold_kind = hold_kind or "cycle",
           reason = reason or "dependency-cycle",
+          comment_created_at = core._comment_created_at(comment),
+        }
+      end
+    end
+    for marker in body:gmatch(unresolvable_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
+        and marker:match('version="([^"]*)"') == tostring(current.version) then
+        return {
+          proposal_id = tostring(proposal_id),
+          version = tostring(current.version),
+          marker_kind = "dependency-unresolvable",
+          hold_kind = hold_kind or "unresolvable",
+          reason = reason or "gh-failed",
           comment_created_at = core._comment_created_at(comment),
         }
       end

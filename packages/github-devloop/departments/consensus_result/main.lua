@@ -72,7 +72,9 @@ function pipeline(event)
       local version = tostring(reached.dedup_key)
       local marker = gate.kind == "cycle"
         and core.dependency_cycle_marker(reached.proposal_id, version)
-        or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet)
+        or (gate.kind == "unresolvable"
+          and core.dependency_unresolvable_marker(reached.proposal_id, version, gate.unmet)
+          or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet))
       dependency_comment_request = {
         schema = "github-proxy.v1",
         repo = repo,

@@ -272,6 +272,10 @@ return {
       '<!-- fkst:github-devloop:dependency-cycle:v1 proposal="github-devloop/issue/owner/repo/42" version="v1" -->'
     )
     t.eq(
+      core.dependency_unresolvable_marker(proposal_id, "v1", { 1, 2, 3 }),
+      '<!-- fkst:github-devloop:dependency-unresolvable:v1 proposal="github-devloop/issue/owner/repo/42" version="v1" unmet="1,2,3" -->'
+    )
+    t.eq(
       core.dependency_release_marker(proposal_id, "v1"),
       '<!-- fkst:github-devloop:dependency-release:v1 proposal="github-devloop/issue/owner/repo/42" version="v1" -->'
     )
@@ -460,18 +464,27 @@ return {
     local result = run_result()
     t.eq(result.exit_code, 0)
     t.eq(has_queue(result.raises, "devloop_ready"), false)
-    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-wait:v1"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-unresolvable:v1"))
   end,
 
-  test_dependency_hold_fact_reads_wait_failed_and_cycle_holds = function()
+  test_dependency_hold_fact_reads_unresolvable_wait_failed_and_cycle_holds = function()
     local gh_failed = core.dependency_hold_fact({
+      core.state_marker(proposal_id, "ready", version),
+      "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
+        .. core.dependency_unresolvable_marker(proposal_id, version, { 42 }),
+    }, proposal_id)
+    t.eq(gh_failed.marker_kind, "dependency-unresolvable")
+    t.eq(gh_failed.hold_kind, "unresolvable")
+    t.eq(gh_failed.reason, "gh-failed")
+
+    local old_gh_failed = core.dependency_hold_fact({
       core.state_marker(proposal_id, "ready", version),
       "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
         .. core.dependency_wait_marker(proposal_id, version, { 42 }),
     }, proposal_id)
-    t.eq(gh_failed.marker_kind, "dependency-wait")
-    t.eq(gh_failed.hold_kind, "unresolvable")
-    t.eq(gh_failed.reason, "gh-failed")
+    t.eq(old_gh_failed.marker_kind, "dependency-wait")
+    t.eq(old_gh_failed.hold_kind, "unresolvable")
+    t.eq(old_gh_failed.reason, "gh-failed")
 
     local cycle = core.dependency_hold_fact({
       core.state_marker(proposal_id, "ready", version),
@@ -489,7 +502,29 @@ return {
     t.eq(held.exit_code, 0)
     t.eq(has_queue(held.raises, "devloop_ready"), false)
     t.is_true(has_marker(held.raises, "Reason: gh-failed"))
+    t.is_true(has_marker(held.raises, "fkst:github-devloop:dependency-unresolvable:v1"))
 
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
+          .. core.dependency_unresolvable_marker(proposal_id, version, { 42 }),
+      }
+    )
+    mock_blocked_by(42, {})
+    local released = run_observe()
+    t.eq(released.exit_code, 0)
+    t.is_true(has_queue(released.raises, "devloop_ready"))
+    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", version }))
+    t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
+    local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
+      return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
+    end)
+    t.is_true(clear ~= nil)
+  end,
+
+  test_old_gh_failed_wait_hold_rechecks_and_releases_on_next_poll = function()
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
@@ -504,10 +539,6 @@ return {
     t.is_true(has_queue(released.raises, "devloop_ready"))
     t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", version }))
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
-    local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
-      return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
-    end)
-    t.is_true(clear ~= nil)
   end,
 
   test_non_hold_state_clears_stale_dependency_label = function()
