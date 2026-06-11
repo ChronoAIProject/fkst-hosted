@@ -86,8 +86,18 @@ impl StderrBuffer {
 /// department consumer started. Requiring the consumer line guards against
 /// the half-alive mode where `event runtime running` is emitted but every
 /// consumer thread has panicked (spike Q9 / E6).
+///
+/// ANSI-SAFETY: the engine emits `tracing` output WITH ANSI styling on the
+/// piped stderr, and field names are styled separately from their values
+/// (`event runtime running ESC[3mhandles ESC[0m ESC[2m= ...`), so a marker
+/// spanning a field boundary (`handles=`, `dept=`) never matches the raw
+/// stream. The markers therefore match only the un-styled MESSAGE text —
+/// exactly the substrings the issue #17 spike's verdict greps used
+/// (empirically re-verified against the pinned engine image in this issue's
+/// wiring check). Selectivity for the half-alive guard is unchanged: that
+/// mode emits NO `consumer started` line at all.
 pub fn is_ready(stderr: &str) -> bool {
-    stderr.contains("event runtime running handles=") && stderr.contains("consumer started dept=")
+    stderr.contains("event runtime running") && stderr.contains("consumer started")
 }
 
 /// True when the supervise stderr contains a Rust panic marker. Any panic
@@ -438,6 +448,26 @@ mod tests {
         assert!(!is_ready(consumer_only));
         assert!(is_ready(&both));
         assert!(!is_ready(""));
+    }
+
+    #[test]
+    fn is_ready_matches_the_real_engine_ansi_styled_lines() {
+        // Verbatim raw stderr from the pinned engine image (field names are
+        // ANSI-styled separately from their values, so `handles=`/`dept=`
+        // never appear contiguously in the raw stream).
+        let raw = "\u{1b}[2m2026-06-11T05:03:55.974159Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \
+                   \u{1b}[2mfkst_framework::supervise\u{1b}[0m\u{1b}[2m:\u{1b}[0m event runtime \
+                   running \u{1b}[3mhandles\u{1b}[0m\u{1b}[2m=\u{1b}[0m2\n\
+                   \u{1b}[2m2026-06-11T05:03:55.974194Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \
+                   \u{1b}[2mfkst_framework::supervise::consumer\u{1b}[0m\u{1b}[2m:\u{1b}[0m \
+                   consumer started \u{1b}[3mdept\u{1b}[0m\u{1b}[2m=\u{1b}[0mhello\n";
+        assert!(
+            is_ready(raw),
+            "ANSI-styled real-engine output must be ready"
+        );
+        // The first (runtime-running) line alone stays NOT ready.
+        let first_line_only = raw.lines().next().unwrap();
+        assert!(!is_ready(first_line_only));
     }
 
     #[test]
