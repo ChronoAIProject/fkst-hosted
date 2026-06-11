@@ -2,7 +2,10 @@ local S = {}
 
 function S.install(M)
 local max_bundle_file_len = 10 * 1024 * 1024
+local max_context_cache_key_len = 180
 local notice_file_name = "UNTRUSTED-NOTICE.txt"
+local context_bundle_cache_prefix = "github-devloop/context-bundle/"
+local context_bundle_manifest_cache_prefix = "github-devloop/context-bundle-manifest/"
 
 local function runtime_root(exec)
   local run = exec or exec_sync
@@ -33,26 +36,27 @@ local function bundle_segment(value, fallback)
   return segment
 end
 
-local function context_dir(root, proposal_id, version)
-  return root .. "/context/" .. bundle_segment(proposal_id, "proposal") .. "/" .. bundle_segment(version, "version")
-end
-
-local function cache_key_segment(value, fallback, limit)
-  local max_len = limit or 80
+local function bounded_cache_segment(value, fallback, limit, keep_slashes)
   local segment = M.sanitize_key(tostring(value or ""), false)
-  segment = segment:gsub("#", "-")
-  segment = segment:gsub("^/+", ""):gsub("/+$", "")
+  if not keep_slashes then
+    segment = segment:gsub("[/#]", "-"):gsub("%-+", "-")
+  end
+  segment = segment:gsub("^%-+", ""):gsub("%-+$", "")
   if segment == "" then
     segment = fallback or "context"
   end
-  if #segment > max_len then
-    local suffix = "/" .. M._decimal_checksum(value)
-    segment = segment:sub(1, max_len - #suffix):gsub("/+$", "") .. suffix
+  if #segment > limit then
+    local suffix = "-" .. M._decimal_checksum(value)
+    segment = M._utf8_safe_truncate(segment, limit - #suffix):gsub("[/%-]+$", "") .. suffix
   end
   if segment == "" then
     return fallback or "context"
   end
   return segment
+end
+
+local function context_dir(root, proposal_id, version)
+  return root .. "/context/" .. bundle_segment(proposal_id, "proposal") .. "/" .. bundle_segment(version, "version")
 end
 
 local function path_join(dir, name)
@@ -240,19 +244,15 @@ local function fetch_cmd(cmd, label, exec)
 end
 
 function M.context_bundle_key(proposal_id, version)
-  local key = "github-devloop/context-bundle/" .. cache_key_segment(proposal_id, "proposal", 100) .. "/" .. cache_key_segment(version, "version", 60)
-  if not M._is_path_safe_key(key, M._max_key_len) then
-    error("github-devloop: context bundle cache key is invalid")
-  end
-  return key
+  local version_segment = bounded_cache_segment(version, "version", 60, false)
+  local proposal_limit = max_context_cache_key_len - #context_bundle_cache_prefix - 1 - #version_segment
+  return context_bundle_cache_prefix .. bounded_cache_segment(proposal_id, "proposal", proposal_limit, true) .. "/" .. version_segment
 end
 
 function M.context_bundle_manifest_key(proposal_id, version)
-  local key = "github-devloop/context-bundle-manifest/" .. cache_key_segment(proposal_id, "proposal", 100) .. "/" .. cache_key_segment(version, "version", 60)
-  if not M._is_path_safe_key(key, M._max_key_len) then
-    error("github-devloop: context bundle manifest cache key is invalid")
-  end
-  return key
+  local version_segment = bounded_cache_segment(version, "version", 60, false)
+  local proposal_limit = max_context_cache_key_len - #context_bundle_manifest_cache_prefix - 1 - #version_segment
+  return context_bundle_manifest_cache_prefix .. bounded_cache_segment(proposal_id, "proposal", proposal_limit, true) .. "/" .. version_segment
 end
 
 function M.context_bundle_manifest(bundle)

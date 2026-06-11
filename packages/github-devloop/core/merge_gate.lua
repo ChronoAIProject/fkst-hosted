@@ -27,8 +27,44 @@ function M.pr_identity_matches(pr, expected)
   return true, "pr-ok"
 end
 
-function M.evaluate_ci_merge_gate(pr)
+local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
+  if type(M.log_line) ~= "function" then
+    return
+  end
+  M.log_line("info", tostring(opts and opts.dept or "merge"), tostring(opts and opts.proposal_id or "merge-gate"), "CI_FALLBACK", {
+    "repo=" .. tostring(repo),
+    "head_sha=" .. tostring(head_sha),
+    "source=commit-check-runs",
+    "required_checks=" .. table.concat(M._required_check_run_names or {}, ","),
+    "check_runs=" .. tostring(type(runs) == "table" and #runs or 0),
+    "reason=" .. tostring(reason or ""),
+  })
+end
+
+function M.commit_check_runs_merge_gate(repo, head_sha, opts)
+  local result = exec_sync({ cmd = M.gh_commit_check_runs_cmd(repo, head_sha), timeout = 30 })
+  if result.exit_code ~= 0 then
+    error("github-devloop: gh commit check-runs failed: " .. tostring(result.stderr))
+  end
+  local runs = M.parse_commit_check_runs(result.stdout)
+  local green, reason = M.commit_check_runs_green(runs)
+  log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
+  return green, reason, runs
+end
+
+function M.evaluate_ci_status_gate(pr, opts)
   local green, green_reason = M.pr_rollup_green(pr)
+  if not green and green_reason == "missing-status-rollup" and type(opts) == "table" and opts.repo ~= nil then
+    local head_sha = tostring(pr and pr.head_sha or "")
+    if head_sha ~= "" then
+      green, green_reason = M.commit_check_runs_merge_gate(opts.repo, head_sha, opts)
+    end
+  end
+  return green, green_reason
+end
+
+function M.evaluate_ci_merge_gate(pr, opts)
+  local green, green_reason = M.evaluate_ci_status_gate(pr, opts)
   if not green then
     return false, green_reason
   end
@@ -37,6 +73,69 @@ function M.evaluate_ci_merge_gate(pr)
     return false, mergeable_reason
   end
   return true, "merge-gate-ok"
+end
+
+function M.ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_seconds, grace_seconds)
+  local green, green_reason = M.pr_rollup_green(pr)
+  if green or green_reason ~= "missing-status-rollup" then
+    return false, green_reason
+  end
+  local current_seconds = tonumber(now_seconds)
+  local observed_seconds = tonumber(first_observed_seconds)
+  local grace = tonumber(grace_seconds or 300)
+  if observed_seconds == nil or current_seconds == nil then
+    return false, "missing-status-age-unknown"
+  end
+  local age_seconds = current_seconds - observed_seconds
+  if age_seconds < grace then
+    return false, "missing-status-grace"
+  end
+  return true, "missing-status-rollup", age_seconds
+end
+
+function M.dispatch_ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds)
+  local green, green_reason = M.pr_rollup_green(pr)
+  if green or green_reason ~= "missing-status-rollup" then
+    return false, green_reason
+  end
+  local head_sha = tostring(pr and pr.head_sha or "")
+  local head_ref = tostring(pr and pr.head_ref_name or "")
+  local now_seconds = now()
+  local observed_key = M.ci_missing_status_first_observed_key(repo, pr_number, head_sha)
+  local first_observed_seconds = tonumber(cache_get(observed_key) or "")
+  if first_observed_seconds == nil then
+    first_observed_seconds = tonumber(now_seconds)
+    if first_observed_seconds == nil then
+      return false, "missing-status-age-unknown"
+    end
+    cache_set(observed_key, tostring(first_observed_seconds))
+  end
+  local eligible, reason, age_seconds = M.ci_missing_status_dispatch_eligible({
+    status_check_rollup = pr and pr.status_check_rollup,
+  }, now_seconds, first_observed_seconds, grace_seconds)
+  if not eligible then
+    return false, reason
+  end
+  local key = M.ci_dispatch_once_key(repo, pr_number, head_sha)
+  local ran = once(key, function()
+    local result = exec_sync({ cmd = M.gh_workflow_dispatch_ci_cmd(repo, head_ref), timeout = 30 })
+    if result.exit_code ~= 0 then
+      error("github-devloop: ci workflow dispatch failed: " .. tostring(result.stderr))
+    end
+    M.log_line("info", "merge", proposal_id, "ci-dispatch-selfheal", {
+      "repo=" .. tostring(repo),
+      "pr=" .. tostring(pr_number),
+      "head_sha=" .. head_sha,
+      "head_ref=" .. head_ref,
+      "first_observed_seconds=" .. tostring(first_observed_seconds),
+      "age_seconds=" .. tostring(age_seconds or ""),
+      "once_key=" .. key,
+    })
+  end)
+  if not ran then
+    return false, "ci-dispatch-selfheal-already-ran"
+  end
+  return true, "ci-dispatch-selfheal-dispatched"
 end
 
 function M.is_merged_pr(pr)
@@ -68,7 +167,11 @@ function M.run_verified_pr_merge(request)
       return false, validate_reason or "pr-validation-failed", rechecked_pr
     end
   end
-  local gate_ok, gate_reason = M.evaluate_ci_merge_gate(rechecked_pr)
+  local gate_ok, gate_reason = M.evaluate_ci_merge_gate(rechecked_pr, {
+    repo = repo,
+    dept = request.dept or "merge",
+    proposal_id = request.proposal_id,
+  })
   if not gate_ok then
     return false, gate_reason, rechecked_pr
   end

@@ -48,7 +48,11 @@ function pipeline(event)
       log_skip(payload, identity_reason)
       return
     end
-    local gate_ok, gate_reason = core.evaluate_ci_merge_gate(pr)
+    local gate_ok, gate_reason = core.evaluate_ci_merge_gate(pr, {
+      repo = payload.repo,
+      dept = "rollup_merge",
+      proposal_id = "rollup",
+    })
     if not gate_ok then
       log_skip(payload, gate_reason)
       return
@@ -60,6 +64,8 @@ function pipeline(event)
       head_sha = payload.head_sha,
       head_branch = payload.integration_branch,
       base_branch = payload.upstream_branch,
+      dept = "rollup_merge",
+      proposal_id = "rollup",
     })
     if not merged then
       log_skip(payload, reason)
