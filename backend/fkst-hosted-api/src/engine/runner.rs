@@ -226,8 +226,10 @@ impl SessionRunner {
     /// Readiness requires BOTH stderr markers (`event runtime running
     /// handles=` and at least one `consumer started dept=`); child-exit,
     /// a `panicked at` line, or the ready timeout fail startup with the
-    /// stderr tail, after group-killing and reaping the child. On EVERY
-    /// failure path both temp dirs are cleaned before returning.
+    /// stderr tail, after group-killing and reaping the child. EXCEPTION:
+    /// an engine that emitted both ready markers and then exited within
+    /// one poll tick starts successfully (`status()` reports the exit).
+    /// On EVERY failure path both temp dirs are cleaned before returning.
     pub async fn start(&self, pkg: &PreparedPackage) -> Result<RunningSession, RunnerError> {
         // 1. Pure validation — no temp dir is created on the reject path.
         pkg.validate()?;
@@ -298,6 +300,16 @@ impl SessionRunner {
                 }
             };
             if let Some(exit) = exited {
+                // Ready-check FIRST: an engine that emitted BOTH ready
+                // markers and then exited within one poll tick is a
+                // successful start whose exit `status()` will report — not
+                // a StartupFailed. Give the drain task one tick to flush
+                // the remaining buffered stderr to EOF before judging.
+                tokio::time::sleep(READY_POLL_INTERVAL).await;
+                let snapshot = stderr.snapshot();
+                if is_ready(&snapshot) && !is_panicked(&snapshot) {
+                    break;
+                }
                 return Err(fail_startup(
                     guard.defuse(),
                     pid,
@@ -739,6 +751,36 @@ esac
             "panicked supervise group must be killed"
         );
         fs::remove_file(temp_root.path().join("supervise.pid")).expect("rm breadcrumb");
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn ready_then_immediate_clean_exit_is_a_successful_start() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        // Both ready markers, then a clean exit — all within one poll tick.
+        // The exit must NOT be condemned as StartupFailed: the engine WAS
+        // ready; status() reports the subsequent exit.
+        let bin = engine_stub(
+            stub_dir.path(),
+            r#"    echo "event runtime running handles=3" >&2
+    echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+    exit 0"#,
+        );
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let mut session = runner
+            .start(&minimal_package())
+            .await
+            .expect("ready-then-exit must start successfully");
+        assert!(
+            wait_until(|| session.status() != LiveStatus::Running).await,
+            "stub has already exited"
+        );
+        assert_eq!(session.status(), LiveStatus::Stopped);
+
+        runner.stop(&mut session).await.expect("stop");
+        assert_eq!(session.status(), LiveStatus::Stopped);
         assert_eq!(fkst_entries(temp_root.path()), 0);
     }
 
