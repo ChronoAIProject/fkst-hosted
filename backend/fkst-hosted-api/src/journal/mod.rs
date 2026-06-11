@@ -21,6 +21,7 @@
 //!   equality is the rightful holder.
 
 pub mod github;
+pub mod index;
 pub mod model;
 pub mod parse;
 pub mod store;

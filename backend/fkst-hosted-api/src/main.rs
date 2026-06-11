@@ -68,6 +68,16 @@ async fn main() -> ExitCode {
     }
     tracing::info!("indexes ensured");
 
+    // 4a. Ensure the journal-collection indexes (idempotent; fail-closed on
+    //     error) — `session_progress` + `run_journals`, incl. the unique
+    //     partial `sp_run_idem_uniq` idempotency index.
+    if let Err(error) = fkst_hosted_api::journal::index::ensure_journal_indexes(&db.database).await
+    {
+        tracing::error!(error = %error, "failed to ensure journal indexes");
+        return ExitCode::FAILURE;
+    }
+    tracing::info!("journal indexes ensured");
+
     // 4b. Ensure the packages-collection indexes via the domain repository's
     //     own startup hook (idempotent; fail-closed on error). The same
     //     repository instance then joins AppState for the HTTP handlers.
