@@ -282,8 +282,12 @@ return {
     t.eq(result.raises[1].payload.source_ref.kind, "proposal")
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_digests, 3)
-    t.eq(result.raises[1].payload.angle_digests[1].verdict, "approve")
-    t.eq(result.raises[1].payload.angle_digests[2].verdict, "abstain")
+    local verdict_counts = {}
+    for _, digest in ipairs(result.raises[1].payload.angle_digests) do
+      verdict_counts[digest.verdict] = (verdict_counts[digest.verdict] or 0) + 1
+    end
+    t.eq(verdict_counts.approve, 2)
+    t.eq(verdict_counts.abstain, 1)
     t.is_nil(result.raises[1].payload.body)
     t.is_nil(result.raises[1].payload.angle_results)
     t.is_nil(result.raises[1].payload.decision)
