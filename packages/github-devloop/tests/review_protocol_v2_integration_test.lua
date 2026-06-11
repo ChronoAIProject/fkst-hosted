@@ -17,6 +17,22 @@ local mock_bot_env = h.mock_bot_env
 local mock_pr_origin = h.mock_pr_origin
 local find_raise = h.find_raise
 
+local function mock_issue_result_view(labels, comments)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or {}) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', h.json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(comments or {}) do
+    table.insert(rendered_comments, h.render_comment(comment))
+  end
+  t.mock_command("--json labels,comments", {
+    stdout = string.format('{"labels":[%s],"comments":[%s]}\n', table.concat(rendered_labels, ","), table.concat(rendered_comments, ",")),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function pr_event(updated_at)
   return {
     schema = "github-proxy.v1",
@@ -158,7 +174,11 @@ return {
       kind = "external",
       ref = "owner/repo#pr/7",
     })
-    mock_issue_reviewing({ "fkst-dev:fixing" }, {
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
+    })
+    mock_issue_result_view({ "fkst-dev:fixing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
       core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", review_dedup_key, 1, "missing retry guard"),
     })
@@ -180,7 +200,7 @@ return {
     h.mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
-    h.mock_issue_result({ "fkst-dev:reviewing" }, {
+    h.set_pr_phase_comments({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
     })
 
@@ -189,8 +209,20 @@ return {
     local original_fixing = find_raise(original.raises, "devloop_fixing")
     t.is_true(original_fixing ~= nil)
 
-    mock_issue_reviewing({ "fkst-dev:fixing" }, {
-      find_raise(original.raises, "github-proxy.github_pr_comment_request").payload.body,
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", original_fixing.payload.version),
+    })
+    mock_issue_result_view({ "fkst-dev:fixing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", original_fixing.payload.version),
+      core.review_result_marker(
+        original_fixing.payload.review_proposal_id,
+        "github-devloop/issue/owner/repo/42",
+        "reject",
+        original_fixing.payload.review_dedup_key,
+        1,
+        original_fixing.payload.blocking_gap
+      ),
     })
     local healed = run_observe_pr(pr_event(), opts("review-v2-fixing-self-heal-dedup"))
     t.eq(healed.exit_code, 0)
@@ -203,7 +235,11 @@ return {
   test_observe_pr_fixing_self_heal_fails_closed_without_reject_fact = function()
     local impl_version = reviewing().version
     local fix_version = core.next_fix_version(impl_version)
-    mock_issue_reviewing({ "fkst-dev:fixing" }, {
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
+    })
+    mock_issue_result_view({ "fkst-dev:fixing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
     })
 
@@ -219,8 +255,11 @@ return {
     h.mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
-      core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "missing retry guard"),
     }, "devloop-owner-repo-42-01HY", "feedface")
+    mock_issue_result_view({ "fkst-dev:fixing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
+      core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "missing retry guard"),
+    })
 
     local result = run_observe_pr(pr_event(), opts("review-v2-fixing-self-heal-head-advanced"))
     t.eq(result.exit_code, 0)
@@ -234,7 +273,6 @@ return {
     h.mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
-      core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "missing retry guard"),
     }, "devloop-owner-repo-42-01HY", "def456", "CLOSED")
 
     local result = run_observe_pr(pr_event(), opts("review-v2-fixing-self-heal-pr-closed"))
