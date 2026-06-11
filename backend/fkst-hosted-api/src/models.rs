@@ -133,6 +133,19 @@ mod tests {
     }
 
     #[test]
+    fn lease_session_id_serializes_as_binary_subtype_uuid_not_string() {
+        // Regression guard for the lease coordination layer: `session_id`
+        // must stay Binary subtype 4 on BOTH sides of the `sessions._id`
+        // join — a string here would silently never match the driver-written
+        // Binary `_id` of `sessions` (and vice versa).
+        let raw = bson::to_document(&sample_lease()).expect("serialize");
+        match raw.get("session_id").expect("session_id present") {
+            Bson::Binary(binary) => assert_eq!(binary.subtype, BinarySubtype::Uuid),
+            other => panic!("expected Bson::Binary(subtype Uuid), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn lease_doc_id_carries_the_package_name() {
         let raw = bson::to_document(&sample_lease()).expect("serialize");
         assert_eq!(
