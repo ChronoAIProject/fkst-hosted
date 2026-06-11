@@ -115,29 +115,31 @@ function M.parse_issue_list_observe(stdout)
   return parse_numbered_list(stdout)
 end
 
-function M.parse_dashboard_issue_search(stdout)
+function M.parse_dashboard_issue_list(stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
   if type(decoded) ~= "table" then
     return items
   end
-  for _, issue in ipairs(decoded) do
+  each_paginated_item(decoded, function(issue)
     if type(issue) == "table" and tonumber(issue.number) ~= nil then
       local author_login = nil
       if type(issue.author) == "table" and issue.author.login ~= nil then
         author_login = tostring(issue.author.login)
       elseif issue.author_login ~= nil then
         author_login = tostring(issue.author_login)
+      elseif type(issue.user) == "table" and issue.user.login ~= nil then
+        author_login = tostring(issue.user.login)
       end
       table.insert(items, {
         number = tonumber(issue.number),
         title = tostring(issue.title or ""),
         author_login = author_login,
         body = tostring(issue.body or ""),
-        updated_at = issue.updatedAt or issue.updated_at,
+        updated_at = issue.updated_at or issue.updatedAt,
       })
     end
-  end
+  end)
   return items
 end
 

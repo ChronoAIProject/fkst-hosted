@@ -3,6 +3,7 @@ local S = {}
 function S.install(M)
 local dept = "observability"
 local dashboard_title = "fkst-dev board"
+local dashboard_label = "fkst-dashboard"
 local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"
 local max_dashboard_body_len = 12000
 local max_dashboard_section_items = 40
@@ -38,6 +39,54 @@ local function json_string(value)
     return string.format("\\u%04x", char:byte())
   end)
   return '"' .. text .. '"'
+end
+
+local function stderr_http_status(stderr)
+  local text = tostring(stderr or "")
+  local status = text:match("[Hh][Tt][Tt][Pp][^%d]*(%d%d%d)")
+    or text:match("status[^\n%d]*(%d%d%d)")
+  return status or "unknown"
+end
+
+local function gh_auth_mode()
+  if M.env_present("GH_TOKEN") or M.env_present("GITHUB_TOKEN") then
+    return "env-token"
+  end
+  return "gh-auth"
+end
+
+local function command_indicates_not_found(result)
+  local stderr = tostring(result and result.stderr or "")
+  return stderr:find("404", 1, true) ~= nil
+    or stderr:lower():find("not found", 1, true) ~= nil
+end
+
+local function command_indicates_already_exists(result)
+  local stderr = tostring(result and result.stderr or ""):lower()
+  return stderr:find("already exists", 1, true) ~= nil
+    or stderr:find("name already exists", 1, true) ~= nil
+    or stderr:find("422", 1, true) ~= nil
+    or stderr:find("409", 1, true) ~= nil
+end
+
+local function ensure_dashboard_label(repo)
+  local existing = M.gh_exec({ cmd = M.gh_dashboard_label_get_cmd(repo, dashboard_label), timeout = 30 })
+  if existing.exit_code == 0 then
+    return "exists"
+  end
+  if not command_indicates_not_found(existing) then
+    error("github-devloop: gh dashboard label get failed: " .. tostring(existing.stderr))
+  end
+
+  local created = M.gh_exec({ cmd = M.gh_dashboard_label_create_cmd(repo, dashboard_label), timeout = 30 })
+  if created.exit_code == 0 then
+    log.info("github-devloop dept=observability tag=DASHBOARD_LABEL_CREATED label=" .. dashboard_label)
+    return "created"
+  end
+  if command_indicates_already_exists(created) then
+    return "exists"
+  end
+  error("github-devloop: gh dashboard label create failed: " .. tostring(created.stderr))
 end
 
 local function dashboard_input_path(repo, version, hash)
@@ -527,8 +576,17 @@ function M.render_observability_dashboard(args)
 end
 
 local function trusted_dashboard_issue(repo, bot_login)
-  local search = run_cmd(M.gh_dashboard_issue_search_cmd(repo), 30, "gh dashboard issue search")
-  for _, issue in ipairs(M.parse_dashboard_issue_search(search.stdout)) do
+  local listed = M.gh_exec({ cmd = M.gh_dashboard_issue_list_cmd(repo, dashboard_label), timeout = 30 })
+  if listed.exit_code ~= 0 then
+    log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED"
+      .. " locator=label-list"
+      .. " label=" .. dashboard_label
+      .. " auth_mode=" .. gh_auth_mode()
+      .. " http_status=" .. stderr_http_status(listed.stderr)
+      .. " exit_code=" .. tostring(listed.exit_code))
+    error("github-devloop: gh dashboard issue list failed: " .. tostring(listed.stderr))
+  end
+  for _, issue in ipairs(M.parse_dashboard_issue_list(listed.stdout)) do
     if issue.author_login == bot_login
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
       return issue
@@ -553,6 +611,7 @@ local function write_dashboard_input(repo, title, body)
   file.write(path, "{"
     .. '"title":' .. json_string(title)
     .. ',"body":' .. json_string(body)
+    .. ',"labels":[' .. json_string(dashboard_label) .. "]"
     .. "}\n")
   return path
 end
@@ -565,6 +624,7 @@ function M.publish_observability_dashboard(repo, dashboard)
   end
 
   local bot_login = M.assert_trusted_bot_configured()
+  ensure_dashboard_label(repo)
   local current = trusted_dashboard_issue(repo, bot_login)
   local current_version = current ~= nil and dashboard_version_from_body(current.body) or nil
   local current_hash = current ~= nil and dashboard_hash_from_body(current.body) or nil
