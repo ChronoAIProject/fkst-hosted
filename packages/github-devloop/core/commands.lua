@@ -314,6 +314,11 @@ function M.gh_pr_comment_cmd(repo, pr_number, body_file)
     .. " --body-file " .. M._shell_single_quote(body_file)
 end
 
+function M.gh_pr_close_cmd(repo, pr_number)
+  return "gh pr close " .. M._shell_single_quote(pr_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+end
+
 function M.gh_issue_close_cmd(repo, issue_number)
   return "gh issue close " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
