@@ -174,7 +174,7 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
   end
   t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s","headSha":"%s"}]}\n',
+      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"%s","detailsUrl":"https://example.invalid/checks/ci","name":"ci","startedAt":"2026-06-03T02:03:04Z","status":"%s","workflowName":"ci"}]}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
       json_string(base_sha or "abc123"),
@@ -186,9 +186,8 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
       cross,
       json_string(mergeable or "MERGEABLE"),
       json_string(merge_state or "CLEAN"),
-      json_string(rollup_state or "COMPLETED"),
       json_string(rollup_conclusion or "SUCCESS"),
-      json_string(head_sha or "def456")
+      json_string(rollup_state or "COMPLETED")
     ),
     stderr = "",
     exit_code = 0,
