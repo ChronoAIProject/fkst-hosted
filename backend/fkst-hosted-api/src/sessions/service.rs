@@ -405,6 +405,19 @@ impl DriverHost for SessionService {
     }
 }
 
+/// Pure self-fencing decision for the renew arm: with no successful renewal
+/// for longer than the lease TTL, this driver can no longer prove it holds
+/// the lease — the lease has certainly lapsed on the server (the last
+/// successful renew set `expires_at = then + ttl`) and another pod may have
+/// taken over, so a renew ERROR must now be treated exactly like an
+/// observed `Lost`. At exactly the TTL boundary the lease is only just
+/// dead and no takeover (which itself needs a write AFTER expiry plus the
+/// grace window) can have spawned, so strictly-greater keeps one final
+/// retry without risking a dual engine.
+fn renew_overdue(since_last_success: Duration, lease_ttl: Duration) -> bool {
+    since_last_success > lease_ttl
+}
+
 /// Truncate driver-produced error text at a char boundary so the stored
 /// document stays bounded (full text is in the logs).
 fn truncate_error(text: &str) -> String {
@@ -629,6 +642,12 @@ async fn drive_inner(
     };
     let mut renew_tick = tokio::time::interval(renew_interval);
     renew_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Self-fencing clock: the lease was live when this driver claimed the
+    // session, so the success window starts now. Renew ERRORS (Mongo
+    // unreachable) leave us blind: past the TTL the lease may have lapsed
+    // and been taken over, so the engine must die as if the lease were
+    // observed Lost — never run past what we can prove we hold.
+    let mut last_renew_success = tokio::time::Instant::now();
     loop {
         tokio::select! {
             // A closed channel (service dropped) also reads as a stop: this
@@ -682,7 +701,9 @@ async fn drive_inner(
                     continue;
                 };
                 match distributor.leases().renew(package_name, token).await {
-                    Ok(RenewOutcome::Renewed(_)) => {}
+                    Ok(RenewOutcome::Renewed(_)) => {
+                        last_renew_success = tokio::time::Instant::now();
+                    }
                     Ok(RenewOutcome::Lost) => {
                         // Fenced out: a takeover pod owns the lease and the
                         // document now. Kill the local engine and exit
@@ -699,8 +720,28 @@ async fn drive_inner(
                         return false;
                     }
                     Err(error) => {
-                        // Transient: keep supervising; the TTL gives at
-                        // least one more renewal window.
+                        let lease_ttl = distributor.config().pool.lease_ttl;
+                        if renew_overdue(last_renew_success.elapsed(), lease_ttl) {
+                            // Sustained failure past the TTL: the lease may
+                            // already belong to a takeover pod. SELF-FENCE —
+                            // treat it exactly like an observed Lost (kill
+                            // the engine, zero document writes, no release).
+                            tracing::warn!(
+                                session_id = %id,
+                                package_name = %package_name,
+                                token,
+                                error = %error,
+                                lease_ttl_secs = lease_ttl.as_secs(),
+                                "lease renew failing past the TTL; self-fencing \
+                                 (stopping the local engine without document writes)"
+                            );
+                            if let Err(stop_error) = inner.runner.stop(&mut session).await {
+                                tracing::error!(session_id = %id, error = %stop_error, "engine stop failed after renew self-fence");
+                            }
+                            return false;
+                        }
+                        // Transient: keep supervising; the TTL still gives
+                        // at least one more renewal window.
                         tracing::error!(
                             session_id = %id,
                             package_name = %package_name,
@@ -805,6 +846,23 @@ mod tests {
     #[test]
     fn truncate_error_keeps_short_text_verbatim() {
         assert_eq!(truncate_error("boom"), "boom");
+    }
+
+    /// The self-fence trips only STRICTLY past the TTL: while the time
+    /// since the last successful renew is at or under the TTL the lease
+    /// could still be live (keep retrying); one tick past it the engine
+    /// must die rather than run unprovably.
+    #[test]
+    fn renew_overdue_trips_strictly_past_the_ttl() {
+        let ttl = Duration::from_secs(30);
+        assert!(!renew_overdue(Duration::ZERO, ttl));
+        assert!(!renew_overdue(Duration::from_secs(10), ttl));
+        assert!(
+            !renew_overdue(ttl, ttl),
+            "the exact TTL boundary still allows one final retry"
+        );
+        assert!(renew_overdue(ttl + Duration::from_millis(1), ttl));
+        assert!(renew_overdue(Duration::from_secs(120), ttl));
     }
 
     #[test]
