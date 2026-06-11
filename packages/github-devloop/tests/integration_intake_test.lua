@@ -94,11 +94,88 @@ local function mock_intake_judge_view(labels, comments, extra)
 end
 
 local function mock_intake_codex(stdout, exit_code, stderr)
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  for _ = 1, 2 do
+    t.mock_command("test -d", { stdout = "", stderr = "", exit_code = 1 })
+  end
+  t.mock_command("install -d -m 0755", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("mktemp -d", {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime/context/.bundle-tmp.intake\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  mock_intake_judge_view({}, {})
+  t.mock_command("--state open --limit 100 --json number,title,labels", {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
+    stdout = '[{"number":80,"title":"Widget sync retry patch","closedAt":"2026-06-01T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]},{"number":81,"title":"Widget sync retry overflow fix","closedAt":"2026-06-02T01:02:03Z","labels":[{"name":"fingerprint:widget-sync"}]}]\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr list", {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  for _ = 1, 3 do
+    t.mock_command(" > ", { stdout = "", stderr = "", exit_code = 0 })
+  end
+  t.mock_command("python3 -c", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("test -r", { stdout = "", stderr = "", exit_code = 0 })
+  for _ = 1, 8 do
+    t.mock_command("wc -c < ", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("codex exec", {
     stdout = stdout or "⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded implementation task.",
     stderr = stderr or "",
     exit_code = exit_code or 0,
   })
+end
+
+local function codex_calls()
+  local calls = {}
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find("codex exec", 1, true) ~= nil then
+      table.insert(calls, call)
+    end
+  end
+  return calls
+end
+
+local function assert_intake_judgment_call()
+  local calls = codex_calls()
+  t.eq(#calls, 1)
+  t.is_true(calls[1].rendered:find(" -C ", 1, true) ~= nil)
+  t.is_true(calls[1].rendered:find("/judgment-worktrees/github-devloop-intake-", 1, true) ~= nil)
+  t.is_nil(calls[1].rendered:find("/worktrees/", 1, true))
+  t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
+  t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
+  t.is_true(calls[1].stdin:find("issue.json", 1, true) ~= nil)
 end
 
 local function candidate(extra)
@@ -180,6 +257,7 @@ return {
     t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
     t.eq(#label.remove_labels, 0)
+    assert_intake_judgment_call()
   end,
 
   test_judge_negative_and_malformed_codex_write_comment_only = function()
@@ -204,6 +282,24 @@ return {
     t.eq(#malformed.raises, 1)
     t.is_true(find_raise(malformed.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="decline"', 1, true) ~= nil)
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
+  end,
+
+  test_judge_escalate_to_class_writes_comment_without_enabled_label = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      title = "Fix widget sync retry overflow again",
+      body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+
+    local result = run_judge(payload, opts("intake-escalate-class"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    t.is_true(comment.body:find('decision="escalate-to-class"', 1, true) ~= nil)
+    t.is_true(comment.body:find("Rule of Three", 1, true) ~= nil)
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_label_request"))
   end,
 
   test_judge_declines_umbrella_tracker_through_codex_policy = function()

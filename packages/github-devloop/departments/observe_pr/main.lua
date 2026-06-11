@@ -3,7 +3,7 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "github-proxy.github_entity_changed" },
+  consumes = { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
@@ -17,6 +17,27 @@ M.spec = {
 
 local function pr_source_ref(repo, pr_number)
   return core.pr_source_ref(repo, pr_number)
+end
+
+local function pr_context(event)
+  local payload = event.payload or {}
+  if core.is_supported_pr(payload) then
+    return {
+      repo = payload.repo,
+      number = payload.number,
+      dedup_key = payload.dedup_key,
+      source_ref = payload.source_ref,
+    }
+  end
+  if core.is_supported_pr_opened(payload) then
+    return {
+      repo = payload.repo,
+      number = payload.pr_number,
+      dedup_key = payload.dedup_key,
+      source_ref = payload.source_ref,
+    }
+  end
+  return nil
 end
 
 local function origin_from_pr(repo, pr_number, current_pr)
@@ -59,6 +80,17 @@ local function maybe_label_hint(origin, state, source_ref)
   core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
+local function issue_comments_for_origin(origin)
+  if origin.issue_number == nil then
+    return nil
+  end
+  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_result_cmd(origin.repo, origin.issue_number), timeout = 30 })
+  if issue_view.exit_code ~= 0 then
+    error("github-devloop: gh issue result view failed: " .. tostring(issue_view.stderr))
+  end
+  return core.parse_issue_view_result(issue_view.stdout).comments
+end
+
 local function raise_current_state(origin, pr_number, current_pr, state, source_ref)
   if state.state == "reviewing" then
     local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
@@ -72,21 +104,41 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
     return
   end
   if state.state == "fixing" then
-    local reject_fact = core.review_reject_fact(current_pr.comments, origin.proposal_id, state.version)
-    local meta_fix_fact = reject_fact == nil and core.review_meta_fix_fact(current_pr.comments, origin.proposal_id, state.version) or nil
-    local merge_gate_fact = reject_fact == nil and meta_fix_fact == nil and core.merge_gate_fix_fact(current_pr.comments, origin.proposal_id, state.version) or nil
-    local fact = reject_fact or meta_fix_fact or merge_gate_fact
-    if fact ~= nil and fact.review_proposal_id ~= nil and fact.reviewed_head_sha ~= nil then
+    if tostring(current_pr.state or ""):lower() ~= "open" then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(pr-closed)", "re-derived PR is not open")
+      return
+    end
+    local issue_comments = issue_comments_for_origin(origin)
+    local fact_comments = issue_comments or current_pr.comments
+    local feedback = core.fixing_replay_feedback_fact(fact_comments, origin.proposal_id, state.version)
+    if feedback == nil and issue_comments ~= nil then
+      feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version)
+    end
+    if feedback == nil then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(no-trusted-fix-feedback)", "trusted fix feedback marker is not visible")
+      return
+    end
+    if feedback.review_proposal_id ~= nil and feedback.reviewed_head_sha ~= nil then
+      if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
+        core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
+        return
+      end
       local reviewing_version = core.next_fix_version(state.version)
-      if not core.has_state_marker(current_pr.comments, origin.proposal_id, "reviewing", reviewing_version) then
+      if not core.has_state_marker(fact_comments, origin.proposal_id, "reviewing", reviewing_version) then
         local fix_payload = core.build_devloop_fixing_payload({
           proposal_id = origin.proposal_id,
           impl_version = state.version,
         }, pr_number, {
-          review_proposal_id = fact.review_proposal_id,
-          review_dedup_key = fact.review_dedup_key,
-          reviewed_head_sha = fact.reviewed_head_sha,
+          review_proposal_id = feedback.review_proposal_id,
+          review_dedup_key = feedback.review_dedup_key,
+          reviewed_head_sha = feedback.reviewed_head_sha,
+          blocking_gap = feedback.blocking_gap,
         }, source_ref)
+        core.log_line("info", "observe_pr", origin.proposal_id, "SELFHEAL", {
+          "state=fixing",
+          "queue=devloop_fixing",
+          "dedup_key=" .. tostring(fix_payload.dedup_key or ""),
+        })
         core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
           "devloop_fixing",
         })
@@ -111,10 +163,112 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
   end
 end
 
+local function is_stalled_reviewing(current_pr, origin, pr_number, state)
+  if state.state ~= "reviewing" or not core._is_git_sha(current_pr.head_sha) then
+    return false
+  end
+  local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  local review_version = core.safe_version_segment(state.version)
+  local sr_digest = core.source_ref_digest(core.pr_source_ref(origin.repo, pr_number))
+  local facts = core.review_converge_round_facts(
+    current_pr.comments,
+    review_proposal_id,
+    origin.proposal_id,
+    review_version,
+    current_pr.head_sha,
+    sr_digest
+  )
+  local round = core.max_converge_round(facts)
+  return core.is_true_stall(facts, round)
+end
+
+local function maybe_apply_rereview_command(origin, pr_number, current_pr, state, source_ref)
+  local command = core.operator_command_fact(current_pr.comments, "rereview")
+  if command == nil then
+    return false
+  end
+  if core.has_operator_command_response(current_pr.comments, command) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
+    return false
+  end
+  if state.state ~= "blocked" and state.state ~= "review-meta" and state.state ~= "reviewing" then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(invalid-state)", "operator rereview precondition failed")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires blocked, review-meta, or stalled reviewing state",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+  if state.state == "reviewing" and not is_stalled_reviewing(current_pr, origin, pr_number, state) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|stalled-reviewing", "reviewing", "refused(active-reviewing)", "operator rereview requires stalled reviewing")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires blocked, review-meta, or stalled reviewing state",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+  if tostring(current_pr.state or ""):lower() ~= "open" then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(pr-closed)", "operator rereview requires an open PR")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires an open PR",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+  if not core._is_git_sha(current_pr.head_sha) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(head-missing)", "operator rereview requires a current PR head")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires a current PR head",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+
+  local new_version = core.operator_rereview_version(state.version, current_pr.head_sha)
+  local comment_request = core.build_operator_rereview_comment_request(
+    origin.repo,
+    pr_number,
+    origin.proposal_id,
+    new_version,
+    command,
+    source_ref
+  )
+  local reviewing_payload = core.build_devloop_reviewing_payload({
+    proposal_id = origin.proposal_id,
+    impl_version = new_version,
+  }, pr_number, source_ref, new_version)
+  core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "applied(operator-rereview)", "trusted operator command requested rereview")
+  core.log_apply("observe_pr", origin.proposal_id, "reviewing", new_version, { add = {}, remove = {} }, {
+    "github-proxy.github_pr_comment_request",
+    "devloop_reviewing",
+  })
+  core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
+  maybe_label_hint(origin, { state = "reviewing", version = new_version }, core.issue_source_ref(origin.repo, origin.issue_number))
+  return true
+end
+
 function pipeline(event)
-  local pr = event.payload or {}
-  if not core.is_supported_pr(pr) then
-    core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
+  local pr = pr_context(event)
+  local raw = event.payload or {}
+  if pr == nil then
+    core.log_entry("observe_pr", event, "unknown", raw.dedup_key)
     core.log_cas_decision("observe_pr", "unknown", { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "unsupported event payload")
     return
   end
@@ -122,7 +276,7 @@ function pipeline(event)
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   core.assert_trusted_bot_configured()
   local branches = core.branch_config()
-  local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(pr.repo, pr.number), timeout = 30 })
+  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(pr.repo, pr.number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end
@@ -148,6 +302,9 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    if maybe_apply_rereview_command(origin, pr.number, current_pr, state, source_ref) then
+      return
+    end
     if state.state ~= nil and state.state ~= "pr-open" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
       raise_current_state(origin, pr.number, current_pr, state, source_ref)

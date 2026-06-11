@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
+    "devloop_reviewing",
     "devloop_fixing",
   },
   stall_window = "2m",
@@ -53,10 +54,55 @@ local function require_consensus_review_approve(comments, merge_ready)
   return false
 end
 
-local function raise_fixing(repo, issue_number, merge_ready, current_state, reason)
+local function gate_baseline_sha_from_pr(pr)
+  local baseline_sha = tostring(pr and pr.base_ref_oid or "")
+  if not core.is_safe_head_sha(baseline_sha) then
+    error("github-devloop: unsafe merge-gate baseline sha")
+  end
+  return baseline_sha
+end
+
+local function is_rollup_red_fix_reason(reason)
+  local text = tostring(reason or "")
+  return core.is_ci_red_reason(text) or text:find("^rollup%-red:", 1) ~= nil
+end
+
+local function fetch_pr_merge_product_sha(pr_number)
+  local fetch_result = exec_sync({ cmd = core.git_fetch_pr_merge_ref_cmd("origin", pr_number), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local head_result = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref head failed: " .. tostring(head_result.stderr))
+  end
+  local merge_product_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if not core.is_safe_head_sha(merge_product_sha) then
+    error("github-devloop: unsafe PR merge product sha")
+  end
+  return merge_product_sha
+end
+
+local function gate_baseline_sha_for_reason(pr_number, pr, reason)
+  if is_rollup_red_fix_reason(reason) then
+    local gate_sha = tostring(core.rollup_failure_gate_sha(pr) or "")
+    if not core.is_safe_head_sha(gate_sha) then
+      error("github-devloop: unsafe merge-gate rollup sha")
+    end
+    local merge_product_sha = fetch_pr_merge_product_sha(pr_number)
+    if merge_product_sha ~= gate_sha then
+      error("github-devloop: statusCheckRollup sha does not match PR merge product sha")
+    end
+    return merge_product_sha
+  end
+  return gate_baseline_sha_from_pr(pr)
+end
+
+local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason)
   local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
   local fix_version = core.fix_version_from_review_version(current_state.version)
-  local comment_request = core.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, source_ref)
+  local gate_baseline_sha = gate_baseline_sha_for_reason(merge_ready.pr_number, current_pr, reason)
+  local comment_request = core.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref)
   local label_request = issue_number ~= nil and core.build_state_label_request(
     repo,
     issue_number,
@@ -71,6 +117,8 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, reas
     review_proposal_id = merge_ready.review_proposal_id,
     review_dedup_key = merge_ready.review_dedup_key,
     reviewed_head_sha = merge_ready.reviewed_head_sha,
+    gate_baseline_sha = gate_baseline_sha,
+    gate_failure_excerpt = reason,
   }, source_ref)
   local add_labels, remove_labels = core.state_label_changes("fixing")
   core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "fixing", "applied", reason)
@@ -84,6 +132,49 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, reas
     core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
   core.log_raise("merge", merge_ready.proposal_id, "devloop_fixing", fix_payload)
+end
+
+local function raise_reviewing_for_current_head(repo, issue_number, merge_ready, current_state, current_pr, reason)
+  local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
+  local review_version = core.next_review_loop_version(merge_ready.version)
+  if core.has_state_marker(current_pr.comments, merge_ready.proposal_id, "reviewing", review_version) then
+    core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "skip-idempotent(already at to_state)", reason)
+    return
+  end
+  local current_head_sha = tostring(current_pr.head_sha or "")
+  local comment_request = core.build_merge_head_reviewing_comment_request(
+    repo,
+    issue_number,
+    merge_ready,
+    merge_ready.reviewed_head_sha,
+    current_head_sha,
+    review_version,
+    source_ref
+  )
+  local label_request = issue_number ~= nil and core.build_merge_head_reviewing_label_request(
+    repo,
+    issue_number,
+    merge_ready,
+    current_head_sha,
+    review_version,
+    core.issue_source_ref(repo, issue_number)
+  ) or nil
+  local reviewing_payload = core.build_devloop_reviewing_payload({
+    proposal_id = merge_ready.proposal_id,
+    impl_version = review_version,
+  }, merge_ready.pr_number, source_ref, review_version)
+  local add_labels, remove_labels = core.state_label_changes("reviewing")
+  core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "applied", reason)
+  core.log_apply("merge", merge_ready.proposal_id, "reviewing", review_version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_reviewing",
+  })
+  core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if label_request ~= nil then
+    core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  core.log_raise("merge", merge_ready.proposal_id, "devloop_reviewing", reviewing_payload)
 end
 
 local function assert_open_same_repo_pr(merge_ready, pr, repo, branch, head_sha)
@@ -139,12 +230,12 @@ local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
   if current_pr.is_draft ~= true then
     return current_pr
   end
-  local ready_result = exec_sync({ cmd = core.gh_pr_ready_cmd(repo, merge_ready.pr_number), timeout = 60 })
+  local ready_result = core.gh_exec({ cmd = core.gh_pr_ready_cmd(repo, merge_ready.pr_number), timeout = 60 })
   if ready_result.exit_code ~= 0 then
     error("github-devloop: gh pr ready failed: " .. tostring(ready_result.stderr))
   end
 
-  local pr_view = exec_sync({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
+  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr ready recheck failed: " .. tostring(pr_view.stderr))
   end
@@ -156,9 +247,7 @@ local function is_merged_pr(pr)
 end
 
 local function build_merging_body(merge_ready)
-  return "github-devloop is merging PR #" .. tostring(merge_ready.pr_number)
-    .. "\n\n" .. core.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)
-    .. "\n" .. core.merging_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+  return core.build_merging_comment_body(merge_ready)
 end
 
 local function write_merging_marker(repo, merge_ready, comments)
@@ -167,7 +256,7 @@ local function write_merging_marker(repo, merge_ready, comments)
   end
   local path = temp_body_file(repo, merge_ready.pr_number)
   file.write(path, build_merging_body(merge_ready))
-  local result = exec_sync({ cmd = core.gh_pr_comment_cmd(repo, merge_ready.pr_number, path), timeout = 30 })
+  local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, merge_ready.pr_number, path), timeout = 30 })
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr merging marker comment failed: " .. tostring(result.stderr))
   end
@@ -175,11 +264,7 @@ end
 
 local function build_merged_requests(repo, issue_number, merge_ready)
   local merged_source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
-  local merged_body = "github-devloop merged PR #" .. tostring(merge_ready.pr_number)
-    .. "\n\n" .. core.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)
-    .. "\n" .. core.merging_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
-    .. "\n" .. core.state_marker(merge_ready.proposal_id, "merged", merge_ready.version)
-    .. "\n" .. core.merged_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+  local merged_body = core.build_merged_comment_body(merge_ready)
   local comment_request = core.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -197,7 +282,7 @@ end
 
 local function finalize_merged(repo, issue_number, merge_ready, current_state, reason)
   if issue_number ~= nil then
-    local close_result = exec_sync({ cmd = core.gh_issue_close_cmd(repo, issue_number), timeout = 60 })
+    local close_result = core.gh_exec({ cmd = core.gh_issue_close_cmd(repo, issue_number), timeout = 60 })
     if close_result.exit_code ~= 0 then
       error("github-devloop: gh issue close failed: " .. tostring(close_result.stderr))
     end
@@ -243,7 +328,7 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local pr_view = exec_sync({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
+    local pr_view = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr merge view failed: " .. tostring(pr_view.stderr))
     end
@@ -321,7 +406,12 @@ function pipeline(event)
       end
       if pr_reason == "head-sha-mismatch" and state.state == "merging" then
         log_gate(merge_ready, "fixing", "head-sha-mismatch")
-        raise_fixing(repo, issue_number, merge_ready, state, "head-sha-mismatch")
+        raise_fixing(repo, issue_number, merge_ready, state, current_pr, "head-sha-mismatch")
+        return
+      end
+      if pr_reason == "head-sha-mismatch" and state.state == "merge-ready" then
+        log_gate(merge_ready, "reviewing", "head-sha-mismatch")
+        raise_reviewing_for_current_head(repo, issue_number, merge_ready, state, current_pr, "head-sha-mismatch")
         return
       end
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(" .. pr_reason .. ")", "write-time PR fact failed")
@@ -344,15 +434,33 @@ function pipeline(event)
       error("github-devloop: PR fact changed after ready conversion")
     end
 
-    local rollup_green, rollup_reason = core.pr_rollup_green(current_pr)
+    local rollup_green, rollup_reason = core.evaluate_ci_status_gate(current_pr, {
+      repo = repo,
+      dept = "merge",
+      proposal_id = merge_ready.proposal_id,
+    })
     if not rollup_green then
       if not core.is_ci_red_reason(rollup_reason) then
-        log_gate(merge_ready, "dry-run", rollup_reason)
+        if rollup_reason == "missing-status-rollup" then
+          local dispatched, dispatch_reason = core.dispatch_ci_selfheal_once(
+            repo,
+            merge_ready.pr_number,
+            current_pr,
+            merge_ready.proposal_id
+          )
+          if dispatched then
+            log_gate(merge_ready, "dry-run", "ci-dispatch-selfheal-dispatched; waiting for checks")
+          else
+            log_gate(merge_ready, "dry-run", dispatch_reason)
+          end
+        else
+          log_gate(merge_ready, "dry-run", rollup_reason)
+        end
         error("github-devloop: merge wait on " .. tostring(rollup_reason) .. "; retrying")
       end
       local fix_reason = core.rollup_red_fix_reason(current_pr, rollup_reason)
       log_gate(merge_ready, "fixing", fix_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, fix_reason)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, fix_reason)
       return
     end
     local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
@@ -362,11 +470,11 @@ function pipeline(event)
         error("github-devloop: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
       end
       log_gate(merge_ready, "fixing", mergeable_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, mergeable_reason)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason)
       return
     end
 
-    local pr_recheck = exec_sync({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
+    local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
     if pr_recheck.exit_code ~= 0 then
       error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
     end
@@ -374,8 +482,8 @@ function pipeline(event)
     local recheck_ok, recheck_reason, rechecked_state = assert_merge_pr_authority(merge_ready, rechecked_pr_for_gate, repo, issue_number, origin, branches)
     if not recheck_ok then
       if recheck_reason == "head-sha-mismatch" then
-        log_gate(merge_ready, "fixing", "head-sha-mismatch")
-        raise_fixing(repo, issue_number, merge_ready, rechecked_state, "head-sha-mismatch")
+        log_gate(merge_ready, "reviewing", "head-sha-mismatch")
+        raise_reviewing_for_current_head(repo, issue_number, merge_ready, rechecked_state, rechecked_pr_for_gate, "head-sha-mismatch")
         return
       end
       core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready|merging", "merging", "skip-stale(write-gate)", "write-time PR state changed")
@@ -393,6 +501,8 @@ function pipeline(event)
       head_sha = merge_ready.reviewed_head_sha,
       head_branch = origin.branch,
       base_branch = branches.integration,
+      dept = "merge",
+      proposal_id = merge_ready.proposal_id,
       validate_rechecked_pr = function(rechecked_pr)
         local recheck_origin = core.pr_origin_fact(rechecked_pr.comments)
         if recheck_origin == nil then
@@ -423,19 +533,19 @@ function pipeline(event)
       error("github-devloop: merged PR fact changed before finalization")
     end
     if not merge_ok and merge_reason == "head-sha-mismatch" then
-      log_gate(merge_ready, "fixing", "head-sha-mismatch")
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, "head-sha-mismatch")
+      log_gate(merge_ready, "reviewing", "head-sha-mismatch")
+      raise_reviewing_for_current_head(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr or rechecked_pr_for_gate, "head-sha-mismatch")
       return
     end
     if not merge_ok and core.is_ci_red_reason(merge_reason) then
       local fix_reason = core.rollup_red_fix_reason(merge_rechecked_pr, merge_reason)
       log_gate(merge_ready, "fixing", fix_reason)
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, fix_reason)
+      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, fix_reason)
       return
     end
     if not merge_ok and core.is_not_mergeable_reason(merge_reason) then
       log_gate(merge_ready, "fixing", merge_reason)
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_reason)
+      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason)
       return
     end
     if not merge_ok and (merge_reason == "rollup-pending" or merge_reason == "mergeable-unknown") then

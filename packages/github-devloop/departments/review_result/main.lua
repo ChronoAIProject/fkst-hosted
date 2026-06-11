@@ -39,7 +39,7 @@ function pipeline(event)
 
   core.assert_trusted_bot_configured()
   local branches = core.branch_config()
-  local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
   end
@@ -72,6 +72,11 @@ function pipeline(event)
   local reviewed_issue_version = tostring(review_version or "")
   if reviewed_issue_version == "" then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
+    return
+  end
+  if reached.decision == "reject"
+    and not core._is_bounded_string(reached.blocking_gap, core._max_blocking_gap_len) then
+    core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
     return
   end
 
@@ -150,6 +155,7 @@ function pipeline(event)
         reviewed_head_sha = reviewed_head_sha,
         fix_version = issue_version,
         framing = reached.framing,
+        blocking_gap = reached.blocking_gap,
       }, pr_source_ref)
       table.insert(raised, "devloop_fixing")
     else

@@ -51,7 +51,7 @@ function pipeline(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue loop view failed: " .. tostring(view.stderr))
     end
@@ -106,10 +106,19 @@ function pipeline(event)
     end
 
     local next_n = round + 1
-    local proposal = core.build_loop_proposal(repo, issue_number, current, unresolved.source_ref, next_n, {
+    local next_dedup = core.proposal_dedup_key(unresolved.proposal_id, current.updated_at) .. "/loop/" .. tostring(next_n)
+    local content_fetch = core.context_fetch_ref_from_bundle({
+      dept = "loop",
+      repo = repo,
+      issue_number = issue_number,
+      proposal_id = unresolved.proposal_id,
+      version = next_dedup,
+      tick = event.ts,
+    })
+    local proposal = core.build_board_loop_proposal(repo, issue_number, current, unresolved.source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
-    })
+    }, event.ts, content_fetch)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")
       return

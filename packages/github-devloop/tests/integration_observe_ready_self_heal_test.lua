@@ -75,16 +75,27 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_does_not_reconstruct_mid_loop_thinking_proposal = function()
+  test_observe_issue_replays_mid_loop_thinking_proposal_from_converge_marker = function()
     local event = issue()
     local original = core.build_proposal(event)
+    local base_version = original.dedup_key
+    local sr_digest = core.source_ref_digest(event.source_ref)
+    local angle_digests = {
+      { angle = "minimal", verdict = "abstain", digest = "needs-narrower-scope" },
+    }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(original.proposal_id, "thinking", original.dedup_key .. "/loop/1"),
+      core.state_marker(original.proposal_id, "thinking", base_version),
+      core.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests),
     })
 
     local result = run_observe(event, opts("observe-issue-thinking-mid-loop-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    local proposal = find_raise(result.raises, "consensus.proposal").payload
+    t.eq(proposal.dedup_key, base_version .. "/loop/1")
+    t.eq(proposal.round, 1)
+    t.eq(proposal.convergence_question, "Narrow the question")
+    t.eq(proposal.prior_round_digests[1].digest, "needs-narrower-scope")
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,

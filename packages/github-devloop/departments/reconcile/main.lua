@@ -50,7 +50,7 @@ local function pipeline_thinking(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue reconcile view failed: " .. tostring(view.stderr))
     end
@@ -117,7 +117,7 @@ local function pipeline_review(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr review reconcile view failed: " .. tostring(view.stderr))
     end
@@ -188,7 +188,7 @@ local function pipeline_fix(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr fix reconcile view failed: " .. tostring(view.stderr))
     end
