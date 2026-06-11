@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::db::redact_mongodb_uri;
@@ -13,6 +14,9 @@ use crate::error::AppError;
 
 /// Prefix shared by every HTTP/server configuration environment variable.
 const ENV_PREFIX: &str = "FKST_HOSTED_";
+
+/// Prefix of the journaling variables (`FKST_JOURNAL_*` / `FKST_RAISED_*`).
+const JOURNAL_ENV_PREFIX: &str = "FKST_";
 
 /// Default values, shared by serde defaults and `Config::default`.
 mod defaults {
@@ -43,6 +47,38 @@ mod defaults {
     pub(super) fn mongodb_server_selection_timeout_ms() -> u64 {
         5000
     }
+
+    pub(super) fn journal_flush_interval_ms() -> u64 {
+        2000
+    }
+
+    pub(super) fn journal_flush_max_batch() -> usize {
+        50
+    }
+
+    pub(super) fn journal_github_enabled() -> bool {
+        true
+    }
+
+    pub(super) fn journal_issue_comments() -> bool {
+        false
+    }
+
+    pub(super) fn journal_cas_max_retries() -> u32 {
+        5
+    }
+
+    pub(super) fn journal_github_branch() -> String {
+        "main".to_string()
+    }
+
+    pub(super) fn raised_identity_pointers() -> String {
+        "/department,/source,/name,/corr".to_string()
+    }
+
+    pub(super) fn raised_max_line_bytes() -> usize {
+        1_048_576
+    }
 }
 
 /// `FKST_HOSTED_*`-prefixed variables (HTTP/server settings).
@@ -60,6 +96,8 @@ struct HttpVars {
 
 /// Unprefixed MongoDB variables. `MONGODB_URI` has no default: a backend
 /// without a store is misconfigured and must fail closed at startup.
+/// `GITHUB_TOKEN` rides this unprefixed pass too (secret; optional —
+/// without it GitHub journaling degrades to Mongo-only with a warn).
 #[derive(Deserialize)]
 struct MongoVars {
     mongodb_uri: String,
@@ -67,6 +105,32 @@ struct MongoVars {
     mongodb_db: String,
     #[serde(default = "defaults::mongodb_server_selection_timeout_ms")]
     mongodb_server_selection_timeout_ms: u64,
+    #[serde(default)]
+    github_token: Option<String>,
+}
+
+/// `FKST_JOURNAL_*` / `FKST_RAISED_*` variables (journaling settings; envy
+/// pass with the `FKST_` prefix).
+#[derive(Debug, Deserialize)]
+struct JournalVars {
+    #[serde(default = "defaults::journal_flush_interval_ms")]
+    journal_flush_interval_ms: u64,
+    #[serde(default = "defaults::journal_flush_max_batch")]
+    journal_flush_max_batch: usize,
+    #[serde(default = "defaults::journal_github_enabled")]
+    journal_github_enabled: bool,
+    #[serde(default = "defaults::journal_issue_comments")]
+    journal_issue_comments: bool,
+    #[serde(default = "defaults::journal_cas_max_retries")]
+    journal_cas_max_retries: u32,
+    #[serde(default = "defaults::journal_github_branch")]
+    journal_github_branch: String,
+    #[serde(default)]
+    journal_github_repo: Option<String>,
+    #[serde(default = "defaults::raised_identity_pointers")]
+    raised_identity_pointers: String,
+    #[serde(default = "defaults::raised_max_line_bytes")]
+    raised_max_line_bytes: usize,
 }
 
 /// Runtime configuration assembled from both envy passes.
@@ -92,6 +156,38 @@ pub struct Config {
     /// ping and `/health` so an unreachable Mongo fails fast.
     /// Env: `MONGODB_SERVER_SELECTION_TIMEOUT_MS`. Default 5000.
     pub mongodb_server_selection_timeout_ms: u64,
+    /// Max debounce (ms) before flushing buffered completions to GitHub.
+    /// Env: `FKST_JOURNAL_FLUSH_INTERVAL_MS`. Default 2000.
+    pub journal_flush_interval_ms: u64,
+    /// Flush early when this many new completions are buffered.
+    /// Env: `FKST_JOURNAL_FLUSH_MAX_BATCH`. Default 50.
+    pub journal_flush_max_batch: usize,
+    /// Master switch for GitHub journaling (Mongo journaling is always on).
+    /// Env: `FKST_JOURNAL_GITHUB_ENABLED`. Default true.
+    pub journal_github_enabled: bool,
+    /// Enable the optional issue-comment mirroring (dormant by default).
+    /// Env: `FKST_JOURNAL_ISSUE_COMMENTS`. Default false.
+    pub journal_issue_comments: bool,
+    /// Max optimistic-concurrency retries on the GitHub Contents write per
+    /// flush. Env: `FKST_JOURNAL_CAS_MAX_RETRIES`. Default 5.
+    pub journal_cas_max_retries: u32,
+    /// Branch the journal file lives on.
+    /// Env: `FKST_JOURNAL_GITHUB_BRANCH`. Default "main".
+    pub journal_github_branch: String,
+    /// `owner/name` of the journal repo; absent => GitHub journaling is
+    /// disabled (Mongo-only, warn). Env: `FKST_JOURNAL_GITHUB_REPO`.
+    pub journal_github_repo: Option<String>,
+    /// Comma-separated JSON pointers forming raised-event identity.
+    /// Env: `FKST_RAISED_IDENTITY_POINTERS`.
+    /// Default "/department,/source,/name,/corr".
+    pub raised_identity_pointers: String,
+    /// Max stdout line length parsed; longer lines are truncated + counted
+    /// as malformed. Env: `FKST_RAISED_MAX_LINE_BYTES`. Default 1048576.
+    pub raised_max_line_bytes: usize,
+    /// GitHub API token (SECRET — env/secret manager only; never logged,
+    /// redacted from Debug). Env: `GITHUB_TOKEN`. Optional: absent =>
+    /// GitHub journaling is disabled (Mongo-only, warn).
+    pub github_token: Option<SecretString>,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -109,6 +205,20 @@ impl fmt::Debug for Config {
                 "mongodb_server_selection_timeout_ms",
                 &self.mongodb_server_selection_timeout_ms,
             )
+            .field("journal_flush_interval_ms", &self.journal_flush_interval_ms)
+            .field("journal_flush_max_batch", &self.journal_flush_max_batch)
+            .field("journal_github_enabled", &self.journal_github_enabled)
+            .field("journal_issue_comments", &self.journal_issue_comments)
+            .field("journal_cas_max_retries", &self.journal_cas_max_retries)
+            .field("journal_github_branch", &self.journal_github_branch)
+            .field("journal_github_repo", &self.journal_github_repo)
+            .field("raised_identity_pointers", &self.raised_identity_pointers)
+            .field("raised_max_line_bytes", &self.raised_max_line_bytes)
+            // The token value never reaches any Debug/log output.
+            .field(
+                "github_token",
+                &self.github_token.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }
@@ -123,6 +233,16 @@ impl Default for Config {
             mongodb_uri: defaults::mongodb_uri_placeholder(),
             mongodb_db: defaults::mongodb_db(),
             mongodb_server_selection_timeout_ms: defaults::mongodb_server_selection_timeout_ms(),
+            journal_flush_interval_ms: defaults::journal_flush_interval_ms(),
+            journal_flush_max_batch: defaults::journal_flush_max_batch(),
+            journal_github_enabled: defaults::journal_github_enabled(),
+            journal_issue_comments: defaults::journal_issue_comments(),
+            journal_cas_max_retries: defaults::journal_cas_max_retries(),
+            journal_github_branch: defaults::journal_github_branch(),
+            journal_github_repo: None,
+            raised_identity_pointers: defaults::raised_identity_pointers(),
+            raised_max_line_bytes: defaults::raised_max_line_bytes(),
+            github_token: None,
         }
     }
 }
@@ -144,6 +264,33 @@ impl Config {
         if http.request_timeout_secs == 0 {
             return Err(AppError::Config(
                 "FKST_HOSTED_REQUEST_TIMEOUT_SECS must be at least 1".to_string(),
+            ));
+        }
+
+        let journal: JournalVars = envy::prefixed(JOURNAL_ENV_PREFIX)
+            .from_iter(vars.iter().cloned())
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        // A zero interval would force a GitHub round-trip per record and a
+        // zero retry budget would fail every flush instantly — reject both
+        // loudly, mirroring the timeout guards above.
+        if journal.journal_flush_interval_ms == 0 {
+            return Err(AppError::Config(
+                "FKST_JOURNAL_FLUSH_INTERVAL_MS must be at least 1".to_string(),
+            ));
+        }
+        if journal.journal_flush_max_batch == 0 {
+            return Err(AppError::Config(
+                "FKST_JOURNAL_FLUSH_MAX_BATCH must be at least 1".to_string(),
+            ));
+        }
+        if journal.journal_cas_max_retries == 0 {
+            return Err(AppError::Config(
+                "FKST_JOURNAL_CAS_MAX_RETRIES must be at least 1".to_string(),
+            ));
+        }
+        if journal.raised_max_line_bytes == 0 {
+            return Err(AppError::Config(
+                "FKST_RAISED_MAX_LINE_BYTES must be at least 1".to_string(),
             ));
         }
 
@@ -172,6 +319,16 @@ impl Config {
             mongodb_uri: mongo.mongodb_uri,
             mongodb_db: mongo.mongodb_db,
             mongodb_server_selection_timeout_ms: mongo.mongodb_server_selection_timeout_ms,
+            journal_flush_interval_ms: journal.journal_flush_interval_ms,
+            journal_flush_max_batch: journal.journal_flush_max_batch,
+            journal_github_enabled: journal.journal_github_enabled,
+            journal_issue_comments: journal.journal_issue_comments,
+            journal_cas_max_retries: journal.journal_cas_max_retries,
+            journal_github_branch: journal.journal_github_branch,
+            journal_github_repo: journal.journal_github_repo,
+            raised_identity_pointers: journal.raised_identity_pointers,
+            raised_max_line_bytes: journal.raised_max_line_bytes,
+            github_token: mongo.github_token.map(SecretString::from),
         })
     }
 
@@ -318,6 +475,81 @@ mod tests {
         let err = Config::from_vars(vars(&[URI, ("FKST_HOSTED_PORT", "abc")]))
             .expect_err("non-numeric port must fail");
         assert!(matches!(err, AppError::Config(_)));
+    }
+
+    #[test]
+    fn journal_defaults_apply_when_unset() {
+        let config = Config::from_vars(vars(&[URI])).expect("defaults");
+        assert_eq!(config.journal_flush_interval_ms, 2000);
+        assert_eq!(config.journal_flush_max_batch, 50);
+        assert!(config.journal_github_enabled);
+        assert!(!config.journal_issue_comments);
+        assert_eq!(config.journal_cas_max_retries, 5);
+        assert_eq!(config.journal_github_branch, "main");
+        assert_eq!(config.journal_github_repo, None);
+        assert_eq!(
+            config.raised_identity_pointers,
+            "/department,/source,/name,/corr"
+        );
+        assert_eq!(config.raised_max_line_bytes, 1_048_576);
+        assert!(config.github_token.is_none());
+    }
+
+    #[test]
+    fn journal_vars_are_overridable() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_JOURNAL_FLUSH_INTERVAL_MS", "500"),
+            ("FKST_JOURNAL_FLUSH_MAX_BATCH", "10"),
+            ("FKST_JOURNAL_GITHUB_ENABLED", "false"),
+            ("FKST_JOURNAL_ISSUE_COMMENTS", "true"),
+            ("FKST_JOURNAL_CAS_MAX_RETRIES", "9"),
+            ("FKST_JOURNAL_GITHUB_BRANCH", "journal"),
+            ("FKST_JOURNAL_GITHUB_REPO", "acme/pkg-repo"),
+            ("FKST_RAISED_IDENTITY_POINTERS", "/dept,/evt"),
+            ("FKST_RAISED_MAX_LINE_BYTES", "2048"),
+        ]))
+        .expect("overrides");
+        assert_eq!(config.journal_flush_interval_ms, 500);
+        assert_eq!(config.journal_flush_max_batch, 10);
+        assert!(!config.journal_github_enabled);
+        assert!(config.journal_issue_comments);
+        assert_eq!(config.journal_cas_max_retries, 9);
+        assert_eq!(config.journal_github_branch, "journal");
+        assert_eq!(config.journal_github_repo.as_deref(), Some("acme/pkg-repo"));
+        assert_eq!(config.raised_identity_pointers, "/dept,/evt");
+        assert_eq!(config.raised_max_line_bytes, 2048);
+    }
+
+    #[test]
+    fn zero_journal_knobs_are_config_errors_naming_the_var() {
+        for (var, value) in [
+            ("FKST_JOURNAL_FLUSH_INTERVAL_MS", "0"),
+            ("FKST_JOURNAL_FLUSH_MAX_BATCH", "0"),
+            ("FKST_JOURNAL_CAS_MAX_RETRIES", "0"),
+            ("FKST_RAISED_MAX_LINE_BYTES", "0"),
+        ] {
+            let err = Config::from_vars(vars(&[URI, (var, value)])).expect_err("zero must fail");
+            assert!(matches!(err, AppError::Config(_)));
+            assert!(err.to_string().contains(var), "error must name {var}");
+        }
+    }
+
+    #[test]
+    fn non_boolean_journal_switch_is_a_config_error() {
+        let err = Config::from_vars(vars(&[URI, ("FKST_JOURNAL_GITHUB_ENABLED", "yep")]))
+            .expect_err("non-boolean must fail");
+        assert!(matches!(err, AppError::Config(_)));
+    }
+
+    #[test]
+    fn github_token_is_read_and_never_appears_in_debug() {
+        let config = Config::from_vars(vars(&[URI, ("GITHUB_TOKEN", "ghp_sneaky_value")]))
+            .expect("token config");
+        assert!(config.github_token.is_some());
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("ghp_sneaky_value"), "token leaked");
+        assert!(rendered.contains("<redacted>"));
     }
 
     #[test]
