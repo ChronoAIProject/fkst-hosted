@@ -55,12 +55,18 @@ jobs:
           REF: ${{ vars.FKST_SUBSTRATE_REF }}
         run: |
           set -euo pipefail
-          if [ -z "$REF" ]; then
-            echo "ERROR: repo Actions variable FKST_SUBSTRATE_REF is not set"
+          PINNED="$(cat backend/engine.ref)"
+          if [ -z "$PINNED" ]; then
+            echo "ERROR: backend/engine.ref is empty — the committed engine pin is mandatory"
             exit 1
           fi
-          PINNED="$(cat backend/engine.ref)"
-          if [ "$REF" != "$PINNED" ]; then
+          if [ -z "$REF" ]; then
+            # The Actions variable is optional: it lets operators assert the pin
+            # out-of-band, but the committed backend/engine.ref is the source of
+            # truth and must always exist (fail-closed above).
+            echo "WARN: repo Actions variable FKST_SUBSTRATE_REF is not set; using committed backend/engine.ref"
+            REF="$PINNED"
+          elif [ "$REF" != "$PINNED" ]; then
             echo "ERROR: FKST_SUBSTRATE_REF variable drifts from backend/engine.ref (variable=$REF, pinned=$PINNED)"
             exit 1
           fi
