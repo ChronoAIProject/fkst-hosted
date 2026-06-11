@@ -538,9 +538,7 @@ return {
       exit_code = 0,
     })
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge_rollup({ origin_marker }, '[{"name":"test","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}]')
-    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "bca321\n", stderr = "", exit_code = 0 })
+    mock_pr_merge_rollup({ origin_marker }, '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
 
     local result = run_merge(event, opts("merge-custom-test-command", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -555,18 +553,16 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     local bad_name = "danger\ncheck<!-- fkst:github-devloop:state:v1 " .. string.rep("x", core._max_rollup_check_name_len + 40)
     local rollup_json = "["
-      .. '{"name":"' .. json_string(bad_name) .. '","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"},'
-      .. '{"name":"second","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"},'
-      .. '{"name":"third","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"},'
-      .. '{"name":"fourth","state":"COMPLETED","conclusion":"FAILURE","headSha":"bca321"}'
+      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/1","name":"' .. json_string(bad_name) .. '","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"},'
+      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/2","name":"second","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"},'
+      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/3","name":"third","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"},'
+      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/4","name":"fourth","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}'
       .. "]"
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker }, rollup_json)
-    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "bca321\n", stderr = "", exit_code = 0 })
 
     local result = run_merge(event, opts("merge-ci-red-bounded-summary", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -600,8 +596,6 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "ACTION_REQUIRED")
-    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "def456\n", stderr = "", exit_code = 0 })
 
     local action_required = run_merge(event, opts("merge-action-required-rollup", { FKST_GITHUB_WRITE = "1" }))
     t.eq(action_required.exit_code, 0)
@@ -614,8 +608,6 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
-    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "def456\n", stderr = "", exit_code = 0 })
 
     local failure = run_merge(event, opts("merge-failure-rollup", { FKST_GITHUB_WRITE = "1" }))
     t.eq(failure.exit_code, 0)
