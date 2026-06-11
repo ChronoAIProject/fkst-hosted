@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::packages::{is_valid_name, NewPackage, Package, PackageFile, MAX_TOTAL_CONTENT_BYTES};
 use crate::routes::extract::AppJson;
+use crate::routes::rfc3339;
 use crate::state::AppState;
 
 /// Request-body cap for the packages routes (16 MiB).
@@ -60,13 +61,6 @@ pub struct PackageResponse {
     pub composed_deps: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
-}
-
-/// Render a stored BSON datetime (always UTC) as RFC3339 with a `Z` suffix.
-/// A formatting failure means a corrupt stored timestamp: a 500, never a 4xx.
-fn rfc3339(ts: bson::DateTime) -> Result<String, AppError> {
-    ts.try_to_rfc3339_string()
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("invalid stored timestamp: {error}")))
 }
 
 impl TryFrom<Package> for PackageResponse {

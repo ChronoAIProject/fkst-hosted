@@ -9,9 +9,11 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
+use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::packages::{PackageRepository, MAX_FILE_CONTENT_BYTES};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::routes::packages::MAX_REQUEST_BODY_BYTES;
+use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -54,10 +56,16 @@ async fn app() -> (ContainerAsync<Mongo>, axum::Router) {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let packages = PackageRepository::new(&db.database);
+    let sessions = SessionService::new(
+        SessionRepo::new(&db),
+        packages.clone(),
+        EngineConfig::default(),
+    );
     let router = build_router(AppState {
         config,
         db,
         packages,
+        sessions,
     });
     (container, router)
 }

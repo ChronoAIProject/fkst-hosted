@@ -13,4 +13,5 @@ pub mod models;
 pub mod packages;
 pub mod router;
 pub mod routes;
+pub mod sessions;
 pub mod state;
