@@ -38,6 +38,17 @@ pub const STDERR_RING_CAP_BYTES: usize = 64 * 1024;
 /// drain task's memory stays bounded regardless of engine output shape.
 pub const STDERR_LINE_CAP_BYTES: usize = 8 * 1024;
 
+/// Byte cap of a SINGLE stdout line forwarded to the journaling layer
+/// (2 MiB — comfortably above the 1 MiB `FKST_RAISED_MAX_LINE_BYTES`
+/// default, so the journaler itself decides the oversize/malformed verdict).
+/// The remainder of a longer physical line is discarded, never buffered.
+pub const STDOUT_LINE_CAP_BYTES: usize = 2 * 1024 * 1024;
+
+/// Capacity of the stdout line channel. When the consumer falls behind, the
+/// drain task DROPS lines (counted + warned) instead of blocking: stdout
+/// journaling is observability and must never backpressure the engine.
+pub const STDOUT_CHANNEL_CAPACITY: usize = 1024;
+
 /// Per-stream byte cap when collecting conformance output (pre-truncation).
 const CONFORMANCE_CAPTURE_LIMIT: u64 = 256 * 1024;
 
@@ -217,12 +228,17 @@ impl Drop for ChildGroupGuard {
 }
 
 /// A spawned `supervise` child: the handle, its PID (== PGID, own process
-/// group), and the shared stderr ring buffer fed by the drain task.
+/// group), the shared stderr ring buffer fed by the drain task, and the
+/// line-framed stdout stream consumed by the journaling layer.
 #[derive(Debug)]
 pub struct SpawnedChild {
     pub child: Child,
     pub pid: i32,
     pub stderr: StderrBuffer,
+    /// Complete stdout lines (without trailing newlines), capped per line at
+    /// [`STDOUT_LINE_CAP_BYTES`]. Raw bytes: `RAISED:` payload parsing
+    /// (including lossy-UTF-8 handling) is owned by the journal layer.
+    pub stdout_lines: tokio::sync::mpsc::Receiver<Vec<u8>>,
 }
 
 /// Spawn `fkst-framework supervise` for the materialized package at
@@ -239,6 +255,12 @@ pub struct SpawnedChild {
 ///   spike Q8).
 /// - stderr is piped into a [`StderrBuffer`] by a background drain task for
 ///   the child's lifetime, preventing pipe backpressure.
+/// - stdout is piped into a line-framed drain task feeding
+///   [`SpawnedChild::stdout_lines`] (the journaling layer's `RAISED:`
+///   stream). The tap is OBSERVATION ONLY: args, env, and
+///   `FKST_RUNTIME_ROOT` wiring are byte-identical to the pre-tap contract
+///   (CANON: the engine invocation is never altered), and a slow/absent
+///   consumer drops lines instead of backpressuring the engine.
 pub fn spawn_supervise(
     framework_bin: &Path,
     pkg_root: &Path,
@@ -260,7 +282,7 @@ pub fn spawn_supervise(
         .process_group(0)
         .kill_on_drop(false)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     let mut child = command.spawn().map_err(RunnerError::Spawn)?;
@@ -271,6 +293,9 @@ pub fn spawn_supervise(
     })?;
     let stderr_pipe = child.stderr.take().ok_or_else(|| {
         RunnerError::Spawn(std::io::Error::other("supervise stderr pipe missing"))
+    })?;
+    let stdout_pipe = child.stdout.take().ok_or_else(|| {
+        RunnerError::Spawn(std::io::Error::other("supervise stdout pipe missing"))
     })?;
 
     let buffer = StderrBuffer::new(STDERR_RING_CAP_BYTES);
@@ -306,12 +331,62 @@ pub fn spawn_supervise(
         }
     });
 
+    // stdout drain: line-framed, length-capped, never blocking the engine.
+    // Mirrors the stderr drain's cap discipline; an oversized physical line
+    // is forwarded TRUNCATED (the journal layer's own byte cap declares it
+    // malformed) and its remainder discarded without buffering.
+    let (stdout_tx, stdout_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(STDOUT_CHANNEL_CAPACITY);
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout_pipe);
+        let mut line_buf: Vec<u8> = Vec::with_capacity(256);
+        let mut dropped_lines: u64 = 0;
+        loop {
+            line_buf.clear();
+            let mut limited = (&mut reader).take(STDOUT_LINE_CAP_BYTES as u64);
+            let read = match limited.read_until(b'\n', &mut line_buf).await {
+                Ok(0) => break, // EOF
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            let newline_terminated = line_buf.last() == Some(&b'\n');
+            if newline_terminated {
+                line_buf.pop();
+                if line_buf.last() == Some(&b'\r') {
+                    line_buf.pop();
+                }
+            } else if read == STDOUT_LINE_CAP_BYTES {
+                let _ = discard_until_newline(&mut reader).await;
+            }
+            // Lossy delivery by design: a full channel (consumer behind or
+            // absent) drops the line — stdout journaling must never stall
+            // the engine's pipe. Mongo/GitHub durability is unaffected for
+            // consumed lines; dropped ones are counted and warned.
+            match stdout_tx.try_send(std::mem::take(&mut line_buf)) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    dropped_lines += 1;
+                    if dropped_lines == 1 || dropped_lines.is_multiple_of(1000) {
+                        tracing::warn!(dropped_lines, "stdout consumer behind; dropping lines");
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    // No consumer: keep draining to EOF so the pipe never
+                    // backpressures, but stop storing anything.
+                }
+            }
+        }
+        if dropped_lines > 0 {
+            tracing::warn!(dropped_lines, "stdout drain finished with dropped lines");
+        }
+    });
+
     tracing::info!(pid, pkg_root = %pkg_root.display(), rt_root = %rt_root.display(), "session.spawn");
 
     Ok(SpawnedChild {
         child,
         pid,
         stderr: buffer,
+        stdout_lines: stdout_rx,
     })
 }
 
@@ -746,6 +821,155 @@ sleep 30"#,
             "exit was caused by the reap's own SIGTERM"
         );
         assert!(!is_pid_alive(spawned.pid));
+    }
+
+    #[tokio::test]
+    async fn stdout_tap_delivers_line_framed_raised_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        // RAISED traffic goes to STDOUT; the ready markers stay on stderr —
+        // exactly the engine's split.
+        let script = stub(
+            dir.path(),
+            "raiser.sh",
+            r#"echo "RAISED: eyJkZXB0IjoiaGVsbG8ifQ=="
+echo "plain chatter line"
+echo "event runtime running handles=3" >&2
+sleep 30"#,
+        );
+
+        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn raiser");
+        let first = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+            .await
+            .expect("first stdout line within 4s")
+            .expect("channel open");
+        assert_eq!(first, b"RAISED: eyJkZXB0IjoiaGVsbG8ifQ==".to_vec());
+        let second = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+            .await
+            .expect("second stdout line within 4s")
+            .expect("channel open");
+        assert_eq!(second, b"plain chatter line".to_vec());
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap raiser");
+    }
+
+    #[tokio::test]
+    async fn stdout_tap_leaves_the_engine_invocation_unchanged() {
+        // CANON hard rule: tapping stdout is OBSERVATION ONLY. This asserts
+        // the exact `supervise` argv and env wiring (the issue #17 contract)
+        // with the tap active — byte-identical to the pre-tap invocation.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(
+            dir.path(),
+            "contract.sh",
+            r#"echo "argv-raw: $*"
+echo "rt: $FKST_RUNTIME_ROOT"
+echo "durable: $FKST_DURABLE_ROOT"
+echo "pkgroot: ${FKST_PACKAGE_ROOT:-UNSET}"
+echo "pkgroots: ${FKST_PACKAGE_ROOTS:-UNSET}"
+sleep 30"#,
+        );
+
+        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let mut lines: Vec<String> = Vec::new();
+        while lines.len() < 5 {
+            let line = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+                .await
+                .expect("stdout line within 4s")
+                .expect("channel open");
+            lines.push(String::from_utf8(line).expect("utf8 stub output"));
+        }
+        let joined = lines.join("\n");
+        let expected_args = format!(
+            "argv-raw: supervise --project-root {} --package-root {} --framework-bin {}",
+            pkg.path().display(),
+            pkg.path().display(),
+            script.display()
+        );
+        assert!(joined.contains(&expected_args), "argv changed:\n{joined}");
+        assert!(joined.contains(&format!("rt: {}", rt.path().display())));
+        assert!(joined.contains(&format!("durable: {}/durable", rt.path().display())));
+        assert!(joined.contains("pkgroot: UNSET"));
+        assert!(joined.contains("pkgroots: UNSET"));
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap");
+    }
+
+    #[tokio::test]
+    async fn stdout_drain_caps_a_newline_free_blast_and_keeps_flowing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        // A 3 MiB newline-free stdout blast exceeds the 2 MiB per-line cap:
+        // it must arrive truncated (bounded memory) and later lines must
+        // still flow.
+        let script = stub(
+            dir.path(),
+            "stdout-blaster.sh",
+            r#"head -c 3145728 /dev/zero | tr '\0' x
+printf '\n'
+echo "after-blast"
+sleep 30"#,
+        );
+
+        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let blast = tokio::time::timeout(Duration::from_secs(10), spawned.stdout_lines.recv())
+            .await
+            .expect("blast line within 10s")
+            .expect("channel open");
+        assert_eq!(blast.len(), STDOUT_LINE_CAP_BYTES, "truncated at the cap");
+        let after = tokio::time::timeout(Duration::from_secs(4), spawned.stdout_lines.recv())
+            .await
+            .expect("post-blast line within 4s")
+            .expect("channel open");
+        assert_eq!(after, b"after-blast".to_vec());
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap");
+    }
+
+    #[tokio::test]
+    async fn dropped_stdout_receiver_never_stalls_the_engine() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        // Far more lines than the channel capacity, then a breadcrumb file:
+        // with NO consumer the drain must keep the pipe flowing so the stub
+        // reaches the end of its output.
+        let done = dir.path().join("done");
+        let script = stub(
+            dir.path(),
+            "chatty.sh",
+            &format!(
+                r#"i=0
+while [ $i -lt 5000 ]; do echo "line $i"; i=$((i+1)); done
+echo done > {}
+sleep 30"#,
+                done.display()
+            ),
+        );
+
+        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        drop(std::mem::replace(
+            &mut spawned.stdout_lines,
+            tokio::sync::mpsc::channel(1).1,
+        ));
+        assert!(
+            wait_until(|| done.exists()).await,
+            "engine must finish its output with no stdout consumer"
+        );
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap");
     }
 
     #[tokio::test]
