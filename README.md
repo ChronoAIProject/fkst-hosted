@@ -43,8 +43,9 @@ scripts/run.sh test-composed        # 只跑 composed 包及其递归 deps 的�
 FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/run.sh run github-proxy github_poll
 
 # 真实前台事件循环：脚本创建临时 FKST_RUNTIME_ROOT 和独立 FKST_DURABLE_ROOT。
+# FKST_RATE_POOL_ROOT 必须由 host 设置为所有 supervise 实例共享的绝对路径。
 # 可用 FKST_PROJECT_ROOT 覆盖默认 project-root（packages/<pkg>）。
-FKST_GITHUB_REPO=owner/repo scripts/run.sh supervise github-proxy
+FKST_GITHUB_REPO=owner/repo FKST_RATE_POOL_ROOT=/var/lib/fkst/rate-pools scripts/run.sh supervise github-proxy
 
 # 本地 test/run/supervise 会对可溯源到 ../fkst-substrate 的 BIN 做 freshness 自动构建；
 # CI 不自动 build，FKST_NO_AUTOBUILD=1 可跳过。显式 build 仍会 git pull && cargo build。
@@ -53,7 +54,7 @@ scripts/run.sh build
 
 `run` 用临时（或复用已设的）`FKST_RUNTIME_ROOT`、绝不设 `FKST_GITHUB_WRITE`，所以只读 dogfood 保持只读；同一 `FKST_RUNTIME_ROOT` 连跑两次可看去重。脚本对任何 `packages/<pkg>/departments/<dept>` 通用，不写死 github-proxy。
 
-`supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并设置彼此不同的临时 `FKST_RUNTIME_ROOT` / `FKST_DURABLE_ROOT`。
+`supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并设置彼此不同的临时 `FKST_RUNTIME_ROOT` / `FKST_DURABLE_ROOT`。真实 supervise 还会 fail-closed 要求 `FKST_RATE_POOL_ROOT` 是 host 提供的绝对路径；每个消耗同一 GitHub 配额的实例必须指向同一个目录。
 
 本库不做版本化 manifest、root-list 或 override DSL。图由固定的 `departments/` 和 `raisers/` 目录扫描得到。flat 包可独立加载；composed 包显式承担跨包 wiring，并用 `composed.deps` 告诉测试脚本组合 conformance 需要一起加载哪些兄弟包。
 
@@ -114,6 +115,7 @@ engine-PR backlog：
 - `FKST_GITHUB_REPO=owner/repo` 必填；缺失时 fail-closed。
 - `FKST_RUNTIME_ROOT=/path/to/runtime` 必填；引擎用它管理 cache / lock 状态，缺失时入站 poll fail-closed。
 - `FKST_GITHUB_WRITE=1` 是唯一写入姿态开关；未设置或不等于 `1` 时只 dry-run，不调用 mutate GitHub 的 `gh` 命令；设为 `1` 时 `github-devloop` 直接自治执行真实写入。
+- `gh` traffic from `github-proxy` and `github-devloop` is tagged with the engine named rate pool `gh` (`burst=50`, `refill_per_hour=3250`). Real supervise runs fail closed unless `FKST_RATE_POOL_ROOT` is an absolute host-stable shared path, so package and website supervisors spend one GitHub budget instead of separate local budgets. 中文补充：这是集中令牌桶/共享速率池治理，不是 package 侧 sleep。
 - `gh` auth、PATH、权限和 repo 当前 git 工作区都是 host 责任。
 
 本包不会自动 supervise，也不会在测试中打真 GitHub。Lua 集成测试用 `fkst.test.mock_command` mock `gh issue list` / `gh pr list` / `gh issue view` / `gh issue comment` / `gh issue edit`，并用 `fkst.test.command_calls` 断言发出的命令；不生成 fake `gh` 二进制。测试由 `fkst-framework test` 自动运行：

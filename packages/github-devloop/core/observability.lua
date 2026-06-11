@@ -18,7 +18,7 @@ local stall_suspect_threshold_minutes = {
 }
 
 local function run_cmd(cmd, timeout, error_class)
-  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+  local result = M.gh_exec({ cmd = cmd, timeout = timeout or 30 })
   if result.exit_code ~= 0 then
     error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
   end
@@ -623,7 +623,7 @@ function M.publish_observability_dashboard(repo, dashboard)
   end
 
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-  local updated = exec_sync({ cmd = M.gh_dashboard_issue_update_cmd(repo, current.number, path, refreshed.etag), timeout = 30 })
+  local updated = M.gh_exec({ cmd = M.gh_dashboard_issue_update_cmd(repo, current.number, path, refreshed.etag), timeout = 30 })
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")
     if stderr:find("412", 1, true) ~= nil or stderr:find("Precondition Failed", 1, true) ~= nil then

@@ -32,7 +32,7 @@ function pipeline(event)
       return
     end
 
-    local viewed = exec_sync({ cmd = core.gh_pr_view_merge_cmd(payload.repo, payload.pr_number), timeout = 30 })
+    local viewed = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(payload.repo, payload.pr_number), timeout = 30 })
     if viewed.exit_code ~= 0 then
       error("github-devloop: gh rollup PR view failed: " .. tostring(viewed.stderr))
     end

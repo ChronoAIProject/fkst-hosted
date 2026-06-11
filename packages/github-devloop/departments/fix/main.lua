@@ -183,7 +183,7 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local pr_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    local pr_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
@@ -300,7 +300,7 @@ function pipeline(event)
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
+      local issue_view = core.gh_exec({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue fix view failed: " .. tostring(issue_view.stderr))
       end
@@ -337,7 +337,7 @@ function pipeline(event)
       local existing_head_sha = branch_head_if_ahead(fix.reviewed_head_sha, branch)
       if existing_head_sha ~= nil then
         core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
-        local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+        local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
         if pr_recheck.exit_code ~= 0 then
           error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
         end
@@ -359,7 +359,7 @@ function pipeline(event)
         if push.exit_code ~= 0 then
           error("github-devloop: git push failed: " .. tostring(push.stderr))
         end
-        local pushed_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+        local pushed_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
         if pushed_view.exit_code ~= 0 then
           error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
         end
@@ -407,7 +407,7 @@ function pipeline(event)
       return
     end
 
-    local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pr_recheck.exit_code ~= 0 then
       error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
     end
@@ -429,7 +429,7 @@ function pipeline(event)
     if push.exit_code ~= 0 then
       error("github-devloop: git push failed: " .. tostring(push.stderr))
     end
-    local pushed_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    local pushed_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pushed_view.exit_code ~= 0 then
       error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
     end

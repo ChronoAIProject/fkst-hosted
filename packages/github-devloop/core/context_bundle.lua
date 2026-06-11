@@ -235,8 +235,7 @@ local function truncate_if_needed(text, dept, proposal_id, file_name)
 end
 
 local function fetch_cmd(cmd, label, exec)
-  local run = exec or exec_sync
-  local result = run({ cmd = cmd, timeout = 60 })
+  local result = M.gh_exec({ cmd = cmd, timeout = 60 }, nil, exec)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     error("github-devloop: context bundle " .. label .. " failed: " .. tostring(result and result.stderr or "nil result"))
   end
