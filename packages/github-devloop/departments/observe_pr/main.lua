@@ -129,7 +129,12 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
     end
     if feedback.review_proposal_id ~= nil and feedback.reviewed_head_sha ~= nil then
       if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
-        local branch_head = exec_sync({ cmd = core.git_branch_head_cmd(origin.branch), timeout = 30 })
+        local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", origin.branch), timeout = 60 })
+        if fetch_result.exit_code ~= 0 then
+          core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
+          error("github-devloop: PR head changed before fix replay and deterministic branch head is not readable")
+        end
+        local branch_head = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
         if branch_head.exit_code ~= 0 then
           core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
           error("github-devloop: PR head changed before fix replay and deterministic branch head is not readable")
