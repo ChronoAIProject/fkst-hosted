@@ -80,6 +80,7 @@ struct TestApp {
     _temp_root: tempfile::TempDir,
     router: axum::Router,
     db: Db,
+    sessions: SessionService,
 }
 
 /// Start an ephemeral Mongo, write the stub engine, and build the real
@@ -119,7 +120,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         config,
         db: db.clone(),
         packages,
-        sessions,
+        sessions: sessions.clone(),
     });
     TestApp {
         _container: container,
@@ -127,6 +128,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         _temp_root: temp_root,
         router,
         db,
+        sessions,
     }
 }
 
@@ -690,4 +692,34 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
 
     let again = repo.fail_orphans().await.expect("second sweep");
     assert_eq!(again, 0, "sweep is idempotent");
+}
+
+// ---- (10) graceful shutdown ------------------------------------------------------
+
+#[tokio::test]
+async fn graceful_shutdown_records_running_sessions_as_stopped() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = app(PASS_CONFORMANCE, READY_SUPERVISE).await;
+    seed_package(&app.router, "demo").await;
+    let id = create_session(&app.router, "demo").await;
+    poll_until(&app.router, &id, "running").await;
+
+    // SIGTERM-driven pod shutdown signals the drivers directly, WITHOUT any
+    // HTTP stop having CAS'd the document to `stopping`. The stop-success
+    // CAS must therefore accept `running` too — otherwise the document
+    // lingers `running` and the next boot's orphan sweep mislabels a clean
+    // shutdown as "orphaned by pod restart".
+    app.sessions.shutdown().await;
+
+    let (status, _headers, body) = get_path(&app.router, &format!("/api/v1/sessions/{id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["status"], "stopped",
+        "a shutdown stop must persist as stopped: {body}"
+    );
+    assert!(body["stopped_at"].as_str().is_some(), "stopped_at set");
+    assert!(body["error"].is_null(), "clean shutdown carries no error");
 }

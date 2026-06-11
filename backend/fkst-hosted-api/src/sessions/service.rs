@@ -427,11 +427,16 @@ async fn drive(
                 tracing::info!(session_id = %id, "stop signal received; stopping engine");
                 match inner.runner.stop(&mut session).await {
                     Ok(()) => {
+                        // `running` is in the from-set because a graceful
+                        // pod shutdown signals the driver WITHOUT an HTTP
+                        // stop having CAS'd the document to `stopping`; a
+                        // commanded stop arrives as `stopping`. Either way
+                        // this stop was driver-performed and is `stopped`.
                         let _ = inner
                             .repo
                             .transition(
                                 id,
-                                &[SessionStatus::Stopping],
+                                &[SessionStatus::Stopping, SessionStatus::Running],
                                 doc! {
                                     "status": status_bson(SessionStatus::Stopped),
                                     "stopped_at": now(),
@@ -467,11 +472,13 @@ async fn drive(
                 // `stopped`; an uncommanded exit (even a clean one) is a
                 // failure of the supervised contract.
                 if *stop_rx.borrow() {
+                    // `running` in the from-set: a shutdown-driven stop
+                    // signal never CAS'd the document to `stopping`.
                     let _ = inner
                         .repo
                         .transition(
                             id,
-                            &[SessionStatus::Stopping],
+                            &[SessionStatus::Stopping, SessionStatus::Running],
                             doc! {
                                 "status": status_bson(SessionStatus::Stopped),
                                 "stopped_at": now(),
