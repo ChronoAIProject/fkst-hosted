@@ -1,7 +1,8 @@
 //! Low-level engine process management: spawn `supervise` in its own process
-//! group, drain its stderr into a bounded ring buffer, scan for the empirical
-//! ready/panic markers, run the `conformance` pre-flight under a wall-clock
-//! cap, and reap whole process groups with a SIGTERM -> SIGKILL grace ladder.
+//! group, drain BOTH its stdout and stderr into a single bounded ring buffer,
+//! scan for the empirical ready/panic markers, run the `conformance`
+//! pre-flight under a wall-clock cap, and reap whole process groups with a
+//! SIGTERM -> SIGKILL grace ladder.
 //!
 //! Contract notes (issue #17 spike):
 //! - `supervise` is ALWAYS spawned directly (never the engine's wrapper
@@ -13,6 +14,12 @@
 //!   even in the half-alive unset-`FKST_RUNTIME_ROOT` mode (spike Q9). The
 //!   markers are message-text-only because the engine's ANSI styling breaks
 //!   any substring spanning a field boundary (see [`is_ready`]).
+//! - STREAM WIRING (issue #50): `supervise` writes its readiness markers
+//!   (`event runtime running` AND `consumer started`) to STDOUT, while Rust
+//!   panics surface on STDERR. Both streams are therefore piped and drained
+//!   into the SAME shared [`OutputBuffer`] so the marker scan and the panic
+//!   scan both see their evidence. (Piping only stderr — the original wiring —
+//!   discarded every readiness marker, so the ready-wait always timed out.)
 //! - Package-root wiring is FLAG-ONLY: `FKST_PACKAGE_ROOT`/`FKST_PACKAGE_ROOTS`
 //!   env substitution exists upstream but its precedence against the flag is
 //!   untested (spike Q8), so both variables are removed from the child env.
@@ -29,14 +36,15 @@ use tokio::process::{Child, Command};
 
 use crate::engine::error::{truncate_output_lossy, RunnerError};
 
-/// Byte cap of the shared stderr ring buffer (64 KiB). The drain task runs
-/// for the child's lifetime so the pipe never backpressures the engine.
-pub const STDERR_RING_CAP_BYTES: usize = 64 * 1024;
+/// Byte cap of the shared output ring buffer (64 KiB) that merges the
+/// child's stdout and stderr. The drain tasks run for the child's lifetime so
+/// neither pipe ever backpressures the engine.
+pub const OUTPUT_RING_CAP_BYTES: usize = 64 * 1024;
 
-/// Byte cap of a SINGLE stderr line fed into the ring (8 KiB): a newline-free
-/// blast is truncated at this length and the remainder discarded, so the
+/// Byte cap of a SINGLE output line fed into the ring (8 KiB): a newline-free
+/// blast is truncated at this length and the remainder discarded, so each
 /// drain task's memory stays bounded regardless of engine output shape.
-pub const STDERR_LINE_CAP_BYTES: usize = 8 * 1024;
+pub const OUTPUT_LINE_CAP_BYTES: usize = 8 * 1024;
 
 /// Per-stream byte cap when collecting conformance output (pre-truncation).
 const CONFORMANCE_CAPTURE_LIMIT: u64 = 256 * 1024;
@@ -48,15 +56,17 @@ const REAP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// unreapable (20 x 100 ms = 2 s).
 const SIGKILL_REAP_POLLS: u32 = 20;
 
-/// Bounded, shared, append-only view of a child's stderr. Cheap to clone
-/// (an `Arc` handle); the drain task appends, readers snapshot.
+/// Bounded, shared, append-only merge of a child's stdout AND stderr. Cheap
+/// to clone (an `Arc` handle); each drain task appends, readers snapshot. Both
+/// stream drains share one instance so the ready markers (stdout) and panic
+/// markers (stderr) are visible to a single scan (issue #50).
 #[derive(Debug, Clone)]
-pub struct StderrBuffer {
+pub struct OutputBuffer {
     inner: Arc<Mutex<String>>,
     cap: usize,
 }
 
-impl StderrBuffer {
+impl OutputBuffer {
     /// New empty buffer keeping at most `cap` bytes (the newest tail).
     pub fn new(cap: usize) -> Self {
         Self {
@@ -67,8 +77,10 @@ impl StderrBuffer {
 
     /// Append one line (a `\n` is added) and trim the FRONT down to the cap,
     /// never splitting a UTF-8 character: the newest output always survives.
+    /// Both stream drains call this against the same `Arc`, so the `Mutex`
+    /// serialises interleaved stdout/stderr writes at line granularity.
     pub fn append_line(&self, line: &str) {
-        let mut text = self.inner.lock().expect("stderr buffer lock poisoned");
+        let mut text = self.inner.lock().expect("output buffer lock poisoned");
         text.push_str(line);
         text.push('\n');
         if text.len() > self.cap {
@@ -84,18 +96,20 @@ impl StderrBuffer {
     pub fn snapshot(&self) -> String {
         self.inner
             .lock()
-            .expect("stderr buffer lock poisoned")
+            .expect("output buffer lock poisoned")
             .clone()
     }
 }
 
-/// True when the supervise stderr shows the runtime wired AND at least one
-/// department consumer started. Requiring the consumer line guards against
+/// True when the merged supervise output shows the runtime wired AND at least
+/// one department consumer started. Both markers are emitted on the child's
+/// STDOUT (issue #50), which is why [`spawn_supervise`] pipes and drains stdout
+/// into the same buffer this scans. Requiring the consumer line guards against
 /// the half-alive mode where `event runtime running` is emitted but every
 /// consumer thread has panicked (spike Q9 / E6).
 ///
-/// ANSI-SAFETY: the engine emits `tracing` output WITH ANSI styling on the
-/// piped stderr, and field names are styled separately from their values
+/// ANSI-SAFETY: the engine emits `tracing` output WITH ANSI styling, and field
+/// names are styled separately from their values
 /// (`event runtime running ESC[3mhandles ESC[0m ESC[2m= ...`), so a marker
 /// spanning a field boundary (`handles=`, `dept=`) never matches the raw
 /// stream. The markers therefore match only the un-styled MESSAGE text —
@@ -103,14 +117,15 @@ impl StderrBuffer {
 /// (empirically re-verified against the pinned engine image in this issue's
 /// wiring check). Selectivity for the half-alive guard is unchanged: that
 /// mode emits NO `consumer started` line at all.
-pub fn is_ready(stderr: &str) -> bool {
-    stderr.contains("event runtime running") && stderr.contains("consumer started")
+pub fn is_ready(output: &str) -> bool {
+    output.contains("event runtime running") && output.contains("consumer started")
 }
 
-/// True when the supervise stderr contains a Rust panic marker. Any panic
-/// during startup is treated as a startup failure, never as ready.
-pub fn is_panicked(stderr: &str) -> bool {
-    stderr.contains("panicked at")
+/// True when the merged supervise output contains a Rust panic marker. Panics
+/// surface on STDERR (issue #50); any panic during startup is treated as a
+/// startup failure, never as ready.
+pub fn is_panicked(output: &str) -> bool {
+    output.contains("panicked at")
 }
 
 /// Best-effort PID liveness: `kill(pid, 0)`.
@@ -217,12 +232,19 @@ impl Drop for ChildGroupGuard {
 }
 
 /// A spawned `supervise` child: the handle, its PID (== PGID, own process
-/// group), and the shared stderr ring buffer fed by the drain task.
+/// group), the shared output ring buffer fed by the stdout AND stderr drain
+/// tasks, and the join handles of those two tasks (tracked so cancellation /
+/// cleanup can abort them exactly as the original single drain was).
 #[derive(Debug)]
 pub struct SpawnedChild {
     pub child: Child,
     pub pid: i32,
-    pub stderr: StderrBuffer,
+    pub output: OutputBuffer,
+    /// Drain task handles: `[stdout, stderr]`. Held so the caller can abort
+    /// both on teardown; a child's stdout/stderr can each be drained only
+    /// once, so a future tap (issue #25 RAISED-line journaling) must fan out
+    /// from these drains rather than re-piping.
+    pub drains: [tokio::task::JoinHandle<()>; 2],
 }
 
 /// Spawn `fkst-framework supervise` for the materialized package at
@@ -237,8 +259,12 @@ pub struct SpawnedChild {
 ///   spike Q6). `FKST_PACKAGE_ROOT`/`FKST_PACKAGE_ROOTS` are removed so the
 ///   `--package-root` flag is the single wiring (untested precedence,
 ///   spike Q8).
-/// - stderr is piped into a [`StderrBuffer`] by a background drain task for
-///   the child's lifetime, preventing pipe backpressure.
+/// - BOTH stdout and stderr are piped and drained into one shared
+///   [`OutputBuffer`] by two background tasks for the child's lifetime,
+///   preventing pipe backpressure. The readiness markers (`event runtime
+///   running`, `consumer started`) arrive on STDOUT and the panic marker on
+///   STDERR (issue #50), so the merged buffer is what [`is_ready`] /
+///   [`is_panicked`] must scan.
 pub fn spawn_supervise(
     framework_bin: &Path,
     pkg_root: &Path,
@@ -260,7 +286,7 @@ pub fn spawn_supervise(
         .process_group(0)
         .kill_on_drop(false)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     let mut child = command.spawn().map_err(RunnerError::Spawn)?;
@@ -269,22 +295,54 @@ pub fn spawn_supervise(
             "supervise child exited before its pid could be read",
         ))
     })?;
+    let stdout_pipe = child.stdout.take().ok_or_else(|| {
+        RunnerError::Spawn(std::io::Error::other("supervise stdout pipe missing"))
+    })?;
     let stderr_pipe = child.stderr.take().ok_or_else(|| {
         RunnerError::Spawn(std::io::Error::other("supervise stderr pipe missing"))
     })?;
 
-    let buffer = StderrBuffer::new(STDERR_RING_CAP_BYTES);
-    let drain = buffer.clone();
+    let buffer = OutputBuffer::new(OUTPUT_RING_CAP_BYTES);
+    // The readiness markers (`event runtime running`, `consumer started`)
+    // arrive on STDOUT — this is the SHARED SOURCE for them. A child's stdout
+    // can be drained exactly once, so issue #25's RAISED-line journaling tap
+    // must fan out from THIS drain (read each line once, then both append to
+    // the buffer and forward to the journal) rather than re-piping stdout.
+    let stdout_drain = spawn_stream_drain(stdout_pipe, buffer.clone());
+    // Panics surface on STDERR; both drains append to the same buffer.
+    let stderr_drain = spawn_stream_drain(stderr_pipe, buffer.clone());
+
+    tracing::info!(pid, pkg_root = %pkg_root.display(), rt_root = %rt_root.display(), "session.spawn");
+
+    Ok(SpawnedChild {
+        child,
+        pid,
+        output: buffer,
+        drains: [stdout_drain, stderr_drain],
+    })
+}
+
+/// Spawn a background task that drains one child stream (`pipe`) line-by-line
+/// into the shared `buffer` for the child's lifetime, preventing pipe
+/// backpressure. Each line is length-capped at [`OUTPUT_LINE_CAP_BYTES`] (a
+/// newline-free blast is truncated and the remainder discarded — counted,
+/// never stored), and the buffer itself is ring-capped at
+/// [`OUTPUT_RING_CAP_BYTES`]. Both the stdout and stderr drains share one
+/// `buffer`, so the merged view is what the marker scans read.
+fn spawn_stream_drain<R>(pipe: R, buffer: OutputBuffer) -> tokio::task::JoinHandle<()>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
     tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr_pipe);
+        let mut reader = BufReader::new(pipe);
         let mut line_buf: Vec<u8> = Vec::with_capacity(256);
         loop {
             line_buf.clear();
-            // Length-capped read: a newline-free stderr blast can never grow
-            // memory past the per-line cap (next_line() would buffer the
-            // whole physical line). The remainder of an oversized line is
-            // discarded — counted, never stored.
-            let mut limited = (&mut reader).take(STDERR_LINE_CAP_BYTES as u64);
+            // Length-capped read: a newline-free blast can never grow memory
+            // past the per-line cap (next_line() would buffer the whole
+            // physical line). The remainder of an oversized line is discarded
+            // — counted, never stored.
+            let mut limited = (&mut reader).take(OUTPUT_LINE_CAP_BYTES as u64);
             let read = match limited.read_until(b'\n', &mut line_buf).await {
                 Ok(0) => break, // EOF
                 Ok(n) => n,
@@ -298,20 +356,12 @@ pub fn spawn_supervise(
                 }
             }
             let mut line = String::from_utf8_lossy(&line_buf).into_owned();
-            if !newline_terminated && read == STDERR_LINE_CAP_BYTES {
+            if !newline_terminated && read == OUTPUT_LINE_CAP_BYTES {
                 let dropped = discard_until_newline(&mut reader).await;
                 line.push_str(&format!(" [line truncated: {dropped} bytes dropped]"));
             }
-            drain.append_line(&line);
+            buffer.append_line(&line);
         }
-    });
-
-    tracing::info!(pid, pkg_root = %pkg_root.display(), rt_root = %rt_root.display(), "session.spawn");
-
-    Ok(SpawnedChild {
-        child,
-        pid,
-        stderr: buffer,
     })
 }
 
@@ -580,11 +630,11 @@ mod tests {
         false
     }
 
-    // ---- StderrBuffer --------------------------------------------------------
+    // ---- OutputBuffer --------------------------------------------------------
 
     #[test]
-    fn stderr_buffer_keeps_the_newest_tail_within_cap() {
-        let buffer = StderrBuffer::new(32);
+    fn output_buffer_keeps_the_newest_tail_within_cap() {
+        let buffer = OutputBuffer::new(32);
         for i in 0..100 {
             buffer.append_line(&format!("line-{i:03}"));
         }
@@ -595,8 +645,8 @@ mod tests {
     }
 
     #[test]
-    fn stderr_buffer_trims_at_a_char_boundary() {
-        let buffer = StderrBuffer::new(10);
+    fn output_buffer_trims_at_a_char_boundary() {
+        let buffer = OutputBuffer::new(10);
         buffer.append_line("ααααααααα"); // 9 x 2-byte chars + \n = 19 bytes
         let snapshot = buffer.snapshot();
         assert!(snapshot.len() <= 10);
@@ -605,8 +655,8 @@ mod tests {
     }
 
     #[test]
-    fn stderr_buffer_clones_share_the_same_storage() {
-        let buffer = StderrBuffer::new(1024);
+    fn output_buffer_clones_share_the_same_storage() {
+        let buffer = OutputBuffer::new(1024);
         let writer = buffer.clone();
         writer.append_line("shared");
         assert!(buffer.snapshot().contains("shared"));
@@ -712,13 +762,13 @@ sleep 30"#,
         assert_eq!(pgid.as_raw(), spawned.pid, "child must lead its own group");
 
         // The drain task must surface the stub's stderr.
-        let stderr = spawned.stderr.clone();
+        let stderr = spawned.output.clone();
         assert!(
             wait_until(|| is_ready(&stderr.snapshot())).await,
             "ready markers must arrive via the stderr buffer"
         );
 
-        let snapshot = spawned.stderr.snapshot();
+        let snapshot = spawned.output.snapshot();
         let expected_args = format!(
             "args: supervise --project-root {} --package-root {} --framework-bin {}",
             pkg.path().display(),
@@ -765,13 +815,13 @@ sleep 30"#,
         );
 
         let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn blaster");
-        let stderr = spawned.stderr.clone();
+        let stderr = spawned.output.clone();
         assert!(
             wait_until(|| stderr.snapshot().contains("after-blast")).await,
             "post-blast output must still flow through the drain"
         );
 
-        let snapshot = spawned.stderr.snapshot();
+        let snapshot = spawned.output.snapshot();
         assert!(
             snapshot.contains("[line truncated: "),
             "oversized line must carry the dropped-bytes note:\n{snapshot}"
@@ -779,7 +829,7 @@ sleep 30"#,
         // No single stored line may exceed the cap (plus the short note).
         for line in snapshot.lines() {
             assert!(
-                line.len() <= STDERR_LINE_CAP_BYTES + 64,
+                line.len() <= OUTPUT_LINE_CAP_BYTES + 64,
                 "line of {} bytes exceeds the per-line cap",
                 line.len()
             );
@@ -803,6 +853,136 @@ sleep 30"#,
         assert!(matches!(err, RunnerError::Spawn(_)));
     }
 
+    /// Issue #50 regression: the REAL `fkst-framework supervise` writes its
+    /// readiness markers to STDOUT, not stderr. The drain must merge stdout
+    /// into the scanned buffer, or the marker-gated ready-wait times out
+    /// forever. This stub prints both markers on STDOUT only — it FAILS on the
+    /// stderr-only wiring and PASSES once stdout is drained too.
+    #[tokio::test]
+    async fn spawn_supervise_surfaces_ready_markers_emitted_on_stdout() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        // Markers go to STDOUT (no `>&2`) — exactly how supervise emits them.
+        let script = stub(
+            dir.path(),
+            "stdout-ready.sh",
+            r#"echo "event runtime running handles=3"
+echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]"
+sleep 30"#,
+        );
+
+        let mut spawned =
+            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn stdout-ready stub");
+        let output = spawned.output.clone();
+        assert!(
+            wait_until(|| is_ready(&output.snapshot())).await,
+            "ready markers emitted on STDOUT must reach the merged buffer"
+        );
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap stdout-ready stub");
+        assert!(!is_pid_alive(spawned.pid));
+    }
+
+    /// Both streams feed the same buffer, so markers on STDERR also still
+    /// reach ready (back-compat with any engine build that logged to stderr).
+    #[tokio::test]
+    async fn spawn_supervise_surfaces_ready_markers_emitted_on_stderr() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(
+            dir.path(),
+            "stderr-ready.sh",
+            r#"echo "event runtime running handles=3" >&2
+echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+sleep 30"#,
+        );
+
+        let mut spawned =
+            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn stderr-ready stub");
+        let output = spawned.output.clone();
+        assert!(
+            wait_until(|| is_ready(&output.snapshot())).await,
+            "ready markers emitted on STDERR must reach the merged buffer"
+        );
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap stderr-ready stub");
+    }
+
+    /// A panic on STDERR must remain visible after the merge — the panic scan
+    /// reads the same buffer the (stdout) ready markers land in.
+    #[tokio::test]
+    async fn spawn_supervise_surfaces_panic_emitted_on_stderr() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(
+            dir.path(),
+            "panic.sh",
+            r#"echo "event runtime running handles=3"
+echo "thread 'main' (1) panicked at src/consumer.rs:1:1:" >&2
+sleep 30"#,
+        );
+
+        let mut spawned =
+            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn panic stub");
+        let output = spawned.output.clone();
+        assert!(
+            wait_until(|| is_panicked(&output.snapshot())).await,
+            "a panic on STDERR must reach the merged buffer"
+        );
+        // The half-alive guard still holds: a panic without the consumer line
+        // is never ready.
+        assert!(!is_ready(&spawned.output.snapshot()));
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap panic stub");
+    }
+
+    /// A3 half-alive guard across the stream split: `event runtime running` on
+    /// STDOUT with NO `consumer started` ANYWHERE must never read as ready,
+    /// even though the runtime-running marker is now drained from stdout.
+    #[tokio::test]
+    async fn spawn_supervise_marker_split_across_streams_is_not_spuriously_ready() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        // runtime-running on stdout; a DECOY on stderr that is NOT the
+        // consumer marker. `consumer started` appears nowhere.
+        let script = stub(
+            dir.path(),
+            "half-alive.sh",
+            r#"echo "event runtime running handles=3"
+echo "WARN department consumer thread exited" >&2
+sleep 30"#,
+        );
+
+        let mut spawned =
+            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn half-alive stub");
+        let output = spawned.output.clone();
+        // Wait until the runtime-running marker has definitely been drained.
+        assert!(
+            wait_until(|| output.snapshot().contains("event runtime running")).await,
+            "runtime-running marker must be drained from stdout"
+        );
+        // Give the stderr drain a moment too, then assert NOT ready.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !is_ready(&spawned.output.snapshot()),
+            "runtime-running alone (consumer line absent) must NOT be ready"
+        );
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap half-alive stub");
+    }
+
     // ---- reap_with_grace ----------------------------------------------------------
 
     #[tokio::test]
@@ -821,12 +1001,12 @@ wait"#,
         );
 
         let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn group");
-        let stderr = spawned.stderr.clone();
+        let stderr = spawned.output.clone();
         assert!(
             wait_until(|| stderr.snapshot().contains("grandchild: ")).await,
             "stub must report its grandchild pid"
         );
-        let snapshot = spawned.stderr.snapshot();
+        let snapshot = spawned.output.snapshot();
         let grandchild: i32 = snapshot
             .lines()
             .find_map(|line| line.strip_prefix("grandchild: "))
@@ -865,7 +1045,7 @@ while true; do sleep 1; done"#,
 
         let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn ignorer");
         // Only signal once the stub has confirmed its TERM trap is live.
-        let stderr = spawned.stderr.clone();
+        let stderr = spawned.output.clone();
         assert!(
             wait_until(|| stderr.snapshot().contains("trap installed")).await,
             "stub must confirm its trap before the test signals"
