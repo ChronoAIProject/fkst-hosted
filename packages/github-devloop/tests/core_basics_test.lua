@@ -149,15 +149,18 @@ return {
 
   test_review_meta_replay_fact_falls_back_to_state_version = function()
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
-    local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1"
-    local fact = core.review_meta_replay_fact({}, issue_proposal_id, issue_version, 7, "def456")
-    local expected_review = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+    local review_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local issue_version = review_version .. "/fix/1"
+    local expected_review = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
+    local marker = core.review_meta_marker(issue_proposal_id, "consensus:" .. expected_review .. "/review")
+    local fact = core.review_meta_replay_fact({ marker }, issue_proposal_id, issue_version, 7, "def456")
     t.eq(fact.proposal_id, expected_review)
     t.eq(fact.dedup_key, "consensus:" .. expected_review .. "/review")
     t.eq(fact.pr_number, 7)
     t.eq(fact.n, 0)
     t.eq(fact.source_ref.ref, "owner/repo#pr/7")
-    t.eq(core.review_meta_replay_fact({}, issue_proposal_id, issue_version, 7, "not-a-sha"), nil)
+    t.eq(core.review_meta_replay_fact({ marker }, issue_proposal_id, issue_version, 7, "feedface"), nil)
+    t.eq(core.review_meta_replay_fact({}, issue_proposal_id, issue_version, 7, "def456"), nil)
   end,
 
   test_ci_rollup_requires_completed_green_conclusion = function()

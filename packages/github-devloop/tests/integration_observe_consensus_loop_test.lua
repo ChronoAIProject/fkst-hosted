@@ -28,6 +28,7 @@ local run_observe_pr = h.run_observe_pr
 local run_review_pr = h.run_review_pr
 local run_review_result = h.run_review_result
 local run_fix = h.run_fix
+local set_pr_phase_comments = h.set_pr_phase_comments
 local run_review_loop = h.run_review_loop
 local run_review_meta = h.run_review_meta
 local run_merge = h.run_merge
@@ -334,21 +335,22 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:review-meta" }, "OPEN", {
       core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "review-meta", event.version),
+      core.review_meta_marker(event.proposal_id, event.review_dedup_key),
     })
-    mock_pr_origin({
-      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    set_pr_phase_comments({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
+      core.review_meta_marker(event.proposal_id, event.review_dedup_key),
     })
+    mock_pr_origin({ proposal_id = event.proposal_id, version = impl_version })
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-fix-escalation"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     local meta_raise = find_raise(result.raises, "devloop_review_meta").payload
-    local expected_review = core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, "def456")
     t.eq(meta_raise.schema, "github-devloop.review-meta.v1")
     t.eq(meta_raise.proposal_id, event.proposal_id)
-    t.eq(meta_raise.review_proposal_id, expected_review)
-    t.eq(meta_raise.review_dedup_key, "consensus:" .. expected_review .. "/review")
+    t.eq(meta_raise.review_proposal_id, event.review_proposal_id)
+    t.eq(meta_raise.review_dedup_key, event.review_dedup_key)
     t.eq(meta_raise.version, event.version)
     t.eq(meta_raise.pr_number, event.pr_number)
     t.eq(meta_raise.n, 0)
@@ -358,7 +360,7 @@ return {
       tostring(event.version),
       tostring(event.pr_number),
       "0",
-      "consensus:" .. expected_review .. "/review",
+      tostring(event.review_dedup_key),
     }))
     t.eq(count_calls("--json labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
