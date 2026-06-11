@@ -17,6 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Read-only workflow: docker builds + smokes never push back, so the
+          # token must not linger in .git/config for later steps to read.
+          persist-credentials: false
 
       - name: Skip on release-automation PRs
         id: gate

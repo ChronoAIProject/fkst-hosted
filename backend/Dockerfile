@@ -58,12 +58,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
        fi
 RUN test -x /engine-dist/bin/fkst-framework \
     || (echo "ERROR: fkst-framework not produced by the engine build" && exit 1)
-# Capture the engine version for the provenance file. Probe-confirmed: the
-# version lives in the root Cargo.toml under [workspace.package] and is the
-# first `version = "..."` line in that file.
-RUN sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1 > /engine-dist/ENGINE_VERSION; \
+# Capture the engine version for the provenance file. The parse is anchored
+# to the [workspace.package] table of the engine's root Cargo.toml — the
+# scan tracks the current TOML table, so a `version` key in any other table
+# (e.g. a dependency spec) can never be picked up — and the extracted value
+# must be semver-shaped.
+RUN awk -F'"' '/^\[/ { table = $0 } table == "[workspace.package]" && /^version[ \t]*=/ { print $2; exit }' Cargo.toml \
+        > /engine-dist/ENGINE_VERSION; \
     test -s /engine-dist/ENGINE_VERSION \
-    || (echo "ERROR: could not extract engine version from the engine Cargo.toml" && exit 1); \
+    || (echo "ERROR: no version key found under [workspace.package] in the engine Cargo.toml" && exit 1); \
+    grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' /engine-dist/ENGINE_VERSION \
+    || (echo "ERROR: engine version '$(cat /engine-dist/ENGINE_VERSION)' is not semver-shaped" && exit 1); \
     echo "INFO: engine version $(cat /engine-dist/ENGINE_VERSION)"
 
 # ---- server build stage ----
