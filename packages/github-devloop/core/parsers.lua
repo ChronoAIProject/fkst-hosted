@@ -164,6 +164,25 @@ function M.parse_pr_list_observe(stdout)
   return parse_numbered_list(stdout)
 end
 
+function M.parse_pr_list_freshness(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local prs = {}
+  each_paginated_item(decoded, function(pr)
+    if type(pr) == "table" and tonumber(pr.number) ~= nil then
+      table.insert(prs, {
+        number = tonumber(pr.number),
+        state = pr.state,
+        updated_at = pr.updated_at or pr.updatedAt,
+        head_sha = pr.headRefOid or pr.head_ref_oid,
+        head_ref_name = pr.headRefName or pr.head_ref_name,
+        base_ref_name = pr.baseRefName or pr.base_ref_name,
+        is_draft = pr.isDraft or pr.is_draft,
+      })
+    end
+  end)
+  return prs
+end
+
 function M.parse_issue_view_result(stdout)
   local decoded = json.decode(stdout or "{}")
   local state = M.issue_state_from_json(decoded)
@@ -312,6 +331,7 @@ function M.parse_pr_view_origin(stdout)
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
     head_sha = decoded.headRefOid or decoded.head_ref_oid,
     base_ref_name = decoded.baseRefName or decoded.base_ref_name,
+    base_ref_oid = decoded.baseRefOid or decoded.base_ref_oid,
     state = decoded.state,
     updated_at = decoded.updatedAt or decoded.updated_at,
     comments = M.comments_from_json(decoded.comments),
@@ -345,6 +365,7 @@ function M.parse_pr_view_merge(stdout)
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
   result.merged_at = decoded.mergedAt or decoded.merged_at
+  result.labels = label_names(decoded.labels)
   return result
 end
 
@@ -530,6 +551,44 @@ local function check_name(entry)
   return tostring(entry.name or entry.context or entry.workflowName or entry.workflow_name or "")
 end
 
+local function entry_commit_sha(entry)
+  if type(entry) ~= "table" then
+    return nil
+  end
+  local candidates = {
+    entry.headSha,
+    entry.head_sha,
+    entry.sha,
+    entry.oid,
+  }
+  if type(entry.commit) == "table" then
+    table.insert(candidates, entry.commit.oid)
+    table.insert(candidates, entry.commit.sha)
+  end
+  if type(entry.checkSuite) == "table" then
+    table.insert(candidates, entry.checkSuite.headSha)
+    table.insert(candidates, entry.checkSuite.head_sha)
+    if type(entry.checkSuite.commit) == "table" then
+      table.insert(candidates, entry.checkSuite.commit.oid)
+      table.insert(candidates, entry.checkSuite.commit.sha)
+    end
+  end
+  if type(entry.check_suite) == "table" then
+    table.insert(candidates, entry.check_suite.headSha)
+    table.insert(candidates, entry.check_suite.head_sha)
+    if type(entry.check_suite.commit) == "table" then
+      table.insert(candidates, entry.check_suite.commit.oid)
+      table.insert(candidates, entry.check_suite.commit.sha)
+    end
+  end
+  for _, candidate in ipairs(candidates) do
+    if M._is_git_sha(candidate) then
+      return tostring(candidate)
+    end
+  end
+  return nil
+end
+
 function M.pr_rollup_green(pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
@@ -625,6 +684,35 @@ function M.pr_rollup_failure_summary(pr)
   end
   summary = summary:gsub("[%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")
   return summary
+end
+
+function M.rollup_failure_gate_sha(pr)
+  local entries = type(pr) == "table" and pr.status_check_rollup or nil
+  if type(entries) ~= "table" or #entries == 0 then
+    return nil
+  end
+  local gate_sha = nil
+  for _, entry in ipairs(entries) do
+    local state, conclusion = check_entry_state(entry)
+    local is_failed = false
+    if state == "COMPLETED" then
+      is_failed = not green_check_conclusions[conclusion]
+    elseif conclusion == "" and red_status_states[state] then
+      is_failed = true
+    end
+    if is_failed then
+      local sha = entry_commit_sha(entry)
+      if sha == nil then
+        return nil
+      end
+      if gate_sha == nil then
+        gate_sha = sha
+      elseif gate_sha ~= sha then
+        return nil
+      end
+    end
+  end
+  return gate_sha
 end
 
 function M.rollup_red_fix_reason(pr, reason)
