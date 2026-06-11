@@ -864,6 +864,33 @@ function M.pr_origin_fact(comments)
   return nil
 end
 
+function M.orphan_reaped_marker(proposal_id, pr_number, reason)
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid orphan reaped pr number")
+  end
+  local safe_reason = M.sanitize_key(reason or "parent-terminal", false):gsub("/", "-")
+  return '<!-- fkst:github-devloop:orphan-reaped:v1 proposal="' .. tostring(proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" reason="' .. tostring(safe_reason)
+    .. '" -->'
+end
+
+function M.has_orphan_reaped_marker(comments, proposal_id, pr_number)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:orphan%-reaped:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
+        and tostring(marker:match('pr="([^"]+)"')) == tostring(pr_number) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function M.has_impl_failure_marker(comments, proposal_id, dedup_key)
   if type(comments) ~= "table" then
     return false
