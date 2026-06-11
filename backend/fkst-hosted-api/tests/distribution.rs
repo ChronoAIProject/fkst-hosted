@@ -701,6 +701,9 @@ async fn reaper_survives_transient_error() {
     assert_eq!(won[0].session_id, session.id);
 }
 
+/// The boot sweep fails THIS pod's pre-terminal sessions and releases their
+/// leases — and is scoped to this pod: sessions owned by other pods (their
+/// holder may be healthy) and unassigned pending sessions are untouched.
 #[tokio::test]
 async fn fail_orphans_releases_lease() {
     if !docker_available() {
@@ -710,10 +713,16 @@ async fn fail_orphans_releases_lease() {
     let (_container, db) = mongo_db().await;
     let (session, _lease) =
         seed_owned_session(&db, "pkg", "pod-dead", SessionStatus::Running).await;
+    // A foreign pod's live session + lease and an unassigned pending
+    // session: both must survive pod-dead's boot sweep.
+    let (foreign_session, foreign_lease) =
+        seed_owned_session(&db, "pkg-foreign", "pod-other", SessionStatus::Running).await;
+    let unassigned = session_doc("pkg-unassigned", SessionStatus::Pending);
+    insert_session(&db, &unassigned).await;
 
     let dist = distributor(&db, "pod-dead", vec![pod_load("pod-dead", 0)], 0);
     let failed = dist.fail_orphans_at_boot().await.expect("boot sweep");
-    assert_eq!(failed, 1, "the active session is swept");
+    assert_eq!(failed, 1, "exactly this pod's active session is swept");
 
     let stored = raw_session(&db, session.id).await;
     assert_eq!(stored.status, SessionStatus::Failed);
@@ -722,4 +731,20 @@ async fn fail_orphans_releases_lease() {
         raw_lease(&db, "pkg").await.is_none(),
         "the orphaned session's lease must be released at boot"
     );
+
+    // The foreign pod's session and lease are untouched (its recovery, if
+    // its holder really is dead, belongs to the lease-expiry takeover).
+    let foreign = raw_session(&db, foreign_session.id).await;
+    assert_eq!(foreign.status, SessionStatus::Running);
+    assert_eq!(foreign.pod_id.as_deref(), Some("pod-other"));
+    assert_eq!(
+        raw_lease(&db, "pkg-foreign").await.expect("lease present"),
+        foreign_lease,
+        "a foreign pod's lease must not be released by this pod's boot"
+    );
+
+    // The unassigned pending session stays pending for placement.
+    let pending = raw_session(&db, unassigned.id).await;
+    assert_eq!(pending.status, SessionStatus::Pending);
+    assert_eq!(pending.pod_id, None);
 }

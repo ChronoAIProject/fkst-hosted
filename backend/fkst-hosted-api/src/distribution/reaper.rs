@@ -122,13 +122,23 @@ impl Distributor {
     }
 
     /// Boot recovery (replaces the bare v1 orphan sweep): fail every
-    /// pre-terminal session AND release each one's lease at its stored
-    /// holder + token (equality pins; `NotHeld` is ignored). Single-replica
-    /// posture: any active session at boot refers to an engine process that
-    /// died with the previous pod. Run BEFORE the listener binds.
+    /// pre-terminal session **owned by this pod** AND release each one's
+    /// lease at its stored holder + token (equality pins; `NotHeld` is
+    /// ignored). Run BEFORE the listener binds.
+    ///
+    /// Scoped to `pod_id == self` so it stays correct beyond replicas=1
+    /// (#27): a restarting pod's stale identity can only refer to engine
+    /// processes that died with its previous incarnation, while sessions
+    /// owned by OTHER (possibly healthy) pods — and unassigned pending
+    /// sessions — are untouched here; dead foreign holders are recovered by
+    /// the reaper's lease-expiry takeover instead. With replicas=1 the
+    /// behavior is identical to the unscoped sweep.
     pub async fn fail_orphans_at_boot(&self) -> Result<u64, PlacementError> {
         let coll = self.db.sessions();
-        let filter = doc! { "status": { "$in": active_status_bson() } };
+        let filter = doc! {
+            "status": { "$in": active_status_bson() },
+            "pod_id": self.pod_id(),
+        };
         let mut cursor = coll.find(filter.clone()).await?;
         let mut orphans = Vec::new();
         while cursor.advance().await? {
