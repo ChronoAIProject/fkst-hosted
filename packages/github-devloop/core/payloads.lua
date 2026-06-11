@@ -180,16 +180,23 @@ function M.board_digest_block(repo, tick)
   local ok_closed, closed_result = pcall(M.gh_exec, { cmd = recent_closed_issue_list_cmd(M, repo), timeout = 30 })
   if not ok_issue or not ok_pr
     or type(issue_result) ~= "table" or issue_result.exit_code ~= 0
-    or type(pr_result) ~= "table" or pr_result.exit_code ~= 0
-    or not ok_closed or type(closed_result) ~= "table" or closed_result.exit_code ~= 0 then
+    or type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return ""
+  end
+
+  local closed_issues = nil
+  if ok_closed and type(closed_result) == "table" and closed_result.exit_code == 0 then
+    local ok_parse, parsed = pcall(parse_board_list, closed_result.stdout)
+    if ok_parse then
+      closed_issues = parsed
+    end
   end
 
   local block = render_board_digest(
     M,
     parse_board_list(issue_result.stdout),
     parse_board_list(pr_result.stdout),
-    parse_board_list(closed_result.stdout)
+    closed_issues
   )
   cache_set(key, block)
   return block

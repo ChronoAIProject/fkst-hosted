@@ -97,6 +97,25 @@ local function mock_board_lists(issue_count, pr_count, repo)
   })
 end
 
+local function mock_board_lists_closed_failure(issue_count, pr_count, repo)
+  repo = repo or "owner/repo"
+  t.mock_command("gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+    stdout = issue_list_json(issue_count),
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+    stdout = pr_list_json(pr_count),
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh issue list --repo '" .. repo .. "' --state closed --limit 30 --json number,title,closedAt,labels", {
+    stdout = "",
+    stderr = "closed issue query failed",
+    exit_code = 1,
+  })
+end
+
 local function mock_board_title(title, repo)
   repo = repo or "owner/repo"
   t.mock_command("gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
@@ -260,6 +279,22 @@ return {
     t.eq(count_calls("gh issue list --repo 'owner/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
     t.eq(count_calls("gh issue list --repo 'other/repo' --state open --limit 100 --json number,title,labels"), 1)
     t.eq(count_calls("gh issue list --repo 'other/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
+  end,
+
+  test_board_digest_keeps_open_context_when_closed_digest_fetch_fails = function()
+    mock_board_lists_closed_failure(2, 1)
+
+    local result = probe_result(run_probe({
+      mode = "block",
+      repo = "owner/repo",
+      tick = "2026-06-10T02:07:03Z",
+    }, h.opts("board-digest-closed-fetch-fails"))).body
+
+    t.is_true(result:find("Open items snapshot:", 1, true) ~= nil)
+    t.is_true(result:find("#1 [fkst-dev:thinking] Issue title number 1", 1, true) ~= nil)
+    t.is_true(result:find("#101 [fkst-dev:reviewing] PR title number 1", 1, true) ~= nil)
+    t.is_true(result:find("Recent closed issues for recurrence judgment:", 1, true) ~= nil)
+    t.is_true(result:find("(none fetched)", 1, true) ~= nil)
   end,
 
   test_truncate_utf8_handles_mixed_width_boundaries = function()
