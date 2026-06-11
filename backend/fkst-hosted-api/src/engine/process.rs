@@ -8,9 +8,11 @@
 //!   binary, which orphans its child by design — spike Q7) in its OWN process
 //!   group (`process_group(0)`, PGID == child PID) so `killpg` reaps the
 //!   supervisor AND its framework grandchildren.
-//! - Readiness requires BOTH `event runtime running handles=` and at least
-//!   one `consumer started dept=` line: the runtime-running line alone is
-//!   emitted even in the half-alive unset-`FKST_RUNTIME_ROOT` mode (spike Q9).
+//! - Readiness requires BOTH the `event runtime running` and at least one
+//!   `consumer started` message: the runtime-running line alone is emitted
+//!   even in the half-alive unset-`FKST_RUNTIME_ROOT` mode (spike Q9). The
+//!   markers are message-text-only because the engine's ANSI styling breaks
+//!   any substring spanning a field boundary (see [`is_ready`]).
 //! - Package-root wiring is FLAG-ONLY: `FKST_PACKAGE_ROOT`/`FKST_PACKAGE_ROOTS`
 //!   env substitution exists upstream but its precedence against the flag is
 //!   untested (spike Q8), so both variables are removed from the child env.
