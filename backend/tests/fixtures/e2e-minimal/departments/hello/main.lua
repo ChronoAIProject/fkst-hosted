@@ -9,6 +9,10 @@
 -- and `supervise` starts, emits both ready markers ("event runtime running"
 -- and "consumer started"), then idles — exactly what the happy-path e2e
 -- needs to observe `running` without any external inputs.
+--
+-- NOTE: the durable `tick` subscription's reach-`running` guarantee depends on
+-- the runner providing FKST_DURABLE_ROOT (a #18 runner concern, satisfied by
+-- the deployed image).
 local M = {}
 
 M.spec = {

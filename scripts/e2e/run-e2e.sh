@@ -196,8 +196,8 @@ start_session() {
         http_failure POST "$API_BASE/sessions" '201'
         die 4 "session start failed with HTTP $HTTP_CODE"
     fi
-    SESSION_ID="$(jq -r '.id // empty' "$BODY_FILE")"
-    session_status="$(jq -r '.status // empty' "$BODY_FILE")"
+    SESSION_ID="$(jq -r '.id // empty' "$BODY_FILE" 2>/dev/null)" || SESSION_ID=''
+    session_status="$(jq -r '.status // empty' "$BODY_FILE" 2>/dev/null)" || session_status=''
     if [ -z "$SESSION_ID" ]; then
         http_failure POST "$API_BASE/sessions" '201 with a non-empty id'
         die 4 'session start answered 201 without a session id'
@@ -219,7 +219,7 @@ poll_until_running() {
             dump_session
             die 5 "session poll failed with HTTP $HTTP_CODE"
         fi
-        session_status="$(jq -r '.status // empty' "$BODY_FILE")"
+        session_status="$(jq -r '.status // empty' "$BODY_FILE" 2>/dev/null)" || session_status=''
         case "$session_status" in
         running)
             log 'step 4: session is running'
@@ -229,7 +229,7 @@ poll_until_running() {
             log "step 4: status=$session_status ..."
             ;;
         failed)
-            session_error="$(jq -r '.error // "null"' "$BODY_FILE")"
+            session_error="$(jq -r '.error // "null"' "$BODY_FILE" 2>/dev/null)" || session_error='null'
             log "step 4: session FAILED during start: $session_error"
             dump_session
             die 5 'session reached failed while waiting for running'
@@ -267,7 +267,7 @@ poll_until_stopped() {
             dump_session
             die 7 "session poll failed with HTTP $HTTP_CODE"
         fi
-        session_status="$(jq -r '.status // empty' "$BODY_FILE")"
+        session_status="$(jq -r '.status // empty' "$BODY_FILE" 2>/dev/null)" || session_status=''
         case "$session_status" in
         stopped)
             log 'step 6: session is stopped'
@@ -277,7 +277,7 @@ poll_until_stopped() {
             log 'step 6: status=stopping ...'
             ;;
         failed)
-            session_error="$(jq -r '.error // "null"' "$BODY_FILE")"
+            session_error="$(jq -r '.error // "null"' "$BODY_FILE" 2>/dev/null)" || session_error='null'
             log "step 6: session FAILED during stop: $session_error"
             dump_session
             die 7 'session reached failed while waiting for stopped'
