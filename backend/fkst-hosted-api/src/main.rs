@@ -5,8 +5,10 @@ use std::process::ExitCode;
 
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
+use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::packages::PackageRepository;
 use fkst_hosted_api::router::build_router;
+use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
 use tracing_subscriber::EnvFilter;
 
@@ -75,12 +77,40 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // 4c. Load the engine configuration (fail-closed: a zero timeout or a
+    //     malformed value must never reach a live session).
+    let engine_config = match EngineConfig::load_from_env() {
+        Ok(engine_config) => engine_config,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to load engine configuration");
+            return ExitCode::FAILURE;
+        }
+    };
+    tracing::info!(
+        framework_bin = %engine_config.framework_bin.display(),
+        "engine config loaded"
+    );
+
+    // 4d. Build the session service and sweep orphans BEFORE binding: any
+    //     pre-terminal session in Mongo refers to an engine process that
+    //     died with the previous pod (v1 single-pod posture) and must be
+    //     failed before clients can observe stale "running" state.
+    let sessions = SessionService::new(SessionRepo::new(&db), packages.clone(), engine_config);
+    match sessions.repo().fail_orphans().await {
+        Ok(count) => tracing::info!(count, "orphan sweep completed"),
+        Err(error) => {
+            tracing::error!(error = %error, "orphan sweep failed");
+            return ExitCode::FAILURE;
+        }
+    }
+
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let app = build_router(AppState {
         config,
         db,
         packages,
+        sessions: sessions.clone(),
     });
     tracing::info!("router built");
 
@@ -99,8 +129,14 @@ async fn main() -> ExitCode {
         .await
     {
         tracing::error!(error = %error, "server error");
+        // Still drain the session drivers: a serve error must not orphan
+        // live engine processes without a SIGTERM.
+        sessions.shutdown().await;
         return ExitCode::FAILURE;
     }
+
+    // 7. Drain the session drivers (SIGTERM live engines, bounded wait).
+    sessions.shutdown().await;
 
     tracing::info!("server stopped");
     ExitCode::SUCCESS

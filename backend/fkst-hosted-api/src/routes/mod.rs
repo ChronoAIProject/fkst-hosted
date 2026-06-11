@@ -3,6 +3,7 @@
 pub mod extract;
 pub mod health;
 pub mod packages;
+pub mod sessions;
 
 use crate::error::AppError;
 

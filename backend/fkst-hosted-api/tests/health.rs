@@ -11,8 +11,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
+use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::packages::PackageRepository;
 use fkst_hosted_api::router::build_router;
+use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -30,10 +32,16 @@ async fn test_router() -> axum::Router {
         .await
         .expect("lazy handle must build without I/O");
     let packages = PackageRepository::new(&db.database);
+    let sessions = SessionService::new(
+        SessionRepo::new(&db),
+        packages.clone(),
+        EngineConfig::default(),
+    );
     build_router(AppState {
         config,
         db,
         packages,
+        sessions,
     })
 }
 
