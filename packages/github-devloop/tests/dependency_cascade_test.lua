@@ -422,6 +422,69 @@ return {
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-wait:v1"))
   end,
 
+  test_dependency_hold_fact_reads_wait_failed_and_cycle_holds = function()
+    local gh_failed = core.dependency_hold_fact({
+      core.state_marker(proposal_id, "ready", version),
+      "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
+        .. core.dependency_wait_marker(proposal_id, version, { 42 }),
+    }, proposal_id)
+    t.eq(gh_failed.marker_kind, "dependency-wait")
+    t.eq(gh_failed.hold_kind, "unresolvable")
+    t.eq(gh_failed.reason, "gh-failed")
+
+    local cycle = core.dependency_hold_fact({
+      core.state_marker(proposal_id, "ready", version),
+      "github-devloop dependency hold: cycle\n\nReason: dependency-cycle\n\n"
+        .. core.dependency_cycle_marker(proposal_id, version),
+    }, proposal_id)
+    t.eq(cycle.marker_kind, "dependency-cycle")
+    t.eq(cycle.reason, "dependency-cycle")
+  end,
+
+  test_gh_failed_hold_rechecks_and_releases_on_next_poll = function()
+    mock_observe_issue()
+    mock_blocked_by_failure(42)
+    local held = run_observe()
+    t.eq(held.exit_code, 0)
+    t.eq(has_queue(held.raises, "devloop_ready"), false)
+    t.is_true(has_marker(held.raises, "Reason: gh-failed"))
+
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 42 }),
+      }
+    )
+    mock_blocked_by(42, {})
+    local released = run_observe()
+    t.eq(released.exit_code, 0)
+    t.is_true(has_queue(released.raises, "devloop_ready"))
+    local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
+      return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
+    end)
+    t.is_true(clear ~= nil)
+  end,
+
+  test_non_hold_state_clears_stale_dependency_label = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:implementing", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "implementing", "ready-consensus-github-devloop-issue-owner-repo-42-2026-06-03T01-02-03Z"),
+        "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 7 }),
+      }
+    )
+    local result = run_observe()
+    t.eq(result.exit_code, 0)
+    local clear = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
+      return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
+    end)
+    t.is_true(clear ~= nil)
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
+  end,
+
   test_implement_backstop_returns_without_implementing = function()
     mock_blocked_by(42, { { number = 7 } })
     mock_blocked_by(7, {})
