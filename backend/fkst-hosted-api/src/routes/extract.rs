@@ -15,6 +15,22 @@ use crate::error::AppError;
 /// renders the canonical `{"error", "message"}` envelope as a `400`.
 pub struct AppJson<T>(pub T);
 
+/// Cap (in characters) on the rejection text recorded in the warn log.
+///
+/// Serde's rejection text quotes fragments of the client's own payload, so
+/// it is attacker-influenced: without a cap a hostile body could flood the
+/// log, and without escaping it could forge log lines via embedded newlines
+/// or terminal control sequences.
+const MAX_REJECTION_LOG_CHARS: usize = 256;
+
+/// Truncate client-influenced rejection text for logging: at most
+/// [`MAX_REJECTION_LOG_CHARS`] characters (`char`-wise, so never split mid
+/// code point). The caller MUST log the result with the `?` (Debug) sigil so
+/// newlines and control characters render escaped, never verbatim.
+fn log_reason(text: &str) -> String {
+    text.chars().take(MAX_REJECTION_LOG_CHARS).collect()
+}
+
 /// Map a body rejection onto the unified error type.
 ///
 /// - Over-limit bodies (the body-limit layer surfaces 413) become a terse
@@ -42,7 +58,11 @@ where
         match axum::Json::<T>::from_request(req, state).await {
             Ok(axum::Json(value)) => Ok(AppJson(value)),
             Err(rejection) => {
-                tracing::warn!(reason = %rejection, "request body rejected");
+                // Debug-escaped (`?`) and length-capped: the rejection text
+                // echoes client payload fragments and must not be able to
+                // forge or flood log output.
+                let reason = log_reason(&rejection.to_string());
+                tracing::warn!(reason = ?reason, "request body rejected");
                 Err(map_rejection(rejection))
             }
         }
@@ -139,6 +159,28 @@ mod tests {
             message.starts_with("invalid request body: "),
             "got: {message}"
         );
+    }
+
+    #[test]
+    fn log_reason_caps_the_length_in_characters() {
+        let long = "é".repeat(MAX_REJECTION_LOG_CHARS + 100);
+        let reason = log_reason(&long);
+        assert_eq!(reason.chars().count(), MAX_REJECTION_LOG_CHARS);
+
+        let short = "tiny reason";
+        assert_eq!(log_reason(short), short);
+    }
+
+    #[test]
+    fn log_reason_renders_control_characters_escaped_under_debug() {
+        // The call site logs with the `?` sigil (Debug). A payload-borne
+        // newline or ESC must come out escaped, not as a raw byte that could
+        // forge a second log line or smuggle a terminal control sequence.
+        let hostile = "line1\nFORGED level=warn\u{1b}[0m";
+        let rendered = format!("{:?}", log_reason(hostile));
+        assert!(!rendered.contains('\n'), "raw newline leaked: {rendered}");
+        assert!(!rendered.contains('\u{1b}'), "raw ESC leaked: {rendered}");
+        assert!(rendered.contains("\\n"), "newline must render escaped");
     }
 
     #[tokio::test]
