@@ -110,6 +110,38 @@ local encoded = encode_hex("6769746875622d6465766c6f6f7020e6809de88083")
         self.assertIn(root / "packages/github-devloop/core/strings.lua", hits)
 
 
+class GhRatePoolSizingGuardTest(unittest.TestCase):
+    def sizing_lines(self, source: str) -> list[int]:
+        return check_repo.gh_rate_pool_sizing_lines(source)
+
+    def test_warns_on_hardcoded_gh_pool_sizing(self) -> None:
+        source = """
+function M.gh_rate_pool()
+  return { name = "gh", burst = 50, refill_per_hour = 3250 }
+end
+"""
+        self.assertEqual(self.sizing_lines(source), [3])
+
+    def test_allows_name_only_pool_and_unrelated_sizing_fields(self) -> None:
+        source = """
+function M.gh_rate_pool()
+  return { name = "gh" }
+end
+
+local unrelated = { burst = 50, refill_per_hour = 3250 }
+"""
+        self.assertEqual(self.sizing_lines(source), [])
+
+    def test_ignores_comments_and_strings(self) -> None:
+        source = """
+function M.gh_rate_pool()
+  -- burst = 50
+  return { name = "gh", note = "refill_per_hour" }
+end
+"""
+        self.assertEqual(self.sizing_lines(source), [])
+
+
 class RunScriptContractTest(unittest.TestCase):
     def test_supervise_requires_shared_rate_pool_root(self) -> None:
         source = Path(__file__).with_name("run.sh").read_text(encoding="utf-8")

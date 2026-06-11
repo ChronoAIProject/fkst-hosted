@@ -35,14 +35,14 @@ function pipeline(event)
   local candidate = event.payload or {}
   if not core.is_supported_intake_candidate(candidate) then
     core.log_entry("intake_judge", event, "unknown", candidate.dedup_key)
-    core.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|decline", "skip-foreign(payload)", "unsupported event payload")
+    core.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
   core.log_entry("intake_judge", event, candidate.proposal_id, candidate.dedup_key)
   local repo, issue_number = core.parse_issue_source_ref(candidate.source_ref)
   if repo == nil then
-    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-foreign(source_ref)", "invalid source_ref")
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-foreign(source_ref)", "invalid source_ref")
     return
   end
 
@@ -57,11 +57,11 @@ function pipeline(event)
     local current = core.parse_issue_view_intake_judge(view.stdout)
     core.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
     if current.state ~= "OPEN" then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-closed", "issue is not open")
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-closed", "issue is not open")
       return
     end
     if core.is_opted_in(current.labels) then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-enabled", "fkst-dev:enabled is already present")
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
       return
     end
     if core.has_intake_decision_marker(current.comments, candidate.proposal_id) then
