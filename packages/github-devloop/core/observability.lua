@@ -40,7 +40,7 @@ local function json_string(value)
   return '"' .. text .. '"'
 end
 
-local function dashboard_input_path(repo)
+local function dashboard_input_path(repo, version, hash)
   local safe = M.sanitize_key(tostring(repo or "repo"), false):gsub("[/%s]+", "-")
   safe = safe:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if safe == "" then
@@ -49,7 +49,16 @@ local function dashboard_input_path(repo)
   if #safe > 120 then
     safe = safe:sub(1, 120):gsub("%-+$", "")
   end
-  return "/tmp/fkst-github-devloop-dashboard-" .. safe .. ".json"
+  local identity = M.sanitize_key(tostring(version or "unknown") .. "-" .. tostring(hash or "unknown"), false)
+  identity = identity:gsub("[/%s]+", "-")
+  identity = identity:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+  if identity == "" then
+    identity = "unknown"
+  end
+  if #identity > 160 then
+    identity = identity:sub(1, 160):gsub("%-+$", "")
+  end
+  return "/tmp/fkst-github-devloop-dashboard-" .. safe .. "-" .. identity .. ".json"
 end
 
 local function dashboard_marker(hash, generated_at)
@@ -540,7 +549,7 @@ local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login)
 end
 
 local function write_dashboard_input(repo, title, body)
-  local path = dashboard_input_path(repo)
+  local path = dashboard_input_path(repo, dashboard_version_from_body(body), dashboard_hash_from_body(body))
   file.write(path, "{"
     .. '"title":' .. json_string(title)
     .. ',"body":' .. json_string(body)
