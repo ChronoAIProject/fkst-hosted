@@ -320,7 +320,7 @@ return {
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
   end,
 
-  test_judge_escalate_to_class_files_class_issue_and_enables_pipeline = function()
+  test_judge_escalate_to_class_files_class_issue_and_folds_instance = function()
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {}, {
@@ -331,18 +331,16 @@ return {
 
     local result = run_judge(payload, opts("intake-escalate-class"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     local create = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find('decision="escalate-to-class"', 1, true) ~= nil)
     t.is_true(comment.body:find("Rule of Three", 1, true) ~= nil)
     t.eq(create.schema, "github-proxy.issue-create.v1")
     t.eq(create.parent_comment_target.issue_number, "42")
     t.is_true(create.title:find("Class fix needed:", 1, true) == 1)
     t.is_true(create.body:find("intent-before-create", 1, true) ~= nil)
-    t.eq(label.add_labels[1], "fkst-dev:enabled")
-    t.eq(#label.remove_labels, 0)
+    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_label_request"))
   end,
 
   test_judge_declines_umbrella_tracker_through_codex_policy = function()

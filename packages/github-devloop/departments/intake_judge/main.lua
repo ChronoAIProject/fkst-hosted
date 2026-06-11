@@ -20,7 +20,7 @@ local function decline_result(reason)
 end
 
 local function enables_pipeline(action)
-  return action == "enable" or action == "escalate-to-class"
+  return action == "enable"
 end
 
 local function judgment_worktree(role, identity)
