@@ -42,7 +42,7 @@ function pipeline(event)
     return
   end
 
-  local list = exec_sync({ cmd = core.gh_issue_list_intake_cmd(repo, INTAKE_LIMIT), timeout = 30 })
+  local list = core.gh_exec({ cmd = core.gh_issue_list_intake_cmd(repo, INTAKE_LIMIT), timeout = 30 })
   if list.exit_code ~= 0 then
     error("github-devloop: gh issue intake list failed: " .. tostring(list.stderr))
   end
@@ -51,7 +51,7 @@ function pipeline(event)
     local issue_number = tostring(issue.number or "")
     if core.issue_ref_round_trips(repo, issue_number) and not should_skip_known(issue.labels) then
       local proposal_id = core.proposal_id(repo, issue_number)
-      local view = exec_sync({ cmd = core.gh_issue_view_intake_scan_cmd(repo, issue_number), timeout = 30 })
+      local view = core.gh_exec({ cmd = core.gh_issue_view_intake_scan_cmd(repo, issue_number), timeout = 30 })
       if view.exit_code ~= 0 then
         error("github-devloop: gh issue intake scan view failed: " .. tostring(view.stderr))
       end

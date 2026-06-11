@@ -34,6 +34,7 @@ function M.comments_from_json(comments_json)
         author_login = tostring(comment.author_login)
       end
       table.insert(comments, {
+        id = comment.id,
         body = tostring(comment.body),
         author_login = author_login,
         created_at = comment.createdAt or comment.created_at,
@@ -120,8 +121,71 @@ function M.parse_issue_list_observe(stdout)
   return parse_numbered_list(stdout)
 end
 
+function M.parse_dashboard_issue_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  if type(decoded) ~= "table" then
+    return items
+  end
+  each_paginated_item(decoded, function(issue)
+    if type(issue) == "table" and tonumber(issue.number) ~= nil then
+      local author_login = nil
+      if type(issue.author) == "table" and issue.author.login ~= nil then
+        author_login = tostring(issue.author.login)
+      elseif issue.author_login ~= nil then
+        author_login = tostring(issue.author_login)
+      elseif type(issue.user) == "table" and issue.user.login ~= nil then
+        author_login = tostring(issue.user.login)
+      end
+      table.insert(items, {
+        number = tonumber(issue.number),
+        title = tostring(issue.title or ""),
+        author_login = author_login,
+        body = tostring(issue.body or ""),
+        labels = issue.labels,
+        updated_at = issue.updated_at or issue.updatedAt,
+      })
+    end
+  end)
+  return items
+end
+
+function M.parse_repo_labels(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local items = {}
+  each_paginated_item(decoded, function(label)
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(items, {
+        name = tostring(label.name),
+        color = label.color and tostring(label.color) or nil,
+        description = label.description and tostring(label.description) or nil,
+      })
+    end
+  end)
+  return items
+end
+
 function M.parse_pr_list_observe(stdout)
   return parse_numbered_list(stdout)
+end
+
+function M.parse_pr_list_freshness(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local prs = {}
+  each_paginated_item(decoded, function(pr)
+    if type(pr) == "table" and tonumber(pr.number) ~= nil then
+      table.insert(prs, {
+        number = tonumber(pr.number),
+        state = pr.state,
+        updated_at = pr.updated_at or pr.updatedAt,
+        head_sha = pr.headRefOid or pr.head_ref_oid,
+        head_ref_name = pr.headRefName or pr.head_ref_name,
+        base_ref_name = pr.baseRefName or pr.base_ref_name,
+        is_draft = pr.isDraft or pr.is_draft,
+      })
+    end
+  end)
+  return prs
 end
 
 function M.parse_issue_view_result(stdout)
@@ -224,6 +288,7 @@ end
 function M.parse_issue_view_observe(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
+    title = tostring(decoded.title or ""),
     state = decoded.state,
     comments = M.comments_from_json(decoded.comments),
   }
@@ -271,6 +336,7 @@ function M.parse_pr_view_origin(stdout)
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
     head_sha = decoded.headRefOid or decoded.head_ref_oid,
     base_ref_name = decoded.baseRefName or decoded.base_ref_name,
+    base_ref_oid = decoded.baseRefOid or decoded.base_ref_oid,
     state = decoded.state,
     updated_at = decoded.updatedAt or decoded.updated_at,
     comments = M.comments_from_json(decoded.comments),
@@ -304,6 +370,7 @@ function M.parse_pr_view_merge(stdout)
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
   result.merged_at = decoded.mergedAt or decoded.merged_at
+  result.labels = label_names(decoded.labels)
   return result
 end
 
@@ -336,6 +403,31 @@ function M.parse_pr_list_head_base(stdout)
     end
   end)
   return prs
+end
+
+local function check_run_entries(value)
+  if type(value) ~= "table" then
+    return {}
+  end
+  if type(value.check_runs) == "table" then
+    return value.check_runs
+  end
+  return value
+end
+
+function M.parse_commit_check_runs(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local runs = {}
+  for _, run in ipairs(check_run_entries(decoded)) do
+    if type(run) == "table" then
+      table.insert(runs, {
+        name = run.name,
+        status = run.status,
+        conclusion = run.conclusion,
+      })
+    end
+  end
+  return runs
 end
 
 function M.parse_pr_view_head_state(stdout)
@@ -425,10 +517,25 @@ local green_status_states = {
   SUCCESS = true,
 }
 
+local green_check_run_conclusions = {
+  SUCCESS = true,
+  NEUTRAL = true,
+  SKIPPED = true,
+}
+
 local red_status_states = {
   ERROR = true,
   FAILURE = true,
 }
+
+local required_check_run_names = {
+  "test",
+}
+
+local required_check_run_name_set = {}
+for _, name in ipairs(required_check_run_names) do
+  required_check_run_name_set[name] = true
+end
 
 local max_rollup_check_name_len = 80
 local max_rollup_failure_summary_len = 200
@@ -453,6 +560,51 @@ local function safe_rollup_check_name(M, entry)
   return name
 end
 
+local function check_name(entry)
+  if type(entry) ~= "table" then
+    return ""
+  end
+  return tostring(entry.name or entry.context or entry.workflowName or entry.workflow_name or "")
+end
+
+local function entry_commit_sha(entry)
+  if type(entry) ~= "table" then
+    return nil
+  end
+  local candidates = {
+    entry.headSha,
+    entry.head_sha,
+    entry.sha,
+    entry.oid,
+  }
+  if type(entry.commit) == "table" then
+    table.insert(candidates, entry.commit.oid)
+    table.insert(candidates, entry.commit.sha)
+  end
+  if type(entry.checkSuite) == "table" then
+    table.insert(candidates, entry.checkSuite.headSha)
+    table.insert(candidates, entry.checkSuite.head_sha)
+    if type(entry.checkSuite.commit) == "table" then
+      table.insert(candidates, entry.checkSuite.commit.oid)
+      table.insert(candidates, entry.checkSuite.commit.sha)
+    end
+  end
+  if type(entry.check_suite) == "table" then
+    table.insert(candidates, entry.check_suite.headSha)
+    table.insert(candidates, entry.check_suite.head_sha)
+    if type(entry.check_suite.commit) == "table" then
+      table.insert(candidates, entry.check_suite.commit.oid)
+      table.insert(candidates, entry.check_suite.commit.sha)
+    end
+  end
+  for _, candidate in ipairs(candidates) do
+    if M._is_git_sha(candidate) then
+      return tostring(candidate)
+    end
+  end
+  return nil
+end
+
 function M.pr_rollup_green(pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
@@ -470,6 +622,33 @@ function M.pr_rollup_green(pr)
       return false, "rollup-red"
     else
       return false, "rollup-pending"
+    end
+  end
+  return true, "rollup-green"
+end
+
+function M.commit_check_runs_green(runs)
+  if type(runs) ~= "table" or #runs == 0 then
+    return false, "missing-status-rollup"
+  end
+  local seen_required = {}
+  for _, run in ipairs(runs) do
+    local name = check_name(run)
+    if required_check_run_name_set[name] then
+      seen_required[name] = true
+      local state, conclusion = check_entry_state(run)
+      if state == "COMPLETED" then
+        if not green_check_run_conclusions[conclusion] then
+          return false, "rollup-red"
+        end
+      else
+        return false, "rollup-pending"
+      end
+    end
+  end
+  for _, name in ipairs(required_check_run_names) do
+    if not seen_required[name] then
+      return false, "missing-status-rollup"
     end
   end
   return true, "rollup-green"
@@ -523,6 +702,35 @@ function M.pr_rollup_failure_summary(pr)
   return summary
 end
 
+function M.rollup_failure_gate_sha(pr)
+  local entries = type(pr) == "table" and pr.status_check_rollup or nil
+  if type(entries) ~= "table" or #entries == 0 then
+    return nil
+  end
+  local gate_sha = nil
+  for _, entry in ipairs(entries) do
+    local state, conclusion = check_entry_state(entry)
+    local is_failed = false
+    if state == "COMPLETED" then
+      is_failed = not green_check_conclusions[conclusion]
+    elseif conclusion == "" and red_status_states[state] then
+      is_failed = true
+    end
+    if is_failed then
+      local sha = entry_commit_sha(entry)
+      if sha == nil then
+        return nil
+      end
+      if gate_sha == nil then
+        gate_sha = sha
+      elseif gate_sha ~= sha then
+        return nil
+      end
+    end
+  end
+  return gate_sha
+end
+
 function M.rollup_red_fix_reason(pr, reason)
   local base_reason = tostring(reason or "rollup-red")
   local failure_summary = M.pr_rollup_failure_summary(pr)
@@ -534,6 +742,7 @@ end
 
 M._max_rollup_check_name_len = max_rollup_check_name_len
 M._max_rollup_failure_summary_len = max_rollup_failure_summary_len
+M._required_check_run_names = required_check_run_names
 
 function M.pr_mergeable(pr)
   if type(pr) ~= "table" then

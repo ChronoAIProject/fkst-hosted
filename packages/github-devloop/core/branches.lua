@@ -95,6 +95,16 @@ function M.git_push_worktree_branch_update_cmd(worktree, branch)
     .. M._shell_single_quote(require_safe_branch("push branch", branch))
 end
 
+function M.git_push_worktree_branch_update_with_lease_cmd(worktree, branch, expected_old_sha)
+  local safe_branch = require_safe_branch("push branch", branch)
+  local safe_expected_old_sha = require_safe_sha("expected old branch sha", expected_old_sha)
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " push origin HEAD:refs/heads/"
+    .. M._shell_single_quote(safe_branch)
+    .. " --force-with-lease="
+    .. M._shell_single_quote("refs/heads/" .. safe_branch .. ":" .. safe_expected_old_sha)
+end
+
 function M.git_unmerged_paths_cmd(worktree)
   if worktree == nil then
     return "git ls-files -u"
@@ -142,6 +152,17 @@ function M.branch_sync_lock_key(repo, upstream, integration)
     .. require_safe_branch("integration branch", integration)
   if not M._is_path_safe_key(key, M._max_key_len) then
     error("github-devloop: invalid branch sync lock key")
+  end
+  return key
+end
+
+function M.pr_freshness_lock_key(repo, branch)
+  local key = "github-devloop/pr-freshness/"
+    .. M.safe_repo(require_safe_repo(repo))
+    .. "/"
+    .. require_safe_branch("managed branch", branch)
+  if not M._is_path_safe_key(key, M._max_key_len) then
+    error("github-devloop: invalid PR freshness lock key")
   end
   return key
 end
@@ -239,6 +260,22 @@ function M.branch_sync_dedup_key(repo, upstream, integration, upstream_sha)
   })
 end
 
+function M.pr_freshness_dedup_key(repo, branch, baseline_sha)
+  return M._dedup_key({
+    "pr-freshness",
+    require_safe_repo(repo),
+    require_safe_branch("managed branch", branch),
+    require_safe_sha("baseline sha", baseline_sha),
+  })
+end
+
+function M.pr_freshness_source_ref(repo, pr_number)
+  return {
+    kind = "external",
+    ref = require_safe_repo(repo) .. "#pr/" .. tostring(pr_number),
+  }
+end
+
 function M.sync_commit_marker(repo, upstream, integration, upstream_sha, integration_parent, result)
   return '<!-- fkst:github-devloop:sync:v1 repo="' .. require_safe_repo(repo)
     .. '" upstream="' .. require_safe_branch("upstream branch", upstream)
@@ -254,6 +291,18 @@ function M.sync_commit_message(repo, upstream, integration, upstream_sha, integr
     .. " into " .. require_safe_branch("integration branch", integration)
     .. "\n\n"
     .. M.sync_commit_marker(repo, upstream, integration, upstream_sha, integration_parent, result)
+end
+
+function M.pr_freshness_commit_message(repo, branch, integration, branch_parent, integration_sha)
+  return "Refresh " .. require_safe_branch("managed branch", branch)
+    .. " from " .. require_safe_branch("integration branch", integration)
+    .. "\n\n"
+    .. "<!-- fkst:github-devloop:pr-freshness:v1 repo=\"" .. require_safe_repo(repo)
+    .. "\" branch=\"" .. require_safe_branch("managed branch", branch)
+    .. "\" integration=\"" .. require_safe_branch("integration branch", integration)
+    .. "\" branch_parent=\"" .. require_safe_sha("branch parent", branch_parent)
+    .. "\" integration_sha=\"" .. require_safe_sha("integration sha", integration_sha)
+    .. "\" -->"
 end
 
 function M.branch_sync_worktree_path(runtime_root, repo, upstream, integration, integration_sha)
@@ -300,6 +349,22 @@ function M.branch_sync_message_file(runtime_root, repo, upstream, integration, u
   return "/tmp/fkst-github-devloop-sync-message-" .. suffix .. ".txt"
 end
 
+function M.pr_freshness_message_file(runtime_root, repo, branch, integration, branch_parent, integration_sha)
+  local suffix = M._decimal_checksum(
+    require_safe_repo(repo)
+      .. "#"
+      .. require_safe_branch("managed branch", branch)
+      .. "#"
+      .. require_safe_branch("integration branch", integration)
+      .. "#"
+      .. require_safe_sha("branch parent", branch_parent)
+      .. "#"
+      .. require_safe_sha("integration sha", integration_sha)
+  )
+  runtime_root_path(runtime_root)
+  return "/tmp/fkst-github-devloop-pr-freshness-message-" .. suffix .. ".txt"
+end
+
 function M.is_supported_sync_conflict(payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-devloop.v1"
@@ -320,15 +385,24 @@ function M.is_supported_sync_conflict(payload)
   end
 
   local expected_ref = M.branch_sync_source_ref(payload.repo, payload.upstream_branch, payload.integration_branch)
-  if tostring(payload.source_ref.ref or "") ~= expected_ref.ref then
-    return false
-  end
-  return tostring(payload.dedup_key or "") == M.branch_sync_dedup_key(
+  local expected_branch_sync = tostring(payload.source_ref.ref or "") == expected_ref.ref
+    and tostring(payload.dedup_key or "") == M.branch_sync_dedup_key(
     payload.repo,
     payload.upstream_branch,
     payload.integration_branch,
     payload.upstream_sha
   )
+  if expected_branch_sync then
+    return true
+  end
+
+  local expected_pr_freshness = tostring(payload.source_ref.ref or ""):match("^" .. require_safe_repo(payload.repo):gsub("([^%w])", "%%%1") .. "#pr/%d+$") ~= nil
+    and tostring(payload.dedup_key or "") == M.pr_freshness_dedup_key(
+      payload.repo,
+      payload.integration_branch,
+      payload.upstream_sha
+    )
+  return expected_pr_freshness
 end
 end
 

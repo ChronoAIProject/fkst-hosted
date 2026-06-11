@@ -1,0 +1,314 @@
+local core = require("core")
+
+local M = {}
+
+M.spec = {
+  consumes = { "devloop_branch_tick" },
+  produces = { "devloop_sync_conflict" },
+  fanout = { "devloop_branch_tick" },
+  stall_window = "10m",
+}
+
+local blocked_by_skew_label = "fkst-dev:blocked-by-skew"
+
+local function require_repo(repo)
+  local value = tostring(repo or "")
+  if value == "" or core.safe_repo(value) ~= value then
+    error("github-devloop: FKST_GITHUB_REPO is required for PR freshness")
+  end
+  return value
+end
+
+local function run_git(cmd, timeout, error_class)
+  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+  if result.exit_code ~= 0 then
+    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
+  end
+  return result
+end
+
+local function run_gh(cmd, timeout, error_class)
+  local result = core.gh_exec({ cmd = cmd, timeout = timeout or 30 })
+  if result.exit_code ~= 0 then
+    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
+  end
+  return result
+end
+
+local function trim_stdout(result)
+  return tostring(result.stdout or ""):gsub("%s+$", "")
+end
+
+local function fetch_branch(branch)
+  run_git(core.git_fetch_branch_cmd("origin", branch), 60, "git PR freshness fetch")
+end
+
+local function remote_head(branch)
+  local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "git PR freshness remote head")
+  local head = trim_stdout(result)
+  if not core.is_safe_head_sha(head) then
+    error("github-devloop: unsafe PR freshness branch head")
+  end
+  return head
+end
+
+local function is_ancestor(ancestor_sha, descendant_sha)
+  local result = exec_sync({ cmd = core.git_is_ancestor_cmd(ancestor_sha, descendant_sha), timeout = 30 })
+  if result.exit_code == 0 then
+    return true
+  end
+  if result.exit_code == 1 then
+    return false
+  end
+  error("github-devloop: git PR freshness ancestor check failed: " .. tostring(result.stderr))
+end
+
+local function runtime_root()
+  local result = run_git(core.read_runtime_root_cmd(), 30, "FKST_RUNTIME_ROOT read")
+  return result.stdout
+end
+
+local function cleanup_worktree(worktree)
+  if worktree == nil then
+    return
+  end
+  local result = exec_sync({ cmd = core.git_worktree_remove_cmd(worktree), timeout = 60 })
+  if result.exit_code ~= 0 then
+    core.log_line("warn", "pr_freshness_scan", "pr-freshness", "CLEANUP", {
+      "worktree=" .. tostring(worktree),
+      "reason=" .. core._one_line(result.stderr or ""),
+    })
+  end
+end
+
+local function with_temp_worktree(runtime, repo, branch, integration, branch_sha, fn)
+  local worktree = core.branch_sync_worktree_path(runtime, repo, integration, branch, branch_sha)
+  local add_result = exec_sync({ cmd = core.git_worktree_add_detached_cmd(worktree, branch_sha), timeout = 60 })
+  if add_result.exit_code ~= 0 then
+    error("github-devloop: git PR freshness worktree add failed: " .. tostring(add_result.stderr))
+  end
+
+  local ok, result = pcall(fn, worktree)
+  cleanup_worktree(worktree)
+  if not ok then
+    error(result)
+  end
+  return result
+end
+
+local function has_trusted_text(comments, needle)
+  if type(comments) ~= "table" then
+    return false
+  end
+  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
+    if core._comment_body(comment):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function has_approval_marker(comments, issue_proposal_id, pr_number, head_sha)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
+    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+      local review_proposal = marker:match('proposal="([^"]+)"')
+      local _, reviewed_pr_number, _, reviewed_head_sha = core.parse_pr_review_proposal_id(review_proposal)
+      if marker:match('decision="([^"]+)"') == "approve"
+        and marker:match('issue_proposal="([^"]+)"') == tostring(issue_proposal_id)
+        and tostring(reviewed_pr_number or "") == tostring(pr_number or "")
+        and tostring(reviewed_head_sha or "") == tostring(head_sha or "") then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function issue_state(repo, issue_number)
+  if issue_number == nil then
+    return { labels = {}, comments = {} }
+  end
+  local viewed = run_gh(core.gh_issue_view_result_cmd(repo, issue_number), 30, "gh PR freshness issue view")
+  return core.parse_issue_view_result(viewed.stdout)
+end
+
+local function is_blocked_by_skew(pr, issue)
+  return core.has_label(issue.labels, blocked_by_skew_label)
+    or core.has_label(pr.labels, blocked_by_skew_label)
+    or has_trusted_text(issue.comments, "blocked-by-skew")
+    or has_trusted_text(pr.comments, "blocked-by-skew")
+end
+
+local function is_imminently_mergeable(pr)
+  local green, _ = core.evaluate_ci_merge_gate(pr, {})
+  return green
+end
+
+local function is_approved(pr, origin)
+  return has_approval_marker(pr.comments, origin.proposal_id, pr.number, pr.head_sha)
+end
+
+local function candidate_reason(pr, origin, issue, state)
+  if state.state == "fixing" or state.state == "review-meta" or state.state == "merging" then
+    return nil, "arbitrating"
+  end
+  if is_approved(pr, origin) then
+    return "approved"
+  end
+  if core.merge_ready_fact(pr.comments, origin.proposal_id, state.version, pr.number) ~= nil then
+    return "approved"
+  end
+  if is_blocked_by_skew(pr, issue) and is_imminently_mergeable(pr) then
+    return "blocked-by-skew"
+  end
+  return nil, "not-candidate"
+end
+
+local function load_current_pr(repo, pr_number)
+  local viewed = run_gh(core.gh_pr_view_freshness_cmd(repo, pr_number), 30, "gh PR freshness view")
+  return core.parse_pr_view_merge(viewed.stdout)
+end
+
+local function list_open_prs(repo)
+  local listed = run_gh(core.gh_pr_list_freshness_cmd(repo), 30, "gh PR freshness list")
+  return core.parse_pr_list_freshness(listed.stdout)
+end
+
+local function raise_conflict(repo, branch, integration, branch_sha, integration_sha, pr_number)
+  local payload = {
+    schema = "github-devloop.v1",
+    repo = repo,
+    upstream_branch = integration,
+    integration_branch = branch,
+    upstream_sha = integration_sha,
+    integration_sha = branch_sha,
+    dedup_key = core.pr_freshness_dedup_key(repo, branch, integration_sha),
+    source_ref = core.pr_freshness_source_ref(repo, pr_number),
+  }
+  core.log_raise("pr_freshness_scan", "pr-freshness", "devloop_sync_conflict", payload)
+end
+
+local function write_refresh_commit(worktree, runtime, repo, branch, integration, branch_sha, integration_sha)
+  local message_file = core.pr_freshness_message_file(runtime, repo, branch, integration, branch_sha, integration_sha)
+  file.write(message_file, core.pr_freshness_commit_message(repo, branch, integration, branch_sha, integration_sha))
+  run_git(core.git_commit_message_file_cmd(worktree, message_file), 60, "git PR freshness commit")
+end
+
+local function push_if_real(repo, branch, branch_sha, worktree)
+  if core.write_mode() ~= "real" then
+    core.log_line("info", "pr_freshness_scan", "pr-freshness", "OUTBOUND", {
+      "mode=dry-run",
+      "repo=" .. tostring(repo),
+      "branch=" .. tostring(branch),
+      "branch_sha=" .. tostring(branch_sha),
+      "reason=PR freshness push requires FKST_GITHUB_WRITE=1",
+    })
+    return
+  end
+
+  core.assert_trusted_bot_configured()
+  fetch_branch(branch)
+  local rechecked_branch_sha = remote_head(branch)
+  if rechecked_branch_sha ~= branch_sha then
+    core.log_cas_decision("pr_freshness_scan", "pr-freshness", {
+      state = "branch",
+      version = rechecked_branch_sha,
+    }, "freshness", "push", "skip-foreign(head)", "PR branch head changed before push")
+    return
+  end
+  local merge_head = trim_stdout(run_git(core.git_head_sha_cmd(worktree), 30, "git PR freshness head"))
+  if not core.is_safe_head_sha(merge_head) then
+    error("github-devloop: unsafe PR freshness merge head")
+  end
+  run_git(core.git_push_worktree_branch_update_with_lease_cmd(worktree, branch, branch_sha), 120, "git PR freshness push")
+  fetch_branch(branch)
+  local pushed_head = remote_head(branch)
+  if pushed_head ~= merge_head then
+    error("github-devloop: PR freshness push verification failed")
+  end
+  core.log_apply("pr_freshness_scan", "pr-freshness", "refreshed", merge_head, {}, {})
+end
+
+local function in_managed_scope(repo, branches, pr, origin)
+  return tostring(pr.state or ""):upper() == "OPEN"
+    and not pr.is_draft
+    and origin ~= nil
+    and origin.repo == repo
+    and origin.branch == pr.head_ref_name
+    and origin.base_branch == branches.integration
+    and pr.base_ref_name == branches.integration
+    and core.is_devloop_issue_branch(pr.head_ref_name)
+    and core.is_same_repo_pr_head(pr, repo)
+end
+
+local function process_pr(repo, branches, listed_pr)
+  local pr = load_current_pr(repo, listed_pr.number)
+  pr.number = listed_pr.number
+  local origin = core.pr_origin_fact(pr.comments)
+  if not in_managed_scope(repo, branches, pr, origin) then
+    core.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = nil, version = nil }, "tick", "freshness", "skip-foreign(pr-shape)", "PR is outside managed freshness scope")
+    return
+  end
+
+  local issue = issue_state(repo, origin.issue_number)
+  local state = core.current_entity_state(pr.comments, origin.proposal_id)
+  local reason, skip_reason = candidate_reason(pr, origin, issue, state)
+  if reason == nil then
+    core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(" .. skip_reason .. ")", "PR is not a freshness candidate")
+    return
+  end
+
+  with_lock(core.pr_freshness_lock_key(repo, pr.head_ref_name), function()
+    fetch_branch(branches.integration)
+    fetch_branch(pr.head_ref_name)
+    local integration_sha = remote_head(branches.integration)
+    local branch_sha = remote_head(pr.head_ref_name)
+    if branch_sha ~= pr.head_sha then
+      core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-stale(head)", "PR head changed after GitHub read")
+      return
+    end
+    if is_ancestor(integration_sha, branch_sha) then
+      core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(integration-ancestor)", "PR branch already contains integration")
+      return
+    end
+
+    local runtime = runtime_root()
+    with_temp_worktree(runtime, repo, pr.head_ref_name, branches.integration, branch_sha, function(worktree)
+      local merge_result = exec_sync({ cmd = core.git_merge_no_ff_cmd(worktree, integration_sha), timeout = 120 })
+      if merge_result.exit_code == 0 then
+        write_refresh_commit(worktree, runtime, repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha)
+        push_if_real(repo, pr.head_ref_name, branch_sha, worktree)
+        return
+      end
+      local unmerged = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+      if unmerged.exit_code ~= 0 then
+        error("github-devloop: git PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
+      end
+      if tostring(unmerged.stdout or "") ~= "" then
+        raise_conflict(repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha, listed_pr.number)
+        return
+      end
+      error("github-devloop: git PR freshness merge failed without conflicts: " .. tostring(merge_result.stderr))
+    end)
+  end)
+end
+
+function pipeline(event)
+  core.log_entry("pr_freshness_scan", event, "pr-freshness", event and event.queue or "")
+  local branches = core.branch_config()
+  local cfg = core.devloop_config()
+  local repo = require_repo(cfg.repo)
+  if branches.integration == branches.upstream then
+    core.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = "same-branch", version = branches.integration }, "tick", "freshness", "skip-idempotent(same-branch)", "integration branch equals upstream branch")
+    return
+  end
+  for _, pr in ipairs(list_open_prs(repo)) do
+    process_pr(repo, branches, pr)
+  end
+end
+
+return M

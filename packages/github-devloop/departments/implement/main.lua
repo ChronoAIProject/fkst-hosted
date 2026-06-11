@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "devloop_open_pr",
   },
   stall_window = "10m",
 }
@@ -30,9 +31,18 @@ local function raise_implementing(repo, issue_number, ready, worktree, branch, h
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
+    "devloop_open_pr",
   })
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  core.log_raise("implement", ready.proposal_id, "devloop_open_pr", core.build_devloop_open_pr_payload(
+    repo,
+    issue_number,
+    ready,
+    branch,
+    head_sha,
+    base_branch
+  ))
 end
 
 local function implemented_branch_head(base_head, branch)
@@ -54,6 +64,24 @@ local function implemented_branch_head(base_head, branch)
     error("github-devloop: unsafe implementing branch head")
   end
   return head_sha
+end
+
+local function merge_integration_for_implementation(worktree, integration_branch, base_head)
+  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
+  if merge_result.exit_code ~= 0 then
+    local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+    if unmerged_result.exit_code ~= 0 then
+      error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    end
+    if tostring(unmerged_result.stdout or "") == "" then
+      error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+    end
+    core.log_line("info", "implement", "merge-target", "MERGE_SKEW", {
+      "integration_branch=" .. tostring(integration_branch),
+      "integration_sha=" .. tostring(base_head),
+      "reason=integration merge requires codex conflict resolution",
+    })
+  end
 end
 
 function pipeline(event)
@@ -87,7 +115,7 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local view = exec_sync({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue implement view failed: " .. tostring(view.stderr))
     end
@@ -133,18 +161,7 @@ function pipeline(event)
 
     local branch_ref = exec_sync({ cmd = core.git_show_ref_branch_cmd(branch), timeout = 30 })
     local branch_exists = branch_ref.exit_code == 0
-    if branch_exists then
-      local head_sha = implemented_branch_head(base_head, branch)
-      if head_sha ~= nil then
-        core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
-          "branch=" .. tostring(branch),
-          "head_sha=" .. tostring(head_sha),
-          "reason=reusing existing implementation branch",
-        })
-        raise_implementing(repo, issue_number, ready, "(existing deterministic branch)", branch, head_sha, branches.integration, base_head)
-        return
-      end
-    elseif branch_ref.exit_code ~= 1 then
+    if branch_ref.exit_code ~= 0 and branch_ref.exit_code ~= 1 then
       error("github-devloop: git branch ref check failed: " .. tostring(branch_ref.stderr))
     end
 
@@ -179,9 +196,19 @@ function pipeline(event)
       end
     end
 
+    merge_integration_for_implementation(worktree, branches.integration, base_head)
+
     core.log_codex_start("implement", ready.proposal_id, "implement")
+    local content_fetch = core.context_fetch_from_bundle({
+      dept = "implement",
+      repo = repo,
+      issue_number = issue_number,
+      proposal_id = ready.proposal_id,
+      version = ready.dedup_key,
+      tick = event.ts,
+    })
     local result = spawn_codex_sync({
-      prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing),
+      prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing, content_fetch),
       worktree = worktree,
     })
 
@@ -225,7 +252,7 @@ function pipeline(event)
     end
 
     local commit_result = exec_sync({
-      cmd = core.git_commit_cmd(worktree, "Implement github-devloop ready state"),
+      cmd = core.git_commit_cmd(worktree, core.implement_commit_subject(issue_number, current)),
       timeout = 60,
     })
     if commit_result.exit_code ~= 0 then

@@ -141,6 +141,12 @@ function M.next_review_meta_action_version(version)
   return base .. "/review-meta-action/" .. tostring(next_n)
 end
 
+function M.next_review_loop_version(version)
+  local base = tostring(version or "")
+  local next_n = M.version_review_loop_round(base) + 1
+  return base .. "/review-loop/" .. tostring(next_n)
+end
+
 local function version_primary_key(version)
   local updated_at = M.version_updated_at(version)
   if updated_at ~= "" then
@@ -200,15 +206,25 @@ local function strip_transition_version_suffixes(version)
   while previous ~= text do
     previous = text
     text = text
+      :gsub("/rereview/%d+/[0-9A-Fa-f]+$", "")
+      :gsub("%-rereview%-%d+%-[0-9A-Fa-f]+$", "")
+      :gsub("/review%-meta/%d+$", "")
+      :gsub("%-review%-meta%-%d+$", "")
       :gsub("/review%-meta%-action/%d+$", "")
       :gsub("%-review%-meta%-action%-%d+$", "")
       :gsub("/review%-loop/%d+$", "")
       :gsub("%-review%-loop%-%d+$", "")
+      :gsub("/review/%d+$", "")
+      :gsub("%-review%-%d+$", "")
       :gsub("/fix/%d+$", "")
       :gsub("%-fix%-%d+$", "")
+      :gsub("/loop/%d+$", "")
+      :gsub("%-loop%-%d+$", "")
   end
   return text
 end
+
+M._strip_transition_version_suffixes = strip_transition_version_suffixes
 
 local function strip_latest_fix_version_suffix(version)
   return tostring(version or "")

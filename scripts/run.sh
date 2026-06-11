@@ -27,8 +27,10 @@
 #   scripts/run.sh supervise <package>
 #       Start the real fkst-framework supervise event loop for one package.
 #       Uses fresh temporary FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT directories
-#       and runs in the foreground until Ctrl-C. FKST_PROJECT_ROOT can override
-#       the default project root of packages/<package>.
+#       and requires FKST_RATE_POOL_ROOT from the host so named external-command
+#       rate pools are shared across supervise instances. Runs in the foreground
+#       until Ctrl-C. FKST_PROJECT_ROOT can override the default project root of
+#       packages/<package>.
 #
 #   scripts/run.sh build
 #       Local-only helper: update the fkst-substrate dev checkout and build
@@ -122,8 +124,9 @@ usage() {
 }
 
 cmd_check() {
-  python3 "$ROOT/scripts/check_repo.py"
-  python3 "$ROOT/scripts/check_repo_test.py"
+  python3 -B "$ROOT/scripts/check_repo.py"
+  python3 -B "$ROOT/scripts/check_repo_test.py"
+  python3 -B "$ROOT/scripts/bin_cache_test.py"
 }
 
 check_test_file_coverage() {
@@ -178,6 +181,61 @@ PY
   echo "OK: G5 every *_test.lua produced an engine report-json pass"
 }
 
+check_sdk_primitives() {
+  local probe_dir report_file
+  probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-sdk-probe.XXXXXX")"
+  mkdir -p "$probe_dir/tests"
+  printf 'return {}\n' > "$probe_dir/core.lua"
+  cat > "$probe_dir/tests/sdk_primitives_test.lua" <<'LUA'
+local t = fkst.test
+
+local function cjk_char()
+  return string.char(0xe6, 0xb5, 0x8b)
+end
+
+local function emoji_char()
+  return string.char(0xf0, 0x9f, 0x98, 0x80)
+end
+
+local function assert_valid_utf8(value)
+  local ok, len = pcall(utf8.len, tostring(value or ""))
+  t.is_true(ok and len ~= nil)
+end
+
+return {
+  test_truncate_utf8_sdk_primitive_is_deployed = function()
+    t.eq(type(truncate_utf8), "function")
+    local cjk = cjk_char()
+    local emoji = emoji_char()
+    local mixed = "ab" .. cjk .. "cd"
+
+    t.eq(truncate_utf8(mixed, 2), "ab")
+    t.eq(truncate_utf8(mixed, 3), "ab")
+    t.eq(truncate_utf8(mixed, 4), "ab")
+    t.eq(truncate_utf8(mixed, 5), "ab" .. cjk)
+    t.eq(truncate_utf8(mixed, 6), "ab" .. cjk .. "c")
+    t.eq(truncate_utf8("", 3), "")
+    t.eq(truncate_utf8(cjk, 2), "")
+    t.eq(truncate_utf8(emoji .. "x", 3), "")
+    t.eq(truncate_utf8("ab" .. emoji .. "x", 6), "ab" .. emoji)
+    assert_valid_utf8(truncate_utf8(mixed, 1))
+    assert_valid_utf8(truncate_utf8(mixed, 7))
+    assert_valid_utf8(truncate_utf8("ab" .. emoji .. "x", 5))
+    assert_valid_utf8(truncate_utf8("ab" .. emoji .. "x", 6))
+  end,
+}
+LUA
+
+  report_file="$probe_dir/report.json"
+  if ! "$BIN" test --project-root "$probe_dir" --package-root "$probe_dir" --report-json "$report_file"; then
+    rm -rf "$probe_dir"
+    echo "error: required SDK primitive is unavailable or invalid: truncate_utf8(s, max_bytes)" >&2
+    return 1
+  fi
+  rm -rf "$probe_dir"
+  echo "OK: SDK primitive truncate_utf8 is available in BIN: $BIN"
+}
+
 cmd_test() {
   local target="${1:-}" ran=0 fail=0 pkg name
   local self_rt report_dir report_file
@@ -194,6 +252,11 @@ cmd_test() {
     if ! FKST_RUNTIME_ROOT="$self_rt" "$BIN" --self-test; then
       fail=$((fail + 1))
     fi
+  fi
+
+  echo "=== sdk-primitives ==="
+  if ! check_sdk_primitives; then
+    fail=$((fail + 1))
   fi
 
   for pkg in "$ROOT"/packages/*/; do
@@ -390,6 +453,18 @@ cmd_supervise() {
   if [ -z "$pkg" ]; then
     echo "usage: scripts/run.sh supervise <package>" >&2; exit 1
   fi
+  if [ -z "${FKST_RATE_POOL_ROOT:-}" ]; then
+    echo "error: FKST_RATE_POOL_ROOT is required for supervise so gh rate pools share one host-stable budget" >&2
+    echo "  set FKST_RATE_POOL_ROOT to the same host-stable directory for every supervise instance that spends the GitHub quota" >&2
+    exit 1
+  fi
+  case "$FKST_RATE_POOL_ROOT" in
+    /*) ;;
+    *)
+      echo "error: FKST_RATE_POOL_ROOT must be an absolute host-stable directory path" >&2
+      exit 1
+      ;;
+  esac
   local pkgdir="$ROOT/packages/$pkg"
   [ -d "$pkgdir" ] || { echo "error: no package at $pkgdir" >&2; exit 1; }
 
@@ -407,6 +482,7 @@ cmd_supervise() {
   echo "BIN=$BIN"
   echo "FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT"
   echo "FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT"
+  echo "FKST_RATE_POOL_ROOT=$FKST_RATE_POOL_ROOT"
   echo "This starts the real supervise event loop in the foreground. Press Ctrl-C to stop."
   echo "exec: \"$BIN\" supervise --project-root \"$project_root\" --package-root \"$pkgdir\" --framework-bin \"$BIN\""
   exec "$BIN" supervise --project-root "$project_root" --package-root "$pkgdir" --framework-bin "$BIN"

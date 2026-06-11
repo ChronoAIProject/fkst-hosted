@@ -39,7 +39,7 @@ function pipeline(event)
 
   core.assert_trusted_bot_configured()
   local branches = core.branch_config()
-  local pr_view = exec_sync({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
   end
@@ -74,6 +74,11 @@ function pipeline(event)
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
     return
   end
+  if reached.decision == "reject"
+    and not core._is_bounded_string(reached.blocking_gap, core._max_blocking_gap_len) then
+    core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
+    return
+  end
 
   local lock_key = core.review_result_lock_key(origin.proposal_id)
   if lock_key == nil then
@@ -85,7 +90,12 @@ function pipeline(event)
     local pr_source_ref = core.pr_source_ref(origin.repo, pr_number)
     core.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
-    local to_state = reached.decision == "approve" and "merge-ready" or "fixing"
+    local effective_decision = reached.decision
+    local gate_owned_reject = reached.decision == "reject" and core.is_gate_owned_review_gap(reached.blocking_gap)
+    if gate_owned_reject then
+      effective_decision = "approve"
+    end
+    local to_state = effective_decision == "approve" and "merge-ready" or "fixing"
     local current_review_version = core.safe_version_segment(state.version or "")
     local transition = core.cyclic_transition_status({
       state = state.state,
@@ -107,7 +117,7 @@ function pipeline(event)
     end
 
     local issue_version = state.version
-    if reached.decision == "reject" then
+    if effective_decision == "reject" then
       local fix_round = core.version_fix_round(state.version)
       local max_rounds_hit = fix_round >= core.max_fix_rounds()
       if max_rounds_hit then
@@ -129,10 +139,22 @@ function pipeline(event)
       issue_version = core.fix_version_from_review_version(state.version)
     end
     core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
-    local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, reached, pr_source_ref)
+    local comment_reached = reached
+    if gate_owned_reject then
+      comment_reached = {}
+      for key, value in pairs(reached) do
+        comment_reached[key] = value
+      end
+      comment_reached.decision = "approve"
+      comment_reached.body = tostring(reached.body or "")
+        .. "\n\nAdvisory (out-of-contract): rejected only for gate-owned fact: "
+        .. tostring(reached.blocking_gap or "")
+      comment_reached.blocking_gap = nil
+    end
+    local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
     local label_request = nil
     if origin.issue_number ~= nil then
-      label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, reached, core.issue_source_ref(origin.repo, origin.issue_number))
+      label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, comment_reached, core.issue_source_ref(origin.repo, origin.issue_number))
     end
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {
@@ -143,13 +165,14 @@ function pipeline(event)
     end
     local fix_payload = nil
     local merge_payload = nil
-    if reached.decision == "reject" then
+    if effective_decision == "reject" then
       fix_payload = core.build_devloop_fixing_payload(origin, pr_number, {
         review_proposal_id = reached.proposal_id,
         review_dedup_key = reached.dedup_key,
         reviewed_head_sha = reviewed_head_sha,
         fix_version = issue_version,
         framing = reached.framing,
+        blocking_gap = reached.blocking_gap,
       }, pr_source_ref)
       table.insert(raised, "devloop_fixing")
     else
