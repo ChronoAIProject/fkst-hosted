@@ -73,16 +73,17 @@ function pipeline(event)
       local marker = gate.kind == "cycle"
         and core.dependency_cycle_marker(reached.proposal_id, version)
         or (gate.kind == "unresolvable"
-          and core.dependency_unresolvable_marker(reached.proposal_id, version, gate.unmet)
-          or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet))
-      dependency_comment_request = {
-        schema = "github-proxy.v1",
-        repo = repo,
-        issue_number = issue_number,
-        body = "github-devloop dependency hold: " .. tostring(gate.kind) .. "\n\nReason: " .. tostring(gate.reason) .. "\n\n" .. marker,
-        dedup_key = core._dedup_key({ "dependency", "comment", tostring(reached.proposal_id), version, tostring(gate.kind) }),
-        source_ref = core.normalize_source_ref(reached.source_ref),
-      }
+          and core.dependency_unresolvable_marker(reached.proposal_id, version, gate.unmet, gate.kind, gate.reason)
+          or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet, gate.kind, gate.reason))
+      dependency_comment_request = core.build_dependency_hold_comment_request(
+        repo,
+        issue_number,
+        reached.proposal_id,
+        version,
+        gate,
+        marker,
+        reached.source_ref
+      )
       dependency_label_request = core.build_label_request(
         repo,
         issue_number,

@@ -53,6 +53,33 @@ local function dependency_unmet_field(unmet_numbers)
   return table.concat(parts, ",")
 end
 
+local function marker_attr(marker, name)
+  return tostring(marker or ""):match(name .. '="([^"]*)"')
+end
+
+local function safe_dependency_attr(value)
+  local core = root()
+  local text = tostring(value or "")
+  text = text:gsub("<!%-%- fkst:[^\n]*%-%->", " ")
+  text = text:gsub("&lt;!%-%- fkst:[^\n]*%-%-&gt;", " ")
+  text = text:gsub("%c", " "):gsub('"', "'"):gsub("[<>]", ""):gsub("%s+", " ")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if #text > 240 then
+    text = core._utf8_safe_truncate(text, 240)
+  end
+  return text
+end
+
+local function decode_dependency_attr(value)
+  if type(value) ~= "string" or value == "" then
+    return nil
+  end
+  if value:find("%c") ~= nil or value:find("[<>]") ~= nil or value:find('"', 1, true) ~= nil then
+    return nil
+  end
+  return value
+end
+
 local function parse_blocked_by(stdout)
   local core = root()
   local ok, decoded = pcall(json.decode, stdout or "")
@@ -247,9 +274,11 @@ function M.dependency_gate(repo, issue_number)
   return result
 end
 
-function M.dependency_wait_marker(proposal_id, version, unmet_numbers)
+function M.dependency_wait_marker(proposal_id, version, unmet_numbers, hold_kind, reason)
   return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
+    .. '" hold_kind="' .. safe_dependency_attr(hold_kind or "waiting")
+    .. '" reason="' .. safe_dependency_attr(reason or "waiting-on-dependency")
     .. '" unmet="' .. dependency_unmet_field(unmet_numbers)
     .. '" -->'
 end
@@ -260,9 +289,11 @@ function M.dependency_cycle_marker(proposal_id, version)
     .. '" -->'
 end
 
-function M.dependency_unresolvable_marker(proposal_id, version, unmet_numbers)
+function M.dependency_unresolvable_marker(proposal_id, version, unmet_numbers, hold_kind, reason)
   return '<!-- fkst:github-devloop:dependency-unresolvable:v1 proposal="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
+    .. '" hold_kind="' .. safe_dependency_attr(hold_kind or "unresolvable")
+    .. '" reason="' .. safe_dependency_attr(reason or "gh-failed")
     .. '" unmet="' .. dependency_unmet_field(unmet_numbers)
     .. '" -->'
 end
@@ -290,21 +321,21 @@ function M.dependency_hold_fact(comments, proposal_id)
     local hold_kind = body:match("github%-devloop dependency hold:%s*([^\n]+)")
     local reason = body:match("Reason:%s*([^\n]+)")
     for marker in body:gmatch(wait_pattern) do
-      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
-        and marker:match('version="([^"]*)"') == tostring(current.version) then
+      if marker_attr(marker, "proposal") == tostring(proposal_id)
+        and marker_attr(marker, "version") == tostring(current.version) then
         return {
           proposal_id = tostring(proposal_id),
           version = tostring(current.version),
           marker_kind = "dependency-wait",
-          hold_kind = hold_kind or "waiting",
-          reason = reason or "waiting-on-dependency",
+          hold_kind = decode_dependency_attr(marker_attr(marker, "hold_kind")) or hold_kind or "waiting",
+          reason = decode_dependency_attr(marker_attr(marker, "reason")) or reason or "waiting-on-dependency",
           comment_created_at = core._comment_created_at(comment),
         }
       end
     end
     for marker in body:gmatch(cycle_pattern) do
-      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
-        and marker:match('version="([^"]*)"') == tostring(current.version) then
+      if marker_attr(marker, "proposal") == tostring(proposal_id)
+        and marker_attr(marker, "version") == tostring(current.version) then
         return {
           proposal_id = tostring(proposal_id),
           version = tostring(current.version),
@@ -316,14 +347,14 @@ function M.dependency_hold_fact(comments, proposal_id)
       end
     end
     for marker in body:gmatch(unresolvable_pattern) do
-      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
-        and marker:match('version="([^"]*)"') == tostring(current.version) then
+      if marker_attr(marker, "proposal") == tostring(proposal_id)
+        and marker_attr(marker, "version") == tostring(current.version) then
         return {
           proposal_id = tostring(proposal_id),
           version = tostring(current.version),
           marker_kind = "dependency-unresolvable",
-          hold_kind = hold_kind or "unresolvable",
-          reason = reason or "gh-failed",
+          hold_kind = decode_dependency_attr(marker_attr(marker, "hold_kind")) or hold_kind or "unresolvable",
+          reason = decode_dependency_attr(marker_attr(marker, "reason")) or reason or "gh-failed",
           comment_created_at = core._comment_created_at(comment),
         }
       end
