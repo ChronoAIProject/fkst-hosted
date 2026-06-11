@@ -262,6 +262,41 @@ local function raise_stale_dependency_label_clear(issue, proposal_id, state, lab
   return true
 end
 
+local function raise_dependency_release(issue, proposal_id, state, current, ready_payload)
+  local raised = { "devloop_ready" }
+  local has_blocked_label = core.has_label(current.labels, core._blocked_on_dependency_label)
+  local release_fact = core.dependency_release_fact(current.comments, proposal_id, state.version)
+  if release_fact == nil then
+    table.insert(raised, "github-proxy.github_issue_comment_request")
+  end
+  if has_blocked_label then
+    table.insert(raised, "github-proxy.github_issue_label_request")
+  end
+  core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = { core._blocked_on_dependency_label } }, raised)
+  if release_fact == nil then
+    core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", {
+      schema = "github-proxy.v1",
+      repo = issue.repo,
+      issue_number = issue.number,
+      body = "github-devloop dependency release: satisfied\n\nReason: satisfied\n\n"
+        .. core.dependency_release_marker(proposal_id, state.version),
+      dedup_key = core._dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(state.version) }),
+      source_ref = core.normalize_source_ref(issue.source_ref),
+    })
+  end
+  if has_blocked_label then
+    core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
+      issue.repo,
+      issue.number,
+      {},
+      { core._blocked_on_dependency_label },
+      core._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }),
+      issue.source_ref
+    ))
+  end
+  core.log_raise("observe_issue", proposal_id, "devloop_ready", ready_payload)
+end
+
 function pipeline(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
@@ -322,47 +357,42 @@ function pipeline(event)
         if not gate.ok then
           local marker = gate.kind == "cycle"
             and core.dependency_cycle_marker(proposal_id, state.version)
-            or core.dependency_wait_marker(proposal_id, state.version, gate.unmet, gate.kind, gate.reason)
+            or (gate.kind == "unresolvable"
+              and core.dependency_unresolvable_marker(proposal_id, state.version, gate.unmet, gate.kind, gate.reason)
+              or core.dependency_wait_marker(proposal_id, state.version, gate.unmet, gate.kind, gate.reason))
           core.log_cas_decision("observe_issue", proposal_id, state, "ready", "implementing", "hold-dependency", gate.reason)
-          core.log_apply("observe_issue", proposal_id, nil, nil, { add = { core._blocked_on_dependency_label }, remove = {} }, {
-            "github-proxy.github_issue_comment_request",
-            "github-proxy.github_issue_label_request",
-          })
-          core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", core.build_dependency_hold_comment_request(
-            issue.repo,
-            issue.number,
-            proposal_id,
-            state.version,
-            gate,
-            marker,
-            issue.source_ref
-          ))
-          core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
-            issue.repo,
-            issue.number,
-            { core._blocked_on_dependency_label },
-            {},
-            core._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }),
-            issue.source_ref
-          ))
+          if dependency_hold == nil then
+            core.log_apply("observe_issue", proposal_id, nil, nil, { add = { core._blocked_on_dependency_label }, remove = {} }, {
+              "github-proxy.github_issue_comment_request",
+              "github-proxy.github_issue_label_request",
+            })
+            core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", core.build_dependency_hold_comment_request(
+              issue.repo,
+              issue.number,
+              proposal_id,
+              state.version,
+              gate,
+              marker,
+              issue.source_ref
+            ))
+            core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
+              issue.repo,
+              issue.number,
+              { core._blocked_on_dependency_label },
+              {},
+              core._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }),
+              issue.source_ref
+            ))
+          end
           return
         end
-        local raised = { "devloop_ready" }
-        if core.has_label(current.labels, core._blocked_on_dependency_label) then
-          table.insert(raised, "github-proxy.github_issue_label_request")
+        if dependency_hold ~= nil then
+          core.log_cas_decision("observe_issue", proposal_id, state, "ready", "implementing", "release-dependency-hold", "satisfied")
+          raise_dependency_release(issue, proposal_id, state, current, ready_payload)
+        else
+          core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, { "devloop_ready" })
+          core.log_raise("observe_issue", proposal_id, "devloop_ready", ready_payload)
         end
-        core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = { core._blocked_on_dependency_label } }, raised)
-        if core.has_label(current.labels, core._blocked_on_dependency_label) then
-          core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
-            issue.repo,
-            issue.number,
-            {},
-            { core._blocked_on_dependency_label },
-            core._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }),
-            issue.source_ref
-          ))
-        end
-        core.log_raise("observe_issue", proposal_id, "devloop_ready", ready_payload)
       end
       if state.state == "fixing" then
         raise_fixing_replay(issue, proposal_id, state, link, snapshot)
