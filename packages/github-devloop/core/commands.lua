@@ -21,7 +21,7 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --repo " .. M._shell_single_quote(repo)
     .. " --state open"
     .. " --limit " .. tostring(math.floor(bounded_limit))
-    .. " --json number,title,updatedAt,labels"
+    .. " --json number,title,body,updatedAt,labels"
 end
 
 function M.gh_issue_list_recent_closed_cmd(repo, limit)
