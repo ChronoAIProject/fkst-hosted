@@ -483,16 +483,17 @@ json_string = function(value)
 end
 
 render_comment = function(comment)
-  local body = comment
-  local author = "fkst-test-bot"
-  local created_at = "2026-06-03T01:00:00Z"
+  local body, author, created_at = comment, "fkst-test-bot", "2026-06-03T01:00:00Z"
   if type(comment) == "table" then
     body = comment.body
     author = comment.author_login or author
     created_at = comment.created_at or created_at
   end
+  local id = type(comment) == "table" and comment.id or nil
+  local id_field = id ~= nil and tostring(id) ~= "" and string.format('"id":"%s",', json_string(id)) or ""
   return string.format(
-    '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
+    '{%s"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
+    id_field,
     json_string(body or ""),
     json_string(author),
     json_string(created_at)

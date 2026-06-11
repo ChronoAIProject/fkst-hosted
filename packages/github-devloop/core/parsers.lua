@@ -34,6 +34,7 @@ function M.comments_from_json(comments_json)
         author_login = tostring(comment.author_login)
       end
       table.insert(comments, {
+        id = comment.id,
         body = tostring(comment.body),
         author_login = author_login,
         created_at = comment.createdAt or comment.created_at,

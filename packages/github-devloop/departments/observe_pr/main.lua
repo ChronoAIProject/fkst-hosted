@@ -139,6 +139,76 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
   end
 end
 
+local function maybe_apply_rereview_command(origin, pr_number, current_pr, state, source_ref)
+  local command = core.operator_command_fact(current_pr.comments, "rereview")
+  if command == nil then
+    return false
+  end
+  if core.has_operator_command_response(current_pr.comments, command) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
+    return false
+  end
+  if state.state ~= "blocked" and state.state ~= "review-meta" and state.state ~= "reviewing" then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(invalid-state)", "operator rereview precondition failed")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires blocked, review-meta, or stalled reviewing state",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+  if tostring(current_pr.state or ""):lower() ~= "open" then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(pr-closed)", "operator rereview requires an open PR")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires an open PR",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+  if not core._is_git_sha(current_pr.head_sha) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(head-missing)", "operator rereview requires a current PR head")
+    local refusal = core.build_operator_command_refusal_request(
+      origin.repo,
+      pr_number,
+      command,
+      "rereview requires a current PR head",
+      source_ref
+    )
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
+    return true
+  end
+
+  local new_version = core.operator_rereview_version(state.version, current_pr.head_sha)
+  local comment_request = core.build_operator_rereview_comment_request(
+    origin.repo,
+    pr_number,
+    origin.proposal_id,
+    new_version,
+    command,
+    source_ref
+  )
+  local reviewing_payload = core.build_devloop_reviewing_payload({
+    proposal_id = origin.proposal_id,
+    impl_version = new_version,
+  }, pr_number, source_ref, new_version)
+  core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "applied(operator-rereview)", "trusted operator command requested rereview")
+  core.log_apply("observe_pr", origin.proposal_id, "reviewing", new_version, { add = {}, remove = {} }, {
+    "github-proxy.github_pr_comment_request",
+    "devloop_reviewing",
+  })
+  core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
+  maybe_label_hint(origin, { state = "reviewing", version = new_version }, core.issue_source_ref(origin.repo, origin.issue_number))
+  return true
+end
+
 function pipeline(event)
   local pr = event.payload or {}
   if not core.is_supported_pr(pr) then
@@ -176,6 +246,9 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    if maybe_apply_rereview_command(origin, pr.number, current_pr, state, source_ref) then
+      return
+    end
     if state.state ~= nil and state.state ~= "pr-open" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
       raise_current_state(origin, pr.number, current_pr, state, source_ref)
