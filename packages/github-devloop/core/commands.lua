@@ -155,6 +155,13 @@ function M.gh_pr_merge_cmd(repo, pr_number, head_sha)
     .. " --match-head-commit " .. M._shell_single_quote(head_sha)
 end
 
+function M.gh_commit_check_runs_cmd(repo, head_sha)
+  if not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid commit check-runs head sha")
+  end
+  return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/commits/" .. tostring(head_sha) .. "/check-runs")
+end
+
 function M.gh_pr_ready_cmd(repo, pr_number)
   return "gh pr ready " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)

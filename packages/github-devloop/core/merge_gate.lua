@@ -27,8 +27,44 @@ function M.pr_identity_matches(pr, expected)
   return true, "pr-ok"
 end
 
-function M.evaluate_ci_merge_gate(pr)
+local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
+  if type(M.log_line) ~= "function" then
+    return
+  end
+  M.log_line("info", tostring(opts and opts.dept or "merge"), tostring(opts and opts.proposal_id or "merge-gate"), "CI_FALLBACK", {
+    "repo=" .. tostring(repo),
+    "head_sha=" .. tostring(head_sha),
+    "source=commit-check-runs",
+    "required_checks=" .. table.concat(M._required_check_run_names or {}, ","),
+    "check_runs=" .. tostring(type(runs) == "table" and #runs or 0),
+    "reason=" .. tostring(reason or ""),
+  })
+end
+
+function M.commit_check_runs_merge_gate(repo, head_sha, opts)
+  local result = exec_sync({ cmd = M.gh_commit_check_runs_cmd(repo, head_sha), timeout = 30 })
+  if result.exit_code ~= 0 then
+    error("github-devloop: gh commit check-runs failed: " .. tostring(result.stderr))
+  end
+  local runs = M.parse_commit_check_runs(result.stdout)
+  local green, reason = M.commit_check_runs_green(runs)
+  log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
+  return green, reason, runs
+end
+
+function M.evaluate_ci_status_gate(pr, opts)
   local green, green_reason = M.pr_rollup_green(pr)
+  if not green and green_reason == "missing-status-rollup" and type(opts) == "table" and opts.repo ~= nil then
+    local head_sha = tostring(pr and pr.head_sha or "")
+    if head_sha ~= "" then
+      green, green_reason = M.commit_check_runs_merge_gate(opts.repo, head_sha, opts)
+    end
+  end
+  return green, green_reason
+end
+
+function M.evaluate_ci_merge_gate(pr, opts)
+  local green, green_reason = M.evaluate_ci_status_gate(pr, opts)
   if not green then
     return false, green_reason
   end
@@ -131,7 +167,11 @@ function M.run_verified_pr_merge(request)
       return false, validate_reason or "pr-validation-failed", rechecked_pr
     end
   end
-  local gate_ok, gate_reason = M.evaluate_ci_merge_gate(rechecked_pr)
+  local gate_ok, gate_reason = M.evaluate_ci_merge_gate(rechecked_pr, {
+    repo = repo,
+    dept = request.dept or "merge",
+    proposal_id = request.proposal_id,
+  })
   if not gate_ok then
     return false, gate_reason, rechecked_pr
   end

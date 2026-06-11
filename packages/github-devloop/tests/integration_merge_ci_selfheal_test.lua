@@ -14,6 +14,15 @@ local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 
 local dispatch_cmd = "gh workflow run 'ci.yml' --repo 'owner/repo' --ref 'devloop-owner-repo-42-01HY'"
+local check_runs_cmd = "gh api 'repos/owner/repo/commits/def456/check-runs'"
+
+local function mock_absent_check_runs()
+  t.mock_command(check_runs_cmd, {
+    stdout = '{"total_count":0,"check_runs":[]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
 
 local function seed_cache(key, value, run_opts)
   return t.run_department("tests/cache_seed_helpers.lua", {
@@ -38,6 +47,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, "[]")
+    mock_absent_check_runs()
 
     local observed_key = core.ci_missing_status_first_observed_key("owner/repo", event.pr_number, event.reviewed_head_sha)
     local first = run_merge(event, run_opts)
@@ -54,6 +64,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, "[]")
+    mock_absent_check_runs()
     t.mock_command(dispatch_cmd, {
       stdout = "dispatched\n",
       stderr = "",
@@ -71,6 +82,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, "[]")
+    mock_absent_check_runs()
     t.mock_command(dispatch_cmd, {
       stdout = "dispatched\n",
       stderr = "",
@@ -81,7 +93,7 @@ return {
     t.eq(retry.exit_code, 1)
     t.eq(#retry.raises, 0)
     t.eq(count_calls(dispatch_cmd), 1)
-    t.eq(count_calls("gh api"), 0)
+    t.eq(count_calls(check_runs_cmd), 3)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 

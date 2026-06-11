@@ -393,7 +393,11 @@ function pipeline(event)
       error("github-devloop: PR fact changed after ready conversion")
     end
 
-    local rollup_green, rollup_reason = core.pr_rollup_green(current_pr)
+    local rollup_green, rollup_reason = core.evaluate_ci_status_gate(current_pr, {
+      repo = repo,
+      dept = "merge",
+      proposal_id = merge_ready.proposal_id,
+    })
     if not rollup_green then
       if not core.is_ci_red_reason(rollup_reason) then
         if rollup_reason == "missing-status-rollup" then
@@ -456,6 +460,8 @@ function pipeline(event)
       head_sha = merge_ready.reviewed_head_sha,
       head_branch = origin.branch,
       base_branch = branches.integration,
+      dept = "merge",
+      proposal_id = merge_ready.proposal_id,
       validate_rechecked_pr = function(rechecked_pr)
         local recheck_origin = core.pr_origin_fact(rechecked_pr.comments)
         if recheck_origin == nil then
