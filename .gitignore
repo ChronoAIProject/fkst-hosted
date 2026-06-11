@@ -12,6 +12,11 @@ node_modules/
 *.key
 credentials.json
 
+# Local, filled Kubernetes secrets — never commit (template stays tracked)
+backend/deploy/k8s/secret.yaml
+backend/deploy/k8s/secret.*.local.yaml
+!backend/deploy/k8s/secret.example.yaml
+
 # OS noise
 .DS_Store
 
