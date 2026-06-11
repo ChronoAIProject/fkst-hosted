@@ -422,6 +422,25 @@ return {
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-wait:v1"))
   end,
 
+  test_dependency_hold_fact_reads_wait_failed_and_cycle_holds = function()
+    local gh_failed = core.dependency_hold_fact({
+      core.state_marker(proposal_id, "ready", version),
+      "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
+        .. core.dependency_wait_marker(proposal_id, version, { 42 }),
+    }, proposal_id)
+    t.eq(gh_failed.marker_kind, "dependency-wait")
+    t.eq(gh_failed.hold_kind, "unresolvable")
+    t.eq(gh_failed.reason, "gh-failed")
+
+    local cycle = core.dependency_hold_fact({
+      core.state_marker(proposal_id, "ready", version),
+      "github-devloop dependency hold: cycle\n\nReason: dependency-cycle\n\n"
+        .. core.dependency_cycle_marker(proposal_id, version),
+    }, proposal_id)
+    t.eq(cycle.marker_kind, "dependency-cycle")
+    t.eq(cycle.reason, "dependency-cycle")
+  end,
+
   test_gh_failed_hold_rechecks_and_releases_on_next_poll = function()
     mock_observe_issue()
     mock_blocked_by_failure(42)

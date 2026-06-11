@@ -159,7 +159,11 @@ function pipeline(event)
           dedup_key = state.version,
           source_ref = issue.source_ref,
         })
+        local dependency_hold = core.dependency_hold_fact(current.comments, proposal_id)
         local gate = core.dependency_gate(issue.repo, issue.number)
+        if dependency_hold ~= nil then
+          core.log_cas_decision("observe_issue", proposal_id, state, "ready", "implementing", "recheck-dependency-hold", dependency_hold.reason)
+        end
         if not gate.ok then
           local marker = gate.kind == "cycle"
             and core.dependency_cycle_marker(proposal_id, state.version)

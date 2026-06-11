@@ -762,6 +762,50 @@ function M.dependency_cycle_marker(proposal_id, version)
     .. '" -->'
 end
 
+function M.dependency_hold_fact(comments, proposal_id)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local current = M.current_state(comments, proposal_id)
+  if type(current) ~= "table" or current.version == nil then
+    return nil
+  end
+  local wait_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
+  local cycle_pattern = "<!%-%- fkst:github%-devloop:dependency%-cycle:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    local body = M._comment_body(comment)
+    local hold_kind = body:match("github%-devloop dependency hold:%s*([^\n]+)")
+    local reason = body:match("Reason:%s*([^\n]+)")
+    for marker in body:gmatch(wait_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
+        and marker:match('version="([^"]*)"') == tostring(current.version) then
+        return {
+          proposal_id = tostring(proposal_id),
+          version = tostring(current.version),
+          marker_kind = "dependency-wait",
+          hold_kind = hold_kind or "waiting",
+          reason = reason or "waiting-on-dependency",
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+    for marker in body:gmatch(cycle_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
+        and marker:match('version="([^"]*)"') == tostring(current.version) then
+        return {
+          proposal_id = tostring(proposal_id),
+          version = tostring(current.version),
+          marker_kind = "dependency-cycle",
+          hold_kind = hold_kind or "cycle",
+          reason = reason or "dependency-cycle",
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
 function M.dependency_wait_fact(comments, proposal_id)
   if type(comments) ~= "table" then
     return nil
