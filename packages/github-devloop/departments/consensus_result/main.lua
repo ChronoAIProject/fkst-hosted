@@ -72,7 +72,7 @@ function pipeline(event)
       local version = tostring(reached.dedup_key)
       local marker = gate.kind == "cycle"
         and core.dependency_cycle_marker(reached.proposal_id, version)
-        or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet)
+        or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet, gate.kind, gate.reason)
       dependency_comment_request = core.build_dependency_hold_comment_request(
         repo,
         issue_number,

@@ -749,9 +749,13 @@ local function dependency_unmet_field(unmet_numbers)
   return table.concat(parts, ",")
 end
 
-function M.dependency_wait_marker(proposal_id, version, unmet_numbers)
+function M.dependency_wait_marker(proposal_id, version, unmet_numbers, hold_kind, reason)
+  local encoded_hold_kind = safe_marker_attr(M, hold_kind or "waiting", max_attr_len)
+  local encoded_reason = safe_marker_attr(M, reason or "waiting-on-dependency", max_attr_len)
   return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
+    .. '" hold_kind="' .. encoded_hold_kind
+    .. '" reason="' .. encoded_reason
     .. '" unmet="' .. dependency_unmet_field(unmet_numbers)
     .. '" -->'
 end
@@ -781,8 +785,8 @@ function M.dependency_hold_fact(comments, proposal_id)
           proposal_id = tostring(proposal_id),
           version = tostring(current.version),
           marker_kind = "dependency-wait",
-          hold_kind = "waiting",
-          reason = "waiting-on-dependency",
+          hold_kind = decode_marker_attr(marker_attr(marker, "hold_kind")) or "waiting",
+          reason = decode_marker_attr(marker_attr(marker, "reason")) or "waiting-on-dependency",
           comment_created_at = M._comment_created_at(comment),
         }
       end

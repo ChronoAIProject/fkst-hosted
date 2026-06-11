@@ -322,7 +322,7 @@ function pipeline(event)
         if not gate.ok then
           local marker = gate.kind == "cycle"
             and core.dependency_cycle_marker(proposal_id, state.version)
-            or core.dependency_wait_marker(proposal_id, state.version, gate.unmet)
+            or core.dependency_wait_marker(proposal_id, state.version, gate.unmet, gate.kind, gate.reason)
           core.log_cas_decision("observe_issue", proposal_id, state, "ready", "implementing", "hold-dependency", gate.reason)
           core.log_apply("observe_issue", proposal_id, nil, nil, { add = { core._blocked_on_dependency_label }, remove = {} }, {
             "github-proxy.github_issue_comment_request",

@@ -152,7 +152,7 @@ local function comment_cases()
     source_ref = pr_source_ref,
   }
   local gate = { kind = "waiting", reason = "waiting-on-dependency" }
-  local dependency_marker = core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 })
+  local dependency_marker = core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 }, gate.kind, gate.reason)
   local merge_ready = merge_ready_payload()
   local decompose = {
     proposal_id = issue_proposal_id,
