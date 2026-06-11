@@ -503,8 +503,13 @@ esac
             candidate_prefix: "candidate/".to_string(),
             candidate_from_sep: "::".to_string(),
             stop_grace_secs: 5,
-            conformance_timeout_secs: 5,
-            ready_timeout_secs: 5,
+            // Generous engine-level timeouts for the POSITIVE-path tests:
+            // these spawn real `sh` engine children whose markers can lag
+            // well past a few seconds under a saturated full-workspace run.
+            // The negative timeout tests override these locally (and assert
+            // their own short windows), so the wider default is safe.
+            conformance_timeout_secs: 30,
+            ready_timeout_secs: 30,
             error_capture_bytes: 8192,
             log_tail_lines: 200,
         }
