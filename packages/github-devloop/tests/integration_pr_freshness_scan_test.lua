@@ -197,7 +197,7 @@ return {
     t.eq(core.is_supported_sync_conflict(raised.payload), true)
   end,
 
-  test_pr_freshness_once_key_prevents_repeating_same_baseline = function()
+  test_pr_freshness_dry_run_does_not_consume_same_baseline_retry = function()
     mock_env("")
     mock_pr_list(false)
     mock_pr_view("merge-ready")
@@ -217,8 +217,11 @@ return {
     mock_issue_view({})
     mock_fetch_and_heads()
     t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
+    mock_worktree_merge(0)
+    t.mock_command("commit -F", { stdout = "[detached " .. merge_sha .. "] Refresh branch\n", stderr = "", exit_code = 0 })
+    t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = "", stderr = "", exit_code = 0 })
     local second = run_scan(run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(h.count_calls("merge --no-ff --no-commit"), 1)
+    t.eq(h.count_calls("merge --no-ff --no-commit"), 2)
   end,
 }

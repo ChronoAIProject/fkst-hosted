@@ -269,19 +269,6 @@ function M.pr_freshness_dedup_key(repo, branch, baseline_sha)
   })
 end
 
-function M.pr_freshness_once_key(repo, branch, baseline_sha)
-  local key = "github-devloop/pr-freshness/"
-    .. M.safe_repo(require_safe_repo(repo))
-    .. "/"
-    .. require_safe_branch("managed branch", branch)
-    .. "/"
-    .. require_safe_sha("baseline sha", baseline_sha)
-  if not M._is_path_safe_key(key, M._max_dedup_len) then
-    error("github-devloop: invalid PR freshness once key")
-  end
-  return key
-end
-
 function M.pr_freshness_source_ref(repo, pr_number)
   return {
     kind = "external",

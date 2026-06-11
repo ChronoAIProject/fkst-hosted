@@ -272,30 +272,24 @@ local function process_pr(repo, branches, listed_pr)
       return
     end
 
-    local once_key = core.pr_freshness_once_key(repo, pr.head_ref_name, integration_sha)
-    local ran = once(once_key, function()
-      local runtime = runtime_root()
-      with_temp_worktree(runtime, repo, pr.head_ref_name, branches.integration, branch_sha, function(worktree)
-        local merge_result = exec_sync({ cmd = core.git_merge_no_ff_cmd(worktree, integration_sha), timeout = 120 })
-        if merge_result.exit_code == 0 then
-          write_refresh_commit(worktree, runtime, repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha)
-          push_if_real(repo, pr.head_ref_name, branch_sha, worktree)
-          return
-        end
-        local unmerged = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
-        if unmerged.exit_code ~= 0 then
-          error("github-devloop: git PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
-        end
-        if tostring(unmerged.stdout or "") ~= "" then
-          raise_conflict(repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha, listed_pr.number)
-          return
-        end
-        error("github-devloop: git PR freshness merge failed without conflicts: " .. tostring(merge_result.stderr))
-      end)
+    local runtime = runtime_root()
+    with_temp_worktree(runtime, repo, pr.head_ref_name, branches.integration, branch_sha, function(worktree)
+      local merge_result = exec_sync({ cmd = core.git_merge_no_ff_cmd(worktree, integration_sha), timeout = 120 })
+      if merge_result.exit_code == 0 then
+        write_refresh_commit(worktree, runtime, repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha)
+        push_if_real(repo, pr.head_ref_name, branch_sha, worktree)
+        return
+      end
+      local unmerged = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+      if unmerged.exit_code ~= 0 then
+        error("github-devloop: git PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
+      end
+      if tostring(unmerged.stdout or "") ~= "" then
+        raise_conflict(repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha, listed_pr.number)
+        return
+      end
+      error("github-devloop: git PR freshness merge failed without conflicts: " .. tostring(merge_result.stderr))
     end)
-    if not ran then
-      core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(branch-baseline)", "freshness merge already attempted for branch and baseline")
-    end
   end)
 end
 

@@ -78,6 +78,15 @@ local function assert_judgment_worktree(call, role)
   t.is_nil(call.rendered:find("/worktrees/", 1, true))
 end
 
+local function call_for_angle(calls, angle)
+  for _, call in ipairs(calls) do
+    if tostring(call.stdin or ""):find("Angle: " .. angle, 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
+end
+
 local function assert_judgment_dir_read_only(count)
   local seen = 0
   for _, call in ipairs(t.command_calls()) do
@@ -149,16 +158,16 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 3)
-    assert_judgment_worktree(calls[1], "angle-minimal")
-    assert_judgment_worktree(calls[2], "angle-structural")
-    assert_judgment_worktree(calls[3], "angle-delete")
+    local minimal_call = call_for_angle(calls, "minimal")
+    local structural_call = call_for_angle(calls, "structural")
+    local delete_call = call_for_angle(calls, "delete")
+    assert_judgment_worktree(minimal_call, "angle-minimal")
+    assert_judgment_worktree(structural_call, "angle-structural")
+    assert_judgment_worktree(delete_call, "angle-delete")
     assert_judgment_dir_read_only(3)
-    t.is_true(calls[1].stdin:find("Angle: minimal", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
-    t.is_true(calls[2].stdin:find("Angle: structural", 1, true) ~= nil)
-    t.is_true(calls[3].stdin:find("Angle: delete", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
+    t.is_true(minimal_call.stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
   end,
 
   test_codex_stdin_carries_fetch_instruction_not_full_body = function()
@@ -261,8 +270,12 @@ return {
     t.eq(result.raises[1].payload.source_ref.kind, "proposal")
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_digests, 3)
-    t.eq(result.raises[1].payload.angle_digests[1].verdict, "approve")
-    t.eq(result.raises[1].payload.angle_digests[2].verdict, "abstain")
+    local verdict_counts = {}
+    for _, digest in ipairs(result.raises[1].payload.angle_digests) do
+      verdict_counts[digest.verdict] = (verdict_counts[digest.verdict] or 0) + 1
+    end
+    t.eq(verdict_counts.approve, 2)
+    t.eq(verdict_counts.abstain, 1)
     t.is_nil(result.raises[1].payload.body)
     t.is_nil(result.raises[1].payload.angle_results)
     t.is_nil(result.raises[1].payload.decision)
