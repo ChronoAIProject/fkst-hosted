@@ -1,0 +1,25 @@
+# PodDisruptionBudget for fkst-hosted-api.
+#
+# Keeps at least 2 pods available during VOLUNTARY disruptions (node drains,
+# kubectl rollout, cluster upgrades) so the API never drops below 2-pod
+# capacity while one pod is being recycled. With the 3..5 operating range this
+# always leaves headroom (minAvailable: 2 vs replicas >= 3). It does NOT guard
+# against involuntary loss (hard pod/node death) — that path is covered by the
+# distribution layer's lease expiry + reaper takeover.
+#
+# minAvailable (not maxUnavailable) is used so the floor stays fixed at 2
+# regardless of how the replica count is scaled within the range.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fkst-hosted-api
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-hosted-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-hosted-api

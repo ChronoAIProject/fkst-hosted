@@ -5,6 +5,14 @@
 #   - MONGODB_SERVER_SELECTION_TIMEOUT_MS bounds the startup ping and /health
 #   - FKST_HOSTED_LOG_LEVEL               tracing-subscriber EnvFilter directive
 # MONGODB_URI is a credential and lives in the Secret (fkst-hosted-secret).
+#
+# Distribution / lease-takeover knobs (backend/.../src/leases/config.rs and
+# .../src/distribution/config.rs). All are set to their in-code defaults here:
+# explicit values make the multi-pod coordination posture visible and tunable
+# for operators without rebuilding the image. Constraints (fail-closed at
+# startup): TTL in 1..=86400; 0 < RENEW and RENEW*2 < TTL; SCAN > 0;
+# GRACE may be 0; MAX_LOAD 0 = uncapped. FKST_POD_ID is NOT set here — it is
+# injected per-pod from the downward API in the Deployment.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -18,3 +26,9 @@ data:
   MONGODB_DB: "fkst_hosted"
   MONGODB_SERVER_SELECTION_TIMEOUT_MS: "5000"
   FKST_HOSTED_LOG_LEVEL: "info,fkst_hosted_api=debug,tower_http=info"
+  # Lease + takeover cadences (defaults; see header for constraints).
+  FKST_LEASE_TTL_SECS: "30"
+  FKST_LEASE_RENEW_INTERVAL_SECS: "10"
+  FKST_TAKEOVER_SCAN_INTERVAL_SECS: "5"
+  FKST_TAKEOVER_GRACE_SECS: "2"
+  FKST_PLACEMENT_MAX_LOAD: "0"

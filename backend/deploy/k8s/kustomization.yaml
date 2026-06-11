@@ -13,7 +13,15 @@ resources:
   - mongodb-statefulset.yaml
   - api-deployment.yaml
   - api-service.yaml
+  - pdb.yaml
 # Image-tag seam: change the deployed tag in one place.
 images:
   - name: fkst-hosted
     newTag: dev
+# Replica edit-point: the fkst-hosted-api operating range is 3..5. Scaling
+# within the range is a one-line change here (kustomize overrides the
+# Deployment's spec.replicas) — keep it in 3..5 so the PodDisruptionBudget
+# (minAvailable: 2) always has headroom.
+replicas:
+  - name: fkst-hosted-api
+    count: 3
