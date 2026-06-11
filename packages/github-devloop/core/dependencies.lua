@@ -37,6 +37,22 @@ local function add_unmet(unmet, seen, number)
   table.insert(unmet, value)
 end
 
+local function dependency_unmet_field(unmet_numbers)
+  local core = root()
+  local parts = {}
+  for _, number in ipairs(unmet_numbers or {}) do
+    if core._is_positive_pr_number(number) then
+      local next_value = tostring(math.floor(tonumber(number)))
+      local candidate = #parts == 0 and next_value or (table.concat(parts, ",") .. "," .. next_value)
+      if #candidate > 200 then
+        break
+      end
+      table.insert(parts, next_value)
+    end
+  end
+  return table.concat(parts, ",")
+end
+
 local function parse_blocked_by(stdout)
   local core = root()
   local ok, decoded = pcall(json.decode, stdout or "")
@@ -229,6 +245,120 @@ function M.dependency_gate(repo, issue_number)
   end
   result.ok = result.kind == "satisfied"
   return result
+end
+
+function M.dependency_wait_marker(proposal_id, version, unmet_numbers)
+  return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" unmet="' .. dependency_unmet_field(unmet_numbers)
+    .. '" -->'
+end
+
+function M.dependency_cycle_marker(proposal_id, version)
+  return '<!-- fkst:github-devloop:dependency-cycle:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" -->'
+end
+
+function M.dependency_release_marker(proposal_id, version)
+  return '<!-- fkst:github-devloop:dependency-release:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" -->'
+end
+
+function M.dependency_hold_fact(comments, proposal_id)
+  local core = root()
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local current = core.current_state(comments, proposal_id)
+  if type(current) ~= "table" or current.version == nil then
+    return nil
+  end
+  local wait_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
+  local cycle_pattern = "<!%-%- fkst:github%-devloop:dependency%-cycle:v1.-%-%->"
+  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
+    local body = core._comment_body(comment)
+    local hold_kind = body:match("github%-devloop dependency hold:%s*([^\n]+)")
+    local reason = body:match("Reason:%s*([^\n]+)")
+    for marker in body:gmatch(wait_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
+        and marker:match('version="([^"]*)"') == tostring(current.version) then
+        return {
+          proposal_id = tostring(proposal_id),
+          version = tostring(current.version),
+          marker_kind = "dependency-wait",
+          hold_kind = hold_kind or "waiting",
+          reason = reason or "waiting-on-dependency",
+          comment_created_at = core._comment_created_at(comment),
+        }
+      end
+    end
+    for marker in body:gmatch(cycle_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
+        and marker:match('version="([^"]*)"') == tostring(current.version) then
+        return {
+          proposal_id = tostring(proposal_id),
+          version = tostring(current.version),
+          marker_kind = "dependency-cycle",
+          hold_kind = hold_kind or "cycle",
+          reason = reason or "dependency-cycle",
+          comment_created_at = core._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.dependency_release_fact(comments, proposal_id, version)
+  local core = root()
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-release:v1.-%-%->"
+  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
+    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      if marker_proposal == tostring(proposal_id)
+        and marker_version == tostring(version) then
+        return {
+          proposal_id = marker_proposal,
+          version = marker_version,
+          comment_created_at = core._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.dependency_wait_fact(comments, proposal_id)
+  local core = root()
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local current = core.current_state(comments, proposal_id)
+  if type(current) ~= "table" or current.version == nil then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
+  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
+    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      if marker_proposal == tostring(proposal_id)
+        and marker_version == tostring(current.version) then
+        return {
+          proposal_id = marker_proposal,
+          version = marker_version,
+          comment_created_at = core._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
 end
 
 function M.install(root_module)

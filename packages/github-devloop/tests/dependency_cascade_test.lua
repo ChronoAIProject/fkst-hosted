@@ -238,6 +238,16 @@ local function has_queue(raises, queue)
   return find_raise(raises, queue) ~= nil
 end
 
+local function count_queue(raises, queue)
+  local count = 0
+  for _, item in ipairs(raises or {}) do
+    if item.queue == queue then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local function has_marker(raises, marker_text)
   return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
     return tostring(payload.body or ""):find(marker_text, 1, true) ~= nil
@@ -260,6 +270,10 @@ return {
     t.eq(
       core.dependency_cycle_marker(proposal_id, "v1"),
       '<!-- fkst:github-devloop:dependency-cycle:v1 proposal="github-devloop/issue/owner/repo/42" version="v1" -->'
+    )
+    t.eq(
+      core.dependency_release_marker(proposal_id, "v1"),
+      '<!-- fkst:github-devloop:dependency-release:v1 proposal="github-devloop/issue/owner/repo/42" version="v1" -->'
     )
   end,
 
@@ -390,17 +404,44 @@ return {
     t.eq(has_queue(held.raises, "devloop_ready"), false)
     t.is_true(has_marker(held.raises, "fkst:github-devloop:dependency-wait:v1"))
 
-    mock_observe_issue({ "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" })
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 7 }),
+      }
+    )
     mock_blocked_by(42, { { number = 7 } })
     mock_blocked_by(7, {})
     mock_blocker_issue(7, "merged")
     local cascaded = run_observe()
     t.eq(cascaded.exit_code, 0)
     t.is_true(has_queue(cascaded.raises, "devloop_ready"))
+    t.is_true(has_marker(cascaded.raises, "fkst:github-devloop:dependency-release:v1"))
     local clear = find_raise(cascaded.raises, "github-proxy.github_issue_label_request", function(payload)
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
     end)
     t.is_true(clear ~= nil)
+  end,
+
+  test_observe_issue_existing_hold_still_waiting_does_not_refresh = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 7 }),
+      }
+    )
+    mock_blocked_by(42, { { number = 7 } })
+    mock_blocked_by(7, {})
+    mock_blocker_issue(7, "ready")
+    local result = run_observe()
+    t.eq(result.exit_code, 0)
+    t.eq(count_queue(result.raises, "github-proxy.github_issue_comment_request"), 0)
+    t.eq(count_queue(result.raises, "github-proxy.github_issue_label_request"), 0)
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
   end,
 
   test_cycle_holds_with_cycle_marker = function()
@@ -461,6 +502,8 @@ return {
     local released = run_observe()
     t.eq(released.exit_code, 0)
     t.is_true(has_queue(released.raises, "devloop_ready"))
+    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", version }))
+    t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
     local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
     end)
