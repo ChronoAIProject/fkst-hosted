@@ -666,6 +666,7 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         pid: Some(4242),
         runtime_dir: None,
         error: None,
+        run_key: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,

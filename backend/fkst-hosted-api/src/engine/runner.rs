@@ -65,6 +65,10 @@ pub struct RunningSession {
     /// Merged stdout+stderr ring buffer fed by the spawn drains (issue #50):
     /// ready markers come from stdout, panics/exit reasons from stderr.
     output: OutputBuffer,
+    /// Line-framed stdout stream (the journaling layer's `RAISED:` source,
+    /// issue #25), fanned out from the same stdout drain that feeds `output`;
+    /// taken at most once via [`Self::take_stdout`].
+    stdout_lines: Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
     /// First terminal observation, cached so repeated `status()` calls are
     /// stable and never re-`try_wait` an already-reaped child.
     terminal_status: Option<LiveStatus>,
@@ -110,6 +114,14 @@ impl RunningSession {
     /// session later turns `Failed`.
     pub fn engine_stderr(&self) -> String {
         self.output.snapshot()
+    }
+
+    /// Take ownership of the engine's line-framed stdout stream (at most
+    /// once; subsequent calls return `None`). The journaling layer consumes
+    /// this for `RAISED:` parsing; leaving it untaken is safe — the drain
+    /// task keeps the pipe flowing and discards lines.
+    pub fn take_stdout(&mut self) -> Option<tokio::sync::mpsc::Receiver<Vec<u8>>> {
+        self.stdout_lines.take()
     }
 
     /// Stop the session: SIGTERM the process GROUP, wait up to `grace`,
@@ -288,8 +300,10 @@ impl SessionRunner {
             // The drain tasks run for the child's lifetime; reaping the group
             // EOFs both pipes, ending them. They are not aborted here on the
             // success path because the merged buffer must stay readable via
-            // engine_stderr() for the whole session.
+            // engine_stderr() for the whole session, and the stdout fan-out
+            // must keep feeding the journal stream.
             drains: _drains,
+            stdout_lines,
         } = spawned;
         let mut guard = ChildGroupGuard::new(child, pid);
         let ready_timeout = Duration::from_secs(self.config.ready_timeout_secs);
@@ -377,6 +391,7 @@ impl SessionRunner {
             package_guard: Some(package_guard),
             runtime_guard: Some(runtime_guard),
             output,
+            stdout_lines: Some(stdout_lines),
             terminal_status: None,
             log_tail_lines: self.config.log_tail_lines,
         })
@@ -488,8 +503,13 @@ esac
             candidate_prefix: "candidate/".to_string(),
             candidate_from_sep: "::".to_string(),
             stop_grace_secs: 5,
-            conformance_timeout_secs: 5,
-            ready_timeout_secs: 5,
+            // Generous engine-level timeouts for the POSITIVE-path tests:
+            // these spawn real `sh` engine children whose markers can lag
+            // well past a few seconds under a saturated full-workspace run.
+            // The negative timeout tests override these locally (and assert
+            // their own short windows), so the wider default is safe.
+            conformance_timeout_secs: 30,
+            ready_timeout_secs: 30,
             error_capture_bytes: 8192,
             log_tail_lines: 200,
         }
@@ -524,8 +544,11 @@ esac
             .count()
     }
 
+    // ~20 s budget: real-engine-stub tests poll a spawned `sh` child's drained
+    // output, which can lag well past a few seconds under a saturated
+    // full-workspace run (many parallel spawns + containers).
     async fn wait_until(mut predicate: impl FnMut() -> bool) -> bool {
-        for _ in 0..160 {
+        for _ in 0..800 {
             if predicate() {
                 return true;
             }
@@ -674,6 +697,35 @@ esac
             runner.tail_logs(&session.runtime_dir).as_deref(),
             Some("CMD=stub\nframework ok")
         );
+
+        runner.stop(&mut session).await.expect("stop");
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn take_stdout_yields_the_raised_stream_exactly_once() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        let bin = engine_stub(
+            stub_dir.path(),
+            r#"    echo "event runtime running handles=3" >&2
+    echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+    echo "RAISED: eyJkZXB0IjoiaGVsbG8ifQ=="
+    sleep 30"#,
+        );
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let mut session = runner.start(&minimal_package()).await.expect("start");
+        let mut stdout = session.take_stdout().expect("stdout taken once");
+        assert!(
+            session.take_stdout().is_none(),
+            "second take must return None"
+        );
+        let line = tokio::time::timeout(Duration::from_secs(20), stdout.recv())
+            .await
+            .expect("stdout line within 20s")
+            .expect("channel open");
+        assert_eq!(line, b"RAISED: eyJkZXB0IjoiaGVsbG8ifQ==".to_vec());
 
         runner.stop(&mut session).await.expect("stop");
         assert_eq!(fkst_entries(temp_root.path()), 0);

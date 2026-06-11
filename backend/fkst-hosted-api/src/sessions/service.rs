@@ -29,7 +29,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -41,6 +41,13 @@ use crate::engine::{
     EngineConfig, LiveStatus, PreparedPackage, RunnerError, RunningSession, SessionRunner,
 };
 use crate::error::AppError;
+use crate::journal::model::LogRef;
+use crate::journal::parse::{parse_raised_line, ParsedLine};
+use crate::journal::store::MongoProgressStore;
+use crate::journal::{
+    package_fingerprint, JournalConfig, Journaler, LifecycleEvent, ProgressSignal, SessionCtx,
+    Transition,
+};
 use crate::leases::RenewOutcome;
 use crate::models::{SessionDoc, SessionStatus};
 use crate::packages::{is_valid_name, PackageRepository};
@@ -84,7 +91,21 @@ struct Inner {
     shutdown_bound: Duration,
     /// Placement + lease layer; `None` selects the single-pod posture.
     distribution: Option<Distributor>,
+    /// Journaling layer (issue #25), enabled once at startup via
+    /// [`SessionService::enable_journaling`]. Unset => journaling is off
+    /// (legacy tests / minimal runs); the driver behaves identically either
+    /// way — journaling NEVER changes session disposition.
+    journal: OnceLock<JournalSetup>,
 }
+
+/// Journaling wiring shared by every driver this service spawns.
+struct JournalSetup {
+    config: JournalConfig,
+    store: MongoProgressStore,
+}
+
+/// The concrete journaler type drivers hold.
+type ServiceJournaler = Journaler<MongoProgressStore>;
 
 /// Clonable orchestration service: create / get / stop sessions and drive
 /// their engine processes on this pod.
@@ -133,8 +154,26 @@ impl SessionService {
                 pod_id,
                 shutdown_bound,
                 distribution,
+                journal: OnceLock::new(),
             }),
         }
+    }
+
+    /// Enable session-progress journaling (issue #25) for every driver this
+    /// service spawns. Call once at startup, before any session is created;
+    /// a second call is a logged no-op.
+    pub fn enable_journaling(&self, config: JournalConfig, store: MongoProgressStore) {
+        let github = config.github_enabled && config.github_repo.is_some();
+        if self
+            .inner
+            .journal
+            .set(JournalSetup { config, store })
+            .is_err()
+        {
+            tracing::warn!("journaling already enabled; ignoring the second call");
+            return;
+        }
+        tracing::info!(github, "session progress journaling enabled");
     }
 
     /// The repository handle (startup hooks: orphan sweep).
@@ -175,6 +214,7 @@ impl SessionService {
             pid: None,
             runtime_dir: None,
             error: None,
+            run_key: None,
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,
@@ -573,6 +613,15 @@ async fn drive_inner(
             return true;
         }
     };
+
+    // (B2) Journaling bootstrap (issue #25): resolve run_key, stamp it on
+    // the document, and load the GitHub skip-set BEFORE any package work.
+    // Journaling is never load-bearing — every failure below is logged and
+    // swallowed; session disposition is decided exclusively by the CAS
+    // choke-points.
+    let mut journaler = start_journaler(inner, id, package_name, &package, fencing_token).await;
+    journal_lifecycle(&mut journaler, Transition::Validating).await;
+
     let prepared = PreparedPackage::from(package);
 
     // (C) Start the engine. This await runs to completion (never
@@ -581,10 +630,19 @@ async fn drive_inner(
         Ok(session) => session,
         Err(error) => {
             tracing::warn!(session_id = %id, error = %error, "engine start failed");
+            journal_finish(
+                &mut journaler,
+                Transition::Failed {
+                    exit_code: None,
+                    error: describe_runner_error(&error),
+                },
+            )
+            .await;
             fail_session(inner, id, &fence, &describe_runner_error(&error)).await;
             return true;
         }
     };
+    journal_lifecycle(&mut journaler, Transition::Spawned { pid: session.pid }).await;
 
     let stop_already_requested = *stop_rx.borrow();
     let promoted = if stop_already_requested {
@@ -628,12 +686,20 @@ async fn drive_inner(
                 },
             )
             .await;
+        journal_finish(&mut journaler, Transition::Stopped { exit_code: None }).await;
         return true;
     }
     tracing::info!(session_id = %id, pid = session.pid, "session running");
+    journal_lifecycle(&mut journaler, Transition::Running).await;
+    journal_watermark(&mut journaler, &session.runtime_dir).await;
 
-    // (D) Supervise: react to stop requests, renew the lease, and watch
-    // engine liveness.
+    // The journal's RAISED source: the engine's line-framed stdout, taken
+    // exactly once. Leaving it untaken would be safe too (the drain task
+    // keeps the pipe flowing); `None` after EOF parks the select arm.
+    let mut stdout_rx = session.take_stdout();
+
+    // (D) Supervise: react to stop requests, renew the lease, consume the
+    // stdout journal stream, and watch engine liveness.
     let mut tick = tokio::time::interval(SUPERVISE_POLL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let renew_interval = match (&inner.distribution, fencing_token) {
@@ -652,8 +718,19 @@ async fn drive_inner(
         tokio::select! {
             // A closed channel (service dropped) also reads as a stop: this
             // pod is going away and the engine must not be orphaned silently.
+            line = next_stdout_line(&mut stdout_rx) => {
+                match line {
+                    Some(raw) => journal_stdout_line(&mut journaler, &raw).await,
+                    // EOF/closed: park this arm (recv on a closed channel
+                    // answers instantly — polling it again would busy-loop).
+                    None => stdout_rx = None,
+                }
+            }
             _ = stop_rx.changed() => {
                 tracing::info!(session_id = %id, "stop signal received; stopping engine");
+                journal_lifecycle(&mut journaler, Transition::Stopping).await;
+                // Watermark BEFORE stop: stop() removes the runtime dirs.
+                journal_watermark(&mut journaler, &session.runtime_dir).await;
                 match inner.runner.stop(&mut session).await {
                     Ok(()) => {
                         // `running` is in the from-set because a graceful
@@ -674,6 +751,8 @@ async fn drive_inner(
                             )
                             .await;
                         tracing::info!(session_id = %id, "session stopped");
+                        journal_finish(&mut journaler, Transition::Stopped { exit_code: None })
+                            .await;
                     }
                     Err(error) => {
                         // Host-side detail (paths, signalling internals)
@@ -692,6 +771,14 @@ async fn drive_inner(
                                 },
                             )
                             .await;
+                        journal_finish(
+                            &mut journaler,
+                            Transition::Failed {
+                                exit_code: None,
+                                error: "engine stop failed".to_string(),
+                            },
+                        )
+                        .await;
                     }
                 }
                 return true;
@@ -717,6 +804,17 @@ async fn drive_inner(
                         if let Err(error) = inner.runner.stop(&mut session).await {
                             tracing::error!(session_id = %id, error = %error, "engine stop failed after lease loss");
                         }
+                        // Mongo-side terminal journal only: this writer's
+                        // token is superseded, so the journaler's own fence
+                        // keeps it off GitHub; local records aid forensics.
+                        journal_finish(
+                            &mut journaler,
+                            Transition::Failed {
+                                exit_code: None,
+                                error: "package lease lost; superseded by takeover".to_string(),
+                            },
+                        )
+                        .await;
                         return false;
                     }
                     Err(error) => {
@@ -738,6 +836,15 @@ async fn drive_inner(
                             if let Err(stop_error) = inner.runner.stop(&mut session).await {
                                 tracing::error!(session_id = %id, error = %stop_error, "engine stop failed after renew self-fence");
                             }
+                            journal_finish(
+                                &mut journaler,
+                                Transition::Failed {
+                                    exit_code: None,
+                                    error: "lease renew failing past the TTL; self-fenced"
+                                        .to_string(),
+                                },
+                            )
+                            .await;
                             return false;
                         }
                         // Transient: keep supervising; the TTL still gives
@@ -752,10 +859,20 @@ async fn drive_inner(
                 }
             }
             _ = tick.tick() => {
+                // Debounced GitHub sync of buffered completions (no-op when
+                // empty or inside the debounce window).
+                journal_flush(&mut journaler, false).await;
                 let live = session.status();
                 if live == LiveStatus::Running {
                     continue;
                 }
+                // Watermark BEFORE the cleanup below removes the dirs.
+                journal_watermark(&mut journaler, &session.runtime_dir).await;
+                let exit_code = match live {
+                    LiveStatus::Stopped => Some(0),
+                    LiveStatus::Failed { code, .. } => code,
+                    LiveStatus::Running => None,
+                };
                 // Terminal engine state. A commanded stop converges to
                 // `stopped`; an uncommanded exit (even a clean one) is a
                 // failure of the supervised contract.
@@ -775,6 +892,7 @@ async fn drive_inner(
                         )
                         .await;
                     tracing::info!(session_id = %id, "session stopped (engine exit after stop request)");
+                    journal_finish(&mut journaler, Transition::Stopped { exit_code }).await;
                     return true;
                 }
                 let error = describe_exit(live, &session);
@@ -808,6 +926,14 @@ async fn drive_inner(
                         )
                         .await;
                 }
+                journal_finish(
+                    &mut journaler,
+                    Transition::Failed {
+                        exit_code,
+                        error: error.clone(),
+                    },
+                )
+                .await;
                 // Reap/cleanup the dead engine's dirs.
                 let _ = inner.runner.stop(&mut session).await;
                 return true;
@@ -836,6 +962,221 @@ async fn fail_session(inner: &Inner, id: bson::Uuid, fence: &Document, error: &s
         Ok(Some(_)) => tracing::info!(session_id = %id, "session failed"),
         Ok(None) => tracing::warn!(session_id = %id, "fail CAS missed; session already terminal"),
         Err(err) => tracing::error!(session_id = %id, error = %err, "fail CAS errored"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Journaling glue (issue #25). EVERY journaling Result below is logged and
+// swallowed: journaling never changes session disposition, and status writes
+// stay exclusively inside the repository CAS choke-points above.
+// ---------------------------------------------------------------------------
+
+/// Build and bootstrap the per-session journaler: compute the package
+/// fingerprint, start the journaler (run head upsert + GitHub client),
+/// stamp `run_key` onto the sessions doc, and load the redo skip-set from
+/// GitHub truth. `None` when journaling is not enabled or bootstrap failed.
+async fn start_journaler(
+    inner: &Arc<Inner>,
+    id: bson::Uuid,
+    package_name: &str,
+    package: &crate::packages::Package,
+    fencing_token: Option<i64>,
+) -> Option<ServiceJournaler> {
+    let setup = inner.journal.get()?;
+    let ctx = SessionCtx {
+        session_id: id.to_string(),
+        package_name: package_name.to_string(),
+        package_fingerprint: package_fingerprint(&package.files, &package.composed_deps),
+        pod_id: inner.pod_id.clone(),
+        fencing_token: fencing_token.unwrap_or(0),
+    };
+    let mut journaler = match Journaler::start(ctx, setup.config.clone(), setup.store.clone()).await
+    {
+        Ok(journaler) => journaler,
+        Err(error) => {
+            tracing::error!(
+                session_id = %id,
+                package_name = %package_name,
+                error = %error,
+                "journaler start failed; session proceeds unjournaled"
+            );
+            return None;
+        }
+    };
+    if let Err(error) = inner.repo.set_run_key(id, journaler.run_key()).await {
+        tracing::warn!(
+            session_id = %id,
+            error = %error,
+            "run_key stamp failed; journaling continues"
+        );
+    }
+    // Redo bootstrap: GitHub completed[] -> skip-set + local mirror,
+    // fail-open to safe re-execution on any unreachability.
+    match journaler.load_skip_set().await {
+        Ok(skip) => {
+            tracing::info!(
+                session_id = %id,
+                package_name = %package_name,
+                run_key = %journaler.run_key(),
+                skip_set_size = skip.len(),
+                "redo skip-set loaded"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                session_id = %id,
+                error = %error,
+                "skip-set bootstrap failed; proceeding with an empty set"
+            );
+        }
+    }
+    Some(journaler)
+}
+
+/// Record one signal; failures are swallowed (already logged with context by
+/// the journaler / store layers).
+async fn journal_record(journaler: &mut Option<ServiceJournaler>, signal: ProgressSignal) {
+    if let Some(j) = journaler.as_mut() {
+        if let Err(error) = j.record(signal).await {
+            tracing::warn!(error = %error, "journal record failed (swallowed; session unaffected)");
+        }
+    }
+}
+
+/// Debounced/forced GitHub flush; failures are swallowed (the buffer is
+/// retained and retried on the next tick; Mongo already holds the records).
+async fn journal_flush(journaler: &mut Option<ServiceJournaler>, force: bool) {
+    if let Some(j) = journaler.as_mut() {
+        if let Err(error) = j.flush(force).await {
+            tracing::warn!(error = %error, "journal flush failed (swallowed; retried next tick)");
+        }
+    }
+}
+
+/// Record a lifecycle transition and flush promptly (`force=true` — the
+/// spec's lifecycle-flushes-immediately rule).
+async fn journal_lifecycle(journaler: &mut Option<ServiceJournaler>, transition: Transition) {
+    journal_record(
+        journaler,
+        ProgressSignal::Lifecycle(LifecycleEvent::now(transition)),
+    )
+    .await;
+    journal_flush(journaler, true).await;
+}
+
+/// Terminal journal: record the terminal lifecycle + final forced flush
+/// (+ the dormant issue-comment mirror); failures swallowed.
+async fn journal_finish(journaler: &mut Option<ServiceJournaler>, transition: Transition) {
+    if let Some(j) = journaler.as_mut() {
+        if let Err(error) = j.finish(LifecycleEvent::now(transition)).await {
+            tracing::warn!(error = %error, "journal finish failed (swallowed; session unaffected)");
+        }
+    }
+}
+
+/// Journal a `log_watermark` reference for the newest engine child log (a
+/// pointer only — log bodies never enter Mongo). Observed at lifecycle
+/// transitions only, never on a hot path.
+async fn journal_watermark(
+    journaler: &mut Option<ServiceJournaler>,
+    runtime_dir: &std::path::Path,
+) {
+    if journaler.is_none() {
+        return;
+    }
+    if let Some(log_ref) = newest_child_log(runtime_dir) {
+        journal_record(
+            journaler,
+            ProgressSignal::Lifecycle(LifecycleEvent::now(Transition::LogWatermark(log_ref))),
+        )
+        .await;
+    }
+}
+
+/// Newest file under `<runtime_dir>/logs/framework-child/`, as a [`LogRef`].
+/// `None` is the normal answer for an idle session (child logs appear only
+/// after the first dispatched event).
+fn newest_child_log(runtime_dir: &std::path::Path) -> Option<LogRef> {
+    let dir = runtime_dir.join("logs").join("framework-child");
+    let mut newest: Option<(std::time::SystemTime, LogRef)> = None;
+    for entry in std::fs::read_dir(&dir).ok()?.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        if newest
+            .as_ref()
+            .map(|(time, _)| modified > *time)
+            .unwrap_or(true)
+        {
+            newest = Some((
+                modified,
+                LogRef {
+                    path: format!(
+                        "logs/framework-child/{}",
+                        entry.file_name().to_string_lossy()
+                    ),
+                    size: meta.len() as i64,
+                    modified: bson::DateTime::from_system_time(modified),
+                },
+            ));
+        }
+    }
+    newest.map(|(_, log_ref)| log_ref)
+}
+
+/// One engine stdout line: parse the `RAISED:` framing and journal the
+/// outcome (raised event / malformed anomaly / debug-logged chatter).
+async fn journal_stdout_line(journaler: &mut Option<ServiceJournaler>, raw: &[u8]) {
+    let Some(max_line_bytes) = journaler.as_ref().map(|j| j.config().max_line_bytes) else {
+        tracing::debug!(target: "engine.stdout", len = raw.len(), "stdout line (journaling off)");
+        return;
+    };
+    match parse_raised_line(raw, max_line_bytes) {
+        ParsedLine::Raised { event_json } => {
+            journal_record(journaler, ProgressSignal::Raised { event_json }).await;
+            // Debounced: the journaler batches by interval / batch size.
+            journal_flush(journaler, false).await;
+        }
+        ParsedLine::Malformed { excerpt, oversize } => {
+            if let Some(j) = journaler.as_mut() {
+                j.malformed_raised_total += 1;
+                if oversize {
+                    j.oversize_raised_total += 1;
+                }
+                tracing::warn!(
+                    oversize,
+                    malformed_raised_total = j.malformed_raised_total,
+                    oversize_raised_total = j.oversize_raised_total,
+                    payload_excerpt = %excerpt,
+                    "malformed RAISED line (journaled as anomaly; session continues)"
+                );
+            }
+            journal_record(
+                journaler,
+                ProgressSignal::Lifecycle(LifecycleEvent::now(Transition::MalformedRaised {
+                    detail: excerpt,
+                })),
+            )
+            .await;
+        }
+        ParsedLine::Other { excerpt } => {
+            tracing::debug!(target: "engine.stdout", line_excerpt = %excerpt, "engine stdout chatter");
+        }
+    }
+}
+
+/// Await the next stdout line; a parked (`None`) receiver pends forever so
+/// the select arm goes quiet after EOF instead of busy-looping.
+async fn next_stdout_line(
+    rx: &mut Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
+) -> Option<Vec<u8>> {
+    match rx {
+        Some(receiver) => receiver.recv().await,
+        None => std::future::pending().await,
     }
 }
 

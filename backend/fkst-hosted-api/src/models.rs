@@ -37,6 +37,12 @@ pub struct SessionDoc {
     pub pid: Option<i32>,
     pub runtime_dir: Option<String>,
     pub error: Option<String>,
+    /// Logical-run identity stamped by the journaling layer (issue #25);
+    /// lowercase sha256 hex. DELIBERATE exception to the explicit-null
+    /// convention: the field is OMITTED when absent so documents written
+    /// before journaling existed stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_key: Option<String>,
     pub created_at: bson::DateTime,
     pub started_at: Option<bson::DateTime>,
     pub stopped_at: Option<bson::DateTime>,
@@ -72,6 +78,7 @@ mod tests {
             pid: Some(4242),
             runtime_dir: Some("/tmp/run".to_string()),
             error: None,
+            run_key: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
             stopped_at: None,
@@ -156,6 +163,26 @@ mod tests {
             !raw.contains_key("package_name"),
             "package_name must map onto _id only"
         );
+    }
+
+    #[test]
+    fn run_key_is_omitted_when_absent_and_round_trips_when_set() {
+        // Omitted (not null) when absent: pre-journaling documents and new
+        // ones stay byte-identical until the journaler stamps the key.
+        let raw = bson::to_document(&sample_session()).expect("serialize");
+        assert!(!raw.contains_key("run_key"), "run_key must be omitted");
+        // Old documents (no field at all) still deserialize.
+        let mut without = raw.clone();
+        without.remove("run_key");
+        let back: SessionDoc = bson::from_document(without).expect("deserialize");
+        assert_eq!(back.run_key, None);
+
+        let mut doc = sample_session();
+        doc.run_key = Some("ab".repeat(32));
+        let raw = bson::to_document(&doc).expect("serialize");
+        assert_eq!(raw.get_str("run_key").expect("run_key"), "ab".repeat(32));
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, doc);
     }
 
     #[test]
