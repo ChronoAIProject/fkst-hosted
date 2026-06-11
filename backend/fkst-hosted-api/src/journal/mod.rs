@@ -9,6 +9,7 @@
 //! redo on a different pod. Correctness never depends on timestamps or on the
 //! engine's LOCAL `once()` marks / `with_lock` / codex-permits.
 
+pub mod model;
 pub mod parse;
 
 use sha2::{Digest, Sha256};
