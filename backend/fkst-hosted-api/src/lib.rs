@@ -8,6 +8,7 @@ pub mod config;
 pub mod db;
 pub mod engine;
 pub mod error;
+pub mod journal;
 pub mod leases;
 pub mod models;
 pub mod packages;
