@@ -13,6 +13,7 @@
 
 pub mod config;
 pub mod error;
+pub mod logs;
 pub mod materialize;
 pub mod process;
 
