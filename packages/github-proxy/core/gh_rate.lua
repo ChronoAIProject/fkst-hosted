@@ -9,7 +9,7 @@ local function command_result_exit_code(result)
 end
 
 function M.gh_rate_pool()
-  return { name = "gh", burst = 50, refill_per_hour = 3250 }
+  return { name = "gh" }
 end
 
 function M.gh_exec_opts(cmd_or_opts, timeout)
