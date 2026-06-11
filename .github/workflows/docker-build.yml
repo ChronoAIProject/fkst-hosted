@@ -104,12 +104,18 @@ jobs:
       - name: Read engine provenance from the image
         id: provenance
         if: steps.gate.outputs.skip != 'true'
+        env:
+          PINNED_REF: ${{ steps.ref.outputs.ref }}
         run: |
           set -euo pipefail
           ESHA=$(docker run --rm --entrypoint cat "$IMAGE" /etc/fkst-engine-sha)
           EVER=$(docker run --rm --entrypoint cat "$IMAGE" /etc/fkst-engine-version)
           if ! echo "$ESHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "ERROR: /etc/fkst-engine-sha is not a 40-char commit SHA: $ESHA"
+            exit 1
+          fi
+          if [ "$ESHA" != "$PINNED_REF" ]; then
+            echo "ERROR: image engine sha $ESHA != pinned ref $PINNED_REF (pin violation: the image was not built at the pinned engine commit)"
             exit 1
           fi
           if [ -z "$EVER" ]; then

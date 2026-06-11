@@ -24,13 +24,22 @@ WORKDIR /engine
 # Uniform fetch of SHA / tag / branch; --depth 1 by-SHA works against GitHub
 # (uploadpack.allowAnySHA1InWant). Fallback: if a server rejects an
 # arbitrary-SHA shallow fetch, deepen to 50 commits of the default branch and
-# check the ref out from there.
+# check out the pinned ref from there. Each fetch path checks out its own
+# target — FETCH_HEAD only on the primary path, where it IS the requested
+# ref — so the fallback can never silently land on a default-branch tip.
+# When the ref is a full commit SHA, a hard assertion makes any drift fail
+# the build instead of producing a green-but-unpinned engine.
 RUN git init -q \
     && git remote add origin "$FKST_SUBSTRATE_REPO" \
-    && (git -c protocol.version=2 fetch --depth 1 origin "$FKST_SUBSTRATE_REF" \
+    && ((git -c protocol.version=2 fetch --depth 1 origin "$FKST_SUBSTRATE_REF" \
+         && git checkout -q FETCH_HEAD) \
         || (echo "INFO: shallow ref fetch failed; falling back to depth-50 default-branch fetch" \
-            && git fetch --depth 50 origin)) \
-    && (git checkout -q FETCH_HEAD 2>/dev/null || git checkout -q "$FKST_SUBSTRATE_REF") \
+            && git fetch --depth 50 origin \
+            && git checkout -q "$FKST_SUBSTRATE_REF")) \
+    && if echo "$FKST_SUBSTRATE_REF" | grep -Eq '^[0-9a-f]{40}$'; then \
+         [ "$(git rev-parse HEAD)" = "$FKST_SUBSTRATE_REF" ] \
+         || (echo "ERROR: engine HEAD $(git rev-parse HEAD) != pinned ref $FKST_SUBSTRATE_REF" && exit 1); \
+       fi \
     && mkdir -p /engine-dist \
     && git rev-parse HEAD > /engine-dist/ENGINE_SHA \
     && echo "INFO: engine pinned at $(cat /engine-dist/ENGINE_SHA)"
