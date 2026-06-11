@@ -143,13 +143,26 @@ end
 
 
 class RunScriptContractTest(unittest.TestCase):
+    def source(self) -> str:
+        return Path(__file__).with_name("run.sh").read_text(encoding="utf-8")
+
     def test_supervise_requires_shared_rate_pool_root(self) -> None:
-        source = Path(__file__).with_name("run.sh").read_text(encoding="utf-8")
+        source = self.source()
 
         self.assertIn('if [ -z "${FKST_RATE_POOL_ROOT:-}" ]; then', source)
         self.assertIn("FKST_RATE_POOL_ROOT is required for supervise", source)
         self.assertIn("FKST_RATE_POOL_ROOT must be an absolute host-stable directory path", source)
         self.assertIn('echo "FKST_RATE_POOL_ROOT=$FKST_RATE_POOL_ROOT"', source)
+
+    def test_python_repository_checks_do_not_write_bytecode_cache(self) -> None:
+        source = self.source()
+
+        self.assertIn('python3 -B "$ROOT/scripts/check_repo.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/bin_cache_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/check_repo.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/check_repo_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
 
 
 if __name__ == "__main__":
