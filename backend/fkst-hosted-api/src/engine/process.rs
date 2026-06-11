@@ -33,6 +33,11 @@ use crate::engine::error::{truncate_output_lossy, RunnerError};
 /// for the child's lifetime so the pipe never backpressures the engine.
 pub const STDERR_RING_CAP_BYTES: usize = 64 * 1024;
 
+/// Byte cap of a SINGLE stderr line fed into the ring (8 KiB): a newline-free
+/// blast is truncated at this length and the remainder discarded, so the
+/// drain task's memory stays bounded regardless of engine output shape.
+pub const STDERR_LINE_CAP_BYTES: usize = 8 * 1024;
+
 /// Per-stream byte cap when collecting conformance output (pre-truncation).
 const CONFORMANCE_CAPTURE_LIMIT: u64 = 256 * 1024;
 
@@ -271,8 +276,32 @@ pub fn spawn_supervise(
     let buffer = StderrBuffer::new(STDERR_RING_CAP_BYTES);
     let drain = buffer.clone();
     tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr_pipe).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
+        let mut reader = BufReader::new(stderr_pipe);
+        let mut line_buf: Vec<u8> = Vec::with_capacity(256);
+        loop {
+            line_buf.clear();
+            // Length-capped read: a newline-free stderr blast can never grow
+            // memory past the per-line cap (next_line() would buffer the
+            // whole physical line). The remainder of an oversized line is
+            // discarded — counted, never stored.
+            let mut limited = (&mut reader).take(STDERR_LINE_CAP_BYTES as u64);
+            let read = match limited.read_until(b'\n', &mut line_buf).await {
+                Ok(0) => break, // EOF
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            let newline_terminated = line_buf.last() == Some(&b'\n');
+            if newline_terminated {
+                line_buf.pop();
+                if line_buf.last() == Some(&b'\r') {
+                    line_buf.pop();
+                }
+            }
+            let mut line = String::from_utf8_lossy(&line_buf).into_owned();
+            if !newline_terminated && read == STDERR_LINE_CAP_BYTES {
+                let dropped = discard_until_newline(&mut reader).await;
+                line.push_str(&format!(" [line truncated: {dropped} bytes dropped]"));
+            }
             drain.append_line(&line);
         }
     });
@@ -379,6 +408,36 @@ pub async fn run_conformance(
                 code: -1,
                 stderr: format!("conformance timed out after {secs}s"),
             })
+        }
+    }
+}
+
+/// Skip the rest of an oversized physical line: consume bytes (without
+/// storing them) up to and including the next `\n`, or to EOF/error.
+/// Returns the number of bytes discarded.
+async fn discard_until_newline<R>(reader: &mut R) -> u64
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    let mut dropped: u64 = 0;
+    loop {
+        let (consumed, found_newline) = {
+            let available = match reader.fill_buf().await {
+                Ok(buf) => buf,
+                Err(_) => return dropped,
+            };
+            if available.is_empty() {
+                return dropped; // EOF
+            }
+            match available.iter().position(|&byte| byte == b'\n') {
+                Some(index) => (index + 1, true),
+                None => (available.len(), false),
+            }
+        };
+        reader.consume(consumed);
+        dropped += consumed as u64;
+        if found_newline {
+            return dropped;
         }
     }
 }
@@ -659,6 +718,48 @@ sleep 30"#,
             .expect("reap");
         assert!(!escalated, "sh dies on SIGTERM without escalation");
         assert!(!is_pid_alive(spawned.pid));
+    }
+
+    #[tokio::test]
+    async fn stderr_drain_caps_a_newline_free_blast() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        // 200 000 'x' bytes with NO newline, then a normal line: without the
+        // length-capped read the drain task would buffer the entire blast.
+        let script = stub(
+            dir.path(),
+            "blaster.sh",
+            r#"head -c 200000 /dev/zero | tr '\0' x >&2
+printf '\n' >&2
+echo "after-blast" >&2
+sleep 30"#,
+        );
+
+        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn blaster");
+        let stderr = spawned.stderr.clone();
+        assert!(
+            wait_until(|| stderr.snapshot().contains("after-blast")).await,
+            "post-blast output must still flow through the drain"
+        );
+
+        let snapshot = spawned.stderr.snapshot();
+        assert!(
+            snapshot.contains("[line truncated: "),
+            "oversized line must carry the dropped-bytes note:\n{snapshot}"
+        );
+        // No single stored line may exceed the cap (plus the short note).
+        for line in snapshot.lines() {
+            assert!(
+                line.len() <= STDERR_LINE_CAP_BYTES + 64,
+                "line of {} bytes exceeds the per-line cap",
+                line.len()
+            );
+        }
+
+        reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5))
+            .await
+            .expect("reap blaster");
     }
 
     #[tokio::test]
