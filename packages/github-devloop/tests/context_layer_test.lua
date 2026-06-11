@@ -52,6 +52,24 @@ local function json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
 
+local function closed_issue_list_json(items)
+  local rendered = {}
+  for _, item in ipairs(items or {}) do
+    local labels = {}
+    for _, label in ipairs(item.labels or {}) do
+      table.insert(labels, '{"name":"' .. json_string(label) .. '"}')
+    end
+    table.insert(rendered, string.format(
+      '{"number":%d,"title":"%s","closedAt":"%s","labels":[%s]}',
+      item.number,
+      json_string(item.title or "Closed issue"),
+      json_string(item.closed_at or "2026-06-01T01:02:03Z"),
+      table.concat(labels, ",")
+    ))
+  end
+  return "[" .. table.concat(rendered, ",") .. "]"
+end
+
 local function assert_valid_utf8(value)
   local ok, len = pcall(utf8.len, tostring(value or ""))
   t.is_true(ok and len ~= nil)
@@ -69,6 +87,14 @@ local function mock_board_lists(issue_count, pr_count, repo)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("gh issue list --repo '" .. repo .. "' --state closed --limit 30 --json number,title,closedAt,labels", {
+    stdout = closed_issue_list_json({
+      { number = 80, title = "Closed recurring widget sync retry fix", labels = { "error-class:retry", "fingerprint:widget-sync" } },
+      { number = 81, title = "Closed widget sync backoff patch", labels = { "fingerprint:widget-sync" } },
+    }),
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_board_title(title, repo)
@@ -79,6 +105,11 @@ local function mock_board_title(title, repo)
     exit_code = 0,
   })
   t.mock_command("gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+    stdout = "[]",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh issue list --repo '" .. repo .. "' --state closed --limit 30 --json number,title,closedAt,labels", {
     stdout = "[]",
     stderr = "",
     exit_code = 0,
@@ -199,6 +230,7 @@ return {
     t.is_nil(proposal.body:find("#101 ", 1, true))
     t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 0)
     t.eq(count_calls("gh pr list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 0)
+    t.eq(count_calls("gh issue list --repo 'owner/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 0)
     t.eq(find_raise(second.raises, "consensus.proposal").payload.body, proposal.body)
   end,
 
@@ -219,10 +251,15 @@ return {
     }, run_opts)).body
 
     t.is_true(first:find("#1 [fkst-dev:thinking] Issue title number 1", 1, true) ~= nil)
+    t.is_true(first:find("Recent closed issues for recurrence judgment:", 1, true) ~= nil)
+    t.is_true(first:find("#80 [closed] Closed recurring widget sync retry fix", 1, true) ~= nil)
+    t.is_true(first:find("fingerprint:widget-sync", 1, true) ~= nil)
     t.is_nil(first:find("#2 [fkst-dev:thinking] Issue title number 2", 1, true))
     t.is_true(second:find("#2 [fkst-dev:thinking] Issue title number 2", 1, true) ~= nil)
     t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 1)
+    t.eq(count_calls("gh issue list --repo 'owner/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
     t.eq(count_calls("gh issue list --repo 'other/repo' --state open --limit 100 --json number,title,labels"), 1)
+    t.eq(count_calls("gh issue list --repo 'other/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
   end,
 
   test_truncate_utf8_handles_mixed_width_boundaries = function()
@@ -336,10 +373,12 @@ return {
     for _, proposal in ipairs({ loop, review, review_loop }) do
       t.is_true(proposal.body:find("BEGIN UNTRUSTED ISSUE DATA", 1, true) ~= nil)
       t.is_true(proposal.body:find("Open items snapshot:", 1, true) ~= nil)
+      t.is_true(proposal.body:find("Recent closed issues for recurrence judgment:", 1, true) ~= nil)
       t.is_true(core.validate_proposal(proposal))
     end
     t.eq(loop.round, 2)
     t.eq(review_loop.round, 3)
     t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 1)
+    t.eq(count_calls("gh issue list --repo 'owner/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
   end,
 }

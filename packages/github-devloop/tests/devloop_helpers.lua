@@ -65,6 +65,16 @@ local function mock_context_bundle()
     stderr = "",
     exit_code = 0,
   })
+  helpers.t.mock_command("--state open --limit 100 --json number,title,labels", {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  helpers.t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
   for _ = 1, 5 do
     helpers.t.mock_command(" > ", ok)
   end
