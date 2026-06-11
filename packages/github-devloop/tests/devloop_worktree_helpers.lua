@@ -261,6 +261,37 @@ local function mock_missing_fix_worktree(branch, head, path)
   return worktree
 end
 
+local function mock_outside_runtime_fix_worktree(branch, head, path)
+  local worktree = path or "/tmp/fkst-packages-test/github-devloop/old-runtime/worktrees/fix-worktree"
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree " .. worktree .. "\nHEAD " .. tostring(head or "def456")
+      .. "\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("[ -d '" .. worktree .. "' ]", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git fetch 'origin' '" .. tostring(branch) .. "'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add --force -B", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  return worktree
+end
+
 local function mock_write_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
     stdout = value or "",
@@ -346,6 +377,7 @@ return {
   mock_git_status = mock_git_status,
   mock_existing_fix_worktree = mock_existing_fix_worktree,
   mock_missing_fix_worktree = mock_missing_fix_worktree,
+  mock_outside_runtime_fix_worktree = mock_outside_runtime_fix_worktree,
   mock_write_env = mock_write_env,
   mock_bot_env = mock_bot_env,
   mock_issue_view_failure = mock_issue_view_failure,

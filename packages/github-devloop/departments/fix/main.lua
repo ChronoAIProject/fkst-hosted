@@ -38,6 +38,11 @@ local function branch_worktree(repo, issue_number, version, branch)
       if prune_result.exit_code ~= 0 then
         error("github-devloop: git worktree prune failed: " .. tostring(prune_result.stderr))
       end
+    else
+      local remove_result = exec_sync({ cmd = core.git_worktree_remove_cmd(existing), timeout = 60 })
+      if remove_result.exit_code ~= 0 then
+        error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
+      end
     end
   end
 
