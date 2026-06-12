@@ -113,8 +113,11 @@ function pipeline(event)
       error("github-devloop: unsafe implementing branch head")
     end
     if head_sha ~= fact.head_sha then
-      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-foreign(head)", "branch head moved past implementing fact")
-      return
+      local ancestry = exec_sync({ cmd = core.git_is_ancestor_cmd(fact.head_sha, head_sha), timeout = 30 })
+      if ancestry.exit_code ~= 0 then
+        core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-foreign(head)", "branch head is not descended from implementing fact")
+        return
+      end
     end
 
     local write_enabled = core.write_mode() == "real"
@@ -131,7 +134,7 @@ function pipeline(event)
     end
 
     core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", core.cas_outcome(state, "apply", state.version), "write gate satisfied; opening PR")
-    local pr_request = core.build_pr_open_request(input.repo, input.issue_number, proposal_id, state, current_issue.title, fact.branch, fact.head_sha, branches.integration)
+    local pr_request = core.build_pr_open_request(input.repo, input.issue_number, proposal_id, state, current_issue.title, fact.branch, head_sha, branches.integration)
     core.log_apply("open_pr", proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
       "github-proxy.github_pr_open_request",
     })

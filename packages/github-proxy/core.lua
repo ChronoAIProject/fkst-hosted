@@ -593,6 +593,19 @@ function M.git_show_ref_branch_cmd(branch)
   return "git show-ref --verify refs/heads/" .. shell_single_quote(branch)
 end
 
+function M.git_is_ancestor_cmd(maybe_ancestor_sha, descendant_sha)
+  if not is_git_sha(maybe_ancestor_sha) then
+    error("github-proxy: invalid ancestor sha")
+  end
+  if not is_git_sha(descendant_sha) then
+    error("github-proxy: invalid descendant sha")
+  end
+  return "git merge-base --is-ancestor "
+    .. shell_single_quote(maybe_ancestor_sha)
+    .. " "
+    .. shell_single_quote(descendant_sha)
+end
+
 function M.parse_git_show_ref_head(stdout, branch)
   local head_sha, ref = tostring(stdout or ""):match("^%s*([0-9a-fA-F]+)%s+(%S+)")
   if is_git_sha(head_sha) and ref == "refs/heads/" .. tostring(branch) then
