@@ -51,6 +51,7 @@ export interface OverviewProps {
   mergedDetails?: string[];
   reviewPressureLabel?: string;
   shipTag?: string;
+  onNewGoal?: () => void;
 }
 
 export function Overview({
@@ -65,6 +66,7 @@ export function Overview({
   mergedDetails = ['— · 24h', 'terminal'],
   reviewPressureLabel,
   shipTag,
+  onNewGoal,
 }: OverviewProps) {
   const [view, setView] = useState<'pipeline' | 'board'>(initialView);
   const [timeWindow, setTimeWindow] = useState<string>(initialWindow);
@@ -94,8 +96,14 @@ export function Overview({
       {/* Toolbar */}
       <div className="flex items-center gap-4 flex-wrap pb-3.5 border-b border-line">
         <button
-          disabled
-          className="font-ui font-semibold text-[12.5px] bg-amber/50 text-amber-ink/50 cursor-not-allowed rounded-control px-3.5 py-[7px] opacity-50 select-none flex-shrink-0"
+          onClick={onNewGoal}
+          disabled={!onNewGoal}
+          className={cn(
+            "font-ui font-semibold text-[12.5px] rounded-control px-3.5 py-[7px] flex-shrink-0 transition-colors",
+            onNewGoal
+              ? "bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer"
+              : "bg-amber/50 text-amber-ink/50 cursor-not-allowed opacity-50 select-none"
+          )}
         >
           + New goal
         </button>

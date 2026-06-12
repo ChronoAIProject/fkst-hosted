@@ -1,16 +1,165 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { App } from './index';
 import { nextCondensed } from './shell';
 
+const mockFetch: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  void init;
+
+  if (href.includes('/api/v1/health')) {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          status: 'ok',
+          mongo: 'up',
+          version: '1.0.0-test',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+  }
+  if (href.includes('/api/v1/packages')) {
+    if (href.endsWith('/api/v1/packages')) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(['package-example']),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+    }
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          name: 'package-example',
+          files: [],
+          composed_deps: [],
+          created_at: '2026-06-13T00:00:00Z',
+          updated_at: '2026-06-13T00:00:00Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+  }
+  if (href.includes('/api/v1/sessions')) {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          id: 'session-123',
+          package_name: 'package-example',
+          status: 'running',
+          pod_id: 'pod-123',
+          fencing_token: 1,
+          pid: 1234,
+          runtime_dir: '/tmp',
+          error: null,
+          created_at: '2026-06-13T00:00:00Z',
+          started_at: '2026-06-13T00:00:00Z',
+          stopped_at: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+  }
+  return Promise.reject(new Error(`Unhandled request to ${href}`));
+};
+
 describe('App Smoke Test', () => {
-  it('redirects to /overview and renders the Overview screen pending text', async () => {
+  let originalFetch: typeof globalThis.fetch;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // NOTE: Layout overflow and container dimensions are not verified in these unit tests.
+    // We explicitly defer overflow assertions to the W3.N Playwright smoke tests,
+    // as JSDOM does not measure layout or perform CSS container rendering.
+    window.history.pushState({}, '', '/');
+    originalFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(mockFetch);
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it('redirects to /overview and renders the Overview screen', async () => {
     render(<App />);
     
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Overview' })).toBeInTheDocument();
-      expect(screen.getByText('screen pending')).toBeInTheDocument();
+      expect(screen.getByText('Design')).toBeInTheDocument();
       expect(window.location.pathname).toBe('/overview');
+      // Honesty regression guard: assert Overview vitals cells render default unknown/—
+      expect(screen.getAllByText('unknown')[0]).toBeInTheDocument();
+    });
+  });
+
+  it('renders Overview screen on /overview', async () => {
+    window.history.pushState({}, '', '/overview');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Design')).toBeInTheDocument();
+      expect(screen.getByText('Build')).toBeInTheDocument();
+      expect(screen.getByText('Review')).toBeInTheDocument();
+      expect(screen.getByText('Ship')).toBeInTheDocument();
+      expect(screen.getByText('Merged')).toBeInTheDocument();
+    });
+  });
+
+  it('renders Goals screen on /goals (issues view)', async () => {
+    window.history.pushState({}, '', '/goals');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText(/no GitHub plane connected/i)).toBeInTheDocument();
+    });
+  });
+
+  it('renders Goals screen on /goals?view=activity (activity view)', async () => {
+    window.history.pushState({}, '', '/goals?view=activity');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText(/host telemetry not connected/i)).toBeInTheDocument();
+      // Assert the Activity segment carries the active treatment
+      const activityButton = screen.getByRole('button', { name: 'Activity' });
+      expect(activityButton).toHaveClass('bg-amber');
+      expect(activityButton).toHaveClass('text-amber-ink');
+      expect(activityButton).toHaveClass('font-semibold');
+    });
+  });
+
+  it('renders Goal screen on /goals/:id', async () => {
+    window.history.pushState({}, '', '/goals/152');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText(/no GitHub plane connected/i)).toBeInTheDocument();
+      expect(screen.getByText('#152')).toBeInTheDocument();
+    });
+  });
+
+  it('renders Packages screen on /packages', async () => {
+    window.history.pushState({}, '', '/packages');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText(/Packages are the/i)).toBeInTheDocument();
+    });
+  });
+
+  it('renders Settings screen on /settings', async () => {
+    window.history.pushState({}, '', '/settings');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Hosted engine — ChronoAI cloud')).toBeInTheDocument();
+    });
+  });
+
+  it('redirects /runs to /goals?view=activity', async () => {
+    window.history.pushState({}, '', '/runs');
+    render(<App />);
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/goals');
+      expect(window.location.search).toBe('?view=activity');
+      expect(screen.getByText(/host telemetry not connected/i)).toBeInTheDocument();
     });
   });
 

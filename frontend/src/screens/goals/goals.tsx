@@ -39,6 +39,8 @@ export interface GoalsProps {
     medianDuration?: string | 'unknown';
     inDlq?: string | 'unknown';
   };
+  onNewGoal?: () => void;
+  onViewChange?: (view: 'issues' | 'activity') => void;
 }
 
 export function Goals({
@@ -46,10 +48,17 @@ export function Goals({
   goals = [],
   runs = [],
   vitals,
+  onNewGoal,
+  onViewChange,
 }: GoalsProps) {
   const [prevView, setPrevView] = useState(view);
   const [currentView, setCurrentView] = useState<'issues' | 'activity'>(view);
   const [timeWindow, setTimeWindow] = useState<string>('24h');
+
+  const handleViewChange = (v: 'issues' | 'activity') => {
+    setCurrentView(v);
+    onViewChange?.(v);
+  };
 
   if (view !== prevView) {
     setCurrentView(view);
@@ -64,8 +73,14 @@ export function Goals({
       {/* Toolbar */}
       <div className="flex items-center gap-4 flex-wrap pb-3.5 border-b border-line">
         <button
-          disabled
-          className="font-ui font-semibold text-[12.5px] bg-amber/50 text-amber-ink/50 cursor-not-allowed rounded-control px-3.5 py-[7px] opacity-50 select-none flex-shrink-0"
+          onClick={onNewGoal}
+          disabled={!onNewGoal}
+          className={cn(
+            "font-ui font-semibold text-[12.5px] rounded-control px-3.5 py-[7px] flex-shrink-0 transition-colors",
+            onNewGoal
+              ? "bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer"
+              : "bg-amber/50 text-amber-ink/50 cursor-not-allowed opacity-50 select-none"
+          )}
         >
           + New goal
         </button>
@@ -76,7 +91,7 @@ export function Goals({
           <div className="bg-raise border border-line rounded-control p-[2px] inline-flex items-center select-none">
             <button
               type="button"
-              onClick={() => setCurrentView('issues')}
+              onClick={() => handleViewChange('issues')}
               className={cn(
                 'py-[5px] px-[13px] text-[12.5px] font-medium rounded-chip transition-colors cursor-pointer outline-none',
                 currentView === 'issues'
@@ -88,7 +103,7 @@ export function Goals({
             </button>
             <button
               type="button"
-              onClick={() => setCurrentView('activity')}
+              onClick={() => handleViewChange('activity')}
               className={cn(
                 'py-[5px] px-[13px] text-[12.5px] font-medium rounded-chip transition-colors cursor-pointer outline-none',
                 currentView === 'activity'

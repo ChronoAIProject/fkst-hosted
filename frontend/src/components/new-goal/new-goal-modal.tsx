@@ -109,13 +109,23 @@ function PackageGraphSection() {
 }
 
 export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps) {
-  const { control, register, handleSubmit } = useForm<NewGoalFormValues>({
+  const { control, register, handleSubmit, reset } = useForm<NewGoalFormValues>({
     defaultValues: {
       repository: '',
       title: '',
       description: '',
     },
   });
+
+  React.useEffect(() => {
+    if (!open) {
+      reset({
+        repository: '',
+        title: '',
+        description: '',
+      });
+    }
+  }, [open, reset]);
 
   const onSubmit = () => {
     // Submission is disabled in v1
@@ -133,17 +143,13 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
       showClose={false}
       className="p-0 border-0 bg-transparent w-full max-w-[560px]"
       style={{ boxShadow: 'none' }}
-      aria-labelledby="ng-modal-title"
       aria-describedby={undefined}
       data-testid="new-goal-modal-content"
     >
+      <DialogTitle className="sr-only">New goal</DialogTitle>
       <form onSubmit={handleSubmit(onSubmit)}>
         <ModalSheet
-          title={
-            <DialogTitle asChild id="ng-modal-title">
-              <span>New goal</span>
-            </DialogTitle>
-          }
+          title={<span>New goal</span>}
           meta="creates a GitHub issue + fkst-dev:enabled — via NyxID"
           className="relative max-h-[88vh]"
           closeButtonSlot={
