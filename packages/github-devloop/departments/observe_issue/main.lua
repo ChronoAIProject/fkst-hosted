@@ -51,11 +51,22 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     snapshot = snapshot,
     event_ts = event_ts,
   }
+  if observe_replay_states[state.state] and state.state == "thinking" then
+    if issue_state ~= nil
+      and issue_state.state == state.state
+      and tostring(issue_state.version or "") == tostring(state.version or "")
+      and core.liveness_timeout_due(row, state, now()) then
+      if core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts) then
+        return true
+      end
+    end
+    return core.replay_from_table("observe_issue", issue, state, row, facts)
+  end
   if observe_replay_states[state.state]
     and core.replay_from_table("observe_issue", issue, state, row, facts) then
     return true
   end
-  if observe_replay_states[state.state] then
+  if observe_replay_states[state.state] and state.state ~= "thinking" then
     return false
   end
   if issue_state == nil

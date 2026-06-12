@@ -114,7 +114,7 @@ return {
     mock_issue_state({ "fkst-dev:tracking" })
     local tracking = run_observe(issue({ labels = { "fkst-dev:tracking" } }), opts("observe-tracking-label")) t.eq(tracking.exit_code, 0) t.eq(#tracking.raises, 0)
 
-    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", { { body = core.state_marker("github-devloop/issue/owner/repo/42", "thinking", "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"), created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()) } })
     local thinking = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:thinking" } }), opts("observe-thinking"))
     t.eq(thinking.exit_code, 0) t.eq(#thinking.raises, 1)
     t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay")
@@ -419,7 +419,7 @@ return {
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 3)
 
-    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", { { body = core.state_marker("github-devloop/issue/owner/repo/42", "thinking", "github-devloop/issue/owner/repo/42/2026-06-03T01-02-05Z"), created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()) } })
     local thinking = run_observe(issue({
       updated_at = "2026-06-03T01:02:05Z",
       view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-05Z",
