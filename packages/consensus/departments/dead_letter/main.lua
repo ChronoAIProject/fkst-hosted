@@ -1,3 +1,5 @@
+local core = require("core")
+
 local M = {}
 
 M.spec = {
@@ -33,9 +35,17 @@ end
 
 function pipeline(event)
   local payload = event.payload or {}
+  local error_class = one_line(payload.error_class or "dead-letter")
+  local error_message = payload.error or payload.message or error_class
+  local fields = core.error_fact_fields(error_class, payload.queue, payload.dept, error_message, {
+    source_ref = payload.source_ref or (type(payload.payload) == "table" and payload.payload.source_ref or nil),
+    attempt = payload.attempt,
+    terminal = true,
+  })
 
   log.warn(
     "consensus dept=dead_letter tag=DEAD_LETTER"
+      .. " " .. table.concat(fields, " ")
       .. " delivery_id=" .. one_line(payload.delivery_id)
       .. " queue=" .. one_line(payload.queue)
       .. " dead_dept=" .. one_line(payload.dept)
@@ -45,5 +55,7 @@ function pipeline(event)
       .. " error=" .. one_line(payload.error)
   )
 end
+
+pipeline = core.wrap_pipeline_failure("dead_letter", pipeline)
 
 return M

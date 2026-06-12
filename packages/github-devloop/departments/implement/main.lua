@@ -250,7 +250,7 @@ local function prepare_worktree(repo, issue_number, ready, branch, base_head)
   return worktree
 end
 
-local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, attempt, event_ts)
+local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, attempt, event_ts, event_queue)
   local worktree = prepare_worktree(repo, issue_number, ready, branch, base_head)
   merge_integration_for_implementation(worktree, branches.integration, base_head)
 
@@ -276,7 +276,11 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
 
   if type(result) ~= "table" or result.exit_code ~= 0 then
     local stderr = type(result) == "table" and result.stderr or "nil result"
-    core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr)
+    core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr, {
+      queue = event_queue,
+      source_ref = ready.source_ref,
+      terminal = false,
+    })
     raise_work_card(repo, issue_number, ready, {
       started_at = codex_started_at,
       finished_at = now(),
@@ -315,7 +319,11 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     if detail == "" then
       detail = tostring(result.stderr or "")
     end
-    core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes")
+    core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes", {
+      queue = event_queue,
+      source_ref = ready.source_ref,
+      terminal = false,
+    })
     raise_work_card(repo, issue_number, ready, {
       started_at = codex_started_at,
       finished_at = now(),
@@ -460,7 +468,7 @@ function pipeline(event)
         return
       end
       core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(retry-no-progress)", "no PR or branch progress is visible; retrying implementation attempt")
-      return run_attempt(repo, issue_number, marker_ready, current, branches, branch, base_head, attempts + 1, event.ts)
+      return run_attempt(repo, issue_number, marker_ready, current, branches, branch, base_head, attempts + 1, event.ts, event.queue)
     end
 
     local retry_failure = nil
@@ -509,8 +517,10 @@ function pipeline(event)
       "reason=implementation fact marker absent for this version",
     })
 
-    run_attempt(repo, issue_number, marker_ready, current, branches, branch, prepare_base(branches), ready.impl_retry_attempt or 1, event.ts)
+    run_attempt(repo, issue_number, marker_ready, current, branches, branch, prepare_base(branches), ready.impl_retry_attempt or 1, event.ts, event.queue)
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("implement", pipeline)
 
 return M

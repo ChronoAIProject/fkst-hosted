@@ -1,5 +1,7 @@
 local M = {}
 
+require("core.error_facts").install(M)
+
 function M.persistence_class()
   return "stateless_adapter"
 end

@@ -135,7 +135,11 @@ function pipeline(event)
     ))
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr)
+      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr, {
+        queue = event.queue,
+        source_ref = candidate.source_ref,
+        terminal = false,
+      })
       error("github-devloop: intake codex failed: " .. tostring(stderr))
     end
 
@@ -225,5 +229,7 @@ function pipeline(event)
     end
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("intake_judge", pipeline)
 
 return M

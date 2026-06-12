@@ -982,4 +982,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("merge", pipeline)
+
 return M
