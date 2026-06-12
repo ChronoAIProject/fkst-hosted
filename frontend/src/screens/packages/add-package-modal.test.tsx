@@ -8,6 +8,7 @@ import { http, HttpResponse } from 'msw';
 import { AddPackageModal } from './add-package-modal';
 import PackagesScreen from './packages-screen';
 import * as toaster from '../../components/primitives/toaster';
+import { SessionRegistryProvider } from '../../lib/hooks/session-registry';
 
 // MSW setup
 const server = setupServer();
@@ -31,7 +32,9 @@ function createTestWrapper() {
     },
   });
   return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <SessionRegistryProvider>{children}</SessionRegistryProvider>
+    </QueryClientProvider>
   );
 }
 

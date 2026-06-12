@@ -15,6 +15,10 @@ import {
 } from '../../components/primitives/select';
 import { TriPanel, TriPanelCell } from '../../components/layout/tri-panel';
 import { AddPackageModal } from './add-package-modal';
+import { Switch } from '../../components/primitives/switch';
+import { useSessionRegistry } from '../../lib/hooks/session-registry';
+import { useCreateSession, useSession, useStopSession } from '../../lib/hooks/useSessions';
+import { isSessionTerminal } from '../../lib/api/truth';
 
 export interface DerivedTopology {
   departments: string[];
@@ -70,6 +74,8 @@ export interface PackagesViewProps {
   sessionStatusCopy?: React.ReactNode;
   isApplyDisabled?: boolean;
   onApplyClick?: () => void;
+  cycleState?: 'idle' | 'stopping' | 'polling' | 'creating' | 'error';
+  onCancelClick?: () => void;
 }
 
 export function PackagesView({
@@ -83,6 +89,8 @@ export function PackagesView({
   sessionStatusCopy,
   isApplyDisabled = true,
   onApplyClick,
+  cycleState = 'idle',
+  onCancelClick,
 }: PackagesViewProps) {
   // Compute flat vs composed counts only if ALL details are resolved
   const allResolved =
@@ -204,12 +212,24 @@ export function PackagesView({
           </button>
           <div className="min-[601px]:ml-auto flex items-center gap-2 flex-wrap max-[600px]:w-full">
             <span className="font-mono text-[11px] text-ghost leading-normal max-[600px]:w-full">
-              manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its composed_deps) — changing the set = create a new package revision (create-only store), then cycle the session
+              manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its composed_deps) — changing the set = create a new package revision (create-only store), then cycle the session; per-package enable switches are a target-state UI over that flow
             </span>
             {sessionStatusCopy && (
-              <span className="text-[12px] font-mono text-ghost select-text mr-2">
+              <span
+                role="status"
+                aria-live="polite"
+                className="text-[12px] font-mono text-ghost select-text mr-2"
+              >
                 {sessionStatusCopy}
               </span>
+            )}
+            {(cycleState === 'stopping' || cycleState === 'polling' || cycleState === 'creating') && onCancelClick && (
+              <button
+                onClick={onCancelClick}
+                className="text-[12.5px] font-semibold rounded-control px-3.5 py-[7px] text-dim bg-raise border border-line-2 hover:border-faint cursor-pointer transition-all flex-none mr-2"
+              >
+                Cancel
+              </button>
             )}
             <button
               disabled={isApplyDisabled}
@@ -220,7 +240,7 @@ export function PackagesView({
                   : 'text-amber-ink bg-amber cursor-pointer hover:brightness-[106%]'
               }`}
             >
-              Apply changes · stop &amp; restart session
+              {selectedPkgName ? `Apply changes to ${selectedPkgName} · stop & restart session` : 'Apply changes · stop & restart session'}
             </button>
           </div>
         </div>
@@ -498,7 +518,6 @@ export function PackagesView({
   );
 }
 
-// Package Row Presentation Component
 export interface PackageRowProps {
   name: string;
   pkg?: PackageResponse;
@@ -507,6 +526,8 @@ export interface PackageRowProps {
 }
 
 export function PackageRow({ name, pkg, isLoading, error }: PackageRowProps) {
+  const [isEnabled, setIsEnabled] = useState(true);
+
   if (isLoading) {
     return <PackageRowSkeleton name={name} />;
   }
@@ -586,7 +607,22 @@ export function PackageRow({ name, pkg, isLoading, error }: PackageRowProps) {
         </div>
       }
       rightContent={
-        <div className="flex flex-col items-end gap-3 flex-none select-none">
+        <div className="flex flex-col items-end gap-2.5 flex-none select-none">
+          <div className="flex items-center gap-2">
+            <span className={`font-mono text-[11px] min-w-[46px] text-right transition-colors ${isEnabled ? 'text-amber' : 'text-ghost'}`}>
+              {isEnabled ? 'enabled' : 'disabled'}
+            </span>
+            <Switch
+              checked={isEnabled}
+              onCheckedChange={(checked) => {
+                setIsEnabled(checked);
+              }}
+              aria-label={`Toggle target state for ${name}`}
+            />
+          </div>
+          <span className="text-[10px] text-gold font-mono max-w-[150px] text-right leading-tight">
+            target state — applies via session restart; no enable endpoint in v1
+          </span>
           <div className="flex items-center gap-[11px]">
             <span className="text-[12px] text-ghost/40 cursor-not-allowed select-none">
               View source ↗ <span className="text-[11px] font-sans font-normal">(source viewer not exposed in v1)</span>
@@ -662,6 +698,102 @@ export default function PackagesScreen() {
     }
   }, [topologyEligiblePackages, selectedPkgName]);
 
+  // W2.F4: Session Cycling Flow
+  const { getSessionId } = useSessionRegistry();
+  const sessionId = selectedPkgName ? getSessionId(selectedPkgName) : undefined;
+
+  const stopSessionMutation = useStopSession();
+  const createSessionMutation = useCreateSession();
+
+  const [cycleState, setCycleState] = useState<'idle' | 'stopping' | 'polling' | 'creating' | 'error'>('idle');
+  const [cycleError, setCycleError] = useState<string | null>(null);
+
+  // Reset states when changing active package
+  useEffect(() => {
+    setCycleState('idle');
+    setCycleError(null);
+  }, [selectedPkgName]);
+
+  // Poll status of the stopping session
+  const sessionQuery = useSession(cycleState === 'polling' ? sessionId : undefined);
+
+  useEffect(() => {
+    if (cycleState === 'polling' && sessionQuery.data?.status) {
+      const status = sessionQuery.data.status;
+      if (isSessionTerminal(status)) {
+        setCycleState('creating');
+        createSessionMutation.mutate(selectedPkgName, {
+          onSuccess: () => {
+            setCycleState('idle');
+          },
+          onError: (err: unknown) => {
+            setCycleState('error');
+            const apiErr = err as { status?: number; statusCode?: number; message?: string };
+            if (apiErr && (apiErr.status === 409 || apiErr.statusCode === 409)) {
+              setCycleError("session stopped, but restart failed — package already has a live session; its id isn't exposed by the v1 API, so it can't be stopped from here.");
+            } else {
+              setCycleError(apiErr.message || 'Failed to create new session');
+            }
+          },
+        });
+      }
+    }
+  }, [cycleState, sessionQuery.data?.status, selectedPkgName, createSessionMutation]);
+
+  // Handle polling errors
+  useEffect(() => {
+    if (cycleState === 'polling' && sessionQuery.isError) {
+      setCycleState('error');
+      setCycleError('status poll failed — session may still be stopping; Apply to retry');
+    }
+  }, [cycleState, sessionQuery.isError]);
+
+  const handleApplyClick = async () => {
+    if (!sessionId) return;
+    setCycleError(null);
+    setCycleState('stopping');
+    try {
+      await stopSessionMutation.mutateAsync(sessionId);
+      setCycleState('polling');
+    } catch (err: unknown) {
+      setCycleState('error');
+      const apiErr = err as { message?: string };
+      setCycleError(apiErr.message || 'Failed to stop session');
+    }
+  };
+
+  // Construct status copy
+  let sessionStatusCopy: React.ReactNode = null;
+  if (cycleState === 'stopping') {
+    sessionStatusCopy = <span className="text-ghost">{selectedPkgName} · stop requested (202 ack) →</span>;
+  } else if (cycleState === 'polling') {
+    sessionStatusCopy = <span className="text-ghost">{selectedPkgName} · waiting for stopped →</span>;
+  } else if (cycleState === 'creating') {
+    sessionStatusCopy = <span className="text-ghost">{selectedPkgName} · starting new session →</span>;
+  } else if (cycleState === 'error') {
+    if (cycleError?.includes("package already has a live session")) {
+      sessionStatusCopy = (
+        <span className="text-red font-mono text-[11px] leading-tight">
+          {selectedPkgName} · session stopped, but restart failed — package already has a live session; its id isn't exposed by the v1 API, so it can't be stopped from here.
+        </span>
+      );
+    } else {
+      sessionStatusCopy = <span className="text-red font-mono text-[11px] leading-tight">{selectedPkgName} · {cycleError}</span>;
+    }
+  } else if (!sessionId && selectedPkgName) {
+    sessionStatusCopy = (
+      <span className="text-gold font-mono text-[11px] leading-tight">
+        {selectedPkgName} · current session id not exposed by the v1 API — this console can only manage sessions it started this tab.
+      </span>
+    );
+  }
+
+  const isApplyDisabled =
+    isLoadingList ||
+    !selectedPkgName ||
+    !sessionId ||
+    (cycleState !== 'idle' && cycleState !== 'error');
+
   return (
     <>
       <PackagesView
@@ -672,6 +804,14 @@ export default function PackagesScreen() {
         onAddPackageClick={() => setIsAddModalOpen(true)}
         selectedPkgName={selectedPkgName}
         onSelectedPkgChange={setSelectedPkgName}
+        sessionStatusCopy={sessionStatusCopy}
+        isApplyDisabled={isApplyDisabled}
+        onApplyClick={handleApplyClick}
+        cycleState={cycleState}
+        onCancelClick={() => {
+          setCycleState('idle');
+          setCycleError(null);
+        }}
       />
       <AddPackageModal isOpen={isAddModalOpen} onOpenChange={setIsAddModalOpen} />
     </>
