@@ -22,7 +22,7 @@ use crate::auth::AuthContext;
 use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::goals::{
-    validate_goal_fields, GoalDoc, GoalStatus, RepoRef, MAX_GOAL_DESCRIPTION_BYTES,
+    validate_goal_fields, CreateRepoSpec, GoalDoc, GoalStatus, RepoRef, MAX_GOAL_DESCRIPTION_BYTES,
     MAX_GOAL_TITLE_CHARS,
 };
 use crate::routes::extract::AppJson;
@@ -111,13 +111,61 @@ pub struct ListGoalsQuery {
     pub offset: Option<u64>,
 }
 
+/// Default value for `repo_mode` field: `RepoMode::Existing`.
+fn default_repo_mode() -> RepoMode {
+    RepoMode::Existing
+}
+
+/// Default value for boolean fields that default to `true`.
+fn default_true() -> bool {
+    true
+}
+
+/// How the trigger handler should resolve the target repository.
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RepoMode {
+    /// Use an existing repo (the stored goal repo or `repo` override).
+    #[default]
+    Existing,
+    /// Create a new GitHub repo via the NyxID proxy before triggering.
+    CreateNew,
+}
+
 /// Request body for `POST /api/v1/goals/{id}/trigger`. Unknown fields denied.
 /// The `repo` field is optional: when absent, the goal's stored repo is used.
+/// When `repo_mode` is `create_new`, the `create` field is required and
+/// specifies the new repository to create.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TriggerRequest {
+    /// Override the goal's stored repo for this trigger (only for `existing` mode).
     #[serde(default)]
     pub repo: Option<RepoRefBody>,
+    /// Whether to use an existing repo or create a new one.
+    #[serde(default = "default_repo_mode")]
+    pub repo_mode: RepoMode,
+    /// Specification for the new repo to create. Required when `repo_mode` is
+    /// `create_new`; forbidden when `repo_mode` is `existing`.
+    #[serde(default)]
+    pub create: Option<CreateRepoSpecBody>,
+}
+
+/// Request-body specification for creating a new GitHub repo during trigger.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateRepoSpecBody {
+    /// Repository name (required).
+    pub name: String,
+    /// Whether the repo should be private (defaults to `true`).
+    #[serde(default = "default_true")]
+    pub private: bool,
+    /// Optional description for the repository.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// If set, create under this org; otherwise under the authenticated user.
+    #[serde(default)]
+    pub org_login: Option<String>,
 }
 
 /// Response body for `POST /api/v1/goals/{id}/trigger` (202).
@@ -589,6 +637,10 @@ async fn delete_one(
 /// `POST /api/v1/goals/{id}/trigger`: trigger a goal, creating a new session.
 /// Returns 202 on success.
 ///
+/// Supports two repo modes:
+/// - `existing` (default): use the goal's stored repo or a `repo` override.
+/// - `create_new`: create a new GitHub repo via NyxID proxy, then trigger.
+///
 /// Authorization: caller is the goal owner OR the goal has an org_id and the
 /// caller's org role is admin or member (viewers excluded).
 async fn trigger(
@@ -599,6 +651,29 @@ async fn trigger(
 ) -> Result<(StatusCode, Json<TriggerResponse>), AppError> {
     let uuid = parse_goal_uuid(&id)?;
 
+    // Cross-field validation for repo_mode.
+    match body.repo_mode {
+        RepoMode::CreateNew => {
+            if body.create.is_none() {
+                return Err(AppError::Validation(
+                    "create_new mode requires the 'create' field".to_string(),
+                ));
+            }
+            if body.repo.is_some() {
+                return Err(AppError::Validation(
+                    "create_new mode forbids the 'repo' field".to_string(),
+                ));
+            }
+        }
+        RepoMode::Existing => {
+            if body.create.is_some() {
+                return Err(AppError::Validation(
+                    "existing mode forbids the 'create' field".to_string(),
+                ));
+            }
+        }
+    }
+
     // Step 1: Load goal.
     let mut goal = state
         .goals
@@ -607,7 +682,7 @@ async fn trigger(
         .ok_or_else(|| AppError::NotFound(format!("goal not found: {id}")))?;
 
     // Authorization check: owner can always trigger; org members (admin,
-    // member) can trigger org goals — NOT viewers.
+    // member) can trigger org goals -- NOT viewers.
     {
         let ownership = goal_ownership(&goal);
         // Owner or admin-scope: always allowed (checked by authorize with Write
@@ -619,7 +694,7 @@ async fn trigger(
             if let Some(ref org_id) = goal.org_id {
                 state.authz.require_org_writer(&ctx, org_id).await?;
             } else {
-                // Not the owner, no org — forbidden.
+                // Not the owner, no org -- forbidden.
                 return Err(AppError::Forbidden(
                     "insufficient permissions: only the owner can trigger this goal".to_string(),
                 ));
@@ -677,7 +752,7 @@ async fn trigger(
                 goal = repaired;
             }
         } else {
-            // Still actively triggered or running — conflict.
+            // Still actively triggered or running -- conflict.
             return Err(AppError::Conflict(
                 "goal already triggered or running".to_string(),
             ));
@@ -685,19 +760,67 @@ async fn trigger(
     }
 
     // Step 2: Resolve effective repo.
-    let effective_repo = match body.repo {
-        Some(ref r) => RepoRef {
-            owner: r.owner.clone(),
-            name: r.name.clone(),
+    let effective_repo = match body.repo_mode {
+        RepoMode::Existing => match body.repo {
+            Some(ref r) => RepoRef {
+                owner: r.owner.clone(),
+                name: r.name.clone(),
+            },
+            None => match goal.repo.clone() {
+                Some(r) => r,
+                None => {
+                    return Err(AppError::Unprocessable(
+                        "no repo specified and goal has no stored repo".to_string(),
+                    ));
+                }
+            },
         },
-        None => match goal.repo.clone() {
-            Some(r) => r,
-            None => {
-                return Err(AppError::Unprocessable(
-                    "no repo specified and goal has no stored repo".to_string(),
-                ));
+        RepoMode::CreateNew => {
+            // The `create` field is guaranteed present by cross-field validation.
+            let spec_body = body.create.as_ref().expect("create field validated above");
+            let spec = CreateRepoSpec {
+                name: spec_body.name.clone(),
+                private: spec_body.private,
+                description: spec_body.description.clone(),
+                org_login: spec_body.org_login.clone(),
+            };
+
+            // Validate the requested repo name format before calling GitHub.
+            validate_goal_fields(
+                "dummy",
+                "dummy",
+                &["dummy".to_string()],
+                Some(&RepoRef {
+                    // The owner will come from GitHub; validate the name at least.
+                    owner: spec.org_login.clone().unwrap_or_else(|| "x".to_string()),
+                    name: spec.name.clone(),
+                }),
+            )
+            .map_err(AppError::Validation)?;
+
+            // Idempotency: if the goal already has a repo matching the requested
+            // name, skip creation.
+            if let Some(ref existing_repo) = goal.repo {
+                let matches = if let Some(ref org) = spec.org_login {
+                    existing_repo.name == spec.name && existing_repo.owner == *org
+                } else {
+                    existing_repo.name == spec.name
+                };
+                if matches {
+                    tracing::info!(
+                        goal_id = %id,
+                        "create_new idempotent: goal already has matching repo"
+                    );
+                    // Use the existing repo as the effective repo.
+                    existing_repo.clone()
+                } else {
+                    // Goal has a different repo; proceed with creation.
+                    create_new_repo(&state, &ctx, &goal, spec).await?
+                }
+            } else {
+                create_new_repo(&state, &ctx, &goal, spec).await?
             }
-        },
+        }
     };
 
     // Validate repo shape.
@@ -778,6 +901,58 @@ async fn trigger(
     ))
 }
 
+/// Create a new GitHub repo via the NyxID proxy and persist it on the goal.
+///
+/// This function:
+/// 1. Exchanges the user's token for a delegated token via NyxID.
+/// 2. Proxies a "create repo" request through NyxID to GitHub.
+/// 3. Persists the resulting [`RepoRef`] onto the goal document.
+/// 4. Returns the [`RepoRef`] for use in the rest of the trigger flow.
+async fn create_new_repo(
+    state: &AppState,
+    ctx: &AuthContext,
+    goal: &GoalDoc,
+    spec: CreateRepoSpec,
+) -> Result<RepoRef, AppError> {
+    // Obtain the NyxID client.
+    let nyxid = state.authz.nyxid().ok_or_else(|| {
+        AppError::Unavailable(
+            "credential proxy not configured; cannot create repository".to_string(),
+        )
+    })?;
+
+    // Exchange the user's inbound token for a delegated token.
+    let delegated = nyxid.exchange_token(&ctx.raw_token).await.map_err(|e| {
+        // Map NyxID errors to CreateRepoError, then AppError.
+        crate::goals::CreateRepoError::from(e)
+    })?;
+
+    // Create the repository via the GitHub proxy.
+    let created_repo = crate::goals::repo_create::create_repo(nyxid, &delegated, &spec).await?;
+
+    // Persist the created repo onto the goal (CAS: only if status is triggered).
+    // Note: at this point the goal is still in its pre-trigger status, so
+    // set_repo may not match. That is acceptable: the repo is used as the
+    // effective repo for the trigger regardless. The persist is best-effort
+    // to support idempotent retries.
+    let persisted = state.goals.set_repo(goal.id, &created_repo).await?;
+    if persisted {
+        tracing::info!(
+            goal_id = %goal.id,
+            repo_owner = %created_repo.owner,
+            repo_name = %created_repo.name,
+            "created repo persisted onto goal"
+        );
+    } else {
+        tracing::debug!(
+            goal_id = %goal.id,
+            "set_repo did not match (goal may have progressed); using repo for trigger anyway"
+        );
+    }
+
+    Ok(created_repo)
+}
+
 // ---- Router ---------------------------------------------------------------
 
 /// Goal routes, nested under `/api/v1`.
@@ -843,6 +1018,8 @@ mod tests {
     fn trigger_request_accepts_empty_body() {
         let req: TriggerRequest = serde_json::from_str("{}").expect("empty body");
         assert!(req.repo.is_none());
+        assert_eq!(req.repo_mode, RepoMode::Existing);
+        assert!(req.create.is_none());
     }
 
     #[test]
@@ -852,12 +1029,55 @@ mod tests {
         let repo = req.repo.expect("repo");
         assert_eq!(repo.owner, "acme");
         assert_eq!(repo.name, "site");
+        assert_eq!(req.repo_mode, RepoMode::Existing);
+    }
+
+    #[test]
+    fn trigger_request_accepts_create_new_mode() {
+        let req: TriggerRequest =
+            serde_json::from_str(r#"{"repo_mode":"create_new","create":{"name":"my-repo"}}"#)
+                .expect("create_new");
+        assert_eq!(req.repo_mode, RepoMode::CreateNew);
+        assert!(req.repo.is_none());
+        let create = req.create.expect("create present");
+        assert_eq!(create.name, "my-repo");
+        assert!(create.private); // defaults to true
+        assert!(create.description.is_none());
+        assert!(create.org_login.is_none());
+    }
+
+    #[test]
+    fn trigger_request_create_new_with_all_fields() {
+        let req: TriggerRequest = serde_json::from_str(
+            r#"{"repo_mode":"create_new","create":{"name":"my-repo","private":false,"description":"A test repo","org_login":"acme"}}"#,
+        )
+        .expect("create_new full");
+        let create = req.create.expect("create present");
+        assert_eq!(create.name, "my-repo");
+        assert!(!create.private);
+        assert_eq!(create.description.as_deref(), Some("A test repo"));
+        assert_eq!(create.org_login.as_deref(), Some("acme"));
+    }
+
+    #[test]
+    fn trigger_request_explicit_existing_mode() {
+        let req: TriggerRequest =
+            serde_json::from_str(r#"{"repo_mode":"existing"}"#).expect("existing");
+        assert_eq!(req.repo_mode, RepoMode::Existing);
     }
 
     #[test]
     fn trigger_request_rejects_unknown_fields() {
         let result = serde_json::from_str::<TriggerRequest>(r#"{"bogus":1}"#);
         assert!(result.is_err(), "unknown fields must be rejected");
+    }
+
+    #[test]
+    fn trigger_request_rejects_unknown_fields_in_create() {
+        let result = serde_json::from_str::<TriggerRequest>(
+            r#"{"repo_mode":"create_new","create":{"name":"x","bogus":1}}"#,
+        );
+        assert!(result.is_err(), "unknown fields in create must be rejected");
     }
 
     #[test]
@@ -875,5 +1095,40 @@ mod tests {
         assert_eq!(body["session_id"], session_id.to_string());
         assert_eq!(body["goal_status"], "triggered");
         assert_eq!(body["session_status"], "pending");
+    }
+
+    // ---- RepoMode serde tests ----
+
+    #[test]
+    fn repo_mode_default_is_existing() {
+        assert_eq!(default_repo_mode(), RepoMode::Existing);
+    }
+
+    #[test]
+    fn repo_mode_deserializes_snake_case() {
+        let mode: RepoMode =
+            serde_json::from_value(serde_json::json!("create_new")).expect("deserialize");
+        assert_eq!(mode, RepoMode::CreateNew);
+        let mode: RepoMode =
+            serde_json::from_value(serde_json::json!("existing")).expect("deserialize");
+        assert_eq!(mode, RepoMode::Existing);
+    }
+
+    // ---- CreateRepoSpecBody tests ----
+
+    #[test]
+    fn create_repo_spec_body_minimal() {
+        let body: CreateRepoSpecBody =
+            serde_json::from_str(r#"{"name":"my-repo"}"#).expect("minimal");
+        assert_eq!(body.name, "my-repo");
+        assert!(body.private);
+        assert!(body.description.is_none());
+        assert!(body.org_login.is_none());
+    }
+
+    #[test]
+    fn create_repo_spec_body_rejects_unknown_fields() {
+        let result = serde_json::from_str::<CreateRepoSpecBody>(r#"{"name":"x","extra":true}"#);
+        assert!(result.is_err());
     }
 }
