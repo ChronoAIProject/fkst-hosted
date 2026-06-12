@@ -133,6 +133,17 @@ local function assert_no_unmerged_paths(worktree)
   end
 end
 
+local function assert_no_conflict_markers(worktree)
+  local markers_result = exec_sync({ cmd = core.git_conflict_markers_cmd(worktree), timeout = 30 })
+  if markers_result.exit_code == 1 then
+    return
+  end
+  if markers_result.exit_code == 0 then
+    error("github-devloop: fix left conflict markers unresolved")
+  end
+  error("github-devloop: git conflict marker check failed: " .. tostring(markers_result.stderr))
+end
+
 local function raise_review_meta(repo, issue_number, fix, reason, detail)
   local comment_request = core.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
   local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
@@ -406,6 +417,7 @@ function pipeline(event)
     end
     core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=completed", nil)
     assert_no_unmerged_paths(worktree)
+    assert_no_conflict_markers(worktree)
 
     local status = exec_sync({ cmd = core.git_status_cmd(worktree), timeout = 30 })
     if status.exit_code ~= 0 then

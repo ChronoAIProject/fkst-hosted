@@ -99,4 +99,55 @@ return {
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
     t.eq(count_calls("ls-files -u"), 2)
   end,
+
+  test_fix_errors_on_leftover_conflict_markers = function()
+    local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "rollup-red: test: COMPLETED/FAILURE" })
+    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local reject_comment = "github-devloop merge gate failed: rollup-red: test: COMPLETED/FAILURE"
+      .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
+      .. "\n" .. core.merge_gate_marker(
+        event.proposal_id,
+        event.pr_number,
+        event.version,
+        event.review_proposal_id,
+        event.review_dedup_key,
+        event.reviewed_head_sha,
+        event.gate_baseline_sha,
+        "rollup-red"
+      )
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+    }, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, "def456")
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+      stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_existing_fix_worktree(branch, "def456", nil, {
+      sha = "abc123",
+      exit_code = 1,
+      stdout = "",
+      stderr = "CONFLICT (content): Merge conflict in packages/github-devloop/core.lua\n",
+      unmerged_stdout = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
+      post_codex_unmerged_stdout = "",
+      post_codex_conflict_markers_stdout = "packages/github-devloop/core.lua:1:<<<<<<< HEAD\n",
+      post_codex_conflict_markers_exit_code = 0,
+    })
+    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "abc123\n", stderr = "", exit_code = 0 })
+    mock_write_env("1")
+    mock_implement_codex(0, "resolved merge product failure")
+
+    local result = run_fix(event, opts("fix-leftover-conflict-markers", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("grep -n -I -E"), 1)
+    t.eq(count_calls("status --porcelain"), 0)
+    t.eq(count_calls("commit -m"), 0)
+    t.eq(count_calls("git push origin"), 0)
+  end,
 }

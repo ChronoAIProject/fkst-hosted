@@ -138,6 +138,14 @@ function M.git_diff_cached_check_cmd(worktree)
   return "git -C " .. M._shell_single_quote(worktree) .. " diff --cached --check"
 end
 
+function M.git_conflict_markers_cmd(worktree)
+  local pattern = M._shell_single_quote("^(<<<<<<<|=======|>>>>>>>)")
+  if worktree == nil then
+    return "git grep -n -I -E " .. pattern .. " -- ."
+  end
+  return "git -C " .. M._shell_single_quote(worktree) .. " grep -n -I -E " .. pattern .. " -- ."
+end
+
 function M.git_commit_message_file_cmd(worktree, message_file)
   return "git -C " .. M._shell_single_quote(worktree)
     .. " commit -F " .. M._shell_single_quote(message_file)
