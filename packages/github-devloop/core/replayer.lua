@@ -207,11 +207,7 @@ end
 
 local function gather_fetch_before_compare_fact(facts, entity, family)
   if family == "pr-head" then
-    if type(facts.snapshot) ~= "table"
-      or type(facts.snapshot.fetch_before_compare) ~= "table"
-      or facts.snapshot.fetch_before_compare["pr-head"] ~= true then
-      facts.snapshot = snapshot_from_issue_comments(entity.repo, facts.proposal_id, facts.current and facts.current.comments or {})
-    end
+    facts.snapshot = snapshot_from_issue_comments(entity.repo, facts.proposal_id, facts.current and facts.current.comments or {})
     facts.link = M.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
     return true
   end

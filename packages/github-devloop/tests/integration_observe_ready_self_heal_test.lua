@@ -26,7 +26,7 @@ local function has_value(values, expected)
   return false
 end
 
-local function mock_linked_pr_state(comments, state, exit_code)
+local function mock_linked_pr_state(comments, state, exit_code, times)
   local rendered_comments = {}
   for _, comment in ipairs(comments or {}) do
     table.insert(rendered_comments, render_comment(comment))
@@ -35,15 +35,17 @@ local function mock_linked_pr_state(comments, state, exit_code)
   if exit_code ~= nil and exit_code ~= 0 then
     stderr = "pr view failed"
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
-    stdout = string.format(
-      '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
-      json_string(state or "OPEN"),
-      table.concat(rendered_comments, ",")
-    ),
-    stderr = stderr,
-    exit_code = exit_code or 0,
-  })
+  for _ = 1, times or 1 do
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+      stdout = string.format(
+        '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+        json_string(state or "OPEN"),
+        table.concat(rendered_comments, ",")
+      ),
+      stderr = stderr,
+      exit_code = exit_code or 0,
+    })
+  end
 end
 
 local function mock_decompose_child_issue_list(event, indexes)
@@ -209,7 +211,7 @@ return {
       core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
-    mock_linked_pr_state({})
+    mock_linked_pr_state({}, nil, nil, 2)
 
     local first = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-1"))
     t.eq(first.exit_code, 0)
@@ -233,7 +235,7 @@ return {
     t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, ready_payload.dedup_key, "def456"))
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
-    mock_linked_pr_state({})
+    mock_linked_pr_state({}, nil, nil, 2)
     local second = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-2"))
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 2)
@@ -248,7 +250,7 @@ return {
       core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key .. "/other"),
       core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
     })
-    mock_linked_pr_state({})
+    mock_linked_pr_state({}, nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-version-mismatch"))
     t.eq(result.exit_code, 0)
@@ -275,7 +277,7 @@ return {
       core.state_marker(proposal_id, "fixing", issue_version),
       feedback,
     })
-    mock_linked_pr_state({})
+    mock_linked_pr_state({}, nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-premigration-link"))
     t.eq(result.exit_code, 0)

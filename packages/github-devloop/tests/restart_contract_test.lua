@@ -325,6 +325,9 @@ return {
       current = { comments = issue_comments },
       snapshot = {
         fresh = true,
+        fetch_before_compare = {
+          ["pr-head"] = true,
+        },
         comments = issue_comments,
         prs = {
           {
