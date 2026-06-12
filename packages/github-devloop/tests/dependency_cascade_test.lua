@@ -523,6 +523,13 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        core.dependency_wait_marker(proposal_id, version, { 7 }),
+      }
+    )
     local result = run_dependency_reconcile()
     t.eq(result.exit_code, 0)
     local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
@@ -534,6 +541,28 @@ return {
     t.eq(raised.payload.source, "dependency-reconcile")
     t.eq(raised.payload.source_ref.ref, "owner/repo#issue/42")
     t.is_true(tostring(raised.payload.dedup_key):find("dependency%-reconcile", 1) ~= nil)
+  end,
+
+  test_dependency_reconcile_skips_label_without_trusted_hold_marker = function()
+    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = repo,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+      }
+    )
+    local result = run_dependency_reconcile()
+    t.eq(result.exit_code, 0)
+    t.eq(has_queue(result.raises, "github-proxy.github_entity_changed"), false)
   end,
 
   test_observe_issue_existing_hold_still_waiting_does_not_refresh = function()
