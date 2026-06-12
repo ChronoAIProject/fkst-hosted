@@ -201,7 +201,7 @@ async fn seed_goal_with_status(db: &Db, status: GoalStatus) -> bson::Uuid {
         package_names: vec!["test-pkg".to_string()],
         repo: None,
         status,
-        owner_user_id: "dev-user".to_string(),
+        owner_user_id: "dev-local".to_string(),
         org_id: None,
         active_session_id: None,
         created_at: now,
@@ -288,7 +288,7 @@ async fn post_goal_creates_201_with_location_and_not_started() {
     assert!(goal["repo"].is_null());
     assert!(goal["org_id"].is_null());
     assert!(goal["active_session_id"].is_null());
-    assert_eq!(goal["owner_user_id"], "dev-user");
+    assert_eq!(goal["owner_user_id"], "dev-local");
 
     // GET the goal by its ID.
     let goal_id = goal["id"].as_str().expect("id");
