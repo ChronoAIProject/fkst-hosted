@@ -666,21 +666,87 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         eprintln!("skipped: docker unavailable");
         return;
     }
-    // Build a custom router with an unprotected route that tries to extract
-    // AuthContext. This is a programming error and must surface as 500.
-    let app = auth_app(jwks_response(KID)).await;
+    // Test the programming-error path: a handler that tries to extract
+    // AuthContext from a route NOT behind the protect() middleware, with auth
+    // enabled. The FromRequestParts impl detects the missing extension and
+    // AuthMode::Enabled -> returns AppError::Internal -> 500.
+    use fkst_hosted_api::auth::AuthContext;
+    use fkst_hosted_api::state::AppState;
 
-    // /health is unprotected; it does NOT extract AuthContext, so it returns 200.
-    // To test the extractor failure, we need a route that extracts AuthContext
-    // but is NOT behind the protect() middleware. We test this indirectly:
-    // the /api/v1/packages route IS behind protect(), so AuthContext is available.
-    // Without protection, the extractor would fail — but we can't add an unprotected
-    // route that uses AuthContext without modifying the application router.
-    //
-    // Instead, verify the middleware insertion path: a valid token on a protected
-    // route inserts AuthContext into extensions. We verify this by checking that
-    // the handler runs successfully (which it does, meaning the extractor works).
-    let token = sign_token(&valid_claims(), KID);
-    let (status, _headers, _body) = get_with_auth(&app.router, "/api/v1/packages", &token).await;
-    assert_eq!(status, StatusCode::OK);
+    // Handler that extracts AuthContext — if the middleware didn't run, the
+    // extractor will reject with Internal.
+    async fn needs_auth(ctx: AuthContext) -> String {
+        format!("user={}", ctx.user_id)
+    }
+
+    // Build a minimal state with AuthMode::Enabled. We construct the state
+    // from scratch with a fresh Mongo container and a test handler on an
+    // unprotected path.
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/.well-known/jwks.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(jwks_response(KID)))
+        .mount(&mock_server)
+        .await;
+
+    let container = Mongo::default()
+        .with_tag(MONGO_TAG)
+        .start()
+        .await
+        .expect("start mongo");
+    let host = container.get_host().await.expect("container host");
+    let port = container
+        .get_host_port_ipv4(27017)
+        .await
+        .expect("container port");
+    let config = Config {
+        mongodb_uri: format!("mongodb://{host}:{port}"),
+        mongodb_server_selection_timeout_ms: 5000,
+        ..Config::default()
+    };
+    let db = Db::connect(&config).await.expect("connect + ping");
+    let packages = PackageRepository::new(&db.database);
+    let sessions = SessionService::new(
+        SessionRepo::new(&db),
+        packages.clone(),
+        EngineConfig::default(),
+    );
+    let state = AppState {
+        config,
+        db,
+        packages,
+        sessions,
+        auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
+            base_url: mock_server.uri(),
+            issuer: ISSUER.to_string(),
+            audience: AUDIENCE.to_string(),
+            jwks_cache_ttl: Duration::from_secs(JWKS_TTL_SECS),
+        }),
+    };
+
+    // Build a router with a route that extracts AuthContext but is NOT
+    // protected by the auth middleware.
+    let test_router = axum::Router::new()
+        .route("/test-extract", axum::routing::get(needs_auth))
+        .with_state(state);
+
+    // Send a request without any auth header. The extractor should reject with
+    // 500 Internal Server Error because auth is enabled but the route was not
+    // behind protect().
+    let response = test_router
+        .clone()
+        .oneshot(
+            Request::get("/test-extract")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("router must respond");
+    let (status, _headers, body) = drain(response).await;
+    assert_eq!(
+        status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "expected 500 for extractor on unprotected route, body: {body}"
+    );
+    assert_eq!(body["error"], "internal");
 }

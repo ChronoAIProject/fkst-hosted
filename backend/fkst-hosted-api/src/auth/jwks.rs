@@ -43,6 +43,10 @@ struct Jwk {
 struct CacheState {
     keys: HashMap<String, Arc<DecodingKey>>,
     fetched_at: Instant,
+    /// True when the most recent refresh attempt failed. Used to distinguish
+    /// "kid genuinely absent from fresh keys" (401) from "kid absent but we
+    /// cannot confirm because JWKS is down" (503).
+    last_refresh_failed: bool,
 }
 
 impl CacheState {
@@ -50,6 +54,7 @@ impl CacheState {
         Self {
             keys: HashMap::new(),
             fetched_at: Instant::now() - Duration::from_secs(365 * 24 * 3600),
+            last_refresh_failed: false,
         }
     }
 }
@@ -118,11 +123,21 @@ impl JwksCache {
 
         // Re-read after potential refresh.
         let state = self.state.read().await;
-        state
-            .keys
-            .get(kid)
-            .cloned()
-            .ok_or(AuthError::InvalidToken("unknown key id"))
+        match state.keys.get(kid) {
+            Some(key) => Ok(Arc::clone(key)),
+            None => {
+                if state.last_refresh_failed {
+                    // JWKS is down and the kid is not in the stale cache. We
+                    // cannot confirm the kid is truly absent, so surface this
+                    // as a 503 (service unavailable) rather than 401.
+                    Err(AuthError::JwksUnavailable(
+                        "key not found and JWKS refresh failed".to_string(),
+                    ))
+                } else {
+                    Err(AuthError::InvalidToken("unknown key id"))
+                }
+            }
+        }
     }
 
     /// Perform a refresh if the TTL has expired or the kid is unknown (rate-
@@ -163,18 +178,24 @@ impl JwksCache {
                 let mut state = self.state.write().await;
                 state.keys = new_keys;
                 state.fetched_at = Instant::now();
+                state.last_refresh_failed = false;
                 tracing::debug!(keys = state.keys.len(), "JWKS cache refreshed");
                 Ok(())
             }
             Err(e) => {
                 // Stale-if-error: log the failure but keep serving old keys.
-                // The caller will fail with "unknown key id" only if the kid
-                // is still missing from the stale cache.
+                // Known kids are served from the stale cache. Unknown kids
+                // get 503 (not 401) because we cannot confirm the kid is
+                // truly absent when the JWKS is down.
                 tracing::warn!(error = %e, "JWKS fetch failed; serving stale keys");
+                {
+                    let mut state = self.state.write().await;
+                    state.last_refresh_failed = true;
+                }
                 // Update the rate-limit floor so we don't hammer a down issuer.
                 let mut floor = self.unknown_kid_floor.write().await;
                 *floor = Instant::now() + UNKNOWN_KID_REFRESH_MIN;
-                Err(e)
+                Ok(())
             }
         }
     }

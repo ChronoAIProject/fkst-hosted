@@ -75,6 +75,11 @@ timeout) are rejected at startup with a clear error.
 | `FKST_HOSTED_BIND_ADDR` | no | `0.0.0.0` | Bind address. |
 | `FKST_HOSTED_LOG_LEVEL` | no | `info` | `tracing-subscriber` `EnvFilter` directive (e.g. `debug`, `fkst_hosted_api=debug`). An invalid directive falls back to `info` with a warning. Logs are JSON. |
 | `FKST_HOSTED_REQUEST_TIMEOUT_SECS` | no | `30` | Per-request timeout in seconds (`408 Request Timeout` on expiry). Must be ≥ 1; `0` is rejected at startup. |
+| `FKST_AUTH_ENABLED` | no | `true` | Enable NyxID JWT authentication. Set to `"false"` for local dev (all routes open, extractor yields dev context). Default is fail-closed: auth is on unless explicitly disabled. |
+| `FKST_AUTH_NYXID_BASE_URL` | when auth enabled | — | NyxID base URL for the JWKS endpoint (e.g. `https://nyxid.example.com`). Trailing `/` is trimmed. Required when `FKST_AUTH_ENABLED=true`. |
+| `FKST_AUTH_ISSUER` | no | `nyxid` | Expected JWT `iss` claim. |
+| `FKST_AUTH_AUDIENCE` | no | same as base URL | Expected JWT `aud` claim. Defaults to the (trimmed) `FKST_AUTH_NYXID_BASE_URL`. |
+| `FKST_AUTH_JWKS_CACHE_TTL_SECS` | no | `300` | JWKS cache TTL in seconds. Must be ≥ 1; `0` is rejected at startup. After TTL expiry, stale keys are served if the refresh fetch fails. |
 
 ## Health endpoints
 
