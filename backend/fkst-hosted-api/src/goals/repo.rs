@@ -282,4 +282,21 @@ impl GoalRepo {
         );
         Ok(matched)
     }
+
+    /// Raw CAS update with a caller-provided filter and update document.
+    /// Returns `true` when the update matched a document, `false` otherwise.
+    /// Used by the driver's best-effort goal-status sync writes where the
+    /// filter includes `active_session_id` to avoid clobbering a newer trigger.
+    pub async fn transition_raw(
+        &self,
+        filter: bson::Document,
+        update: bson::Document,
+    ) -> Result<bool, crate::error::AppError> {
+        let result = self
+            .coll
+            .update_one(filter, update)
+            .await
+            .map_err(|error| log_db_error("transition_raw", error))?;
+        Ok(result.matched_count > 0)
+    }
 }

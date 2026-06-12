@@ -29,6 +29,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -41,6 +42,7 @@ use crate::engine::{
     EngineConfig, LiveStatus, PreparedPackage, RunnerError, RunningSession, SessionRunner,
 };
 use crate::error::AppError;
+use crate::github_app::GithubAppTokens;
 use crate::goals::{GoalRepo, GoalStatus, RepoRef};
 use crate::journal::model::LogRef;
 use crate::journal::parse::{parse_raised_line, ParsedLine};
@@ -99,6 +101,24 @@ const SHUTDOWN_HEADROOM_SECS: u64 = 10;
 /// posture): effectively never fires meaningfully, and the arm no-ops.
 const NO_LEASE_RENEW_INTERVAL: Duration = Duration::from_secs(86_400);
 
+/// Default token refresh interval: mint a fresh GitHub installation token
+/// every 55 minutes (tokens expire after ~60 min, 5 min buffer).
+const TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(55 * 60);
+
+/// Minimum cooldown between token refresh attempts (even on failure, do not
+/// hammer the GitHub API more often than once per minute).
+const TOKEN_REFRESH_COOLDOWN: Duration = Duration::from_secs(60);
+
+/// Per-session goal drive state: tracks token lifecycle and goal association
+/// for a goal-triggered session running inside the driver's supervise loop.
+struct GoalDrive {
+    goal_id: bson::Uuid,
+    repo: RepoRef,
+    token_path: PathBuf,
+    minted_at: std::time::Instant,
+    last_attempt: std::time::Instant,
+}
+
 /// Shared internals behind the clonable service handle.
 struct Inner {
     repo: SessionRepo,
@@ -121,12 +141,22 @@ struct Inner {
     /// (legacy tests / minimal runs); the driver behaves identically either
     /// way — journaling NEVER changes session disposition.
     journal: OnceLock<JournalSetup>,
+    /// Goal support layer (issue #63), enabled once at startup via
+    /// [`SessionService::enable_goal_support`]. Set before any session is
+    /// created; a second call is a logged no-op.
+    goal_support: OnceLock<GoalSupport>,
 }
 
 /// Journaling wiring shared by every driver this service spawns.
 struct JournalSetup {
     config: JournalConfig,
     store: MongoProgressStore,
+}
+
+/// Goal support wiring shared by every driver this service spawns.
+struct GoalSupport {
+    goals: GoalRepo,
+    github_app: GithubAppTokens,
 }
 
 /// The concrete journaler type drivers hold.
@@ -180,6 +210,7 @@ impl SessionService {
                 shutdown_bound,
                 distribution,
                 journal: OnceLock::new(),
+                goal_support: OnceLock::new(),
             }),
         }
     }
@@ -199,6 +230,23 @@ impl SessionService {
             return;
         }
         tracing::info!(github, "session progress journaling enabled");
+    }
+
+    /// Enable goal-support features for this service: best-effort goal-status
+    /// sync writes and token refresh inside the driver loop. Call once at
+    /// startup, after construction but before any goal-triggered session is
+    /// created.
+    pub fn enable_goal_support(&self, goals: GoalRepo, github_app: GithubAppTokens) {
+        if self
+            .inner
+            .goal_support
+            .set(GoalSupport { goals, github_app })
+            .is_err()
+        {
+            tracing::warn!("goal support already enabled; ignoring the second call");
+            return;
+        }
+        tracing::info!("goal support enabled (goal-status sync + token refresh)");
     }
 
     /// The repository handle (startup hooks: orphan sweep).
@@ -593,8 +641,29 @@ impl SessionService {
         let id = session.id;
         let package_name = session.package_name.clone();
         let fencing_token = session.fencing_token;
+        let goal_info = session.goal_id.map(|goal_id| {
+            let repo = session.repo.clone().expect("goal session must have repo");
+            GoalDrive {
+                goal_id,
+                repo,
+                // Token path: <runtime_dir>/github-token (set once the
+                // engine starts and the runtime dir is known; until then
+                // this placeholder is never written).
+                token_path: PathBuf::new(),
+                minted_at: std::time::Instant::now(),
+                last_attempt: std::time::Instant::now(),
+            }
+        });
         tokio::spawn(async move {
-            drive(Arc::clone(&inner), id, package_name, stop_rx, fencing_token).await;
+            drive(
+                Arc::clone(&inner),
+                id,
+                package_name,
+                stop_rx,
+                fencing_token,
+                goal_info,
+            )
+            .await;
             inner
                 .registry
                 .lock()
@@ -727,16 +796,23 @@ async fn drive(
     package_name: String,
     stop_rx: watch::Receiver<bool>,
     fencing_token: Option<i64>,
+    mut goal_info: Option<GoalDrive>,
 ) {
-    let release = drive_inner(&inner, id, &package_name, stop_rx, fencing_token).await;
+    let release = drive_inner(&inner, id, &package_name, stop_rx, fencing_token, &mut goal_info).await;
     if !release {
         return;
     }
     if let (Some(distributor), Some(token)) = (&inner.distribution, fencing_token) {
-        if let Err(error) = distributor.leases().release(&package_name, token).await {
+        // Use lease_key for the release: for goal sessions the lease key is
+        // "goal-<uuid>", for classic sessions it's the package_name.
+        let lease_key = match &goal_info {
+            Some(gi) => format!("goal-{}", gi.goal_id),
+            None => package_name.clone(),
+        };
+        if let Err(error) = distributor.leases().release(&lease_key, token).await {
             tracing::error!(
                 session_id = %id,
-                package_name = %package_name,
+                lease_key = %lease_key,
                 token,
                 error = %error,
                 "lease release failed on driver exit; the lease will lapse"
@@ -756,6 +832,7 @@ async fn drive_inner(
     package_name: &str,
     mut stop_rx: watch::Receiver<bool>,
     fencing_token: Option<i64>,
+    goal_info: &mut Option<GoalDrive>,
 ) -> bool {
     let now = bson::DateTime::now;
 
@@ -818,7 +895,7 @@ async fn drive_inner(
     let package = match inner.packages.get(package_name).await {
         Ok(Some(package)) => package,
         Ok(None) => {
-            fail_session(inner, id, &fence, "package disappeared before start").await;
+            fail_session(inner, id, &fence, "package disappeared before start", goal_info).await;
             return true;
         }
         Err(error) => {
@@ -826,7 +903,7 @@ async fn drive_inner(
             // topology/connection detail: log it, never persist it into the
             // client-served `error` field.
             tracing::error!(session_id = %id, error = %error, "driver failed to load package");
-            fail_session(inner, id, &fence, "failed to load package").await;
+            fail_session(inner, id, &fence, "failed to load package", goal_info).await;
             return true;
         }
     };
@@ -855,7 +932,7 @@ async fn drive_inner(
                 },
             )
             .await;
-            fail_session(inner, id, &fence, &describe_runner_error(&error)).await;
+            fail_session(inner, id, &fence, &describe_runner_error(&error), goal_info).await;
             return true;
         }
     };
@@ -909,6 +986,16 @@ async fn drive_inner(
     tracing::info!(session_id = %id, pid = session.pid, "session running");
     journal_lifecycle(&mut journaler, Transition::Running).await;
     journal_watermark(&mut journaler, &session.runtime_dir).await;
+
+    // Goal-status sync: triggered -> running (best-effort CAS).
+    if let Some(ref gi) = goal_info {
+        goal_status_sync(inner, gi.goal_id, id, &[GoalStatus::Triggered], GoalStatus::Running).await;
+    }
+
+    // Update goal drive token_path now that the runtime dir is known.
+    if let Some(ref mut gi) = goal_info {
+        gi.token_path = session.runtime_dir.join("github-token");
+    }
 
     // The journal's RAISED source: the engine's line-framed stdout, taken
     // exactly once. Leaving it untaken would be safe too (the drain task
@@ -968,6 +1055,17 @@ async fn drive_inner(
                             )
                             .await;
                         tracing::info!(session_id = %id, "session stopped");
+                        // Goal-status sync: {triggered,running} -> stopped.
+                        if let Some(ref gi) = goal_info {
+                            goal_status_sync(
+                                inner,
+                                gi.goal_id,
+                                id,
+                                &[GoalStatus::Triggered, GoalStatus::Running],
+                                GoalStatus::Stopped,
+                            )
+                            .await;
+                        }
                         journal_finish(&mut journaler, Transition::Stopped { exit_code: None })
                             .await;
                     }
@@ -1004,7 +1102,13 @@ async fn drive_inner(
                 let (Some(distributor), Some(token)) = (&inner.distribution, fencing_token) else {
                     continue;
                 };
-                match distributor.leases().renew(package_name, token).await {
+                // Use the lease key (goal-<uuid> for goal sessions, package_name
+                // for classic) for renewal.
+                let lease_key = match goal_info {
+                    Some(gi) => format!("goal-{}", gi.goal_id),
+                    None => package_name.to_string(),
+                };
+                match distributor.leases().renew(&lease_key, token).await {
                     Ok(RenewOutcome::Renewed(_)) => {
                         last_renew_success = tokio::time::Instant::now();
                     }
@@ -1014,7 +1118,7 @@ async fn drive_inner(
                         // WITHOUT writing status and WITHOUT releasing.
                         tracing::warn!(
                             session_id = %id,
-                            package_name = %package_name,
+                            lease_key = %lease_key,
                             token,
                             "package lease lost; stopping the local engine without document writes"
                         );
@@ -1043,7 +1147,7 @@ async fn drive_inner(
                             // the engine, zero document writes, no release).
                             tracing::warn!(
                                 session_id = %id,
-                                package_name = %package_name,
+                                lease_key = %lease_key,
                                 token,
                                 error = %error,
                                 lease_ttl_secs = lease_ttl.as_secs(),
@@ -1068,7 +1172,7 @@ async fn drive_inner(
                         // at least one more renewal window.
                         tracing::error!(
                             session_id = %id,
-                            package_name = %package_name,
+                            lease_key = %lease_key,
                             error = %error,
                             "lease renew errored; retrying on the next interval"
                         );
@@ -1079,6 +1183,14 @@ async fn drive_inner(
                 // Debounced GitHub sync of buffered completions (no-op when
                 // empty or inside the debounce window).
                 journal_flush(&mut journaler, false).await;
+
+                // Token refresh for goal sessions: mint a fresh GitHub
+                // installation token when the current one is nearing expiry
+                // and the cooldown since the last attempt has passed.
+                if let Some(ref mut gi) = goal_info {
+                    refresh_goal_token(inner, gi).await;
+                }
+
                 let live = session.status();
                 if live == LiveStatus::Running {
                     continue;
@@ -1109,6 +1221,17 @@ async fn drive_inner(
                         )
                         .await;
                     tracing::info!(session_id = %id, "session stopped (engine exit after stop request)");
+                    // Goal-status sync: {triggered,running} -> stopped.
+                    if let Some(ref gi) = goal_info {
+                        goal_status_sync(
+                            inner,
+                            gi.goal_id,
+                            id,
+                            &[GoalStatus::Triggered, GoalStatus::Running],
+                            GoalStatus::Stopped,
+                        )
+                        .await;
+                    }
                     journal_finish(&mut journaler, Transition::Stopped { exit_code }).await;
                     return true;
                 }
@@ -1151,6 +1274,17 @@ async fn drive_inner(
                     },
                 )
                 .await;
+                // Goal-status sync: {triggered,running} -> failed.
+                if let Some(ref gi) = goal_info {
+                    goal_status_sync(
+                        inner,
+                        gi.goal_id,
+                        id,
+                        &[GoalStatus::Triggered, GoalStatus::Running],
+                        GoalStatus::Failed,
+                    )
+                    .await;
+                }
                 // Reap/cleanup the dead engine's dirs.
                 let _ = inner.runner.stop(&mut session).await;
                 return true;
@@ -1161,7 +1295,15 @@ async fn drive_inner(
 
 /// Converge a pre-`running` failure: CAS `validating|stopping -> failed`
 /// with the (truncated) error and a stop timestamp, pinned by the fence.
-async fn fail_session(inner: &Inner, id: bson::Uuid, fence: &Document, error: &str) {
+/// Also performs best-effort goal-status sync ({triggered,running} -> failed)
+/// when the session is a goal session.
+async fn fail_session(
+    inner: &Inner,
+    id: bson::Uuid,
+    fence: &Document,
+    error: &str,
+    goal_info: &Option<GoalDrive>,
+) {
     let result = inner
         .repo
         .transition_guarded(
@@ -1179,6 +1321,146 @@ async fn fail_session(inner: &Inner, id: bson::Uuid, fence: &Document, error: &s
         Ok(Some(_)) => tracing::info!(session_id = %id, "session failed"),
         Ok(None) => tracing::warn!(session_id = %id, "fail CAS missed; session already terminal"),
         Err(err) => tracing::error!(session_id = %id, error = %err, "fail CAS errored"),
+    }
+    // Goal-status sync: {triggered,running} -> failed (best-effort).
+    if let Some(ref gi) = goal_info {
+        goal_status_sync(
+            inner,
+            gi.goal_id,
+            id,
+            &[GoalStatus::Triggered, GoalStatus::Running],
+            GoalStatus::Failed,
+        )
+        .await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Goal-status sync + token refresh (issue #63). Best-effort CAS writes to the
+// goals collection, logged and swallowed — never load-bearing. Token refresh
+// writes <token_path>.tmp then renames atomically.
+// ---------------------------------------------------------------------------
+
+/// Best-effort CAS transition of a goal's status. The CAS is guarded with
+/// `active_session_id == session_id` so a newer trigger is never clobbered.
+/// All errors are logged and swallowed.
+async fn goal_status_sync(
+    inner: &Inner,
+    goal_id: bson::Uuid,
+    session_id: bson::Uuid,
+    from_statuses: &[GoalStatus],
+    target: GoalStatus,
+) {
+    let Some(gs) = inner.goal_support.get() else {
+        return;
+    };
+    let goals = &gs.goals;
+    let from_bson: Vec<bson::Bson> = from_statuses
+        .iter()
+        .map(|s| bson::to_bson(s).expect("GoalStatus serializes"))
+        .collect();
+    let filter = doc! {
+        "_id": goal_id,
+        "status": { "$in": from_bson },
+        "active_session_id": session_id,
+    };
+    let update = doc! {
+        "$set": {
+            "status": bson::to_bson(&target).expect("GoalStatus serializes"),
+            "updated_at": bson::DateTime::now(),
+        }
+    };
+    match goals.transition_raw(filter, update).await {
+        Ok(true) => tracing::info!(
+            goal_id = %goal_id,
+            session_id = %session_id,
+            target = ?target,
+            "goal-status sync applied"
+        ),
+        Ok(false) => tracing::debug!(
+            goal_id = %goal_id,
+            session_id = %session_id,
+            "goal-status sync CAS missed (concurrent change)"
+        ),
+        Err(error) => tracing::warn!(
+            goal_id = %goal_id,
+            session_id = %session_id,
+            error = %error,
+            "goal-status sync write failed (swallowed)"
+        ),
+    }
+}
+
+/// Refresh the GitHub installation token for a goal session. Minted fresh
+/// when the refresh interval has elapsed and the cooldown since the last
+/// attempt has passed. Writes `<token_path>.tmp` then `fs::rename` for
+/// atomicity on the same filesystem. Failures are WARN'd; the engine keeps
+/// using the previous token.
+async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
+    let now = std::time::Instant::now();
+    if drive.minted_at.elapsed() < TOKEN_REFRESH_INTERVAL {
+        return;
+    }
+    if drive.last_attempt.elapsed() < TOKEN_REFRESH_COOLDOWN {
+        return;
+    }
+    drive.last_attempt = now;
+
+    let Some(gs) = inner.goal_support.get() else {
+        return;
+    };
+    let github_app = &gs.github_app;
+
+    if drive.token_path.as_os_str().is_empty() {
+        // Runtime dir not yet established (engine not started).
+        return;
+    }
+
+    let repo_ref = format!("{}/{}", drive.repo.owner, drive.repo.name);
+    match github_app.token_for_repo(&repo_ref, None).await {
+        Ok(token) => {
+            let tmp_path = drive.token_path.with_extension("tmp");
+            use secrecy::ExposeSecret;
+            let token_str = token.expose_secret();
+            match tokio::fs::write(&tmp_path, token_str.as_bytes()).await {
+                Ok(()) => {
+                    match tokio::fs::rename(&tmp_path, &drive.token_path).await {
+                        Ok(()) => {
+                            drive.minted_at = std::time::Instant::now();
+                            tracing::info!(
+                                goal_id = %drive.goal_id,
+                                "github token refreshed"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                goal_id = %drive.goal_id,
+                                path = %drive.token_path.display(),
+                                error = %error,
+                                "token rename failed; retrying next tick"
+                            );
+                            let _ = tokio::fs::remove_file(&tmp_path).await;
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        goal_id = %drive.goal_id,
+                        path = %tmp_path.display(),
+                        error = %error,
+                        "token tmp write failed; retrying next tick"
+                    );
+                }
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                goal_id = %drive.goal_id,
+                repo = %repo_ref,
+                error = %error,
+                "token mint failed; engine keeps previous token"
+            );
+        }
     }
 }
 
