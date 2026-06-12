@@ -1,4 +1,5 @@
 local S = {}
+local registry = require("core.registry")
 
 function S.install(M)
 
@@ -14,91 +15,19 @@ local payload_derivations = {
   ["comment_body:fix-feedback"] = true,
 }
 
-local marker_fields = {
-  state = { proposal = true, state = true, version = true, stage_rank = true, effects = true },
-  ["converge-round"] = {
-    proposal = true,
-    version = true,
-    source_ref = true,
-    round = true,
-    question = true,
-    verdicts = true,
-    dedup = true,
-    narrowed_question = true,
-    angle_digests = true,
-  },
-  ["review-converge-round"] = {
-    proposal = true,
-    issue_proposal = true,
-    version = true,
-    head_sha = true,
-    source_ref = true,
-    round = true,
-    question = true,
-    verdicts = true,
-    dedup = true,
-    narrowed_question = true,
-    angle_digests = true,
-  },
-  ["dependency-release"] = { proposal = true, version = true },
-  ["dependency-void"] = { proposal = true, version = true, blocker = true, reason = true },
-  ["dependency-waiver"] = { proposal = true, version = true, blocker = true, reason = true },
-  implementing = { proposal = true, dedup = true, branch = true, head_sha = true, base_branch = true, base_sha = true },
-  ["implement-attempt"] = { proposal = true, dedup = true, attempt = true, started_at = true },
-  ["pr-link"] = { proposal = true, pr = true, branch = true, impl_version = true, base_branch = true },
-  ["review-result"] = {
-    proposal = true,
-    issue_proposal = true,
-    decision = true,
-    dedup = true,
-    fix_round = true,
-    gap = true,
-  },
-  ["review-meta"] = { proposal = true, dedup = true, action = true, version = true, gap = true, reason = true },
-  ["fix-reflection"] = { proposal = true, dedup = true, verdict = true, version = true, fix_round = true },
-  ["merge-gate"] = {
-    proposal = true,
-    pr = true,
-    version = true,
-    review_proposal = true,
-    review_dedup = true,
-    head_sha = true,
-    gate_baseline_sha = true,
-    reason = true,
-  },
-  ["merge-ready"] = {
-    proposal = true,
-    pr = true,
-    version = true,
-    review_proposal = true,
-    review_dedup = true,
-    head_sha = true,
-  },
-  ["review-carry-over"] = {
-    proposal = true,
-    version = true,
-    old_review_proposal = true,
-    old_review_dedup = true,
-    approved_head_sha = true,
-    new_review_proposal = true,
-    new_review_dedup = true,
-    new_head_sha = true,
-    base_head_sha = true,
-    proof = true,
-  },
-  ["impl-failure"] = { proposal = true, reason = true, attempt = true, dedup = true },
-  merging = { proposal = true, pr = true, version = true, head_sha = true },
-  decomposed = { proposal = true, version = true, pr = true, count = true },
-}
+local marker_fields = registry.load_indexed_map("core.restart.marker_fields.index", "family")
 
-local required_replay_payload_fields = {
-  fixing = {
-    gate_baseline_sha = "build_replayed_fixing_payload copies merge-gate.gate_baseline_sha",
-  },
-}
+local required_replay_payload_fields = registry.load_indexed_map("core.restart.required_replay_payload_fields.index", "state")
 
 local function fact(family, freshness)
   return { family = family, freshness = freshness }
+end
+
+local function obligation(kinds, exits)
+  return {
+    kinds = kinds,
+    exits = exits,
+  }
 end
 
 local function effect(kinds, completeness, completeness_derivation)
@@ -117,294 +46,25 @@ local function effect(kinds, completeness, completeness_derivation)
   }
 end
 
-local transition_table = {
-  {
-    from_state = "thinking",
-    to_states = { "ready", "blocked" },
-    driving_queue = "consensus.proposal",
-    payload_builder = M.build_proposal,
-    dedup_shape = "proposal:<proposal_id>/<updated_at> or consensus:<base_version>/loop/<n>",
-    required_facts = { fact("state", "marker-read"), fact("converge-round", "marker-read") },
-    payload_fields = {
-      proposal_id = "marker:state.proposal",
-      dedup_key = "marker:state.version",
-      source_ref = "source_ref:issue",
-    },
-    version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "consensus.proposal" }, "consensus proposal dedup is derived from state.version or next complete converge-round"),
-    marker_facts = "state:v1 thinking plus optional converge-round:v1",
-    kickoff = "consensus.proposal",
-    replay = "Initial thinking reuses the state version as proposal dedup; convergence replays the next /loop/N from the latest complete converge-round marker.",
-  },
-  {
-    from_state = "ready",
-    to_states = { "implementing" },
-    driving_queue = "devloop_ready",
-    payload_builder = M.build_devloop_ready_payload,
-    dedup_shape = "ready/<state.version>",
-    required_facts = { fact("state", "marker-read"), fact("dependency-release", "marker-read") },
-    payload_fields = {
-      proposal_id = "marker:state.proposal",
-      dedup_key = "marker:state.version",
-      source_ref = "source_ref:issue",
-    },
-    version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(
-      { "result-marker", "ready-label", "devloop_ready" },
-      "ready replay is complete only when the result marker and ready label are visible, and observe_issue can re-raise devloop_ready while still ready",
-      "result_effects_complete"
-    ),
-    marker_facts = "state:v1 ready",
-    kickoff = "devloop_ready",
-    replay = "Raise ready/<version> after dependency gate re-derives satisfied blockers.",
-  },
-  {
-    from_state = "implementing",
-    to_states = { "pr-open", "impl-failed" },
-    driving_queue = "github-proxy.github_entity_changed",
-    payload_builder = M.build_devloop_open_pr_payload,
-    dedup_shape = "open-pr-kickoff/<proposal_id>/<impl_version>/<branch>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("implementing", "marker-read"),
-      fact("implement-attempt", "marker-read"),
-      fact("branch-head", "fetch-before-compare"),
-    },
-    payload_fields = {
-      proposal_id = "marker:implementing.proposal",
-      version = "marker:implementing.dedup",
-      branch = "marker:implementing.branch",
-      head_sha = "marker:implementing.head_sha",
-      base_branch = "marker:implementing.base_branch",
-      source_ref = "source_ref:issue",
-    },
-    version_identity = "implementing.dedup",
-    effects = effect({ "devloop_open_pr" }, "implementing transition is complete only when the branch progress fact immediately kicks off PR opening"),
-    marker_facts = "state:v1 implementing plus implementing:v1 and implement-attempt:v1",
-    kickoff = "devloop_open_pr",
-    replay = "Observe re-raises devloop_ready only when the implement attempt is past its liveness budget; implement then re-derives PR link, remote branch, local branch, or bounded retry.",
-  },
-  {
-    from_state = "impl-failed",
-    to_states = { "implementing" },
-    driving_queue = "devloop_ready",
-    payload_builder = M.build_devloop_ready_payload,
-    dedup_shape = "ready/<state.version> with impl_retry_attempt=<impl-failure.attempt+1>",
-    required_facts = { fact("state", "marker-read"), fact("impl-failure", "marker-read"), fact("dependency-release", "marker-read") },
-    payload_fields = {
-      proposal_id = "marker:state.proposal",
-      dedup_key = "marker:impl-failure.dedup",
-      source_ref = "source_ref:issue",
-    },
-    version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "devloop_ready" }, "impl-failed replay is complete when trusted codex-failed impl-failure attempt is below the retry ceiling"),
-    marker_facts = "state:v1 impl-failed plus impl-failure:v1 reason=codex-failed attempt<N",
-    kickoff = "devloop_ready",
-    replay = "Observe re-raises ready/<version> after one observe tick for bounded codex-failed implementation retries.",
-  },
-  {
-    from_state = "pr-open",
-    to_states = { "reviewing" },
-    driving_queue = "devloop_reviewing",
-    payload_builder = M.build_devloop_reviewing_payload,
-    dedup_shape = "reviewing/<proposal_id>/<impl_version>/<pr>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("pr-link", "marker-read"),
-      fact("pr-head", "fetch-before-compare"),
-    },
-    payload_fields = {
-      proposal_id = "marker:pr-link.proposal",
-      pr_number = "marker:pr-link.pr",
-      version = "marker:pr-link.impl_version",
-      source_ref = "source_ref:pr",
-    },
-    version_identity = "pr-link.impl_version",
-    effects = effect({ "devloop_reviewing" }, "reviewing payload is complete when linked open PR head/base still match the pr-link marker"),
-    marker_facts = "state:v1 pr-open plus pr-link:v1",
-    kickoff = "devloop_reviewing",
-    replay = "Observe re-fetches the linked PR and raises review for the linked PR head.",
-  },
-  {
-    from_state = "reviewing",
-    to_states = { "merge-ready", "fixing", "review-meta", "blocked" },
-    driving_queue = "devloop_reviewing",
-    payload_builder = M.build_devloop_reviewing_payload,
-    dedup_shape = "reviewing/<proposal_id>/<state.version>/<pr>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("pr-link", "marker-read"),
-      fact("pr-head", "fetch-before-compare"),
-      fact("review-converge-round", "marker-read"),
-    },
-    payload_fields = {
-      proposal_id = "marker:state.proposal",
-      version = "marker:state.version",
-      pr_number = "marker:pr-link.pr",
-      source_ref = "source_ref:pr",
-    },
-    version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "devloop_reviewing" }, "review payload is complete when current PR head is fetched and no head-bound review result exists"),
-    marker_facts = "state:v1 reviewing plus PR head facts",
-    kickoff = "devloop_reviewing",
-    replay = "PR observe re-derives review kickoff from current PR head and issue version.",
-  },
-  {
-    from_state = "fixing",
-    to_states = { "reviewing", "review-meta" },
-    driving_queue = "devloop_fixing",
-    payload_builder = M.build_devloop_fixing_payload,
-    dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<reviewed_head_sha>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("pr-link", "marker-read"),
-      fact("review-result", "marker-read"),
-      fact("review-meta", "marker-read"),
-      fact("merge-gate", "marker-read"),
-      fact("pr-head", "fetch-before-compare"),
-    },
-    payload_fields = {
-      schema = "literal:github-devloop.fixing.v1",
-      proposal_id = "marker:state.proposal",
-      pr_number = "marker:pr-link.pr",
-      version = "marker:state.version",
-      review_proposal_id = "marker:merge-gate.review_proposal",
-      review_dedup_key = "marker:merge-gate.review_dedup",
-      reviewed_head_sha = "marker:merge-gate.head_sha",
-      dedup_key = "dedup:replayed-fixing",
-      gate_baseline_sha = "marker:merge-gate.gate_baseline_sha",
-      gate_failure_excerpt = "comment_body:fix-feedback",
-      source_ref = "source_ref:pr",
-    },
-    version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "devloop_fixing" }, "fixing replay is complete only when trusted feedback marker fields are copied into devloop_fixing"),
-    marker_facts = "state:v1 fixing plus review-result/review-meta/merge-gate feedback, or current PR head for deterministic renormalization",
-    kickoff = "devloop_fixing or devloop_reviewing",
-    replay = "Observe re-raises fix when a trusted feedback fact is parseable; otherwise it re-enters reviewing for the current head.",
-  },
-  {
-    from_state = "review-meta",
-    to_states = { "fixing", "blocked" },
-    driving_queue = "devloop_review_meta",
-    payload_builder = M.build_devloop_review_meta_payload,
-    dedup_shape = "review-meta/<proposal_id>/<version>/<pr>/<n>/<review_dedup>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("pr-link", "marker-read"),
-      fact("review-meta", "marker-read"),
-      fact("fix-reflection", "marker-read"),
-      fact("review-result", "marker-read"),
-      fact("review-converge-round", "marker-read"),
-      fact("pr-head", "fetch-before-compare"),
-    },
-    payload_fields = {
-      proposal_id = "marker:review-meta.proposal",
-      review_proposal_id = "marker:review-converge-round.proposal",
-      review_dedup_key = "marker:review-converge-round.dedup",
-      version = "marker:state.version",
-      pr_number = "marker:pr-link.pr",
-      n = "marker:review-converge-round.round",
-      blocking_gap = "marker:review-result.gap",
-      source_ref = "source_ref:pr",
-    },
-    version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "devloop_review_meta" }, "review-meta replay is complete when review proposal, dedup, PR number, and issue version are reconstructed"),
-    marker_facts = "state:v1 review-meta plus review proposal encoded in version/dedup",
-    kickoff = "devloop_review_meta",
-    replay = "Observe re-raises review-meta using the review proposal, PR number, issue version, and original dedup.",
-  },
-  {
-    from_state = "merge-ready",
-    to_states = { "reviewing", "merging", "fixing", "blocked" },
-    driving_queue = "devloop_merge_ready",
-    payload_builder = M.build_devloop_merge_ready_payload,
-    dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("pr-link", "marker-read"),
-      fact("review-result", "marker-read"),
-      fact("merge-ready", "marker-read"),
-      fact("review-carry-over", "marker-read"),
-      fact("pr-head", "fetch-before-compare"),
-      fact("base-head", "fetch-before-compare"),
-    },
-    payload_fields = {
-      proposal_id = "marker:merge-ready.proposal",
-      pr_number = "marker:merge-ready.pr",
-      version = "marker:merge-ready.version",
-      review_proposal_id = "marker:merge-ready.review_proposal",
-      review_dedup_key = "marker:merge-ready.review_dedup",
-      reviewed_head_sha = "marker:merge-ready.head_sha",
-      source_ref = "source_ref:pr",
-    },
-    version_identity = "strip_transition_version_suffixes(merge-ready.version)",
-    effects = effect(
-      { "review-carry-over-marker", "devloop_merge_ready" },
-      "merge-ready replay is complete when head-bound approval and fetched PR head match, or when review_carry_over_marker proves the carried approval marker was written",
-      "review_carry_over_marker"
-    ),
-    marker_facts = "state:v1 merge-ready plus merge-ready:v1",
-    kickoff = "devloop_merge_ready",
-    replay = "PR observe or merge retry re-derives merge-ready from head-bound approval facts.",
-  },
-  {
-    from_state = "merging",
-    to_states = { "merged", "fixing", "blocked" },
-    driving_queue = "devloop_merge_ready",
-    payload_builder = M.build_devloop_merge_ready_payload,
-    dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("merge-ready", "marker-read"),
-      fact("merging", "marker-read"),
-      fact("review-result", "marker-read"),
-      fact("pr-head", "fetch-before-compare"),
-      fact("ci-status", "fetch-before-compare"),
-    },
-    payload_fields = {
-      proposal_id = "marker:merge-ready.proposal",
-      pr_number = "marker:merge-ready.pr",
-      version = "marker:merge-ready.version",
-      review_proposal_id = "marker:merge-ready.review_proposal",
-      review_dedup_key = "marker:merge-ready.review_dedup",
-      reviewed_head_sha = "marker:merge-ready.head_sha",
-      source_ref = "source_ref:pr",
-    },
-    version_identity = "strip_transition_version_suffixes(merge-ready.version)",
-    effects = effect({ "devloop_merge_ready" }, "merging retry is complete when merge-ready and merging markers bind the same fetched PR head"),
-    marker_facts = "state:v1 merging plus merging:v1",
-    kickoff = "devloop_merge_ready",
-    replay = "Merge retry re-derives completion or repair from PR mergeability and head facts.",
-  },
-  {
-    from_state = "blocked",
-    to_states = {},
-    driving_queue = "devloop_decompose",
-    payload_builder = M.build_decompose_replay_payload,
-    dedup_shape = "forward:decompose/<proposal_id>/<version>; replay:decompose/replay/<proposal_id>/<version>/<pr>/<expected_child_count>/<completed_child_count>",
-    required_facts = {
-      fact("state", "marker-read"),
-      fact("pr-link", "marker-read"),
-      fact("decomposed", "marker-read"),
-      fact("decompose-children", "fetch-before-compare"),
-    },
-    payload_fields = {
-      proposal_id = "marker:state.proposal",
-      version = "marker:state.version",
-      pr_number = "marker:pr-link.pr",
-      source_ref = "source_ref:pr",
-    },
-    version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(
-      { "decomposed-marker", "github-proxy.github_issue_create_request[*]" },
-      "blocked decompose replay is complete only when the decomposed marker count and every declared child issue are derivable",
-      "decompose_children_complete"
-    ),
-    marker_facts = "state:v1 blocked plus decomposed:v1 when class decomposition is incomplete",
-    kickoff = "devloop_decompose",
-    replay = "Observe can replay decomposed blocked issues when deterministic child completion facts are missing.",
-  },
-}
+local function budget(minutes)
+  return { minutes = minutes }
+end
+
+local function timeout(queue)
+  return {
+    action = "redrive",
+    queue = queue,
+    escalate_after_attempts = 3,
+  }
+end
+
+local transition_table = registry.load_indexed_array("core.restart.transitions.index", "from_state", M, {
+  fact = fact,
+  obligation = obligation,
+  effect = effect,
+  budget = budget,
+  timeout = timeout,
+})
 
 local audit_by_state = {}
 for _, row in ipairs(transition_table) do

@@ -930,6 +930,7 @@ function M.observe_devloop_entities()
   end
   log_summary(counts, #list)
   reap_orphan_prs(repo, list)
+  local conflict_hotspot = M.observe_conflict_hotspots(repo)
   local dashboard = M.render_observability_dashboard({
     entities = list,
     counts = counts,
@@ -941,6 +942,7 @@ function M.observe_devloop_entities()
   return {
     entity_count = #list,
     counts = counts,
+    conflict_hotspot = conflict_hotspot,
     dashboard_hash = dashboard.hash,
   }
 end

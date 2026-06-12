@@ -376,15 +376,26 @@ function M.append_board_digest_to_proposal(proposal, repo, tick)
 end
 
 function M.build_devloop_ready_payload(source)
+  local ready_version = M._dedup_key({
+    "ready",
+    tostring(source.dedup_key),
+  })
   local payload = {
     schema = "github-devloop.ready.v1",
     proposal_id = source.proposal_id,
-    dedup_key = M._dedup_key({
-      "ready",
-      tostring(source.dedup_key),
-    }),
+    dedup_key = ready_version,
     source_ref = M.normalize_source_ref(source.source_ref),
   }
+  if source.include_ready_hand_off == true then
+    payload.ready_hand_off = {
+      kind = "own-ready-state-marker",
+      proposal_id = source.proposal_id,
+      state = "ready",
+      version = ready_version,
+      stage_rank = M.stage_rank("ready"),
+      effects = "result-marker,ready-label,devloop-ready",
+    }
+  end
   local framing = bounded_framing(M, source.framing)
   if framing ~= nil then
     payload.framing = framing
@@ -397,6 +408,18 @@ function M.build_devloop_ready_payload(source)
     payload.impl_retry_attempt = attempt
   end
   return payload
+end
+
+function M.is_ready_hand_off(hand_off, ready)
+  if type(hand_off) ~= "table" or type(ready) ~= "table" then
+    return false
+  end
+  return hand_off.kind == "own-ready-state-marker"
+    and hand_off.proposal_id == ready.proposal_id
+    and hand_off.state == "ready"
+    and hand_off.version == ready.dedup_key
+    and hand_off.stage_rank == M.stage_rank("ready")
+    and hand_off.effects == "result-marker,ready-label,devloop-ready"
 end
 
 function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, version)
@@ -572,6 +595,10 @@ function M.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, i
 end
 
 function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, review_fact, source_ref)
+  local current_head_sha = review_fact and review_fact.current_head_sha
+  if current_head_sha == nil then
+    current_head_sha = review_fact and review_fact.reviewed_head_sha
+  end
   return {
     schema = "github-devloop.merge-ready.v1",
     proposal_id = issue_proposal_id,
@@ -586,6 +613,7 @@ function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, versi
       tostring(version),
       tostring(pr_number),
       tostring(review_fact and review_fact.review_dedup_key or "review"),
+      tostring(current_head_sha or "nohead"),
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }

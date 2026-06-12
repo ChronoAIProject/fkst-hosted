@@ -137,6 +137,31 @@ return {
     assert_valid_utf8(result.issue_content)
   end,
 
+  test_stale_generation_manifest_file_loss_is_terminal_class = function()
+    local result = run_probe("stale_manifest_files", runtime_root("stale-manifest-files"))
+
+    t.eq(result.ok, false)
+    t.eq(result.stale, true)
+    t.eq(result.class, "stale_generation_context")
+    t.is_true(result.error:find("context bundle manifest files are unreadable", 1, true) ~= nil)
+  end,
+
+  test_stale_generation_classifier_accepts_consensus_manifest_errors = function()
+    t.eq(core.is_stale_generation_context_error("consensus: runtime context cache miss"), true)
+    t.eq(core.is_stale_generation_context_error("consensus: runtime context manifest file is unreadable"), true)
+  end,
+
+  test_stale_generation_replayer_rebuilds_manifest_after_runtime_swap = function()
+    local result = run_probe("stale_manifest_rebuild", runtime_root("stale-manifest-rebuild"))
+
+    t.eq(result.stale_ok, false)
+    t.eq(result.stale, true)
+    t.eq(result.same_ref, true)
+    t.eq(result.fresh_fetch_count, 1)
+    t.is_true(result.fresh_manifest:find("/fresh/context/", 1, true) ~= nil)
+    t.is_true(result.fresh_manifest:find("Fresh issue", 1, true) == nil)
+  end,
+
   test_context_bundle_manifest_key_accepts_full_pr_review_proposal_id = function()
     local repo = fixtures.long_repo()
     local version = fixtures.full_review_issue_version(repo)

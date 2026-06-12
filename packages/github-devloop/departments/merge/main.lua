@@ -63,8 +63,7 @@ local function gate_baseline_sha_from_pr(pr)
 end
 
 local function is_rollup_red_fix_reason(reason)
-  local text = tostring(reason or "")
-  return core.is_ci_red_reason(text) or text:find("^rollup%-red:", 1) ~= nil
+  return core.merge_gate_reason_class(reason) == "rollup-red"
 end
 
 local function fetch_pr_merge_product_sha(pr_number)
@@ -323,7 +322,7 @@ function pipeline(event)
   local repo = entity.repo
   local issue_number = entity.issue_number
 
-  local lock_key = core.transition_lock_key(merge_ready.proposal_id)
+  local lock_key = core.merge_lane_lock_key(repo)
   if lock_key == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return
@@ -420,6 +419,13 @@ function pipeline(event)
         return
       end
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(" .. pr_reason .. ")", "write-time PR fact failed")
+      return
+    end
+
+    local queue_ok, queue_reason = core.merge_queue_allows_event(repo, branches.integration, merge_ready, current_pr)
+    if not queue_ok then
+      core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "hold-merge-queue", queue_reason)
+      log_gate(merge_ready, "dry-run", queue_reason)
       return
     end
 

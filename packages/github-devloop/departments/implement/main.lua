@@ -6,7 +6,8 @@ local MAX_IMPLEMENT_ATTEMPTS = 2
 local implemented_branch_head
 
 M.spec = {
-  consumes = { "devloop_ready" },
+  consumes = { "devloop_ready", "devloop_ready_session" },
+  ephemeral = { "devloop_ready_session" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
@@ -445,17 +446,17 @@ function pipeline(event)
         raise_open_pr_from_fact(repo, issue_number, marker_ready, progress, "implementing remote branch progress is visible")
         return
       end
-      local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, marker_ready.dedup_key)
-      if attempts >= MAX_IMPLEMENT_ATTEMPTS then
-        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "impl-failed", "applied(attempts-exhausted)", "implementation attempts exhausted with no PR or branch progress")
-        raise_impl_failed(repo, issue_number, marker_ready, "retry-exhausted", "No linked PR or remote implementation branch was visible after " .. tostring(attempts) .. " attempts.", attempts)
-        return
-      end
       local base_head = prepare_base(branches)
       local local_progress = local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
       if local_progress ~= nil then
         local_progress.proposal_id = ready.proposal_id
         raise_open_pr_from_fact(repo, issue_number, marker_ready, local_progress, "local implementation branch progress is visible")
+        return
+      end
+      local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, marker_ready.dedup_key)
+      if attempts >= MAX_IMPLEMENT_ATTEMPTS then
+        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "impl-failed", "applied(attempts-exhausted)", "implementation attempts exhausted with no PR or branch progress")
+        raise_impl_failed(repo, issue_number, marker_ready, "retry-exhausted", "No linked PR, remote branch, or local branch progress was visible after " .. tostring(attempts) .. " attempts.", attempts)
         return
       end
       core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(retry-no-progress)", "no PR or branch progress is visible; retrying implementation attempt")
@@ -479,11 +480,27 @@ function pipeline(event)
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
     end
+    local accepts_ready_hand_off = event.queue == "devloop_ready_session"
     if transition == "pending" then
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
-      error("github-devloop: ready state marker not yet visible for implement; retrying")
+      if accepts_ready_hand_off and retry_failure == nil and ready.impl_retry_attempt == nil and core.is_ready_hand_off(ready.ready_hand_off, ready) then
+        core.log_cas_decision("implement", ready.proposal_id, {
+          state = "ready",
+          version = ready.dedup_key,
+          stage_rank = core.stage_rank("ready"),
+        }, "ready", "implementing", "apply(own-ready-hand-off)", "ready marker was written by the same in-band generation")
+      else
+        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
+        error("github-devloop: ready state marker not yet visible for implement; retrying")
+      end
+    else
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
     end
-    core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
+
+    local wip_ok, wip_reason, wip_count, wip_max = core.wip_capacity_allows_start(repo, issue_number)
+    if not wip_ok then
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-wip-cap", wip_reason .. ": " .. tostring(wip_count) .. "/" .. tostring(wip_max))
+      return
+    end
 
     local issue_slug = core.safe_issue_slug(repo, issue_number)
     core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {

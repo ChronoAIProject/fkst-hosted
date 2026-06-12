@@ -1,0 +1,40 @@
+return function(M, h)
+  local fact = h.fact
+  local obligation = h.obligation
+  local effect = h.effect
+  local budget = h.budget
+  local timeout = h.timeout
+  return {
+    from_state = "blocked",
+    terminal = false,
+    to_states = {},
+    driving_queue = "devloop_decompose",
+    output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator rereview/reintake command" }, { "blocked", "reviewing", "thinking" }),
+    reentry_commands = { "rereview", "reintake" },
+    budget = budget(1440),
+    on_timeout = timeout("devloop_decompose"),
+    payload_builder = M.build_decompose_replay_payload,
+    dedup_shape = "forward:decompose/<proposal_id>/<version>; replay:decompose/replay/<proposal_id>/<version>/<pr>/<expected_child_count>/<completed_child_count>",
+    required_facts = {
+      fact("state", "marker-read"),
+      fact("pr-link", "marker-read"),
+      fact("decomposed", "marker-read"),
+      fact("decompose-children", "fetch-before-compare"),
+    },
+    payload_fields = {
+      proposal_id = "marker:state.proposal",
+      version = "marker:state.version",
+      pr_number = "marker:pr-link.pr",
+      source_ref = "source_ref:pr",
+    },
+    version_identity = "strip_transition_version_suffixes(state.version)",
+    effects = effect(
+      { "decomposed-marker", "github-proxy.github_issue_create_request[*]" },
+      "blocked decompose replay is complete only when the decomposed marker count and every declared child issue are derivable",
+      "decompose_children_complete"
+    ),
+    marker_facts = "state:v1 blocked plus decomposed:v1 when class decomposition is incomplete",
+    kickoff = "devloop_decompose",
+    replay = "Observe can replay decomposed blocked issues when deterministic child completion facts are missing.",
+  }
+end

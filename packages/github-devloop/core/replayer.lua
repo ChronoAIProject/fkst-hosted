@@ -1,7 +1,5 @@
 local S = {}
-
 function S.install(M)
-
 local function transition_row(state_name)
   for _, row in ipairs(M.restart_transition_table()) do
     if row.from_state == state_name then
@@ -14,7 +12,6 @@ end
 function M.restart_transition_row(state_name)
   return transition_row(state_name)
 end
-
 local marker_aliases = {
   ["pr-link"] = { pr = "pr_number" },
   ["review-result"] = { gap = "blocking_gap" },
@@ -23,7 +20,6 @@ local marker_aliases = {
   merging = { head_sha = "head_sha" },
   ["review-converge-round"] = { proposal = "proposal_id", dedup = "dedup_key", round = "n" },
 }
-
 local function marker_source(facts, family)
   if family == "state" then
     return facts.state
@@ -45,7 +41,6 @@ local function marker_source(facts, family)
   end
   return facts[family]
 end
-
 local function marker_value(facts, family, attr)
   local source = marker_source(facts, family)
   if source == nil then
@@ -64,7 +59,6 @@ local function marker_value(facts, family, attr)
   local key = aliases[attr] or attr
   return source[key]
 end
-
 local function resolve_payload_fields(row, state, facts)
   local resolved = {}
   local context = facts or {}
@@ -91,7 +85,6 @@ end
 function M.resolve_replay_payload_fields(row, state, facts)
   return resolve_payload_fields(row, state, facts or {})
 end
-
 local function find_linked_pr(snapshot, pr_number)
   for _, item in ipairs(snapshot and snapshot.prs or {}) do
     if tostring(item.number or "") == tostring(pr_number or "") then
@@ -327,7 +320,7 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
   local state_base_version = M.version_loop_round(state.version) > 0 and M.converge_base_version(state.version) or nil
   local latest = M.latest_complete_converge_round(current.comments, proposal_id, state_base_version, issue.source_ref)
   if latest ~= nil then
-    local base_version = latest.version
+    local base_version = M.proposal_dedup_key(proposal_id, issue.updated_at)
     local next_n = latest.round + 1
     local next_dedup = base_version .. "/loop/" .. tostring(next_n)
     local content_fetch = M.context_fetch_ref_from_bundle({
@@ -354,10 +347,20 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
   end
 
   local replay_issue = {}
-  for key, value in pairs(issue) do replay_issue[key] = value end
-  replay_issue.content_fetch = M.context_fetch_ref_from_bundle({ dept = "observe_issue", repo = issue.repo, issue_number = issue.number, proposal_id = proposal_id, version = state.version, tick = event_ts })
+  for key, value in pairs(issue) do
+    replay_issue[key] = value
+  end
+  local replay_dedup = M.proposal_dedup_key(proposal_id, issue.updated_at) .. "/replay"
+  replay_issue.content_fetch = M.context_fetch_ref_from_bundle({
+    dept = "observe_issue",
+    repo = issue.repo,
+    issue_number = issue.number,
+    proposal_id = proposal_id,
+    version = replay_dedup,
+    tick = event_ts,
+  })
   local proposal = M.build_board_proposal(replay_issue, event_ts)
-  proposal.dedup_key = state.version
+  proposal.dedup_key = replay_dedup
   return M.validate_proposal(proposal) and proposal or nil
 end
 
@@ -879,6 +882,7 @@ local function maybe_replay_review_carry_over(dept, issue, state, row, facts, li
     review_proposal_id = new_review_proposal,
     review_dedup_key = new_review_dedup,
     reviewed_head_sha = current_pr.head_sha,
+    current_head_sha = current_pr.head_sha,
   }, source_ref)
   M.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
   return raise_effects(dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
@@ -916,6 +920,7 @@ local function replay_merge_ready_like(dept, issue, state, row, facts)
     review_proposal_id = fields.review_proposal_id,
     review_dedup_key = fields.review_dedup_key,
     reviewed_head_sha = fields.reviewed_head_sha,
+    current_head_sha = current_pr.head_sha,
   }, fields.source_ref)
   M.log_cas_decision(dept, proposal_id, state, row.from_state, "merge-ready", "applied(replay)", "trusted head-bound merge-ready fact is visible")
   return raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
@@ -990,7 +995,6 @@ function M.replay_from_table(dept, entity, state, table_row, facts)
   local replay_facts = gather_required_facts(row, entity, state, facts or {})
   return replay(dept, entity, state, row, replay_facts)
 end
-
 end
 
 return S

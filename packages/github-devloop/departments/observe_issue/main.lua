@@ -14,6 +14,9 @@ M.spec = {
     "devloop_fixing",
     "devloop_decompose",
     "devloop_merge_ready",
+    "devloop_reconcile",
+    "devloop_review_reconcile",
+    "devloop_timeout_reconcile",
   },
   fanout = { "github-proxy.github_entity_changed" },
   stall_window = "30s",
@@ -30,6 +33,39 @@ local observe_replay_states = {
   ["impl-failed"] = true,
 }
 
+local function thinking_state_budget_exceeded(state)
+  local threshold = core.stall_suspect_threshold_minutes("thinking")
+  local marker_seconds = core.iso_timestamp_epoch_seconds(state and state.marker_created_at)
+  if threshold == nil or marker_seconds == nil then
+    return false
+  end
+  return now() - marker_seconds >= threshold * 60
+end
+
+local function replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event_ts, issue_state)
+  local row = core.restart_transition_row(state.state)
+  local facts = {
+    proposal_id = proposal_id,
+    current = current,
+    link = link,
+    snapshot = snapshot,
+    event_ts = event_ts,
+  }
+  if observe_replay_states[state.state]
+    and core.replay_from_table("observe_issue", issue, state, row, facts) then
+    return true
+  end
+  if observe_replay_states[state.state] then
+    return false
+  end
+  if issue_state == nil
+    or issue_state.state ~= state.state
+    or tostring(issue_state.version or "") ~= tostring(state.version or "") then
+    return false
+  end
+  return core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts)
+end
+
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
   local command = core.operator_command_fact(current.comments, "rereview")
   if command == nil then
@@ -39,13 +75,26 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
     core.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
-  if state.state ~= "thinking" or not core.has_thinking_converge_replay(current, proposal_id, state, issue.source_ref) then
-    core.log_cas_decision("observe_issue", proposal_id, state, "thinking-converge", "thinking", "refused(invalid-state)", "operator rereview requires thinking converge")
+  if state.state ~= "thinking" then
+    core.log_cas_decision("observe_issue", proposal_id, state, "thinking", "thinking", "refused(invalid-state)", "operator rereview requires thinking")
     local refusal = core.build_operator_issue_command_refusal_request(
       issue.repo,
       issue.number,
       command,
-      "rereview requires thinking converge state",
+      "rereview requires thinking state",
+      issue.source_ref
+    )
+    core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
+    return true
+  end
+  if not core.has_thinking_converge_replay(current, proposal_id, state, issue.source_ref)
+    and not thinking_state_budget_exceeded(state) then
+    core.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "refused(active-thinking)", "operator rereview requires stalled thinking")
+    local refusal = core.build_operator_issue_command_refusal_request(
+      issue.repo,
+      issue.number,
+      command,
+      "rereview requires stalled thinking state",
       issue.source_ref
     )
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
@@ -292,6 +341,7 @@ function pipeline(event)
     local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
     snapshot.fresh = true
     local state = snapshot.state
+    local issue_state = core.current_state(current.comments, proposal_id)
     if state.state ~= nil then
       if maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event.ts) then
         return
@@ -314,14 +364,7 @@ function pipeline(event)
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
       end
       raise_stale_dependency_label_clear(issue, proposal_id, state, current.labels)
-      if observe_replay_states[state.state] then
-        core.replay_from_table("observe_issue", issue, state, core.restart_transition_row(state.state), {
-          proposal_id = proposal_id,
-          current = current,
-          link = link,
-          snapshot = snapshot,
-          event_ts = event.ts,
-        })
+      if replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event.ts, issue_state) then
         return
       end
     end

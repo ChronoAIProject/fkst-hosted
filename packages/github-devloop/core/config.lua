@@ -7,7 +7,9 @@ local allowed_env = {
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
+  FKST_DEVLOOP_MAX_INFLIGHT = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
+  FKST_DEVLOOP_CONFLICT_LOG_CMD = true,
   FKST_DEVLOOP_TEST_COMMAND = true,
   FKST_OUTPUT_LANG = true,
 }
@@ -62,6 +64,22 @@ end
 
 function M.write_mode(exec)
   return M.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
+end
+
+function M.max_inflight(exec)
+  local value = M.read_env("FKST_DEVLOOP_MAX_INFLIGHT", exec)
+  if value == nil then
+    return nil
+  end
+  value = M._trim(value)
+  if value == "" then
+    return nil
+  end
+  local parsed = tonumber(value)
+  if parsed == nil or parsed ~= math.floor(parsed) or parsed < 1 or parsed > 100 then
+    error("github-devloop: invalid FKST_DEVLOOP_MAX_INFLIGHT")
+  end
+  return parsed
 end
 
 function M.max_fix_rounds()

@@ -110,7 +110,7 @@ return {
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh workflow run"), 0)
-    t.eq(count_calls("gh api"), 0)
+    t.eq(count_calls(check_runs_cmd), 0)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 

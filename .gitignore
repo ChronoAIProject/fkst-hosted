@@ -1,5 +1,7 @@
-# Local, machine-specific config. Tracked template lives in env.example.
-.env
+# Local, machine-specific config. Tracked template lives in .fkst/env.example.
+.fkst/env
+.fkst/runtime/
+.fkst/durable/
 
 # Python bytecode
 __pycache__/

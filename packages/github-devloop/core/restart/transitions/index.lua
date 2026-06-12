@@ -1,0 +1,14 @@
+return {
+  { module = "blocked", key = "blocked" },
+  { module = "fixing", key = "fixing" },
+  { module = "impl_failed", key = "impl-failed" },
+  { module = "implementing", key = "implementing" },
+  { module = "merge_ready", key = "merge-ready" },
+  { module = "merged", key = "merged" },
+  { module = "merging", key = "merging" },
+  { module = "pr_open", key = "pr-open" },
+  { module = "ready", key = "ready" },
+  { module = "review_meta", key = "review-meta" },
+  { module = "reviewing", key = "reviewing" },
+  { module = "thinking", key = "thinking" },
+}
