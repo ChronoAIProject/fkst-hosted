@@ -46,6 +46,7 @@ function pipeline(_event)
               state = entity.state,
               labels = entity.labels,
               updated_at = entity.updated_at,
+              view_cache_key = core.entity_view_cache_key(repo, entity_type.type, entity.number, entity.updated_at),
               dedup_key = dedup_key,
               source = "gh",
               -- Durable-delivery: stable pointer so a reliable consumer can

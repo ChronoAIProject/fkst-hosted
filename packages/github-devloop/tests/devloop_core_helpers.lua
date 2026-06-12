@@ -18,6 +18,8 @@ local function source_ref()
 end
 
 local function issue(extra)
+  local fields = extra or {}
+  local updated_at = fields.updated_at or "2026-06-03T01:02:03Z"
   local value = {
     schema = "github-proxy.v1",
     type = "issue",
@@ -26,12 +28,13 @@ local function issue(extra)
     title = "Implement decision recorder",
     url = "https://github.example/owner/repo/issues/42",
     state = "OPEN",
-    updated_at = "2026-06-03T01:02:03Z",
+    updated_at = updated_at,
     labels = { "fkst-dev:enabled" },
     dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
+    view_cache_key = "github-proxy/view/owner/repo/issue/42/" .. tostring(updated_at):gsub("[^%w%._%-]", "-"),
     source_ref = source_ref(),
   }
-  for key, field in pairs(extra or {}) do
+  for key, field in pairs(fields) do
     value[key] = field
   end
   return value

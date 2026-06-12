@@ -180,6 +180,41 @@ return {
     t.is_true(edit.rendered:find("--remove-label 'fkst-dev:implementing'", 1, true) ~= nil)
   end,
 
+  test_pr_open_write_guard_bypasses_warm_entity_view_cache = function()
+    local run_opts = opts("pr-open-write-guard-fresh", {
+      FKST_GITHUB_WRITE = "1",
+    })
+    mock_write_env("1")
+    mock_bot_env()
+    t.mock_command("--json title,body,comments,labels,state", {
+      stdout = '{"title":"Cached","body":"","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local cached = core.fetch_issue_view("owner/x", 42, "2026-06-03T01:02:03Z")
+    t.eq(cached.exit_code, 0)
+
+    local guard_calls_before = count_calls("--json labels,comments")
+    local pr_create_calls_before = count_calls("gh pr create")
+    mock_pr_open_guard(nil, pr_open_guard_comments())
+    mock_branch_head("abc123")
+    mock_pr_head_list("[]\n")
+    mock_git_push()
+    mock_pr_create(7)
+    mock_pr_head_state("abc123", "OPEN")
+    mock_comment_view("existing issue comment")
+    mock_comment_write()
+    mock_pr_comment_view("existing pr comment")
+    mock_pr_comment_write()
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
+    mock_label_write()
+
+    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("--json labels,comments") - guard_calls_before, 2)
+    t.eq(count_calls("gh pr create") - pr_create_calls_before, 1)
+  end,
+
   test_pr_open_request_pushes_without_intent_label = function()
     mock_write_env("1")
     mock_bot_env()
