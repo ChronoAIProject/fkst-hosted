@@ -491,11 +491,32 @@ function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
   return nil
 end
 
-function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
+local function merge_gate_fix_fact_matches_bindings(fact, opts)
+  if type(opts) ~= "table" then
+    return true
+  end
+  local baseline_bound = opts.match_gate_baseline_sha == true or opts.gate_baseline_sha ~= nil
+  if opts.review_proposal_id ~= nil and fact.review_proposal_id ~= tostring(opts.review_proposal_id) then
+    return false
+  end
+  if opts.review_dedup_key ~= nil and fact.review_dedup_key ~= tostring(opts.review_dedup_key) then
+    return false
+  end
+  if baseline_bound and opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha ~= tostring(opts.gate_baseline_sha) then
+    return false
+  end
+  if baseline_bound and opts.gate_baseline_sha == nil and fact.gate_baseline_sha ~= nil then
+    return false
+  end
+  return true
+end
+
+function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
   if type(comments) ~= "table" then
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate:v1.-%-%->"
+  local first_fact = nil
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
@@ -510,17 +531,26 @@ function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
         and M._is_git_sha(marker_head_sha)
         and (marker_gate_baseline_sha == nil or M._is_git_sha(marker_gate_baseline_sha)) then
-        return {
+        local fact = {
           review_proposal_id = marker_review_proposal,
           review_dedup_key = marker_review_dedup,
           reviewed_head_sha = marker_head_sha,
           gate_baseline_sha = marker_gate_baseline_sha,
           review_reason = M._comment_body(comment),
         }
+        if first_fact == nil then
+          first_fact = fact
+        end
+        if merge_gate_fix_fact_matches_bindings(fact, opts) then
+          return fact
+        end
       end
     end
   end
-  return nil
+  if type(opts) == "table" then
+    return nil
+  end
+  return first_fact
 end
 
 function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
