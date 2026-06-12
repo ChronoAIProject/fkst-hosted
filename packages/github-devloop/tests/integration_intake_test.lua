@@ -66,6 +66,15 @@ local function find_comment_body(raises, needle)
   return nil
 end
 
+local function has_value(values, expected)
+  for _, value in ipairs(values or {}) do
+    if tostring(value) == tostring(expected) then
+      return true
+    end
+  end
+  return false
+end
+
 local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
@@ -267,13 +276,13 @@ return {
     mock_issue_list({
       { number = 40, labels = { "fkst-dev:enabled" } },
       { number = 41, labels = { "fkst-dev:thinking" } },
-      { number = 42, labels = {} },
+      { number = 42, labels = { "fkst-class:expedite" } },
       { number = 43, labels = {} },
       { number = 44, labels = {} },
     })
     mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
     mock_intake_scan_view({ "fkst-dev:thinking" }, {}, "OPEN")
-    mock_intake_scan_view({}, {}, "OPEN")
+    mock_intake_scan_view({ "fkst-class:expedite" }, {}, "OPEN")
     mock_intake_scan_view({}, {}, "CLOSED")
     mock_intake_scan_view({}, {
       core.intake_decision_marker("github-devloop/issue/owner/repo/44", "decline", "intake/github-devloop/issue/owner/repo/44/v1"),
@@ -379,7 +388,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {})
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded implementation task.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ expedite\n⟦FKST:REASON⟧ Clear bounded implementation task.")
 
     local result = run_judge(payload, opts("intake-positive"))
     t.eq(result.exit_code, 0)
@@ -388,33 +397,100 @@ return {
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find('fkst:github-devloop:intake-decision:v1', 1, true) ~= nil)
     t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
+    t.is_true(comment.body:find('class="expedite"', 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
-    t.eq(#label.remove_labels, 0)
+    t.eq(label.add_labels[2], "fkst-class:expedite")
+    t.is_true(has_value(label.remove_labels, "fkst-class:standard"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
     assert_intake_judgment_call()
   end,
 
-  test_judge_negative_and_malformed_codex_write_comment_only = function()
+  test_judge_standard_class_is_default_and_replaces_other_class_labels = function()
     local payload = candidate()
     mock_bot_env()
-    mock_intake_judge_view({}, {}, {
+    mock_intake_judge_view({ "fkst-class:expedite" }, {})
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded implementation task.")
+
+    local result = run_judge(payload, opts("intake-standard-default"))
+    t.eq(result.exit_code, 0)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:enabled")
+    t.eq(label.add_labels[2], "fkst-class:standard")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
+  end,
+
+  test_judge_negative_and_malformed_codex_write_comment_and_class_label = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-class:background" }, {}, {
       body = "Rotate the production deploy credentials after confirming with the on-call engineer.",
     })
     mock_intake_codex("⟦FKST:INTAKE⟧ decline\n⟦FKST:REASON⟧ Requires production credentials and human confirmation.")
 
     local negative = run_judge(payload, opts("intake-negative"))
     t.eq(negative.exit_code, 0)
-    t.eq(#negative.raises, 1)
-    t.is_true(find_raise(negative.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="decline"', 1, true) ~= nil)
-    t.is_nil(find_raise(negative.raises, "github-proxy.github_issue_label_request"))
+    t.eq(#negative.raises, 2)
+    local negative_comment = find_raise(negative.raises, "github-proxy.github_issue_comment_request").payload
+    local negative_label = find_raise(negative.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(negative_comment.body:find('decision="decline"', 1, true) ~= nil)
+    t.is_true(negative_comment.body:find('class="standard"', 1, true) ~= nil)
+    t.eq(negative_label.add_labels[1], "fkst-class:standard")
+    t.is_true(has_value(negative_label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(negative_label.remove_labels, "fkst-class:background"))
 
     mock_bot_env()
-    mock_intake_judge_view({}, {})
+    mock_intake_judge_view({ "fkst-class:expedite" }, {})
     mock_intake_codex("enable\nreason")
     local malformed = run_judge(payload, opts("intake-malformed"))
     t.eq(malformed.exit_code, 0)
-    t.eq(#malformed.raises, 1)
-    t.is_true(find_raise(malformed.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="decline"', 1, true) ~= nil)
-    t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
+    t.eq(#malformed.raises, 2)
+    local malformed_comment = find_raise(malformed.raises, "github-proxy.github_issue_comment_request").payload
+    local malformed_label = find_raise(malformed.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(malformed_comment.body:find('decision="decline"', 1, true) ~= nil)
+    t.is_true(malformed_comment.body:find('class="standard"', 1, true) ~= nil)
+    t.eq(malformed_label.add_labels[1], "fkst-class:standard")
+    t.is_true(has_value(malformed_label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(malformed_label.remove_labels, "fkst-class:background"))
+  end,
+
+  test_judge_tracking_background_class_writes_display_label_only = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-class:standard" }, {})
+    mock_intake_codex("⟦FKST:INTAKE⟧ track\n⟦FKST:CLASS⟧ background\n⟦FKST:REASON⟧ Umbrella tracker issue; individual waves should be separate proposals.")
+
+    local result = run_judge(payload, opts("intake-track-background"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('decision="track"', 1, true) ~= nil)
+    t.is_true(comment.body:find('class="background"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:tracking")
+    t.eq(label.add_labels[2], "fkst-class:background")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:standard"))
+  end,
+
+  test_judge_invalid_class_normalizes_to_standard_display_label = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-class:background" }, {})
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ urgent\n⟦FKST:REASON⟧ Invalid class values must not become stable facts.")
+
+    local result = run_judge(payload, opts("intake-invalid-class-standard"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:enabled")
+    t.eq(label.add_labels[2], "fkst-class:standard")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
   end,
 
   test_judge_escalate_to_class_creates_carrier_links_and_folds_instance = function()
@@ -430,16 +506,21 @@ return {
 
     local result = run_judge(payload, opts("intake-escalate-class"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
+    t.eq(#result.raises, 5)
     local comment = find_comment_body(result.raises, 'decision="escalate-to-class"')
     local followup = find_comment_body(result.raises, "intake class follow-up: folded")
     local create = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    local folded_label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    local class_label = result.raises[#result.raises].payload
     t.is_true(comment.body:find('decision="escalate-to-class"', 1, true) ~= nil)
+    t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
     t.is_true(comment.body:find("Rule of Three", 1, true) ~= nil)
     t.is_true(followup.body:find('outcome="folded"', 1, true) ~= nil)
     t.is_true(followup.body:find('carrier="pending-create"', 1, true) ~= nil)
-    t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.eq(folded_label.add_labels[1], "fkst-dev:blocked")
+    t.eq(class_label.add_labels[1], "fkst-class:standard")
+    t.is_true(has_value(class_label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(class_label.remove_labels, "fkst-class:background"))
     t.eq(create.schema, "github-proxy.issue-create.v1")
     t.eq(create.parent_comment_target.issue_number, "42")
     t.is_true(create.title:find("Class fix needed:", 1, true) == 1)
@@ -467,12 +548,14 @@ return {
 
     local result = run_judge(payload, opts("intake-escalate-class-reuse"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 4)
     local followup = find_comment_body(result.raises, "intake class follow-up: folded")
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    local folded_label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    local class_label = result.raises[#result.raises].payload
     t.is_true(followup.body:find("Class carrier: #77", 1, true) ~= nil)
     t.is_true(followup.body:find('carrier="77"', 1, true) ~= nil)
-    t.eq(label.add_labels[1], "fkst-dev:blocked")
+    t.eq(folded_label.add_labels[1], "fkst-dev:blocked")
+    t.eq(class_label.add_labels[1], "fkst-class:standard")
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 
@@ -526,10 +609,11 @@ return {
 
     local result = run_judge(payload, opts("intake-escalate-class-reuse-by-class-key"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 4)
     local followup = find_comment_body(result.raises, "intake class follow-up: folded")
     t.is_true(followup.body:find("Class carrier: #77", 1, true) ~= nil)
     t.is_true(followup.body:find('carrier="77"', 1, true) ~= nil)
+    t.eq(result.raises[#result.raises].payload.add_labels[1], "fkst-class:standard")
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 
@@ -603,7 +687,9 @@ return {
     t.is_true(comment.body:find("Acknowledged as a tracking umbrella", 1, true) ~= nil)
     t.is_true(comment.body:find("individual waves", 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:tracking")
-    t.eq(#label.remove_labels, 0)
+    t.eq(label.add_labels[2], "fkst-class:standard")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
     t.eq(count_calls("codex exec"), 1)
   end,
 
@@ -743,9 +829,14 @@ return {
 
     local result = run_judge(payload, opts("intake-neutralize"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find('decision="decline"', 1, true) ~= nil)
+    t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-class:standard")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
     t.eq(count_calls("codex exec"), 1)
   end,
 }
