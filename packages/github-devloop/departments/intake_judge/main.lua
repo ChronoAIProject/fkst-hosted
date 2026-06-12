@@ -142,12 +142,15 @@ function pipeline(event)
     local parsed = core.parse_intake_action(result.stdout)
     if parsed == nil then
       parsed = decline_result()
+      parsed.service_class = core.normalize_intake_service_class(nil)
       core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
     else
-      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
+      parsed.service_class = core.normalize_intake_service_class(parsed.service_class)
+      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " class=" .. tostring(parsed.service_class) .. " reason=" .. tostring(parsed.reason), nil)
     end
 
-    local comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason)
+    candidate.service_class = parsed.service_class
+    local comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason, parsed.service_class)
     local command_comment_request = has_pending_reintake
       and core.build_operator_issue_reintake_comment_request(repo, issue_number, reintake_command, candidate, candidate.source_ref)
       or nil
@@ -174,15 +177,20 @@ function pipeline(event)
         end
       end
     end
-    comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason)
+    candidate.service_class = parsed.service_class
+    comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason, parsed.service_class)
+    table.insert(raised, "github-proxy.github_issue_label_request")
+    local class_add, class_remove = core.intake_service_class_label_changes(parsed.service_class)
+    local apply_add = { class_add[1] }
+    local apply_remove = class_remove
     if enables_pipeline(parsed.action) then
-      table.insert(raised, "github-proxy.github_issue_label_request")
+      table.insert(apply_add, 1, core._enabled_label)
     elseif tracks_umbrella(parsed.action) then
-      table.insert(raised, "github-proxy.github_issue_label_request")
+      table.insert(apply_add, 1, core._tracking_label)
     end
     core.log_apply("intake_judge", candidate.proposal_id, parsed.action, candidate.dedup_key, {
-      add = enables_pipeline(parsed.action) and { core._enabled_label } or (tracks_umbrella(parsed.action) and { core._tracking_label } or {}),
-      remove = {},
+      add = apply_add,
+      remove = apply_remove,
     }, raised)
     if command_comment_request ~= nil then
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
@@ -210,6 +218,9 @@ function pipeline(event)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
     elseif tracks_umbrella(parsed.action) then
       local label_request = core.build_intake_tracking_label_request(repo, issue_number, candidate)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    else
+      local label_request = core.build_intake_service_class_label_request(repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
     end
   end)

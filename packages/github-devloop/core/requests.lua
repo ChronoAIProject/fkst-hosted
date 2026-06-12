@@ -402,8 +402,9 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
   }), review_reconcile.source_ref)
 end
 
-function M.build_intake_decision_comment_request(repo, issue_number, candidate, decision, reason)
-  local marker = M.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key)
+function M.build_intake_decision_comment_request(repo, issue_number, candidate, decision, reason, service_class)
+  local normalized_class = M.normalize_intake_service_class(service_class)
+  local marker = M.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
     safe_reason = M.comment_string("no_reason_provided")
@@ -420,6 +421,7 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
     repo = repo,
     issue_number = issue_number,
     body = M.comment_string("intake_decision_prefix") .. tostring(decision)
+      .. "\nService class: " .. normalized_class
       .. detail
       .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
       .. "\n\n" .. marker,
@@ -434,11 +436,13 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
 end
 
 function M.build_intake_enabled_label_request(repo, issue_number, candidate)
+  local add_labels, remove_labels = M.intake_service_class_label_changes(candidate.service_class)
+  table.insert(add_labels, 1, M._enabled_label)
   return M.build_label_request(
     repo,
     issue_number,
-    { M._enabled_label },
-    {},
+    add_labels,
+    remove_labels,
     M._dedup_key({
       "intake",
       "label",
@@ -450,11 +454,13 @@ function M.build_intake_enabled_label_request(repo, issue_number, candidate)
 end
 
 function M.build_intake_tracking_label_request(repo, issue_number, candidate)
+  local add_labels, remove_labels = M.intake_service_class_label_changes(candidate.service_class)
+  table.insert(add_labels, 1, M._tracking_label)
   return M.build_label_request(
     repo,
     issue_number,
-    { M._tracking_label },
-    {},
+    add_labels,
+    remove_labels,
     M._dedup_key({
       "intake",
       "label",
