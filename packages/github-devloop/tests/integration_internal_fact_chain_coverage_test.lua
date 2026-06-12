@@ -462,7 +462,10 @@ return {
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     }, opts("internal-chain-review-reject-recovery"))
     t.eq(recovered_fix.exit_code, 0)
-    t.eq(find_raise(recovered_fix.raises, "devloop_fixing").payload.dedup_key, direct_fix.payload.dedup_key)
+    local replay_fix = find_raise(recovered_fix.raises, "devloop_fixing").payload
+    t.is_true(replay_fix.dedup_key ~= direct_fix.payload.dedup_key)
+    t.is_true(replay_fix.dedup_key:find("/nobase/" .. tostring(direct_fix.payload.reviewed_head_sha), 1, true) ~= nil)
+    t.eq(replay_fix.review_dedup_key, direct_fix.payload.review_dedup_key)
   end,
 
   test_merge_direct_cascade_and_poll_recovery_cover_terminal_and_repair_paths = function()
@@ -496,7 +499,10 @@ return {
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     }, opts("internal-chain-merge-red-recovery"))
     t.eq(recovered_fix.exit_code, 0)
-    t.eq(find_raise(recovered_fix.raises, "devloop_fixing").payload.dedup_key, direct_fix.payload.dedup_key)
+    local replay_fix = find_raise(recovered_fix.raises, "devloop_fixing").payload
+    t.is_true(replay_fix.dedup_key ~= direct_fix.payload.dedup_key)
+    t.is_true(replay_fix.dedup_key:find("/nobase/" .. tostring(direct_fix.payload.reviewed_head_sha), 1, true) ~= nil)
+    t.eq(replay_fix.review_dedup_key, direct_fix.payload.review_dedup_key)
 
     mock_bot_env()
     mock_write_env("1")
@@ -626,6 +632,18 @@ return {
     t.eq(fixing_raise.payload.gate_baseline_sha, fixture.gate_baseline_sha)
     t.is_true(fixing_raise.payload.gate_failure_excerpt:find("rollup-red", 1, true) ~= nil)
     t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
+    local defective_replay = core.build_replayed_fixing_payload({
+      proposal_id = event.proposal_id,
+      impl_version = fixture.fixing_version,
+    }, fixture.pr_number, {
+      review_proposal_id = fixture.review_proposal,
+      review_dedup_key = fixture.review_dedup,
+      reviewed_head_sha = event.reviewed_head_sha,
+      blocking_gap = "rollup-red",
+    }, core.pr_source_ref(fixture.repo, fixture.pr_number))
+    t.is_true(defective_replay.dedup_key ~= fixing_raise.payload.dedup_key)
+    t.is_true(defective_replay.dedup_key:find("/nobase/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
+    t.is_true(fixing_raise.payload.dedup_key:find("/" .. fixture.gate_baseline_sha .. "/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
     local matching_fact = core.merge_gate_fix_fact(fixture.pr_comments, event.proposal_id, fixture.fixing_version, {
       review_proposal_id = fixture.review_proposal,
       review_dedup_key = fixture.review_dedup,

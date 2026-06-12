@@ -268,15 +268,10 @@ local function raise_fixing_replay(issue, proposal_id, state, link, snapshot)
 
   local feedback = core.fixing_replay_feedback_fact(snapshot.comments, proposal_id, state.version)
   if feedback ~= nil then
-    local fix_payload = core.build_devloop_fixing_payload({
+    local fix_payload = core.build_replayed_fixing_payload({
       proposal_id = proposal_id,
       impl_version = state.version,
-    }, link.pr_number, {
-      review_proposal_id = feedback.review_proposal_id,
-      review_dedup_key = feedback.review_dedup_key,
-      reviewed_head_sha = feedback.reviewed_head_sha,
-      blocking_gap = feedback.blocking_gap,
-    }, core.pr_source_ref(issue.repo, link.pr_number))
+    }, link.pr_number, feedback, core.pr_source_ref(issue.repo, link.pr_number))
     core.log_apply("observe_issue", proposal_id, "fixing", state.version, { add = {}, remove = {} }, {
       "devloop_fixing",
     })
@@ -393,7 +388,7 @@ local function raise_decompose_replay(issue, proposal_id, state, link, snapshot)
     core.log_cas_decision("observe_issue", proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed children already visible)", "decompose children are complete")
     return
   end
-  local payload = core.build_decompose_replay_payload(decomposed, snapshot.comments, core.pr_source_ref(issue.repo, decomposed.pr_number))
+  local payload = core.build_decompose_replay_payload(decomposed, snapshot.comments, core.pr_source_ref(issue.repo, decomposed.pr_number), completed_count)
   if payload == nil then
     core.log_cas_decision("observe_issue", proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
     return

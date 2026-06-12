@@ -440,8 +440,18 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   return payload
 end
 
+local function replay_fact_sha(value, fallback)
+  if value ~= nil then
+    if not M._is_git_sha(value) then
+      error("github-devloop: invalid replay fact sha")
+    end
+    return tostring(value)
+  end
+  return fallback
+end
+
 function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref)
-  return M.build_devloop_fixing_payload(origin, pr_number, {
+  local payload = M.build_devloop_fixing_payload(origin, pr_number, {
     review_proposal_id = feedback.review_proposal_id,
     review_dedup_key = feedback.review_dedup_key,
     reviewed_head_sha = feedback.reviewed_head_sha,
@@ -449,6 +459,17 @@ function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     gate_baseline_sha = feedback.gate_baseline_sha,
     gate_failure_excerpt = feedback.review_reason,
   }, source_ref)
+  payload.dedup_key = M._dedup_key({
+    "fixing",
+    "replay",
+    tostring(origin.proposal_id),
+    tostring(payload.version),
+    tostring(pr_number),
+    tostring(feedback.review_dedup_key),
+    replay_fact_sha(feedback.gate_baseline_sha, "nobase"),
+    replay_fact_sha(feedback.reviewed_head_sha, "nohead"),
+  })
+  return payload
 end
 
 function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)

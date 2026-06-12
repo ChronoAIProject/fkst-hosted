@@ -181,6 +181,88 @@ return {
     t.eq(count_calls("merge --no-edit '" .. event.gate_baseline_sha .. "'"), 1)
   end,
 
+  test_corrected_merge_gate_replay_dedup_reaches_fix_after_nil_baseline_predecessor = function()
+    local event = fixing({
+      gate_baseline_sha = "828df8d3",
+      gate_failure_excerpt = "mergeable-conflicting",
+    })
+    local defective = core.build_replayed_fixing_payload({
+      proposal_id = event.proposal_id,
+      impl_version = event.version,
+    }, event.pr_number, {
+      review_proposal_id = event.review_proposal_id,
+      review_dedup_key = event.review_dedup_key,
+      reviewed_head_sha = event.reviewed_head_sha,
+      blocking_gap = "mergeable-conflicting",
+    }, event.source_ref)
+    local corrected = core.build_replayed_fixing_payload({
+      proposal_id = event.proposal_id,
+      impl_version = event.version,
+    }, event.pr_number, {
+      review_proposal_id = event.review_proposal_id,
+      review_dedup_key = event.review_dedup_key,
+      reviewed_head_sha = event.reviewed_head_sha,
+      blocking_gap = "mergeable-conflicting",
+      gate_baseline_sha = event.gate_baseline_sha,
+      review_reason = "mergeable-conflicting",
+    }, event.source_ref)
+    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local feedback = "github-devloop merge gate failed: mergeable-conflicting"
+      .. "\n" .. core.merge_gate_marker(
+        event.proposal_id,
+        event.pr_number,
+        event.version,
+        event.review_proposal_id,
+        event.review_dedup_key,
+        event.reviewed_head_sha,
+        event.gate_baseline_sha,
+        "mergeable-conflicting"
+      )
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+
+    t.is_true(defective.dedup_key ~= corrected.dedup_key)
+    t.is_true(defective.dedup_key:find("/nobase/" .. event.reviewed_head_sha, 1, true) ~= nil)
+    t.is_true(corrected.dedup_key:find("/" .. event.gate_baseline_sha .. "/" .. event.reviewed_head_sha, 1, true) ~= nil)
+    t.eq(corrected.gate_baseline_sha, event.gate_baseline_sha)
+
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_fix_for_event(corrected, { "fkst-dev:fixing" }, {
+      core.state_marker(corrected.proposal_id, "fixing", corrected.version),
+      feedback,
+    }, branch, corrected.version)
+    mock_pr_fix({ origin_marker }, branch, corrected.reviewed_head_sha)
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+      stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_existing_fix_worktree(branch, corrected.reviewed_head_sha, nil, {
+      sha = corrected.gate_baseline_sha,
+      exit_code = 0,
+      stdout = "",
+      stderr = "",
+    })
+    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = corrected.gate_baseline_sha .. "\n", stderr = "", exit_code = 0 })
+    mock_implement_codex(0, "fixed corrected replay")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("feedface", branch)
+    mock_write_env("1")
+    mock_issue_fix_for_event(corrected, { "fkst-dev:fixing" }, {
+      core.state_marker(corrected.proposal_id, "fixing", corrected.version),
+      feedback,
+    }, branch, corrected.version)
+    mock_pr_fix({ origin_marker }, branch, corrected.reviewed_head_sha)
+    mock_git_push(branch)
+    mock_pr_fix({ origin_marker }, branch, "feedface")
+
+    local result = run_fix(corrected, opts("fix-corrected-replay-after-nil-baseline", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(corrected.version))
+    t.eq(count_calls("merge --no-edit '" .. corrected.gate_baseline_sha .. "'"), 1)
+  end,
+
   test_synthetic_rollup_sha_still_cross_verifies_against_pr_merge_product = function()
     local event = merge_ready()
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")

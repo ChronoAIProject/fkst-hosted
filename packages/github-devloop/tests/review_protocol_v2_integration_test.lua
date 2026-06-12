@@ -162,7 +162,7 @@ return {
     local fix_version = core.next_fix_version(impl_version)
     local review_id = core.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     local review_dedup_key = "consensus:" .. review_id .. "/review"
-    local expected = core.build_devloop_fixing_payload({
+    local expected = core.build_replayed_fixing_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = fix_version,
     }, 7, {
@@ -228,8 +228,10 @@ return {
     t.eq(healed.exit_code, 0)
     local healed_fixing = find_raise(healed.raises, "devloop_fixing")
     t.is_true(healed_fixing ~= nil)
-    t.eq(healed_fixing.payload.dedup_key, original_fixing.payload.dedup_key)
+    t.is_true(healed_fixing.payload.dedup_key ~= original_fixing.payload.dedup_key)
+    t.is_true(healed_fixing.payload.dedup_key:find("/nobase/" .. tostring(original_fixing.payload.reviewed_head_sha), 1, true) ~= nil)
     t.eq(healed_fixing.payload.review_dedup_key, original_fixing.payload.review_dedup_key)
+    t.eq(healed_fixing.payload.reviewed_head_sha, original_fixing.payload.reviewed_head_sha)
   end,
 
   test_observe_pr_fixing_self_heal_fails_closed_without_reject_fact = function()
