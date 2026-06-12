@@ -10,6 +10,7 @@ M.spec = {
     "github-proxy.github_pr_comment_request",
     "devloop_reviewing",
     "devloop_fixing",
+    "devloop_decompose",
     "devloop_merge_ready",
   },
   stall_window = "30s",
@@ -374,6 +375,40 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
       })
       core.log_raise("observe_pr", origin.proposal_id, "devloop_merge_ready", merge_payload)
     end
+    return
+  end
+  if state.state == "blocked" and origin.issue_number ~= nil then
+    local fact_comments = current_pr.comments or {}
+    local decomposed = core.decomposed_fact(fact_comments, origin.proposal_id, state.version, pr_number)
+    if decomposed == nil then
+      return
+    end
+    local child_list = core.gh_exec({ cmd = core.gh_issue_list_decompose_children_cmd(origin.repo, origin.proposal_id), timeout = 30 })
+    if child_list.exit_code ~= 0 then
+      error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
+    end
+    local complete, completed_count = core.decompose_children_complete(
+      fact_comments,
+      core.parse_decompose_child_issue_list(child_list.stdout),
+      origin.proposal_id,
+      decomposed.version,
+      decomposed.pr_number,
+      decomposed.count
+    )
+    if complete then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed children already visible)", "decompose children are complete")
+      return
+    end
+    local payload = core.build_decompose_replay_payload(decomposed, fact_comments, source_ref)
+    if payload == nil then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
+      return
+    end
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "applied(decomposed-children-missing)", "decomposed marker count exceeds derived child count " .. tostring(completed_count))
+    core.log_apply("observe_pr", origin.proposal_id, "blocked", state.version, { add = {}, remove = {} }, {
+      "devloop_decompose",
+    })
+    core.log_raise("observe_pr", origin.proposal_id, "devloop_decompose", payload)
   end
 end
 
