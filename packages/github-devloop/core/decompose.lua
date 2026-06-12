@@ -196,6 +196,43 @@ function M.decompose_child_fact_indexes(comments, issues, proposal_id, version, 
   return completed
 end
 
+local function decompose_child_count(completed)
+  local count = 0
+  for _, present in pairs(completed or {}) do
+    if present then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+function M.decompose_children_complete(comments, issues, proposal_id, version, pr_number, expected_count)
+  local count = tonumber(expected_count)
+  if count == nil or count < 1 or count > max_decompose_issues or count % 1 ~= 0 then
+    return true, 0
+  end
+  local completed = M.decompose_child_fact_indexes(comments, issues, proposal_id, version, pr_number, {})
+  local completed_count = decompose_child_count(completed)
+  return completed_count >= count, completed_count
+end
+
+function M.build_decompose_replay_payload(fact, comments, source_ref)
+  local feedback = M.fixing_replay_feedback_fact(comments, fact.proposal_id, fact.version)
+  if feedback == nil then
+    return nil
+  end
+  return M.build_devloop_decompose_payload({
+    proposal_id = fact.proposal_id,
+    pr_number = fact.pr_number,
+    issue_version = fact.version,
+    review_proposal_id = feedback.review_proposal_id,
+    review_dedup_key = feedback.review_dedup_key,
+    head_sha = feedback.reviewed_head_sha,
+    round = M.version_fix_round(fact.version),
+    source_ref = source_ref,
+  })
+end
+
 function M.decompose_child_marker(proposal_id, version, pr_number, index)
   return '<!-- fkst:github-devloop:decompose-child:v1 parent="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)

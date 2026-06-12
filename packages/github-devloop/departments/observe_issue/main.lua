@@ -12,6 +12,7 @@ M.spec = {
     "devloop_ready",
     "devloop_reviewing",
     "devloop_fixing",
+    "devloop_decompose",
     "devloop_merge_ready",
   },
   fanout = { "github-proxy.github_entity_changed" },
@@ -362,6 +363,48 @@ local function raise_review_meta_replay(issue, proposal_id, state, link, snapsho
   core.log_raise("observe_issue", proposal_id, "devloop_review_meta", payload)
 end
 
+local function raise_decompose_replay(issue, proposal_id, state, link, snapshot)
+  if link == nil then
+    core.log_cas_decision("observe_issue", proposal_id, state, "blocked", "decomposed", "skip-foreign(pr-link)", "decompose recovery requires a pr-link marker")
+    return
+  end
+  local current_pr = find_linked_pr(snapshot, link.pr_number)
+  if current_pr == nil then
+    core.log_cas_decision("observe_issue", proposal_id, state, "blocked", "decomposed", "skip-foreign(pr-link)", "linked PR fact is not visible")
+    return
+  end
+  local decomposed = core.decomposed_fact(snapshot.comments, proposal_id, state.version, link.pr_number)
+  if decomposed == nil then
+    return
+  end
+  local child_list = core.gh_exec({ cmd = core.gh_issue_list_decompose_children_cmd(issue.repo, proposal_id), timeout = 30 })
+  if child_list.exit_code ~= 0 then
+    error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
+  end
+  local complete, completed_count = core.decompose_children_complete(
+    snapshot.comments,
+    core.parse_decompose_child_issue_list(child_list.stdout),
+    proposal_id,
+    decomposed.version,
+    decomposed.pr_number,
+    decomposed.count
+  )
+  if complete then
+    core.log_cas_decision("observe_issue", proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed children already visible)", "decompose children are complete")
+    return
+  end
+  local payload = core.build_decompose_replay_payload(decomposed, snapshot.comments, core.pr_source_ref(issue.repo, decomposed.pr_number))
+  if payload == nil then
+    core.log_cas_decision("observe_issue", proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
+    return
+  end
+  core.log_cas_decision("observe_issue", proposal_id, state, "blocked", "decomposed", "applied(decomposed-children-missing)", "decomposed marker count exceeds derived child count " .. tostring(completed_count))
+  core.log_apply("observe_issue", proposal_id, "blocked", state.version, { add = {}, remove = {} }, {
+    "devloop_decompose",
+  })
+  core.log_raise("observe_issue", proposal_id, "devloop_decompose", payload)
+end
+
 local function raise_stale_dependency_label_clear(issue, proposal_id, state, labels)
   if state.state == "ready" or not core.has_label(labels, core._blocked_on_dependency_label) then
     return false
@@ -601,6 +644,9 @@ function pipeline(event)
       end
       if state.state == "review-meta" then
         raise_review_meta_replay(issue, proposal_id, state, link, snapshot)
+      end
+      if state.state == "blocked" then
+        raise_decompose_replay(issue, proposal_id, state, link, snapshot)
       end
       if state.state == "thinking" or state.state == "pr-open" then
         if state.state == "pr-open" and tostring(state.version or "") == tostring(link and link.impl_version or "") then
