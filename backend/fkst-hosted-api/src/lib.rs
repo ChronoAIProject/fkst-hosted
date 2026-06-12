@@ -12,6 +12,7 @@ pub mod distribution;
 pub mod engine;
 pub mod error;
 pub mod github_app;
+pub mod goals;
 pub mod journal;
 pub mod leases;
 pub mod models;

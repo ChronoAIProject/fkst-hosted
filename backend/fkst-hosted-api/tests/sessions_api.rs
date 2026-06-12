@@ -19,6 +19,7 @@ use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::models::{SessionDoc, SessionStatus};
 use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
@@ -118,6 +119,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
 
     let packages = PackageRepository::new(&db.database);
     let shares = ShareRepo::new(&db.database);
+    let goals = GoalRepo::new(&db.database);
     let sessions = SessionService::new(SessionRepo::new(&db), packages.clone(), engine);
     let router = build_router(AppState {
         config,
@@ -128,6 +130,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
+        goals,
     })
     .expect("router");
     TestApp {
