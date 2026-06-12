@@ -174,6 +174,13 @@ local function validate_cached_manifest(manifest, exec)
   return manifest_files_are_valid(manifest, exec)
 end
 
+local function has_stale_generation_context_error(text)
+  return text:find("context bundle manifest cache miss", 1, true) ~= nil
+    or text:find("context bundle manifest files are unreadable", 1, true) ~= nil
+    or text:find("runtime context cache miss", 1, true) ~= nil
+    or text:find("runtime context manifest file is unreadable", 1, true) ~= nil
+end
+
 local function rename_dir_cmd(from_dir, to_dir)
   local script = "import os, sys\nos.rename(sys.argv[1], sys.argv[2])\n"
   return "python3 -c " .. M._shell_single_quote(script)
@@ -312,16 +319,7 @@ function M.is_stale_generation_context_error(err)
   if text:find("error_class=" .. stale_generation_context_error_class, 1, true) ~= nil then
     return true
   end
-  if text:find("context bundle manifest cache miss", 1, true) ~= nil then
-    return true
-  end
-  if text:find("context bundle manifest files are unreadable", 1, true) ~= nil then
-    return true
-  end
-  if text:find("runtime context cache miss", 1, true) ~= nil then
-    return true
-  end
-  return text:find("runtime context manifest file is unreadable", 1, true) ~= nil
+  return has_stale_generation_context_error(text)
 end
 
 function M.build_context_bundle(args)

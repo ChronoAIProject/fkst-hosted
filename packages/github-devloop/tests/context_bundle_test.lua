@@ -146,6 +146,11 @@ return {
     t.is_true(result.error:find("context bundle manifest files are unreadable", 1, true) ~= nil)
   end,
 
+  test_stale_generation_classifier_accepts_consensus_manifest_errors = function()
+    t.eq(core.is_stale_generation_context_error("consensus: runtime context cache miss"), true)
+    t.eq(core.is_stale_generation_context_error("consensus: runtime context manifest file is unreadable"), true)
+  end,
+
   test_stale_generation_replayer_rebuilds_manifest_after_runtime_swap = function()
     local result = run_probe("stale_manifest_rebuild", runtime_root("stale-manifest-rebuild"))
 
