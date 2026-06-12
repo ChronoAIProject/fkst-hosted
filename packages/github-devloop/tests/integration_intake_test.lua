@@ -50,6 +50,12 @@ local function trusted_reintake_command(id)
   }
 end
 
+local function untrusted_reintake_command(id)
+  local command = trusted_reintake_command(id or "IC_reintake_untrusted")
+  command.author_login = "ordinary-user"
+  return command
+end
+
 local function find_comment_body(raises, needle)
   for _, raised in ipairs(raises or {}) do
     if raised.queue == "github-proxy.github_issue_comment_request"
@@ -234,6 +240,12 @@ local function candidate(extra)
   return value
 end
 
+local function reintake_candidate(command)
+  return candidate({
+    dedup_key = core.build_devloop_intake_candidate_payload("owner/repo", 42, command.created_at).dedup_key,
+  })
+end
+
 local function run_scan(run_opts)
   return t.run_department("departments/intake_scan/main.lua", {
     queue = "devloop_intake_tick",
@@ -259,6 +271,8 @@ return {
       { number = 43, labels = {} },
       { number = 44, labels = {} },
     })
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
+    mock_intake_scan_view({ "fkst-dev:thinking" }, {}, "OPEN")
     mock_intake_scan_view({}, {}, "OPEN")
     mock_intake_scan_view({}, {}, "CLOSED")
     mock_intake_scan_view({}, {
@@ -275,12 +289,13 @@ return {
 
   test_scan_reintake_requeues_issue_with_trusted_intake_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
+    local command = trusted_reintake_command("IC_reintake_scan")
     mock_bot_env()
     mock_repo_env()
     mock_issue_list({ { number = 42, labels = {} } })
     mock_intake_scan_view({}, {
       core.intake_decision_marker(proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v1"),
-      trusted_reintake_command("IC_reintake_scan"),
+      command,
     }, "OPEN")
 
     local result = run_scan(opts("intake-scan-reintake"))
@@ -288,6 +303,59 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "devloop_intake_candidate")
     t.eq(result.raises[1].payload.issue_number, "42")
+    t.eq(result.raises[1].payload.dedup_key, core.intake_dedup_key(proposal_id, command.created_at))
+    t.is_true(result.raises[1].payload.dedup_key ~= core.intake_dedup_key(proposal_id, "2026-06-03T01:02:03Z"))
+  end,
+
+  test_scan_reintake_without_prior_intake_marker_refuses = function()
+    mock_bot_env()
+    mock_repo_env()
+    mock_issue_list({ { number = 42, labels = {} } })
+    mock_intake_scan_view({}, {
+      trusted_reintake_command("IC_reintake_no_marker"),
+    }, "OPEN")
+
+    local result = run_scan(opts("intake-scan-reintake-no-marker"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local refusal = find_comment_body(result.raises, "operator command refused")
+    t.is_true(refusal ~= nil)
+    t.is_true(refusal.body:find("reintake requires an existing intake decision", 1, true) ~= nil)
+    t.is_true(refusal.body:find('outcome="refused"', 1, true) ~= nil)
+  end,
+
+  test_scan_reintake_mid_pipeline_refuses = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_bot_env()
+    mock_repo_env()
+    mock_issue_list({ { number = 42, labels = { "fkst-dev:thinking" } } })
+    mock_intake_scan_view({ "fkst-dev:thinking" }, {
+      core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1"),
+      trusted_reintake_command("IC_reintake_active"),
+    }, "OPEN")
+
+    local result = run_scan(opts("intake-scan-reintake-active-state"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local refusal = find_comment_body(result.raises, "operator command refused")
+    t.is_true(refusal ~= nil)
+    t.is_true(refusal.body:find("reintake requires no active devloop state", 1, true) ~= nil)
+    t.is_true(refusal.body:find('outcome="refused"', 1, true) ~= nil)
+  end,
+
+  test_scan_reintake_forged_command_is_ignored = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_bot_env()
+    mock_repo_env()
+    mock_issue_list({ { number = 42, labels = {} } })
+    mock_intake_scan_view({}, {
+      core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1"),
+      untrusted_reintake_command("IC_reintake_forged"),
+    }, "OPEN")
+
+    local result = run_scan(opts("intake-scan-reintake-forged"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
   end,
 
   test_scan_ignores_forged_marker = function()
@@ -592,8 +660,8 @@ return {
   end,
 
   test_judge_reintake_rejudges_after_trusted_intake_marker = function()
-    local payload = candidate()
     local command = trusted_reintake_command("IC_reintake_judge")
+    local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({}, {
       core.intake_decision_marker(payload.proposal_id, "escalate-to-class", payload.dedup_key),
@@ -611,6 +679,39 @@ return {
     t.is_true(command_comment.body:find('command="reintake"', 1, true) ~= nil)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
     t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_judge_reintake_stale_candidate_is_skipped = function()
+    local payload = candidate()
+    local command = trusted_reintake_command("IC_reintake_stale")
+    mock_bot_env()
+    mock_intake_judge_view({}, {
+      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
+      command,
+    })
+
+    local result = run_judge(payload, opts("intake-reintake-stale-candidate"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_judge_reintake_mid_pipeline_refuses = function()
+    local command = trusted_reintake_command("IC_reintake_judge_active")
+    local payload = reintake_candidate(command)
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:thinking" }, {
+      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
+      command,
+    })
+
+    local result = run_judge(payload, opts("intake-reintake-judge-active-state"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local refusal = find_comment_body(result.raises, "operator command refused")
+    t.is_true(refusal ~= nil)
+    t.is_true(refusal.body:find("reintake requires no active devloop state", 1, true) ~= nil)
+    t.eq(count_calls("codex exec"), 0)
   end,
 
   test_judge_prompt_neutralizes_sentinel_and_marker_injection = function()
