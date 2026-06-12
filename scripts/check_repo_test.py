@@ -187,5 +187,12 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
 
 
+class RepositoryInterfaceContractTest(unittest.TestCase):
+    def test_repository_checks_scan_fkst_packages_view(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+
+        self.assertEqual(check_repo.packages_root(root), root / ".fkst" / "packages")
+
+
 if __name__ == "__main__":
     unittest.main()
