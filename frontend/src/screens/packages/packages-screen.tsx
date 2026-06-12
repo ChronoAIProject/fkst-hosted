@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { usePackagesList } from '../../lib/hooks/usePackages';
 import { useQueries } from '@tanstack/react-query';
 import { getPackage } from '../../lib/api/client';
@@ -5,6 +6,7 @@ import { LevelsGrid, LevelsGridCell } from '../../components/layout/levels-grid'
 import { SectionHeading } from '../../components/layout/section-heading';
 import { HairlineList, HairlineRow } from '../../components/layout/hairline-list';
 import { PackageResponse } from '../../lib/api/types';
+import { AddPackageModal } from './add-package-modal';
 
 // Presentational View Component (for easy testing & stories)
 export interface PackagesViewProps {
@@ -319,6 +321,7 @@ export function PackageRowSkeleton({ name }: { name?: string }) {
 // Default Screen Export
 export default function PackagesScreen() {
   const { data: names, isLoading: isLoadingList, error: listError } = usePackagesList();
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   // Lift per-row details fetching here via useQueries
   const packagesQueries = useQueries({
@@ -342,12 +345,15 @@ export default function PackagesScreen() {
   });
 
   return (
-    <PackagesView
-      isLoadingList={isLoadingList}
-      listError={listError ? listError.message : null}
-      packageNames={names}
-      packagesData={packagesData}
-      onAddPackageClick={() => {}}
-    />
+    <>
+      <PackagesView
+        isLoadingList={isLoadingList}
+        listError={listError ? listError.message : null}
+        packageNames={names}
+        packagesData={packagesData}
+        onAddPackageClick={() => setIsAddModalOpen(true)}
+      />
+      <AddPackageModal isOpen={isAddModalOpen} onOpenChange={setIsAddModalOpen} />
+    </>
   );
 }
