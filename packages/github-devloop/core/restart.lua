@@ -188,6 +188,13 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
         and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
         and tostring(reviewed_head_sha or "") == tostring(head_sha)
         and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
+        local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+        if reject_fact == nil
+          or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
+          or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
+          or not M._is_bounded_string(reject_fact.blocking_gap, M._max_blocking_gap_len) then
+          return nil
+        end
         return {
           proposal_id = review_proposal,
           dedup_key = marker_dedup,
@@ -196,6 +203,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
           n = tonumber(n) or 0,
           mode = "fix-reflection",
           fix_round = round,
+          blocking_gap = reject_fact.blocking_gap,
         }
       end
     end

@@ -100,6 +100,29 @@ return {
     t.eq(core.review_meta_fix_fact({ comment }, event.proposal_id, exit_version).blocking_gap, "missing regression guard")
   end,
 
+  test_fix_reflection_replay_fact_restores_blocking_gap = function()
+    local issue_version = core.fix_version_from_review_version(reflection_review_version())
+    local review_version = core._strip_latest_fix_version_suffix(issue_version)
+    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
+    local review_dedup = "consensus:" .. review_proposal .. "/review"
+    local comments = {
+      {
+        author_login = core._test_bot_login,
+        body = table.concat({
+          core.state_marker("github-devloop/issue/owner/repo/42", "review-meta", issue_version),
+          core.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "reject", review_dedup, 3, "missing regression guard"),
+          core.fix_reflection_marker("github-devloop/issue/owner/repo/42", review_dedup, "checkpoint", issue_version, 3),
+        }, "\n"),
+        created_at = "2026-06-03T01:02:03Z",
+      },
+    }
+
+    local fact = core.review_meta_replay_fact_from_state(comments, "github-devloop/issue/owner/repo/42", issue_version, 7, "def456", 0)
+    t.eq(fact.mode, "fix-reflection")
+    t.eq(fact.fix_round, 3)
+    t.eq(fact.blocking_gap, "missing regression guard")
+  end,
+
   test_fix_reflection_spec_gap_blocks_and_files_spec_amendment = function()
     local event = reflection_meta_event()
     mock_reflection_context(event, "Round ledger: latest gap diverges from stated acceptance.")
