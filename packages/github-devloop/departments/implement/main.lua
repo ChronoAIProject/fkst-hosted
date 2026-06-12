@@ -151,10 +151,19 @@ function pipeline(event)
       return
     end
     if transition == "pending" then
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
-      error("github-devloop: ready state marker not yet visible for implement; retrying")
+      if core.is_ready_hand_off(ready.ready_hand_off, ready) then
+        core.log_cas_decision("implement", ready.proposal_id, {
+          state = "ready",
+          version = ready.dedup_key,
+          stage_rank = core.stage_rank("ready"),
+        }, "ready", "implementing", "apply(own-ready-hand-off)", "ready marker was written by the same in-band generation")
+      else
+        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
+        error("github-devloop: ready state marker not yet visible for implement; retrying")
+      end
+    else
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
     end
-    core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
 
     local issue_slug = core.safe_issue_slug(repo, issue_number)
     local branch = core.implement_branch(repo, issue_number, ready.dedup_key)

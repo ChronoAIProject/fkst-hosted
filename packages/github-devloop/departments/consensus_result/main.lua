@@ -81,7 +81,12 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
     return
   end
   core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready", reason, "result effects complete or recoverable")
-  core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(reached))
+  local ready_payload = {}
+  for key, value in pairs(reached) do
+    ready_payload[key] = value
+  end
+  ready_payload.include_ready_hand_off = true
+  core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(ready_payload))
 end
 
 function pipeline(event)

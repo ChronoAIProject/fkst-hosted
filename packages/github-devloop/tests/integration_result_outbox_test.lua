@@ -25,6 +25,8 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
     t.eq(ready_raise.payload.schema, "github-devloop.ready.v1")
     t.eq(ready_raise.payload.dedup_key, core.build_devloop_ready_payload(current).dedup_key)
+    t.eq(ready_raise.payload.ready_hand_off.version, ready_raise.payload.dedup_key)
+    t.eq(ready_raise.payload.ready_hand_off.effects, "result-marker,ready-label,devloop-ready")
   end,
 
   test_consensus_result_ready_marker_skips_when_declared_effects_are_complete = function()

@@ -124,6 +124,7 @@ function M.is_supported_ready(payload)
     and payload.schema == "github-devloop.ready.v1"
     and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
     and (payload.framing == nil or M._is_bounded_string(payload.framing, M._max_framing_len))
+    and (payload.ready_hand_off == nil or M.is_ready_hand_off(payload.ready_hand_off, payload))
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
