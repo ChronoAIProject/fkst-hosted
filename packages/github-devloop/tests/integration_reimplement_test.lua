@@ -101,7 +101,10 @@ return {
 
     local result = run_implement(ready, opts("implement-retry-success"))
     t.eq(result.exit_code, 0)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
+      return tostring(payload.body or ""):find("github-devloop implementation started", 1, true) ~= nil
+    end)
+    t.is_true(comment ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "implementing", ready.dedup_key .. "/reimplement/2"), 1, true) ~= nil)
   end,
 }

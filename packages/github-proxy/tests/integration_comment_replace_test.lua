@@ -38,6 +38,14 @@ local function mock_comment_edit()
   })
 end
 
+local function mock_comment_edit_result(comment_id, exit_code, stderr)
+  t.mock_command("gh api --method PATCH 'repos/owner/x/issues/comments/" .. tostring(comment_id) .. "' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-pr-7.md'", {
+    stdout = "",
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
+end
+
 return {
   test_replace_marker_edits_existing_trusted_comment = function()
     mock_write_env("1")
@@ -79,6 +87,63 @@ return {
     t.eq(count_calls("gh pr view"), 1)
     t.eq(count_calls("gh api --method PATCH"), 0)
     t.eq(count_calls("gh pr comment"), 1)
+  end,
+
+  test_replace_marker_falls_back_to_create_when_edit_target_is_stale = function()
+    t.eq(core.stale_comment_target_error_class(), "stale-comment-target")
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_comment_view({
+      {
+        databaseId = 123456,
+        body = "old card\n" .. event().payload.replace_marker,
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_comment_edit_result(123456, 1, "gh: Not Found")
+    mock_pr_comment_view({})
+    mock_pr_comment_write()
+
+    local result = t.run_department("departments/github_pr_comment/main.lua", event(), opts("comment-replace-stale-edit-create", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr view"), 2)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
+    t.eq(count_calls("gh pr comment"), 1)
+  end,
+
+  test_replace_marker_rereads_once_when_edit_404_then_edits_refreshed_comment = function()
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_comment_view({
+      {
+        databaseId = 123456,
+        body = "old card\n" .. event().payload.replace_marker,
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_comment_edit_result(123456, 1, "HTTP 404: Not Found")
+    mock_pr_comment_view({
+      {
+        databaseId = 654321,
+        body = "new card\n" .. event().payload.replace_marker,
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_comment_edit_result(654321)
+    mock_pr_comment_write()
+
+    local result = t.run_department("departments/github_pr_comment/main.lua", event(), opts("comment-replace-404-reread-edit", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr view"), 2)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/654321' --field body=@"), 1)
+    t.eq(count_calls("gh pr comment"), 0)
   end,
 
   test_parse_issue_comments_preserves_comment_id = function()

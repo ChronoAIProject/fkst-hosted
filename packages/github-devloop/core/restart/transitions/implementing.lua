@@ -17,6 +17,7 @@ return function(M, h)
     required_facts = {
       fact("state", "marker-read"),
       fact("implementing", "marker-read"),
+      fact("implement-attempt", "marker-read"),
       fact("branch-head", "fetch-before-compare"),
     },
     payload_fields = {
@@ -28,9 +29,9 @@ return function(M, h)
       source_ref = "source_ref:issue",
     },
     version_identity = "implementing.dedup",
-    effects = effect({ "github-proxy.github_entity_changed" }, "open-pr payload is complete when implementing marker and fetched branch head agree"),
-    marker_facts = "state:v1 implementing plus implementing:v1",
-    kickoff = "github-proxy.github_entity_changed",
-    replay = "Branch poll re-derives PR open or impl-failed from branch/worktree facts.",
+    effects = effect({ "devloop_open_pr" }, "implementing transition is complete only when branch progress immediately kicks off PR opening"),
+    marker_facts = "state:v1 implementing plus implementing:v1 and implement-attempt:v1",
+    kickoff = "devloop_open_pr",
+    replay = "Observe re-raises devloop_ready only when the implement attempt is past its liveness budget; implement then re-derives PR link, remote branch, local branch, or bounded retry.",
   }
 end

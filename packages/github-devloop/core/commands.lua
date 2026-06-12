@@ -46,7 +46,11 @@ function M.gh_issue_list_recent_closed_cmd(repo, limit)
 end
 
 function M.gh_issue_list_observe_cmd(repo, label)
-  local selected_label = label or M._enabled_label
+  if label == nil or tostring(label) == "" then
+    return "gh api --paginate --slurp "
+      .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
+  end
+  local selected_label = label
   return "gh api --paginate --slurp "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
