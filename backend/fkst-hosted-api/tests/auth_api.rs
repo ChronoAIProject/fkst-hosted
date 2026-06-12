@@ -31,7 +31,7 @@ use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -261,6 +261,7 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -276,6 +277,7 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
         config,
         db,
         packages,
+        shares,
         sessions,
         auth_mode,
         authz: Authorizer::disabled(),
@@ -308,6 +310,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -317,6 +320,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         config,
         db,
         packages,
+        shares,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
@@ -558,6 +562,7 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -573,6 +578,7 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
         config,
         db,
         packages,
+        shares,
         sessions,
         auth_mode,
         authz: Authorizer::disabled(),
@@ -628,6 +634,7 @@ async fn kid_rotation_recovers_after_refresh() {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -643,6 +650,7 @@ async fn kid_rotation_recovers_after_refresh() {
         config,
         db,
         packages,
+        shares,
         sessions,
         auth_mode,
         authz: Authorizer::disabled(),
@@ -715,6 +723,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -724,6 +733,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         config,
         db,
         packages,
+        shares,
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
             base_url: mock_server.uri(),

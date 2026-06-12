@@ -18,7 +18,9 @@ use fkst_hosted_api::db::{
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::leases::{LeaseStore, PoolConfig, IDX_LEASES_HOLDER_POD};
 use fkst_hosted_api::models::{SessionDoc, SessionStatus};
-use fkst_hosted_api::packages::{Package, PackageFile, PackageRepository, PACKAGES_COLLECTION};
+use fkst_hosted_api::packages::{
+    Package, PackageFile, PackageRepository, ShareRepo, PACKAGES_COLLECTION,
+};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -296,6 +298,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
     // Short selection timeout so the post-stop request fails fast.
     let (container, config, db) = mongo_db(500).await;
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -305,6 +308,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
         config,
         db,
         packages,
+        shares,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),

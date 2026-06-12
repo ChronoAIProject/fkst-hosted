@@ -31,6 +31,7 @@ use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::nyxid::NyxIdClient;
 use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::packages::ShareRepo;
 use fkst_hosted_api::packages::PACKAGES_COLLECTION;
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
@@ -354,6 +355,7 @@ async fn authz_app_with_db() -> AuthzTestAppWithDb {
     let db = Db::connect(&config).await.expect("connect + ping");
     let database = db.database.clone();
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -375,13 +377,15 @@ async fn authz_app_with_db() -> AuthzTestAppWithDb {
         jwks_cache_ttl: Duration::from_secs(JWKS_TTL_SECS),
     });
 
+    let authz = Authorizer::with_shares(Some(nyxid_client), shares.clone());
     let router = build_router(AppState {
         config,
         db,
         packages,
+        shares,
         sessions,
         auth_mode,
-        authz: Authorizer::new(Some(nyxid_client)),
+        authz,
         github_app: None,
     })
     .expect("router");

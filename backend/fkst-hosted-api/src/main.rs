@@ -13,7 +13,7 @@ use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::journal::store::MongoProgressStore;
 use fkst_hosted_api::journal::JournalConfig;
 use fkst_hosted_api::leases::LeaseStore;
-use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
@@ -93,6 +93,14 @@ async fn main() -> ExitCode {
     let packages = PackageRepository::new(&db.database);
     if let Err(error) = packages.ensure_indexes().await {
         tracing::error!(error = %error, "failed to ensure packages indexes");
+        return ExitCode::FAILURE;
+    }
+
+    // 4b-bis. Ensure the package_shares-collection indexes (idempotent;
+    //         fail-closed on error). Share-aware policy checks depend on these.
+    let shares = ShareRepo::new(&db.database);
+    if let Err(error) = shares.ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure package_shares indexes");
         return ExitCode::FAILURE;
     }
 
@@ -211,6 +219,7 @@ async fn main() -> ExitCode {
 
     // Build the NyxID client and Authorizer. Only construct a NyxIdClient
     // when auth is enabled AND both service-account credentials are present.
+    // The Authorizer is given the ShareRepo for share-aware policy checks.
     let authz = match (
         &auth_mode,
         &config.nyxid_client_id,
@@ -225,7 +234,7 @@ async fn main() -> ExitCode {
             ) {
                 Ok(client) => {
                     tracing::info!("NyxID org features enabled");
-                    Authorizer::new(Some(client))
+                    Authorizer::with_shares(Some(client), shares.clone())
                 }
                 Err(error) => {
                     tracing::error!(error = %error, "failed to build NyxID client");
@@ -235,9 +244,9 @@ async fn main() -> ExitCode {
         }
         (fkst_hosted_api::auth::AuthMode::Enabled(_), None, None) => {
             tracing::warn!("NyxID org features disabled: NYXID_CLIENT_ID/SECRET not configured");
-            Authorizer::new(None)
+            Authorizer::with_shares(None, shares.clone())
         }
-        _ => Authorizer::disabled(),
+        _ => Authorizer::with_shares(None, shares.clone()),
     };
 
     // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must
@@ -270,6 +279,7 @@ async fn main() -> ExitCode {
         config,
         db,
         packages,
+        shares,
         sessions: sessions.clone(),
         auth_mode,
         authz,
