@@ -1,0 +1,110 @@
+local S = {}
+
+local max_impl_auto_retry_attempts = 2
+local max_impl_retry_attempts = 100000
+
+local function marker_attr(marker, name)
+  return marker:match(name .. '="([^"]*)"')
+end
+
+local function valid_attempt(value)
+  local n = tonumber(value)
+  if n == nil or n < 1 or n ~= math.floor(n) or n > max_impl_retry_attempts then
+    return nil
+  end
+  return n
+end
+
+function S.install(M)
+M._max_impl_retry_attempts = max_impl_retry_attempts
+M._max_impl_auto_retry_attempts = max_impl_auto_retry_attempts
+
+function M.impl_failure_marker(proposal_id, dedup_key, reason, attempt)
+  local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
+  local attempt_field = ""
+  if attempt ~= nil then
+    local n = valid_attempt(attempt)
+    if n == nil then
+      error("github-devloop: invalid impl failure attempt")
+    end
+    attempt_field = '" attempt="' .. tostring(n)
+  end
+  return '<!-- fkst:github-devloop:impl-failure:v1 proposal="' .. tostring(proposal_id)
+    .. '" reason="' .. safe_reason
+    .. attempt_field
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" -->'
+end
+
+function M.impl_failure_fact(comments, proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local best = nil
+  local marker_pattern = "<!%-%- fkst:github%-devloop:impl%-failure:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker_attr(marker, "proposal")
+      local marker_dedup = marker_attr(marker, "dedup")
+      local reason = marker_attr(marker, "reason")
+      if marker_proposal == tostring(proposal_id)
+        and marker_dedup == tostring(dedup_key)
+        and reason ~= nil
+        and M._is_bounded_string(reason, M._max_key_len) then
+        local attempt = valid_attempt(marker_attr(marker, "attempt")) or 1
+        local fact = {
+          proposal_id = marker_proposal,
+          dedup_key = marker_dedup,
+          reason = reason,
+          attempt = attempt,
+          comment_created_at = M._comment_created_at(comment),
+        }
+        if best == nil or fact.attempt > best.attempt then
+          best = fact
+        end
+      end
+    end
+  end
+  return best
+end
+
+function M.has_impl_failure_marker(comments, proposal_id, dedup_key)
+  return M.impl_failure_fact(comments, proposal_id, dedup_key) ~= nil
+end
+
+function M.impl_failure_retry_allowed(fact)
+  return type(fact) == "table"
+    and fact.reason == "codex-failed"
+    and tonumber(fact.attempt or 1) < max_impl_auto_retry_attempts
+end
+
+function M.next_impl_retry_attempt(fact)
+  if not M.impl_failure_retry_allowed(fact) then
+    return nil
+  end
+  return tonumber(fact.attempt or 1) + 1
+end
+
+function M.implementation_base_version(version)
+  return tostring(version or ""):gsub("/reimplement/%d+$", "")
+end
+
+function M.implementation_attempt_version(version, attempt)
+  local base = M.implementation_base_version(version)
+  local n = tonumber(attempt)
+  if n == nil or n <= 1 then
+    return base
+  end
+  if n ~= math.floor(n) or n > max_impl_retry_attempts then
+    error("github-devloop: invalid implementation attempt version")
+  end
+  return base .. "/reimplement/" .. tostring(n)
+end
+
+function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)
+  return M.has_implementing_marker(comments, proposal_id, dedup_key)
+    or M.has_impl_failure_marker(comments, proposal_id, dedup_key)
+end
+end
+
+return S

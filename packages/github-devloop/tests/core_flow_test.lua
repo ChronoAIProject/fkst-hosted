@@ -414,6 +414,11 @@ return {
     t.eq(core.is_supported_ready(ready_with_hand_off), true)
     ready_with_hand_off.ready_hand_off.version = "ready/other"
     t.eq(core.is_supported_ready(ready_with_hand_off), false)
+    ready_with_hand_off = core.build_devloop_ready_payload(copy_table(reached(), {
+      include_ready_hand_off = true,
+      impl_retry_attempt = 2,
+    }))
+    t.eq(core.is_supported_ready(ready_with_hand_off), false)
 
     t.eq(core.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
     local deterministic_branch = core.implement_branch("owner/repo", "42", ready.dedup_key)
@@ -476,6 +481,15 @@ return {
     local failed = core.impl_failure_marker(ready.proposal_id, ready.dedup_key, "codex-failed")
     t.eq(core.has_impl_failure_marker({ failed }, ready.proposal_id, ready.dedup_key), true)
     t.eq(core.has_implementation_fact_marker({ failed }, ready.proposal_id, ready.dedup_key), true)
+    t.eq(core.impl_failure_fact({ failed }, ready.proposal_id, ready.dedup_key).attempt, 1)
+    local retry_failed = core.impl_failure_marker(ready.proposal_id, ready.dedup_key, "codex-failed", 2)
+    local retry_fact = core.impl_failure_fact({ failed, retry_failed }, ready.proposal_id, ready.dedup_key)
+    t.eq(retry_fact.reason, "codex-failed")
+    t.eq(retry_fact.attempt, 2)
+    t.eq(core.impl_failure_retry_allowed(core.impl_failure_fact({ failed }, ready.proposal_id, ready.dedup_key)), true)
+    t.eq(core.impl_failure_retry_allowed(retry_fact), false)
+    t.eq(core.implementation_attempt_version(ready.dedup_key, 2), ready.dedup_key .. "/reimplement/2")
+    t.eq(core.implementation_base_version(ready.dedup_key .. "/reimplement/2"), ready.dedup_key)
 
     local label = core.build_implementing_label_request("owner/repo", "42", ready)
     t.eq(label.add_labels[1], "fkst-dev:implementing")

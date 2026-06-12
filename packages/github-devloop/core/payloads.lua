@@ -400,6 +400,13 @@ function M.build_devloop_ready_payload(source)
   if framing ~= nil then
     payload.framing = framing
   end
+  local attempt = tonumber(source.impl_retry_attempt)
+  if attempt ~= nil then
+    if attempt < 1 or attempt ~= math.floor(attempt) or attempt > M._max_impl_retry_attempts then
+      error("github-devloop: invalid implementation retry attempt")
+    end
+    payload.impl_retry_attempt = attempt
+  end
   return payload
 end
 

@@ -460,6 +460,27 @@ return {
     t.eq(count_calls("git -C"), 0)
   end,
 
+  test_implement_retry_ignores_ready_hand_off_before_marker_visibility = function()
+    local event = ready({
+      impl_retry_attempt = 2,
+      ready_hand_off = {
+        kind = "own-ready-state-marker",
+        proposal_id = ready().proposal_id,
+        state = "ready",
+        version = ready().dedup_key,
+        stage_rank = core.stage_rank("ready"),
+        effects = "result-marker,ready-label,devloop-ready",
+      },
+    })
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+
+    local result = run_implement(event, opts("implement-retry-hand-off-marker-pending"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git -C"), 0)
+  end,
+
   test_implement_implementing_label_without_marker_reruns = function()
     mock_issue_implement({ "fkst-dev:implementing" })
 

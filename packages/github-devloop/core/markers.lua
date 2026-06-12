@@ -711,14 +711,6 @@ function M.has_merged_marker(comments, issue_proposal_id, pr_number, version, he
   return fact ~= nil and tostring(fact.head_sha) == tostring(head_sha)
 end
 
-function M.impl_failure_marker(proposal_id, dedup_key, reason)
-  local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
-  return '<!-- fkst:github-devloop:impl-failure:v1 proposal="' .. tostring(proposal_id)
-    .. '" reason="' .. safe_reason
-    .. '" dedup="' .. tostring(dedup_key)
-    .. '" -->'
-end
-
 function M.has_review_result_marker(comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
   if type(comments) ~= "table" then
     return false
@@ -963,27 +955,6 @@ function M.has_orphan_reaped_marker(comments, proposal_id, pr_number)
     end
   end
   return false
-end
-
-function M.has_impl_failure_marker(comments, proposal_id, dedup_key)
-  if type(comments) ~= "table" then
-    return false
-  end
-  local marker_pattern = "<!%-%- fkst:github%-devloop:impl%-failure:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_dedup = marker:match('dedup="([^"]*)"')
-      if marker_proposal == proposal_id and marker_dedup == tostring(dedup_key) then
-        return true
-      end
-    end
-  end
-  return false
-end
-function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)
-  return M.has_implementing_marker(comments, proposal_id, dedup_key)
-    or M.has_impl_failure_marker(comments, proposal_id, dedup_key)
 end
 
 function M.result_marker(proposal_id, decision, dedup_key)
