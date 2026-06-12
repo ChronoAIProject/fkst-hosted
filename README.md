@@ -31,7 +31,7 @@ fkst-framework run <department-main.lua> \
 cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
 ```
 
-通用脚本 `scripts/run.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.env` 的 `BIN=` > PATH > 同级 `../fkst-substrate`）：
+通用脚本 `scripts/run.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.env` 的 `BIN=` > PATH > 同级 `../fkst-substrate` > `.fkst-substrate-ref` pinned source cache fallback）：
 
 ```sh
 scripts/run.sh test                 # self-test，所有包测试；flat 跑单根 conformance，composed 跳单根 conformance；最后跑组合 conformance；等价 CI
@@ -48,7 +48,8 @@ FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/run.sh run github-proxy 
 FKST_GITHUB_REPO=owner/repo FKST_RATE_POOL_ROOT=/var/lib/fkst/rate-pools scripts/run.sh supervise github-proxy
 
 # 本地 test/run/supervise 会对可溯源到 ../fkst-substrate 的 BIN 做 freshness 自动构建；
-# CI 不自动 build，FKST_NO_AUTOBUILD=1 可跳过。显式 build 仍会 git pull && cargo build。
+# 若所有既有 BIN 来源都缺失，非 CI 本地会按 .fkst-substrate-ref clone/build 到 per-pin cache；
+# 显式 BIN/.env BIN 无效会直接报错，CI 不自动 build，FKST_NO_AUTOBUILD=1 会禁用 clone/build fallback。
 scripts/run.sh build
 ```
 
