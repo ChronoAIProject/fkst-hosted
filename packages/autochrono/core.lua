@@ -1,5 +1,9 @@
 local M = {}
 
+function M.persistence_class()
+  return "judgment_pipeline"
+end
+
 local max_key_len = 200
 local max_title_len = 240
 local max_body_len = 12000

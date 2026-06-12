@@ -1,5 +1,9 @@
 local M = {}
 
+function M.persistence_class()
+  return "stateless_adapter"
+end
+
 require("core.issue_create").install(M)
 require("core.entity_view").install(M)
 require("core.gh_rate").install(M)
@@ -37,9 +41,7 @@ end
 
 local function repo_owner(repo) return tostring(repo or ""):match("^([^/]+)/") end
 
-local function is_bounded_string(value, limit)
-  return type(value) == "string" and value ~= "" and #value <= limit
-end
+local function is_bounded_string(value, limit) return type(value) == "string" and value ~= "" and #value <= limit end
 
 local function is_git_ref_safe(value)
   if not is_bounded_string(value, max_branch_len) then

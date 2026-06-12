@@ -1,5 +1,9 @@
 local M = {}
 
+function M.persistence_class()
+  return "judgment_pipeline"
+end
+
 local default_angles = { "minimal", "structural", "delete" }
 -- Angle count and per-reply length are capped so consensus_reached has a PROVABLE upper
 -- bound. Worst-case raw content = max_angles * max_reply_len + max_framing_len =

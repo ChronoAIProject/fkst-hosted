@@ -1,5 +1,9 @@
 local M = {}
 
+function M.persistence_class()
+  return "composed_judgment_pipeline"
+end
+
 local function require_field(payload, name)
   local value = payload[name]
   if value == nil or value == "" then
