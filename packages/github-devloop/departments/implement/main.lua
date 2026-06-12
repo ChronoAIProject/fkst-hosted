@@ -186,6 +186,12 @@ function pipeline(event)
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
     end
 
+    local wip_ok, wip_reason, wip_count, wip_max = core.wip_capacity_allows_start(repo, issue_number)
+    if not wip_ok then
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-wip-cap", wip_reason .. ": " .. tostring(wip_count) .. "/" .. tostring(wip_max))
+      return
+    end
+
     local branches = core.branch_config()
     local issue_slug = core.safe_issue_slug(repo, issue_number)
     local implementation_version = core.implementation_attempt_version(ready.dedup_key, ready.impl_retry_attempt)
