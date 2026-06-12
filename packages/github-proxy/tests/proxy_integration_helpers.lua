@@ -83,8 +83,12 @@ local function json_string(value)
     :gsub("\n", "\\n")
 end
 
-local function comment_json(body, author)
-  return string.format('{"body":"%s","author":{"login":"%s"}}', json_string(body), json_string(author or "fkst-test-bot"))
+local function comment_json(body, author, id)
+  local id_field = ""
+  if id ~= nil then
+    id_field = '"id":"' .. json_string(id) .. '",'
+  end
+  return string.format('{%s"body":"%s","author":{"login":"%s"}}', id_field, json_string(body), json_string(author or "fkst-test-bot"))
 end
 
 local function mock_comment_view(comments, author)
@@ -92,7 +96,7 @@ local function mock_comment_view(comments, author)
   if type(comments) == "table" then
     local parts = {}
     for _, comment in ipairs(comments) do
-      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author))
+      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author, comment.id))
     end
     rendered_comments = table.concat(parts, ",")
   else
@@ -260,7 +264,7 @@ local function mock_pr_comment_view(comments, author)
   if type(comments) == "table" then
     local parts = {}
     for _, comment in ipairs(comments) do
-      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author))
+      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author, comment.id))
     end
     rendered_comments = table.concat(parts, ",")
   else
