@@ -50,15 +50,20 @@ function M.is_supported_decompose(payload)
     return false
   end
   local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local has_review_binding = payload.review_proposal_id ~= nil
+    or payload.review_dedup_key ~= nil
+    or payload.head_sha ~= nil
+  local valid_review_binding = not has_review_binding
+    or (M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
+      and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
+      and M._is_git_sha(payload.head_sha))
   return payload.schema == "github-devloop.decompose.v1"
     and repo ~= nil
     and issue_number ~= nil
     and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
     and M._is_positive_pr_number(payload.pr_number)
     and M._is_bounded_string(payload.version, M._max_dedup_len)
-    and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
-    and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
-    and M._is_git_sha(payload.head_sha)
+    and valid_review_binding
     and tonumber(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.version)
     and M._is_path_safe_key(payload.dedup_key, M._max_dedup_len)
@@ -218,16 +223,13 @@ end
 
 function M.build_decompose_replay_payload(fact, comments, source_ref)
   local feedback = M.fixing_replay_feedback_fact(comments, fact.proposal_id, fact.version)
-  if feedback == nil then
-    return nil
-  end
   return M.build_devloop_decompose_payload({
     proposal_id = fact.proposal_id,
     pr_number = fact.pr_number,
     issue_version = fact.version,
-    review_proposal_id = feedback.review_proposal_id,
-    review_dedup_key = feedback.review_dedup_key,
-    head_sha = feedback.reviewed_head_sha,
+    review_proposal_id = feedback and feedback.review_proposal_id or nil,
+    review_dedup_key = feedback and feedback.review_dedup_key or nil,
+    head_sha = feedback and feedback.reviewed_head_sha or nil,
     round = M.version_fix_round(fact.version),
     source_ref = source_ref,
   })
