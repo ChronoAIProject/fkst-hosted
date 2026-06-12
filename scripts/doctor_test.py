@@ -65,6 +65,10 @@ class DoctorHarness:
                 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
                   exit 0
                 fi
+                if [ "$1" = "--version" ]; then
+                  echo 'gh version test'
+                  exit 0
+                fi
                 echo 'gh version test'
                 exit 0
                 """
@@ -101,7 +105,7 @@ class DoctorScriptTest(unittest.TestCase):
             self.assertIn("DOCTOR bin-self-test ok", result.stdout)
             self.assertIn("DOCTOR codex ok", result.stdout)
             self.assertIn("DOCTOR gh ok", result.stdout)
-            self.assertIn("DOCTOR gh-auth ok", result.stdout)
+            self.assertIn("DOCTOR gh-auth ok status=authenticated", result.stdout)
         finally:
             h.close()
 
@@ -126,6 +130,10 @@ class DoctorScriptTest(unittest.TestCase):
                     if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
                       exit 1
                     fi
+                    if [ "$1" = "--version" ]; then
+                      echo 'gh version test'
+                      exit 0
+                    fi
                     echo 'gh version test'
                     exit 0
                     """
@@ -135,6 +143,29 @@ class DoctorScriptTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("DOCTOR gh ok", result.stdout)
             self.assertIn("DOCTOR gh-auth missing hint=gh auth login", result.stdout)
+        finally:
+            h.close()
+
+    def test_tool_version_failure_is_hard_failure(self) -> None:
+        h = DoctorHarness()
+        try:
+            write_executable(h.fake_bin / "cargo", "#!/bin/sh\necho 'cargo broken'\nexit 1\n")
+            result = h.run_doctor()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("DOCTOR cargo missing", result.stdout)
+            self.assertIn("detail=cargo broken", result.stdout)
+        finally:
+            h.close()
+
+    def test_optional_env_missing_does_not_make_doctor_fail(self) -> None:
+        h = DoctorHarness()
+        try:
+            result = h.run_doctor()
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn(
+                "DOCTOR env.FKST_GITHUB_REPO missing hint=optional host fact is unset",
+                result.stdout,
+            )
         finally:
             h.close()
 

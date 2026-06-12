@@ -28,13 +28,22 @@ doctor_ok() {
   doctor_emit "$1" "ok" "$2"
 }
 
+doctor_first_line() {
+  printf '%s\n' "$1" | sed -n '1p'
+}
+
 doctor_check_tool() {
-  local tool="$1" version_args="$2" hint="$3" path version
+  local tool="$1" version_args="$2" hint="$3" path output version
   if ! path="$(command -v "$tool" 2>/dev/null)"; then
     doctor_missing "$tool" "hint=$hint"
     return 0
   fi
-  version="$("$tool" $version_args 2>&1 | head -n 1 || true)"
+  if ! output="$("$tool" $version_args 2>&1)"; then
+    version="$(doctor_first_line "$output")"
+    doctor_missing "$tool" "hint=$hint detail=${version:-version-check-failed}"
+    return 0
+  fi
+  version="$(doctor_first_line "$output")"
   doctor_ok "$tool" "path=$path version=${version:-unknown}"
 }
 
@@ -122,14 +131,19 @@ doctor_check_codex() {
 }
 
 doctor_check_gh() {
-  local path
+  local path output version
   if ! path="$(command -v gh 2>/dev/null)"; then
     doctor_missing "gh" "hint=install GitHub CLI, then run gh auth login"
     return 0
   fi
-  doctor_ok "gh" "path=$path"
+  if output="$(gh --version 2>&1)"; then
+    version="$(doctor_first_line "$output")"
+  else
+    version="unknown"
+  fi
+  doctor_ok "gh" "path=$path version=$version"
   if gh auth status >/dev/null 2>&1; then
-    doctor_ok "gh-auth" "hint=gh auth status"
+    doctor_ok "gh-auth" "status=authenticated"
   else
     doctor_missing "gh-auth" "hint=gh auth login"
   fi
