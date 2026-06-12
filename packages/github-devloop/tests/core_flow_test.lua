@@ -325,6 +325,49 @@ return {
     t.eq(facts[1].verdicts, bare_facts[1].verdicts)
   end,
 
+  test_decompose_child_fact_indexes_use_created_and_trusted_child_facts = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "2026-06-03T01-02-03Z"
+    local decompose = core.build_devloop_decompose_payload({
+      proposal_id = proposal_id,
+      pr_number = 7,
+      issue_version = version,
+      review_proposal_id = "github-devloop/pr-review/owner-repo/7/version/def456",
+      review_dedup_key = "consensus:github-devloop/pr-review/owner-repo/7/version/def456/review",
+      head_sha = "def456",
+      round = 0,
+      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+    })
+    decompose.current_issue_body = "Parent body"
+    local dedup_by_index = {
+      core.build_issue_create_request("owner/repo", decompose, { title = "One", body = "Body one" }, 1).dedup_key,
+      core.build_issue_create_request("owner/repo", decompose, { title = "Two", body = "Body two" }, 2).dedup_key,
+    }
+    local completed = core.decompose_child_fact_indexes({
+      {
+        body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_by_index[1] .. '" issue="101" -->',
+        author_login = "fkst-test-bot",
+      },
+      {
+        body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_by_index[2] .. '" issue="102" -->',
+        author_login = "someone-else",
+      },
+    }, {
+      {
+        body = core.decompose_child_marker(proposal_id, version, 7, 3),
+        author_login = "fkst-test-bot",
+      },
+      {
+        body = core.decompose_child_marker(proposal_id, version, 7, 2),
+        author_login = "someone-else",
+      },
+    }, proposal_id, version, 7, dedup_by_index)
+
+    t.eq(completed[1], true)
+    t.eq(completed[2], nil)
+    t.eq(completed[3], true)
+  end,
+
   test_ready_and_implementation_helpers = function()
     local source = reached({
       framing = "Only include bounded issue comments; defer raising bounds.",

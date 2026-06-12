@@ -1,6 +1,7 @@
 local core = require("core")
 
 local M = {}
+local ai_sentinel = "⟦AI:FKST⟧"
 
 M.spec = {
   consumes = { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" },
@@ -100,7 +101,168 @@ local function has_reviewing_marker(issue_comments, pr_comments, proposal_id, ve
     or has_reviewing_marker_for_comments(pr_comments, proposal_id, version)
 end
 
+local function run_git(cmd, timeout, label)
+  local result = exec_sync({ cmd = cmd, timeout = timeout })
+  if result.exit_code ~= 0 then
+    return nil, tostring(label or "git command") .. " failed: " .. tostring(result.stderr)
+  end
+  return result
+end
+
+local function current_base_head(origin)
+  local fetch_result, fetch_error = run_git(core.git_fetch_branch_cmd("origin", origin.base_branch), 60, "git base fetch")
+  if fetch_result == nil then
+    return nil, fetch_error
+  end
+  local head_result, head_error = run_git(core.git_remote_branch_head_cmd("origin", origin.base_branch), 30, "git base head")
+  if head_result == nil then
+    return nil, head_error
+  end
+  local base_head = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if not core.is_safe_head_sha(base_head) then
+    return nil, "unsafe base head"
+  end
+  return base_head
+end
+
+local function has_empty_resolution_delta(approved_head_sha, base_head_sha, new_head_sha)
+  local result = exec_sync({
+    cmd = core.git_merge_tree_empty_delta_cmd(approved_head_sha, base_head_sha, new_head_sha),
+    timeout = 120,
+  })
+  if result.exit_code == 0 then
+    return true, "empty"
+  end
+  return false, tostring(result.stderr or "")
+end
+
+local function current_head_review_payload(origin, pr_number, current_pr, state, source_ref)
+  local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  if core.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
+    return nil
+  end
+  return core.build_devloop_reviewing_payload({
+    proposal_id = origin.proposal_id,
+    impl_version = state.version,
+  }, pr_number, source_ref, state.version)
+end
+
+local function build_review_carry_over_comment_request(origin, pr_number, version, carry, source_ref)
+  local state_marker = core.state_marker(origin.proposal_id, "merge-ready", version)
+  local review_marker = core.review_result_marker(carry.new_review_proposal_id, origin.proposal_id, "approve", carry.new_review_dedup_key)
+  local merge_marker = core.merge_ready_marker(origin.proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
+  local carry_marker = core.review_carry_over_marker(
+    origin.proposal_id,
+    version,
+    carry.old_review_proposal_id,
+    carry.old_review_dedup_key,
+    carry.approved_head_sha,
+    carry.new_review_proposal_id,
+    carry.new_review_dedup_key,
+    carry.new_head_sha,
+    carry.base_head_sha
+  )
+  return core.build_entity_comment_request({
+    kind = "pr",
+    repo = origin.repo,
+    number = pr_number,
+  }, "github-devloop PR review approval carried over"
+    .. "\nResolution delta proof: merge-tree-empty-delta"
+    .. "\nApproved head: " .. tostring(carry.approved_head_sha)
+    .. "\nNew head: " .. tostring(carry.new_head_sha)
+    .. "\nBase head: " .. tostring(carry.base_head_sha)
+    .. "\n\n" .. state_marker
+    .. "\n" .. review_marker
+    .. "\n" .. merge_marker
+    .. "\n" .. carry_marker
+    .. "\n" .. ai_sentinel, core._dedup_key({
+    "review-carry-over",
+    "comment",
+    tostring(origin.proposal_id),
+    tostring(version),
+    tostring(carry.approved_head_sha),
+    tostring(carry.new_head_sha),
+  }), source_ref)
+end
+
+local function maybe_carry_over_approved_head(origin, pr_number, current_pr, state, source_ref)
+  if state.state ~= "merge-ready" then
+    return false
+  end
+  if tostring(current_pr.state or ""):lower() ~= "open" then
+    return false
+  end
+  if not core.is_safe_head_sha(current_pr.head_sha) then
+    return false
+  end
+  local fact = core.merge_ready_fact(current_pr.comments, origin.proposal_id, state.version, pr_number)
+  if fact == nil or tostring(fact.head_sha or "") == tostring(current_pr.head_sha or "") then
+    return false
+  end
+  local approved = {
+    proposal_id = origin.proposal_id,
+    pr_number = pr_number,
+    version = state.version,
+    review_proposal_id = fact.review_proposal_id,
+    review_dedup_key = fact.review_dedup_key,
+    reviewed_head_sha = fact.head_sha,
+  }
+  local approval_ok = core.review_result_approval_matches_event(current_pr.comments, approved)
+  if not approval_ok then
+    return false
+  end
+  local base_head, base_error = current_base_head(origin)
+  if base_head == nil then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "merge-ready", "reviewing", "skip-stale(carry-over-proof-unavailable)", base_error)
+    local reviewing_payload = current_head_review_payload(origin, pr_number, current_pr, state, source_ref)
+    if reviewing_payload ~= nil then
+      core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
+    end
+    return true
+  end
+  local empty_delta, delta_reason = has_empty_resolution_delta(fact.head_sha, base_head, current_pr.head_sha)
+  if not empty_delta then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "merge-ready", "reviewing", "skip-stale(non-empty-resolution-delta)", delta_reason)
+    local reviewing_payload = current_head_review_payload(origin, pr_number, current_pr, state, source_ref)
+    if reviewing_payload ~= nil then
+      core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
+    end
+    return true
+  end
+  local new_review_proposal = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
+  if core.has_any_review_result_marker(current_pr.comments, new_review_proposal, origin.proposal_id) then
+    return false
+  end
+  local carry = {
+    old_review_proposal_id = fact.review_proposal_id,
+    old_review_dedup_key = fact.review_dedup_key,
+    approved_head_sha = fact.head_sha,
+    new_review_proposal_id = new_review_proposal,
+    new_review_dedup_key = new_review_dedup,
+    new_head_sha = current_pr.head_sha,
+    base_head_sha = base_head,
+  }
+  local comment_request = build_review_carry_over_comment_request(origin, pr_number, state.version, carry, source_ref)
+  local merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, pr_number, state.version, {
+    review_proposal_id = new_review_proposal,
+    review_dedup_key = new_review_dedup,
+    reviewed_head_sha = current_pr.head_sha,
+  }, source_ref)
+  core.log_cas_decision("observe_pr", origin.proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
+  core.log_apply("observe_pr", origin.proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
+    "github-proxy.github_pr_comment_request",
+    "devloop_merge_ready",
+  })
+  core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  core.log_raise("observe_pr", origin.proposal_id, "devloop_merge_ready", merge_payload)
+  return true
+end
+
 local function raise_current_state(origin, pr_number, current_pr, state, source_ref)
+  if maybe_carry_over_approved_head(origin, pr_number, current_pr, state, source_ref) then
+    return
+  end
   if state.state == "reviewing" then
     local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
     if not core.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
@@ -200,7 +362,7 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
     return
   end
   if state.state == "merge-ready" or state.state == "merging" then
-    local fact = core.merge_ready_fact(current_pr.comments, origin.proposal_id, state.version, pr_number)
+    local fact = core.merge_ready_fact(current_pr.comments, origin.proposal_id, state.version, pr_number, current_pr.head_sha)
     if fact ~= nil then
       local merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, fact.pr_number, state.version, {
         review_proposal_id = fact.review_proposal_id,
