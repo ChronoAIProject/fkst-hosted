@@ -90,6 +90,7 @@ return {
   end,
 
   test_replace_marker_falls_back_to_create_when_edit_target_is_stale = function()
+    t.eq(core.stale_comment_target_error_class(), "stale-comment-target")
     mock_write_env("1")
     mock_bot_env()
     mock_pr_comment_view({

@@ -2,6 +2,7 @@ local S = {}
 
 function S.install(M)
 local max_runtime_id_len = 180
+local stale_comment_target_error_class = "stale-comment-target"
 
 local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
@@ -48,6 +49,10 @@ end
 
 function M._comment_author_login(comment)
   return comment_author_login(comment)
+end
+
+function M.stale_comment_target_error_class()
+  return stale_comment_target_error_class
 end
 
 local function comment_id(comment)
@@ -193,8 +198,8 @@ local function edit_existing_comment(M, repo, target, path, existing, replace_ma
   local comments = load_comments(M, target, repo)
   local refreshed = M.trusted_comment_with_fragment(comments, replace_marker, bot_login)
   if refreshed == nil or refreshed.id == nil then
-    log.warn("github-proxy: gh comment edit target is stale: error_class=stale-comment-target")
-    return false, "stale-comment-target"
+    log.warn("github-proxy: gh comment edit target is stale: error_class=" .. stale_comment_target_error_class)
+    return false, stale_comment_target_error_class
   end
 
   local refreshed_ok, refreshed_err = M.gh_exec_result(M.gh_comment_edit_cmd(repo, refreshed.id, path), 30, "gh comment edit")
@@ -202,8 +207,8 @@ local function edit_existing_comment(M, repo, target, path, existing, replace_ma
     return true, nil
   end
   if is_gh_not_found(refreshed_err.result) then
-    log.warn("github-proxy: refreshed gh comment edit target is stale: error_class=stale-comment-target")
-    return false, "stale-comment-target"
+    log.warn("github-proxy: refreshed gh comment edit target is stale: error_class=" .. stale_comment_target_error_class)
+    return false, stale_comment_target_error_class
   end
   error(refreshed_err.message)
 end
@@ -247,7 +252,7 @@ function M.write_comment_request(payload, target)
     if edited then
       return
     end
-    if edit_status == "stale-comment-target" then
+    if edit_status == stale_comment_target_error_class then
       log.warn("github-proxy: creating a fresh comment after stale comment edit target")
     elseif existing ~= nil then
       log.warn("github-proxy: replace marker comment missing id; creating a fresh comment")
