@@ -253,6 +253,98 @@ return {
     t.is_true(err.message:find("gh-command-failed", 1, true) ~= nil)
   end,
 
+  test_error_fact_fields_include_available_delivery_context = function()
+    local fields = core.error_fact_fields(
+      "gh-command-failed",
+      "github_issue_comment_request",
+      "github_comment",
+      "github-proxy: gh issue comment failed: gh-command-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a",
+      {
+        source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+        attempt = 2,
+        terminal = false,
+      }
+    )
+
+    t.eq(fields[1], "error_class=gh-command-failed")
+    t.eq(fields[2], "fingerprint=" .. core.error_fingerprint(
+      "gh-command-failed",
+      "github_issue_comment_request",
+      "github_comment",
+      "github-proxy: gh issue comment failed: gh-command-failed: bad sha fedcba0987654321 at 2026-07-11T09:08:07Z /tmp/fkst-b"
+    ))
+    t.eq(fields[3], "source_ref=external:owner/repo#issue/42")
+    t.eq(fields[4], "attempt=2")
+    t.eq(fields[5], "terminal=false")
+  end,
+
+  test_error_fact_fields_omit_unavailable_delivery_context = function()
+    local fields = core.error_fact_fields("caught-failure", "github_poll_tick", "github_poll", "poll failed", {})
+
+    t.eq(#fields, 2)
+    t.eq(fields[1], "error_class=caught-failure")
+    t.is_true(fields[2]:find("^fingerprint=fp%-") ~= nil)
+  end,
+
+  test_log_error_fact_emits_structured_failure_line = function()
+    local captured = {}
+    local old_log = log
+    log = {
+      warn = function(message)
+        table.insert(captured, tostring(message))
+      end,
+    }
+
+    core.log_error_fact("warn", "github_poll", "FAILURE", "gh-command-failed", "github_poll_tick", "gh failed", {
+      source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+      terminal = false,
+    })
+    log = old_log
+
+    t.eq(#captured, 1)
+    t.is_true(captured[1]:find("github-proxy dept=github_poll tag=FAILURE", 1, true) ~= nil)
+    t.is_true(captured[1]:find("error_class=gh-command-failed", 1, true) ~= nil)
+    t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(captured[1]:find("terminal=false", 1, true) ~= nil)
+  end,
+
+  test_wrapped_pipeline_failure_logs_delivery_error_fact_and_rethrows = function()
+    local captured = {}
+    local old_log = log
+    log = {
+      error = function(message)
+        table.insert(captured, tostring(message))
+      end,
+    }
+
+    local wrapped = core.wrap_pipeline_failure("github_pr_open", function(_event)
+      error("github-proxy: gh-pr-create-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a")
+    end)
+    local ok, err = pcall(function()
+      wrapped({
+        queue = "github_pr_open_request",
+        attempt = 5,
+        terminal = false,
+        payload = {
+          source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+        },
+      })
+    end)
+
+    log = old_log
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh-pr-create-failed", 1, true) ~= nil)
+    t.eq(#captured, 1)
+    t.is_true(captured[1]:find("github-proxy dept=github_pr_open tag=FAILURE", 1, true) ~= nil)
+    t.is_true(captured[1]:find("error_class=gh-pr-create-failed", 1, true) ~= nil)
+    t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(captured[1]:find("attempt=5", 1, true) ~= nil)
+    t.is_nil(captured[1]:find("terminal=", 1, true))
+    t.is_true(captured[1]:find("queue=github_pr_open_request", 1, true) ~= nil)
+  end,
+
   test_gh_exec_fails_closed_for_non_rate_limit_failure = function()
     local ok, err = pcall(function()
       core.gh_exec("gh issue list", 30, "gh issue list", function(_spec)

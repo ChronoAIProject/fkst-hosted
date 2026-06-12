@@ -120,4 +120,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("review_pr", pipeline)
+
 return M

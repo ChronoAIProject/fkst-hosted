@@ -53,6 +53,8 @@ GRAPHQL_FIRST_CONNECTION_RE = re.compile(
 LONG_STRING_CHAR_RE = re.compile(r"\bstring\s*\.\s*char\s*\((?P<args>[^)]*)\)", re.DOTALL)
 NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*(?:0x[0-9A-Fa-f]+|\d+)\s*(?=,|\Z)")
 HIDDEN_TEXT_STRING_CHAR_ARG_MIN = 6
+ERROR_CALL_STRING_RE = re.compile(r"\berror\s*\(\s*(?P<quote>['\"])(?P<message>[^'\"]*)(?P=quote)")
+ERROR_CLASS_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9-]*: [a-z0-9][a-z0-9-]*:")
 HELPER_STRING_ARG_RE = re.compile(
     r"\b(?P<func>(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?[A-Za-z_][A-Za-z0-9_]*)"
     r"\s*\(\s*(?P<quote>[\"'])"
@@ -369,6 +371,18 @@ def hidden_text_string_char_lines(text: str) -> list[int]:
     for match in LONG_STRING_CHAR_RE.finditer(stripped):
         numeric_args = NUMERIC_ARG_RE.findall(match.group("args"))
         if len(numeric_args) >= HIDDEN_TEXT_STRING_CHAR_ARG_MIN:
+            lines.append(text.count("\n", 0, match.start()) + 1)
+    return lines
+
+
+def unclassified_error_call_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = []
+    for match in ERROR_CALL_STRING_RE.finditer(text):
+        if not is_unmasked_range(text, stripped, match.start(), match.start("quote")):
+            continue
+        message = match.group("message")
+        if not ERROR_CLASS_PREFIX_RE.match(message):
             lines.append(text.count("\n", 0, match.start()) + 1)
     return lines
 
@@ -790,6 +804,21 @@ def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
             )
 
 
+def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
+    packages = root / "packages"
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file() or "tests" in path.relative_to(packages).parts:
+            continue
+        for line in unclassified_error_call_lines(read_text(path)):
+            add(
+                warnings,
+                "G7",
+                f"{rel(root, path)}:{line} production error(...) string lacks a greppable class prefix",
+            )
+
+
 def package_persistence_class(core_path: Path) -> str | None:
     match = PERSISTENCE_CLASS_RE.search(read_text(core_path))
     if match is None:
@@ -843,6 +872,7 @@ def main() -> int:
     check_rest_pagination_guards(root, warnings)
     check_hidden_text_encoded_literals(root, violations)
     check_gh_rate_pool_sizing(root, violations)
+    check_error_class_prefixes(root, warnings)
     check_persistence_classes(root, violations)
 
     for warning in warnings:
