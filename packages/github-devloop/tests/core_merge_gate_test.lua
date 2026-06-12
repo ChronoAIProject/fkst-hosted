@@ -163,6 +163,18 @@ return {
     t.eq(reason, "missing-status-rollup")
   end,
 
+  test_not_mergeable_pr_does_not_wait_on_missing_status = function()
+    local ok, reason = core.evaluate_ci_merge_gate(pr({
+      merge_state_status = "DIRTY",
+      status_check_rollup = {},
+    }), {
+      repo = "owner/repo",
+    })
+    t.eq(ok, false)
+    t.eq(reason, "merge-state-dirty")
+    t.eq(#t.command_calls(), 0)
+  end,
+
   test_missing_status_dispatch_eligibility_uses_first_observed_time = function()
     local eligible, reason, age = core.ci_missing_status_dispatch_eligible(pr({
       status_check_rollup = {},
