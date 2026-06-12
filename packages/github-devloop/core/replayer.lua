@@ -318,7 +318,8 @@ local function raise_effects(dept, proposal_id, apply_state, version, label_chan
 end
 
 local function build_thinking_replay_proposal(issue, proposal_id, state, current, event_ts)
-  local state_base_version = M.version_loop_round(state.version) > 0 and M.converge_base_version(state.version) or nil
+  local stable_version = M.strip_transition_version_suffixes(state.version)
+  local state_base_version = M.version_loop_round(stable_version) > 0 and M.converge_base_version(stable_version) or nil
   local latest = M.latest_complete_converge_round(current.comments, proposal_id, state_base_version, issue.source_ref)
   if latest ~= nil then
     local base_version = M.proposal_dedup_key(proposal_id, issue.updated_at)
@@ -343,15 +344,13 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
     return M.validate_proposal(proposal) and proposal or nil
   end
 
-  if M.version_loop_round(state.version) ~= 0 then
-    return nil
-  end
-
   local replay_issue = {}
   for key, value in pairs(issue) do
     replay_issue[key] = value
   end
-  local replay_dedup = M.proposal_dedup_key(proposal_id, issue.updated_at) .. "/replay"
+  local replay_dedup = M.proposal_dedup_key(proposal_id, issue.updated_at)
+    .. "/replay"
+    .. tostring(state.version or ""):sub(#stable_version + 1)
   replay_issue.content_fetch = M.context_fetch_ref_from_bundle({
     dept = "observe_issue",
     repo = issue.repo,

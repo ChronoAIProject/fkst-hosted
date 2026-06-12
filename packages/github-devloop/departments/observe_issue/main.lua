@@ -54,7 +54,7 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     and core.replay_from_table("observe_issue", issue, state, row, facts) then
     return true
   end
-  if observe_replay_states[state.state] then
+  if observe_replay_states[state.state] and state.state ~= "thinking" then
     return false
   end
   if issue_state == nil
