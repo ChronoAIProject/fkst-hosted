@@ -30,6 +30,7 @@ end
 local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
   local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
   local label_request = core.build_implementing_label_request(repo, issue_number, ready)
+  local open_pr_payload = core.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
   local add_labels, remove_labels = core.state_label_changes("implementing")
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
@@ -38,14 +39,7 @@ local function raise_implementing(repo, issue_number, ready, worktree, branch, h
   })
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  core.log_raise("implement", ready.proposal_id, "devloop_open_pr", core.build_devloop_open_pr_payload(
-    repo,
-    issue_number,
-    ready,
-    branch,
-    head_sha,
-    base_branch
-  ))
+  core.log_raise("implement", ready.proposal_id, "devloop_open_pr", open_pr_payload)
 end
 
 local function raise_implement_attempt(repo, issue_number, ready, attempt, started_at)
