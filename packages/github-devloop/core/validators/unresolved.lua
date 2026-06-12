@@ -1,0 +1,11 @@
+return function(M)
+function M.is_supported_unresolved(payload)
+  return type(payload) == "table"
+    and payload.schema == "consensus.consensus_converge.v1"
+    and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
+    and payload.body == nil
+    and payload.angle_results == nil
+    and payload.decision == nil
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+end
