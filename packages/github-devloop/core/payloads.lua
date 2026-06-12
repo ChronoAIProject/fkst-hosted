@@ -667,26 +667,6 @@ end
 function M.fix_commit_subject(issue_number, current)
   return bounded_commit_subject(M, "auto-fix", issue_number, current)
 end
-
-function M.commit_issue_subject_snapshot(repo, issue_number)
-  if issue_number == nil then
-    return {}
-  end
-  local ok, view = pcall(M.gh_exec, { cmd = M.gh_issue_view_commit_subject_cmd(repo, issue_number), timeout = 30 })
-  if not ok then
-    return {}
-  end
-  if view.exit_code ~= 0 then
-    return {}
-  end
-  local ok, decoded = pcall(json.decode, view.stdout or "{}")
-  if not ok or type(decoded) ~= "table" then
-    return {}
-  end
-  return {
-    title = tostring(decoded.title or ""),
-  }
-end
 end
 
 return S

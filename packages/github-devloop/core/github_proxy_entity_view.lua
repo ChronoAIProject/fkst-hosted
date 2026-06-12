@@ -199,6 +199,23 @@ function M.fetch_issue_view_open_pr(repo, issue_number, updated_at, opts)
   return M.fetch_issue_view(repo, issue_number, updated_at, options)
 end
 
+function M.commit_issue_subject_snapshot(repo, issue_number)
+  if issue_number == nil then
+    return {}
+  end
+  local ok, view = pcall(M.gh_exec, { cmd = M.gh_issue_view_commit_subject_cmd(repo, issue_number), timeout = 30 })
+  if not ok or type(view) ~= "table" or view.exit_code ~= 0 then
+    return {}
+  end
+  local decoded_ok, decoded = pcall(json.decode, view.stdout or "{}")
+  if not decoded_ok or type(decoded) ~= "table" then
+    return {}
+  end
+  return {
+    title = tostring(decoded.title or ""),
+  }
+end
+
 function M.fetch_pr_view_origin(repo, pr_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "observe_pr"
