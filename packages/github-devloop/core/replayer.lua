@@ -954,9 +954,16 @@ local function replay_blocked(dept, issue, state, row, facts)
 end
 
 local replayers = {
-  thinking = replay_thinking, ready = replay_ready, ["impl-failed"] = replay_impl_failed, ["pr-open"] = replay_pr_open,
-  reviewing = replay_reviewing, fixing = replay_fixing, ["review-meta"] = replay_review_meta,
-  ["merge-ready"] = replay_merge_ready_like, merging = replay_merge_ready_like, blocked = replay_blocked,
+  thinking = replay_thinking,
+  ready = replay_ready,
+  ["impl-failed"] = replay_impl_failed,
+  ["pr-open"] = replay_pr_open,
+  reviewing = replay_reviewing,
+  fixing = replay_fixing,
+  ["review-meta"] = replay_review_meta,
+  ["merge-ready"] = replay_merge_ready_like,
+  merging = replay_merge_ready_like,
+  blocked = replay_blocked,
 }
 
 function M.replay_from_table(dept, entity, state, table_row, facts)

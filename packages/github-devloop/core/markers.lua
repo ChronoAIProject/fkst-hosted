@@ -516,10 +516,12 @@ function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
       local marker_review_dedup = marker:match('review_dedup="([^"]*)"')
       local marker_head_sha = marker:match('head_sha="([^"]+)"')
       local marker_gate_baseline_sha = marker:match('gate_baseline_sha="([^"]+)"')
+      local marker_reason = marker:match('reason="([^"]+)"')
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(issue_version)
         and M._is_bounded_string(marker_review_proposal, M._max_key_len)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
+        and M._is_bounded_string(marker_reason, M._max_key_len)
         and M._is_git_sha(marker_head_sha)
         and (marker_gate_baseline_sha == nil or M._is_git_sha(marker_gate_baseline_sha)) then
         local fact = {
@@ -527,6 +529,7 @@ function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
           review_dedup_key = marker_review_dedup,
           reviewed_head_sha = marker_head_sha,
           gate_baseline_sha = marker_gate_baseline_sha,
+          reason = marker_reason,
           review_reason = M._comment_body(comment),
         }
         if first_fact == nil then

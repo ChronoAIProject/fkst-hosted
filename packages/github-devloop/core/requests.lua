@@ -759,7 +759,7 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
 end
 
 function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref)
-  local safe_reason = M.sanitize_key(reason or "gate-failed", false):gsub("/", "-")
+  local safe_reason = M.merge_gate_reason_class(reason)
   local display_reason = M.neutralize_untrusted_comment_text(reason or "gate-failed")
   if display_reason == "" then
     display_reason = "gate-failed"

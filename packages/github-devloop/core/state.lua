@@ -131,6 +131,28 @@ function M.version_review_loop_round(version)
   return max_n
 end
 
+function M.version_timeout_round(version, state_name)
+  local max_n = 0
+  local state = tostring(state_name or "")
+  if state == "" then
+    return 0
+  end
+  local escaped = state:gsub("%-", "%%-")
+  for n in tostring(version or ""):gmatch("/timeout/" .. escaped .. "/(%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  for n in tostring(version or ""):gmatch("%-timeout%-" .. escaped .. "%-(%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
 function M.version_reimplement_round(version)
   local max_n = 0
   for n in tostring(version or ""):gmatch("[/-]reimplement[/-](%d+)") do
@@ -239,6 +261,8 @@ local function strip_transition_version_suffixes(version)
       :gsub("%-review%-%d+$", "")
       :gsub("/fix/%d+$", "")
       :gsub("%-fix%-%d+$", "")
+      :gsub("/timeout/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
       :gsub("/reimplement/%d+$", "")
       :gsub("%-reimplement%-%d+$", "")
       :gsub("/loop/%d+$", "")

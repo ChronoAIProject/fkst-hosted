@@ -63,8 +63,7 @@ local function gate_baseline_sha_from_pr(pr)
 end
 
 local function is_rollup_red_fix_reason(reason)
-  local text = tostring(reason or "")
-  return core.is_ci_red_reason(text) or text:find("^rollup%-red:", 1) ~= nil
+  return core.merge_gate_reason_class(reason) == "rollup-red"
 end
 
 local function fetch_pr_merge_product_sha(pr_number)

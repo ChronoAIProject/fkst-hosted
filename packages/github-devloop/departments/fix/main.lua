@@ -80,8 +80,10 @@ local function fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
   return merge_product_sha
 end
 
-local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha)
-  fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha, merge_gate_reason)
+  if core.merge_gate_reason_requires_pr_merge_product(merge_gate_reason) then
+    fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+  end
   local base_head = expected_baseline_sha
   if base_head == nil then
     local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
@@ -415,7 +417,13 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    local merge_context = merge_integration_for_fix(worktree, fix.pr_number, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
+    local merge_context = merge_integration_for_fix(
+      worktree,
+      fix.pr_number,
+      branches.integration,
+      merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil,
+      merge_gate_fact and merge_gate_fact.reason or nil
+    )
     local codex_started_at = now()
     raise_work_card(repo, fix, {
       started_at = codex_started_at,

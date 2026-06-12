@@ -315,6 +315,26 @@ return {
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
   end,
 
+  test_observe_issue_timeout_redrives_issue_local_non_replay_state = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "dev"),
+      {
+        body = core.state_marker(proposal_id, "reviewing", version),
+        created_at = "2026-06-03T01:00:00Z",
+      },
+    })
+    mock_linked_pr_state({}, nil, nil, 2)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:reviewing" } }), opts("observe-issue-reviewing-timeout-redrive"))
+    t.eq(result.exit_code, 0)
+    local reviewing = find_raise(result.raises, "devloop_reviewing")
+    t.is_true(reviewing ~= nil)
+    t.is_true(reviewing.payload.version:find("/timeout/reviewing/1", 1, true) ~= nil)
+    t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")
+  end,
+
   test_observe_issue_pr_open_does_not_reraise_after_pr_local_reviewing = function()
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)
