@@ -128,6 +128,50 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
   return true
 end
 
+local function maybe_apply_issue_reimplement_command(issue, proposal_id, current, state)
+  local command = core.operator_command_fact(current.comments, "reimplement")
+  if command == nil then
+    return false
+  end
+  if core.has_operator_command_response(current.comments, command) then
+    core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
+    return false
+  end
+  if state.state ~= "impl-failed" then
+    core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed state")
+    local refusal = core.build_operator_issue_command_refusal_request(
+      issue.repo,
+      issue.number,
+      command,
+      "reimplement requires impl-failed state",
+      issue.source_ref
+    )
+    core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
+    return true
+  end
+  local row = core.restart_transition_row("impl-failed")
+  local re_state = {
+    state = state.state,
+    version = core.next_liveness_timeout_version(row, state),
+    proposal_id = state.proposal_id,
+    stage_rank = state.stage_rank,
+    marker_created_at = state.marker_created_at,
+  }
+  local command_comment_request = core.build_operator_issue_reimplement_comment_request(
+    issue.repo,
+    issue.number,
+    command,
+    "reimplement",
+    issue.source_ref
+  )
+  core.replay_from_table("observe_issue", issue, re_state, row, {
+    proposal_id = proposal_id,
+    current = current,
+  })
+  core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
+  return true
+end
+
 function pipeline(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
@@ -168,6 +212,9 @@ function pipeline(event)
       if maybe_apply_issue_reready_command(issue, proposal_id, current, state) then
         return
       end
+      if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state) then
+        return
+      end
       if not core.state_label_hint_matches(current.labels, state.state) then
         local label_request = core.build_reconcile_state_label_request(issue.repo, issue.number, proposal_id, state.state, state.version, issue.source_ref)
         local add_labels, remove_labels = core.state_label_changes(state.state)
@@ -185,6 +232,15 @@ function pipeline(event)
           snapshot = snapshot,
           event_ts = event.ts,
         })
+        return
+      end
+      if state.state == "impl-failed" and core.maybe_timeout_redrive_from_table("observe_issue", issue, state, core.restart_transition_row(state.state), {
+        proposal_id = proposal_id,
+        current = current,
+        link = link,
+        snapshot = snapshot,
+        event_ts = event.ts,
+      }) then
         return
       end
     end

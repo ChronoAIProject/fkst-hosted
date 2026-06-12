@@ -141,11 +141,16 @@ function pipeline(event)
     local current = core.parse_issue_view_implement(view.stdout)
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
     local state = core.current_state(current.comments, ready.proposal_id)
-    if state.state == "implementing" or state.state == "impl-failed" then
+    if state.state == "implementing" then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation fact marker already visible")
       return
     end
-    local transition = core.versioned_transition_status(state, { "ready" }, "implementing", ready.dedup_key)
+    if state.state == "impl-failed" and core.version_timeout_round(ready.dedup_key, "impl-failed") == 0 then
+      core.log_cas_decision("implement", ready.proposal_id, state, "impl-failed", "implementing", "skip-idempotent(impl-failed)", "implementation failure marker is waiting for timeout redrive or operator re-entry")
+      return
+    end
+    local from_states = state.state == "impl-failed" and { "impl-failed" } or { "ready" }
+    local transition = core.versioned_transition_status(state, from_states, "implementing", ready.dedup_key)
     if transition == "idempotent" or transition == "stale" then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return

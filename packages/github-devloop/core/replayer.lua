@@ -970,6 +970,7 @@ local replayers = {
   ["merge-ready"] = replay_merge_ready_like,
   merging = replay_merge_ready_like,
   blocked = replay_blocked,
+  ["impl-failed"] = replay_ready,
 }
 
 function M.replay_from_table(dept, entity, state, table_row, facts)

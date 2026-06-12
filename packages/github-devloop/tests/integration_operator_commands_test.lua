@@ -356,4 +356,24 @@ return {
     t.is_true(comment_raise.payload.body:find("reready requires ready state", 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
+
+  test_issue_reimplement_command_reenters_impl_failed = function()
+    local event = reached()
+    local command = trusted_issue_command("reimplement", "IC_issue_reimplement")
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:impl-failed" }, "OPEN", {
+      core.state_marker(event.proposal_id, "impl-failed", event.dedup_key),
+      core.impl_failure_marker(event.proposal_id, event.dedup_key, "codex-failed"),
+      command,
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:impl-failed" } }), opts("operator-issue-reimplement"))
+    t.eq(result.exit_code, 0)
+    local command_response = find_issue_comment_raise(result.raises, "operator command accepted: reimplement")
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.is_true(command_response ~= nil)
+    t.is_true(command_response.payload.body:find('command="reimplement"', 1, true) ~= nil)
+    t.is_true(ready_raise ~= nil)
+    t.eq(ready_raise.payload.proposal_id, event.proposal_id)
+    t.is_true(ready_raise.payload.dedup_key:find("/timeout/impl-failed/1", 1, true) ~= nil)
+  end,
 }

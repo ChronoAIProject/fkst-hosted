@@ -85,6 +85,7 @@ local marker_fields = {
   },
   merging = { proposal = true, pr = true, version = true, head_sha = true },
   decomposed = { proposal = true, version = true, pr = true, count = true },
+  ["impl-failure"] = { proposal = true, reason = true, dedup = true },
 }
 
 local required_replay_payload_fields = {
@@ -95,6 +96,13 @@ local required_replay_payload_fields = {
 
 local function fact(family, freshness)
   return { family = family, freshness = freshness }
+end
+
+local function obligation(kinds, exits)
+  return {
+    kinds = kinds,
+    exits = exits,
+  }
 end
 
 local function effect(kinds, completeness, completeness_derivation)
@@ -113,11 +121,27 @@ local function effect(kinds, completeness, completeness_derivation)
   }
 end
 
+local function budget(minutes)
+  return { minutes = minutes }
+end
+
+local function timeout(queue)
+  return {
+    action = "redrive",
+    queue = queue,
+    escalate_after_attempts = 3,
+  }
+end
+
 local transition_table = {
   {
     from_state = "thinking",
+    terminal = false,
     to_states = { "ready", "blocked" },
     driving_queue = "consensus.proposal",
+    output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "blocked", "thinking" }),
+    budget = budget(90),
+    on_timeout = timeout("consensus.proposal"),
     payload_builder = M.build_proposal,
     dedup_shape = "proposal:<proposal_id>/<updated_at> or consensus:<base_version>/loop/<n>",
     required_facts = { fact("state", "marker-read"), fact("converge-round", "marker-read") },
@@ -134,8 +158,12 @@ local transition_table = {
   },
   {
     from_state = "ready",
+    terminal = false,
     to_states = { "implementing" },
     driving_queue = "devloop_ready",
+    output_obligation = obligation({ "state:v1 implementing", "dependency-hold:v1" }, { "implementing", "ready" }),
+    budget = budget(45),
+    on_timeout = timeout("devloop_ready"),
     payload_builder = M.build_devloop_ready_payload,
     dedup_shape = "ready/<state.version>",
     required_facts = { fact("state", "marker-read"), fact("dependency-release", "marker-read") },
@@ -156,8 +184,12 @@ local transition_table = {
   },
   {
     from_state = "implementing",
+    terminal = false,
     to_states = { "pr-open", "impl-failed" },
     driving_queue = "github-proxy.github_entity_changed",
+    output_obligation = obligation({ "state:v1 pr-open", "state:v1 impl-failed" }, { "pr-open", "impl-failed" }),
+    budget = budget(45),
+    on_timeout = timeout("github-proxy.github_entity_changed"),
     payload_builder = M.build_devloop_open_pr_payload,
     dedup_shape = "open-pr-kickoff/<proposal_id>/<impl_version>/<branch>",
     required_facts = {
@@ -181,8 +213,12 @@ local transition_table = {
   },
   {
     from_state = "pr-open",
+    terminal = false,
     to_states = { "reviewing" },
     driving_queue = "devloop_reviewing",
+    output_obligation = obligation({ "state:v1 reviewing", "devloop_reviewing" }, { "reviewing" }),
+    budget = budget(30),
+    on_timeout = timeout("devloop_reviewing"),
     payload_builder = M.build_devloop_reviewing_payload,
     dedup_shape = "reviewing/<proposal_id>/<impl_version>/<pr>",
     required_facts = {
@@ -204,8 +240,12 @@ local transition_table = {
   },
   {
     from_state = "reviewing",
+    terminal = false,
     to_states = { "merge-ready", "fixing", "review-meta", "blocked" },
     driving_queue = "devloop_reviewing",
+    output_obligation = obligation({ "review-result:v1", "review-converge-round:v1", "state:v1 blocked" }, { "merge-ready", "fixing", "review-meta", "blocked", "reviewing" }),
+    budget = budget(120),
+    on_timeout = timeout("devloop_reviewing"),
     payload_builder = M.build_devloop_reviewing_payload,
     dedup_shape = "reviewing/<proposal_id>/<state.version>/<pr>",
     required_facts = {
@@ -228,8 +268,12 @@ local transition_table = {
   },
   {
     from_state = "fixing",
+    terminal = false,
     to_states = { "reviewing", "review-meta" },
     driving_queue = "devloop_fixing",
+    output_obligation = obligation({ "fix:v1", "state:v1 reviewing", "review-meta:v1" }, { "reviewing", "review-meta", "fixing" }),
+    budget = budget(120),
+    on_timeout = timeout("devloop_fixing"),
     payload_builder = M.build_devloop_fixing_payload,
     dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<reviewed_head_sha>",
     required_facts = {
@@ -261,8 +305,12 @@ local transition_table = {
   },
   {
     from_state = "review-meta",
+    terminal = false,
     to_states = { "fixing", "blocked" },
     driving_queue = "devloop_review_meta",
+    output_obligation = obligation({ "review-meta:v1", "state:v1 fixing", "state:v1 blocked" }, { "fixing", "blocked" }),
+    budget = budget(60),
+    on_timeout = timeout("devloop_review_meta"),
     payload_builder = M.build_devloop_review_meta_payload,
     dedup_shape = "review-meta/<proposal_id>/<version>/<pr>/<n>/<review_dedup>",
     required_facts = {
@@ -292,8 +340,12 @@ local transition_table = {
   },
   {
     from_state = "merge-ready",
+    terminal = false,
     to_states = { "reviewing", "merging", "fixing", "blocked" },
     driving_queue = "devloop_merge_ready",
+    output_obligation = obligation({ "state:v1 merging", "state:v1 reviewing", "state:v1 fixing", "state:v1 blocked" }, { "merging", "reviewing", "fixing", "blocked" }),
+    budget = budget(45),
+    on_timeout = timeout("devloop_merge_ready"),
     payload_builder = M.build_devloop_merge_ready_payload,
     dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>",
     required_facts = {
@@ -326,8 +378,12 @@ local transition_table = {
   },
   {
     from_state = "merging",
+    terminal = false,
     to_states = { "merged", "fixing", "blocked" },
     driving_queue = "devloop_merge_ready",
+    output_obligation = obligation({ "merged:v1", "state:v1 fixing", "state:v1 blocked" }, { "merged", "fixing", "blocked" }),
+    budget = budget(45),
+    on_timeout = timeout("devloop_merge_ready"),
     payload_builder = M.build_devloop_merge_ready_payload,
     dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>",
     required_facts = {
@@ -355,8 +411,13 @@ local transition_table = {
   },
   {
     from_state = "blocked",
+    terminal = false,
     to_states = {},
     driving_queue = "devloop_decompose",
+    output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator rereview/reintake command" }, { "blocked", "reviewing", "thinking" }),
+    reentry_commands = { "rereview", "reintake" },
+    budget = budget(1440),
+    on_timeout = timeout("devloop_decompose"),
     payload_builder = M.build_decompose_replay_payload,
     dedup_shape = "forward:decompose/<proposal_id>/<version>; replay:decompose/replay/<proposal_id>/<version>/<pr>/<expected_child_count>/<completed_child_count>",
     required_facts = {
@@ -380,6 +441,36 @@ local transition_table = {
     marker_facts = "state:v1 blocked plus decomposed:v1 when class decomposition is incomplete",
     kickoff = "devloop_decompose",
     replay = "Observe can replay decomposed blocked issues when deterministic child completion facts are missing.",
+  },
+  {
+    from_state = "impl-failed",
+    terminal = false,
+    to_states = { "implementing" },
+    driving_queue = "devloop_ready",
+    output_obligation = obligation({ "operator reready/reimplement command", "state:v1 implementing" }, { "implementing", "impl-failed" }),
+    reentry_commands = { "reready", "reimplement" },
+    budget = budget(1440),
+    on_timeout = timeout("devloop_ready"),
+    payload_builder = M.build_devloop_ready_payload,
+    dedup_shape = "ready/<state.version>",
+    required_facts = { fact("state", "marker-read") },
+    payload_fields = {
+      proposal_id = "marker:state.proposal",
+      dedup_key = "marker:state.version",
+      source_ref = "source_ref:issue",
+    },
+    version_identity = "strip_transition_version_suffixes(state.version)",
+    effects = effect({ "devloop_ready" }, "impl-failed replay requires a trusted operator command or timeout-redrive of the original ready event"),
+    marker_facts = "state:v1 impl-failed plus impl-failure:v1",
+    kickoff = "devloop_ready",
+    replay = "Observe can redrive implementation from impl-failed after timeout or a trusted re-entry command.",
+  },
+  {
+    from_state = "merged",
+    terminal = true,
+    to_states = {},
+    marker_facts = "state:v1 merged plus merged:v1",
+    replay = "Merged is a legal terminal state and has no output obligation.",
   },
 }
 
