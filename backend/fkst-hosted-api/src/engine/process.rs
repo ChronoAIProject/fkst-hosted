@@ -24,7 +24,7 @@
 //!   env substitution exists upstream but its precedence against the flag is
 //!   untested (spike Q8), so both variables are removed from the child env.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -40,6 +40,21 @@ use crate::engine::error::{truncate_output_lossy, RunnerError};
 /// child's stdout and stderr. The drain tasks run for the child's lifetime so
 /// neither pipe ever backpressures the engine.
 pub const OUTPUT_RING_CAP_BYTES: usize = 64 * 1024;
+
+/// Environment variables forwarded to the supervise child for goal sessions.
+/// The `github_token` is a bare `String` (not `SecretString`) because the
+/// process module is a low-level OS abstraction: the secret is already
+/// materialized on disk by the caller and must be set in the child env. The
+/// caller is responsible for zeroing/protecting the token at higher layers.
+#[derive(Debug, Clone)]
+pub struct GoalEnv {
+    /// `GITHUB_TOKEN` value for the engine's GitHub integration.
+    pub github_token: String,
+    /// Path to the token file, forwarded as `FKST_GITHUB_TOKEN_FILE`.
+    pub github_token_file: PathBuf,
+    /// Path to `goal.json`, forwarded as `FKST_GOAL_FILE`.
+    pub goal_file: PathBuf,
+}
 
 /// Byte cap of a SINGLE output line fed into the ring (8 KiB): a newline-free
 /// blast is truncated at this length and the remainder discarded, so each
@@ -269,42 +284,38 @@ pub struct SpawnedChild {
     pub stdout_lines: tokio::sync::mpsc::Receiver<Vec<u8>>,
 }
 
-/// Spawn `fkst-framework supervise` for the materialized package at
-/// `pkg_root` with runtime root `rt_root`.
+/// Spawn `fkst-framework supervise` for the materialized package(s) with
+/// runtime root `rt_root`.
 ///
-/// - Own process group (`process_group(0)`): PGID == child PID, so a single
-///   `killpg` reaps the supervisor and its framework grandchildren.
-/// - `kill_on_drop(false)`: dropping the handle never kills a live engine;
-///   lifecycle is managed explicitly by the runner.
-/// - Env: `FKST_RUNTIME_ROOT=<rt_root>`, `FKST_DURABLE_ROOT=<rt_root>/durable`
-///   (fresh per attempt — a stale `delivery.redb` would replay lease state,
-///   spike Q6). `FKST_PACKAGE_ROOT`/`FKST_PACKAGE_ROOTS` are removed so the
-///   `--package-root` flag is the single wiring (untested precedence,
-///   spike Q8).
-/// - BOTH stdout and stderr are piped and drained into one shared
-///   [`OutputBuffer`] by two background tasks for the child's lifetime,
-///   preventing pipe backpressure. The readiness markers (`event runtime
-///   running`, `consumer started`) arrive on STDOUT and the panic marker on
-///   STDERR (issue #50), so the merged buffer is what [`is_ready`] /
-///   [`is_panicked`] must scan.
-/// - The stdout drain ADDITIONALLY fans each line out to
-///   [`SpawnedChild::stdout_lines`] (the journaling layer's `RAISED:` stream,
-///   issue #25). This is OBSERVATION ONLY: args, env, and `FKST_RUNTIME_ROOT`
-///   wiring are byte-identical to the pre-tap contract (CANON: the engine
-///   invocation is never altered), and a slow/absent journal consumer drops
-///   lines instead of backpressuring the engine.
+/// - `project_root` is the FIRST package root (used for `--project-root`).
+/// - `package_roots` contains ALL materialized package roots. Each becomes a
+///   `--package-root` flag. When `package_roots` has exactly one entry and
+///   `goal_env` is `None`, the argv is byte-identical to the pre-multi-root
+///   contract (CANON: existing tests must stay green).
+/// - `goal_env`, when present, adds `GITHUB_TOKEN`, `FKST_GITHUB_TOKEN_FILE`,
+///   and `FKST_GOAL_FILE` to the child environment.
+///
+/// All other wiring (own process group, env vars, stream draining) is
+/// unchanged from the single-root version. See the original doc comments for
+/// the full rationale.
 pub fn spawn_supervise(
     framework_bin: &Path,
-    pkg_root: &Path,
+    project_root: &Path,
+    package_roots: &[PathBuf],
     rt_root: &Path,
+    goal_env: Option<&GoalEnv>,
 ) -> Result<SpawnedChild, RunnerError> {
     let mut command = Command::new(framework_bin);
     command
         .arg("supervise")
         .arg("--project-root")
-        .arg(pkg_root)
-        .arg("--package-root")
-        .arg(pkg_root)
+        .arg(project_root);
+    // Every root gets its own --package-root flag. For N=1 this produces
+    // exactly the same flag sequence as the pre-multi-root code.
+    for root in package_roots {
+        command.arg("--package-root").arg(root);
+    }
+    command
         .arg("--framework-bin")
         .arg(framework_bin)
         .env("FKST_RUNTIME_ROOT", rt_root)
@@ -316,6 +327,15 @@ pub fn spawn_supervise(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // Goal env vars are added after the base wiring so they do not interfere
+    // with the FKST_PACKAGE_ROOT / FKST_PACKAGE_ROOTS removal above.
+    if let Some(env) = goal_env {
+        command
+            .env("GITHUB_TOKEN", &env.github_token)
+            .env("FKST_GITHUB_TOKEN_FILE", &env.github_token_file)
+            .env("FKST_GOAL_FILE", &env.goal_file);
+    }
 
     let mut child = command.spawn().map_err(RunnerError::Spawn)?;
     let pid = child.id().map(|id| id as i32).ok_or_else(|| {
@@ -342,7 +362,14 @@ pub fn spawn_supervise(
     // Panics surface on STDERR; both drains append to the same buffer.
     let stderr_drain = spawn_stream_drain(stderr_pipe, buffer.clone());
 
-    tracing::info!(pid, pkg_root = %pkg_root.display(), rt_root = %rt_root.display(), "session.spawn");
+    tracing::info!(
+        pid,
+        project_root = %project_root.display(),
+        package_root_count = package_roots.len(),
+        rt_root = %rt_root.display(),
+        has_goal_env = goal_env.is_some(),
+        "session.spawn"
+    );
 
     Ok(SpawnedChild {
         child,
@@ -881,7 +908,7 @@ sleep 30"#,
         );
 
         let mut spawned =
-            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn stub supervise");
+            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn stub supervise");
         std::env::remove_var("FKST_PACKAGE_ROOT");
 
         // Own process group: PGID == PID.
@@ -941,7 +968,7 @@ echo "event runtime running handles=3" >&2
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn raiser");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn raiser");
         let first = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
             .await
             .expect("first stdout line within 20s")
@@ -977,7 +1004,7 @@ echo "pkgroots: ${FKST_PACKAGE_ROOTS:-UNSET}"
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
         let mut lines: Vec<String> = Vec::new();
         while lines.len() < 5 {
             let line = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
@@ -1021,7 +1048,7 @@ echo "after-blast"
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
         let blast = tokio::time::timeout(Duration::from_secs(30), spawned.stdout_lines.recv())
             .await
             .expect("blast line within 30s")
@@ -1059,7 +1086,7 @@ sleep 30"#,
             ),
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
         drop(std::mem::replace(
             &mut spawned.stdout_lines,
             tokio::sync::mpsc::channel(1).1,
@@ -1090,7 +1117,7 @@ echo "after-blast" >&2
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn blaster");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn blaster");
         let stderr = spawned.output.clone();
         assert!(
             wait_until(|| stderr.snapshot().contains("after-blast")).await,
@@ -1123,7 +1150,9 @@ sleep 30"#,
         let err = spawn_supervise(
             Path::new("/definitely/missing/fkst-framework"),
             pkg.path(),
+            &[pkg.path().to_path_buf()],
             rt.path(),
+            None,
         )
         .expect_err("missing binary must fail to spawn");
         assert!(matches!(err, RunnerError::Spawn(_)));
@@ -1149,7 +1178,7 @@ sleep 30"#,
         );
 
         let mut spawned =
-            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn stdout-ready stub");
+            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn stdout-ready stub");
         let output = spawned.output.clone();
         assert!(
             wait_until(|| is_ready(&output.snapshot())).await,
@@ -1178,7 +1207,7 @@ sleep 30"#,
         );
 
         let mut spawned =
-            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn stderr-ready stub");
+            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn stderr-ready stub");
         let output = spawned.output.clone();
         assert!(
             wait_until(|| is_ready(&output.snapshot())).await,
@@ -1206,7 +1235,7 @@ sleep 30"#,
         );
 
         let mut spawned =
-            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn panic stub");
+            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn panic stub");
         let output = spawned.output.clone();
         assert!(
             wait_until(|| is_panicked(&output.snapshot())).await,
@@ -1240,7 +1269,7 @@ sleep 30"#,
         );
 
         let mut spawned =
-            spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn half-alive stub");
+            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn half-alive stub");
         let output = spawned.output.clone();
         // Wait until the runtime-running marker has definitely been drained.
         assert!(
@@ -1276,7 +1305,7 @@ echo "grandchild: $!" >&2
 wait"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn group");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn group");
         let stderr = spawned.output.clone();
         assert!(
             wait_until(|| stderr.snapshot().contains("grandchild: ")).await,
@@ -1319,7 +1348,7 @@ echo "trap installed" >&2
 while true; do sleep 1; done"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn ignorer");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn ignorer");
         // Only signal once the stub has confirmed its TERM trap is live.
         let stderr = spawned.output.clone();
         assert!(
@@ -1341,7 +1370,7 @@ while true; do sleep 1; done"#,
         let rt = tempfile::tempdir().expect("rt dir");
         let script = stub(dir.path(), "instant-exit.sh", "exit 0");
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
         // Let the stub exit on its own; it stays a zombie until reaped (no
         // try_wait yet), which on Darwin makes its group EPERM-unsignalable.
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1562,7 +1591,7 @@ exit 1"#,
         let rt = tempfile::tempdir().expect("rt dir");
         let script = stub(dir.path(), "sleeper.sh", "sleep 30");
 
-        let spawned = spawn_supervise(&script, pkg.path(), rt.path()).expect("spawn");
+        let spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
         let pid = spawned.pid;
         let guard = ChildGroupGuard::new(spawned.child, pid);
         let mut child = guard.defuse(); // ownership handed back: drop is a no-op

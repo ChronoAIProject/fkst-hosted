@@ -219,6 +219,32 @@ pub fn materialize_package(pkg: &PreparedPackage, base: &Path) -> Result<TempDir
     Ok(dir)
 }
 
+/// Materialize multiple packages into fresh `fkst-pkg-<name>-*` temp dirs under
+/// `base`. Each package is validated and materialized individually. On ANY error
+/// all previously-created dirs are dropped (cleaned by RAII), so no partial
+/// tree is ever leaked.
+pub fn materialize_packages(pkgs: &[PreparedPackage], base: &Path) -> Result<Vec<TempDir>, RunnerError> {
+    let mut dirs = Vec::with_capacity(pkgs.len());
+    for pkg in pkgs {
+        match materialize_package(pkg, base) {
+            Ok(dir) => dirs.push(dir),
+            Err(e) => {
+                tracing::info!(
+                    failed_index = dirs.len(),
+                    materialized_so_far = dirs.len(),
+                    "session.prepare.packages: aborting, earlier dirs dropped by RAII"
+                );
+                return Err(e);
+            }
+        }
+    }
+    tracing::info!(
+        package_count = dirs.len(),
+        "session.prepare.packages"
+    );
+    Ok(dirs)
+}
+
 /// Write the defensive 2-key `fkst.env` at the package root: exactly two
 /// `KEY=VALUE\n` lines in sorted key order. Values are written verbatim
 /// (engine contract: plain `KEY=VALUE`, no quoting) and never logged.
@@ -549,6 +575,78 @@ mod tests {
             0,
             "partial fkst-pkg-* must be cleaned on error"
         );
+    }
+
+    // ---- materialize_packages ---------------------------------------------------
+
+    #[test]
+    fn materialize_packages_creates_one_dir_per_package() {
+        let base = base_dir();
+        let pkgs = vec![
+            PreparedPackage {
+                package_name: "alpha".to_string(),
+                files: vec![
+                    file("departments/alpha/main.lua", "return {}\n"),
+                    file("raisers/tick.lua", "return {}\n"),
+                ],
+                composed_deps: Vec::new(),
+            },
+            PreparedPackage {
+                package_name: "beta".to_string(),
+                files: vec![
+                    file("departments/beta/main.lua", "return {}\n"),
+                    file("raisers/tock.lua", "return {}\n"),
+                ],
+                composed_deps: Vec::new(),
+            },
+        ];
+        let dirs = materialize_packages(&pkgs, base.path()).expect("materialize all");
+        assert_eq!(dirs.len(), 2);
+        assert!(dirs[0].path().join("departments/alpha/main.lua").is_file());
+        assert!(dirs[1].path().join("departments/beta/main.lua").is_file());
+        let name0 = dirs[0].path().file_name().unwrap().to_str().unwrap();
+        assert!(name0.starts_with("fkst-pkg-alpha-"), "got {name0:?}");
+        let name1 = dirs[1].path().file_name().unwrap().to_str().unwrap();
+        assert!(name1.starts_with("fkst-pkg-beta-"), "got {name1:?}");
+    }
+
+    #[test]
+    fn materialize_packages_cleans_all_dirs_on_failure() {
+        let base = base_dir();
+        let pkgs = vec![
+            // First package is valid.
+            PreparedPackage {
+                package_name: "good".to_string(),
+                files: vec![
+                    file("departments/good/main.lua", "return {}\n"),
+                    file("raisers/tick.lua", "return {}\n"),
+                ],
+                composed_deps: Vec::new(),
+            },
+            // Second package is invalid (no department).
+            PreparedPackage {
+                package_name: "bad".to_string(),
+                files: vec![file("raisers/tick.lua", "return {}\n")],
+                composed_deps: Vec::new(),
+            },
+        ];
+        let err = materialize_packages(&pkgs, base.path()).expect_err("second must fail");
+        assert!(matches!(err, RunnerError::InvalidPackage(_)));
+        // Both dirs must be cleaned (first was valid but dropped).
+        assert_eq!(
+            count_entries(base.path()),
+            0,
+            "no fkst-pkg-* may remain after partial failure"
+        );
+    }
+
+    #[test]
+    fn materialize_packages_single_package_works_like_materialize_package() {
+        let base = base_dir();
+        let pkgs = vec![minimal()];
+        let dirs = materialize_packages(&pkgs, base.path()).expect("single package");
+        assert_eq!(dirs.len(), 1);
+        assert!(dirs[0].path().join("departments/hello/main.lua").is_file());
     }
 
     // ---- write_fkst_env ---------------------------------------------------------

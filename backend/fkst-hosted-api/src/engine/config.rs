@@ -52,6 +52,10 @@ mod defaults {
     pub(super) fn log_tail_lines() -> usize {
         200
     }
+
+    pub(super) fn github_token_refresh_secs() -> u64 {
+        2400
+    }
 }
 
 /// Engine-runner configuration (env prefix `FKST_HOSTED_ENGINE_`).
@@ -102,6 +106,11 @@ pub struct EngineConfig {
     /// capped). Env: `FKST_HOSTED_ENGINE_LOG_TAIL_LINES`. Default 200.
     #[serde(default = "defaults::log_tail_lines")]
     pub log_tail_lines: usize,
+    /// Interval in seconds between GitHub token refreshes for goal sessions.
+    /// Env: `FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS`. Default 2400
+    /// (40 min), must be >= 1.
+    #[serde(default = "defaults::github_token_refresh_secs")]
+    pub github_token_refresh_secs: u64,
 }
 
 impl Default for EngineConfig {
@@ -116,6 +125,7 @@ impl Default for EngineConfig {
             ready_timeout_secs: defaults::ready_timeout_secs(),
             error_capture_bytes: defaults::error_capture_bytes(),
             log_tail_lines: defaults::log_tail_lines(),
+            github_token_refresh_secs: defaults::github_token_refresh_secs(),
         }
     }
 }
@@ -145,6 +155,10 @@ impl EngineConfig {
             (
                 config.ready_timeout_secs,
                 "FKST_HOSTED_ENGINE_READY_TIMEOUT_SECS",
+            ),
+            (
+                config.github_token_refresh_secs,
+                "FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS",
             ),
         ] {
             if value == 0 {
@@ -187,6 +201,7 @@ mod tests {
         assert_eq!(config.ready_timeout_secs, 30);
         assert_eq!(config.error_capture_bytes, 8192);
         assert_eq!(config.log_tail_lines, 200);
+        assert_eq!(config.github_token_refresh_secs, 2400);
     }
 
     #[test]
@@ -208,6 +223,10 @@ mod tests {
             from_env.error_capture_bytes
         );
         assert_eq!(from_default.log_tail_lines, from_env.log_tail_lines);
+        assert_eq!(
+            from_default.github_token_refresh_secs,
+            from_env.github_token_refresh_secs
+        );
     }
 
     #[test]
@@ -250,6 +269,7 @@ mod tests {
             ("FKST_HOSTED_ENGINE_READY_TIMEOUT_SECS", "7"),
             ("FKST_HOSTED_ENGINE_ERROR_CAPTURE_BYTES", "1024"),
             ("FKST_HOSTED_ENGINE_LOG_TAIL_LINES", "50"),
+            ("FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS", "600"),
         ]))
         .unwrap();
         assert_eq!(config.stop_grace_secs, 3);
@@ -257,6 +277,7 @@ mod tests {
         assert_eq!(config.ready_timeout_secs, 7);
         assert_eq!(config.error_capture_bytes, 1024);
         assert_eq!(config.log_tail_lines, 50);
+        assert_eq!(config.github_token_refresh_secs, 600);
     }
 
     #[test]
@@ -290,6 +311,19 @@ mod tests {
         assert!(err
             .to_string()
             .contains("FKST_HOSTED_ENGINE_READY_TIMEOUT_SECS"));
+    }
+
+    #[test]
+    fn zero_github_token_refresh_secs_is_a_config_error_naming_the_env_var() {
+        let err = EngineConfig::from_vars(vars(&[(
+            "FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS",
+            "0",
+        )]))
+        .expect_err("zero refresh must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err
+            .to_string()
+            .contains("FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS"));
     }
 
     #[test]
