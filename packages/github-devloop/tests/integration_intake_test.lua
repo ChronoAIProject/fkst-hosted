@@ -585,23 +585,39 @@ return {
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 
-  test_judge_declines_umbrella_tracker_through_codex_policy = function()
+  test_judge_tracks_umbrella_tracker_through_codex_policy = function()
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {}, {
       title = "[umbrella] Fold the babysitter into the system",
       body = "Tracks independent waves.\n\n- wave-1 stall watchdog\n- wave-2 DLQ triage\n\nSplit into independent wave proposals.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ decline\n⟦FKST:REASON⟧ Umbrella tracker issues must be split into independent proposals.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ track\n⟦FKST:REASON⟧ Umbrella tracker issue; individual waves should be separate proposals.")
 
-    local result = run_judge(payload, opts("intake-umbrella-codex-decline"))
+    local result = run_judge(payload, opts("intake-umbrella-codex-track"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
-    t.is_true(comment.body:find('decision="decline"', 1, true) ~= nil)
-    t.is_true(comment.body:find("independent proposals", 1, true) ~= nil)
-    t.is_nil(find_raise(result.raises, "github-proxy.github_issue_label_request"))
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('decision="track"', 1, true) ~= nil)
+    t.is_true(comment.body:find("Acknowledged as a tracking umbrella", 1, true) ~= nil)
+    t.is_true(comment.body:find("individual waves", 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:tracking")
+    t.eq(#label.remove_labels, 0)
     t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_judge_track_idempotent_skips_trusted_marker = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:tracking" }, {
+      core.intake_decision_marker(payload.proposal_id, "track", payload.dedup_key),
+    })
+
+    local result = run_judge(payload, opts("intake-track-idempotent"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
   end,
 
   test_judge_enables_ambiguous_cross_repo_and_insufficient_detail_tasks = function()

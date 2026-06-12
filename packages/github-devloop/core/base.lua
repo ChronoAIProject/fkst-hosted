@@ -32,6 +32,7 @@ local untrusted_issue_data_end = "END UNTRUSTED ISSUE DATA"
 local test_bot_login = "fkst-test-bot"
 
 local enabled_label = "fkst-dev:enabled"
+local tracking_label = "fkst-dev:tracking"
 local thinking_label = "fkst-dev:thinking"
 local ready_label = "fkst-dev:ready"
 local implementing_label = "fkst-dev:implementing"
@@ -921,6 +922,7 @@ M._untrusted_issue_data_begin = untrusted_issue_data_begin
 M._untrusted_issue_data_end = untrusted_issue_data_end
 M._test_bot_login = test_bot_login
 M._enabled_label = enabled_label
+M._tracking_label = tracking_label
 M._thinking_label = thinking_label
 M._ready_label = ready_label
 M._implementing_label = implementing_label

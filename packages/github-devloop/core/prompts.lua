@@ -194,7 +194,7 @@ function M.build_decompose_prompt(decompose, current_issue, content_manifest)
 end
 
 local function is_intake_action(value)
-  return value == "enable" or value == "decline" or value == "escalate-to-class"
+  return value == "enable" or value == "track" or value == "decline" or value == "escalate-to-class"
 end
 
 function M.parse_intake_action(stdout)
@@ -211,6 +211,7 @@ function M.parse_intake_action(stdout)
   end
 
   local action = lines[1]:match("^" .. M._intake_label .. " (enable)$")
+    or lines[1]:match("^" .. M._intake_label .. " (track)$")
     or lines[1]:match("^" .. M._intake_label .. " (decline)$")
     or lines[1]:match("^" .. M._intake_label .. " (escalate%-to%-class)$")
   local reason = lines[2]:match("^" .. M._reason_label .. " (.+)$")

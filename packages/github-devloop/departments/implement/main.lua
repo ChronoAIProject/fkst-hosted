@@ -45,6 +45,24 @@ local function raise_implementing(repo, issue_number, ready, worktree, branch, h
   ))
 end
 
+local function raise_work_card(repo, issue_number, ready, card)
+  local request = core.build_work_card_comment_request({
+    kind = "issue",
+    repo = repo,
+    number = issue_number,
+  }, {
+    proposal_id = ready.proposal_id,
+    role = "implement",
+    version = ready.dedup_key,
+    started_at = card.started_at,
+    finished_at = card.finished_at,
+    outcome = card.outcome,
+    base_sha = card.base_sha,
+    source_ref = ready.source_ref,
+  })
+  core.log_work_card("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
+end
+
 local function implemented_branch_head(base_head, branch)
   local ahead_result = exec_sync({ cmd = core.git_branch_ahead_count_cmd(base_head, branch), timeout = 30 })
   if ahead_result.exit_code ~= 0 then
@@ -198,6 +216,11 @@ function pipeline(event)
 
     merge_integration_for_implementation(worktree, branches.integration, base_head)
 
+    local codex_started_at = now()
+    raise_work_card(repo, issue_number, ready, {
+      started_at = codex_started_at,
+      base_sha = base_head,
+    })
     core.log_codex_start("implement", ready.proposal_id, "implement")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "implement",
@@ -215,6 +238,12 @@ function pipeline(event)
     if type(result) ~= "table" or result.exit_code ~= 0 then
       local stderr = type(result) == "table" and result.stderr or "nil result"
       core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr)
+      raise_work_card(repo, issue_number, ready, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "failed: codex-failed",
+        base_sha = base_head,
+      })
       raise_impl_failed(repo, issue_number, ready, "codex-failed", stderr)
       return
     end
@@ -233,6 +262,12 @@ function pipeline(event)
           "head_sha=" .. tostring(head_sha),
           "reason=reusing clean ahead implementation branch",
         })
+        raise_work_card(repo, issue_number, ready, {
+          started_at = codex_started_at,
+          finished_at = now(),
+          outcome = "completed",
+          base_sha = base_head,
+        })
         raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, branches.integration, base_head)
         return
       end
@@ -242,6 +277,12 @@ function pipeline(event)
         detail = tostring(result.stderr or "")
       end
       core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes")
+      raise_work_card(repo, issue_number, ready, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "failed: no-changes",
+        base_sha = base_head,
+      })
       raise_impl_failed(repo, issue_number, ready, "no-changes", detail)
       return
     end
@@ -283,6 +324,12 @@ function pipeline(event)
       error("github-devloop: unsafe implementing head_sha")
     end
 
+    raise_work_card(repo, issue_number, ready, {
+      started_at = codex_started_at,
+      finished_at = now(),
+      outcome = "completed",
+      base_sha = base_head,
+    })
     raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, branches.integration, base_head)
   end)
 end

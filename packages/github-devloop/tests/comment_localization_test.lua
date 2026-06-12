@@ -236,6 +236,7 @@ local audited_english_skeletons = {
   "github-devloop fix escalated to review-meta: ",
   "github-devloop review-meta action: ",
   "github-devloop dependency hold: ",
+  "Acknowledged as a tracking umbrella. Individual waves should enter the pipeline as separate issues; this issue stays open for tracking.",
   "github-devloop is merging PR #",
   "github-devloop merged PR #",
   "github-devloop decomposed blocked PR into ",
