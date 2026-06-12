@@ -129,6 +129,35 @@ local function timeout_escalation(row, state, age)
   }
 end
 
+local function build_timeout_reconcile(row, entity, state, facts, decision)
+  local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
+  if row.from_state == "thinking" and M._has_bounded_source_ref(source_ref) then
+    local base_version = M.strip_transition_version_suffixes(state.version)
+    return "devloop_reconcile", M.build_devloop_reconcile_payload({
+      proposal_id = state.proposal_id,
+      source_ref = source_ref,
+    }, decision.attempt, base_version)
+  end
+  if row.from_state == "reviewing"
+    and M._has_bounded_source_ref(source_ref)
+    and M._is_git_sha(facts and facts.head_sha) then
+    local review_proposal_id = facts and facts.review_proposal_id
+    if review_proposal_id == nil and entity ~= nil and entity.repo ~= nil then
+      local _, pr_number = M.parse_pr_source_ref(source_ref)
+      if pr_number ~= nil then
+        review_proposal_id = M.pr_review_proposal_id(entity.repo, pr_number, state.version, facts.head_sha)
+      end
+    end
+    if review_proposal_id ~= nil then
+      return "devloop_review_reconcile", M.build_devloop_review_reconcile_payload({
+        proposal_id = review_proposal_id,
+        source_ref = source_ref,
+      }, decision.attempt, state.proposal_id, M.safe_version_segment(state.version), facts.head_sha)
+    end
+  end
+  return nil, nil
+end
+
 function M.liveness_timeout_decision(row, state, now_seconds)
   local due, age = M.liveness_timeout_due(row, state, now_seconds)
   if not due then
@@ -152,7 +181,13 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
   end
   M.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "timeout-" .. decision.action, "state output obligation exceeded budget")
   if decision.action == "escalate" then
-    return false
+    local queue, payload = build_timeout_reconcile(row, entity, state, facts, decision)
+    if queue == nil then
+      return false
+    end
+    M.log_apply(dept, proposal_id, nil, nil, { add = {}, remove = {} }, { queue })
+    M.log_raise(dept, proposal_id, queue, payload)
+    return true
   end
   return M.replay_from_table(dept, entity, {
     state = state.state,

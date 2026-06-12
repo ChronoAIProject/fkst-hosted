@@ -202,6 +202,85 @@ return {
     t.eq(escalated.action, "escalate")
   end,
 
+  test_liveness_timeout_escalates_thinking_to_reconcile_event = function()
+    local row = table_by_state().thinking
+    local base = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local raised = {}
+    local original_log_raise = core.log_raise
+    core.log_raise = function(_, _, queue, payload)
+      table.insert(raised, { queue = queue, payload = payload })
+    end
+    local ok, err = pcall(function()
+      local applied = core.maybe_timeout_redrive_from_table("observe_issue", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      }, {
+        state = "thinking",
+        version = base .. "/timeout/thinking/3",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T01:02:03Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, true)
+    end)
+    core.log_raise = original_log_raise
+    if not ok then
+      error(err)
+    end
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "devloop_reconcile")
+    t.eq(raised[1].payload.schema, "github-devloop.reconcile.v1")
+    t.eq(raised[1].payload.round, 3)
+    t.eq(raised[1].payload.base_version, base)
+    t.eq(raised[1].payload.dedup_key, "reconcile:" .. base .. "/loop/3")
+  end,
+
+  test_liveness_timeout_escalates_reviewing_to_review_reconcile_event = function()
+    local row = table_by_state().reviewing
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local head_sha = "def456"
+    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, head_sha)
+    local raised = {}
+    local original_log_raise = core.log_raise
+    core.log_raise = function(_, _, queue, payload)
+      table.insert(raised, { queue = queue, payload = payload })
+    end
+    local ok, err = pcall(function()
+      local applied = core.maybe_timeout_redrive_from_table("observe_pr", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      }, {
+        state = "reviewing",
+        version = version .. "/timeout/reviewing/3",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T01:02:03Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        source_ref = core.pr_source_ref("owner/repo", 7),
+        review_proposal_id = review_proposal_id,
+        head_sha = head_sha,
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, true)
+    end)
+    core.log_raise = original_log_raise
+    if not ok then
+      error(err)
+    end
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "devloop_review_reconcile")
+    t.eq(raised[1].payload.schema, "github-devloop.review-reconcile.v1")
+    t.eq(raised[1].payload.proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(raised[1].payload.review_proposal_id, review_proposal_id)
+    t.eq(raised[1].payload.issue_version, core.safe_version_segment(version .. "/timeout/reviewing/3"))
+    t.eq(raised[1].payload.head_sha, head_sha)
+    t.eq(raised[1].payload.round, 3)
+  end,
+
   test_restart_table_matches_state_graph_and_stage_rank = function()
     local by_state = table_by_state()
     local expected = {
