@@ -8,6 +8,7 @@ node_modules/
 # Secrets and credentials — never commit these
 .env
 .env.*
+!frontend/.env.example
 *.pem
 *.key
 credentials.json
