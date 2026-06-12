@@ -28,6 +28,30 @@ local observe_replay_states = {
   blocked = true,
 }
 
+local function replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event_ts, issue_state)
+  local row = core.restart_transition_row(state.state)
+  local facts = {
+    proposal_id = proposal_id,
+    current = current,
+    link = link,
+    snapshot = snapshot,
+    event_ts = event_ts,
+  }
+  if observe_replay_states[state.state]
+    and core.replay_from_table("observe_issue", issue, state, row, facts) then
+    return true
+  end
+  if observe_replay_states[state.state] then
+    return false
+  end
+  if issue_state == nil
+    or issue_state.state ~= state.state
+    or tostring(issue_state.version or "") ~= tostring(state.version or "") then
+    return false
+  end
+  return core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts)
+end
+
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
   local command = core.operator_command_fact(current.comments, "rereview")
   if command == nil then
@@ -205,6 +229,7 @@ function pipeline(event)
     local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
     snapshot.fresh = true
     local state = snapshot.state
+    local issue_state = core.current_state(current.comments, proposal_id)
     if state.state ~= nil then
       if maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event.ts) then
         return
@@ -224,23 +249,7 @@ function pipeline(event)
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
       end
       raise_stale_dependency_label_clear(issue, proposal_id, state, current.labels)
-      if observe_replay_states[state.state] then
-        core.replay_from_table("observe_issue", issue, state, core.restart_transition_row(state.state), {
-          proposal_id = proposal_id,
-          current = current,
-          link = link,
-          snapshot = snapshot,
-          event_ts = event.ts,
-        })
-        return
-      end
-      if state.state == "impl-failed" and core.maybe_timeout_redrive_from_table("observe_issue", issue, state, core.restart_transition_row(state.state), {
-        proposal_id = proposal_id,
-        current = current,
-        link = link,
-        snapshot = snapshot,
-        event_ts = event.ts,
-      }) then
+      if replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event.ts, issue_state) then
         return
       end
     end
