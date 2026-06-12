@@ -61,6 +61,25 @@ GH_RATE_POOL_FUNCTION_RE = re.compile(
     r"\bfunction\b[^\n]*\bgh_rate_pool\b|\bgh_rate_pool\b\s*=\s*function\b"
 )
 GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
+PERSISTENCE_CLASS_RE = re.compile(
+    r"\bfunction\s+M\s*\.\s*persistence_class\s*\([^)]*\)\s*"
+    r"return\s*(?P<quote>[\"'])(?P<class>[A-Za-z0-9_]+)(?P=quote)",
+    re.DOTALL,
+)
+ALLOWED_PERSISTENCE_CLASSES = {
+    "saga",
+    "stateless_adapter",
+    "judgment_pipeline",
+    "composed_judgment_pipeline",
+}
+SAGA_RECOVERY_TOKENS = (
+    "fkst:github-devloop:state:v1",
+    "current_entity_state",
+    "restart_completeness",
+    "transition_status",
+    "versioned_transition_status",
+    "cyclic_transition_status",
+)
 HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
 BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
@@ -763,6 +782,47 @@ def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
             )
 
 
+def package_persistence_class(core_path: Path) -> str | None:
+    match = PERSISTENCE_CLASS_RE.search(read_text(core_path))
+    if match is None:
+        return None
+    return match.group("class")
+
+
+def check_persistence_classes(root: Path, violations: list[str]) -> None:
+    for pkg in package_dirs(root):
+        core_path = pkg / "core.lua"
+        if not core_path.exists():
+            continue
+        declared = package_persistence_class(core_path)
+        if declared is None:
+            add(
+                violations,
+                "G8",
+                f"{rel(root, core_path)} must declare M.persistence_class()",
+            )
+            continue
+        if declared not in ALLOWED_PERSISTENCE_CLASSES:
+            add(
+                violations,
+                "G8",
+                f"{rel(root, core_path)} declares unsupported persistence class: {declared}",
+            )
+        if declared == "saga":
+            continue
+        for path in sorted(pkg.rglob("*.lua")):
+            if not path.is_file() or "tests" in path.relative_to(pkg).parts:
+                continue
+            text = read_text(path)
+            for token in SAGA_RECOVERY_TOKENS:
+                if token in text:
+                    add(
+                        violations,
+                        "G8",
+                        f"{rel(root, path)} uses saga recovery token {token!r} but {pkg.name} is {declared}",
+                    )
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -775,6 +835,7 @@ def main() -> int:
     check_rest_pagination_guards(root, warnings)
     check_hidden_text_encoded_literals(root, violations)
     check_gh_rate_pool_sizing(root, violations)
+    check_persistence_classes(root, violations)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
