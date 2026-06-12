@@ -95,7 +95,15 @@ function pipeline(event)
     if gate_owned_reject then
       effective_decision = "approve"
     end
-    local to_state = effective_decision == "approve" and "merge-ready" or "fixing"
+    local issue_version = state.version
+    local reflection_checkpoint = false
+    if effective_decision == "reject" and core.version_fix_round(state.version) < core.max_fix_rounds() then
+      issue_version = core.fix_version_from_review_version(state.version)
+      reflection_checkpoint = core.version_fix_round(issue_version) == core.fix_reflection_checkpoint_round()
+    end
+    local to_state = effective_decision == "approve" and "merge-ready"
+      or reflection_checkpoint and "review-meta"
+      or "fixing"
     local current_review_version = core.safe_version_segment(state.version or "")
     local transition = core.cyclic_transition_status({
       state = state.state,
@@ -116,7 +124,6 @@ function pipeline(event)
       return
     end
 
-    local issue_version = state.version
     if effective_decision == "reject" then
       local fix_round = core.version_fix_round(state.version)
       local max_rounds_hit = fix_round >= core.max_fix_rounds()
@@ -136,7 +143,6 @@ function pipeline(event)
         core.log_raise("review_result", origin.proposal_id, "devloop_decompose", decompose)
         return
       end
-      issue_version = core.fix_version_from_review_version(state.version)
     end
     core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
     local comment_reached = reached
@@ -151,6 +157,13 @@ function pipeline(event)
         .. tostring(reached.blocking_gap or "")
       comment_reached.blocking_gap = nil
     end
+    if reflection_checkpoint then
+      comment_reached = {}
+      for key, value in pairs(reached) do
+        comment_reached[key] = value
+      end
+      comment_reached.reflection_checkpoint = true
+    end
     local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
     local label_request = nil
     if origin.issue_number ~= nil then
@@ -164,8 +177,17 @@ function pipeline(event)
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
     local fix_payload = nil
+    local reflection_payload = nil
     local merge_payload = nil
-    if effective_decision == "reject" then
+    if reflection_checkpoint then
+      reflection_payload = core.build_devloop_fix_reflection_payload({
+        proposal_id = reached.proposal_id,
+        dedup_key = reached.dedup_key,
+        source_ref = pr_source_ref,
+      }, origin.proposal_id, issue_version, pr_number, core.version_fix_round(issue_version), pr_source_ref)
+      reflection_payload.blocking_gap = reached.blocking_gap
+      table.insert(raised, "devloop_review_meta")
+    elseif effective_decision == "reject" then
       fix_payload = core.build_devloop_fixing_payload(origin, pr_number, {
         review_proposal_id = reached.proposal_id,
         review_dedup_key = reached.dedup_key,
@@ -190,6 +212,9 @@ function pipeline(event)
     end
     if fix_payload ~= nil then
       core.log_raise("review_result", origin.proposal_id, "devloop_fixing", fix_payload)
+    end
+    if reflection_payload ~= nil then
+      core.log_raise("review_result", origin.proposal_id, "devloop_review_meta", reflection_payload)
     end
     if merge_payload ~= nil then
       core.log_raise("review_result", origin.proposal_id, "devloop_merge_ready", merge_payload)
