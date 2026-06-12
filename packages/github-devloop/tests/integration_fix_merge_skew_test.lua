@@ -204,7 +204,7 @@ return {
       stderr = "CONFLICT (content): Merge conflict in packages/github-devloop/core.lua\n",
       unmerged_stdout = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
       post_codex_unmerged_stdout = "",
-      post_codex_conflict_markers_stdout = "packages/github-devloop/core.lua:1:<<<<<<< HEAD\n",
+      post_codex_conflict_markers_stdout = "packages/github-devloop/core.lua:1:" .. string.rep("<", 7) .. " HEAD\n",
       post_codex_conflict_markers_exit_code = 0,
     })
     t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })

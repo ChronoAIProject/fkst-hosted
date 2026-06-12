@@ -12,7 +12,6 @@ local active_wip_states = {
 }
 
 local merge_queue_lane_states = {
-  fixing = true,
   ["merge-ready"] = true,
   merging = true,
 }
