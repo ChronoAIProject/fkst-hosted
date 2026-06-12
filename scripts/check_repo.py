@@ -97,11 +97,20 @@ def repo_root() -> Path:
 
 
 def rel(root: Path, path: Path) -> str:
+    packages_view = packages_root(root)
+    try:
+        return "packages/" + path.relative_to(packages_view).as_posix()
+    except ValueError:
+        pass
     return path.relative_to(root).as_posix()
 
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def packages_root(root: Path) -> Path:
+    return root / ".fkst" / "packages"
 
 
 def line_count(path: Path) -> int:
@@ -445,8 +454,7 @@ def hidden_text_encoded_literal_lines(text: str) -> list[int]:
 
 
 def check_line_limit(root: Path, violations: list[str]) -> None:
-    for scan_root_name in ("packages", "scripts"):
-        scan_root = root / scan_root_name
+    for scan_root in (packages_root(root), root / "scripts"):
         if not scan_root.exists():
             continue
         for path in sorted(scan_root.rglob("*")):
@@ -462,7 +470,7 @@ def check_line_limit(root: Path, violations: list[str]) -> None:
 
 
 def package_dirs(root: Path) -> list[Path]:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return []
     return [path for path in sorted(packages.iterdir()) if path.is_dir()]
@@ -707,7 +715,7 @@ def check_helper_reachability(root: Path, violations: list[str]) -> None:
 
 
 def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
@@ -722,7 +730,7 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
 
 
 def check_rest_pagination_guards(root: Path, warnings: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
@@ -737,7 +745,7 @@ def check_rest_pagination_guards(root: Path, warnings: list[str]) -> None:
 
 
 def check_hidden_text_encoded_literals(root: Path, violations: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
@@ -768,7 +776,7 @@ def gh_rate_pool_sizing_lines(text: str) -> list[int]:
 
 
 def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
