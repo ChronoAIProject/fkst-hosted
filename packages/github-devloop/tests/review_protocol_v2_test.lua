@@ -52,6 +52,7 @@ return {
     )
     t.is_true(proposal.body:find("Review boundary:", 1, true) ~= nil)
     t.is_true(proposal.body:find("CI/mergeability/head-binding are later merge-gate facts", 1, true) ~= nil)
+    t.is_true(proposal.body:find("Review contract: reject only for a stated issue requirement the diff fails", 1, true) ~= nil)
     t.is_true(#proposal.body < 512)
 
     local reject_comment = core.build_review_result_comment_request(
@@ -110,6 +111,36 @@ return {
     })
     t.is_true(meta_prompt:find("gate-owned fact", 1, true) ~= nil)
     t.is_true(meta_prompt:find("not as a reason for another fix pass", 1, true) ~= nil)
+    t.is_true(meta_prompt:find("cites no stated issue requirement", 1, true) ~= nil)
+    t.is_true(meta_prompt:find("spec-amendment material, not as fix material", 1, true) ~= nil)
+  end,
+
+  test_out_of_contract_reject_is_advisory_and_does_not_enter_fixing = function()
+    local event = review_event({
+      decision = "reject",
+      body = "Reject: add an immutability proof before merge.",
+      blocking_gap = "New requirement outside the stated issue acceptance bounds: prove API immutability.",
+      angle_results = {
+        { angle = "minimal", verdict = "approve" },
+        { angle = "delete", verdict = "reject" },
+      },
+    })
+    local impl_version = h.reviewing().version
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    h.mock_issue_result({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = h.run_review_result(event, h.opts("review-v2-contract-gap-advisory"))
+    t.eq(result.exit_code, 0)
+    t.is_nil(h.find_raise(result.raises, "devloop_fixing"))
+    t.is_true(h.find_raise(result.raises, "devloop_merge_ready") ~= nil)
+    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(comment:find("github-devloop PR review decision: approve", 1, true) ~= nil)
+    t.is_true(comment:find("Advisory (out-of-contract): rejected only for demand beyond the stated issue bounds", 1, true) ~= nil)
+    t.is_true(comment:find("merge-ready", 1, true) ~= nil)
   end,
 
   test_gate_owned_reject_is_advisory_and_does_not_enter_fixing = function()
