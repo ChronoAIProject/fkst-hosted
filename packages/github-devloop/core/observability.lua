@@ -660,6 +660,7 @@ function M.render_observability_dashboard(args)
   local list = args and args.entities or {}
   local counts = args and args.counts or {}
   local stalls = args and args.stalls or {}
+  local state_gap_report = args and args.state_gap_report or {}
   local now_seconds = args and args.now_seconds or now()
   local generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now_seconds)
   local instance = M.read_env("FKST_GITHUB_BOT_LOGIN") or "unknown"
@@ -720,9 +721,7 @@ function M.render_observability_dashboard(args)
     end
   end
 
-  table.insert(lines, "")
-  table.insert(lines, "## Recent transitions")
-  table.insert(lines, "- Not rendered: no existing low-cost transition history source is available to this department.")
+  M.append_state_gap_dashboard_section(lines, state_gap_report)
   table.insert(lines, "")
   table.insert(lines, "## Footer")
   table.insert(lines, "- quota: not rendered")
@@ -929,12 +928,17 @@ function M.observe_devloop_entities()
     end
   end
   log_summary(counts, #list)
+  local state_gap_report = M.state_gap_report(list)
+  for _, edge in ipairs(state_gap_report.edges or {}) do
+    log.info(M.state_gap_log_line(edge))
+  end
   reap_orphan_prs(repo, list)
   local conflict_hotspot = M.observe_conflict_hotspots(repo)
   local dashboard = M.render_observability_dashboard({
     entities = list,
     counts = counts,
     stalls = stalls,
+    state_gap_report = state_gap_report,
     now_seconds = now_seconds,
   })
   M.publish_observability_dashboard(repo, dashboard)
@@ -943,6 +947,7 @@ function M.observe_devloop_entities()
     entity_count = #list,
     counts = counts,
     conflict_hotspot = conflict_hotspot,
+    state_gap_report = state_gap_report,
     dashboard_hash = dashboard.hash,
   }
 end
