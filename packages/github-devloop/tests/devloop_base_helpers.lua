@@ -37,8 +37,7 @@ end
 
 local render_comment
 local take_pr_phase_comments
-local json_string
-local take_pending_pr_origin
+local json_string, take_pending_pr_origin
 local mock_pr_origin_from_cached
 
 local function source_ref()
@@ -54,7 +53,6 @@ local function pr_source_ref()
     ref = "owner/repo#pr/7",
   }
 end
-
 local function issue(extra)
   local value = {
     schema = "github-proxy.v1",
@@ -67,6 +65,7 @@ local function issue(extra)
     updated_at = "2026-06-03T01:02:03Z",
     labels = { "fkst-dev:enabled" },
     dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
+    view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-03Z",
     source_ref = source_ref(),
   }
   for key, field in pairs(extra or {}) do
@@ -541,8 +540,8 @@ local function mock_issue_state(labels, state, comments)
       table.insert(rendered_comments, render_comment(state_marker))
     end
   end
-  t.mock_command("--json labels,state,comments", {
-    stdout = string.format('{"state":"%s","labels":[%s],"comments":[%s]}\n',
+  t.mock_command("--json title,body,comments,labels,state", {
+    stdout = string.format('{"title":"Implement decision recorder","body":"","state":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(state or "OPEN"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")),
@@ -794,10 +793,12 @@ local function mock_issue_open_pr(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,labels,comments", {
+  t.mock_command("--json title,body,comments,labels,state", {
     stdout = string.format(
-      '{"title":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","body":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
+      json_string(fields.body or ""),
+      json_string(fields.state or "OPEN"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
     ),
@@ -931,7 +932,6 @@ local function mock_issue_merge(labels, comments, extra)
     exit_code = 0,
   })
 end
-
 
 return {
   t = t,
