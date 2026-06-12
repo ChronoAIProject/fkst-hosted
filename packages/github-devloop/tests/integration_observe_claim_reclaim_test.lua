@@ -69,7 +69,7 @@ return {
     local result = run_observe(issue(), opts("observe-managed-unassigned-reclaim", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay")
+    t.eq(find_raise(result.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay/timeout/thinking/1")
     t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 0)
     t.eq(count_calls("gh issue view '42' --repo 'owner/repo' --json assignees"), 1)
@@ -86,7 +86,7 @@ return {
     local result = run_observe(issue(), opts("observe-timeout-release-reclaim", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay")
+    t.eq(find_raise(result.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay/timeout/thinking/1")
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("gh issue view '42' --repo 'owner/repo' --json assignees"), 2)

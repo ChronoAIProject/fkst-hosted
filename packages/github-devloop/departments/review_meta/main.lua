@@ -48,7 +48,7 @@ end
 function pipeline(event)
   local review_meta = event.payload or {}
   if not core.is_supported_review_meta(review_meta) then
-    core.log_entry("review_meta", event, "unknown", review_meta.dedup_key)
+    core.log_entry("review_meta", event, "unknown", core.payload_field(review_meta, "dedup_key"))
     core.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
     return
   end

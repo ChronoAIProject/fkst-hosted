@@ -337,7 +337,7 @@ end
 function pipeline(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
-    core.log_entry("observe_issue", event, "unknown", issue.dedup_key)
+    core.log_entry("observe_issue", event, "unknown", core.payload_field(issue, "dedup_key"))
     core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "unmanaged", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end

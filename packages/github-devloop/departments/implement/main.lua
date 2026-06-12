@@ -375,7 +375,7 @@ end
 function pipeline(event)
   local ready = event.payload or {}
   if not core.is_supported_ready(ready) then
-    core.log_entry("implement", event, "unknown", ready.dedup_key)
+    core.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
     core.log_cas_decision("implement", "unknown", { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end

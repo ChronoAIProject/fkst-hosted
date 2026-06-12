@@ -52,7 +52,7 @@ end
 function pipeline(event)
   local candidate = event.payload or {}
   if not core.is_supported_intake_candidate(candidate) then
-    core.log_entry("intake_judge", event, "unknown", candidate.dedup_key)
+    core.log_entry("intake_judge", event, "unknown", core.payload_field(candidate, "dedup_key"))
     core.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
     return
   end

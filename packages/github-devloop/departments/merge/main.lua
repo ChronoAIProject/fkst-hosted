@@ -54,6 +54,9 @@ local function verify_issue_claim_before_merge_write(repo, issue_number, merge_r
   if issue_number == nil then
     return true
   end
+  if current_issue == nil and merge_ready._merge_pass == "poll" then
+    return true
+  end
   if core.issue_claim_state(current_issue and current_issue.assignees, core.claim_owner()) == "self" then
     return true
   end
@@ -345,7 +348,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       return
     end
     local issue_view = nil
-    if issue_number ~= nil then
+    if issue_number ~= nil and merge_ready._merge_pass ~= "poll" then
       issue_view = core.gh_exec({ cmd = core.gh_issue_view_merge_cmd(repo, issue_number), timeout = 30 })
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue merge view failed: " .. tostring(issue_view.stderr))
@@ -663,6 +666,10 @@ local function process_merge_queue_tick(event)
     merge_ready._merge_pass = "poll"
     core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
     local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
+    if entity == nil then
+      core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+      return
+    end
     process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches)
   end)
 end
@@ -675,7 +682,7 @@ function pipeline(event)
 
   local merge_ready = event.payload or {}
   if not core.is_supported_merge_ready(merge_ready) then
-    core.log_entry("merge", event, "unknown", merge_ready.dedup_key)
+    core.log_entry("merge", event, "unknown", core.payload_field(merge_ready, "dedup_key"))
     core.log_cas_decision("merge", "unknown", { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(payload)", "unsupported event payload")
     return
   end
