@@ -20,6 +20,7 @@ use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::nyxid::NyxIdClient;
 use fkst_hosted_api::packages::{PackageRepository, ShareRepo, PACKAGE_SHARES_COLLECTION};
 use fkst_hosted_api::router::build_router;
@@ -356,6 +357,7 @@ async fn share_app() -> ShareTestApp {
     let packages = PackageRepository::new(&db.database);
     packages.ensure_indexes().await.expect("packages indexes");
     let shares = ShareRepo::new(&db.database);
+    let goals = GoalRepo::new(&db.database);
     shares.ensure_indexes().await.expect("shares indexes");
     let sessions = SessionService::new(
         SessionRepo::new(&db),
@@ -388,6 +390,7 @@ async fn share_app() -> ShareTestApp {
         auth_mode,
         authz,
         github_app: None,
+        goals,
     })
     .expect("router");
 

@@ -5,6 +5,7 @@ use crate::authz::Authorizer;
 use crate::config::Config;
 use crate::db::Db;
 use crate::github_app::GithubAppTokens;
+use crate::goals::GoalRepo;
 use crate::packages::{PackageRepository, ShareRepo};
 use crate::sessions::SessionService;
 
@@ -35,4 +36,7 @@ pub struct AppState {
     /// (module disabled). Wired into `AppState` so a bad PEM fails at deploy
     /// time and the trigger issue consumes it with zero re-plumbing.
     pub github_app: Option<GithubAppTokens>,
+    /// Repository over the `goals` collection (domain layer owned by the goals
+    /// module). Goal CRUD handlers go through this, never raw Mongo.
+    pub goals: GoalRepo,
 }

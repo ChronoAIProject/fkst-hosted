@@ -16,6 +16,7 @@ use fkst_hosted_api::db::{
     IDX_SESSIONS_PACKAGE_NAME, IDX_SESSIONS_POD_ID, IDX_SESSIONS_STATUS,
 };
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::leases::{LeaseStore, PoolConfig, IDX_LEASES_HOLDER_POD};
 use fkst_hosted_api::models::{SessionDoc, SessionStatus};
 use fkst_hosted_api::packages::{
@@ -299,6 +300,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
     let (container, config, db) = mongo_db(500).await;
     let packages = PackageRepository::new(&db.database);
     let shares = ShareRepo::new(&db.database);
+    let goals = GoalRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -313,6 +315,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
+        goals,
     })
     .expect("router");
 

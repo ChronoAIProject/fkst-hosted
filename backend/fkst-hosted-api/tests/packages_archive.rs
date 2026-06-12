@@ -9,6 +9,7 @@ use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::packages::{PackageRepository, ShareRepo, MAX_FILES, MAX_FILE_CONTENT_BYTES};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
@@ -57,6 +58,7 @@ async fn app() -> TestApp {
     let db = Db::connect(&config).await.expect("connect + ping");
     let packages = PackageRepository::new(&db.database);
     let shares = ShareRepo::new(&db.database);
+    let goals = GoalRepo::new(&db.database);
     let sessions = SessionService::new(
         SessionRepo::new(&db),
         packages.clone(),
@@ -71,6 +73,7 @@ async fn app() -> TestApp {
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
+        goals,
     })
     .expect("router");
     TestApp {

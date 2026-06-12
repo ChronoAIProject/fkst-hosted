@@ -10,6 +10,7 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
 use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost, SelfOnlyHealth};
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::journal::store::MongoProgressStore;
 use fkst_hosted_api::journal::JournalConfig;
 use fkst_hosted_api::leases::LeaseStore;
@@ -101,6 +102,14 @@ async fn main() -> ExitCode {
     let shares = ShareRepo::new(&db.database);
     if let Err(error) = shares.ensure_indexes().await {
         tracing::error!(error = %error, "failed to ensure package_shares indexes");
+        return ExitCode::FAILURE;
+    }
+
+    // 4b-ter. Ensure the goals-collection indexes (idempotent; fail-closed on
+    //          error). Goal CRUD and list queries depend on these.
+    let goals = GoalRepo::new(&db.database);
+    if let Err(error) = goals.ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure goals indexes");
         return ExitCode::FAILURE;
     }
 
@@ -284,6 +293,7 @@ async fn main() -> ExitCode {
         auth_mode,
         authz,
         github_app,
+        goals,
     }) {
         Ok(router) => router,
         Err(error) => {
