@@ -260,7 +260,7 @@ local function maybe_carry_over_approved_head(origin, pr_number, current_pr, sta
   return true
 end
 
-local function raise_current_state(origin, pr_number, current_pr, state, source_ref)
+local function raise_current_state(origin, pr_number, current_pr, state, source_ref, known_issue_comments)
   if maybe_carry_over_approved_head(origin, pr_number, current_pr, state, source_ref) then
     return
   end
@@ -280,7 +280,7 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(pr-closed)", "re-derived PR is not open")
       return
     end
-    local issue_comments = issue_comments_for_origin(origin)
+    local issue_comments = known_issue_comments or issue_comments_for_origin(origin)
     local fact_comments = issue_comments or current_pr.comments
     local feedback = core.fixing_replay_feedback_fact(fact_comments, origin.proposal_id, state.version)
     if feedback == nil and issue_comments ~= nil then
@@ -358,7 +358,11 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
           "devloop_fixing",
         })
         core.log_raise("observe_pr", origin.proposal_id, "devloop_fixing", fix_payload)
+      else
+        core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "skip-idempotent(reviewing marker already visible)", "reviewing state marker for fix is already visible")
       end
+    else
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-foreign(fix-feedback-binding)", "trusted fix feedback marker lacks review binding")
     end
     return
   end
@@ -551,6 +555,20 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    local merge_gate_feedback = nil
+    if state.state == "reviewing" and origin.issue_number ~= nil then
+      merge_gate_feedback = core.merge_gate_fix_fact(current_pr.comments, origin.proposal_id, core.next_fix_version(state.version))
+    end
+    if merge_gate_feedback ~= nil then
+      local issue_comments = issue_comments_for_origin(origin)
+      local issue_state = core.current_entity_state(issue_comments, origin.proposal_id)
+      if issue_state.state == "fixing" then
+        core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
+        raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, issue_comments)
+        maybe_label_hint(origin, issue_state, core.issue_source_ref(origin.repo, origin.issue_number))
+        return
+      end
+    end
     if maybe_apply_rereview_command(origin, pr.number, current_pr, state, source_ref) then
       return
     end
