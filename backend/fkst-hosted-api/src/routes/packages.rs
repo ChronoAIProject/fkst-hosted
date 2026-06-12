@@ -13,6 +13,8 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AuthContext;
+use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::packages::{is_valid_name, NewPackage, Package, PackageFile, MAX_TOTAL_CONTENT_BYTES};
 use crate::routes::extract::AppJson;
@@ -44,6 +46,10 @@ pub struct CreatePackageRequest {
     pub files: Vec<PackageFile>,
     #[serde(default)]
     pub composed_deps: Vec<String>,
+    /// Optional org to attach the package to. When present, the caller
+    /// must be an admin or member of that org.
+    #[serde(default)]
+    pub org_id: Option<String>,
 }
 
 /// Response body for `POST /api/v1/packages` (201).
@@ -59,6 +65,10 @@ pub struct PackageResponse {
     pub name: String,
     pub files: Vec<PackageFile>,
     pub composed_deps: Vec<String>,
+    /// Owner user ID (explicit null for legacy packages).
+    pub owner_user_id: Option<String>,
+    /// Organization ID (explicit null for personal packages).
+    pub org_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -73,6 +83,8 @@ impl TryFrom<Package> for PackageResponse {
             name: package.name,
             files: package.files,
             composed_deps: package.composed_deps,
+            owner_user_id: package.owner_user_id,
+            org_id: package.org_id,
             created_at,
             updated_at,
         })
@@ -84,6 +96,7 @@ impl TryFrom<Package> for PackageResponse {
 /// uniqueness (no read-then-write): the loser of a race gets a `409`.
 async fn create(
     State(state): State<AppState>,
+    ctx: AuthContext,
     AppJson(request): AppJson<CreatePackageRequest>,
 ) -> Result<
     (
@@ -93,21 +106,31 @@ async fn create(
     ),
     AppError,
 > {
+    // If body has org_id, require the caller to be an org writer.
+    if let Some(ref org_id) = request.org_id {
+        state.authz.require_org_writer(&ctx, org_id).await?;
+    }
+
     // NEVER log content; paths/sizes/counts only (the repository logs the
     // accepted package at INFO).
     tracing::debug!(
         name = ?request.name,
         files = request.files.len(),
         composed_deps = request.composed_deps.len(),
+        org_id = ?request.org_id,
         "package create requested"
     );
     let created = state
         .packages
-        .create(NewPackage {
-            name: request.name,
-            files: request.files,
-            composed_deps: request.composed_deps,
-        })
+        .create(
+            NewPackage {
+                name: request.name,
+                files: request.files,
+                composed_deps: request.composed_deps,
+            },
+            &ctx.user_id,
+            request.org_id.as_deref(),
+        )
         .await?;
 
     // The name passed domain validation ([A-Za-z0-9_-]+), so it is ASCII and
@@ -122,9 +145,14 @@ async fn create(
 }
 
 /// `GET /api/v1/packages`: flat JSON array of names (repository order:
-/// ascending). Empty store answers `[]`.
-async fn list(State(state): State<AppState>) -> Result<Json<Vec<String>>, AppError> {
-    let names = state.packages.list().await?;
+/// ascending). Empty store answers `[]`. Filters to visible packages
+/// based on caller identity and org memberships.
+async fn list(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+) -> Result<Json<Vec<String>>, AppError> {
+    let org_ids = state.authz.visible_org_ids(&ctx).await?;
+    let names = state.packages.list_visible(&ctx.user_id, &org_ids).await?;
     tracing::info!(count = names.len(), "packages listed");
     Ok(Json(names))
 }
@@ -132,6 +160,7 @@ async fn list(State(state): State<AppState>) -> Result<Json<Vec<String>>, AppErr
 /// `GET /api/v1/packages/{name}`: fetch one package or `404`.
 async fn get_one(
     State(state): State<AppState>,
+    ctx: AuthContext,
     Path(name): Path<String>,
 ) -> Result<Json<PackageResponse>, AppError> {
     // Axum percent-decodes the segment before `Path<String>` sees it, and the
@@ -147,6 +176,14 @@ async fn get_one(
     }
     match state.packages.get(&name).await? {
         Some(package) => {
+            let ownership = Ownership {
+                owner_user_id: package.owner_user_id.as_deref(),
+                org_id: package.org_id.as_deref(),
+            };
+            state
+                .authz
+                .authorize(&ctx, ownership, Action::Read, "package", &name)
+                .await?;
             tracing::info!(name = %name, "package fetched");
             Ok(Json(PackageResponse::try_from(package)?))
         }
@@ -162,4 +199,40 @@ pub fn router() -> Router<AppState> {
         .route("/packages", get(list).post(create))
         .route("/packages/:name", get(get_one))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_response_serializes_to_the_documented_shape() {
+        let body = serde_json::to_value(CreatePackageResponse {
+            name: "billing-pipeline".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "name": "billing-pipeline"
+            })
+        );
+    }
+
+    #[test]
+    fn package_response_emits_explicit_nulls_for_ownership() {
+        let package = Package {
+            name: "demo".to_string(),
+            files: vec![],
+            composed_deps: vec![],
+            owner_user_id: None,
+            org_id: None,
+            created_at: bson::DateTime::from_millis(1_700_000_000_000),
+            updated_at: bson::DateTime::from_millis(1_700_000_000_000),
+        };
+        let view = PackageResponse::try_from(package).expect("view");
+        let body = serde_json::to_value(&view).unwrap();
+        assert!(body["owner_user_id"].is_null(), "must be explicit null");
+        assert!(body["org_id"].is_null(), "must be explicit null");
+    }
 }

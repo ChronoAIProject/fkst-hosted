@@ -49,6 +49,33 @@ impl PackageRepository {
     /// and MUST NOT attempt to recreate `_id_` — Mongo forbids declaring an
     /// explicit `_id` index and would error.
     pub async fn ensure_indexes(&self) -> Result<(), PackageError> {
+        use mongodb::{options::IndexOptions, IndexModel};
+
+        let indexes: Vec<IndexModel> = vec![
+            IndexModel::builder()
+                .keys(doc! { "owner_user_id": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .name("packages_owner_user_id".to_string())
+                        .build(),
+                )
+                .build(),
+            IndexModel::builder()
+                .keys(doc! { "org_id": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .name("packages_org_id".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+        self.collection
+            .create_indexes(indexes)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "failed to create packages indexes");
+                PackageError::Db(error)
+            })?;
         tracing::info!(collection = PACKAGES_COLLECTION, "packages indexes ensured");
         Ok(())
     }
@@ -59,7 +86,16 @@ impl PackageRepository {
     /// NOT an upsert: an existing name yields `PackageError::Duplicate`
     /// (conceptually 409). Concurrency is arbitrated solely by the Mongo
     /// `_id` uniqueness constraint — no read-then-write pre-check (TOCTOU).
-    pub async fn create(&self, new_package: NewPackage) -> Result<Package, PackageError> {
+    ///
+    /// `owner_user_id` stamps ownership; `org_id` optionally attaches the
+    /// package to an organization. Both follow the omit-when-absent serde
+    /// convention so pre-existing documents stay byte-identical.
+    pub async fn create(
+        &self,
+        new_package: NewPackage,
+        owner_user_id: &str,
+        org_id: Option<&str>,
+    ) -> Result<Package, PackageError> {
         if let Err(reason) = new_package.validate() {
             // Reasons carry paths, sizes, and counts only — never content.
             // The name is NOT yet validated here: log it debug-escaped (`?`)
@@ -73,6 +109,8 @@ impl PackageRepository {
             name: new_package.name,
             files: new_package.files,
             composed_deps: new_package.composed_deps,
+            owner_user_id: Some(owner_user_id.to_string()),
+            org_id: org_id.map(|s| s.to_string()),
             created_at: now,
             updated_at: now,
         };
@@ -146,5 +184,57 @@ impl PackageRepository {
             .map_err(|error| log_db_error("exists", error))?;
         tracing::debug!(name, exists = count > 0, "package exists check");
         Ok(count > 0)
+    }
+
+    /// List package names visible to `owner_user_id` given their org
+    /// memberships (`org_ids`). Visible = owned by caller OR in one of
+    /// the caller's orgs OR legacy (no owner field). Sorted ascending.
+    ///
+    /// Note: `{owner_user_id: {$exists: false}}` is a collection scan,
+    /// acceptable at current scale (list already scanned). Document for
+    /// future optimization if needed.
+    pub async fn list_visible(
+        &self,
+        owner_user_id: &str,
+        org_ids: &[String],
+    ) -> Result<Vec<String>, PackageError> {
+        let mut or_branches = vec![
+            doc! { "owner_user_id": owner_user_id },
+            doc! { "owner_user_id": { "$exists": false } },
+        ];
+        if !org_ids.is_empty() {
+            or_branches.push(doc! { "org_id": { "$in": org_ids } });
+        }
+        let filter = doc! { "$or": or_branches };
+
+        let mut cursor = self
+            .collection
+            .clone_with_type::<IdOnly>()
+            .find(filter)
+            .projection(doc! { "_id": 1 })
+            .sort(doc! { "_id": 1 })
+            .await
+            .map_err(|error| log_db_error("list_visible", error))?;
+
+        let mut names = Vec::new();
+        while cursor
+            .advance()
+            .await
+            .map_err(|error| log_db_error("list_visible", error))?
+        {
+            names.push(
+                cursor
+                    .deserialize_current()
+                    .map_err(|error| log_db_error("list_visible", error))?
+                    .name,
+            );
+        }
+        tracing::debug!(
+            owner = owner_user_id,
+            orgs = org_ids.len(),
+            count = names.len(),
+            "visible packages listed"
+        );
+        Ok(names)
     }
 }

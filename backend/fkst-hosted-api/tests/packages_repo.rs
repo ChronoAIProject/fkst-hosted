@@ -88,7 +88,7 @@ async fn ensure_indexes_is_idempotent_and_adds_nothing_beyond_implicit_id() {
 
     // Materialize the collection, ensure again, then prove only `_id_`.
     repository
-        .create(sample_new_package("demo-package"))
+        .create(sample_new_package("demo-package"), "test-user", None)
         .await
         .expect("create");
     repository.ensure_indexes().await.expect("third ensure");
@@ -103,10 +103,15 @@ async fn ensure_indexes_is_idempotent_and_adds_nothing_beyond_implicit_id() {
         let model = cursor.deserialize_current().expect("index model");
         names.push(model.options.and_then(|o| o.name).expect("index name"));
     }
+    names.sort();
     assert_eq!(
         names,
-        vec!["_id_".to_string()],
-        "only the implicit _id index"
+        vec![
+            "_id_".to_string(),
+            "packages_org_id".to_string(),
+            "packages_owner_user_id".to_string()
+        ],
+        "implicit _id plus ownership indexes"
     );
 }
 
@@ -119,7 +124,10 @@ async fn create_then_get_round_trips_deeply() {
     let (_container, _database, repository) = repo().await;
     let input = sample_new_package("demo-package");
 
-    let created = repository.create(input.clone()).await.expect("create");
+    let created = repository
+        .create(input.clone(), "test-user", None)
+        .await
+        .expect("create");
     assert_eq!(created.name, input.name);
     assert_eq!(created.files, input.files);
     assert_eq!(created.composed_deps, input.composed_deps);
@@ -159,7 +167,10 @@ async fn stored_bson_shape_matches_canon() {
         ],
         composed_deps: Vec::new(),
     };
-    repository.create(input).await.expect("create");
+    repository
+        .create(input, "test-user", None)
+        .await
+        .expect("create");
 
     let raw = database
         .collection::<bson::Document>(PACKAGES_COLLECTION)
@@ -201,12 +212,12 @@ async fn duplicate_create_returns_duplicate_not_db() {
     let (_container, _database, repository) = repo().await;
 
     repository
-        .create(sample_new_package("dup-pkg"))
+        .create(sample_new_package("dup-pkg"), "test-user", None)
         .await
         .expect("first create");
     // Exercises the real is_duplicate_key path against a real server 11000.
     let err = repository
-        .create(sample_new_package("dup-pkg"))
+        .create(sample_new_package("dup-pkg"), "test-user", None)
         .await
         .expect_err("second create must fail");
     match err {
@@ -224,8 +235,8 @@ async fn concurrent_creates_of_the_same_name_yield_one_ok_one_duplicate() {
     let (_container, _database, repository) = repo().await;
 
     let (left, right) = tokio::join!(
-        repository.create(sample_new_package("race-pkg")),
-        repository.create(sample_new_package("race-pkg")),
+        repository.create(sample_new_package("race-pkg"), "test-user", None),
+        repository.create(sample_new_package("race-pkg"), "test-user", None),
     );
     let outcomes = [left, right];
     let oks = outcomes.iter().filter(|r| r.is_ok()).count();
@@ -250,11 +261,11 @@ async fn list_returns_only_names_sorted_ascending() {
 
     // Insert out of order to prove the sort.
     repository
-        .create(sample_new_package("beta-pkg"))
+        .create(sample_new_package("beta-pkg"), "test-user", None)
         .await
         .expect("create beta");
     repository
-        .create(sample_new_package("alpha-pkg"))
+        .create(sample_new_package("alpha-pkg"), "test-user", None)
         .await
         .expect("create alpha");
 
@@ -274,7 +285,7 @@ async fn get_missing_is_none_and_exists_reports_presence() {
     assert!(!repository.exists("missing").await.expect("exists"));
 
     repository
-        .create(sample_new_package("present-pkg"))
+        .create(sample_new_package("present-pkg"), "test-user", None)
         .await
         .expect("create");
     assert!(repository.exists("present-pkg").await.expect("exists"));
@@ -295,7 +306,7 @@ async fn invalid_input_is_rejected_before_any_write() {
         composed_deps: Vec::new(),
     };
     let err = repository
-        .create(input)
+        .create(input, "test-user", None)
         .await
         .expect_err("traversal path must be rejected");
     match err {
@@ -320,11 +331,11 @@ async fn case_variant_package_names_are_distinct_documents() {
     // Names are case-sensitive, consistent with the engine and `_id`
     // semantics: "MY-PKG" and "my-pkg" must coexist as distinct documents.
     let upper = repository
-        .create(sample_new_package("MY-PKG"))
+        .create(sample_new_package("MY-PKG"), "test-user", None)
         .await
         .expect("create MY-PKG");
     let lower = repository
-        .create(sample_new_package("my-pkg"))
+        .create(sample_new_package("my-pkg"), "test-user", None)
         .await
         .expect("create my-pkg");
 

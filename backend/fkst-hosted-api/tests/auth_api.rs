@@ -27,6 +27,7 @@ use axum::http::{header, HeaderMap, Request, StatusCode};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use fkst_hosted_api::auth::{AuthMode, NyxIdAuthSettings};
+use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
@@ -277,6 +278,7 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
         packages,
         sessions,
         auth_mode,
+        authz: Authorizer::disabled(),
     })
     .expect("router");
     AuthTestApp {
@@ -316,6 +318,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         packages,
         sessions,
         auth_mode: AuthMode::Disabled,
+        authz: Authorizer::disabled(),
     })
     .expect("router");
     (container, router)
@@ -570,6 +573,7 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
         packages,
         sessions,
         auth_mode,
+        authz: Authorizer::disabled(),
     })
     .expect("router");
 
@@ -638,6 +642,7 @@ async fn kid_rotation_recovers_after_refresh() {
         packages,
         sessions,
         auth_mode,
+        authz: Authorizer::disabled(),
     })
     .expect("router");
 
@@ -722,6 +727,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
             audience: AUDIENCE.to_string(),
             jwks_cache_ttl: Duration::from_secs(JWKS_TTL_SECS),
         }),
+        authz: Authorizer::disabled(),
     };
 
     // Build a router with a route that extracts AuthContext but is NOT

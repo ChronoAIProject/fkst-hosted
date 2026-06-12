@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use fkst_hosted_api::auth::AuthMode;
+use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
@@ -214,6 +215,7 @@ async fn e2e_happy_path_runs_then_stops_against_the_real_engine() {
         packages,
         sessions,
         auth_mode: AuthMode::Disabled,
+        authz: Authorizer::disabled(),
     })
     .expect("router");
 

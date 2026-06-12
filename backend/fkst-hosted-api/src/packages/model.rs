@@ -57,6 +57,12 @@ pub struct Package {
     pub files: Vec<PackageFile>,
     #[serde(default)]
     pub composed_deps: Vec<String>,
+    /// User who owns this package. Omitted for legacy pre-auth docs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_user_id: Option<String>,
+    /// Organization this package belongs to. Omitted for personal packages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
     pub created_at: bson::DateTime,
     pub updated_at: bson::DateTime,
 }
@@ -287,6 +293,8 @@ mod tests {
             name: "demo-package".to_string(),
             files: vec![entry(), file("lib/util.lua", "-- util")],
             composed_deps: vec!["base".to_string()],
+            owner_user_id: None,
+            org_id: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             updated_at: bson::DateTime::from_millis(1_700_000_000_000),
         }
@@ -705,5 +713,48 @@ mod tests {
             .validate()
             .expect_err("must be rejected");
         assert!(err.starts_with("unsafe path component"), "got: {err}");
+    }
+
+    // ---- ownership field serde tests ----
+
+    #[test]
+    fn package_ownership_fields_are_omitted_when_absent() {
+        let raw = bson::to_document(&sample_package()).expect("serialize");
+        assert!(
+            !raw.contains_key("owner_user_id"),
+            "owner_user_id must be omitted when absent"
+        );
+        assert!(
+            !raw.contains_key("org_id"),
+            "org_id must be omitted when absent"
+        );
+    }
+
+    #[test]
+    fn package_ownership_fields_round_trip_when_set() {
+        let mut package = sample_package();
+        package.owner_user_id = Some("user-42".to_string());
+        package.org_id = Some("org-1".to_string());
+        let raw = bson::to_document(&package).expect("serialize");
+        assert_eq!(
+            raw.get_str("owner_user_id").expect("owner_user_id"),
+            "user-42"
+        );
+        assert_eq!(raw.get_str("org_id").expect("org_id"), "org-1");
+        let back: Package = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, package);
+    }
+
+    #[test]
+    fn legacy_package_without_ownership_fields_still_deserializes() {
+        let raw = doc! {
+            "_id": "demo",
+            "files": [{ "path": "departments/x/main.lua", "content": "return {}" }],
+            "created_at": bson::DateTime::from_millis(0),
+            "updated_at": bson::DateTime::from_millis(0),
+        };
+        let package: Package = bson::from_document(raw).expect("deserialize");
+        assert_eq!(package.owner_user_id, None);
+        assert_eq!(package.org_id, None);
     }
 }

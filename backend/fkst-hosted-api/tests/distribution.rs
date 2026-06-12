@@ -155,6 +155,8 @@ fn session_doc(package_name: &str, status: SessionStatus) -> SessionDoc {
         runtime_dir: None,
         error: None,
         run_key: None,
+        owner_user_id: None,
+        org_id: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,
@@ -176,6 +178,8 @@ async fn insert_package(db: &Db, name: &str) {
             content: "return {}".to_string(),
         }],
         composed_deps: vec![],
+        owner_user_id: None,
+        org_id: None,
         created_at: bson::DateTime::now(),
         updated_at: bson::DateTime::now(),
     };

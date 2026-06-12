@@ -1,6 +1,7 @@
 //! Shared application state passed to every handler.
 
 use crate::auth::AuthMode;
+use crate::authz::Authorizer;
 use crate::config::Config;
 use crate::db::Db;
 use crate::packages::PackageRepository;
@@ -22,4 +23,7 @@ pub struct AppState {
     /// Authentication mode: disabled (local dev) or enabled with NyxID
     /// settings. Determines whether the JWT middleware is active.
     pub auth_mode: AuthMode,
+    /// Authorization facade: wraps NyxID client (if configured) for org-role
+    /// lookups, ownership enforcement, and the `allows()` policy.
+    pub authz: Authorizer,
 }

@@ -80,6 +80,26 @@ timeout) are rejected at startup with a clear error.
 | `FKST_AUTH_ISSUER` | no | `nyxid` | Expected JWT `iss` claim. |
 | `FKST_AUTH_AUDIENCE` | no | same as base URL | Expected JWT `aud` claim. Defaults to the (trimmed) `FKST_AUTH_NYXID_BASE_URL`. |
 | `FKST_AUTH_JWKS_CACHE_TTL_SECS` | no | `300` | JWKS cache TTL in seconds. Must be ≥ 1; `0` is rejected at startup. After TTL expiry, stale keys are served if the refresh fetch fails. |
+| `NYXID_CLIENT_ID` | no | — | NyxID service-account client ID for org APIs (e.g. `sa_…`). Both-or-neither with `NYXID_CLIENT_SECRET`. Without both, org features degrade gracefully (owner-only authorization). |
+| `NYXID_CLIENT_SECRET` | no | — | NyxID service-account client secret (SECRET). Both-or-neither with `NYXID_CLIENT_ID`. |
+| `FKST_NYXID_ORG_CACHE_TTL_SECS` | no | `30` | TTL in seconds for NyxID org-role and user-orgs caches. Controls how stale org membership data may be. Must be ≥ 1; `0` is rejected at startup. |
+
+### Claiming legacy packages and sessions
+
+Pre-auth packages and sessions have no `owner_user_id` field and are grandfathered open to any authenticated user. To assign ownership of legacy docs, run a one-off `mongosh` snippet:
+
+```js
+// Assign all ownerless packages to a specific user:
+db.packages.updateMany(
+  { owner_user_id: { $exists: false } },
+  { $set: { owner_user_id: "<user-id>" } }
+);
+// Assign all ownerless sessions to a specific user:
+db.sessions.updateMany(
+  { owner_user_id: { $exists: false } },
+  { $set: { owner_user_id: "<user-id>" } }
+);
+```
 
 ## Health endpoints
 

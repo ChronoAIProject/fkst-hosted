@@ -9,6 +9,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use bson::doc;
 use fkst_hosted_api::auth::AuthMode;
+use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{
     Db, IDX_LEASES_EXPIRES_AT, IDX_SESSIONS_PACKAGE_NAME, IDX_SESSIONS_POD_ID, IDX_SESSIONS_STATUS,
@@ -94,6 +95,8 @@ fn sample_session() -> SessionDoc {
         runtime_dir: Some("/tmp/run".to_string()),
         error: None,
         run_key: None,
+        owner_user_id: None,
+        org_id: None,
         created_at: bson::DateTime::from_millis(1_700_000_000_000),
         started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
         stopped_at: None,
@@ -114,6 +117,8 @@ fn sample_package() -> Package {
             },
         ],
         composed_deps: vec!["base".to_string()],
+        owner_user_id: None,
+        org_id: None,
         created_at: bson::DateTime::from_millis(1_700_000_000_000),
         updated_at: bson::DateTime::from_millis(1_700_000_001_000),
     }
@@ -294,6 +299,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
         packages,
         sessions,
         auth_mode: AuthMode::Disabled,
+        authz: Authorizer::disabled(),
     })
     .expect("router");
 
