@@ -174,7 +174,7 @@ return {
     t.is_true(logs:find("gap_seconds=3000", 1, true) ~= nil)
     t.is_true(logs:find("budget_seconds=2700", 1, true) ~= nil)
     t.is_true(logs:find("budget_status=over-budget", 1, true) ~= nil)
-    t.is_true(logs:find("wait_class=unattributed", 1, true) ~= nil)
+    t.is_true(logs:find("wait_class=visibility-retry", 1, true) ~= nil)
     t.is_true(logs:find("ready->blocked", 1, true) == nil)
   end,
 
@@ -233,8 +233,58 @@ return {
     local logs = table.concat(gap_logs(), "\n")
 
     t.is_true(logs:find("## State-gap latency", 1, true) ~= nil)
-    t.is_true(logs:find("ready->implementing: count 2, P50 10m 0s, P95 50m 0s, max 50m 0s, budget 45m 0s, near 0, over 1, classes unattributed 2", 1, true) ~= nil)
+    t.is_true(logs:find("ready->implementing: count 2, P50 10m 0s, P95 50m 0s, max 50m 0s, budget 45m 0s, near 0, over 1", 1, true) ~= nil)
+    t.is_true(logs:find("classes visibility-retry 2", 1, true) ~= nil)
+    t.is_true(logs:find("handoff unknown 2", 1, true) ~= nil)
+    t.is_true(logs:find("spawn_slot_candidates 0", 1, true) ~= nil)
     t.is_true(logs:find("worst #42 50m 0s, #43 10m 0s", 1, true) ~= nil)
+  end,
+
+  test_quantifies_ready_implementing_visibility_and_spawn_slot_candidates = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
+      render_comment(core.work_card_marker(proposal_id), "fkst-test-bot", "2026-06-03T01:14:00Z"),
+      render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:35:00Z"),
+    })
+
+    local logs = table.concat(gap_logs(), "\n")
+
+    t.is_true(logs:find("gap_edge=ready->implementing", 1, true) ~= nil)
+    t.is_true(logs:find("wait_class=spawn-slot-candidate", 1, true) ~= nil)
+    t.is_true(logs:find("handoff_class=durable-visibility-path", 1, true) ~= nil)
+    t.is_true(logs:find("ready_pre_start_seconds=840", 1, true) ~= nil)
+    t.is_true(logs:find("ready_post_start_seconds=1260", 1, true) ~= nil)
+    t.is_true(logs:find("spawn_slot_candidate=true", 1, true) ~= nil)
+    t.is_true(logs:find("handoff durable-visibility-path 1", 1, true) ~= nil)
+    t.is_true(logs:find("spawn_slot_candidates 1", 1, true) ~= nil)
+  end,
+
+  test_quantifies_ready_implementing_batch_release_peak = function()
+    local proposal_42 = "github-devloop/issue/owner/repo/42"
+    local proposal_43 = "github-devloop/issue/owner/repo/43"
+    mock_env()
+    mock_all_issue_lists({ 42, 43 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_42, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
+      render_comment(core.work_card_marker(proposal_42), "fkst-test-bot", "2026-06-03T01:20:00Z"),
+      render_comment(core.state_marker(proposal_42, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:35:00Z"),
+    })
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_43, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:02:00Z"),
+      render_comment(core.work_card_marker(proposal_43), "fkst-test-bot", "2026-06-03T01:20:30Z"),
+      render_comment(core.state_marker(proposal_43, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:36:00Z"),
+    })
+
+    local logs = table.concat(gap_logs(), "\n")
+
+    t.is_true(logs:find("implement_start_batch_count=2", 1, true) ~= nil)
+    t.is_true(logs:find("start_batch_peak 2", 1, true) ~= nil)
+    t.is_true(logs:find("spawn_slot_candidates 2", 1, true) ~= nil)
   end,
 
   test_state_gap_stream_spans_issue_and_pr_marker_comments = function()
