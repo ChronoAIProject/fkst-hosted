@@ -29,6 +29,15 @@ local observe_replay_states = {
   ["impl-failed"] = true,
 }
 
+local function thinking_state_budget_exceeded(state)
+  local threshold = core.stall_suspect_threshold_minutes("thinking")
+  local marker_seconds = core.iso_timestamp_epoch_seconds(state and state.marker_created_at)
+  if threshold == nil or marker_seconds == nil then
+    return false
+  end
+  return now() - marker_seconds >= threshold * 60
+end
+
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
   local command = core.operator_command_fact(current.comments, "rereview")
   if command == nil then
@@ -38,13 +47,26 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
     core.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
-  if state.state ~= "thinking" or not core.has_thinking_converge_replay(current, proposal_id, state, issue.source_ref) then
-    core.log_cas_decision("observe_issue", proposal_id, state, "thinking-converge", "thinking", "refused(invalid-state)", "operator rereview requires thinking converge")
+  if state.state ~= "thinking" then
+    core.log_cas_decision("observe_issue", proposal_id, state, "thinking", "thinking", "refused(invalid-state)", "operator rereview requires thinking")
     local refusal = core.build_operator_issue_command_refusal_request(
       issue.repo,
       issue.number,
       command,
-      "rereview requires thinking converge state",
+      "rereview requires thinking state",
+      issue.source_ref
+    )
+    core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
+    return true
+  end
+  if not core.has_thinking_converge_replay(current, proposal_id, state, issue.source_ref)
+    and not thinking_state_budget_exceeded(state) then
+    core.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "refused(active-thinking)", "operator rereview requires stalled thinking")
+    local refusal = core.build_operator_issue_command_refusal_request(
+      issue.repo,
+      issue.number,
+      command,
+      "rereview requires stalled thinking state",
       issue.source_ref
     )
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)

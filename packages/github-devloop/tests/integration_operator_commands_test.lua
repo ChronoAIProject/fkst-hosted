@@ -295,12 +295,37 @@ return {
     t.eq(proposal_raise.payload.prior_round_digests[1].digest, "digest-7")
   end,
 
+  test_issue_rereview_command_reenters_stalled_plain_thinking = function()
+    local event = issue({
+      updated_at = "2026-06-03T04:05:06Z",
+      view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T04-05-06Z",
+    })
+    local command = trusted_issue_command("rereview", "IC_issue_rereview_plain_stalled")
+    local base_version = core.build_proposal(event).dedup_key
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+      command,
+    })
+
+    local result = run_observe(event, opts("operator-issue-rereview-plain-stalled"))
+    t.eq(result.exit_code, 0)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local proposal_raise = find_raise(result.raises, "consensus.proposal")
+    t.is_true(comment_raise.payload.body:find("operator command accepted: rereview", 1, true) ~= nil)
+    t.eq(proposal_raise.payload.dedup_key, base_version .. "/replay")
+    t.eq(proposal_raise.payload.round, nil)
+    t.eq(proposal_raise.payload.source_ref.ref, "owner/repo#issue/42")
+  end,
+
   test_issue_rereview_command_active_thinking_refuses_once = function()
     local event = issue()
     local command = trusted_issue_command("rereview", "IC_issue_rereview_active")
     local base_version = core.build_proposal(event).dedup_key
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+      {
+        body = core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
       command,
     })
 
@@ -308,12 +333,15 @@ return {
     t.eq(result.exit_code, 0)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find("operator command refused", 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find("thinking converge state", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("stalled thinking state", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('outcome="refused"', 1, true) ~= nil)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+      {
+        body = core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
       command,
       comment_raise.payload.body,
     })

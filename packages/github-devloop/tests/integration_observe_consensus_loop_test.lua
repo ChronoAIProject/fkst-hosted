@@ -117,7 +117,7 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
     local thinking = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:thinking" } }), opts("observe-thinking"))
     t.eq(thinking.exit_code, 0) t.eq(#thinking.raises, 1)
-    t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)
+    t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay")
     t.eq(count_calls("gh issue view"), 4)
     t.eq(count_calls("--json body"), 0)
   end,
@@ -426,7 +426,7 @@ return {
     }), run_opts)
     t.eq(thinking.exit_code, 0)
     t.eq(#thinking.raises, 1)
-    t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)
+    t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-05Z/replay")
     t.eq(count_calls("--json title,body,comments,labels,state"), 3)
     t.eq(count_calls("--json body"), 0)
   end,
