@@ -222,6 +222,10 @@ function M.gh_issue_view_fix_cmd(repo, issue_number)
   return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments")
 end
 
+function M.gh_issue_view_commit_subject_cmd(repo, issue_number)
+  return M.gh_issue_view_cmd(repo, issue_number, "number,title")
+end
+
 function M.gh_issue_view_review_loop_cmd(repo, issue_number)
   return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments")
 end
