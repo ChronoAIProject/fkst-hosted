@@ -70,7 +70,7 @@ local function pr_native_comments(event, include_review_result)
   return comments
 end
 
-local function mock_pr_origin(comments, head, head_sha, state, base_branch)
+local function mock_pr_origin(comments, head, head_sha, state, base_branch, times)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   local has_state_marker = false
@@ -121,18 +121,20 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch)
   for _, comment in ipairs(input_comments or {}) do
     table.insert(rendered_comments, render_comment(comment))
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
-      json_string(head or "devloop-owner-repo-42-01HY"),
-      json_string(head_sha or "def456"),
-      json_string(base_branch or "dev"),
-      json_string(state or "OPEN"),
-      table.concat(rendered_comments, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  for _ = 1, times or 1 do
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+      stdout = string.format(
+        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+        json_string(head or "devloop-owner-repo-42-01HY"),
+        json_string(head_sha or "def456"),
+        json_string(base_branch or "dev"),
+        json_string(state or "OPEN"),
+        table.concat(rendered_comments, ",")
+      ),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, is_draft, base_sha)

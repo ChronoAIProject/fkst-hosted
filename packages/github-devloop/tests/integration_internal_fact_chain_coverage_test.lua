@@ -359,7 +359,7 @@ return {
     mock_pr_origin({
       core.pr_origin_marker(event.proposal_id, "42", branch, impl_version, "dev"),
       core.state_marker(event.proposal_id, "fixing", event.version),
-    })
+    }, nil, nil, nil, nil, 2)
     local recovered = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("internal-chain-fix-recovery"))
     t.eq(recovered.exit_code, 0)
     local recovered_reviewing = find_raise(recovered.raises, "devloop_reviewing")
