@@ -157,6 +157,14 @@ local function mock_branch_head(head_sha)
   })
 end
 
+local function mock_branch_head_descends(descends)
+  t.mock_command("merge-base --is-ancestor", {
+    stdout = "",
+    stderr = "",
+    exit_code = descends == false and 1 or 0,
+  })
+end
+
 local function mock_non_branch_ref_head(head_sha)
   t.mock_command("git show-ref --verify refs/heads", {
     stdout = tostring(head_sha or "abc123") .. " refs/tags/devloop-owner-x-42-01HY\n",
@@ -465,6 +473,7 @@ return {
   mock_label_view = mock_label_view,
   mock_pr_open_guard = mock_pr_open_guard,
   mock_branch_head = mock_branch_head,
+  mock_branch_head_descends = mock_branch_head_descends,
   mock_non_branch_ref_head = mock_non_branch_ref_head,
   mock_comment_write = mock_comment_write,
   mock_repo_label_list = mock_repo_label_list,
