@@ -252,7 +252,10 @@ function pipeline(event)
     end
 
     local commit_result = exec_sync({
-      cmd = core.git_commit_cmd(worktree, core.implement_commit_subject(issue_number, current)),
+      cmd = core.git_commit_cmd(worktree, core.implement_commit_subject(
+        issue_number,
+        core.commit_issue_subject_snapshot(repo, issue_number)
+      )),
       timeout = 60,
     })
     if commit_result.exit_code ~= 0 then
