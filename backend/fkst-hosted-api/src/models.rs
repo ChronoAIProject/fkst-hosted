@@ -10,8 +10,19 @@
 //!   `find_one({_id})` lookups. Convert to/from `uuid::Uuid` at the edges.
 //! - Timestamps are `bson::DateTime` (millisecond UTC, driver-native) so
 //!   round-trips are lossless.
+//!
+//! Re-exports: [`RepoRef`] is shared by both the sessions and goals domains.
+//! The canonical definition lives here; `goals/model.rs` re-exports it.
 
 use serde::{Deserialize, Serialize};
+
+/// GitHub repository reference: `owner/name`. Shared by sessions (via
+/// [`SessionDoc::repo`]) and goals; re-exported by `goals/model.rs`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RepoRef {
+    pub owner: String,
+    pub name: String,
+}
 
 /// Lifecycle state of a session. Serializes lowercase on the wire.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,13 +62,53 @@ pub struct SessionDoc {
     /// Omitted when the session is personal or the package has no org.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org_id: Option<String>,
+    /// Additional package names for multi-package sessions. New inserts
+    /// always write >= 1 entry. Legacy docs (field absent) fall back to
+    /// [`Self::effective_package_names`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub package_names: Vec<String>,
+    /// Goal this session was spawned from, if any. Classic (non-goal)
+    /// sessions leave this `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_id: Option<bson::Uuid>,
+    /// Target GitHub repo, inherited from the goal when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<RepoRef>,
+    /// Event that triggered this session (e.g. `"goal-trigger"`, `"manual"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triggered_by: Option<String>,
     pub created_at: bson::DateTime,
     pub started_at: Option<bson::DateTime>,
     pub stopped_at: Option<bson::DateTime>,
 }
 
-/// `leases` collection: `_id` is the package name (at most one live holder
-/// per package).
+impl SessionDoc {
+    /// Returns the effective set of package names for this session.
+    /// Falls back to `[package_name]` when the `package_names` vec is empty
+    /// (legacy documents or single-package sessions).
+    pub fn effective_package_names(&self) -> Vec<String> {
+        if self.package_names.is_empty() {
+            vec![self.package_name.clone()]
+        } else {
+            self.package_names.clone()
+        }
+    }
+
+    /// Returns the lease key for this session. For goal sessions this is
+    /// `"goal-<hyphenated-uuid>"`; for classic sessions it is the
+    /// `package_name`. The result always satisfies `is_valid_name` because
+    /// the UUID's hex chars and hyphens are in `[A-Za-z0-9_-]+`.
+    pub fn lease_key(&self) -> String {
+        match self.goal_id {
+            Some(goal_id) => format!("goal-{}", goal_id),
+            None => self.package_name.clone(),
+        }
+    }
+}
+
+/// `leases` collection: `_id` is the lease key — either a package name (for
+/// classic sessions) or `"goal-<uuid>"` (for goal-triggered sessions). At most
+/// one live holder per lease key.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LeaseDoc {
     #[serde(rename = "_id")]
@@ -89,6 +140,10 @@ mod tests {
             run_key: None,
             owner_user_id: None,
             org_id: None,
+            package_names: vec![],
+            goal_id: None,
+            repo: None,
+            triggered_by: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
             stopped_at: None,
@@ -243,5 +298,128 @@ mod tests {
         let back: SessionDoc = bson::from_document(raw).expect("deserialize");
         assert_eq!(back.owner_user_id, None);
         assert_eq!(back.org_id, None);
+    }
+
+    // ---- new session fields (goal integration) serde tests ----
+
+    #[test]
+    fn new_fields_are_omitted_when_absent() {
+        let raw = bson::to_document(&sample_session()).expect("serialize");
+        assert!(
+            !raw.contains_key("package_names"),
+            "package_names must be omitted when empty"
+        );
+        assert!(
+            !raw.contains_key("goal_id"),
+            "goal_id must be omitted when None"
+        );
+        assert!(
+            !raw.contains_key("repo"),
+            "repo must be omitted when None"
+        );
+        assert!(
+            !raw.contains_key("triggered_by"),
+            "triggered_by must be omitted when None"
+        );
+    }
+
+    #[test]
+    fn new_fields_round_trip_when_set() {
+        let mut doc = sample_session();
+        doc.package_names = vec!["pkg-a".to_string(), "pkg-b".to_string()];
+        doc.goal_id = Some(bson::Uuid::new());
+        doc.repo = Some(RepoRef {
+            owner: "acme".to_string(),
+            name: "my-repo".to_string(),
+        });
+        doc.triggered_by = Some("goal-trigger".to_string());
+        let raw = bson::to_document(&doc).expect("serialize");
+        assert_eq!(
+            raw.get_array("package_names").expect("package_names").len(),
+            2
+        );
+        match raw.get("goal_id").expect("goal_id present") {
+            Bson::Binary(_) => {}
+            other => panic!("expected Bson::Binary for goal_id, got {other:?}"),
+        }
+        match raw.get("repo").expect("repo present") {
+            Bson::Document(_) => {}
+            other => panic!("expected Bson::Document for repo, got {other:?}"),
+        }
+        assert_eq!(
+            raw.get_str("triggered_by").expect("triggered_by"),
+            "goal-trigger"
+        );
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn pre_existing_docs_without_new_fields_still_deserialize() {
+        let mut raw = bson::to_document(&sample_session()).expect("serialize");
+        // Simulate a document written before the new fields existed.
+        raw.remove("package_names");
+        raw.remove("goal_id");
+        raw.remove("repo");
+        raw.remove("triggered_by");
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back.package_names, Vec::<String>::new());
+        assert_eq!(back.goal_id, None);
+        assert_eq!(back.repo, None);
+        assert_eq!(back.triggered_by, None);
+    }
+
+    #[test]
+    fn lease_key_returns_package_name_for_classic_sessions() {
+        let doc = sample_session();
+        assert_eq!(doc.lease_key(), "demo-package");
+    }
+
+    #[test]
+    fn lease_key_returns_goal_prefix_for_goal_sessions() {
+        let mut doc = sample_session();
+        let goal_uuid = bson::Uuid::parse_str("a1b2c3d4-e5f6-7890-abcd-ef1234567890").unwrap();
+        doc.goal_id = Some(goal_uuid);
+        let key = doc.lease_key();
+        assert_eq!(key, "goal-a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    }
+
+    #[test]
+    fn lease_key_for_goal_sessions_passes_is_valid_name() {
+        let mut doc = sample_session();
+        let goal_uuid = bson::Uuid::parse_str("a1b2c3d4-e5f6-7890-abcd-ef1234567890").unwrap();
+        doc.goal_id = Some(goal_uuid);
+        let key = doc.lease_key();
+        // The lease key must satisfy the package-name regex [A-Za-z0-9_-]+
+        let re = regex::Regex::new("^[A-Za-z0-9_-]+$").unwrap();
+        assert!(
+            re.is_match(&key),
+            "lease key {:?} must match [A-Za-z0-9_-]+",
+            key
+        );
+    }
+
+    #[test]
+    fn effective_package_names_falls_back_to_single_package_name() {
+        let doc = sample_session();
+        assert_eq!(doc.effective_package_names(), vec!["demo-package"]);
+    }
+
+    #[test]
+    fn effective_package_names_returns_vec_when_non_empty() {
+        let mut doc = sample_session();
+        doc.package_names = vec!["pkg-a".to_string(), "pkg-b".to_string()];
+        assert_eq!(doc.effective_package_names(), vec!["pkg-a", "pkg-b"]);
+    }
+
+    #[test]
+    fn repo_ref_round_trips_losslessly() {
+        let r = RepoRef {
+            owner: "acme".to_string(),
+            name: "billing".to_string(),
+        };
+        let raw = bson::to_document(&r).expect("serialize");
+        let back: RepoRef = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, r);
     }
 }

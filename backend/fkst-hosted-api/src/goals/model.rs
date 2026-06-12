@@ -48,11 +48,9 @@ pub enum GoalStatus {
 }
 
 /// GitHub repository reference: `owner/name`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RepoRef {
-    pub owner: String,
-    pub name: String,
-}
+/// Canonical definition is in [`crate::models::RepoRef`]; re-exported here
+/// for backward compatibility.
+pub use crate::models::RepoRef;
 
 /// `goals` collection document: `_id` is a UUID stored as BSON Binary subtype 4.
 ///
