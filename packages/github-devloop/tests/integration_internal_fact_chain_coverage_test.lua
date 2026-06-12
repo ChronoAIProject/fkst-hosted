@@ -92,37 +92,43 @@ local function mock_decompose_child_issue_list(event, indexes)
 end
 
 local function live_308_decompose_reconcile_stream(event)
+  local proposal_id = "github-devloop/issue/owner/repo/42"
+  local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705"
+  event.proposal_id = proposal_id
+  event.version = version
+  event.dedup_key = core._dedup_key({ "decompose", proposal_id, version })
   return {
-    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
-    core.state_marker(event.proposal_id, "blocked", event.version),
-    core.fix_reconcile_marker(event.proposal_id, event.version, "drop"),
-    core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+    'github-devloop implementation PR for issue #285\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/repo/42" issue="42" branch="devloop-owner-repo-42-01HY" impl_version="ready/consensus-github-devloop/issue/owner/repo/42/2026-06-10T13-45-26Z" base_branch="dev" -->',
+    'github-devloop fix-loop reconcile decision: drop\n\nReason:\nfix-loop-max-rounds-after-14-rounds\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="blocked" version="' .. version .. '" stage_rank="800" -->\n<!-- fkst:github-devloop:fix-reconcile:v1 proposal="github-devloop/issue/owner/repo/42" version="' .. version .. '" round="14" action="drop" dedup="fix-reconcile:' .. version .. '" -->\n' .. "⟦AI:FKST⟧",
+    'github-devloop decomposed blocked PR into 3 follow-up issue(s)\n\n<!-- fkst:github-devloop:decomposed:v1 proposal="github-devloop/issue/owner/repo/42" version="' .. version .. '" pr="7" count="3" -->',
   }
 end
 
 local function live_305_merge_gate_fix_stream(event, fixing_version)
-  local review_proposal = core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, event.reviewed_head_sha)
+  local proposal_id = "github-devloop/issue/owner/repo/42"
+  local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-09T18-20-31Z"
+  local head_sha = "def456"
+  local review_proposal = "github-devloop/pr-review/owner-repo/7/ready-consensus-github-devloop-issue-owner-repo-42-2026-06-09T18-20-31Z/def456"
   local review_dedup = "consensus:" .. review_proposal .. "/review"
-  local merge_gate = core.merge_gate_marker(
-    event.proposal_id,
-    event.pr_number,
-    fixing_version,
-    review_proposal,
-    review_dedup,
-    event.reviewed_head_sha,
-    nil,
-    "rollup-red"
-  )
+  fixing_version = version .. "/fix/1"
+  event.proposal_id = proposal_id
+  event.version = version
+  event.review_proposal_id = review_proposal
+  event.review_dedup_key = review_dedup
+  event.reviewed_head_sha = head_sha
+  event.dedup_key = core._dedup_key({ "merge-ready", proposal_id, version, "7", head_sha })
+  local merge_gate = 'github-devloop merge gate failed: rollup-red\nReproduce locally: scripts/run.sh test\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="fixing" version="' .. fixing_version .. '" stage_rank="700" -->\n<!-- fkst:github-devloop:merge-gate:v1 proposal="github-devloop/issue/owner/repo/42" pr="7" version="' .. fixing_version .. '" review_proposal="' .. review_proposal .. '" review_dedup="' .. review_dedup .. '" head_sha="def456" reason="rollup-red" -->'
   return {
     pr_comments = {
-      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
-      core.state_marker(event.proposal_id, "reviewing", event.version),
+      'github-devloop implementation PR for issue #300\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/repo/42" issue="42" branch="devloop-owner-repo-42-01HY" impl_version="' .. version .. '" base_branch="dev" -->',
+      'github-devloop PR is ready for review\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="reviewing" version="' .. version .. '" stage_rank="675" -->',
       merge_gate,
     },
     issue_comments = {
-      core.state_marker(event.proposal_id, "fixing", fixing_version),
+      'github-devloop PR fix is in progress\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="fixing" version="' .. fixing_version .. '" stage_rank="700" -->',
       merge_gate,
     },
+    fixing_version = fixing_version,
     review_proposal = review_proposal,
     review_dedup = review_dedup,
   }
@@ -451,9 +457,7 @@ return {
   end,
 
   test_observe_pr_live_308_decompose_reconcile_replay_does_not_require_fix_feedback = function()
-    local event = core.build_devloop_decompose_payload(h.fix_reconcile({
-      issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705",
-    }))
+    local event = core.build_devloop_decompose_payload(h.fix_reconcile())
     event.review_proposal_id = nil
     event.review_dedup_key = nil
     event.head_sha = nil
@@ -483,6 +487,7 @@ return {
     local event = merge_ready()
     local fixing_version = core.next_fix_version(event.version)
     local fixture = live_305_merge_gate_fix_stream(event, fixing_version)
+    fixing_version = fixture.fixing_version
     mock_bot_env()
     mock_pr_origin(fixture.pr_comments)
     mock_issue_result_view({ "fkst-dev:fixing" }, fixture.issue_comments)
