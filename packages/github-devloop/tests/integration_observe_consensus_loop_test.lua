@@ -201,7 +201,7 @@ return {
     mock_pr_origin({
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       reject_comment,
-    })
+    }, nil, nil, nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal"))
     t.eq(result.exit_code, 0)
@@ -241,7 +241,7 @@ return {
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", core._strip_latest_fix_version_suffix(event.version), "dev"),
       reject_comment,
       core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(event.version)),
-    })
+    }, nil, nil, nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-progressed"))
     t.eq(result.exit_code, 0)
@@ -260,7 +260,7 @@ return {
     mock_pr_origin({
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "fixing", event.version),
-    })
+    }, nil, nil, nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-no-fact"))
     t.eq(result.exit_code, 0)
@@ -305,7 +305,7 @@ return {
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "review-meta", event.version),
       marker,
-    })
+    }, nil, nil, nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-self-heal"))
     t.eq(result.exit_code, 0)
@@ -339,7 +339,7 @@ return {
       core.state_marker(event.proposal_id, "review-meta", event.version),
       core.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard"),
     })
-    mock_pr_origin({ proposal_id = event.proposal_id, version = impl_version })
+    mock_pr_origin({ proposal_id = event.proposal_id, version = impl_version }, nil, nil, nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-fix-escalation"))
     t.eq(result.exit_code, 0)
@@ -374,7 +374,7 @@ return {
     mock_pr_origin({
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker(event.proposal_id, "review-meta", event.version),
-    }, nil, "not-a-sha")
+    }, nil, "not-a-sha", nil, nil, 2)
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" } }), opts("observe-issue-review-meta-unparseable-state-fact"))
     t.eq(result.exit_code, 0)
