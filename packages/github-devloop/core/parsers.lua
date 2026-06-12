@@ -291,6 +291,7 @@ function M.parse_issue_view_observe(stdout)
   return {
     title = tostring(decoded.title or ""),
     state = decoded.state,
+    state_reason = decoded.stateReason or decoded.state_reason,
     comments = M.comments_from_json(decoded.comments),
   }
 end

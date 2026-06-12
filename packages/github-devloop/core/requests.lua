@@ -315,6 +315,28 @@ function M.build_dependency_hold_comment_request(repo, issue_number, proposal_id
   }
 end
 
+function M.build_dependency_release_comment_request(repo, issue_number, proposal_id, version, gate, source_ref)
+  local reason = M.neutralize_untrusted_comment_text(gate and gate.reason or "satisfied")
+  if reason == "" then
+    reason = "satisfied"
+  end
+  local note_markers = M.dependency_gate_note_markers(proposal_id, version, gate)
+  local markers = M.dependency_release_marker(proposal_id, version)
+  if note_markers ~= "" then
+    markers = markers .. "\n" .. note_markers
+  end
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = M.comment_string("dependency_release_prefix") .. reason
+      .. "\n\n" .. M.comment_string("reason_inline_label") .. reason
+      .. "\n\n" .. markers,
+    dedup_key = M._dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(version), reason }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
 function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
   local version = M.reconcile_state_version(reconcile.base_version, reconcile.round)
   local marker = M.reconcile_marker(reconcile.proposal_id, reconcile.base_version, reconcile.round, action)

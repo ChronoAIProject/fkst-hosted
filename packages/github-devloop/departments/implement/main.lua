@@ -117,12 +117,6 @@ function pipeline(event)
     return
   end
 
-  local gate = core.dependency_gate(repo, issue_number)
-  if not gate.ok then
-    core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "hold-dependency-backstop", gate.reason)
-    return
-  end
-
   local lock_key = core.implement_lock_key(ready.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "no transition lock key")
@@ -131,7 +125,6 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
-    local branches = core.branch_config()
 
     local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
@@ -141,6 +134,15 @@ function pipeline(event)
     local current = core.parse_issue_view_implement(view.stdout)
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
     local state = core.current_state(current.comments, ready.proposal_id)
+    local gate = core.dependency_gate(repo, issue_number, {
+      proposal_id = ready.proposal_id,
+      version = ready.dedup_key,
+      comments = current.comments,
+    })
+    if not gate.ok then
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-dependency-backstop", gate.reason)
+      return
+    end
     if state.state == "implementing" or state.state == "impl-failed" then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation fact marker already visible")
       return
@@ -156,6 +158,7 @@ function pipeline(event)
     end
     core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
 
+    local branches = core.branch_config()
     local issue_slug = core.safe_issue_slug(repo, issue_number)
     local branch = core.implement_branch(repo, issue_number, ready.dedup_key)
     core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {

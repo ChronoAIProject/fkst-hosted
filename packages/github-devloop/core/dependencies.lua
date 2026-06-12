@@ -24,6 +24,13 @@ local function gate(kind, reason, unmet)
   }
 end
 
+local function add_gate_note(notes, note)
+  if type(notes) ~= "table" or type(note) ~= "table" then
+    return
+  end
+  table.insert(notes, note)
+end
+
 local function add_unmet(unmet, seen, number)
   local core = root()
   if not core._is_positive_pr_number(number) then
@@ -110,6 +117,7 @@ local function parse_blocked_by(stdout)
     table.insert(blockers, {
       number = tonumber(node.number),
       state = tostring(node.state or ""),
+      state_reason = tostring(node.stateReason or node.state_reason or ""),
       repo = blocker_repo,
     })
   end
@@ -124,6 +132,12 @@ local function parse_blocked_by(stdout)
     truncated = true
   end
   return blockers, truncated
+end
+
+local function normalized_state_reason(value)
+  local text = tostring(value or ""):lower():gsub("_", "-")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  return text
 end
 
 local function fetch_blocked_by(repo, issue_number)
@@ -179,10 +193,7 @@ local function blocker_merged(repo, blocker_number)
     return nil, "malformed-json"
   end
   local state = core.current_entity_state(current.comments, blocker_proposal_id)
-  if type(state) ~= "table" then
-    return nil, "unknown-blocker"
-  end
-  if state.state == "merged" then
+  if type(state) == "table" and state.state == "merged" then
     return true, nil
   end
 
@@ -230,8 +241,44 @@ local function prove_blocker_merged(repo, blocker_number)
   return merged, reason
 end
 
+function M.dependency_waiver_fact(comments, proposal_id, version, blocker_number)
+  local core = root()
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-waiver:v1.-%-%->"
+  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
+    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+      if marker_attr(marker, "proposal") == tostring(proposal_id)
+        and marker_attr(marker, "version") == tostring(version)
+        and tonumber(marker_attr(marker, "blocker") or "") == tonumber(blocker_number) then
+        return {
+          proposal_id = tostring(proposal_id),
+          version = tostring(version),
+          blocker_number = tonumber(blocker_number),
+          reason = decode_dependency_attr(marker_attr(marker, "reason")) or "dependency-waiver",
+          comment_created_at = core._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+local function has_dependency_waiver(context, blocker_number)
+  if type(context) ~= "table" then
+    return false
+  end
+  return M.dependency_waiver_fact(
+    context.comments,
+    context.proposal_id,
+    context.version,
+    blocker_number
+  ) ~= nil
+end
+
 local visit
-visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
+visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth, context, notes)
   if depth > max_dependency_depth then
     add_unmet(unmet, unmet_seen, issue_number)
     return gate("unresolvable", "depth-cap-exceeded", unmet)
@@ -261,7 +308,14 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
       return gate("unresolvable", "cross-repo-blocker", unmet)
     end
 
-    if not cached_blocker_merged(repo, blocker.number) then
+    local state_reason = normalized_state_reason(blocker.state_reason)
+    if blocker.state == "CLOSED" and state_reason == "not-planned" then
+      add_gate_note(notes, {
+        kind = "dependency-void",
+        blocker_number = blocker.number,
+        reason = "not_planned",
+      })
+    elseif not cached_blocker_merged(repo, blocker.number) then
       local prefer_terminal_proof = blocker.state == "CLOSED"
       local merged = nil
       local merged_reason = nil
@@ -270,8 +324,8 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
         merged, merged_reason = prove_blocker_merged(repo, blocker.number)
       end
 
-      if not prefer_terminal_proof or merged == false then
-        local nested = visit(repo, blocker.number, stack, visited, unmet, unmet_seen, depth + 1)
+      if not prefer_terminal_proof or (merged == false and state_reason ~= "completed") then
+        local nested = visit(repo, blocker.number, stack, visited, unmet, unmet_seen, depth + 1, context, notes)
         if nested.kind == "cycle" or nested.kind == "unresolvable" then
           stack[key] = nil
           return nested
@@ -288,7 +342,19 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
         return gate("unresolvable", merged_reason or "unknown-blocker", unmet)
       end
       if not merged then
-        add_unmet(unmet, unmet_seen, blocker.number)
+        if prefer_terminal_proof and state_reason == "completed" and has_dependency_waiver(context, blocker.number) then
+          add_gate_note(notes, {
+            kind = "dependency-waiver",
+            blocker_number = blocker.number,
+            reason = "completed_without_merged_marker",
+          })
+        else
+          add_unmet(unmet, unmet_seen, blocker.number)
+          if prefer_terminal_proof and state_reason == "completed" then
+            stack[key] = nil
+            return gate("waiting", "dependency-waiver-required", unmet)
+          end
+        end
       end
     end
   end
@@ -298,7 +364,12 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
   if #unmet > 0 then
     return gate("waiting", "waiting-on-dependency", unmet)
   end
-  return gate("satisfied", "satisfied", {})
+  local result = gate("satisfied", "satisfied", {})
+  if type(notes) == "table" and #notes > 0 then
+    result.reason = notes[1].kind
+    result.notes = notes
+  end
+  return result
 end
 
 function M.gh_blocked_by_cmd(repo, issue_number)
@@ -309,16 +380,16 @@ function M.gh_blocked_by_cmd(repo, issue_number)
   end
   local query = '{repository(owner:"' .. owner .. '",name:"' .. name
     .. '"){issue(number:' .. tostring(math.floor(tonumber(issue_number)))
-    .. '){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number state repository{nameWithOwner}}}}}}'
+    .. '){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number state stateReason repository{nameWithOwner}}}}}}'
   return "gh api graphql -f query=" .. core._shell_single_quote(query)
 end
 
-function M.dependency_gate(repo, issue_number)
+function M.dependency_gate(repo, issue_number, context)
   local core = root()
   if split_repo(repo) == nil or not core._is_positive_pr_number(issue_number) then
     return gate("unresolvable", "invalid-target", {})
   end
-  local ok, result = pcall(visit, repo, issue_number, {}, {}, {}, {}, 0)
+  local ok, result = pcall(visit, repo, issue_number, {}, {}, {}, {}, 0, context, {})
   if not ok or type(result) ~= "table" then
     return gate("unresolvable", "dependency-gate-exception", {})
   end
@@ -356,6 +427,41 @@ function M.dependency_release_marker(proposal_id, version)
   return '<!-- fkst:github-devloop:dependency-release:v1 proposal="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
     .. '" -->'
+end
+
+function M.dependency_void_marker(proposal_id, version, blocker_number, reason)
+  return '<!-- fkst:github-devloop:dependency-void:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" blocker="' .. dependency_unmet_field({ blocker_number })
+    .. '" reason="' .. safe_dependency_attr(reason or "not_planned")
+    .. '" -->'
+end
+
+function M.dependency_waiver_marker(proposal_id, version, blocker_number, reason)
+  return '<!-- fkst:github-devloop:dependency-waiver:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" blocker="' .. dependency_unmet_field({ blocker_number })
+    .. '" reason="' .. safe_dependency_attr(reason or "dependency-waiver")
+    .. '" -->'
+end
+
+function M.dependency_gate_note_markers(proposal_id, version, gate_result)
+  local lines = {}
+  if type(gate_result) ~= "table" or type(gate_result.notes) ~= "table" then
+    return ""
+  end
+  for _, note in ipairs(gate_result.notes) do
+    if type(note) == "table" and note.kind == "dependency-void" then
+      table.insert(lines, M.dependency_void_marker(proposal_id, version, note.blocker_number, note.reason))
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
+function M.dependency_gate_has_notes(gate_result)
+  return type(gate_result) == "table"
+    and type(gate_result.notes) == "table"
+    and #gate_result.notes > 0
 end
 
 function M.dependency_hold_fact(comments, proposal_id)
