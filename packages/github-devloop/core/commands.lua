@@ -385,6 +385,12 @@ function M.gh_pr_diff_cmd(repo, pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
 end
 
+function M.gh_pr_diff_name_only_cmd(repo, pr_number)
+  return "gh pr diff " .. M._shell_single_quote(pr_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --name-only"
+end
+
 function M.gh_pr_view_head_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
