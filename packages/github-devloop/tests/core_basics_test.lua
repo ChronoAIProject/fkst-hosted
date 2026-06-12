@@ -483,7 +483,7 @@ return {
   test_gh_issue_view_state_command_and_parse = function()
     t.eq(
       core.gh_issue_list_intake_cmd("owner/repo", 50),
-      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels"
+      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels,assignees"
     )
     t.eq(
       core.gh_pr_list_head_base_cmd("owner/repo", "integration/dev", "dev"),
@@ -509,7 +509,7 @@ return {
 
     t.eq(
       core.gh_issue_view_state_cmd("owner/repo", 42),
-      "gh issue view '42' --repo 'owner/repo' --json labels,state,comments"
+      "gh issue view '42' --repo 'owner/repo' --json labels,state,comments,assignees"
     )
     t.eq(
       core.gh_issue_view_result_cmd("owner/repo", 42),
@@ -536,9 +536,9 @@ return {
 
   test_gh_issue_view_commands_match_existing_strings = function()
     local cases = {
-      { core.gh_issue_view_intake_scan_cmd, "labels,comments,state" },
-      { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state" },
-      { core.gh_issue_view_state_cmd, "labels,state,comments" },
+      { core.gh_issue_view_intake_scan_cmd, "labels,comments,state,assignees" },
+      { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state,assignees" },
+      { core.gh_issue_view_state_cmd, "labels,state,comments,assignees" },
       { core.gh_issue_view_result_cmd, "labels,comments" },
       { core.gh_issue_view_loop_cmd, "title,updatedAt,labels,comments,state" },
       { core.gh_issue_view_meta_cmd, "title,labels,comments" },
@@ -549,7 +549,7 @@ return {
       { core.gh_issue_view_decompose_cmd, "title,body,labels,comments" },
       { core.gh_issue_view_fix_cmd, "title,labels,comments" },
       { core.gh_issue_view_review_loop_cmd, "title,labels,comments" },
-      { core.gh_issue_view_merge_cmd, "title,labels,comments,state" },
+      { core.gh_issue_view_merge_cmd, "title,labels,comments,state,assignees" },
       { core.gh_issue_view_observe_cmd, "title,comments,state,stateReason" },
     }
 

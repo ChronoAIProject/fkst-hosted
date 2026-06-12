@@ -342,6 +342,13 @@ function pipeline(event)
     local state = snapshot.state
     local issue_state = core.current_state(current.comments, proposal_id)
     if state.state ~= nil then
+      if core.issue_claim_state(current.assignees, core.claim_owner()) ~= "self" then
+        core.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
+        return
+      end
+      if core.maybe_release_stale_self_claim("observe_issue", issue.repo, issue.number, current, proposal_id, state) then
+        return
+      end
       if maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event.ts) then
         return
       end
@@ -375,6 +382,9 @@ function pipeline(event)
     if transition == "pending" then
       core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "unmanaged state marker pending for observe")
       error("github-devloop: unmanaged state marker pending for observe; retrying")
+    end
+    if not core.claim_issue_for_management("observe_issue", issue.repo, issue.number, current, proposal_id) then
+      return
     end
     core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
 

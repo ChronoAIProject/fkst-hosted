@@ -20,6 +20,7 @@ function M.issue_state_from_json(decoded)
     labels = labels,
     comments = M.comments_from_json(decoded.comments),
     state = decoded.state,
+    assignees = M.assignee_logins(decoded.assignees),
   }
 end
 
@@ -97,6 +98,7 @@ function M.parse_issue_list_intake(stdout, limit)
         body = tostring(issue.body or ""),
         updated_at = issue.updatedAt or issue.updated_at,
         labels = label_names(issue.labels),
+        assignees = M.assignee_logins(issue.assignees),
       })
     end
   end)
@@ -217,6 +219,7 @@ function M.parse_issue_view_result(stdout)
   return {
     labels = state.labels,
     comments = state.comments,
+    assignees = M.assignee_logins(decoded.assignees),
   }
 end
 
@@ -229,6 +232,7 @@ function M.parse_issue_view_loop(stdout)
     state = decoded.state,
     labels = result.labels,
     comments = result.comments,
+    assignees = result.assignees,
   }
 end
 
@@ -246,6 +250,7 @@ function M.parse_issue_view_intake_judge(stdout)
     state = decoded.state,
     labels = result.labels,
     comments = result.comments,
+    assignees = result.assignees,
   }
 end
 
@@ -302,7 +307,8 @@ end
 
 function M.parse_issue_view_merge(stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_meta(stdout)
+  local result = M.parse_issue_view_result(stdout)
+  result.title = tostring(decoded.title or "")
   result.state = decoded.state
   return result
 end

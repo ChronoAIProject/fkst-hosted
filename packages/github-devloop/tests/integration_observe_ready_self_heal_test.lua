@@ -117,7 +117,7 @@ return {
     t.eq(second_proposal.dedup_key, core.build_proposal(updated_event).dedup_key .. "/replay")
     t.is_true(second_proposal.dedup_key ~= first_proposal.dedup_key)
     t.is_true(second_proposal.content_fetch ~= first_proposal.content_fetch)
-    t.eq(count_calls("--json title,body,comments,labels,state"), 3)
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 3)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -142,7 +142,7 @@ return {
     t.eq(proposal.round, 1)
     t.eq(proposal.convergence_question, "Narrow the question")
     t.eq(proposal.prior_round_digests[1].digest, "needs-narrower-scope")
-    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -165,7 +165,7 @@ return {
       source_ref = event.source_ref,
     }).dedup_key)
     t.is_nil(ready_raise.payload.ready_hand_off)
-    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -181,7 +181,7 @@ return {
     local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-issue-ready-self-heal-advanced"))
     t.eq(observed.exit_code, 0)
     t.eq(find_raise(observed.raises, "devloop_ready"), nil)
-    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json body"), 0)
 
     mock_issue_implement_raw({ "fkst-dev:implementing" }, {
@@ -212,7 +212,7 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"))
-    t.eq(count_calls("--json title,body,comments,labels,state"), 1)
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
   end,
 

@@ -45,6 +45,17 @@ local function log_gate(merge_ready, outcome, reason)
   })
 end
 
+local function verify_issue_claim_before_merge_write(repo, issue_number, merge_ready, current_issue)
+  if issue_number == nil then
+    return true
+  end
+  if core.issue_claim_state(current_issue and current_issue.assignees, core.claim_owner()) == "self" then
+    return true
+  end
+  core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "claim", "merge-write", "skip-claim-lost", "CLAIM lost before merge external write")
+  return false
+end
+
 local function require_consensus_review_approve(comments, merge_ready)
   local ok, reason = core.review_result_approval_matches_event(comments, merge_ready)
   if ok then
@@ -343,6 +354,14 @@ function pipeline(event)
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-idempotent(already at to_state)", "merged marker already visible")
       return
     end
+    local issue_view = nil
+    if issue_number ~= nil then
+      issue_view = core.gh_exec({ cmd = core.gh_issue_view_merge_cmd(repo, issue_number), timeout = 30 })
+      if issue_view.exit_code ~= 0 then
+        error("github-devloop: gh issue merge view failed: " .. tostring(issue_view.stderr))
+      end
+    end
+    local current_issue = issue_view ~= nil and core.parse_issue_view_merge(issue_view.stdout) or nil
     local transition = core.cyclic_transition_status(state, { "merge-ready", "merging" }, "merging", merge_ready.version)
     if transition == "pending" then
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", core.cas_outcome(state, transition, merge_ready.version), "merge-ready state marker not yet visible")
@@ -433,6 +452,9 @@ function pipeline(event)
       log_gate(merge_ready, "dry-run", "merge requires FKST_GITHUB_WRITE=1")
       return
     end
+    if not verify_issue_claim_before_merge_write(repo, issue_number, merge_ready, current_issue) then
+      return
+    end
     if not require_consensus_review_approve(current_pr.comments, merge_ready) then
       return
     end
@@ -503,6 +525,9 @@ function pipeline(event)
     end
     if not write_enabled then
       log_gate(merge_ready, "dry-run", "write-time FKST_GITHUB_WRITE missing")
+      return
+    end
+    if not verify_issue_claim_before_merge_write(repo, issue_number, merge_ready, current_issue) then
       return
     end
     log_gate(merge_ready, "write-ready", "write-time FKST_GITHUB_WRITE=1 and trusted review-result approve")
