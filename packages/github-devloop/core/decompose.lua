@@ -102,7 +102,7 @@ function M.has_decomposed_marker(comments, proposal_id, version, pr_number)
   return false
 end
 
-function M.decomposed_fact(comments, proposal_id)
+function M.decomposed_fact(comments, proposal_id, version, pr_number)
   if type(comments) ~= "table" then
     return nil
   end
@@ -110,17 +110,20 @@ function M.decomposed_fact(comments, proposal_id)
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if marker:match('proposal="([^"]+)"') == tostring(proposal_id) then
-        local pr_number = marker:match('pr="([^"]+)"')
+        local marker_version = marker:match('version="([^"]*)"')
+        local marker_pr_number = marker:match('pr="([^"]+)"')
         local count = tonumber(marker:match('count="([^"]+)"'))
-        if M._is_positive_pr_number(pr_number)
+        if (version == nil or marker_version == tostring(version))
+          and (pr_number == nil or tostring(marker_pr_number) == tostring(pr_number))
+          and M._is_positive_pr_number(marker_pr_number)
           and count ~= nil
           and count >= 1
           and count <= max_decompose_issues
           and count % 1 == 0 then
           return {
             proposal_id = tostring(proposal_id),
-            version = marker:match('version="([^"]*)"'),
-            pr_number = tonumber(pr_number),
+            version = marker_version,
+            pr_number = tonumber(marker_pr_number),
             count = count,
             comment_created_at = M._comment_created_at(comment),
           }
@@ -129,6 +132,68 @@ function M.decomposed_fact(comments, proposal_id)
     end
   end
   return nil
+end
+
+function M.parse_decompose_child_issue_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local issues = {}
+  if type(decoded) ~= "table" then
+    return issues
+  end
+  for _, issue in ipairs(decoded) do
+    if type(issue) == "table" then
+      local author_login = issue.author_login
+      if author_login == nil and type(issue.author) == "table" then
+        author_login = issue.author.login
+      end
+      table.insert(issues, {
+        number = issue.number,
+        title = issue.title,
+        state = issue.state,
+        body = tostring(issue.body or ""),
+        author_login = author_login,
+        url = issue.url,
+      })
+    end
+  end
+  return issues
+end
+
+function M.decompose_child_fact_indexes(comments, issues, proposal_id, version, pr_number, dedup_by_index)
+  local completed = {}
+  local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+    for marker in M._comment_body(comment):gmatch(created_pattern) do
+      local dedup = marker:match('dedup="([^"]+)"')
+      for index = 1, max_decompose_issues do
+        if type(dedup_by_index) == "table"
+          and dedup_by_index[index] ~= nil
+          and tostring(dedup) == tostring(dedup_by_index[index]) then
+          completed[index] = true
+        end
+      end
+    end
+  end
+
+  local child_pattern = "<!%-%- fkst:github%-devloop:decompose%-child:v1.-%-%->"
+  for _, issue in ipairs(issues or {}) do
+    local body = tostring(type(issue) == "table" and issue.body or "")
+    local trusted_child = type(issue) == "table"
+      and M.comment_author_login(issue) == M.trusted_bot_login()
+    if trusted_child then
+      for marker in body:gmatch(child_pattern) do
+        if marker:match('parent="([^"]+)"') == tostring(proposal_id)
+          and marker:match('version="([^"]*)"') == tostring(version)
+          and tostring(marker:match('pr="([^"]+)"')) == tostring(pr_number) then
+          local index = tonumber(marker:match('index="([^"]+)"'))
+          if index ~= nil and index >= 1 and index <= max_decompose_issues and index % 1 == 0 then
+            completed[index] = true
+          end
+        end
+      end
+    end
+  end
+  return completed
 end
 
 function M.decompose_child_marker(proposal_id, version, pr_number, index)

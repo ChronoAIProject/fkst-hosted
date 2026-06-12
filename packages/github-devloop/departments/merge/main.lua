@@ -439,6 +439,17 @@ function pipeline(event)
       error("github-devloop: PR fact changed after ready conversion")
     end
 
+    local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
+    if not mergeable then
+      if not core.is_not_mergeable_reason(mergeable_reason) then
+        log_gate(merge_ready, "dry-run", mergeable_reason)
+        error("github-devloop: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
+      end
+      log_gate(merge_ready, "fixing", mergeable_reason)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason)
+      return
+    end
+
     local rollup_green, rollup_reason = core.evaluate_ci_status_gate(current_pr, {
       repo = repo,
       dept = "merge",
@@ -466,16 +477,6 @@ function pipeline(event)
       local fix_reason = core.rollup_red_fix_reason(current_pr, rollup_reason)
       log_gate(merge_ready, "fixing", fix_reason)
       raise_fixing(repo, issue_number, merge_ready, state, current_pr, fix_reason)
-      return
-    end
-    local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
-    if not mergeable then
-      if not core.is_not_mergeable_reason(mergeable_reason) then
-        log_gate(merge_ready, "dry-run", mergeable_reason)
-        error("github-devloop: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
-      end
-      log_gate(merge_ready, "fixing", mergeable_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason)
       return
     end
 

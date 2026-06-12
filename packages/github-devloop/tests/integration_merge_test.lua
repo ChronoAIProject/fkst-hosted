@@ -713,6 +713,26 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
   end,
 
+  test_merge_dirty_pr_with_missing_status_moves_back_to_fixing_without_status_wait = function()
+    local event = merge_ready()
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge_rollup({ origin_marker }, "[]", "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "DIRTY")
+
+    local result = run_merge(event, opts("merge-dirty-missing-status", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 3)
+    t.eq(count_calls("gh api 'repos/owner/repo/commits/def456/check-runs'"), 0)
+    t.eq(count_calls("gh workflow run"), 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+    local fixing_payload = find_raise(result.raises, "devloop_fixing").payload
+    t.eq(fixing_payload.gate_failure_excerpt, "merge-state-dirty")
+  end,
+
   test_merge_unstable_merge_state_errors_for_retry_without_fixing = function()
     local event = merge_ready()
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")

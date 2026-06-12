@@ -24,6 +24,15 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --json number,title,body,updatedAt,labels"
 end
 
+function M.gh_issue_list_decompose_children_cmd(repo, proposal_id)
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state all"
+    .. " --limit 100"
+    .. " --search " .. M._shell_single_quote("fkst:github-devloop:decompose-child:v1 " .. tostring(proposal_id))
+    .. " --json number,title,state,author,body,url"
+end
+
 function M.gh_issue_list_recent_closed_cmd(repo, limit)
   local bounded_limit = tonumber(limit or 30)
   if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then

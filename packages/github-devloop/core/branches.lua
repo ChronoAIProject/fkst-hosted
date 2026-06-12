@@ -75,6 +75,18 @@ function M.git_trees_equal_quiet_cmd(sha_a, sha_b)
     .. M._shell_single_quote(require_safe_sha("tree compare sha", sha_b))
 end
 
+function M.git_merge_tree_empty_delta_cmd(approved_head_sha, base_head_sha, new_head_sha)
+  local approved = require_safe_sha("approved head sha", approved_head_sha)
+  local base = require_safe_sha("base head sha", base_head_sha)
+  local new_head = require_safe_sha("new head sha", new_head_sha)
+  return "tmp_tree=$(git merge-tree --write-tree "
+    .. M._shell_single_quote(approved)
+    .. " "
+    .. M._shell_single_quote(base)
+    .. ") && git diff --quiet \"$tmp_tree\" "
+    .. M._shell_single_quote(new_head)
+end
+
 function M.git_push_branch_force_with_lease_cmd(branch, new_sha, expected_old_sha)
   local safe_branch = require_safe_branch("push branch", branch)
   local safe_new_sha = require_safe_sha("new branch sha", new_sha)
