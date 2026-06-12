@@ -869,6 +869,7 @@ local function maybe_replay_review_carry_over(dept, issue, state, row, facts, li
     review_proposal_id = new_review_proposal,
     review_dedup_key = new_review_dedup,
     reviewed_head_sha = current_pr.head_sha,
+    current_head_sha = current_pr.head_sha,
   }, source_ref)
   M.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
   return raise_effects(dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
@@ -906,6 +907,7 @@ local function replay_merge_ready_like(dept, issue, state, row, facts)
     review_proposal_id = fields.review_proposal_id,
     review_dedup_key = fields.review_dedup_key,
     reviewed_head_sha = fields.reviewed_head_sha,
+    current_head_sha = current_pr.head_sha,
   }, fields.source_ref)
   M.log_cas_decision(dept, proposal_id, state, row.from_state, "merge-ready", "applied(replay)", "trusted head-bound merge-ready fact is visible")
   return raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {

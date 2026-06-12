@@ -595,6 +595,10 @@ function M.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, i
 end
 
 function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, review_fact, source_ref)
+  local current_head_sha = review_fact and review_fact.current_head_sha
+  if current_head_sha == nil then
+    current_head_sha = review_fact and review_fact.reviewed_head_sha
+  end
   return {
     schema = "github-devloop.merge-ready.v1",
     proposal_id = issue_proposal_id,
@@ -609,6 +613,7 @@ function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, versi
       tostring(version),
       tostring(pr_number),
       tostring(review_fact and review_fact.review_dedup_key or "review"),
+      tostring(current_head_sha or "nohead"),
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
