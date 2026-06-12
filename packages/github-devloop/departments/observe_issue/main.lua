@@ -26,6 +26,7 @@ local observe_replay_states = {
   fixing = true,
   ["review-meta"] = true,
   blocked = true,
+  ["impl-failed"] = true,
 }
 
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
@@ -128,6 +129,56 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
   return true
 end
 
+local function maybe_apply_issue_reimplement_command(issue, proposal_id, current, state)
+  local command = core.operator_command_fact(current.comments, "reimplement")
+  if command == nil then
+    return false
+  end
+  if core.has_operator_command_response(current.comments, command) then
+    core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
+    return false
+  end
+  if state.state ~= "impl-failed" then
+    core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed state")
+    local refusal = core.build_operator_issue_command_refusal_request(
+      issue.repo,
+      issue.number,
+      command,
+      "reimplement requires impl-failed state",
+      issue.source_ref
+    )
+    core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
+    return true
+  end
+
+  local attempt = 1
+  local failure = core.impl_failure_fact(current.comments, proposal_id, state.version)
+  if failure ~= nil then
+    attempt = tonumber(failure.attempt or 1) + 1
+  end
+  local payload = core.build_devloop_ready_payload({
+    proposal_id = proposal_id,
+    dedup_key = state.version,
+    source_ref = issue.source_ref,
+    impl_retry_attempt = attempt,
+  })
+  local comment_request = core.build_operator_issue_reimplement_comment_request(
+    issue.repo,
+    issue.number,
+    command,
+    attempt,
+    issue.source_ref
+  )
+  core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "applied(operator-reimplement)", "trusted operator command requested implementation retry")
+  core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
+    "github-proxy.github_issue_comment_request",
+    "devloop_ready",
+  })
+  core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  core.log_raise("observe_issue", proposal_id, "devloop_ready", payload)
+  return true
+end
+
 function pipeline(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
@@ -166,6 +217,9 @@ function pipeline(event)
         return
       end
       if maybe_apply_issue_reready_command(issue, proposal_id, current, state) then
+        return
+      end
+      if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state) then
         return
       end
       if not core.state_label_hint_matches(current.labels, state.state) then
