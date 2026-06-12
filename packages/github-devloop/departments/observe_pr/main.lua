@@ -398,7 +398,7 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed children already visible)", "decompose children are complete")
       return
     end
-    local payload = core.build_decompose_replay_payload(decomposed, fact_comments, source_ref)
+    local payload = core.build_decompose_replay_payload(decomposed, fact_comments, source_ref, completed_count)
     if payload == nil then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
       return
