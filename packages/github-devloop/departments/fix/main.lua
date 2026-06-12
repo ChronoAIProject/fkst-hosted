@@ -424,6 +424,9 @@ function pipeline(event)
       merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil,
       merge_gate_fact and merge_gate_fact.reason or nil
     )
+    if merge_context.conflicted then
+      core.log_conflict_files("fix", fix.proposal_id, fix.pr_number, merge_context.unmerged_paths)
+    end
     local codex_started_at = now()
     raise_work_card(repo, fix, {
       started_at = codex_started_at,

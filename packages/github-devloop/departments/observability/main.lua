@@ -4,8 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "devloop_observe_tick" },
-  produces = {},
-  ephemeral = { "devloop_observe_tick" },
+  produces = { "github-proxy.github_issue_create_request" },
   retry = false,
   stall_window = "2m",
 }
