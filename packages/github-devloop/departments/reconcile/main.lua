@@ -313,4 +313,6 @@ function pipeline(event)
   return pipeline_thinking(event)
 end
 
+pipeline = core.wrap_pipeline_failure("reconcile", pipeline)
+
 return M

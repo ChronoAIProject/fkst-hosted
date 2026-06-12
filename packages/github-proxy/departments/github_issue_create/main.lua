@@ -11,4 +11,6 @@ function pipeline(event)
   core.write_issue_create_request(event.payload or {})
 end
 
+pipeline = core.wrap_pipeline_failure("github_issue_create", pipeline)
+
 return M

@@ -67,4 +67,6 @@ function pipeline(event)
   })
 end
 
+pipeline = core.wrap_pipeline_failure("github_comment", pipeline)
+
 return M

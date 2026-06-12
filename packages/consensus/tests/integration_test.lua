@@ -73,6 +73,25 @@ local function codex_calls()
   return calls
 end
 
+local function assert_call_contains(calls, expected)
+  for _, call in ipairs(calls) do
+    if tostring(call.stdin or ""):find(expected, 1, true) ~= nil then
+      return
+    end
+  end
+  error("missing codex stdin fragment: " .. expected)
+end
+
+local function count_verdicts(items, verdict)
+  local count = 0
+  for _, item in ipairs(items or {}) do
+    if item.verdict == verdict then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local function assert_judgment_worktree(call, role)
   t.is_true(call.rendered:find(" -C ", 1, true) ~= nil)
   t.is_true(call.rendered:find("/judgment-worktrees/consensus-" .. role, 1, true) ~= nil)
@@ -166,6 +185,11 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 3)
+    assert_call_contains(calls, "Angle: minimal")
+    assert_call_contains(calls, "Angle: structural")
+    assert_call_contains(calls, "Angle: delete")
+    assert_call_contains(calls, "source_ref.ref: demo/consensus/42")
+    assert_call_contains(calls, "fetch-source --ref demo/consensus/42 --full")
     local minimal_call = judgment_call("angle-minimal")
     local structural_call = judgment_call("angle-structural")
     local delete_call = judgment_call("angle-delete")
@@ -322,12 +346,8 @@ return {
     t.eq(result.raises[1].payload.source_ref.kind, "proposal")
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_digests, 3)
-    local verdict_counts = {}
-    for _, digest in ipairs(result.raises[1].payload.angle_digests) do
-      verdict_counts[digest.verdict] = (verdict_counts[digest.verdict] or 0) + 1
-    end
-    t.eq(verdict_counts.approve, 2)
-    t.eq(verdict_counts.abstain, 1)
+    t.eq(count_verdicts(result.raises[1].payload.angle_digests, "approve"), 2)
+    t.eq(count_verdicts(result.raises[1].payload.angle_digests, "abstain"), 1)
     t.is_nil(result.raises[1].payload.body)
     t.is_nil(result.raises[1].payload.angle_results)
     t.is_nil(result.raises[1].payload.decision)
@@ -380,7 +400,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.eq(result.raises[1].payload.angle_digests[1].verdict, "invalid")
+    t.eq(count_verdicts(result.raises[1].payload.angle_digests, "invalid"), 1)
     t.eq(result.raises[1].payload.narrowed_question, "What concern prevents approval?")
     t.eq(#codex_calls(), 4)
   end,
@@ -511,6 +531,8 @@ return {
 
     local calls = codex_calls()
     t.eq(#calls, 2)
+    assert_call_contains(calls, "Angle: minimal")
+    assert_call_contains(calls, "Angle: delete")
     t.is_true(judgment_call("angle-minimal").stdin:find("Angle: minimal", 1, true) ~= nil)
     t.is_true(judgment_call("angle-delete").stdin:find("Angle: delete", 1, true) ~= nil)
   end,

@@ -320,4 +320,6 @@ function pipeline(event)
   end)
 end
 
+pipeline = core.wrap_pipeline_failure("observe_pr", pipeline)
+
 return M

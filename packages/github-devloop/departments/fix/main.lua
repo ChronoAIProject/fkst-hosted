@@ -447,7 +447,11 @@ function pipeline(event)
     })
     if type(result) ~= "table" or result.exit_code ~= 0 then
       local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, stderr)
+      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, stderr, {
+        queue = event.queue,
+        source_ref = fix.source_ref,
+        terminal = false,
+      })
       raise_work_card(repo, fix, {
         started_at = codex_started_at,
         finished_at = now(),
@@ -509,7 +513,11 @@ function pipeline(event)
         raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, existing_head_sha, "existing fix commit pushed and PR head verified", result.stdout or result.stderr)
         return
       end
-      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, "no-changes")
+      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, "no-changes", {
+        queue = event.queue,
+        source_ref = fix.source_ref,
+        terminal = false,
+      })
       raise_work_card(repo, fix, {
         started_at = codex_started_at,
         finished_at = now(),
@@ -600,5 +608,7 @@ function pipeline(event)
     raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, new_head_sha, "fix pushed and PR head verified", result.stdout or result.stderr)
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("fix", pipeline)
 
 return M
