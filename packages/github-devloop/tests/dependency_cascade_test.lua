@@ -120,6 +120,14 @@ local function mock_blocker_issue(issue_number, state_name)
   })
 end
 
+local function mock_blocker_issue_failure(issue_number)
+  t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
+    stdout = "",
+    stderr = "issue view failed",
+    exit_code = 1,
+  })
+end
+
 local function mock_blocker_issue_with_pr_link(issue_number, pr_number, state_name)
   local blocker_proposal_id = core.proposal_id(repo, issue_number)
   local branch = "devloop-owner-repo-" .. tostring(issue_number) .. "-01HY"
@@ -254,6 +262,16 @@ local function has_marker(raises, marker_text)
   end) ~= nil
 end
 
+local function count_calls(needle)
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 return {
   test_dependency_gate_satisfied_without_blockers = function()
     mock_blocked_by(42, {})
@@ -282,32 +300,89 @@ return {
   end,
 
   test_dependency_gate_waiting_for_open_blocker = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 11 } })
+    mock_blocked_by(11, {})
+    mock_blocker_issue(11, "ready")
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "waiting")
-    t.eq(gate.unmet[1], 7)
+    t.eq(gate.unmet[1], 11)
   end,
 
   test_dependency_gate_satisfied_for_merged_blocker = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "merged")
+    mock_blocked_by(42, { { number = 12 } })
+    mock_blocked_by(12, {})
+    mock_blocker_issue(12, "merged")
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, true)
     t.eq(gate.kind, "satisfied")
   end,
 
+  test_dependency_gate_caches_terminal_merged_blocker = function()
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
+    mock_blocked_by_failure(17)
+    mock_blocker_issue(17, "merged")
+    local first = core.dependency_gate(repo, 42)
+    t.eq(first.ok, true)
+    t.eq(first.kind, "satisfied")
+    local graphql_calls_after_first = count_calls("gh api graphql")
+    t.eq(graphql_calls_after_first, 1)
+
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
+    mock_blocked_by_failure(17)
+    local second = core.dependency_gate(repo, 42)
+    t.eq(second.ok, true)
+    t.eq(second.kind, "satisfied")
+    t.eq(count_calls("gh api graphql"), graphql_calls_after_first + 1)
+
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" }, { number = 18 } })
+    mock_blocked_by(18, {})
+    mock_blocker_issue(18, "ready")
+    local changed_root_edges = core.dependency_gate(repo, 42)
+    t.eq(changed_root_edges.ok, false)
+    t.eq(changed_root_edges.kind, "waiting")
+    t.eq(changed_root_edges.unmet[1], 18)
+
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
+    mock_blocked_by(17, {})
+    mock_blocker_issue_failure(17)
+    local third = core.dependency_gate(repo, 42)
+    t.eq(third.ok, true)
+    t.eq(third.kind, "satisfied")
+
+    t.eq(core.merged_blocker_cache_key(repo, 17), "github-devloop/dependency/merged/owner/repo/issue/17")
+  end,
+
+  test_dependency_gate_does_not_cache_waiting_blocker = function()
+    local graphql_calls_before = count_calls("gh api graphql")
+    local issue_view_calls_before = count_calls(core.gh_issue_view_observe_cmd(repo, 27))
+    mock_blocked_by(42, { { number = 27 } })
+    mock_blocked_by(27, {})
+    mock_blocker_issue(27, "ready")
+    local first = core.dependency_gate(repo, 42)
+    t.eq(first.ok, false)
+    t.eq(first.kind, "waiting")
+    t.eq(first.unmet[1], 27)
+
+    mock_blocked_by(42, { { number = 27 } })
+    mock_blocked_by(27, {})
+    mock_blocker_issue(27, "ready")
+    local second = core.dependency_gate(repo, 42)
+    t.eq(second.ok, false)
+    t.eq(second.kind, "waiting")
+    t.eq(second.unmet[1], 27)
+    t.eq(count_calls("gh api graphql"), graphql_calls_before + 4)
+    t.eq(count_calls(core.gh_issue_view_observe_cmd(repo, 27)), issue_view_calls_before + 2)
+  end,
+
   test_dependency_gate_satisfied_for_pr_stream_merged_blocker = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    local link = mock_blocker_issue_with_pr_link(7, 8, "pr-open")
-    mock_blocker_pr(7, 8, link, {
-      core.pr_origin_marker(link.proposal_id, 7, link.branch, link.impl_version, link.base_branch),
+    mock_blocked_by(42, { { number = 31, state = "CLOSED" } })
+    mock_blocked_by_failure(31)
+    local link = mock_blocker_issue_with_pr_link(31, 32, "pr-open")
+    mock_blocker_pr(31, 32, link, {
+      core.pr_origin_marker(link.proposal_id, 31, link.branch, link.impl_version, link.base_branch),
       core.state_marker(link.proposal_id, "merged", "merge-version-7"),
-      core.merged_marker(link.proposal_id, 8, "merge-version-7", "def456"),
+      core.merged_marker(link.proposal_id, 32, "merge-version-7", "def456"),
     })
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, true)
@@ -315,40 +390,40 @@ return {
   end,
 
   test_dependency_gate_waits_when_linked_pr_has_no_merged_fact = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    local link = mock_blocker_issue_with_pr_link(7, 8, "pr-open")
-    mock_blocker_pr(7, 8, link, {
-      core.pr_origin_marker(link.proposal_id, 7, link.branch, link.impl_version, link.base_branch),
+    mock_blocked_by(42, { { number = 33 } })
+    mock_blocked_by(33, {})
+    local link = mock_blocker_issue_with_pr_link(33, 34, "pr-open")
+    mock_blocker_pr(33, 34, link, {
+      core.pr_origin_marker(link.proposal_id, 33, link.branch, link.impl_version, link.base_branch),
       core.state_marker(link.proposal_id, "merge-ready", "merge-version-7"),
     })
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "waiting")
-    t.eq(gate.unmet[1], 7)
+    t.eq(gate.unmet[1], 33)
   end,
 
   test_dependency_gate_pr_stream_fetch_failure_fails_closed = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue_with_pr_link(7, 8, "pr-open")
-    mock_blocker_pr_failure(8)
+    mock_blocked_by(42, { { number = 35 } })
+    mock_blocked_by(35, {})
+    mock_blocker_issue_with_pr_link(35, 36, "pr-open")
+    mock_blocker_pr_failure(36)
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "unresolvable")
-    t.eq(gate.unmet[1], 7)
+    t.eq(gate.unmet[1], 35)
   end,
 
   test_dependency_gate_cycle = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, { { number = 42 } })
+    mock_blocked_by(42, { { number = 37 } })
+    mock_blocked_by(37, { { number = 42 } })
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "cycle")
   end,
 
   test_dependency_gate_cross_repo_and_failures_unresolvable = function()
-    mock_blocked_by(42, { { number = 7, repo = "other/repo" } })
+    mock_blocked_by(42, { { number = 41, repo = "other/repo" } })
     local cross_repo = core.dependency_gate(repo, 42)
     t.eq(cross_repo.ok, false)
     t.eq(cross_repo.kind, "unresolvable")
@@ -375,9 +450,9 @@ return {
 
   test_consensus_result_holds_for_unmet_dependency = function()
     mock_result_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 51 } })
+    mock_blocked_by(51, {})
+    mock_blocker_issue(51, "ready")
     local result = run_result()
     t.eq(result.exit_code, 0)
     t.eq(has_queue(result.raises, "devloop_ready"), false)
@@ -390,9 +465,9 @@ return {
 
   test_consensus_result_raises_ready_for_satisfied_dependency = function()
     mock_result_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "merged")
+    mock_blocked_by(42, { { number = 52 } })
+    mock_blocked_by(52, {})
+    mock_blocker_issue(52, "merged")
     local result = run_result()
     t.eq(result.exit_code, 0)
     t.is_true(has_queue(result.raises, "devloop_ready"))
@@ -400,9 +475,9 @@ return {
 
   test_observe_issue_ready_holds_then_cascades_when_satisfied = function()
     mock_observe_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 53 } })
+    mock_blocked_by(53, {})
+    mock_blocker_issue(53, "ready")
     local held = run_observe()
     t.eq(held.exit_code, 0)
     t.eq(has_queue(held.raises, "devloop_ready"), false)
@@ -413,12 +488,12 @@ return {
       {
         core.state_marker(proposal_id, "ready", version),
         "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
-          .. core.dependency_wait_marker(proposal_id, version, { 7 }),
+          .. core.dependency_wait_marker(proposal_id, version, { 53 }),
       }
     )
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "merged")
+    mock_blocked_by(42, { { number = 53 } })
+    mock_blocked_by(53, {})
+    mock_blocker_issue(53, "merged")
     local cascaded = run_observe()
     t.eq(cascaded.exit_code, 0)
     t.is_true(has_queue(cascaded.raises, "devloop_ready"))
@@ -450,8 +525,8 @@ return {
 
   test_cycle_holds_with_cycle_marker = function()
     mock_result_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, { { number = 42 } })
+    mock_blocked_by(42, { { number = 54 } })
+    mock_blocked_by(54, { { number = 42 } })
     local result = run_result()
     t.eq(result.exit_code, 0)
     t.eq(has_queue(result.raises, "devloop_ready"), false)
@@ -569,9 +644,9 @@ return {
   end,
 
   test_implement_backstop_returns_without_implementing = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 55 } })
+    mock_blocked_by(55, {})
+    mock_blocker_issue(55, "ready")
     mock_implement_issue()
     local result = run_implement()
     t.eq(result.exit_code, 0)

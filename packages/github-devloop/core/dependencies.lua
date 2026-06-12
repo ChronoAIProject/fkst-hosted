@@ -142,6 +142,31 @@ local function fetch_blocked_by(repo, issue_number)
   return blockers, nil
 end
 
+local function merged_blocker_cache_key(repo, blocker_number)
+  local core = root()
+  if not core.issue_ref_round_trips(repo, blocker_number) then
+    error("github-devloop: invalid merged blocker cache key target")
+  end
+  local key = "github-devloop/dependency/merged/"
+    .. core.safe_repo(repo)
+    .. "/issue/"
+    .. core.safe_issue(blocker_number)
+  if not core._is_path_safe_key(key, core._max_key_len) then
+    error("github-devloop: invalid merged blocker cache key")
+  end
+  return key
+end
+
+local function cached_blocker_merged(repo, blocker_number)
+  local key = merged_blocker_cache_key(repo, blocker_number)
+  return cache_get(key) == "1"
+end
+
+local function cache_blocker_merged(repo, blocker_number)
+  local key = merged_blocker_cache_key(repo, blocker_number)
+  cache_set(key, "1")
+end
+
 local function blocker_merged(repo, blocker_number)
   local core = root()
   local blocker_proposal_id = core.proposal_id(repo, blocker_number)
@@ -193,6 +218,18 @@ local function blocker_merged(repo, blocker_number)
   return merged ~= nil, nil
 end
 
+local function prove_blocker_merged(repo, blocker_number)
+  if cached_blocker_merged(repo, blocker_number) then
+    return true, nil
+  end
+
+  local merged, reason = blocker_merged(repo, blocker_number)
+  if merged == true then
+    cache_blocker_merged(repo, blocker_number)
+  end
+  return merged, reason
+end
+
 local visit
 visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
   if depth > max_dependency_depth then
@@ -224,20 +261,35 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth)
       return gate("unresolvable", "cross-repo-blocker", unmet)
     end
 
-    local nested = visit(repo, blocker.number, stack, visited, unmet, unmet_seen, depth + 1)
-    if nested.kind == "cycle" or nested.kind == "unresolvable" then
-      stack[key] = nil
-      return nested
-    end
+    if not cached_blocker_merged(repo, blocker.number) then
+      local prefer_terminal_proof = blocker.state == "CLOSED"
+      local merged = nil
+      local merged_reason = nil
 
-    local merged, merged_reason = blocker_merged(repo, blocker.number)
-    if merged == nil then
-      stack[key] = nil
-      add_unmet(unmet, unmet_seen, blocker.number)
-      return gate("unresolvable", merged_reason or "unknown-blocker", unmet)
-    end
-    if not merged then
-      add_unmet(unmet, unmet_seen, blocker.number)
+      if prefer_terminal_proof then
+        merged, merged_reason = prove_blocker_merged(repo, blocker.number)
+      end
+
+      if not prefer_terminal_proof or merged == false then
+        local nested = visit(repo, blocker.number, stack, visited, unmet, unmet_seen, depth + 1)
+        if nested.kind == "cycle" or nested.kind == "unresolvable" then
+          stack[key] = nil
+          return nested
+        end
+      end
+
+      if not prefer_terminal_proof then
+        merged, merged_reason = prove_blocker_merged(repo, blocker.number)
+      end
+
+      if merged == nil then
+        stack[key] = nil
+        add_unmet(unmet, unmet_seen, blocker.number)
+        return gate("unresolvable", merged_reason or "unknown-blocker", unmet)
+      end
+      if not merged then
+        add_unmet(unmet, unmet_seen, blocker.number)
+      end
     end
   end
 
@@ -273,6 +325,8 @@ function M.dependency_gate(repo, issue_number)
   result.ok = result.kind == "satisfied"
   return result
 end
+
+M.merged_blocker_cache_key = merged_blocker_cache_key
 
 function M.dependency_wait_marker(proposal_id, version, unmet_numbers, hold_kind, reason)
   return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
