@@ -94,7 +94,7 @@ local state_graph = {
   merged = {},
   fixing = { "reviewing", "review-meta" },
   ["review-meta"] = { "fixing", "blocked" },
-  ["impl-failed"] = {},
+  ["impl-failed"] = { "implementing" },
   blocked = {},
 }
 
