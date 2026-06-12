@@ -2,7 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 export interface VitalsCellProps {
-  value: number | 'unknown';
+  value: number | string | 'unknown';
   label: string;
   tone?: 'green' | 'red';
   className?: string;
