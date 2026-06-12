@@ -40,36 +40,55 @@
 #       from the current fkst-substrate working tree before running.
 #
 # fkst-framework binary resolution (priority): $BIN > repo .env `BIN=` > PATH >
-# sibling ../fkst-substrate/target/debug/fkst-framework.
+# sibling ../fkst-substrate/target/debug/fkst-framework > pinned source cache
+# clone/build fallback.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# shellcheck source=scripts/bin_bootstrap.sh
+. "$ROOT/scripts/bin_bootstrap.sh"
+
 resolve_bin() {
-  if [ -z "${BIN:-}" ] && [ -f "$ROOT/.env" ]; then
+  if [ -n "${BIN:-}" ]; then
+    if [ ! -x "$BIN" ]; then
+      echo "error: explicit BIN is not executable: $BIN" >&2
+      exit 1
+    fi
+    export BIN
+    return 0
+  fi
+
+  if [ -f "$ROOT/.env" ]; then
     # `|| true`: no BIN= line is fine under set -o pipefail. Strip optional
     # surrounding quotes and a trailing ` # comment`.
     BIN="$(grep -E '^BIN=' "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
     BIN="${BIN%%[[:space:]]#*}"
     BIN="${BIN%\"}"; BIN="${BIN#\"}"; BIN="${BIN%\'}"; BIN="${BIN#\'}"
-  fi
-  if [ -z "${BIN:-}" ]; then
-    if command -v fkst-framework >/dev/null 2>&1; then
-      BIN="$(command -v fkst-framework)"
-    elif [ -x "$ROOT/../fkst-substrate/target/debug/fkst-framework" ]; then
-      BIN="$ROOT/../fkst-substrate/target/debug/fkst-framework"
+    if [ -n "${BIN:-}" ]; then
+      if [ ! -x "$BIN" ]; then
+        echo "error: .env BIN is not executable: $BIN" >&2
+        exit 1
+      fi
+      export BIN
+      return 0
     fi
   fi
+
+  if command -v fkst-framework >/dev/null 2>&1; then
+    BIN="$(command -v fkst-framework)"
+  elif [ -x "$ROOT/../fkst-substrate/target/debug/fkst-framework" ]; then
+    BIN="$ROOT/../fkst-substrate/target/debug/fkst-framework"
+  fi
+
   if [ -z "${BIN:-}" ] || [ ! -x "$BIN" ]; then
     if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
       echo "error: fkst-framework binary is not executable in CI: ${BIN:-<unset>}" >&2
       echo "  CI must build fkst-substrate and inject BIN; scripts/run.sh will not build in CI." >&2
       exit 1
     fi
-    echo "error: fkst-framework binary not found (\$BIN, .env, PATH, ../fkst-substrate)." >&2
-    echo "  fix: cp env.example .env (set BIN=), or build the engine:" >&2
-    echo "       scripts/run.sh build" >&2
-    exit 1
+    echo "fkst-framework binary not found in \$BIN, .env, PATH, or ../fkst-substrate; bootstrapping pinned source" >&2
+    BIN="$(bootstrap_bin_on_total_miss "$ROOT")"
   fi
   export BIN
 }
@@ -129,6 +148,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo.py"
   python3 -B "$ROOT/scripts/check_repo_test.py"
   python3 -B "$ROOT/scripts/bin_cache_test.py"
+  python3 -B "$ROOT/scripts/bin_bootstrap_test.py"
 }
 
 check_test_file_coverage() {
@@ -517,13 +537,19 @@ cmd_build() {
   echo "OK: built $substrate/target/debug/fkst-framework"
 }
 
-case "${1:-}" in
-  check) shift; cmd_check "$@" ;;
-  test) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
-  test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
-  run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
-  supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
-  build) shift; cmd_build "$@" ;;
-  -h|--help|help|"") usage ;;
-  *) echo "unknown subcommand: $1" >&2; usage; exit 1 ;;
-esac
+main() {
+  case "${1:-}" in
+    check) shift; cmd_check "$@" ;;
+    test) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
+    test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
+    run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
+    supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
+    build) shift; cmd_build "$@" ;;
+    -h|--help|help|"") usage ;;
+    *) echo "unknown subcommand: $1" >&2; usage; exit 1 ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
