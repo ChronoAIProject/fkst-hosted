@@ -46,6 +46,11 @@ return {
       t.eq(loaded["first-entry"].value, "a")
       t.eq(loaded["second-entry"].value, "b")
       t.eq(loaded["first-entry"].name, nil)
+
+      local loaded_again = registry.load_indexed_map("tests.fake_registry.index", "name")
+      t.eq(loaded_again["first-entry"].value, "a")
+      t.eq(loaded_again["second-entry"].value, "b")
+      t.eq(loaded_again["first-entry"].name, nil)
     end)
   end,
 

@@ -92,8 +92,13 @@ function S.load_indexed_map(index_module, key_field, M, helpers)
   local map = {}
   for _, row in ipairs(rows) do
     local key = row[key_field]
-    row[key_field] = nil
-    map[key] = row
+    local value = {}
+    for field, field_value in pairs(row) do
+      if field ~= key_field then
+        value[field] = field_value
+      end
+    end
+    map[key] = value
   end
   return map
 end
