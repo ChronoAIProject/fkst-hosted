@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FKST — Packages</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:oklch(16% 0.011 250);--raise:oklch(20% 0.012 250);--raise-2:oklch(23% 0.013 250);
+    --line:oklch(26% 0.012 250);--line-2:oklch(33% 0.013 250);
+    --fg:oklch(97% 0.005 240);--dim:oklch(72% 0.014 245);--faint:oklch(58% 0.014 245);--ghost:oklch(46% 0.012 245);
+    --amber:oklch(81% 0.15 80);
+    --green:oklch(74% 0.13 158);--red:oklch(67% 0.18 18);--gold:oklch(80% 0.10 85);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --ui:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+    --display:"Space Grotesk","IBM Plex Sans",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .screen{width:100%;min-height:900px}
+  .wrap{max-width:1440px;margin:0 auto;padding:0 24px}
+  .eyebrow{font:600 11px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ghost)}
+
+  /* ---- top bar: logo is the FKST wordmark, K = the brand mark ---- */
+  .hd{display:flex;align-items:center;gap:16px;height:62px;border-bottom:1px solid var(--line)}
+  /* sticky top: header + toolbar stick together; toolbar condenses on scroll */
+  .hd{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .toolbar{position:sticky;top:61px;z-index:39;background:var(--bg)}
+  html.scrolled .toolbar{min-height:44px;padding:6px 0}
+  html.scrolled .toolbar .eyebrow{display:none}
+  .logo{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.01em;color:var(--fg);text-decoration:none;line-height:1;display:inline-block;white-space:nowrap;flex:none}
+  .logo .kk{position:relative;display:inline-block}
+  .logo .kk .knode{position:absolute;left:.04em;top:.36em;width:.205em;height:.205em;border-radius:50%;background:var(--amber);box-shadow:0 0 0 .05em var(--bg)}
+  .crumb{color:var(--ghost);font-size:13.5px}
+  .crumb b{color:var(--dim);font-weight:500;font-family:var(--mono);font-size:13px}
+  /* discreet posture chip (no more banner) */
+  .posture{display:inline-flex;align-items:center;gap:7px;font:600 11.5px var(--ui);letter-spacing:.02em;padding:5px 10px;border-radius:8px;
+    color:var(--red);background:color-mix(in oklab,var(--red) 12%,transparent);border:1px solid color-mix(in oklab,var(--red) 38%,var(--line))}
+  .posture .d{width:7px;height:7px;border-radius:50%;background:var(--red)}
+  .posture.dry{color:var(--faint);background:var(--raise);border-color:var(--line)} .posture.dry .d{background:var(--ghost)}
+  /* ---- interactive states (consistent across the system) ---- */
+  a,button{transition:background .12s ease,color .12s ease,border-color .12s ease}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:6px}
+  .nav{display:flex;gap:2px}
+  .nav a{font-size:13.5px;color:var(--faint);text-decoration:none;padding:7px 12px;border-radius:8px}
+  .nav a:hover{color:var(--dim);background:color-mix(in oklab,var(--raise) 55%,transparent)}
+  .nav a.on{color:var(--fg);background:var(--raise)}
+  .nav a.on:hover{background:var(--raise-2)}
+  .fr{margin-left:auto;display:flex;gap:18px;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .fr b{color:var(--faint);font-weight:500}
+  .fr .dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;vertical-align:middle}
+  .avatar{flex:none;width:30px;height:30px;border-radius:50%;background:var(--raise-2);border:1px solid var(--line-2);color:var(--dim);font:600 11px var(--ui);letter-spacing:.02em;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.avatar:hover{border-color:var(--faint);color:var(--fg)}.avatar.on{border-color:var(--amber);color:var(--amber)}
+
+  /* ---- window/filter toolbar ---- */
+  .toolbar{display:flex;align-items:center;gap:14px 16px;flex-wrap:wrap;min-height:56px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .seg{display:inline-flex;background:var(--raise);border:1px solid var(--line);border-radius:9px;padding:2px}
+  .seg button{font:500 12.5px var(--ui);color:var(--faint);background:none;border:0;padding:5px 13px;border-radius:7px;cursor:pointer}
+  .seg button:hover:not(.on){color:var(--dim);background:color-mix(in oklab,var(--raise-2) 65%,transparent)}
+  .seg button.on{color:oklch(22% 0.04 80);background:var(--amber);font-weight:600}
+  .sel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);border:1px solid var(--line);border-radius:9px;padding:6px 11px;background:var(--raise);cursor:pointer}
+  .sel:hover{border-color:var(--line-2);color:var(--fg)}
+  .sel .mono{color:var(--fg)} .sel .car{color:var(--ghost)}
+  .toggle{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--dim);cursor:pointer;user-select:none}
+  .toggle:hover .sw{background:var(--line-2);filter:brightness(1.15)}
+  .sw{width:30px;height:18px;border-radius:10px;background:var(--line-2);position:relative;transition:background .14s}
+  .sw i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--faint);transition:left .14s,background .14s}
+  .sw.on{background:color-mix(in oklab,var(--amber) 55%,var(--line))} .sw.on i{left:14px;background:var(--amber)}
+  .tr{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+
+  /* ---- shared section heading ---- */
+  .sec{display:flex;align-items:baseline;gap:12px;margin:34px 0 14px;flex-wrap:wrap}
+  .sec h2{font-family:var(--display);font-weight:600;font-size:16px;letter-spacing:.01em;margin:0;color:var(--fg)}
+  .sec .n{font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .sec .n b{color:var(--faint);font-weight:500}
+
+  /* ============ INTRO — the behavior layer in one breath ============ */
+  .intro{margin:24px 0 0;border:1px solid var(--line);border-radius:14px;background:var(--raise);overflow:hidden}
+  .intro .lede{padding:18px 22px;font-size:13.5px;color:var(--dim);line-height:1.62;border-bottom:1px solid var(--line)}
+  .intro .lede b{color:var(--fg);font-weight:500}
+  .intro .lede .hot{color:var(--amber)}
+  /* the 3-level model — Company · Department · Person */
+  .levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line)}
+  .lvl{background:var(--raise);padding:16px 22px;min-width:0}
+  .lvl .lk{font:600 10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost)}
+  .lvl .lv{font-family:var(--display);font-weight:600;font-size:16px;color:var(--fg);margin-top:8px;letter-spacing:.01em}
+  .lvl .ld{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:6px;line-height:1.55}
+  .lvl .ld code{color:var(--dim)}
+
+  /* ============ LOADED PACKAGES — the manage surface ============ */
+  .pkgbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .pkgbar .add{display:inline-flex;align-items:center;gap:7px;font:500 12.5px var(--ui);color:var(--dim);background:var(--raise);border:1px dashed var(--line-2);border-radius:9px;padding:7px 13px;cursor:pointer}
+  .pkgbar .add:hover{color:var(--fg);border-color:var(--faint);border-style:solid}
+  .pkgbar .add .pl{font-family:var(--mono);font-size:14px;line-height:1;color:var(--faint)}
+  .pkgbar .apply{margin-left:auto;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .pkgbar .apply .note{font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .pkgbar .apply .note b{color:var(--gold);font-weight:500}
+  .pkgbar .apply button{font:600 12.5px var(--ui);color:oklch(22% 0.04 80);background:var(--amber);border:0;border-radius:9px;padding:7px 14px;cursor:pointer}
+  .pkgbar .apply button:hover{filter:brightness(1.06)}
+
+  .plist{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--line);display:grid;gap:1px}
+  .pkg{background:var(--raise);padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 18px;align-items:start;transition:background .12s}
+  .pkg:hover{background:color-mix(in oklab,var(--raise-2) 45%,var(--raise))}
+  .pkg.off{opacity:.62}
+  .pkg .l{min-width:0}
+  .pkg .nmrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pkg .pn{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--fg)}
+  .pkg .badge{font:600 10px var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:6px;border:1px solid var(--line-2);color:var(--faint);background:var(--raise-2)}
+  .pkg .badge.composed{color:var(--amber);border-color:color-mix(in oklab,var(--amber) 38%,var(--line))}
+  .pkg .badge.flat{color:var(--dim)}
+  .pkg .engine{font:600 10px var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:6px;color:var(--green);border:1px solid color-mix(in oklab,var(--green) 40%,var(--line))}
+  .pkg .role{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.5}
+  .pkg .meta{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .pkg .meta b{color:var(--faint);font-weight:500}
+  .pkg .meta .ok{color:var(--green)}
+  .pkg .deps{margin-top:9px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .pkg .deps .dk{color:var(--faint)}
+  .pkg .deps .chip{padding:2px 8px;border-radius:6px;border:1px solid var(--line-2);color:var(--dim);background:var(--raise-2)}
+  .pkg .r{display:flex;flex-direction:column;align-items:flex-end;gap:12px;flex:none}
+  .pkg .ctl{display:flex;align-items:center;gap:11px}
+  .pkg .src{font:500 12px var(--ui);color:var(--dim);text-decoration:none;white-space:nowrap}
+  .pkg .src:hover{color:var(--fg)}
+  /* enabled toggle — amber on, reuses system switch */
+  .swbtn{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--ghost);background:none;border:0;cursor:pointer;padding:0}
+  .swbtn .lab{min-width:46px;text-align:right}
+  .swbtn .sw{width:30px;height:18px;border-radius:10px;background:var(--line-2);position:relative;transition:background .14s;flex:none}
+  .swbtn .sw i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--faint);transition:left .14s,background .14s}
+  .swbtn[aria-pressed="true"] .sw{background:color-mix(in oklab,var(--amber) 55%,var(--line))}
+  .swbtn[aria-pressed="true"] .sw i{left:14px;background:var(--amber)}
+  .swbtn[aria-pressed="true"] .lab{color:var(--amber)}
+  .swbtn:hover .sw{filter:brightness(1.12)}
+
+  /* ============ COMPOSED GRAPH / TOPOLOGY ============ */
+  .topo{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--raise)}
+  .topo .tcap{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:13px 20px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .topo .tcap .pk{color:var(--amber);font-weight:500}
+  .topo .tcap .legend{margin-left:auto;display:flex;gap:16px;flex-wrap:wrap}
+  .topo .tcap .legend span b{color:var(--faint);font-weight:500}
+
+  /* SOURCES band — the raisers / cron */
+  .srcband{padding:16px 20px;border-bottom:1px solid var(--line);background:color-mix(in oklab,var(--raise-2) 30%,var(--raise))}
+  .srcband .bh{font:600 10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost);margin-bottom:12px}
+  .srcs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .src-c{min-width:0;border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--raise)}
+  .src-c .sn{font-family:var(--mono);font-size:12px;color:var(--fg);overflow-wrap:anywhere}
+  .src-c .scron{display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .src-c .scron .ic{width:6px;height:6px;border-radius:50%;background:var(--amber);flex:none}
+  .src-c .sq{font-family:var(--mono);font-size:10.5px;color:var(--ghost);margin-top:6px;overflow-wrap:anywhere}
+  .src-c .sq b{color:var(--dim);font-weight:500}
+
+  /* PIPELINE — departments as an adjacency, queues as chips between */
+  .pipe-h{padding:14px 20px 4px;font:600 10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost)}
+  .flow{padding:6px 20px 18px;display:flex;flex-direction:column}
+  .dep{display:grid;grid-template-columns:170px minmax(0,1fr) auto;gap:14px;align-items:start;padding:13px 0;border-top:1px solid color-mix(in oklab,var(--line) 60%,transparent)}
+  .dep:first-child{border-top:0}
+  .dep .dn{display:flex;flex-direction:column;gap:5px;min-width:0}
+  .dep .dn .dnm{font-family:var(--mono);font-size:12.5px;color:var(--fg);overflow-wrap:anywhere}
+  .dep .dn .dx{font:600 9.5px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--gold);width:max-content}
+  .dep .dn .dx.det{color:var(--faint)}
+  .io{min-width:0;display:flex;flex-direction:column;gap:7px}
+  .io .ln{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+  .io .dir{font-family:var(--mono);font-size:10px;color:var(--ghost);width:62px;flex:none;letter-spacing:.04em;text-transform:uppercase}
+  .q{font-family:var(--mono);font-size:11px;color:var(--dim);padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--raise-2);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  .q.x{color:var(--amber);border-color:color-mix(in oklab,var(--amber) 30%,var(--line))}   /* cross-package queue */
+  .q.term{color:var(--green);border-color:color-mix(in oklab,var(--green) 35%,var(--line))}
+  .dep .codex{flex:none;font-family:var(--mono);font-size:10.5px;color:var(--ghost);padding:3px 9px;border-radius:6px;border:1px solid var(--line);white-space:nowrap}
+  .dep .codex.on{color:var(--gold);border-color:color-mix(in oklab,var(--gold) 35%,var(--line))}
+  .topo .tnote{padding:13px 20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--ghost);line-height:1.6}
+  .topo .tnote b{color:var(--faint);font-weight:500}
+
+  /* ============ READ / WRITE BOUNDARY ============ */
+  .rw{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .rwc{background:var(--raise);padding:18px 20px;min-width:0}
+  .rwc .rh{display:flex;align-items:center;gap:9px;font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ghost)}
+  .rwc .rh .rd{width:8px;height:8px;border-radius:2px;flex:none}
+  .rwc.ro .rd{background:var(--faint)} .rwc.fe .rd{background:var(--amber)} .rwc.wr .rd{background:var(--red)}
+  .rwc .rt{font-family:var(--display);font-weight:600;font-size:14.5px;color:var(--fg);margin-top:11px;letter-spacing:.01em}
+  .rwc .rb{font-size:12.5px;color:var(--dim);margin-top:8px;line-height:1.55}
+  .rwc .rb code{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+  .rwc .rtag{display:inline-flex;align-items:center;gap:6px;margin-top:12px;font:500 11px var(--mono);padding:3px 9px;border-radius:7px;border:1px solid var(--line-2);color:var(--faint)}
+  .rwc.ro .rtag{color:var(--faint)} .rwc.wr .rtag{color:var(--red);border-color:color-mix(in oklab,var(--red) 40%,var(--line))}
+  .rwc.fe .rtag{color:var(--amber);border-color:color-mix(in oklab,var(--amber) 35%,var(--line))}
+
+  .foot{margin:32px 0 36px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:24px;font-family:var(--mono);font-size:11px;color:var(--ghost);flex-wrap:wrap}
+  .foot b{color:var(--faint);font-weight:500} .foot .note{color:var(--gold)}
+
+  /* ============ responsive ============ */
+  @media(max-width:1080px){
+    .srcs{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media(max-width:980px){
+    .levels{grid-template-columns:minmax(0,1fr)}
+    .rw{grid-template-columns:minmax(0,1fr)}
+    .dep{grid-template-columns:140px minmax(0,1fr);gap:12px}
+    .dep .codex{grid-column:2;justify-self:start}
+  }
+  @media(max-width:780px){
+    .hd{height:auto;flex-wrap:wrap;gap:10px 12px;padding:12px 0}
+    .crumb,.fr{display:none}
+    .nav{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .toolbar{height:auto;flex-wrap:wrap;gap:12px;padding:14px 0}
+    .tr{display:none}
+    .pkg{grid-template-columns:minmax(0,1fr)}
+    .pkg .r{align-items:flex-start}
+  }
+  @media(max-width:600px){
+    .srcs{grid-template-columns:minmax(0,1fr)}
+    .dep{grid-template-columns:minmax(0,1fr);gap:8px}
+    .dep .dn{flex-direction:row;align-items:center;gap:9px;flex-wrap:wrap}
+    .io .dir{width:auto}
+    .pkgbar .apply{margin-left:0;width:100%}
+  }
+  @media(max-width:480px){
+    .wrap{padding:0 16px}
+    .seg{flex-wrap:wrap}
+  }
+  /* ---- + Add package: button + add-package modal ---- */
+  .newgoal{font:600 12.5px var(--ui);color:oklch(22% 0.04 80);background:var(--amber);border:0;border-radius:9px;padding:7px 14px;cursor:pointer;flex:none}
+  .newgoal:hover{filter:brightness(1.06)}
+  .ovl{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:6vh 20px;background:color-mix(in oklab,#000 58%,transparent);overflow:auto}
+  .ovl[hidden]{display:none}
+  .sheet{position:relative;width:100%;max-width:560px;background:var(--raise);border:1px solid var(--line-2);border-radius:16px;box-shadow:0 24px 60px -22px rgba(0,0,0,.6)}
+  .sheet .x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--raise-2);color:var(--faint);font-size:17px;line-height:1;cursor:pointer}
+  .sheet .x:hover{color:var(--fg);border-color:var(--faint)}
+  .m-hd{padding:20px 22px 16px;border-bottom:1px solid var(--line)}
+  .m-tt{display:flex;align-items:baseline;gap:10px;margin:0 0 4px;flex-wrap:wrap}
+  .m-tt h2{font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:-.01em;margin:0;color:var(--fg)}
+  .m-meta{font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .m-act{display:flex;align-items:center;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .m-act .m-act-l{margin-right:auto;display:flex;gap:10px}
+  .sheet .m-act .btn{font:500 12.5px var(--ui);border:1px solid var(--line-2);background:var(--raise-2);color:var(--dim);border-radius:9px;padding:8px 14px;cursor:pointer;text-decoration:none}
+  .sheet .m-act .btn:hover{border-color:var(--faint);color:var(--fg)}
+  .ngf{display:flex;flex-direction:column;gap:14px;padding:18px 22px}
+  .ngrow{display:flex;flex-direction:column;gap:6px}
+  .nglab{font:600 10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost)}
+  .nginp,.ngsel,.ngta{background:var(--raise-2);border:1px solid var(--line-2);border-radius:9px;color:var(--fg);font:400 13px var(--ui);padding:9px 12px;outline:0;width:100%}
+  .nginp:focus,.ngta:focus,.ngsel:focus{border-color:var(--faint)}
+  .ngta{min-height:84px;resize:vertical;line-height:1.5}
+  .ngnote{font-family:var(--mono);font-size:11px;color:var(--ghost);line-height:1.6;background:var(--raise-2);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
+  .ngnote b{color:var(--faint);font-weight:500}
+  .ngcreate{font:600 12.5px var(--ui);color:oklch(22% 0.04 80);background:var(--amber);border:0;border-radius:9px;padding:8px 15px;cursor:pointer}
+  .ngcreate:hover{filter:brightness(1.06)}
+  .ngpkgs{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .ngpkg{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:12.5px;color:var(--dim);background:var(--raise-2);border-top:1px solid var(--line);cursor:pointer;user-select:none}
+  .ngpkg:first-child{border-top:0}
+  .ngpkg .t{font-family:var(--mono);font-size:10px;color:var(--ghost);margin-left:8px}
+  .ngsub{font-family:var(--mono);font-size:10.5px;color:var(--ghost);margin-top:7px;line-height:1.55}
+  .ngsub a{color:var(--faint);text-decoration:underline;text-underline-offset:2px}
+
+  /* ===== consolidated topbar on scroll (matches overview) ===== */
+  .topbar{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .hd,.toolbar{position:static}
+  html.scrolled .topbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;min-height:54px;border-bottom:1px solid var(--line)}
+  html.scrolled .hd,html.scrolled .toolbar{display:contents}
+  html.scrolled .logo{order:0} html.scrolled .nav{order:1}
+  html.scrolled .newgoal{order:2;margin-left:auto}
+  html.scrolled .minis{display:inline-flex;order:3}
+  /* minimized = icon + CURRENT SETTING chips; full controls hide */
+  html.scrolled .toolbar > *:not(.newgoal):not(.minis){display:none!important}
+  .minis{display:none;align-items:center;gap:8px}
+  .mini{display:inline-flex;align-items:center;gap:7px;font:500 11.5px var(--mono);color:var(--faint);background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+  .mini:hover{color:var(--dim);border-color:var(--line-2)}
+  .mini svg{width:12px;height:12px;flex:none}
+  .mini b{font-weight:500;color:var(--fg)}
+  .mini.dim{color:var(--ghost)} .mini.ic{padding:5px 8px} .mini.ic svg{width:13px;height:13px}
+  /* the one section pipe: hidden at top, appears on scroll LEFT of the GitHub chip */
+  .hpipe{flex:none;width:1px;height:18px;background:var(--line-2);align-self:center;margin:0 2px;display:none}
+  html.scrolled .hpipe{display:block;order:49}
+  html.scrolled .fr{order:50;margin-left:0} html.scrolled .avatar{order:52}
+
+  /* GitHub status chip (octocat + health dot) */
+  .frq{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:var(--raise);color:var(--faint)}
+  .frq:hover{color:var(--dim);border-color:var(--line-2)}
+  .frq .d{position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-radius:50%;background:var(--green);border:1.5px solid var(--raise)}
+</style></head>
+<body>
+<section class="screen"><div class="wrap">
+
+  <div class="topbar">
+  <div class="hd">
+    <a class="logo" href="#">F<span class="kk">K<i class="knode"></i></span>ST</a>
+    <div class="nav"><a href="overview.html">Overview</a><a href="goals.html">Goals</a><a class="on" href="packages.html">Packages</a></div>
+    <span class="hpipe"></span>
+    <div class="fr"><span class="frq" title="GitHub — synced 30s ago"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><i class="d"></i></span></div>
+    <a class="avatar" href="settings.html" title="Account &amp; settings">CT</a>
+  </div>
+
+  <div class="toolbar">
+    <button class="newgoal" id="newpkgbtn">+ Add package</button>
+    <!-- scrolled-state compact chips: icon + current setting -->
+    <div class="minis">
+      <span class="mini" title="Deployment graph · github-devloop"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 1.8 14 5v6l-6 3.2L2 11V5l6-3.2z"/><path d="M2 5l6 3.2L14 5M8 8.2V14"/></svg><b>github-devloop</b></span>
+      <span class="mini dim" title="Graph scanned once at session start"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.8v3.3h-3.3"/></svg><b>30s ago</b></span>
+      <span class="mini dim ic" title="Disabled packages · hidden"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.8"/></svg></span>
+    </div>
+    <span class="eyebrow">Deployment</span>
+    <div class="sel">graph <span class="mono">github-devloop</span> <span class="car">▾</span></div>
+    <div class="sel">scanned <span class="mono">at startup · 30s ago</span></div>
+    <div class="toggle">Disabled packages <span class="sw"><i></i></span></div>
+    <span class="tr">5 roots · 1 composed graph · scan-once</span>
+  </div>
+  </div><!-- /topbar -->
+
+  <!-- INTRO — the behavior layer + the 3-level model -->
+  <div class="intro">
+    <div class="lede">
+      Packages are the <b>behavior layer</b> — the Lua that runs on the hosted engine. They live in the <b>hosted package store</b> (<span class="mono">GET/POST /api/v1/packages</span>); an engine <b>session</b> (<span class="mono">POST /api/v1/sessions</span>, one live session per package, lease-fenced) scans its root <b>once</b> at start and composes <b>one static graph</b>. Changing the set or topology applies on the next <span class="hot">session restart</span> (stop → poll <span class="mono">stopped</span> → start) — there is no hot-reload, and the package <b>source tree is read-only at runtime</b>. What you manage here is <b>which</b> packages load and how they wire — not their source.
+    </div>
+    <div class="levels">
+      <div class="lvl"><div class="lk">Company</div><div class="lv">The deployment</div><div class="ld">supervisor + framework + the one composed graph. Receives source events, routes by queue, spawns runs.</div></div>
+      <div class="lvl"><div class="lk">Department</div><div class="lv">A node</div><div class="ld"><code>departments/&lt;d&gt;/main.lua</code> — declares <code>consumes</code> / <code>produces</code>. Nodes = departments.</div></div>
+      <div class="lvl"><div class="lk">Person</div><div class="lv">One codex run</div><div class="ld">a single <code>codex exec</code> per event. No memory, no identity, exits when done.</div></div>
+    </div>
+  </div>
+
+  <!-- LOADED PACKAGES — the manage surface -->
+  <div class="sec"><h2>Loaded packages</h2><span class="n"><b>5</b> roots scanned · 2 flat · 3 composed · conformance green</span></div>
+
+  <div class="pkgbar">
+    <button class="add"><span class="pl">+</span> Add package root</button>
+    <div class="apply">
+      <span class="note">manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its <span class="mono">composed_deps</span>) — changing the set = create a new package revision (create-only store), then cycle the session; per-package enable switches are a <b>target-state UI</b> over that flow</span>
+      <button>Apply changes · stop &amp; restart session</button>
+    </div>
+  </div>
+
+  <div class="plist">
+
+    <div class="pkg" data-pkg="github-proxy">
+      <div class="l">
+        <div class="nmrow"><span class="pn">github-proxy</span><span class="badge flat">flat</span></div>
+        <div class="role">GitHub I/O bridge — polls issues/PRs in, writes issue / PR / comment / label out.</div>
+        <div class="meta"><span><b>6</b> departments</span><span><b>1</b> raiser</span><span class="ok">conformance ✓ single-root</span><span>namespace <b>github-proxy</b></span></div>
+      </div>
+      <div class="r">
+        <button class="swbtn" aria-pressed="true"><span class="lab">enabled</span><span class="sw"><i></i></span></button>
+        <div class="ctl"><a class="src" href="#" target="_blank" rel="noopener">View source ↗</a></div>
+      </div>
+    </div>
+
+    <div class="pkg" data-pkg="consensus">
+      <div class="l">
+        <div class="nmrow"><span class="pn">consensus</span><span class="badge flat">flat</span></div>
+        <div class="role">Multi-angle codex verdict engine — peer-invisible angles, then a meta-judge. Converge mode + gate mode.</div>
+        <div class="meta"><span><b>1</b> department</span><span><b>0</b> raisers</span><span class="ok">conformance ✓ single-root</span><span>source-agnostic</span></div>
+      </div>
+      <div class="r">
+        <button class="swbtn" aria-pressed="true"><span class="lab">enabled</span><span class="sw"><i></i></span></button>
+        <div class="ctl"><a class="src" href="#" target="_blank" rel="noopener">View source ↗</a></div>
+      </div>
+    </div>
+
+    <div class="pkg" data-pkg="autochrono">
+      <div class="l">
+        <div class="nmrow"><span class="pn">autochrono</span><span class="badge composed">composed</span></div>
+        <div class="role">issue → reply via consensus. Maps its own issue protocol onto the consensus proposal engine.</div>
+        <div class="meta"><span><b>2</b> departments</span><span><b>0</b> raisers</span><span class="ok">conformance ✓ composed</span></div>
+        <div class="deps"><span class="dk">composed.deps</span><span class="chip">consensus</span></div>
+      </div>
+      <div class="r">
+        <button class="swbtn" aria-pressed="false"><span class="lab">disabled</span><span class="sw"><i></i></span></button>
+        <div class="ctl"><a class="src" href="#" target="_blank" rel="noopener">View source ↗</a></div>
+      </div>
+    </div>
+
+    <div class="pkg" data-pkg="github-autochrono">
+      <div class="l">
+        <div class="nmrow"><span class="pn">github-autochrono</span><span class="badge composed">composed</span></div>
+        <div class="role">Adapter / wiring — composes github-proxy + autochrono. GitHub issue → autochrono reply, no business logic of its own.</div>
+        <div class="meta"><span><b>2</b> departments</span><span><b>0</b> raisers</span><span class="ok">conformance ✓ composed</span></div>
+        <div class="deps"><span class="dk">composed.deps</span><span class="chip">github-proxy</span><span class="chip">autochrono</span></div>
+      </div>
+      <div class="r">
+        <button class="swbtn" aria-pressed="false"><span class="lab">disabled</span><span class="sw"><i></i></span></button>
+        <div class="ctl"><a class="src" href="#" target="_blank" rel="noopener">View source ↗</a></div>
+      </div>
+    </div>
+
+    <div class="pkg" data-pkg="github-devloop">
+      <div class="l">
+        <div class="nmrow"><span class="pn">github-devloop</span><span class="badge composed">composed</span><span class="engine">active goal engine</span></div>
+        <div class="role">Composes github-proxy + consensus. Owns the 12-state goal lifecycle — design consensus, converge / true-stall reconcile, implement, PR-diff review, merge → integration branch.</div>
+        <div class="meta"><span><b>21</b> departments</span><span><b>3</b> raisers</span><span class="ok">conformance ✓ composed</span><span>posture <b>FKST_GITHUB_WRITE</b></span></div>
+        <div class="deps"><span class="dk">composed.deps</span><span class="chip">github-proxy</span><span class="chip">consensus</span></div>
+      </div>
+      <div class="r">
+        <button class="swbtn" aria-pressed="true"><span class="lab">enabled</span><span class="sw"><i></i></span></button>
+        <div class="ctl"><a class="src" href="#" target="_blank" rel="noopener">View source ↗</a></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- COMPOSED GRAPH / TOPOLOGY -->
+  <div class="sec"><h2>Composed graph · topology</h2><span class="n">active <b>github-devloop</b> · nodes = departments · edges = queues</span></div>
+
+  <div class="topo">
+    <div class="tcap">
+      <span class="pk">github-devloop</span> + github-proxy + consensus → one composed graph
+      <span class="legend">
+        <span><b>amber</b> queue = cross-package</span>
+        <span><b>green</b> = terminal</span>
+        <span><b>codex</b> = one exec / event</span>
+      </span>
+    </div>
+
+    <!-- SOURCES band — the raisers (cron 5m) -->
+    <div class="srcband">
+      <div class="bh">Sources · raisers · cron 5m</div>
+      <div class="srcs">
+        <div class="src-c"><div class="sn">github-proxy / github_poll</div><div class="scron"><span class="ic"></span>cron · 5m</div><div class="sq"><b>→</b> github_poll_tick · issues/PRs in</div></div>
+        <div class="src-c"><div class="sn">intake_poll</div><div class="scron"><span class="ic"></span>cron · 5m</div><div class="sq"><b>→</b> devloop_intake_tick</div></div>
+        <div class="src-c"><div class="sn">branch_poll</div><div class="scron"><span class="ic"></span>cron · 5m</div><div class="sq"><b>→</b> devloop_branch_tick · rollup / sync</div></div>
+        <div class="src-c"><div class="sn">observability_poll</div><div class="scron"><span class="ic"></span>cron · 5m</div><div class="sq"><b>→</b> devloop_observe_tick</div></div>
+      </div>
+    </div>
+
+    <!-- PIPELINE — departments in flow order, queues between -->
+    <div class="pipe-h">Departments · pipeline order · consumes → produces</div>
+    <div class="flow">
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">intake_scan</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_intake_tick</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q">devloop_intake_candidate</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">intake_judge</span><span class="dx">codex gate</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_intake_candidate</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">github-proxy.github_issue_label_request</span><span class="q x">github-proxy.github_issue_comment_request</span></div>
+        </div>
+        <span class="codex on">codex ✓</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">observe_issue</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">github-proxy.github_entity_changed</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">consensus.proposal</span><span class="q">devloop_ready</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">consensus.decide</span><span class="dx">codex angles</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">consensus.proposal</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">consensus.consensus_reached</span><span class="q x">consensus.consensus_converge</span></div>
+        </div>
+        <span class="codex on">codex ✓ ×N+meta</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">consensus_result</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">consensus.consensus_reached</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q">devloop_ready</span><span class="q x">github-proxy.github_issue_comment_request</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">loop</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">consensus.consensus_converge</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">consensus.proposal</span><span class="q">devloop_reconcile</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">implement</span><span class="dx">codex worktree</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_ready</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">github-proxy.github_issue_label_request</span><span class="q x">github-proxy.github_issue_comment_request</span></div>
+        </div>
+        <span class="codex on">codex ✓</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">open_pr</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">github-proxy.github_entity_changed</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">github-proxy.github_pr_open_request</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">observe_pr</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">github-proxy.github_entity_changed</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q">devloop_reviewing</span><span class="q">devloop_merge_ready</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">review_pr</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_reviewing</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">consensus.proposal</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">review_result</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">consensus.consensus_reached</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q">devloop_merge_ready</span><span class="q">devloop_fixing</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">review_loop</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q x">consensus.consensus_converge</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">consensus.proposal</span><span class="q">devloop_review_reconcile</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">review_meta</span><span class="dx">codex judge</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_review_meta</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q">devloop_fixing</span></div>
+        </div>
+        <span class="codex on">codex ✓</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">fix</span><span class="dx">codex worktree</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_fixing</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q">devloop_reviewing</span><span class="q">devloop_review_meta</span></div>
+        </div>
+        <span class="codex on">codex ✓</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">merge</span><span class="dx">posture-gated</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_merge_ready</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">github-proxy.github_pr_comment_request</span><span class="q term">gh pr merge → integration branch</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">reconcile</span><span class="dx det">deterministic · drop</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_reconcile</span><span class="q">devloop_review_reconcile</span><span class="q">devloop_fix_reconcile</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q x">github-proxy.github_issue_comment_request</span><span class="q term">blocked · terminal</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+      <div class="dep">
+        <div class="dn"><span class="dnm">rollup_scan → rollup_merge</span><span class="dx det">deterministic</span></div>
+        <div class="io">
+          <div class="ln"><span class="dir">consumes</span><span class="q">devloop_branch_tick</span></div>
+          <div class="ln"><span class="dir">produces</span><span class="q">devloop_rollup_ready</span><span class="q term">rollup PR · integration → dev</span></div>
+        </div>
+        <span class="codex">no codex</span>
+      </div>
+
+    </div>
+    <div class="tnote">
+      Nodes are <b>Departments</b>; edges are <b>queues</b>; one <b>codex exec</b> runs per event. Cross-package edges (<b>amber</b>) carry <code class="mono" style="color:var(--faint)">pkg.queue</code> names — this graph reaches into <b>github-proxy</b> for GitHub I/O and <b>consensus</b> for verdicts. <b>21</b> departments total; 4 collapsed here for legibility — <b>decompose</b> (<code class="mono" style="color:var(--faint)">devloop_decompose → github-proxy.github_issue_create_request</code>), <b>observability</b> off the observe tick, and <b>sync_scan / sync_conflict</b> (<code class="mono" style="color:var(--faint)">devloop_sync_conflict</code>) off the branch tick.
+    </div>
+  </div>
+
+  <!-- READ / WRITE BOUNDARY -->
+  <div class="sec"><h2>Read / write boundary</h2><span class="n">the non-negotiable — what is read-only, what the FE manages, where writes land</span></div>
+
+  <div class="rw">
+    <div class="rwc ro">
+      <div class="rh"><span class="rd"></span>Read-only</div>
+      <div class="rt">Package source tree</div>
+      <div class="rb">The loaded Lua is <b style="color:var(--fg);font-weight:500">read-only at runtime</b> — even to the engine. Departments have no lifecycle hooks, no shared memory, no persistent state. The graph is scanned <code>once</code> at startup.</div>
+      <div class="rtag">runtime read-only</div>
+    </div>
+    <div class="rwc fe">
+      <div class="rh"><span class="rd"></span>FE manages</div>
+      <div class="rt">Which packages load · topology · posture</div>
+      <div class="rb">This console sets the package <b style="color:var(--fg);font-weight:500">set</b>, the composed topology, and the global posture. Changes are <b style="color:var(--fg);font-weight:500">config</b>, applied on the next supervise <code>restart</code> — never a live source edit, never per-goal.</div>
+      <div class="rtag">applied via restart</div>
+    </div>
+    <div class="rwc wr">
+      <div class="rh"><span class="rd"></span>Business writes</div>
+      <div class="rt">GitHub only · under REAL posture</div>
+      <div class="rb">Issues, PRs, comments, merges land on <b style="color:var(--fg);font-weight:500">GitHub</b> — only when <code>FKST_GITHUB_WRITE</code> is REAL (global, never per-goal). The redb durable-delivery transport is <b style="color:var(--fg);font-weight:500">engine-internal</b>, not a business fact store.</div>
+      <div class="rtag">REAL posture required</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>package set &amp; topology <b>poll-derived</b></span>
+    <span>the graph is parsed by the hosted backend from the <b>loaded package roots</b></span>
+    <span>scan-once at session start · changes apply on <span class="note">session restart</span> · session: pending → validating → running → stopping → stopped / failed</span>
+    <span>state as of <b>30s ago</b></span>
+  </div>
+
+</div></section>
+
+<script>
+  (function(){
+    // enabled toggle — manage capability (config; applied on restart). Optimistic visual only.
+    document.querySelectorAll('.swbtn').forEach(function(b){
+      b.addEventListener('click',function(){
+        var on=b.getAttribute('aria-pressed')==='true';
+        b.setAttribute('aria-pressed',String(!on));
+        b.querySelector('.lab').textContent = on ? 'disabled' : 'enabled';
+        b.closest('.pkg').classList.toggle('off', on);
+      });
+    });
+  })();
+</script>
+<!-- add-package modal — add a package root to the deployment's composed graph -->
+<div class="ovl" id="ngovl" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ng-h">
+    <button class="x" aria-label="Close" data-ngx>×</button>
+    <div class="m-hd">
+      <div class="m-tt"><h2 id="ng-h">Add package</h2></div>
+      <div class="m-meta">create a package in the hosted store — <span class="mono">POST /api/v1/packages</span></div>
+    </div>
+    <div class="ngf">
+      <div class="ngrow"><span class="nglab">Name · unique, create-only</span>
+        <input class="nginp" placeholder="e.g. github-devloop"></div>
+      <div class="ngrow"><span class="nglab">Files · the package root, inline</span>
+        <input class="nginp" placeholder="core.lua · departments/&lt;d&gt;/main.lua · raisers/*.lua  —  upload or paste"></div>
+      <div class="ngrow"><span class="nglab">composed_deps · optional</span>
+        <input class="nginp" placeholder="github-proxy, consensus"></div>
+      <div class="ngnote">Stored in the hosted package store as <span class="mono">{name, files[], composed_deps[]}</span> — <b>create-only</b>: a duplicate name is a <span class="mono">409</span>, and v1 has <b>no update or delete</b> (a new revision is a new name). A package is loaded <b>once</b> at session start and composed into the one static graph — applying it = <b>stop the session, start a new one</b> (<span class="mono">POST /sessions/:id/stop</span> → poll <span class="mono">stopped</span> → <span class="mono">POST /sessions</span>). Create validates <b>structure only</b> (name <span class="mono">[A-Za-z0-9_-]+</span> · ≥1 file · ≤256 files · ≤1&nbsp;MiB/file · ≤12&nbsp;MiB total · must contain <span class="mono">departments/*/main.lua</span> or <span class="mono">raisers/*.lua</span>); <b>conformance runs at session start</b> — the session passes through <span class="mono">validating</span> and lands <span class="mono">failed</span> with the error on the session record if it doesn't conform. The source tree is <b>read-only at runtime</b>.</div>
+    </div>
+    <div class="m-act">
+      <div class="m-act-l"></div>
+      <button class="btn" data-ngx>Cancel</button>
+      <button class="ngcreate">Create package</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    var btn=document.getElementById('newpkgbtn'), ng=document.getElementById('ngovl');
+    if(!btn||!ng)return;
+    function o(){ng.hidden=false;document.body.style.overflow='hidden';}
+    function c(){ng.hidden=true;document.body.style.overflow='';}
+    btn.addEventListener('click',o);
+    ng.addEventListener('click',function(e){if(e.target===ng)c();});
+    ng.querySelectorAll('[data-ngx]').forEach(function(b){b.addEventListener('click',c);});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!ng.hidden)c();});
+  })();
+</script>
+<script>
+/* hysteresis band: condense once past 140, expand only back under 40 — no flicker at the boundary */
+(function(){var on=false;function upd(){var y=window.scrollY||0;if(!on&&y>140){on=true;document.documentElement.classList.add("scrolled");}else if(on&&y<40){on=false;document.documentElement.classList.remove("scrolled");}}addEventListener("scroll",upd,{passive:true});upd();})();
+</script>
+</body></html>

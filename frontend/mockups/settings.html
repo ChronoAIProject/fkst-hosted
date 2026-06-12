@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FKST — Settings &amp; Safety</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:oklch(16% 0.011 250);--raise:oklch(20% 0.012 250);--raise-2:oklch(23% 0.013 250);
+    --line:oklch(26% 0.012 250);--line-2:oklch(33% 0.013 250);
+    --fg:oklch(97% 0.005 240);--dim:oklch(72% 0.014 245);--faint:oklch(58% 0.014 245);--ghost:oklch(46% 0.012 245);
+    --amber:oklch(81% 0.15 80);
+    --green:oklch(74% 0.13 158);--red:oklch(67% 0.18 18);--gold:oklch(80% 0.10 85);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --ui:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+    --display:"Space Grotesk","IBM Plex Sans",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .screen{width:100%;min-height:900px}
+  .wrap{max-width:1440px;margin:0 auto;padding:0 24px}
+  .eyebrow{font:600 11px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ghost)}
+
+  /* ---- top bar: logo is the FKST wordmark, K = the brand mark ---- */
+  .hd{display:flex;align-items:center;gap:16px;height:62px;border-bottom:1px solid var(--line)}
+  /* sticky top: header + toolbar stick together; toolbar condenses on scroll */
+  .hd{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .toolbar{position:sticky;top:61px;z-index:39;background:var(--bg)}
+  html.scrolled .toolbar{min-height:44px;padding:6px 0}
+  html.scrolled .toolbar .eyebrow{display:none}
+  .logo{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.01em;color:var(--fg);text-decoration:none;line-height:1;display:inline-block;white-space:nowrap;flex:none}
+  .logo .kk{position:relative;display:inline-block}
+  .logo .kk .knode{position:absolute;left:.04em;top:.36em;width:.205em;height:.205em;border-radius:50%;background:var(--amber);box-shadow:0 0 0 .05em var(--bg)}
+  .crumb{color:var(--ghost);font-size:13.5px}
+  .crumb b{color:var(--dim);font-weight:500;font-family:var(--mono);font-size:13px}
+  /* discreet posture chip (no more banner) */
+  .posture{display:inline-flex;align-items:center;gap:7px;font:600 11.5px var(--ui);letter-spacing:.02em;padding:5px 10px;border-radius:8px;
+    color:var(--red);background:color-mix(in oklab,var(--red) 12%,transparent);border:1px solid color-mix(in oklab,var(--red) 38%,var(--line))}
+  .posture .d{width:7px;height:7px;border-radius:50%;background:var(--red)}
+  .posture.dry{color:var(--faint);background:var(--raise);border-color:var(--line)} .posture.dry .d{background:var(--ghost)}
+  /* ---- interactive states (consistent across the system) ---- */
+  a,button{transition:background .12s ease,color .12s ease,border-color .12s ease}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:6px}
+  .nav{display:flex;gap:2px}
+  .nav a{font-size:13.5px;color:var(--faint);text-decoration:none;padding:7px 12px;border-radius:8px}
+  .nav a:hover{color:var(--dim);background:color-mix(in oklab,var(--raise) 55%,transparent)}
+  .nav a.on{color:var(--fg);background:var(--raise)}
+  .nav a.on:hover{background:var(--raise-2)}
+  .fr{margin-left:auto;display:flex;gap:18px;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .fr b{color:var(--faint);font-weight:500}
+  .fr .dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;vertical-align:middle}
+  .avatar{flex:none;width:30px;height:30px;border-radius:50%;background:var(--raise-2);border:1px solid var(--line-2);color:var(--dim);font:600 11px var(--ui);letter-spacing:.02em;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.avatar:hover{border-color:var(--faint);color:var(--fg)}.avatar.on{border-color:var(--amber);color:var(--amber)}
+
+  /* ---- window/filter toolbar ---- */
+  .toolbar{display:flex;align-items:center;gap:14px 16px;flex-wrap:wrap;min-height:56px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .seg{display:inline-flex;background:var(--raise);border:1px solid var(--line);border-radius:9px;padding:2px}
+  .seg button{font:500 12.5px var(--ui);color:var(--faint);background:none;border:0;padding:5px 13px;border-radius:7px;cursor:pointer}
+  .seg button:hover:not(.on){color:var(--dim);background:color-mix(in oklab,var(--raise-2) 65%,transparent)}
+  .seg button.on{color:oklch(22% 0.04 80);background:var(--amber);font-weight:600}
+  .sel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);border:1px solid var(--line);border-radius:9px;padding:6px 11px;background:var(--raise);cursor:pointer}
+  .sel:hover{border-color:var(--line-2);color:var(--fg)}
+  .sel .mono{color:var(--fg)} .sel .car{color:var(--ghost)}
+  .toggle{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--dim);cursor:pointer;user-select:none}
+  .toggle:hover .sw{background:var(--line-2);filter:brightness(1.15)}
+  .sw{width:30px;height:18px;border-radius:10px;background:var(--line-2);position:relative;transition:background .14s}
+  .sw i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--faint);transition:left .14s,background .14s}
+  .sw.on{background:color-mix(in oklab,var(--amber) 55%,var(--line))} .sw.on i{left:14px;background:var(--amber)}
+  .tr{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+
+  /* ============ TIER 2 — vitals (the "panels" the user liked), a single contained panel ============ */
+  /* grid + 1px gap on --line bg = responsive hairline dividers that survive wrapping */
+  .vitals{margin:22px 0 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:var(--line)}
+  .vital{background:var(--raise);padding:16px 22px}
+  .vital.win{display:flex;flex-direction:column;justify-content:center}
+  .vital .v{font-family:var(--display);font-weight:600;font-size:27px;letter-spacing:-.02em;line-height:1}
+  .vital .v.green{color:var(--green)} .vital .v.red{color:var(--red)}
+  .vital .k{font-size:12px;color:var(--faint);margin-top:6px}
+  .vital.win .r1{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  .vital.win .r2{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:4px}
+
+  /* ============ TIER 1 — the pipeline (hero) ============ */
+  .sec{display:flex;align-items:baseline;gap:12px;margin:30px 0 12px}
+  .sec .n{font-family:var(--mono);font-size:11.5px;color:var(--red)}
+  /* ONE horizontal rail: intake faucet → 4 active stages → merged drain.
+     open top/bottom + a continuous conduit + vertical-only dividers read as a PIPE, not a table. */
+  .pipe{position:relative;display:flex;align-items:stretch;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .pipe::before{content:"";position:absolute;left:0;right:0;top:64px;height:1px;background:var(--line)}   /* the conduit */
+  /* slim end-caps — endpoints, not stages you manage (no count tile, no goal list) */
+  .cap{flex:0 0 88px;padding:20px 14px;position:relative;cursor:pointer;transition:background .12s}
+  .cap:hover{background:color-mix(in oklab,var(--raise) 45%,var(--bg))}
+  .cap .cnm{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.01em;color:var(--ghost)}
+  .cap .cmeta{font-family:var(--mono);font-size:10.5px;color:var(--ghost);margin-top:34px;line-height:1.6}
+  .cap.out{border-left:1px solid var(--line)}
+  .cap.out .cmeta b{color:var(--green);font-weight:600;font-size:12.5px}
+  .cap .cnode{position:absolute;top:59px;left:16px;width:9px;height:9px;border-radius:50%;border:2px solid var(--bg);background:var(--line-2);z-index:2}
+  .cap.out .cnode{background:var(--green)}
+  /* the 4 active stages — the real pipeline; flex:1 so each gets equal, generous width */
+  .stg{flex:1 1 0;min-width:0;min-height:300px;background:var(--bg);padding:20px 20px;position:relative;border-left:1px solid var(--line);cursor:pointer;transition:background .12s}
+  .stg:hover{background:color-mix(in oklab,var(--raise) 45%,var(--bg))}
+  .stg .top{display:flex;align-items:flex-start;justify-content:space-between}
+  .stg .nm{font-family:var(--display);font-weight:600;font-size:14px;letter-spacing:.01em;color:var(--faint)}   /* neutral stages recede */
+  .stg .ct{font-family:var(--display);font-weight:700;font-size:32px;line-height:.8;letter-spacing:-.02em;color:var(--fg)}
+  .node{position:absolute;top:59px;left:22px;width:10px;height:10px;border-radius:50%;background:var(--line-2);border:2px solid var(--bg);z-index:2}
+  .stg .io{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:30px}
+  .stg .io b{color:var(--faint);font-weight:500}
+  .glist{margin-top:14px;display:flex;flex-direction:column}
+  /* titles WRAP to 2 lines (not truncate) — a ~130px column then shows ~40 chars, fully legible */
+  .g{display:flex;align-items:flex-start;gap:8px;padding:8px 0;font-size:12.5px;color:var(--dim);border-top:1px solid color-mix(in oklab,var(--line) 55%,transparent);min-width:0}
+  .g:first-child{border-top:0}
+  .g .dot{width:6px;height:6px;border-radius:50%;background:var(--ghost);flex:none;margin-top:5px}
+  .g .id{font-family:var(--mono);font-size:11.5px;color:var(--faint);flex:none}
+  /* always a 2-line slot: titles wrap up to 2 lines and rows stay uniform */
+  .g .ttl{min-width:0;flex:1;line-height:1.34;color:var(--fg);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.68em}
+  .g .age{font-family:var(--mono);font-size:11px;color:var(--ghost);flex:none;padding-left:6px}
+  .more{font-family:var(--mono);font-size:11px;color:var(--ghost);padding-top:10px}
+  /* trouble stages advance — colored top rule + one label, no glow */
+  .stg.review{box-shadow:inset 0 2px 0 var(--gold)} .stg.review .nm{color:var(--gold)}
+  .stg.ship{box-shadow:inset 0 2px 0 var(--red)} .stg.ship .nm{color:var(--red)}
+  .tag{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:500;margin-top:12px;padding:4px 10px;border-radius:7px;border:1px solid}
+  .tag.gold{color:var(--gold);border-color:color-mix(in oklab,var(--gold) 38%,var(--line))}
+  .tag.red{color:var(--red);border-color:color-mix(in oklab,var(--red) 45%,var(--line))}
+  .tag .d{width:6px;height:6px;border-radius:50%}
+
+  /* ---- view switch (Pipeline | Board) ---- */
+  .viewbar{align-items:center}
+  .vseg{padding:2px}
+  .vseg button{font:600 12.5px var(--ui);padding:6px 15px}
+  .canvas[data-view="board"] .pipe{display:none}
+  .canvas[data-view="pipeline"] .board{display:none}
+
+  /* ============ BOARD view — every goal as a card, grouped by stage ============ */
+  .board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px}
+  .bcol{min-width:0;display:flex;flex-direction:column}
+  .bcol-hd{display:flex;align-items:center;gap:10px;padding:0 2px 11px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+  .bcol-hd .bnm{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.01em;color:var(--faint)}
+  .bcol-hd .bct{margin-left:auto;font-family:var(--display);font-weight:700;font-size:15px;color:var(--fg)}
+  .bcol.review .bnm{color:var(--gold)} .bcol.review .bcol-hd{border-color:color-mix(in oklab,var(--gold) 42%,var(--line))}
+  .bcol.ship .bnm{color:var(--red)} .bcol.ship .bcol-hd{border-color:color-mix(in oklab,var(--red) 42%,var(--line))}
+  .bcol.done .bnm,.bcol.done .bct{color:var(--green)}
+  .bcards{display:flex;flex-direction:column;gap:10px}
+  .card{background:var(--raise);border:1px solid var(--line);border-radius:10px;padding:11px 12px;cursor:pointer;transition:background .12s,border-color .12s}
+  .card:hover{background:var(--raise-2);border-color:var(--line-2)}
+  .card .crow{display:flex;align-items:center;gap:8px}
+  .card .cid{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .card .cbadge{margin-left:auto;font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:5px;border:1px solid var(--line-2);color:var(--ghost);white-space:nowrap}
+  .card .cbadge.red{color:var(--red);border-color:color-mix(in oklab,var(--red) 45%,var(--line))}
+  .card .cbadge.green{color:var(--green);border-color:color-mix(in oklab,var(--green) 40%,var(--line))}
+  .card .ctitle{font-size:12.5px;color:var(--fg);margin-top:7px;line-height:1.34;min-height:2.68em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .card .cmeta{font-family:var(--mono);font-size:10.5px;color:var(--ghost);margin-top:8px}
+  .bmore{font-family:var(--mono);font-size:11px;color:var(--ghost);padding:8px 2px 0}
+
+  /* ============ TIER 3 — needs you (subordinate) ============ */
+  .needs{margin-top:34px}
+  .nrow{display:flex;align-items:center;gap:16px;padding:12px 2px;border-top:1px solid var(--line)}
+  .nrow .lead{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;width:104px;color:var(--faint)}
+  .nrow .lead.red{color:var(--red)} .nrow .lead.gold{color:var(--gold)}
+  .nrow .body{flex:1;min-width:0}
+  .nrow .body .t{font-weight:500;font-size:13px}
+  .nrow .body .t .id{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-left:7px}
+  .nrow .body .why{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:2px}
+  .nrow{transition:background .12s} .nrow:hover{background:color-mix(in oklab,var(--raise) 30%,transparent)}
+  .nrow .btn{font:500 12px var(--ui);border:1px solid var(--line-2);background:var(--raise);color:var(--dim);border-radius:8px;padding:6px 13px;cursor:pointer}
+  .nrow .btn:hover{background:var(--raise-2);border-color:var(--faint);color:var(--fg)}     /* neutral brighten, not amber */
+  .nrow .btn:active{background:var(--raise)}
+  .nrow .btn.red{border-color:color-mix(in oklab,var(--red) 50%,var(--line));color:var(--red)}
+  .nrow .btn.red:hover{background:color-mix(in oklab,var(--red) 13%,transparent);border-color:var(--red);color:var(--red)}
+
+  .foot{margin:24px 0 32px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:24px;font-family:var(--mono);font-size:11px;color:var(--ghost);flex-wrap:wrap}
+  .foot b{color:var(--faint);font-weight:500} .foot .note{color:var(--gold)}
+
+  /* ============ responsive — capped at 1440, fluid below ============ */
+  @media(max-width:1080px){
+    .board{display:flex;overflow-x:auto;scrollbar-width:thin}   /* board is a grid — swipe the columns */
+    .bcol{flex:0 0 240px}
+  }
+  @media(max-width:980px){
+    .pipe{overflow-x:auto;scrollbar-width:thin}   /* keep one rail; swipe it */
+    .stg{flex:0 0 250px}
+    .cap{flex:0 0 110px}
+    .vitals{grid-template-columns:repeat(3,minmax(0,1fr))}
+  }
+  @media(max-width:780px){
+    .hd{height:auto;flex-wrap:wrap;gap:10px 12px;padding:12px 0}
+    .crumb,.fr{display:none}
+    .nav{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .toolbar{height:auto;flex-wrap:wrap;gap:12px;padding:14px 0}
+    .tr{display:none}
+    .vitals{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .sec{flex-wrap:wrap;gap:4px 12px}
+    .nrow{flex-wrap:wrap;gap:8px 14px}
+    .nrow .lead{order:1}
+    .nrow .body{order:2;flex:1 1 100%}
+    .nrow .btn{order:3}
+  }
+  @media(max-width:600px){
+    .pipe{flex-direction:column}        /* stack the rail — each stage full width */
+    .pipe::before{display:none}
+    .stg,.cap{flex:1 1 auto;min-height:auto;border-left:0;border-top:1px solid var(--line)}
+    .cap.out{border-left:0}
+    .stg:first-of-type{border-top:0}
+  }
+  @media(max-width:480px){
+    .wrap{padding:0 16px}
+    .vitals{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .vital .v{font-size:23px}
+    .seg{flex-wrap:wrap}
+  }
+
+  /* ====================================================================== */
+  /* ============ SCREEN-SPECIFIC — Settings & Safety ===================== */
+  /* ====================================================================== */
+  /* stacked sections, hairline-separated, each with a section eyebrow */
+  .sset{padding:30px 0;border-top:1px solid var(--line)}
+  .sset:first-of-type{border-top:0}
+  .sset > .shd{display:flex;align-items:baseline;gap:12px;margin-bottom:18px}
+  .sset > .shd .sub{font-size:12.5px;color:var(--faint)}
+  .sset > .shd .sub b{color:var(--dim);font-weight:500}
+
+  /* layout helper: a label column + value/control column, hairline rows */
+  .rows{display:flex;flex-direction:column}
+  .row{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr) auto;align-items:center;gap:16px 20px;
+       padding:13px 2px;border-top:1px solid color-mix(in oklab,var(--line) 70%,transparent)}
+  .row:first-child{border-top:0}
+  .row .lbl{min-width:0}
+  .row .lbl .l{font-size:13px;color:var(--dim);font-weight:450}
+  .row .lbl .env{font-family:var(--mono);font-size:10.5px;color:var(--ghost);margin-top:3px;letter-spacing:.01em}
+  .row .val{min-width:0;font-family:var(--mono);font-size:12.5px;color:var(--fg);overflow-wrap:anywhere}
+  .row .val .muted{color:var(--ghost)}
+  .row .act{justify-self:end}
+  .ro{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ghost)}
+  .ro::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--line-2)}
+
+  /* ---- (1) POSTURE & SAFETY — the hero verdict ---- */
+  .postpanel{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--raise)}
+  .postpanel.real{border-color:color-mix(in oklab,var(--red) 42%,var(--line))}
+  .verdict{display:flex;align-items:flex-start;gap:22px;padding:22px 24px;flex-wrap:wrap}
+  .verdict .vbig{display:flex;flex-direction:column;gap:9px;min-width:0}
+  .vstate{display:inline-flex;align-items:center;gap:13px}
+  .vstate .vdot{width:13px;height:13px;border-radius:50%;background:var(--green);flex:none}
+  .vstate .vlab{font-family:var(--display);font-weight:700;font-size:31px;letter-spacing:-.02em;line-height:1;color:var(--fg)}
+  .vstate .vlab .w{color:var(--ghost);font-weight:600}
+  .verdict.real .vstate .vdot{background:var(--red)}
+  .verdict.real .vstate .vlab{color:var(--red)}
+  .verdict .vsay{font-size:13px;color:var(--dim);max-width:560px;line-height:1.5}
+  .verdict .vsay b{color:var(--fg);font-weight:500}
+  .verdict .vmeta{margin-left:auto;display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-family:var(--mono);font-size:11px;color:var(--ghost);text-align:right}
+  .verdict .vmeta .kv b{color:var(--faint);font-weight:500}
+  .verdict .vmeta .kv .ok{color:var(--green)}
+
+  /* elevation control sits in its own band below the verdict */
+  .elevate{border-top:1px solid var(--line);padding:18px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .elevate .ehead{min-width:0;flex:1}
+  .elevate .ehead .et{font-size:13px;color:var(--dim)}
+  .elevate .ehead .et b{color:var(--fg);font-weight:600}
+  .elevate .ehead .es{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:3px}
+  .elevate .ehead .es.blocked{color:var(--gold)}
+  /* the big toggle, styled like the shared toggle but danger-tinted when armed */
+  .bigtoggle{display:inline-flex;align-items:center;gap:12px;cursor:not-allowed;user-select:none}
+  .bigtoggle[data-ready="1"]{cursor:pointer}
+  .bigtoggle .bsw{width:46px;height:26px;border-radius:14px;background:var(--line-2);position:relative;transition:background .14s;opacity:.5}
+  .bigtoggle[data-ready="1"] .bsw{opacity:1}
+  .bigtoggle .bsw i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--faint);transition:left .14s,background .14s}
+  .bigtoggle .bsw.on{background:color-mix(in oklab,var(--red) 60%,var(--line))}
+  .bigtoggle .bsw.on i{left:23px;background:var(--red)}
+  .bigtoggle .bt{font:600 12.5px var(--ui);color:var(--faint)}
+  .bigtoggle[data-ready="1"] .bt{color:var(--dim)}
+
+  /* prerequisite checklist */
+  .prereq{border-top:1px solid var(--line);padding:18px 24px}
+  .prereq .pq-h{font:600 11px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ghost);margin-bottom:4px}
+  .prereq .pq-s{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-bottom:12px}
+  .pqlist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .pq{display:flex;align-items:flex-start;gap:11px;padding:13px 15px;background:var(--raise);min-width:0}
+  .pq .mk{flex:none;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 12px var(--ui);margin-top:1px}
+  .pq.pass .mk{color:var(--green);border:1.5px solid color-mix(in oklab,var(--green) 55%,var(--line))}
+  .pq.fail .mk{color:var(--red);border:1.5px solid color-mix(in oklab,var(--red) 55%,var(--line))}
+  .pq .pqb{min-width:0}
+  .pq .pqt{font-size:12.5px;color:var(--fg);font-weight:450}
+  .pq .pqd{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:3px;overflow-wrap:anywhere}
+  .pq.fail .pqd{color:var(--gold)}
+
+  /* the red confirm box, revealed when armed */
+  .confirm{margin:0 24px 22px;border:1px solid color-mix(in oklab,var(--red) 50%,var(--line));border-radius:12px;
+    background:color-mix(in oklab,var(--red) 7%,var(--raise));padding:18px 20px;display:none}
+  .confirm.show{display:block}
+  .confirm .cwarn{display:flex;gap:11px;align-items:flex-start}
+  .confirm .cwarn .cmark{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--red);color:var(--red);
+    display:flex;align-items:center;justify-content:center;font:600 11px var(--ui);margin-top:1px}
+  .confirm .cwarn .ctxt{font-size:13px;color:var(--fg);line-height:1.5}
+  .confirm .cwarn .ctxt b{color:var(--red);font-weight:600}
+  .confirm .cform{display:flex;gap:12px;align-items:center;margin-top:15px;flex-wrap:wrap}
+  .confirm .cform .pre{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .confirm input.cin{font-family:var(--mono);font-size:13px;color:var(--fg);background:var(--bg);
+    border:1px solid var(--line-2);border-radius:8px;padding:9px 12px;width:240px;outline:none}
+  .confirm input.cin:focus{border-color:var(--red)}
+  .confirm input.cin::placeholder{color:var(--ghost)}
+  .btn-real{font:600 12.5px var(--ui);border:1px solid var(--red);background:color-mix(in oklab,var(--red) 14%,transparent);
+    color:var(--red);border-radius:8px;padding:9px 16px;cursor:not-allowed;opacity:.55}
+  .btn-real[data-armed="1"]{cursor:pointer;opacity:1}
+  .btn-real[data-armed="1"]:hover{background:color-mix(in oklab,var(--red) 22%,transparent)}
+  .confirm .cnote{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:13px;line-height:1.6;border-top:1px solid color-mix(in oklab,var(--red) 22%,var(--line));padding-top:11px}
+  .confirm .cnote b{color:var(--gold);font-weight:500}
+
+  /* ---- (2) CONNECTIONS ---- */
+  .conn{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .cpane{background:var(--raise);padding:18px 20px;min-width:0;display:flex;flex-direction:column;gap:12px}
+  .cpane .ctop{display:flex;align-items:center;gap:10px}
+  .cpane .ctop .sdot{width:8px;height:8px;border-radius:50%;flex:none}
+  .cpane .ctop .sdot.up{background:var(--green)}
+  .cpane .ctop .sdot.off{background:var(--ghost)}
+  .cpane .ctop .cname{font-family:var(--display);font-weight:600;font-size:14.5px;color:var(--fg)}
+  .cpane .ctop .cstat{margin-left:auto;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
+  .cpane .ctop .cstat.up{color:var(--green)}
+  .cpane .ctop .cstat.off{color:var(--faint)}
+  .cpane .cdesc{font-size:12.5px;color:var(--dim);line-height:1.5}
+  .cpane .cdesc b{color:var(--fg);font-weight:500}
+  .cpane .cdetail{font-family:var(--mono);font-size:11px;color:var(--ghost);line-height:1.7}
+  .cpane .cdetail .k{color:var(--faint)}
+  .cpane .cdetail .warn{color:var(--gold)}
+  .cpane .cfoot{margin-top:auto;display:flex;gap:10px;align-items:center;padding-top:4px}
+  .btn{font:500 12px var(--ui);border:1px solid var(--line-2);background:var(--raise);color:var(--dim);border-radius:8px;padding:7px 14px;cursor:pointer}
+  .btn:hover{background:var(--raise-2);border-color:var(--faint);color:var(--fg)}
+  .btn:active{background:var(--raise)}
+  .btn.red{border-color:color-mix(in oklab,var(--red) 50%,var(--line));color:var(--red)}
+  .btn.red:hover{background:color-mix(in oklab,var(--red) 13%,transparent);border-color:var(--red);color:var(--red)}
+
+  /* ---- (3) ENGINE KNOBS — label · mono value rows ---- */
+  .knobs{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .knobs .row{padding:14px 20px;grid-template-columns:minmax(0,300px) minmax(0,1fr) auto;border-top:1px solid var(--line)}
+  .knobs .row:first-child{border-top:0}
+  .knobs .row:hover{background:color-mix(in oklab,var(--raise) 28%,transparent)}
+  /* a read-mostly select, styled to match the shared .sel */
+  .ksel{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--fg);
+    border:1px solid var(--line);border-radius:8px;padding:6px 11px;background:var(--raise);cursor:pointer}
+  .ksel:hover{border-color:var(--line-2)}
+  .ksel .car{color:var(--ghost)}
+
+  /* ---- (4) DANGER ZONE ---- */
+  .danger{border:1px solid color-mix(in oklab,var(--red) 32%,var(--line));border-radius:14px;overflow:hidden}
+  .dz{display:flex;align-items:center;gap:18px;padding:16px 20px;border-top:1px solid color-mix(in oklab,var(--red) 22%,var(--line))}
+  .dz:first-child{border-top:0}
+  .dz .dzb{flex:1;min-width:0}
+  .dz .dzb .dzt{font-size:13.5px;color:var(--fg);font-weight:500}
+  .dz .dzb .dzw{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:3px;line-height:1.5}
+
+  /* ---- (A) ACCOUNT — the signed-in identity ---- */
+  .acct{display:flex;align-items:center;gap:18px;border:1px solid var(--line);border-radius:14px;background:var(--raise);padding:18px 22px;flex-wrap:wrap}
+  .acct .abig{width:48px;height:48px;border-radius:50%;flex:none;background:var(--raise-2);border:1px solid var(--line-2);
+    color:var(--dim);font:600 16px var(--ui);letter-spacing:.02em;display:flex;align-items:center;justify-content:center}
+  .acct .ab{min-width:0;display:flex;flex-direction:column;gap:3px}
+  .acct .anm{font-family:var(--display);font-weight:600;font-size:16px;letter-spacing:-.01em;color:var(--fg)}
+  .acct .aml{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .acct .avia{font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .acct .avia b{color:var(--faint);font-weight:500}
+  .acct .aact{margin-left:auto}
+
+  /* ---- (B) CONNECTED REPOSITORIES — owner/repo rows ---- */
+  .repos{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .repo{display:flex;align-items:center;gap:16px;padding:15px 20px;border-top:1px solid var(--line);transition:background .12s}
+  .repo:first-child{border-top:0}
+  .repo:hover{background:color-mix(in oklab,var(--raise) 28%,transparent)}
+  .repo .rdot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--green)}
+  .repo .rb{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}
+  .repo .rname{font-family:var(--mono);font-size:13px;color:var(--fg)}
+  .repo .rname .own{color:var(--ghost)}
+  .repo .rrole{font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .repo .rrole b{color:var(--faint);font-weight:500}
+  .repo .rstat{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--green);flex:none}
+  .repoadd{display:flex;align-items:center;gap:14px;padding:14px 20px;border-top:1px solid var(--line);background:color-mix(in oklab,var(--raise) 40%,transparent)}
+  .repoadd .rab{flex:1;min-width:0;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .repoadd .rab b{color:var(--faint);font-weight:500}
+
+  /* ---- (C) POLL INTERVAL — a single control row in a panel ---- */
+  .pollpanel{border:1px solid var(--line);border-radius:14px;background:var(--raise);padding:18px 22px;
+    display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .pollpanel .pb{flex:1;min-width:0}
+  .pollpanel .pt{font-size:13.5px;color:var(--dim)}
+  .pollpanel .pt b{color:var(--fg);font-weight:500;font-family:var(--mono)}
+  .pollpanel .ps{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:4px;line-height:1.5}
+  .pollpanel .pt .muted{color:var(--ghost);font-family:var(--ui);font-weight:450}
+  .pollpanel .ksel{flex:none;color:var(--dim)}
+
+  @media(max-width:780px){
+    .conn{grid-template-columns:minmax(0,1fr)}
+    .pqlist{grid-template-columns:minmax(0,1fr)}
+    .verdict .vmeta{margin-left:0;align-items:flex-start;text-align:left}
+    .row,.knobs .row{grid-template-columns:minmax(0,1fr);gap:8px}
+    .row .act{justify-self:start}
+    .dz{flex-wrap:wrap;gap:10px}
+    .acct .aact{margin-left:0}
+    .repo{flex-wrap:wrap;gap:10px 14px}
+    .repo .rstat{order:3}
+  }
+  @media(max-width:480px){
+    .vstate .vlab{font-size:26px}
+    .confirm input.cin{width:100%}
+  }
+
+  /* GitHub status chip (octocat + health dot) */
+  .frq{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:var(--raise);color:var(--faint)}
+  .frq:hover{color:var(--dim);border-color:var(--line-2)}
+  .frq .d{position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-radius:50%;background:var(--green);border:1.5px solid var(--raise)}
+
+  /* scrolled: section pipe appears LEFT of the GitHub chip */
+  .hpipe{flex:none;width:1px;height:18px;background:var(--line-2);align-self:center;margin:0 2px;display:none}
+  html.scrolled .hpipe{display:block}
+</style></head>
+<body>
+<section class="screen"><div class="wrap">
+
+  <div class="hd">
+    <a class="logo" href="#">F<span class="kk">K<i class="knode"></i></span>ST</a>
+    <div class="nav"><a href="overview.html">Overview</a><a href="goals.html">Goals</a><a href="packages.html">Packages</a></div>
+    <span class="hpipe"></span>
+    <div class="fr"><span class="frq" title="GitHub — synced 30s ago"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><i class="d"></i></span></div>
+    <a class="avatar on" href="settings.html" title="Account & settings">CT</a>
+  </div>
+
+  <!-- ===================== (1) ACCOUNT ===================== -->
+  <div class="sset">
+    <div class="shd">
+      <span class="eyebrow">Account</span>
+      <span class="sub">the signed-in user for this console — identity is brokered by <b>NyxID</b>.</span>
+    </div>
+
+    <div class="acct">
+      <span class="abig">CT</span>
+      <div class="ab">
+        <span class="anm">Calvin Tan</span>
+        <span class="aml">calvin.tan@aelf.io</span>
+        <span class="avia">signed in via <b>NyxID</b> · session active</span>
+      </div>
+      <div class="aact"><button class="btn">Sign out</button></div>
+    </div>
+  </div>
+
+  <!-- ===================== (2) CONNECTED REPOSITORIES ===================== -->
+  <div class="sset">
+    <div class="shd">
+      <span class="eyebrow">Connected repositories</span>
+      <span class="sub">each connected repo is one <b>deployment</b> — a single host repo (<span class="mono">FKST_GITHUB_REPO</span>) running one composed graph. Goals are that repo's issues labeled <b>fkst-dev:enabled</b>. This console is a fleet view across them.</span>
+    </div>
+
+    <div class="repos">
+      <div class="repo">
+        <span class="rdot"></span>
+        <div class="rb">
+          <span class="rname"><span class="own">ChronoAIProject/</span>fkst-substrate</span>
+          <span class="rrole">deployment · <b>github-devloop</b> graph · this repo's <b>fkst-dev:enabled</b> issues are its goals</span>
+        </div>
+        <span class="rstat">connected</span>
+        <button class="btn">Disconnect</button>
+      </div>
+      <div class="repo">
+        <span class="rdot"></span>
+        <div class="rb">
+          <span class="rname"><span class="own">ChronoAIProject/</span>fkst-packages</span>
+          <span class="rrole">deployment · <b>github-devloop</b> graph · this repo's <b>fkst-dev:enabled</b> issues are its goals</span>
+        </div>
+        <span class="rstat">connected</span>
+        <button class="btn">Disconnect</button>
+      </div>
+      <div class="repoadd">
+        <span class="rab">authorize a repo via <b>GitHub → NyxID</b> to stand up a new deployment · only its <b>fkst-dev:enabled</b> issues become goals</span>
+        <button class="btn">Connect a repository</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== (3) POLL INTERVAL ===================== -->
+  <div class="sset">
+    <div class="shd">
+      <span class="eyebrow">Poll cadence</span>
+      <span class="sub">how often the engine re-derives state from GitHub. Data is <b>poll-derived, not live</b>.</span>
+    </div>
+
+    <div class="pollpanel">
+      <div class="pb">
+        <div class="pt">Re-derives every <b>5m</b> <span class="muted">— set by the package raisers (cron)</span></div>
+        <div class="ps"><span class="mono">interval = "5m"</span> declared statically in each raiser (intake · branch · observability · github poll) · the package source tree is read-only at runtime, so this is not a settings knob · between ticks, counts &amp; state are as-of the last poll</div>
+      </div>
+      <a class="ksel" href="packages.html" style="text-decoration:none">change on Packages <span class="car">→</span></a>
+    </div>
+  </div>
+
+  <!-- ===================== (4) WRITE POSTURE & SAFETY ===================== -->
+  <div class="sset">
+    <div class="shd">
+      <span class="eyebrow">Write posture &amp; safety</span>
+      <span class="sub">the deployment's <b>global</b> <span class="mono">FKST_GITHUB_WRITE</span> — never per-goal. Elevation is deliberate.</span>
+    </div>
+
+    <div class="postpanel" id="postpanel">
+      <!-- the verdict, big -->
+      <div class="verdict" id="verdict">
+        <div class="vbig">
+          <span class="vstate"><span class="vdot"></span><span class="vlab"><span class="w">WRITE:</span> DRY-RUN</span></span>
+          <div class="vsay" id="vsay">No external GitHub writes. The engine plans every comment, label, PR and merge but stops at <b>execute</b>. Safe to leave running unattended — this is the default and recommended posture.</div>
+        </div>
+        <div class="vmeta">
+          <span class="kv"><b>FKST_GITHUB_WRITE</b> = 0</span>
+          <span class="kv">repo <b>fkst-substrate</b></span>
+          <span class="kv ok" id="kvprereq">3 / 4 prerequisites met</span>
+          <span class="kv">posture as of <b>38s ago</b></span>
+        </div>
+      </div>
+
+      <!-- elevation control -->
+      <div class="elevate">
+        <div class="ehead">
+          <div class="et">Set deployment to <b>WRITE: REAL</b></div>
+          <div class="es blocked" id="estate">Disabled — branch protection not verified. All 4 prerequisites must pass before REAL can be armed on the hosted service.</div>
+        </div>
+        <label class="bigtoggle" id="bigtoggle" data-ready="0">
+          <span class="bsw" id="bsw"><i></i></span>
+          <span class="bt">Arm REAL</span>
+        </label>
+      </div>
+
+      <!-- prerequisites -->
+      <div class="prereq">
+        <div class="pq-h">Prerequisites for REAL</div>
+        <div class="pq-s">poll-derived (~5-min ticks) · re-verified each tick · checks read "unknown" when the hosted service is unreachable</div>
+        <div class="pqlist">
+          <div class="pq pass">
+            <span class="mk">✓</span>
+            <div class="pqb">
+              <div class="pqt">CI required &amp; green on the integration branch</div>
+              <div class="pqd">branch protection: 1 required check · last run passed · merge is match-head-commit only</div>
+            </div>
+          </div>
+          <div class="pq pass">
+            <span class="mk">✓</span>
+            <div class="pqb">
+              <div class="pqt">Integration branch set</div>
+              <div class="pqd">FKST_DEVLOOP_INTEGRATION_BRANCH = integration · rollup PR carries integration → dev</div>
+            </div>
+          </div>
+          <div class="pq pass">
+            <span class="mk">✓</span>
+            <div class="pqb">
+              <div class="pqt">Bot login configured</div>
+              <div class="pqd">FKST_GITHUB_BOT_LOGIN = fkst-devloop-bot · only this author's markers are trusted</div>
+            </div>
+          </div>
+          <div class="pq fail">
+            <span class="mk">✗</span>
+            <div class="pqb">
+              <div class="pqt">Branch protection enforced on the integration branch</div>
+              <div class="pqd">required status checks must be server-side enforced and the bot must lack bypass / admin override · currently missing on integration · GitHub API reads "unknown" until reachable, not 0 · fix protection to arm REAL</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- the red confirm box, revealed only when armed -->
+      <div class="confirm" id="confirm">
+        <div class="cwarn">
+          <span class="cmark">!</span>
+          <div class="ctxt"><b>This sets <span class="mono">FKST_GITHUB_WRITE = 1</span> on the hosted deployment — REAL enables autonomous <span class="mono">gh pr merge</span> into the integration branch within seconds</b> (a rollup PR then carries integration → dev; never main). Once set, the merge department executes deterministically the moment a goal reaches merge-ready — no human in the loop. Type the repo name to confirm.</div>
+        </div>
+        <div class="cform">
+          <span class="pre">repo</span>
+          <input class="cin" id="cin" type="text" placeholder="fkst-substrate" autocomplete="off" spellcheck="false">
+          <button class="btn-real" id="btnreal" data-armed="0">Enable REAL writes</button>
+        </div>
+        <div class="cnote">Note: real merges are fast and autonomous, so a <b>last-second hold is fictional</b> — there is no "cancel mid-merge." Your real controls are the global posture (switch the deployment back to DRY-RUN) or a GitHub mutation that removes the work (close the PR / remove the enabling label). There is no per-goal pause.</div>
+        <div class="cnote"><b>Grounding · hosted v1 gap:</b> the v1 API has <b>no posture endpoint</b> — today <span class="mono">FKST_GITHUB_WRITE</span> is deploy-time env applied via a session restart. This switch ships when the hosted config endpoint lands (backend issue); until then the control renders disabled with this note.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== (5) CONNECTIONS ===================== -->
+  <div class="sset">
+    <div class="shd">
+      <span class="eyebrow">Connections</span>
+      <span class="sub">how the console reaches GitHub and the hosted engine. The SPA never holds a raw token.</span>
+    </div>
+
+    <div class="conn">
+      <div class="cpane">
+        <div class="ctop">
+          <span class="sdot up"></span>
+          <span class="cname">NyxID — credential broker</span>
+          <span class="cstat up">connected</span>
+        </div>
+        <div class="cdesc">NyxID brokers the GitHub credential server-side and proxies every call. The SPA carries only a <b>~15-min NyxID token</b> — never a raw GitHub token.</div>
+        <div class="cdetail">
+          <span class="k">service</span> api-github · https://api.github.com<br>
+          <span class="k">token</span> NyxID access · expires in 11m · auto-refresh<br>
+          <span class="k">proxy</span> /api/v1/proxy/s/api-github/… · last call 38s ago
+        </div>
+        <div class="cfoot"><button class="btn">Reconnect</button><span class="ro">broker-held · revocable</span></div>
+      </div>
+
+      <div class="cpane">
+        <div class="ctop">
+          <span class="sdot up"></span>
+          <span class="cname">Hosted engine — ChronoAI cloud</span>
+          <span class="cstat up">live</span>
+        </div>
+        <div class="cdesc">The Rust backend running <b>substrate + packages</b>, hosted on ChronoAI. The FE polls GitHub and reads the hosted service's reported status — it does <b>not</b> command the engine directly.</div>
+        <div class="cdetail">
+          <span class="k">deployment</span> fkst-substrate · region chronoai-cloud · 3–5 replicas, lease-fenced<br>
+          <span class="k">api v1</span> <span class="mono">GET /health</span> · <span class="mono">GET/POST /api/v1/packages</span> · <span class="mono">POST/GET/stop /api/v1/sessions</span><br>
+          <span class="k">session</span> <span class="mono">running</span> · pending → validating → running → stopping → stopped / failed<br>
+          <span class="warn">when the hosted service is unreachable, status reads "unknown" — never 0</span>
+        </div>
+        <div class="cfoot"><span class="ro">engine state read-only · the console manages packages &amp; the session lifecycle, never the engine internals</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== (6) DEPLOYMENT KNOBS ===================== -->
+  <div class="sset">
+    <div class="shd">
+      <span class="eyebrow">Deployment knobs</span>
+      <span class="sub">resolved process env → <span class="mono">host_root/fkst.env</span> → default. The substrate <span class="mono">config</span> command is <b>read-only</b> (no set API) — changes are deploy-time env on the hosted service + a session restart. <b>Hosted v1 gap:</b> no config-read endpoint yet — these values render "unknown" until it lands (backend issue).</span>
+    </div>
+
+    <div class="knobs">
+      <div class="rows">
+        <div class="row">
+          <div class="lbl"><div class="l">Host repo (this deployment)</div><div class="env">FKST_GITHUB_REPO</div></div>
+          <div class="val">ChronoAIProject/fkst-substrate <span class="muted">· the one watched repo = one composed graph</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Integration branch</div><div class="env">FKST_DEVLOOP_INTEGRATION_BRANCH</div></div>
+          <div class="val">integration <span class="muted">· merges land here, never main</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Upstream branch</div><div class="env">FKST_DEVLOOP_UPSTREAM_BRANCH</div></div>
+          <div class="val">dev <span class="muted">· rollup PR target — integration → dev</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Rollup merge</div><div class="env">FKST_DEVLOOP_ROLLUP_MERGE</div></div>
+          <div class="val">auto <span class="muted">· integration → dev rollup PR (auto | manual)</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Bot login (marker trust)</div><div class="env">FKST_GITHUB_BOT_LOGIN</div></div>
+          <div class="val">fkst-devloop-bot <span class="muted">· only this author's state:v1 markers are trusted</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Durable root</div><div class="env">FKST_DURABLE_ROOT</div></div>
+          <div class="val">/var/lib/fkst/durable<span class="muted">/</span>delivery.redb <span class="muted">· redb delivery ledger (operator boundary)</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Package roots</div><div class="env">FKST_PACKAGE_ROOTS</div></div>
+          <div class="val">github-devloop <span class="muted">· composed graph: github-proxy + consensus</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Codex permit slots</div><div class="env">FKST_CODEX_PERMIT_SLOTS</div></div>
+          <div class="val">20 <span class="muted">· global concurrent codex exec ceiling</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl"><div class="l">Retry / DLQ max attempts</div><div class="env">FKST_RETRY_DEFAULT_MAX_ATTEMPTS</div></div>
+          <div class="val">5 <span class="muted">· base 60s · cap 30m · then dead-letter</span></div>
+          <div class="act"><span class="ro">read-only</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== (7) DANGER ZONE ===================== -->
+  <div class="sset">
+    <div class="shd">
+      <span class="eyebrow">Danger zone</span>
+      <span class="sub">hosted-service lifecycle &amp; account removal — irreversible actions live here.</span>
+    </div>
+
+    <div class="danger">
+      <div class="dz">
+        <div class="dzb">
+          <div class="dzt">Suspend deployment</div>
+          <div class="dzw">A hosted-service lifecycle action on ChronoAI cloud (not an engine-internal API) — <span class="mono">POST /api/v1/sessions/:id/stop</span> (202 accepted; the console polls <span class="mono">GET /sessions/:id</span> through <span class="mono">stopping → stopped</span>). No pipelines or packages run and no polls fire while stopped. The durable ledger is preserved; resume = <span class="mono">POST /sessions</span> for the package. Full stop.</div>
+        </div>
+        <button class="btn red">Suspend deployment</button>
+      </div>
+      <div class="dz">
+        <div class="dzb">
+          <div class="dzt">Delete account</div>
+          <div class="dzw">Removes this account and the <b>NyxID-brokered credentials</b> it holds (GitHub access, hosted backend). Connected repositories are released and the console can no longer reach GitHub or the engine. <span style="color:var(--red)">Irreversible.</span></div>
+        </div>
+        <button class="btn red">Delete account</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>posture &amp; prerequisites as of <b>38s ago</b> · poll-derived (~5-min ticks)</span>
+    <span>merges → <b>integration branch</b> · a rollup PR carries integration → dev · never main</span>
+    <span class="note">hosted engine status reads unknown when unreachable, not 0</span>
+    <span>SPA holds a <b>~15-min NyxID token</b>, never a raw GitHub token</span>
+  </div>
+
+</div></section>
+<script>
+  (function(){
+    // Prereqs: 3 of 4 pass — dev branch protection is the blocker. REAL stays disabled.
+    var ALL_PREREQS_MET = false;   // branch protection unverified → REAL cannot be armed
+
+    var bigtoggle = document.getElementById('bigtoggle');
+    var bsw       = document.getElementById('bsw');
+    var confirm   = document.getElementById('confirm');
+    var postpanel = document.getElementById('postpanel');
+    var verdict   = document.getElementById('verdict');
+    var cin       = document.getElementById('cin');
+    var btnreal   = document.getElementById('btnreal');
+    var estate    = document.getElementById('estate');
+    var REPO      = 'fkst-substrate';
+    var armed     = false;
+
+    bigtoggle.setAttribute('data-ready', ALL_PREREQS_MET ? '1' : '0');
+
+    function setArmed(on){
+      armed = on;
+      bsw.classList.toggle('on', on);
+      confirm.classList.toggle('show', on);
+      postpanel.classList.toggle('real', on);
+      verdict.classList.toggle('real', on);
+      if(on){ cin.focus(); } else { cin.value=''; syncBtn(); }
+    }
+    function syncBtn(){
+      var ok = armed && cin.value.trim() === REPO;
+      btnreal.setAttribute('data-armed', ok ? '1' : '0');
+    }
+
+    bigtoggle.addEventListener('click', function(e){
+      e.preventDefault();
+      if(!ALL_PREREQS_MET) return;   // gated — disabled until all prereqs pass
+      setArmed(!armed);
+    });
+    cin.addEventListener('input', syncBtn);
+    btnreal.addEventListener('click', function(){
+      if(btnreal.getAttribute('data-armed') !== '1') return;
+      /* mockup: no real state change */
+    });
+  })();
+</script>
+<script>
+/* hysteresis band: condense once past 140, expand only back under 40 — no flicker at the boundary */
+(function(){var on=false;function upd(){var y=window.scrollY||0;if(!on&&y>140){on=true;document.documentElement.classList.add("scrolled");}else if(on&&y<40){on=false;document.documentElement.classList.remove("scrolled");}}addEventListener("scroll",upd,{passive:true});upd();})();
+</script>
+</body></html>

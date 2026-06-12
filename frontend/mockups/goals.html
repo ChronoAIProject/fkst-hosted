@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="en" data-view="issues"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FKST — Goals · Issues &amp; Activity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:oklch(16% 0.011 250);--raise:oklch(20% 0.012 250);--raise-2:oklch(23% 0.013 250);
+    --line:oklch(26% 0.012 250);--line-2:oklch(33% 0.013 250);
+    --fg:oklch(97% 0.005 240);--dim:oklch(72% 0.014 245);--faint:oklch(58% 0.014 245);--ghost:oklch(46% 0.012 245);
+    --amber:oklch(81% 0.15 80);
+    --green:oklch(74% 0.13 158);--red:oklch(67% 0.18 18);--gold:oklch(80% 0.10 85);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --ui:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+    --display:"Space Grotesk","IBM Plex Sans",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .screen{width:100%;min-height:900px}
+  .wrap{max-width:1440px;margin:0 auto;padding:0 24px}
+  .eyebrow{font:600 11px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ghost)}
+
+  /* ---- top bar: logo is the FKST wordmark, K = the brand mark ---- */
+  .hd{display:flex;align-items:center;gap:16px;height:62px;border-bottom:1px solid var(--line)}
+  /* sticky top: header + toolbar stick together; toolbar condenses on scroll */
+  .hd{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .toolbar{position:sticky;top:61px;z-index:39;background:var(--bg)}
+  html.scrolled .toolbar{min-height:44px;padding:6px 0}
+  html.scrolled .toolbar .eyebrow{display:none}
+  .logo{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.01em;color:var(--fg);text-decoration:none;line-height:1;display:inline-block;white-space:nowrap;flex:none}
+  .logo .kk{position:relative;display:inline-block}
+  .logo .kk .knode{position:absolute;left:.04em;top:.36em;width:.205em;height:.205em;border-radius:50%;background:var(--amber);box-shadow:0 0 0 .05em var(--bg)}
+  .crumb{color:var(--ghost);font-size:13.5px}
+  .crumb b{color:var(--dim);font-weight:500;font-family:var(--mono);font-size:13px}
+  /* discreet posture chip (no more banner) */
+  .posture{display:inline-flex;align-items:center;gap:7px;font:600 11.5px var(--ui);letter-spacing:.02em;padding:5px 10px;border-radius:8px;
+    color:var(--red);background:color-mix(in oklab,var(--red) 12%,transparent);border:1px solid color-mix(in oklab,var(--red) 38%,var(--line))}
+  .posture .d{width:7px;height:7px;border-radius:50%;background:var(--red)}
+  .posture.dry{color:var(--faint);background:var(--raise);border-color:var(--line)} .posture.dry .d{background:var(--ghost)}
+  /* ---- interactive states (consistent across the system) ---- */
+  a,button{transition:background .12s ease,color .12s ease,border-color .12s ease}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:6px}
+  .nav{display:flex;gap:2px}
+  .nav a{font-size:13.5px;color:var(--faint);text-decoration:none;padding:7px 12px;border-radius:8px}
+  .nav a:hover{color:var(--dim);background:color-mix(in oklab,var(--raise) 55%,transparent)}
+  .nav a.on{color:var(--fg);background:var(--raise)}
+  .nav a.on:hover{background:var(--raise-2)}
+  .fr{margin-left:auto;display:flex;gap:18px;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .fr b{color:var(--faint);font-weight:500}
+  .fr .dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;vertical-align:middle}
+  .avatar{flex:none;width:30px;height:30px;border-radius:50%;background:var(--raise-2);border:1px solid var(--line-2);color:var(--dim);font:600 11px var(--ui);letter-spacing:.02em;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.avatar:hover{border-color:var(--faint);color:var(--fg)}.avatar.on{border-color:var(--amber);color:var(--amber)}
+
+  /* ---- window/filter toolbar ---- */
+  .toolbar{display:flex;align-items:center;gap:14px 16px;flex-wrap:wrap;min-height:56px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .seg{display:inline-flex;background:var(--raise);border:1px solid var(--line);border-radius:9px;padding:2px}
+  .seg button{font:500 12.5px var(--ui);color:var(--faint);background:none;border:0;padding:5px 13px;border-radius:7px;cursor:pointer}
+  .seg button:hover:not(.on){color:var(--dim);background:color-mix(in oklab,var(--raise-2) 65%,transparent)}
+  .seg button.on{color:oklch(22% 0.04 80);background:var(--amber);font-weight:600}
+  .sel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);border:1px solid var(--line);border-radius:9px;padding:6px 11px;background:var(--raise);cursor:pointer}
+  .sel:hover{border-color:var(--line-2);color:var(--fg)}
+  .sel .mono{color:var(--fg)} .sel .car{color:var(--ghost)}
+  .toggle{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--dim);cursor:pointer;user-select:none}
+  .toggle:hover .sw{background:var(--line-2);filter:brightness(1.15)}
+  .sw{width:30px;height:18px;border-radius:10px;background:var(--line-2);position:relative;transition:background .14s}
+  .sw i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--faint);transition:left .14s,background .14s}
+  .sw.on{background:color-mix(in oklab,var(--amber) 55%,var(--line))} .sw.on i{left:14px;background:var(--amber)}
+  .tr{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+
+  .foot{margin:24px 0 32px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:24px;font-family:var(--mono);font-size:11px;color:var(--ghost);flex-wrap:wrap}
+  .foot b{color:var(--faint);font-weight:500} .foot .note{color:var(--gold)}
+
+  /* ---- the view switch: a labelled segmented control, reuses .seg ---- */
+  .vswitch{display:inline-flex;align-items:center;gap:9px}
+  .vswitch .lbl{font:600 11px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ghost)}
+  /* filter groups are shown/hidden with the active view */
+  [data-view-filters]{display:contents}
+  html[data-view="issues"] [data-view-filters="activity"],
+  html[data-view="activity"] [data-view-filters="issues"]{display:none}
+  /* the two views toggle inside one canvas */
+  .canvas[data-view="issues"] .view-activity,
+  .canvas[data-view="activity"] .view-issues{display:none}
+
+  /* ============================================================= */
+  /* ====  SCREEN-SPECIFIC — Goals list (Linear-issue feel)   ==== */
+  /* ============================================================= */
+
+  /* --- the search input (a quiet field, not a card) --- */
+  .search{display:flex;align-items:center;gap:9px;flex:0 1 300px;min-width:200px;
+    border:1px solid var(--line);border-radius:9px;background:var(--raise);padding:6px 11px}
+  .search:focus-within{border-color:var(--line-2)}
+  .search .ic{flex:none;width:14px;height:14px;color:var(--ghost)}
+  .search input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--fg);font:400 13px var(--ui)}
+  .search input::placeholder{color:var(--ghost)}
+
+  /* the active-filter group; an applied .sel gets the amber treatment (active filter == brand moment) */
+  .sel.act{border-color:color-mix(in oklab,var(--amber) 55%,var(--line));color:var(--fg)}
+  .sel.act .mono{color:var(--amber)} .sel.act .car{color:color-mix(in oklab,var(--amber) 70%,var(--ghost))}
+  .clearf{font:500 12px var(--ui);color:var(--faint);background:none;border:0;cursor:pointer;padding:6px 4px;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-2)}
+  .clearf:hover{color:var(--dim)}
+
+  /* provenance note — quiet, no card; trusted markers are authority, labels are hints */
+  .prov{margin:18px 0 0;font-size:12px;line-height:1.5;color:var(--faint)}
+  .prov .mono{font-size:11.5px;color:var(--dim)}
+  .prov b{color:var(--dim);font-weight:500}
+
+  /* ============ TIER 1 — the table (hero). Hairline ROWS, not boxed cards ============ */
+  .tbl{margin:14px 0 0;width:100%}
+  /* one shared grid track for header + every row, so columns align.
+     title (col 3) is the elastic minmax(0,1fr); all others are fixed/auto, min-width:0 where text lives */
+  .thead,.trow{display:grid;align-items:center;
+    grid-template-columns:14px 52px minmax(0,1fr) 104px 128px 56px 40px 64px 116px;
+    gap:16px;padding:0 6px}
+  .thead{height:34px;border-bottom:1px solid var(--line-2)}
+  .thead span{font:600 10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thead .r{justify-self:end}
+
+  .trow{min-height:52px;padding-top:9px;padding-bottom:9px;border-bottom:1px solid var(--line);
+    color:var(--dim);text-decoration:none;cursor:pointer;transition:background .12s ease}
+  .trow:hover{background:color-mix(in oklab,var(--raise) 55%,transparent)}
+  .trow:last-of-type{border-bottom:0}
+
+  /* col 1 — state dot (status, never amber). neutral = in-flight */
+  .sd{width:8px;height:8px;border-radius:50%;background:var(--faint);justify-self:center}
+  .sd.green{background:var(--green)} .sd.red{background:var(--red)} .sd.gold{background:var(--gold)}
+
+  /* col 2 — mono #id */
+  .c-id{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--faint);white-space:nowrap}
+
+  /* col 3 — title, wraps to max 2 lines (never single-line-truncate) */
+  .c-ttl{min-width:0;color:var(--fg);font-size:13.5px;line-height:1.32;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+  /* col 4 — stage. neutral by default; trouble stages advance via color */
+  .c-stage{min-width:0;font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .c-stage.review{color:var(--gold)} .c-stage.ship{color:var(--red)}
+  .c-stage.merged{color:var(--green)} .c-stage.blocked{color:var(--red)}
+
+  /* col 5 — repo (mono) */
+  .c-repo{font-family:var(--mono);font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
+  /* col 6 — PR (mono) */
+  .c-pr{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11.5px;color:var(--faint);white-space:nowrap}
+  .c-pr.none{color:var(--ghost)}
+
+  /* col 7 — CI: pass green / unknown — / fail red. shape + color (colorblind-safe) */
+  .ci{font-family:var(--mono);font-size:13px;color:var(--ghost)}
+  .ci.pass{color:var(--green)} .ci.fail{color:var(--red)}
+
+  /* col 8 — age (mono, tabular) */
+  .c-age{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11.5px;color:var(--ghost);white-space:nowrap}
+  .c-age.stale{color:var(--gold)}
+
+  /* col 9 — state badge (12-state vocab). right-aligned */
+  .c-st{justify-self:end}
+  .badge{display:inline-block;font:500 10.5px var(--mono);letter-spacing:.02em;padding:3px 8px;border-radius:6px;
+    border:1px solid var(--line-2);color:var(--dim);background:var(--raise);white-space:nowrap}
+  .badge.green{color:var(--green);border-color:color-mix(in oklab,var(--green) 40%,var(--line))}
+  .badge.red{color:var(--red);border-color:color-mix(in oklab,var(--red) 45%,var(--line))}
+  .badge.gold{color:var(--gold);border-color:color-mix(in oklab,var(--gold) 40%,var(--line))}
+  /* ready/gated — consensus output held at the dependency gate; a held substate, neutral (not a status hue) */
+  .badge.gated{color:var(--faint);border-style:dashed;border-color:var(--line-2)}
+
+  /* ============ TIER 3 — result count / showing hint ============ */
+  .count{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:16px 0 0;padding:14px 6px 0;border-top:1px solid var(--line)}
+  .count .n{font-family:var(--display);font-weight:600;font-size:18px;letter-spacing:-.01em;color:var(--fg)}
+  .count .lbl{font-size:12.5px;color:var(--dim)}
+  .count .hint{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .count .more{font:500 12.5px var(--ui);color:var(--faint);background:none;border:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-2)}
+  .count .more:hover{color:var(--dim)}
+
+  /* ============================================================= */
+  /* ==== ACTIVITY VIEW — the engine's runs, goal-centric      ==== */
+  /* ==== (folded in from the old standalone Runs screen)      ==== */
+  /* ============================================================= */
+
+  /* ---- diagnostic vitals strip: a single hairline row, not decorative tiles ---- */
+  .runvitals{margin:18px 0 0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .rv{background:var(--raise);padding:14px 20px;min-width:0}
+  .rv .v{font-family:var(--display);font-weight:600;font-size:24px;letter-spacing:-.02em;line-height:1}
+  .rv .v.green{color:var(--green)} .rv .v.red{color:var(--red)} .rv .v.gold{color:var(--gold)}
+  .rv .v.unk{color:var(--faint);font-size:18px;letter-spacing:0}
+  .rv .k{font-size:12px;color:var(--faint);margin-top:6px}
+  .rv .k .sub{font-family:var(--mono);font-size:10.5px;color:var(--ghost)}
+
+  /* ---- derivation note: rows are NOT an authoritative ledger ---- */
+  .deriv{margin:14px 0 0;padding:11px 14px;border:1px solid var(--line);border-left:2px solid var(--gold);
+    border-radius:9px;background:color-mix(in oklab,var(--raise) 55%,transparent);
+    font-size:12.5px;line-height:1.5;color:var(--dim)}
+  .deriv b{color:var(--fg);font-weight:600}
+  .deriv .m{font-family:var(--mono);font-size:11px;color:var(--ghost)}
+
+  /* ---- the runs table header strip ---- */
+  .tblhead{display:flex;align-items:baseline;gap:12px;margin:24px 0 0}
+  .tblhead .crumb2{color:var(--ghost);font-size:12.5px}
+  .tblhead .meta{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+
+  /* contained horizontal scroll so the PAGE never overflows (§5 scrolls-then-folds) */
+  .tblscroll{max-width:100%;overflow-x:auto;scrollbar-width:thin}
+  .runs{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  .runs thead th{font:600 10.5px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost);
+    text-align:left;font-weight:600;padding:11px 14px 10px;border-bottom:1px solid var(--line-2);white-space:nowrap;vertical-align:bottom}
+  .runs thead th.num{text-align:right}
+  .runs tbody td{padding:13px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  .runs tbody tr{transition:background .12s}
+  .runs tbody tr:last-child td{border-bottom:0}
+  .runs tbody tr:hover{background:color-mix(in oklab,var(--raise) 55%,transparent);cursor:pointer}
+
+  /* status dot column (status, never amber) */
+  .st{width:34px;padding-right:0!important}
+  .st .d{width:9px;height:9px;border-radius:50%;background:var(--line-2);margin-top:4px}
+  .st .d.ok{background:var(--green)} .st .d.fail{background:var(--red)} .st .d.retried{background:var(--gold)}
+  /* running = neutral, a quiet outlined ring so it reads "in flight" not "idle" */
+  .st .d.running{background:transparent;box-shadow:inset 0 0 0 2px var(--faint)}
+
+  /* HEADLINE — goal served: mono #id + short title, wraps to 2 lines */
+  td.goal{min-width:0;max-width:360px}
+  td.goal .gid{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+  td.goal .gt{color:var(--fg);font-size:13px;line-height:1.34;margin-top:2px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+  /* action — a quiet neutral chip; the dispatched department verb */
+  td.act{white-space:nowrap}
+  .actchip{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--dim);
+    border:1px solid var(--line-2);border-radius:6px;padding:3px 8px;background:color-mix(in oklab,var(--raise) 60%,transparent)}
+  /* the one REAL write — merge dispatch to integration — earns a red outline at the point of action */
+  .actchip.real{color:var(--red);border-color:color-mix(in oklab,var(--red) 45%,var(--line));font-weight:500}
+
+  /* attempt — mono, gold when a retry (>1), red when dead */
+  td.att{font-family:var(--mono);font-size:12px;color:var(--faint);white-space:nowrap}
+  td.att.retried{color:var(--gold)}
+  td.att.dead{color:var(--red)}
+
+  /* duration */
+  td.dur{font-family:var(--mono);font-size:12px;color:var(--dim);white-space:nowrap;text-align:right}
+  td.dur .run{color:var(--faint)}
+
+  /* exit code */
+  td.exit{font-family:var(--mono);font-size:12px;white-space:nowrap;text-align:right}
+  .exitcell{display:inline-flex;align-items:baseline;gap:6px;justify-content:flex-end}
+  .exitcell .code{color:var(--faint)}
+  .exitcell .code.ok{color:var(--green)} .exitcell .code.fail{color:var(--red)}
+  .exitcell .tag124{font-size:10px;color:var(--red);border:1px solid color-mix(in oklab,var(--red) 42%,var(--line));border-radius:5px;padding:1px 5px}
+  td.exit .pend{color:var(--ghost)}
+
+  /* when (relative) */
+  td.when{font-family:var(--mono);font-size:11.5px;color:var(--ghost);white-space:nowrap;text-align:right}
+
+  /* DEMOTED detail — run id + lease_gen, a small trailing note (not a headline column) */
+  td.detail{font-family:var(--mono);font-size:11px;color:var(--ghost);white-space:nowrap;text-align:right;min-width:0}
+  td.detail .rid{color:var(--faint)}
+  td.detail .lease{color:var(--ghost)}
+  td.detail .lease b{color:var(--faint);font-weight:400}
+
+  /* a DLQ note that hangs under a dead row */
+  .deadnote{font-family:var(--mono);font-size:10.5px;color:var(--red);margin-top:5px}
+
+  /* ============ responsive — capped at 1440, fluid below ============ */
+  @media(max-width:1080px){
+    /* drop repo into the title cell's meta later; here just tighten + hide CI label col contents stay */
+    .thead,.trow{grid-template-columns:14px 48px minmax(0,1fr) 96px 116px 48px 36px 60px 108px;gap:13px}
+  }
+  @media(max-width:980px){
+    /* the table keeps its axis but scrolls horizontally so columns never collapse onto each other */
+    .tscroll{overflow-x:auto;scrollbar-width:thin}
+    .thead,.trow{min-width:880px}
+  }
+  @media(max-width:780px){
+    .hd{height:auto;flex-wrap:wrap;gap:10px 12px;padding:12px 0}
+    .crumb,.fr{display:none}
+    .nav{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .toolbar{height:auto;flex-wrap:wrap;gap:12px;padding:14px 0}
+    .tr{display:none}
+    .search{flex:1 1 100%}
+    /* Activity view: fold the lowest-value columns, keep the goal-centric core */
+    .runvitals{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .runs th.h-att,.runs td.att{display:none}
+    td.goal{max-width:220px}
+  }
+  @media(max-width:600px){
+    .wrap{padding:0 16px}
+    .seg{flex-wrap:wrap}
+    .count .hint{margin-left:0;flex:1 1 100%}
+    .runvitals{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .runs th.h-exit,.runs td.exit{display:none}
+    .runs th.h-detail,.runs td.detail{display:none}
+    .runs thead th{padding:9px 9px 9px;font-size:10px}
+    .runs tbody td{padding:11px 9px}
+    td.goal{max-width:none}
+  }
+  /* ---- + New goal: button + create-goal modal ---- */
+  .newgoal{font:600 12.5px var(--ui);color:oklch(22% 0.04 80);background:var(--amber);border:0;border-radius:9px;padding:7px 14px;cursor:pointer;flex:none}
+  .newgoal:hover{filter:brightness(1.06)}
+  .ovl{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:6vh 20px;background:color-mix(in oklab,#000 58%,transparent);overflow:auto}
+  .ovl[hidden]{display:none}
+  .sheet{position:relative;width:100%;max-width:560px;background:var(--raise);border:1px solid var(--line-2);border-radius:16px;box-shadow:0 24px 60px -22px rgba(0,0,0,.6)}
+  .sheet .x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--raise-2);color:var(--faint);font-size:17px;line-height:1;cursor:pointer}
+  .sheet .x:hover{color:var(--fg);border-color:var(--faint)}
+  .m-hd{padding:20px 22px 16px;border-bottom:1px solid var(--line)}
+  .m-tt{display:flex;align-items:baseline;gap:10px;margin:0 0 4px;flex-wrap:wrap}
+  .m-tt h2{font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:-.01em;margin:0;color:var(--fg)}
+  .m-meta{font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .m-act{display:flex;align-items:center;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .m-act .m-act-l{margin-right:auto;display:flex;gap:10px}
+  .sheet .m-act .btn{font:500 12.5px var(--ui);border:1px solid var(--line-2);background:var(--raise-2);color:var(--dim);border-radius:9px;padding:8px 14px;cursor:pointer;text-decoration:none}
+  .sheet .m-act .btn:hover{border-color:var(--faint);color:var(--fg)}
+  .ngf{display:flex;flex-direction:column;gap:14px;padding:18px 22px}
+  .ngrow{display:flex;flex-direction:column;gap:6px}
+  .nglab{font:600 10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost)}
+  .nginp,.ngsel,.ngta{background:var(--raise-2);border:1px solid var(--line-2);border-radius:9px;color:var(--fg);font:400 13px var(--ui);padding:9px 12px;outline:0;width:100%}
+  .nginp:focus,.ngta:focus,.ngsel:focus{border-color:var(--faint)}
+  .ngta{min-height:84px;resize:vertical;line-height:1.5}
+  .ngnote{font-family:var(--mono);font-size:11px;color:var(--ghost);line-height:1.6;background:var(--raise-2);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
+  .ngnote b{color:var(--faint);font-weight:500}
+  .ngcreate{font:600 12.5px var(--ui);color:oklch(22% 0.04 80);background:var(--amber);border:0;border-radius:9px;padding:8px 15px;cursor:pointer}
+  .ngcreate:hover{filter:brightness(1.06)}
+  .ngpkgs{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .ngpkg{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:12.5px;color:var(--dim);background:var(--raise-2);border-top:1px solid var(--line)}
+  .ngpkg:first-child{border-top:0}
+  .ngpkg .t{font-family:var(--mono);font-size:10px;color:var(--ghost);margin-left:8px}
+  .ngsub{font-family:var(--mono);font-size:10.5px;color:var(--ghost);margin-top:7px;line-height:1.55}
+  .ngsub a{color:var(--faint);text-decoration:underline;text-underline-offset:2px}
+
+  /* ===== consolidated topbar on scroll (matches overview) ===== */
+  .topbar{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .hd,.toolbar{position:static}
+  html.scrolled .topbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;min-height:54px;border-bottom:1px solid var(--line)}
+  html.scrolled .hd,html.scrolled .toolbar{display:contents}
+  html.scrolled .logo{order:0} html.scrolled .nav{order:1}
+  html.scrolled .newgoal{order:2;margin-left:auto}
+  html.scrolled .minis{display:inline-flex;order:3}
+  /* minimized = icon + CURRENT SETTING chips; full controls hide */
+  html.scrolled .toolbar > *:not(.newgoal):not(.minis){display:none!important}
+  .minis{display:none;align-items:center;gap:8px}
+  .mini{display:inline-flex;align-items:center;gap:7px;font:500 11.5px var(--mono);color:var(--faint);background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+  .mini:hover{color:var(--dim);border-color:var(--line-2)}
+  .mini svg{width:12px;height:12px;flex:none}
+  .mini b{font-weight:500;color:var(--fg)}
+  .mini.dim{color:var(--ghost)} .mini.ic{padding:5px 8px} .mini.ic svg{width:13px;height:13px}
+  /* the one section pipe: hidden at top, appears on scroll LEFT of the GitHub chip */
+  .hpipe{flex:none;width:1px;height:18px;background:var(--line-2);align-self:center;margin:0 2px;display:none}
+  html.scrolled .hpipe{display:block;order:49}
+  html.scrolled .fr{order:50;margin-left:0} html.scrolled .avatar{order:52}
+
+  /* GitHub status chip (octocat + health dot) */
+  .frq{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:var(--raise);color:var(--faint)}
+  .frq:hover{color:var(--dim);border-color:var(--line-2)}
+  .frq .d{position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-radius:50%;background:var(--green);border:1.5px solid var(--raise)}
+
+  /* expandable compact search: boxed magnifier widens into an input on click */
+  .msearch .msinput{display:none;background:none;border:0;outline:0;color:var(--fg);font:500 11.5px var(--mono);width:150px;padding:0}
+  .msearch.open{padding:5px 10px}
+  .msearch.open .msinput{display:block}
+  .msearch.open svg{color:var(--dim)}
+</style></head>
+<body>
+<section class="screen"><div class="wrap">
+
+  <div class="topbar">
+  <div class="hd">
+    <a class="logo" href="#">F<span class="kk">K<i class="knode"></i></span>ST</a>
+    <div class="nav"><a href="overview.html">Overview</a><a class="on" href="goals.html">Goals</a><a href="packages.html">Packages</a></div>
+    <span class="hpipe"></span>
+    <div class="fr"><span class="frq" title="GitHub — synced 30s ago"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><i class="d"></i></span></div>
+    <a class="avatar" href="settings.html" title="Account & settings">CT</a>
+  </div>
+
+  <!-- TIER 2 · the view switch + per-view filters + the shared Window -->
+  <div class="toolbar">
+    <button class="newgoal" id="newgoalbtn">+ New goal</button>
+    <!-- scrolled-state compact chips: icon + current setting -->
+    <div class="minis">
+      <span data-view-filters="issues">
+        <span class="mini" title="View · Issues"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.8" cy="4" r=".9" fill="currentColor" stroke="none"/><circle cx="2.8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="2.8" cy="12" r=".9" fill="currentColor" stroke="none"/></svg><b>Issues</b></span>
+        <span class="mini ic msearch" id="msearch" title="Search goals — click to expand"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg><input class="msinput" type="text" placeholder="Search goals…" aria-label="Search goals"></span>
+        <span class="mini dim ic" title="Filters · stage all · repo all · state all"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 3.2h12L9.7 8.4v4.4l-3.4-1.6V8.4L2 3.2z"/></svg></span>
+      </span>
+      <span data-view-filters="activity">
+        <span class="mini" title="View · Activity"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.8 8h2.6l1.8-4.2 3.6 8.4L11.6 8h2.6"/></svg><b>Activity</b></span>
+        <span class="mini" title="Status · All"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg><b>All</b></span>
+      </span>
+      <span class="mini" title="Window · 24h"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="8" cy="8" r="5.6"/><path d="M8 4.8V8l2.3 1.4"/></svg><b>24h</b></span>
+    </div>
+    <!-- the view switch — reuses .seg; active segment = amber (default: Issues) -->
+    <div class="vswitch">
+      <span class="lbl">View</span>
+      <div class="seg" id="viewswitch"><button class="on" data-view="issues">Issues</button><button data-view="activity">Activity</button></div>
+    </div>
+
+    <!-- Issues-view filters (search + stage/repo/state + clear) -->
+    <span data-view-filters="issues">
+      <label class="search">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+        <input type="text" placeholder="Search goals…" aria-label="Search goals">
+      </label>
+      <div class="sel">Stage <span class="mono">all</span> <span class="car">▾</span></div>
+      <div class="sel">Repo <span class="mono">all</span> <span class="car">▾</span></div>
+      <div class="sel">State <span class="mono">all</span> <span class="car">▾</span></div>
+      <button class="clearf">Clear</button>
+    </span>
+
+    <!-- Activity-view filter (run status) -->
+    <span data-view-filters="activity" class="fgrp">
+      <span class="lbl">Status</span>
+      <div class="seg" id="statusfilter"><button class="on" data-f="all">All</button><button data-f="running">Running</button><button data-f="ok">OK</button><button data-f="retried">Retried</button><button data-f="timeout">Timed-out</button><button data-f="dead">Dead</button></div>
+    </span>
+
+    <!-- shared across both views -->
+    <span class="eyebrow" style="margin-left:auto">Window</span>
+    <div class="seg"><button>Live</button><button>1h</button><button class="on">24h</button><button>7d</button><button>30d</button></div>
+  </div>
+  </div><!-- /topbar -->
+
+  <!-- one canvas, two views: Issues (the goal list) · Activity (the engine's runs) -->
+  <div class="canvas" data-view="issues">
+
+  <!-- ============ ISSUES VIEW — the existing goals table ============ -->
+  <div class="view-issues">
+
+  <!-- provenance: state authority is the trusted-bot marker; labels are only hints -->
+  <p class="prov">State is derived from trusted-bot <span class="mono">state:v1</span> markers; <span class="mono">fkst-dev:*</span> labels are self-heal hints only. Stage groups the design / build / review / ship flow; <b>ready · gated</b> is consensus output held at the dependency gate (<span class="mono">fkst-dev:n</span> · <span class="mono">n:v1</span> marker).</p>
+
+  <!-- TIER 1 · the table (hero) -->
+  <div class="tscroll">
+  <div class="tbl">
+    <div class="thead">
+      <span></span>
+      <span>#</span>
+      <span>Goal</span>
+      <span>Stage</span>
+      <span>Repo</span>
+      <span>PR</span>
+      <span>CI</span>
+      <span class="r">Age</span>
+      <span class="r">State</span>
+    </div>
+
+    <!-- Design (CONVERGE consensus): thinking → ready/gated, then hands to Build -->
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#214</span>
+      <span class="c-ttl">Tighten consensus parser to handle nested quorum refs</span>
+      <span class="c-stage">Design</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">4m</span>
+      <span class="c-st"><span class="badge">thinking</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#231</span>
+      <span class="c-ttl">Document DLQ retention &amp; replay semantics for the delivery ledger</span>
+      <span class="c-stage">Design</span>
+      <span class="c-repo">fkst-packages</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">11m</span>
+      <span class="c-st"><span class="badge gated" title="consensus reached — held by the dependency gate before Build">ready · gated</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#240</span>
+      <span class="c-ttl">Validate cron source cadence on cold start before first faucet tick</span>
+      <span class="c-stage">Design</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">18m</span>
+      <span class="c-st"><span class="badge">thinking</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#244</span>
+      <span class="c-ttl">Allow per-department stall_window override via fkst.env</span>
+      <span class="c-stage">Design</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">26m</span>
+      <span class="c-st"><span class="badge gated" title="consensus reached — held by the dependency gate before Build">ready · gated</span></span>
+    </a>
+
+    <!-- Build -->
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#205</span>
+      <span class="c-ttl">Make the state label set-exclusive on PR open so labels never stack</span>
+      <span class="c-stage">Build</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">1m</span>
+      <span class="c-st"><span class="badge">implementing</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#238</span>
+      <span class="c-ttl">Reflect dead-letters back into the goal board as a surfaced state</span>
+      <span class="c-stage">Build</span>
+      <span class="c-repo">fkst-packages</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">7m</span>
+      <span class="c-st"><span class="badge">implementing</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#242</span>
+      <span class="c-ttl">Extract fanout spawn into its own module to drop the cycle</span>
+      <span class="c-stage">Build</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">12m</span>
+      <span class="c-st"><span class="badge">pr-open</span></span>
+    </a>
+
+    <!-- Review -->
+    <a class="trow" href="goal.html">
+      <span class="sd gold"></span>
+      <span class="c-id">#187</span>
+      <span class="c-ttl">Propagate source_ref through the fanout spawn path end to end</span>
+      <span class="c-stage review">Review</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr">#41</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age stale">14m</span>
+      <span class="c-st"><span class="badge gold">reviewing</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd gold"></span>
+      <span class="c-id">#161</span>
+      <span class="c-ttl">ack on RAISED publish failure before the retry reschedules</span>
+      <span class="c-stage review">Review</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr">#38</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age stale">31m</span>
+      <span class="c-st"><span class="badge gold">reviewing</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#158</span>
+      <span class="c-ttl">Reconcile lease_generation on requeue to stop double leases</span>
+      <span class="c-stage review">Review</span>
+      <span class="c-repo">fkst-packages</span>
+      <span class="c-pr">#36</span>
+      <span class="ci">—</span>
+      <span class="c-age">44m</span>
+      <span class="c-st"><span class="badge">fixing</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd"></span>
+      <span class="c-id">#172</span>
+      <span class="c-ttl">Carry review-meta action count into the version tuple ordering</span>
+      <span class="c-stage review">Review</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr">#43</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age">22m</span>
+      <span class="c-st"><span class="badge">reviewing</span></span>
+    </a>
+
+    <!-- Ship -->
+    <a class="trow" href="goal.html">
+      <span class="sd red"></span>
+      <span class="c-id">#152</span>
+      <span class="c-ttl">Composed conformance suite for github-autochrono department wiring</span>
+      <span class="c-stage ship">Ship</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr">#29</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age">3m</span>
+      <span class="c-st"><span class="badge red">merging</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd green"></span>
+      <span class="c-id">#149</span>
+      <span class="c-ttl">Extract cache_get / cache_set helper functions from the scratch KV</span>
+      <span class="c-stage ship">Ship</span>
+      <span class="c-repo">fkst-packages</span>
+      <span class="c-pr">#27</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age">6m</span>
+      <span class="c-st"><span class="badge">merge-ready</span></span>
+    </a>
+
+    <!-- Blocked / impl-failed (red, fell out of the flow) -->
+    <a class="trow" href="goal.html">
+      <span class="sd red"></span>
+      <span class="c-id">#173</span>
+      <span class="c-ttl">Rework dispatcher into a second coordinator for cross-pipeline locks</span>
+      <span class="c-stage blocked">Blocked</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr none">—</span>
+      <span class="ci">—</span>
+      <span class="c-age">2h</span>
+      <span class="c-st"><span class="badge red">blocked</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd red"></span>
+      <span class="c-id">#168</span>
+      <span class="c-ttl">Retry storm guard on dead_letter publish when the queue is folded</span>
+      <span class="c-stage blocked">Blocked</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr none">—</span>
+      <span class="ci fail">✗</span>
+      <span class="c-age">3h</span>
+      <span class="c-st"><span class="badge red">impl-failed</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd red"></span>
+      <span class="c-id">#166</span>
+      <span class="c-ttl">Dependency-cycle detection across decomposed child issues</span>
+      <span class="c-stage blocked">Blocked</span>
+      <span class="c-repo">fkst-packages</span>
+      <span class="c-pr">#34</span>
+      <span class="ci fail">✗</span>
+      <span class="c-age">5h</span>
+      <span class="c-st"><span class="badge red">impl-failed</span></span>
+    </a>
+
+    <!-- Merged (terminal, green) -->
+    <a class="trow" href="goal.html">
+      <span class="sd green"></span>
+      <span class="c-id">#118</span>
+      <span class="c-ttl">Durable redb cutover for the delivery ledger with lease fencing</span>
+      <span class="c-stage merged">Merged</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr">#21</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age">2h</span>
+      <span class="c-st"><span class="badge green">merged</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd green"></span>
+      <span class="c-id">#117</span>
+      <span class="c-ttl">Lease fencing on ack / retry / dead via lease_generation match</span>
+      <span class="c-stage merged">Merged</span>
+      <span class="c-repo">fkst-substrate</span>
+      <span class="c-pr">#19</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age">3h</span>
+      <span class="c-st"><span class="badge green">merged</span></span>
+    </a>
+    <a class="trow" href="goal.html">
+      <span class="sd green"></span>
+      <span class="c-id">#112</span>
+      <span class="c-ttl">Content-addressed delivery_id so re-enqueue of the same fact is a no-op</span>
+      <span class="c-stage merged">Merged</span>
+      <span class="c-repo">fkst-packages</span>
+      <span class="c-pr">#16</span>
+      <span class="ci pass">✓</span>
+      <span class="c-age">4h</span>
+      <span class="c-st"><span class="badge green">merged</span></span>
+    </a>
+  </div><!-- /tbl -->
+  </div><!-- /tscroll -->
+
+  <!-- TIER 3 · result count + showing hint -->
+  <div class="count">
+    <span class="n">20</span>
+    <span class="lbl">goals · <span class="mono" style="color:var(--faint)">state: all</span></span>
+    <button class="more">Load 27 more →</button>
+    <span class="hint">showing 20 of 47 · sorted newest · state from trusted GitHub markers (labels are hints) · poll-derived</span>
+  </div>
+
+  <div class="foot">
+    <span>a goal is a <b>GitHub issue</b> labeled <b>fkst-dev:enabled</b></span>
+    <span>rows scoped to the <b>24h</b> window · open rows drill into the goal page</span>
+    <span class="note">fkst-packages CI unknown shown as — , never a pass</span>
+    <span>state as of <b>30s ago</b> · poll-derived (~5-min ticks), not live</span>
+  </div>
+
+  </div><!-- /view-issues -->
+
+  <!-- ============ ACTIVITY VIEW — the engine's runs, goal-centric ============ -->
+  <div class="view-activity">
+
+    <!-- TIER 2 · diagnostic vitals strip — estimates from logs/transport, not authoritative metrics -->
+    <div class="runvitals">
+      <div class="rv"><div class="v">~9/h</div><div class="k">runs dispatched <span class="sub">· est. from logs</span></div></div>
+      <div class="rv"><div class="v green">~94%</div><div class="k">success rate <span class="sub">· diagnostic est.</span></div></div>
+      <div class="rv"><div class="v">~48s</div><div class="k">median duration <span class="sub">· est. · codex exec</span></div></div>
+      <div class="rv"><div class="v unk">unknown</div><div class="k">in-DLQ <span class="sub">· transport not visible</span></div></div>
+    </div>
+
+    <!-- derivation honesty: these rows are reconstructed, not a stored run history -->
+    <p class="deriv"><b>Reconstructed from logs/transport, not a durable ledger.</b> Rows are <b>derived from engine logs &amp; transport</b>
+      as the hosted service reports them — diagnostic and poll-derived (~5m). redb is a delivery queue, not a run
+      archive: <b>ack deletes</b> the delivery record, so there is <b>no durable run-history store</b> here. The
+      vitals above are <b>diagnostic estimates</b>; when the hosted service can't see transport they read
+      <span class="m">unknown</span>, never 0. The FE only reads — it cannot mutate any run.</p>
+
+    <!-- TIER 1 · the runs table (hero) — leads with the goal -->
+    <div class="tblhead">
+      <span class="eyebrow">Activity</span>
+      <span class="crumb2">what the engine is doing on your goals · dispatches seen in logs/transport · best-effort · newest first</span>
+      <span class="meta" id="rowmeta">16 runs · 24h</span>
+    </div>
+
+    <div class="tblscroll">
+    <table class="runs">
+      <colgroup>
+        <col class="c-st"><col class="c-goal"><col class="c-act"><col class="c-att"><col class="c-dur"><col class="c-exit"><col class="c-when"><col class="c-detail">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="st"></th>
+          <th>Goal</th>
+          <th>Action</th>
+          <th class="h-att">Attempt</th>
+          <th class="num">Duration</th>
+          <th class="num h-exit">Exit</th>
+          <th class="num h-when">When</th>
+          <th class="num h-detail">Run · lease</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <!-- 2 running (neutral) -->
+        <tr data-st="running">
+          <td class="st"><span class="d running"></span></td>
+          <td class="goal"><span class="gid">#205</span><div class="gt">Make the state label set-exclusive on PR open</div></td>
+          <td class="act"><span class="actchip">implement</span></td>
+          <td class="att">1/5</td>
+          <td class="dur"><span class="run">running · 38s</span></td>
+          <td class="exit"><span class="pend">—</span></td>
+          <td class="when">leased 38s ago</td>
+          <td class="detail"><span class="rid">run_8f3a91</span> · <span class="lease">lease <b>7</b></span></td>
+        </tr>
+
+        <tr data-st="running">
+          <td class="st"><span class="d running"></span></td>
+          <td class="goal"><span class="gid">#214</span><div class="gt">Tighten consensus parser to handle nested quorum refs</div></td>
+          <td class="act"><span class="actchip">consensus-round</span></td>
+          <td class="att">1/5</td>
+          <td class="dur"><span class="run">running · 12s</span></td>
+          <td class="exit"><span class="pend">—</span></td>
+          <td class="when">leased 12s ago</td>
+          <td class="detail"><span class="rid">run_e21c4d</span> · <span class="lease">lease <b>3</b></span></td>
+        </tr>
+
+        <!-- OK -->
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#238</span><div class="gt">Reflect dead-letters back into the goal board</div></td>
+          <td class="act"><span class="actchip">implement</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">71s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">2m ago</td>
+          <td class="detail"><span class="rid">run_4b7e02</span> · <span class="lease">lease <b>5</b></span></td>
+        </tr>
+
+        <!-- merge dispatch · REAL → integration · seconds · green -->
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#149</span><div class="gt">Extract cache_get / cache_set helper functions</div></td>
+          <td class="act"><span class="actchip real">merge · REAL → integration</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">4s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">4m ago</td>
+          <td class="detail"><span class="rid">run_1d9a77</span> · <span class="lease">lease <b>2</b></span></td>
+        </tr>
+
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#187</span><div class="gt">Propagate source_ref through the fanout spawn path</div></td>
+          <td class="act"><span class="actchip">review</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">53s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">6m ago</td>
+          <td class="detail"><span class="rid">run_c0f3b8</span> · <span class="lease">lease <b>4</b></span></td>
+        </tr>
+
+        <!-- retried (gold): attempt 2, first lease exit 1, requeued, now OK on next -->
+        <tr data-st="retried">
+          <td class="st"><span class="d retried"></span></td>
+          <td class="goal"><span class="gid">#161</span><div class="gt">ack on RAISED publish failure before retry</div></td>
+          <td class="act"><span class="actchip">implement</span></td>
+          <td class="att retried">2/5</td>
+          <td class="dur">62s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">9m ago</td>
+          <td class="detail"><span class="rid">run_a55e10</span> · <span class="lease">lease <b>9</b></span></td>
+        </tr>
+
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#240</span><div class="gt">Validate cron source cadence on cold start</div></td>
+          <td class="act"><span class="actchip">consensus-round</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">44s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">12m ago</td>
+          <td class="detail"><span class="rid">run_77b2c9</span> · <span class="lease">lease <b>2</b></span></td>
+        </tr>
+
+        <!-- a raise (cron faucet dispatch — no codex, deterministic) -->
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">cron</span><div class="gt">intake_poll → devloop_intake_tick · source faucet</div></td>
+          <td class="act"><span class="actchip">raise</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">1s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">14m ago</td>
+          <td class="detail"><span class="rid">run_30ed6a</span> · <span class="lease">lease <b>1</b></span></td>
+        </tr>
+
+        <!-- retried (gold): attempt 3, stall reclaim — lease expired, reclaimed, fenced -->
+        <tr data-st="retried">
+          <td class="st"><span class="d retried"></span></td>
+          <td class="goal"><span class="gid">#158</span><div class="gt">Reconcile lease_generation on requeue path</div></td>
+          <td class="act"><span class="actchip">review</span></td>
+          <td class="att retried">3/5</td>
+          <td class="dur">88s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">18m ago</td>
+          <td class="detail"><span class="rid">run_9c41fe</span> · <span class="lease">lease <b>14</b></span></td>
+        </tr>
+
+        <!-- timed-out: codex exit 124 → retry, attempt 5/5 reached max → dead-letter -->
+        <tr data-st="timeout dead">
+          <td class="st"><span class="d fail"></span></td>
+          <td class="goal"><span class="gid">#161</span><div class="gt">ack on RAISED publish failure before retry</div>
+            <div class="deadnote">codex timeout · max_attempts hit → moved to dead_by_id (DLQ)</div></td>
+          <td class="act"><span class="actchip">implement</span></td>
+          <td class="att dead">5/5</td>
+          <td class="dur">3600s</td>
+          <td class="exit"><span class="exitcell"><span class="tag124">timeout</span><span class="code fail">124</span></span></td>
+          <td class="when">21m ago</td>
+          <td class="detail"><span class="rid">run_b6802f</span> · <span class="lease">lease <b>12</b></span></td>
+        </tr>
+
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#152</span><div class="gt">Composed conformance suite for github-autochrono</div></td>
+          <td class="act"><span class="actchip">review</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">67s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">24m ago</td>
+          <td class="detail"><span class="rid">run_2af55b</span> · <span class="lease">lease <b>6</b></span></td>
+        </tr>
+
+        <!-- merge dispatch · REAL → integration -->
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#118</span><div class="gt">Durable redb cutover for the delivery ledger</div></td>
+          <td class="act"><span class="actchip real">merge · REAL → integration</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">3s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">28m ago</td>
+          <td class="detail"><span class="rid">run_5e1c83</span> · <span class="lease">lease <b>2</b></span></td>
+        </tr>
+
+        <!-- a generic non-timeout failure: codex exit 1 → retried next attempt -->
+        <tr data-st="retried">
+          <td class="st"><span class="d retried"></span></td>
+          <td class="goal"><span class="gid">#242</span><div class="gt">Extract fanout spawn into its own module</div></td>
+          <td class="act"><span class="actchip">implement</span></td>
+          <td class="att retried">2/5</td>
+          <td class="dur">19s</td>
+          <td class="exit"><span class="exitcell"><span class="code fail">1</span></span></td>
+          <td class="when">33m ago</td>
+          <td class="detail"><span class="rid">run_f3902c</span> · <span class="lease">lease <b>8</b></span></td>
+        </tr>
+
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#231</span><div class="gt">Document DLQ retention &amp; replay semantics</div></td>
+          <td class="act"><span class="actchip">consensus-round</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">51s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">41m ago</td>
+          <td class="detail"><span class="rid">run_88d740</span> · <span class="lease">lease <b>3</b></span></td>
+        </tr>
+
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#117</span><div class="gt">Lease fencing on ack / retry / dead transitions</div></td>
+          <td class="act"><span class="actchip">review</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">59s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">52m ago</td>
+          <td class="detail"><span class="rid">run_6b0e29</span> · <span class="lease">lease <b>5</b></span></td>
+        </tr>
+
+        <!-- merge dispatch · REAL → integration -->
+        <tr data-st="ok">
+          <td class="st"><span class="d ok"></span></td>
+          <td class="goal"><span class="gid">#117</span><div class="gt">Lease fencing on ack / retry / dead transitions</div></td>
+          <td class="act"><span class="actchip real">merge · REAL → integration</span></td>
+          <td class="att">1/5</td>
+          <td class="dur">4s</td>
+          <td class="exit"><span class="exitcell"><span class="code ok">0</span></span></td>
+          <td class="when">53m ago</td>
+          <td class="detail"><span class="rid">run_0a4f12</span> · <span class="lease">lease <b>2</b></span></td>
+        </tr>
+
+      </tbody>
+    </table>
+    </div><!-- /tblscroll -->
+
+    <!-- TIER 3 · footer honesty notes (Activity) -->
+    <div class="foot">
+      <span>runs scoped to <b>24h</b> · newest first · reconstructed from logs, <b>not a ledger</b></span>
+      <span>each run = a <b>lease → codex exec</b> · redb <b>ack deletes</b> the record, so this is diagnostic, not archival</span>
+      <span>merge dispatches write <b>REAL → integration branch</b> (seconds) · never to main</span>
+      <span class="note">in-DLQ unknown — hosted service can't see transport · reads unknown, not 0</span>
+      <span>seen as of <b>21s ago</b> · poll-derived (~5m), not live</span>
+    </div>
+
+  </div><!-- /view-activity -->
+
+  </div><!-- /canvas -->
+
+</div></section>
+<script>
+  /* view switch: toggle Issues / Activity on the canvas */
+  (function(){
+    var canvas=document.querySelector('.canvas');
+    document.querySelectorAll('#viewswitch button').forEach(function(b){
+      b.addEventListener('click',function(){
+        document.querySelectorAll('#viewswitch button').forEach(function(x){x.classList.remove('on');});
+        b.classList.add('on');
+        canvas.setAttribute('data-view',b.getAttribute('data-view'));
+        document.documentElement.setAttribute('data-view',b.getAttribute('data-view'));
+      });
+    });
+  })();
+  /* Activity status filter */
+  (function(){
+    var rows=Array.prototype.slice.call(document.querySelectorAll('.runs tbody tr'));
+    var meta=document.getElementById('rowmeta');
+    var total=rows.length;
+    document.querySelectorAll('#statusfilter button').forEach(function(b){
+      b.addEventListener('click',function(){
+        document.querySelectorAll('#statusfilter button').forEach(function(x){x.classList.remove('on');});
+        b.classList.add('on');
+        var f=b.getAttribute('data-f');
+        var shown=0;
+        rows.forEach(function(r){
+          var states=(r.getAttribute('data-st')||'').split(' ');
+          var on=(f==='all')||states.indexOf(f)>-1;
+          r.style.display=on?'':'none';
+          if(on)shown++;
+        });
+        if(meta)meta.textContent=(f==='all'? total+' runs · 24h' : shown+' of '+total+' runs · 24h');
+      });
+    });
+  })();
+</script>
+<!-- new-goal modal — create a goal from the Goals screen -->
+<div class="ovl" id="ngovl" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ng-h">
+    <button class="x" aria-label="Close" data-ngx>×</button>
+    <div class="m-hd">
+      <div class="m-tt"><h2 id="ng-h">New goal</h2></div>
+      <div class="m-meta">seed a GitHub issue the engine picks up on the next poll</div>
+    </div>
+    <div class="ngf">
+      <div class="ngrow"><span class="nglab">Repository</span>
+        <select class="ngsel"><option>ChronoAIProject/fkst-substrate</option><option>ChronoAIProject/fkst-packages</option></select></div>
+      <div class="ngrow"><span class="nglab">Title</span>
+        <input class="nginp" placeholder="e.g. Add retry backoff to the DLQ requeue path"></div>
+      <div class="ngrow"><span class="nglab">Description</span>
+        <textarea class="ngta" placeholder="What should change, and why. The engine reads the full issue + comments at intake."></textarea></div>
+      <div class="ngrow"><span class="nglab">Deployment package graph · read-only</span>
+        <div class="ngpkgs">
+          <div class="ngpkg"><span>github-devloop<span class="t">goal engine · composed root</span></span><span class="t">FKST_PACKAGE_ROOTS</span></div>
+          <div class="ngpkg"><span>github-proxy<span class="t">GitHub I/O</span></span><span class="t">dep · composed.deps</span></div>
+          <div class="ngpkg"><span>consensus<span class="t">multi-angle verdict</span></span><span class="t">dep · composed.deps</span></div>
+        </div>
+        <div class="ngsub">every goal is processed by this graph — fixed at <b>supervise startup</b>, never per-goal · <a href="packages.html">View packages →</a></div></div>
+      <div class="ngnote">Creates a GitHub issue labeled <b>fkst-dev:enabled</b> via NyxID. The engine's next <b>~5-min poll</b> raises it → <b>intake_judge</b> decides if it's auto-developable → it enters the <b>Design</b> stage. A real GitHub write on your account (via NyxID) — not an engine write, so it works in DRY-RUN too.</div>
+    </div>
+    <div class="m-act">
+      <div class="m-act-l"></div>
+      <button class="btn" data-ngx>Cancel</button>
+      <button class="ngcreate">Create issue &amp; enable</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    var btn=document.getElementById('newgoalbtn'), ng=document.getElementById('ngovl');
+    if(!btn||!ng)return;
+    function o(){ng.hidden=false;document.body.style.overflow='hidden';}
+    function c(){ng.hidden=true;document.body.style.overflow='';}
+    btn.addEventListener('click',o);
+    ng.addEventListener('click',function(e){if(e.target===ng)c();});
+    ng.querySelectorAll('[data-ngx]').forEach(function(b){b.addEventListener('click',c);});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!ng.hidden)c();});
+  })();
+</script>
+<script>
+/* hysteresis band: condense once past 140, expand only back under 40 — no flicker at the boundary */
+(function(){var on=false;function upd(){var y=window.scrollY||0;if(!on&&y>140){on=true;document.documentElement.classList.add("scrolled");}else if(on&&y<40){on=false;document.documentElement.classList.remove("scrolled");}}addEventListener("scroll",upd,{passive:true});upd();})();
+</script>
+<script>
+  /* compact search: expand on click, collapse on outside click when empty */
+  (function(){var m=document.getElementById('msearch');if(!m)return;var inp=m.querySelector('input');
+    m.addEventListener('click',function(){if(!m.classList.contains('open')){m.classList.add('open');inp.focus();}});
+    document.addEventListener('click',function(e){if(m.classList.contains('open')&&!m.contains(e.target)&&!inp.value)m.classList.remove('open');});
+  })();
+</script>
+</body></html>

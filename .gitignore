@@ -22,3 +22,4 @@ backend/deploy/k8s/secret.*.local.yaml
 
 # /auto engine working state
 .auto/
+.gstack/
