@@ -300,14 +300,14 @@ local function pipeline_timeout(event)
 end
 
 function pipeline(event)
-  local payload = event.payload or {}
-  if payload.schema == "github-devloop.timeout-reconcile.v1" then
+  local schema = core.payload_field(event and event.payload, "schema")
+  if schema == "github-devloop.timeout-reconcile.v1" then
     return pipeline_timeout(event)
   end
-  if payload.schema == "github-devloop.review-reconcile.v1" then
+  if schema == "github-devloop.review-reconcile.v1" then
     return pipeline_review(event)
   end
-  if payload.schema == "github-devloop.fix-reconcile.v1" then
+  if schema == "github-devloop.fix-reconcile.v1" then
     return pipeline_fix(event)
   end
   return pipeline_thinking(event)

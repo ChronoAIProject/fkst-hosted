@@ -1,4 +1,5 @@
 local t = fkst.test
+local core = require("core")
 
 local cases = {
   {
@@ -106,13 +107,21 @@ local cases = {
 return {
   test_unsupported_payload_consumers_skip_non_table_payloads = function()
     for _, case in ipairs(cases) do
-      local result = t.run_department(case.path, {
-        queue = case.queue,
-        payload = false,
-      })
+      for _, payload in ipairs({ false, "foreign-payload", 42 }) do
+        local result = t.run_department(case.path, {
+          queue = case.queue,
+          payload = payload,
+        })
 
-      t.eq(result.exit_code, 0)
-      t.eq(#result.raises, 0)
+        t.eq(result.exit_code, 0)
+        t.eq(#result.raises, 0)
+      end
     end
+  end,
+
+  test_payload_field_returns_nil_for_userdata = function()
+    local userdata_payload = assert(io.tmpfile())
+    t.eq(core.payload_field(userdata_payload, "dedup_key"), nil)
+    userdata_payload:close()
   end,
 }
