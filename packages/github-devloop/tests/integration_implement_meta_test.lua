@@ -92,6 +92,12 @@ local function assert_open_pr_kickoff(raises, event, branch, head_sha)
   t.eq(kickoff.payload.source_ref.ref, event.source_ref.ref)
 end
 
+local function find_comment_with(raises, text)
+  return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
+    return tostring(payload.body or ""):find(text, 1, true) ~= nil
+  end)
+end
+
 return {
   test_implement_ready_label_only_empty_comments_does_not_synthesize_marker = function()
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
@@ -129,9 +135,9 @@ return {
 
     local result = run_implement(event, opts("implement-codex-failure"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local comment_raise = find_comment_with(result.raises, "fkst:github-devloop:impl-failure:v1")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:impl-failed")
     t.is_true(#label_raise.payload.remove_labels >= 10)
     t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: codex-failed", 1, true) ~= nil)
@@ -155,8 +161,8 @@ return {
 
     local result = run_implement(event, opts("implement-failure-marker-injection"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.eq(#result.raises, 3)
+    local comment_raise = find_comment_with(result.raises, "fkst:github-devloop:impl-failure:v1")
     t.is_true(comment_raise.payload.body:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.eq(comment_raise.payload.body:find(forged, 1, true) == nil, true)
     local current = core.current_state({ comment_raise.payload.body }, event.proposal_id)
@@ -218,9 +224,9 @@ return {
 
     local result = run_implement(event, opts("implement-existing-branch-reuse"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 4)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local comment = find_comment_with(result.raises, "fkst:github-devloop:implementing:v1").payload.body
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
@@ -253,7 +259,7 @@ return {
 
     local result = run_implement(event, opts("implement-boundary-worktree"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 4)
     assert_open_pr_kickoff(result.raises, event, branch, "def456")
     t.eq(count_calls("git worktree list"), 0)
     t.eq(count_calls("codex exec"), 1)
@@ -273,9 +279,9 @@ return {
 
     local result = run_implement(event, opts("implement-no-changes"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:impl-failed")
-    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local comment_raise = find_comment_with(result.raises, "fkst:github-devloop:impl-failure:v1")
     t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("No files needed changes.", 1, true) ~= nil)
   end,
@@ -300,9 +306,9 @@ return {
 
     local result = run_implement(event, opts("implement-clean-ahead"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 4)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local comment = find_comment_with(result.raises, "fkst:github-devloop:implementing:v1").payload.body
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
@@ -326,9 +332,9 @@ return {
 
     local result = run_implement(event, opts("implement-existing-empty-branch-no-changes"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:impl-failed")
-    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local comment_raise = find_comment_with(result.raises, "fkst:github-devloop:impl-failure:v1")
     t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)
     t.eq(count_calls("git worktree add"), 1)
     t.eq(count_calls("codex exec"), 1)
@@ -354,9 +360,9 @@ return {
 
     local result = run_implement(event, opts("implement-existing-worktree-reuse"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 4)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    local comment = find_comment_with(result.raises, "fkst:github-devloop:implementing:v1").payload.body
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
@@ -426,7 +432,7 @@ return {
 
     local visible = run_implement(ready(), opts("implement-ready-visible"))
     t.eq(visible.exit_code, 0)
-    t.eq(#visible.raises, 3)
+    t.eq(#visible.raises, 4)
     t.eq(find_raise(visible.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
     assert_open_pr_kickoff(visible.raises, ready(), branch, "def456")
     t.eq(count_calls("codex exec"), 1)

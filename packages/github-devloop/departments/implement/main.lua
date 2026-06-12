@@ -48,6 +48,11 @@ local function raise_implementing(repo, issue_number, ready, worktree, branch, h
   ))
 end
 
+local function raise_implement_attempt(repo, issue_number, ready, attempt, started_at)
+  local request = core.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at)
+  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
+end
+
 local function open_pr_payload_from_fact(repo, issue_number, ready, fact)
   return core.build_devloop_open_pr_payload(
     repo,
@@ -246,6 +251,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   merge_integration_for_implementation(worktree, branches.integration, base_head)
 
   local codex_started_at = now()
+  raise_implement_attempt(repo, issue_number, ready, attempt, codex_started_at)
   raise_work_card(repo, issue_number, ready, {
     started_at = codex_started_at,
     base_sha = base_head,

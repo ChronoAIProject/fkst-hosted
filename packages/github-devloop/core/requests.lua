@@ -514,6 +514,24 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
   }
 end
 
+function M.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at)
+  local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt, started_at)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop implementation attempt started\n\n" .. marker,
+    dedup_key = M._dedup_key({
+      "implement",
+      "comment",
+      "attempt",
+      tostring(ready.dedup_key),
+      tostring(attempt),
+    }),
+    source_ref = M.normalize_source_ref(ready.source_ref),
+  }
+end
+
 function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail)
   local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
   local text = tostring(detail or "")

@@ -124,6 +124,26 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:impl-failed")
   end,
 
+  test_second_retry_death_exhausts_after_observe_reraises = function()
+    local event = ready()
+    local comments, branch = implementing_comments(event, {
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 2, tostring(now() - 7201)),
+    })
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
+
+    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-second-attempt-expired"))
+    t.eq(observed.exit_code, 0)
+    t.eq(find_raise(observed.raises, "devloop_ready").payload.proposal_id, event.proposal_id)
+
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
+    mock_missing_remote_branch(branch)
+
+    local retried = run_implement(event, opts("implement-second-attempt-exhausted"))
+    t.eq(retried.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(find_raise(retried.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:impl-failed")
+  end,
+
   test_observe_reraises_implement_after_attempt_liveness_expires = function()
     local event = ready()
     local comments = {
