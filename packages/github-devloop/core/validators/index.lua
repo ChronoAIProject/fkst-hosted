@@ -1,0 +1,17 @@
+return {
+  "fixing",
+  "intake_candidate",
+  "issue",
+  "merge_ready",
+  "open_pr",
+  "pr",
+  "pr_opened",
+  "pr_review_unresolved",
+  "ready",
+  "result",
+  "review_meta",
+  "review_result",
+  "reviewing",
+  "unresolved",
+  "validate_proposal",
+}
