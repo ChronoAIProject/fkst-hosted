@@ -192,6 +192,26 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
   })
 end
 
+local function raise_work_card(repo, fix, card)
+  local request = core.build_work_card_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = fix.pr_number,
+  }, {
+    proposal_id = fix.proposal_id,
+    role = "fix",
+    version = fix.version,
+    round = core.version_fix_round(fix.version),
+    started_at = card.started_at,
+    finished_at = card.finished_at,
+    outcome = card.outcome,
+    gate_baseline_sha = fix.gate_baseline_sha,
+    last_stage = fix.blocking_gap or fix.gate_failure_excerpt,
+    source_ref = fix.source_ref,
+  })
+  core.log_work_card("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", request)
+end
+
 local function assert_fix_write_gate(fix, repo, issue_number)
   local write_enabled = core.write_mode() == "real"
   if write_enabled then
@@ -396,6 +416,10 @@ function pipeline(event)
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
     local merge_context = merge_integration_for_fix(worktree, fix.pr_number, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
+    local codex_started_at = now()
+    raise_work_card(repo, fix, {
+      started_at = codex_started_at,
+    })
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "fix",
@@ -413,6 +437,11 @@ function pipeline(event)
     if type(result) ~= "table" or result.exit_code ~= 0 then
       local stderr = type(result) == "table" and result.stderr or "nil result"
       core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, stderr)
+      raise_work_card(repo, fix, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "failed: codex-failed",
+      })
       error("github-devloop: fix codex failed: " .. tostring(stderr))
     end
     core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=completed", nil)
@@ -461,10 +490,20 @@ function pipeline(event)
           error("github-devloop: pushed PR head verification failed")
         end
 
+        raise_work_card(repo, fix, {
+          started_at = codex_started_at,
+          finished_at = now(),
+          outcome = "completed: existing head pushed",
+        })
         raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, existing_head_sha, "existing fix commit pushed and PR head verified", result.stdout or result.stderr)
         return
       end
       core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, "no-changes")
+      raise_work_card(repo, fix, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "escalated: no-fix",
+      })
       raise_review_meta(repo, issue_number, fix, "no-fix", result.stdout or result.stderr)
       return
     end
@@ -499,6 +538,11 @@ function pipeline(event)
       error("github-devloop: unsafe fix head_sha")
     end
     if new_head_sha == fix.reviewed_head_sha then
+      raise_work_card(repo, fix, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "escalated: no-new-head",
+      })
       raise_review_meta(repo, issue_number, fix, "no-new-head", result.stdout or result.stderr)
       return
     end
@@ -537,6 +581,11 @@ function pipeline(event)
       error("github-devloop: pushed PR head verification failed")
     end
 
+    raise_work_card(repo, fix, {
+      started_at = codex_started_at,
+      finished_at = now(),
+      outcome = "completed: pushed for re-review",
+    })
     raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, new_head_sha, "fix pushed and PR head verified", result.stdout or result.stderr)
   end)
 end
