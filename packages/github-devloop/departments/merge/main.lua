@@ -245,6 +245,60 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
   return true, "merge-authority-ok", state
 end
 
+local function speculative_fix_fact_for_merge(comments, merge_ready)
+  local fix_version = core._strip_latest_fix_version_suffix(merge_ready.version)
+  if tostring(fix_version or "") == tostring(merge_ready.version or "") then
+    return nil
+  end
+  local fact = core.merge_gate_fix_fact(comments, merge_ready.proposal_id, fix_version)
+  if fact == nil or fact.predecessor_set == nil then
+    return nil
+  end
+  if not core.has_fix_marker(
+    comments,
+    merge_ready.proposal_id,
+    fact.review_proposal_id,
+    fact.review_dedup_key,
+    fact.reviewed_head_sha,
+    merge_ready.reviewed_head_sha
+  ) then
+    return {
+      predecessor_set = fact.predecessor_set,
+      reason = "speculative-fix-head-binding-missing",
+    }
+  end
+  return {
+    predecessor_set = fact.predecessor_set,
+    reason = "speculative-predecessor-set",
+  }
+end
+
+local function revalidate_speculative_predecessors(repo, issue_number, merge_ready, state, current_pr, queue_position, speculative_fact)
+  if speculative_fact == nil then
+    return true
+  end
+  local current_position = queue_position
+  if current_position == nil then
+    local branches = core.branch_config()
+    local position, reason = core.merge_queue_position(repo, branches.integration, {
+      pr_number = merge_ready.pr_number,
+      pr = current_pr,
+    })
+    if position == nil then
+      core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "hold-merge-queue", reason)
+      log_gate(merge_ready, "dry-run", reason)
+      return false
+    end
+    current_position = position
+  end
+  if tostring(current_position.predecessor_set or "") == tostring(speculative_fact.predecessor_set or "") then
+    return true
+  end
+  log_gate(merge_ready, "fixing", "predecessor-set-mismatch")
+  raise_fixing(repo, issue_number, merge_ready, state, current_pr, "predecessor-set-mismatch", current_position)
+  return false
+end
+
 local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
   if current_pr.is_draft ~= true then
     return current_pr
@@ -437,6 +491,7 @@ function pipeline(event)
       return
     end
 
+    local speculative_fact = speculative_fix_fact_for_merge(current_pr.comments, merge_ready)
     local queue_position, queue_reason = core.merge_queue_position(repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
@@ -444,6 +499,9 @@ function pipeline(event)
     if queue_position == nil then
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "hold-merge-queue", queue_reason)
       log_gate(merge_ready, "dry-run", queue_reason)
+      return
+    end
+    if not revalidate_speculative_predecessors(repo, issue_number, merge_ready, state, current_pr, queue_position, speculative_fact) then
       return
     end
     if not queue_position.is_head then
@@ -538,6 +596,10 @@ function pipeline(event)
         return
       end
       core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready|merging", "merging", "skip-stale(write-gate)", "write-time PR state changed")
+      return
+    end
+    local rechecked_speculative_fact = speculative_fix_fact_for_merge(rechecked_pr_for_gate.comments, merge_ready)
+    if not revalidate_speculative_predecessors(repo, issue_number, merge_ready, rechecked_state, rechecked_pr_for_gate, nil, rechecked_speculative_fact) then
       return
     end
     if not write_enabled then

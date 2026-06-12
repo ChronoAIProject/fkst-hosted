@@ -253,7 +253,7 @@ return {
     }, branch, event.version)
     mock_pr_fix({ origin_marker, feedback }, branch, "def456")
     mock_queue_list({ 6, 7 })
-    mock_queue_pr(current_predecessor, "2026-06-03T01:30:00Z")
+    mock_queue_pr(current_predecessor, "2026-06-03T00:30:00Z")
     mock_queue_pr(current_merge_ready, "2026-06-03T02:00:00Z", "fixing", event.version)
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
       stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
@@ -276,6 +276,61 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(comment_raise ~= nil)
     t.is_true(comment_raise.payload.body:find('state="fixing" version="' .. core.next_fix_version(event.version) .. '"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('predecessor_set="' .. fixing_raise.payload.predecessor_set .. '"', 1, true) ~= nil)
+  end,
+
+  test_speculative_merge_ready_rechecks_predecessor_set_before_merge = function()
+    local stale_predecessor = event_for_pr(5, 41, "2026-06-03T00-00-00Z", "aaa111")
+    local current_predecessor = event_for_pr(6, 43, "2026-06-03T00-30-00Z", "bbb222")
+    local event = merge_ready({
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1/fix/2",
+      reviewed_head_sha = "fedcba",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    })
+    event.review_proposal_id = core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, event.reviewed_head_sha)
+    event.review_dedup_key = "consensus:" .. event.review_proposal_id .. "/review"
+    local stale_set = "pr5-" .. core.safe_version_segment(stale_predecessor.proposal_id)
+      .. "-" .. core.safe_version_segment(stale_predecessor.version)
+      .. "-" .. stale_predecessor.reviewed_head_sha
+    local fix_version = core._strip_latest_fix_version_suffix(event.version)
+    local old_review_version = core._strip_latest_fix_version_suffix(fix_version)
+    local old_review_proposal = core.pr_review_proposal_id("owner/repo", event.pr_number, old_review_version, "def456")
+    local old_review_dedup = "consensus:" .. old_review_proposal .. "/review"
+    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local comments = merge_comments(event, branch, event.version)
+    table.insert(comments, core.state_marker(event.proposal_id, "fixing", fix_version))
+    table.insert(comments, core.merge_gate_marker(
+      event.proposal_id,
+      event.pr_number,
+      fix_version,
+      old_review_proposal,
+      old_review_dedup,
+      "def456",
+      "abc123",
+      "mergeable-conflicting",
+      stale_set
+    ))
+    table.insert(comments, core.fix_marker(event.proposal_id, old_review_proposal, old_review_dedup, "def456", event.reviewed_head_sha))
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, comments)
+    mock_pr_merge({}, branch, event.reviewed_head_sha)
+    mock_queue_list({ 6 })
+    mock_queue_pr(current_predecessor, "2026-06-03T00:30:00Z")
+
+    local result = run_merge(event, opts("merge-speculative-stale-predecessors", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    t.is_true(fixing_raise ~= nil)
+    t.eq(fixing_raise.payload.predecessor_set,
+      "pr6-" .. core.safe_version_segment(current_predecessor.proposal_id)
+        .. "-" .. core.safe_version_segment(current_predecessor.version)
+        .. "-" .. current_predecessor.reviewed_head_sha)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(comment_raise.payload.body:find('predecessor_set="' .. fixing_raise.payload.predecessor_set .. '"', 1, true) ~= nil)
   end,
 
