@@ -51,6 +51,10 @@ function M.gh_issue_list_observe_cmd(repo, label)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
 
+function M.gh_issue_list_dependency_reconcile_cmd(repo)
+  return M.gh_issue_list_observe_cmd(repo, M._blocked_on_dependency_label)
+end
+
 function M.gh_dashboard_issue_list_cmd(repo, label)
   local selected_label = tostring(label or "")
   if selected_label == "" then
@@ -235,7 +239,7 @@ function M.gh_issue_view_merge_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_observe_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state,stateReason")
 end
 
 function M.gh_pr_view_origin_cmd(repo, pr_number)

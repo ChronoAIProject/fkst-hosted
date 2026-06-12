@@ -37,6 +37,7 @@ cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
 scripts/run.sh test                 # self-test，所有包测试；flat 跑单根 conformance，composed 跳单根 conformance；最后跑组合 conformance；等价 CI
 scripts/run.sh test github-proxy    # 只跑某个包；flat 跑 conformance + test
 scripts/run.sh test-composed        # 只跑 composed 包及其递归 deps 的组合 conformance
+scripts/run.sh doctor               # read-only preflight for git/cargo/rustc, BIN self-test, codex, gh auth, and FKST_* host facts
 
 # 通用一次性跑某部门：解码 RAISED 事件 + dump <RT> 树。包特定配置走 env。
 # github-proxy 的只读入站 dogfood（拿真 gh 打真仓，不写 GitHub）：
@@ -52,6 +53,8 @@ FKST_GITHUB_REPO=owner/repo FKST_RATE_POOL_ROOT=/var/lib/fkst/rate-pools scripts
 # 显式 BIN/.env BIN 无效会直接报错，CI 不自动 build，FKST_NO_AUTOBUILD=1 会禁用 clone/build fallback。
 scripts/run.sh build
 ```
+
+`doctor` is a read-only preflight command. It prints one grep-friendly `DOCTOR <item> ok|missing hint=...` line per check, returns non-zero for missing hard dependencies, and never performs package-manager installs, login, credential writes, GitHub writes, or runtime state mutation. 中文补充：它只报告当前 host fact 和明确人工修复命令；登录/授权仍由人执行。
 
 `run` 用临时（或复用已设的）`FKST_RUNTIME_ROOT`、绝不设 `FKST_GITHUB_WRITE`，所以只读 dogfood 保持只读；同一 `FKST_RUNTIME_ROOT` 连跑两次可看去重。脚本对任何 `packages/<pkg>/departments/<dept>` 通用，不写死 github-proxy。
 

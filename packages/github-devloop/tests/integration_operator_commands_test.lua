@@ -374,6 +374,6 @@ return {
     t.is_true(command_response.payload.body:find('command="reimplement"', 1, true) ~= nil)
     t.is_true(ready_raise ~= nil)
     t.eq(ready_raise.payload.proposal_id, event.proposal_id)
-    t.is_true(ready_raise.payload.dedup_key:find("/timeout/impl-failed/1", 1, true) ~= nil)
+    t.eq(ready_raise.payload.impl_retry_attempt, 2)
   end,
 }

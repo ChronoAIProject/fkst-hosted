@@ -153,6 +153,17 @@ function M.version_timeout_round(version, state_name)
   return max_n
 end
 
+function M.version_reimplement_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]reimplement[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
 function M.next_fix_version(version)
   local base = tostring(version or "")
   local next_n = M.version_fix_round(base) + 1
@@ -188,6 +199,7 @@ local function version_sort_key(version, stage_rank)
     primary = version_primary_key(version),
     loop_n = M.version_loop_round(version),
     fix_n = M.version_fix_round(version),
+    reimplement_n = M.version_reimplement_round(version),
     review_loop_n = M.version_review_loop_round(version),
     review_meta_action_n = M.version_review_meta_action_round(version),
     stage_rank = tonumber(stage_rank) or 0,
@@ -208,6 +220,9 @@ local function compare_version_keys(left, right)
   end
   if left.fix_n ~= right.fix_n then
     return left.fix_n > right.fix_n and 1 or -1
+  end
+  if left.reimplement_n ~= right.reimplement_n then
+    return left.reimplement_n > right.reimplement_n and 1 or -1
   end
   if left.review_meta_action_n ~= right.review_meta_action_n then
     return left.review_meta_action_n > right.review_meta_action_n and 1 or -1
@@ -248,6 +263,8 @@ local function strip_transition_version_suffixes(version)
       :gsub("%-fix%-%d+$", "")
       :gsub("/timeout/[%w%-]+/%d+$", "")
       :gsub("%-timeout%-[%w%-]+%-%d+$", "")
+      :gsub("/reimplement/%d+$", "")
+      :gsub("%-reimplement%-%d+$", "")
       :gsub("/loop/%d+$", "")
       :gsub("%-loop%-%d+$", "")
   end
@@ -271,6 +288,9 @@ local function compare_same_base_transition_versions(incoming_version, current_v
   end
   if incoming_key.fix_n ~= current_key.fix_n then
     return incoming_key.fix_n > current_key.fix_n and 1 or -1
+  end
+  if incoming_key.reimplement_n ~= current_key.reimplement_n then
+    return incoming_key.reimplement_n > current_key.reimplement_n and 1 or -1
   end
   if incoming_key.review_meta_action_n ~= current_key.review_meta_action_n then
     return incoming_key.review_meta_action_n > current_key.review_meta_action_n and 1 or -1

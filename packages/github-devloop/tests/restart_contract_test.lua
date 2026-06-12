@@ -61,6 +61,7 @@ local function marker_builder_paths()
   return {
     "packages/github-devloop/core/state.lua",
     "packages/github-devloop/core/markers.lua",
+    "packages/github-devloop/core/impl_failure.lua",
     "packages/github-devloop/core/convergence.lua",
     "packages/github-devloop/core/dependencies.lua",
     "packages/github-devloop/core/decompose.lua",
@@ -84,7 +85,8 @@ local function rows_by_state(rows)
 end
 
 local function allowed_extra_transition(state, next_state)
-  return state == "reviewing" and next_state == "blocked"
+  return (state == "reviewing" and next_state == "blocked")
+    or (state == "impl-failed" and next_state == "implementing")
 end
 
 return {
@@ -97,6 +99,7 @@ return {
       "thinking",
       "ready",
       "implementing",
+      "impl-failed",
       "pr-open",
       "reviewing",
       "merge-ready",
@@ -104,7 +107,6 @@ return {
       "fixing",
       "review-meta",
       "blocked",
-      "impl-failed",
       "merged",
     }
     local by_state = table_by_state()
@@ -281,12 +283,52 @@ return {
     t.eq(raised[1].payload.round, 3)
   end,
 
+  test_liveness_timeout_escalation_has_observable_event_for_every_non_terminal_row = function()
+    local original_replay = core.replay_from_table
+    local replayed = {}
+    core.replay_from_table = function(_, _, replay_state, row)
+      table.insert(replayed, {
+        state = row.from_state,
+        version = replay_state.version,
+      })
+      return true
+    end
+    local ok, err = pcall(function()
+      for _, row in ipairs(core.restart_transition_table()) do
+        if row.terminal == false then
+          local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+          local state = {
+            state = row.from_state,
+            version = base .. "/timeout/" .. row.from_state .. "/3",
+            proposal_id = "github-devloop/issue/owner/repo/42",
+            marker_created_at = "2026-06-03T01:02:03Z",
+          }
+          local applied = core.maybe_timeout_redrive_from_table("observe_issue", {
+            repo = "owner/repo",
+            number = 42,
+          }, state, row, {
+            proposal_id = state.proposal_id,
+            now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+          })
+          t.eq(applied, true)
+          t.eq(replayed[#replayed].state, row.from_state)
+          t.is_true(replayed[#replayed].version:find("/timeout/" .. row.from_state .. "/4", 1, true) ~= nil)
+        end
+      end
+    end)
+    core.replay_from_table = original_replay
+    if not ok then
+      error(err)
+    end
+  end,
+
   test_restart_table_matches_state_graph_and_stage_rank = function()
     local by_state = table_by_state()
     local expected = {
       thinking = true,
       ready = true,
       implementing = true,
+      ["impl-failed"] = true,
       ["pr-open"] = true,
       reviewing = true,
       ["merge-ready"] = true,

@@ -182,16 +182,15 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
   M.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "timeout-" .. decision.action, "state output obligation exceeded budget")
   if decision.action == "escalate" then
     local queue, payload = build_timeout_reconcile(row, entity, state, facts, decision)
-    if queue == nil then
-      return false
+    if queue ~= nil then
+      M.log_apply(dept, proposal_id, nil, nil, { add = {}, remove = {} }, { queue })
+      M.log_raise(dept, proposal_id, queue, payload)
+      return true
     end
-    M.log_apply(dept, proposal_id, nil, nil, { add = {}, remove = {} }, { queue })
-    M.log_raise(dept, proposal_id, queue, payload)
-    return true
   end
   return M.replay_from_table(dept, entity, {
     state = state.state,
-    version = decision.version,
+    version = decision.version or M.next_liveness_timeout_version(row, state),
     proposal_id = state.proposal_id,
     stage_rank = state.stage_rank,
     marker_created_at = state.marker_created_at,

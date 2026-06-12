@@ -57,6 +57,80 @@ bootstrap_cache_bin_path() {
   python3 -B "$repo_root/scripts/bin_cache.py" "$cache_root" "$owner" "$repo" "$ref"
 }
 
+resolve_bin_contract() {
+  local repo_root="$1" mode="${2:-bootstrap}" candidate="" pin owner repo ref cache_root cache_bin
+  RESOLVED_BIN=""
+  RESOLVE_BIN_ERROR=""
+
+  if [ -n "${BIN:-}" ]; then
+    if [ ! -x "$BIN" ]; then
+      RESOLVE_BIN_ERROR="explicit BIN is not executable: $BIN"
+      return 1
+    fi
+    RESOLVED_BIN="$BIN"
+    return 0
+  fi
+
+  if [ -f "$repo_root/.env" ]; then
+    # `|| true`: no BIN= line is fine under set -o pipefail. Strip optional
+    # surrounding quotes and a trailing ` # comment`.
+    candidate="$(grep -E '^BIN=' "$repo_root/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+    candidate="${candidate%%[[:space:]]#*}"
+    candidate="${candidate%\"}"; candidate="${candidate#\"}"; candidate="${candidate%\'}"; candidate="${candidate#\'}"
+    if [ -n "$candidate" ]; then
+      if [ ! -x "$candidate" ]; then
+        RESOLVE_BIN_ERROR=".env BIN is not executable: $candidate"
+        return 1
+      fi
+      RESOLVED_BIN="$candidate"
+      return 0
+    fi
+  fi
+
+  if command -v fkst-framework >/dev/null 2>&1; then
+    RESOLVED_BIN="$(command -v fkst-framework)"
+    return 0
+  fi
+
+  candidate="$repo_root/../fkst-substrate/target/debug/fkst-framework"
+  if [ -x "$candidate" ]; then
+    RESOLVED_BIN="$candidate"
+    return 0
+  fi
+
+  if [ "$mode" = "readonly" ]; then
+    if [ -z "${FKST_NO_AUTOBUILD:-}" ] && [ -f "$repo_root/.fkst-substrate-ref" ]; then
+      pin="$(bootstrap_read_pin "$repo_root" 2>/dev/null || true)"
+      if [ -n "$pin" ]; then
+        {
+          IFS= read -r owner
+          IFS= read -r repo
+          IFS= read -r ref
+        } < <(bootstrap_parse_pin "$pin" 2>/dev/null || true)
+        cache_root="$(bootstrap_cache_root 2>/dev/null || true)"
+        if [ -n "${owner:-}" ] && [ -n "${repo:-}" ] && [ -n "${ref:-}" ] && [ -n "$cache_root" ]; then
+          cache_bin="$(bootstrap_cache_bin_path "$repo_root" "$cache_root" "$owner" "$repo" "$ref" 2>/dev/null || true)"
+          if [ -x "$cache_bin" ]; then
+            RESOLVED_BIN="$cache_bin"
+            return 0
+          fi
+        fi
+      fi
+    fi
+    RESOLVE_BIN_ERROR="set BIN to an executable fkst-framework, put fkst-framework on PATH, build ../fkst-substrate, or run scripts/run.sh build"
+    return 1
+  fi
+
+  if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+    RESOLVE_BIN_ERROR="fkst-framework binary is not executable in CI: ${BIN:-<unset>}"
+    return 1
+  fi
+
+  echo "fkst-framework binary not found in \$BIN, .env, PATH, or ../fkst-substrate; bootstrapping pinned source" >&2
+  RESOLVED_BIN="$(bootstrap_bin_on_total_miss "$repo_root")" || return $?
+  return 0
+}
+
 bootstrap_with_lock() {
   local lock_dir="$1" timeout="${FKST_BIN_BOOTSTRAP_LOCK_TIMEOUT:-600}" waited=0
   while ! mkdir "$lock_dir" 2>/dev/null; do
