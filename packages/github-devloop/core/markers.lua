@@ -496,21 +496,12 @@ local function merge_gate_fix_fact_matches_bindings(fact, opts)
     return true
   end
   local baseline_bound = opts.match_gate_baseline_sha == true or opts.gate_baseline_sha ~= nil
-  if opts.review_proposal_id ~= nil and fact.review_proposal_id ~= tostring(opts.review_proposal_id) then
-    return false
-  end
-  if opts.review_dedup_key ~= nil and fact.review_dedup_key ~= tostring(opts.review_dedup_key) then
-    return false
-  end
-  if baseline_bound and opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha ~= tostring(opts.gate_baseline_sha) then
-    return false
-  end
-  if baseline_bound and opts.gate_baseline_sha == nil and fact.gate_baseline_sha ~= nil then
-    return false
-  end
-  return true
+  return (opts.review_proposal_id == nil or fact.review_proposal_id == tostring(opts.review_proposal_id))
+    and (opts.review_dedup_key == nil or fact.review_dedup_key == tostring(opts.review_dedup_key))
+    and (not baseline_bound
+      or (opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha == tostring(opts.gate_baseline_sha))
+      or (opts.gate_baseline_sha == nil and fact.gate_baseline_sha == nil))
 end
-
 function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
   if type(comments) ~= "table" then
     return nil
@@ -978,7 +969,6 @@ function M.has_impl_failure_marker(comments, proposal_id, dedup_key)
   if type(comments) ~= "table" then
     return false
   end
-
   local marker_pattern = "<!%-%- fkst:github%-devloop:impl%-failure:v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
@@ -991,7 +981,6 @@ function M.has_impl_failure_marker(comments, proposal_id, dedup_key)
   end
   return false
 end
-
 function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)
   return M.has_implementing_marker(comments, proposal_id, dedup_key)
     or M.has_impl_failure_marker(comments, proposal_id, dedup_key)
