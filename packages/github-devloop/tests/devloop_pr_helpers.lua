@@ -448,6 +448,14 @@ local function mock_branch_exists(branch, head)
   })
 end
 
+local function mock_branch_head_descends(descends)
+  t.mock_command("merge-base --is-ancestor", {
+    stdout = "",
+    stderr = "",
+    exit_code = descends == false and 1 or 0,
+  })
+end
+
 local function mock_meta_codex(action, reason, exit_code, blocking_gap)
   local stdout = ""
   if action ~= nil then
@@ -497,6 +505,7 @@ return {
   mock_pr_head = mock_pr_head,
   mock_pr_diff = mock_pr_diff,
   mock_branch_exists = mock_branch_exists,
+  mock_branch_head_descends = mock_branch_head_descends,
   mock_meta_codex = mock_meta_codex,
   reset_pr_helper_state = reset_pr_helper_state,
 }
