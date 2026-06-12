@@ -284,18 +284,15 @@ return {
   end,
 
   test_liveness_timeout_escalation_has_observable_event_for_every_non_terminal_row = function()
-    local original_replay = core.replay_from_table
-    local replayed = {}
-    core.replay_from_table = function(_, _, replay_state, row)
-      table.insert(replayed, {
-        state = row.from_state,
-        version = replay_state.version,
-      })
-      return true
+    local original_log_raise = core.log_raise
+    local raised = {}
+    core.log_raise = function(_, _, queue, payload)
+      table.insert(raised, { queue = queue, payload = payload })
     end
     local ok, err = pcall(function()
       for _, row in ipairs(core.restart_transition_table()) do
         if row.terminal == false then
+          local before = #raised
           local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
           local state = {
             state = row.from_state,
@@ -306,17 +303,25 @@ return {
           local applied = core.maybe_timeout_redrive_from_table("observe_issue", {
             repo = "owner/repo",
             number = 42,
+            source_ref = core.issue_source_ref("owner/repo", 42),
           }, state, row, {
             proposal_id = state.proposal_id,
+            source_ref = row.from_state == "reviewing" and core.pr_source_ref("owner/repo", 7) or core.issue_source_ref("owner/repo", 42),
+            review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, state.version, "def456"),
+            head_sha = "def456",
             now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
           })
           t.eq(applied, true)
-          t.eq(replayed[#replayed].state, row.from_state)
-          t.is_true(replayed[#replayed].version:find("/timeout/" .. row.from_state .. "/4", 1, true) ~= nil)
+          t.eq(#raised, before + 1)
+          t.is_true(raised[#raised].queue == "devloop_reconcile"
+            or raised[#raised].queue == "devloop_review_reconcile"
+            or raised[#raised].queue == "devloop_timeout_reconcile")
+          t.eq(raised[#raised].queue == row.driving_queue, false)
+          t.eq(tostring(raised[#raised].payload.dedup_key or ""):find("/timeout/" .. row.from_state .. "/4", 1, true), nil)
         end
       end
     end)
-    core.replay_from_table = original_replay
+    core.log_raise = original_log_raise
     if not ok then
       error(err)
     end

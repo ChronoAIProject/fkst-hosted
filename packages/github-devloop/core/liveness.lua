@@ -155,6 +155,11 @@ local function build_timeout_reconcile(row, entity, state, facts, decision)
       }, decision.attempt, state.proposal_id, M.safe_version_segment(state.version), facts.head_sha)
     end
   end
+  if M._has_bounded_source_ref(source_ref)
+    and M._is_path_safe_key(state and state.proposal_id, M._max_key_len)
+    and M._is_bounded_string(state and state.version, M._max_dedup_len) then
+    return "devloop_timeout_reconcile", M.build_devloop_timeout_reconcile_payload(row, state, state.proposal_id, source_ref, decision.attempt)
+  end
   return nil, nil
 end
 
@@ -187,6 +192,7 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
       M.log_raise(dept, proposal_id, queue, payload)
       return true
     end
+    return false
   end
   return M.replay_from_table(dept, entity, {
     state = state.state,
