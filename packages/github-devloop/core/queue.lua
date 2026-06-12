@@ -12,7 +12,6 @@ local active_wip_states = {
 }
 
 local merge_queue_lane_states = {
-  fixing = true,
   ["merge-ready"] = true,
   merging = true,
 }
@@ -97,6 +96,8 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
     version = fact.version,
     state = state.state,
     head_sha = fact.head_sha,
+    review_proposal_id = fact.review_proposal_id,
+    review_dedup_key = fact.review_dedup_key,
     merge_ready_created_at = fact.comment_created_at or "",
   }
 end

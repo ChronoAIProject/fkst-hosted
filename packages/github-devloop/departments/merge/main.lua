@@ -3,7 +3,7 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "devloop_merge_ready" },
+  consumes = { "devloop_merge_ready", "devloop_merge_queue_tick" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
@@ -37,12 +37,17 @@ local function temp_body_file(repo, issue_number)
 end
 
 local function log_gate(merge_ready, outcome, reason)
-  core.log_line("info", "merge", merge_ready.proposal_id, "GATE", {
+  local pass = merge_ready and merge_ready._merge_pass
+  local fields = {
     "pr=" .. tostring(merge_ready.pr_number),
     "version=" .. tostring(merge_ready.version),
     "outcome=" .. tostring(outcome),
     "reason=" .. tostring(reason or ""),
-  })
+  }
+  if pass ~= nil then
+    table.insert(fields, "pass=" .. tostring(pass))
+  end
+  core.log_line("info", "merge", merge_ready.proposal_id, "GATE", fields)
 end
 
 local function require_consensus_review_approve(comments, merge_ready)
@@ -305,32 +310,17 @@ local function finalize_merged(repo, issue_number, merge_ready, current_state, r
   end
 end
 
-function pipeline(event)
-  local merge_ready = event.payload or {}
-  if not core.is_supported_merge_ready(merge_ready) then
-    core.log_entry("merge", event, "unknown", merge_ready.dedup_key)
-    core.log_cas_decision("merge", "unknown", { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(payload)", "unsupported event payload")
-    return
-  end
-
-  core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
+local function process_merge_ready_locked(repo, issue_number, merge_ready, branches)
   local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
   if entity == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
-  local repo = entity.repo
-  local issue_number = entity.issue_number
-
-  local lock_key = core.merge_lane_lock_key(repo)
-  if lock_key == nil then
+  if tostring(entity.repo or "") ~= tostring(repo or "")
+    or tostring(entity.issue_number or "") ~= tostring(issue_number or "") then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
-
-  with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
-    local branches = core.branch_config()
 
     local pr_view = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
@@ -570,6 +560,120 @@ function pipeline(event)
     end
 
     finalize_merged(repo, issue_number, merge_ready, rechecked_state, "gh pr merge confirmed merged")
+end
+
+local function synthesize_merge_ready_from_queue_head(repo, head)
+  if type(head) ~= "table"
+    or head.proposal_id == nil
+    or head.pr_number == nil
+    or head.version == nil
+    or head.review_proposal_id == nil
+    or head.review_dedup_key == nil
+    or head.head_sha == nil then
+    return nil
+  end
+  return core.build_devloop_merge_ready_payload(head.proposal_id, head.pr_number, head.version, {
+    review_proposal_id = head.review_proposal_id,
+    review_dedup_key = head.review_dedup_key,
+    reviewed_head_sha = head.head_sha,
+  }, core.pr_source_ref(repo, head.pr_number))
+end
+
+local function process_merge_queue_tick(event)
+  local repo = core.read_env("FKST_GITHUB_REPO")
+  if repo == nil or repo == "" then
+    core.log_entry("merge", event, "unknown", "")
+    core.log_line("info", "merge", "unknown", "GATE", {
+      "outcome=skip",
+      "reason=missing-repo-config",
+      "pass=poll",
+    })
+    return
+  end
+
+  local lock_key = core.merge_lane_lock_key(repo)
+  if lock_key == nil then
+    core.log_entry("merge", event, "unknown", "")
+    core.log_line("info", "merge", "unknown", "GATE", {
+      "outcome=skip",
+      "reason=no-transition-lock-key",
+      "pass=poll",
+    })
+    return
+  end
+
+  with_lock(lock_key, function()
+    core.assert_trusted_bot_configured()
+    local branches = core.branch_config()
+    local head = core.merge_queue_head(repo, branches.integration)
+    if head == nil then
+      core.log_line("info", "merge", "unknown", "GATE", {
+        "outcome=skip",
+        "reason=merge-queue-empty",
+        "pass=poll",
+      })
+      return
+    end
+    if head.state == "merging" then
+      core.log_line("info", "merge", head.proposal_id, "GATE", {
+        "pr=" .. tostring(head.pr_number),
+        "version=" .. tostring(head.version),
+        "outcome=skip",
+        "reason=merge-queue-head-merging",
+        "pass=poll",
+      })
+      return
+    end
+    local merge_ready = synthesize_merge_ready_from_queue_head(repo, head)
+    if merge_ready == nil or not core.is_supported_merge_ready(merge_ready) then
+      core.log_line("info", "merge", head.proposal_id, "GATE", {
+        "pr=" .. tostring(head.pr_number),
+        "version=" .. tostring(head.version),
+        "outcome=skip",
+        "reason=merge-queue-head-missing-merge-ready-fact",
+        "pass=poll",
+      })
+      return
+    end
+    merge_ready._merge_pass = "poll"
+    core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
+    local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
+    process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches)
+  end)
+end
+
+function pipeline(event)
+  if event.queue == "devloop_merge_queue_tick" then
+    process_merge_queue_tick(event)
+    return
+  end
+
+  local merge_ready = event.payload or {}
+  if not core.is_supported_merge_ready(merge_ready) then
+    core.log_entry("merge", event, "unknown", merge_ready.dedup_key)
+    core.log_cas_decision("merge", "unknown", { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(payload)", "unsupported event payload")
+    return
+  end
+
+  core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
+  local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
+  if entity == nil then
+    core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    return
+  end
+  local repo = entity.repo
+  local issue_number = entity.issue_number
+
+  local lock_key = core.merge_lane_lock_key(repo)
+  if lock_key == nil then
+    core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
+    return
+  end
+
+  with_lock(lock_key, function()
+    core.assert_trusted_bot_configured()
+    local branches = core.branch_config()
+    process_merge_ready_locked(repo, issue_number, merge_ready, branches)
   end)
 end
 
