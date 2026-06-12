@@ -9,7 +9,9 @@ M.spec = {
     "github-proxy.github_pr_comment_request",
     "devloop_reviewing",
     "devloop_fixing",
+    "devloop_merge_queue_tick",
   },
+  fanout = { "devloop_merge_queue_tick" },
   stall_window = "2m",
 }
 
@@ -703,19 +705,16 @@ end
 local function run_batch_window(repo, branches, first_merge_ready, queue_entries, options)
   local first_entry, first_index = find_queue_entry(queue_entries, first_merge_ready)
   if first_entry == nil or first_index == nil then
-    log_batch_window(first_merge_ready.proposal_id, {
-      "action=complete",
-      "size=1",
-      "reason=head-not-initial-queue",
-    })
-    return
+    log_batch_window(first_merge_ready.proposal_id, { "action=complete", "size=1", "reason=head-not-initial-queue" })
+    return first_merge_ready.pr_number
   end
 
   local merged_files = {}
   local merged_count = 1
   if not record_merged_files(repo, first_entry, merged_files) then
-    return
+    return first_entry.pr_number
   end
+  local last_merged_pr_number = first_entry.pr_number
 
   local previous_base_head = tostring(first_entry.base_sha or "")
   local required_base_head, base_reason = current_base_head(branches)
@@ -726,7 +725,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
       "reason=" .. tostring(base_reason),
       "size=" .. tostring(merged_count),
     })
-    return
+    return last_merged_pr_number
   end
   if previous_base_head == required_base_head then
     log_batch_window(first_merge_ready.proposal_id, {
@@ -736,7 +735,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
       "base=" .. tostring(required_base_head),
       "size=" .. tostring(merged_count),
     })
-    return
+    return last_merged_pr_number
   end
 
   for index = first_index + 1, #(queue_entries or {}) do
@@ -748,7 +747,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "reason=lane-state-" .. tostring(entry.state),
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
     local base_ok, head_base_reason = head_contains_base(required_base_head, entry)
     if not base_ok then
@@ -760,7 +759,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "head=" .. tostring(entry.head_sha or ""),
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
     local files, file_reason = core.merge_queue_changed_files(repo, entry)
     if files == nil then
@@ -770,7 +769,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "reason=" .. tostring(file_reason),
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
     local disjoint, path, conflicting_pr = files_disjoint_from_window(files, merged_files)
     if not disjoint then
@@ -784,7 +783,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "head=" .. tostring(files.head_sha or ""),
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
     log_batch_window(entry.proposal_id, {
       "action=try",
@@ -802,7 +801,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "reason=invalid-merge-ready-payload",
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
     merge_ready._merge_pass = "poll"
     local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
@@ -818,10 +817,11 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "outcome=" .. tostring(outcome and outcome.status or "held"),
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
     table.insert(merged_files, files)
     merged_count = merged_count + 1
+    last_merged_pr_number = entry.pr_number
     previous_base_head = tostring(files.base_sha or "")
     required_base_head, base_reason = current_base_head(branches)
     if required_base_head == nil then
@@ -831,7 +831,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "reason=" .. tostring(base_reason),
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
     if previous_base_head == required_base_head then
       log_batch_window(entry.proposal_id, {
@@ -841,7 +841,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         "base=" .. tostring(required_base_head),
         "size=" .. tostring(merged_count),
       })
-      return
+      return last_merged_pr_number
     end
   end
 
@@ -849,6 +849,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
     "action=complete",
     "size=" .. tostring(merged_count),
   })
+  return last_merged_pr_number
 end
 
 local function synthesize_merge_ready_from_queue_head(repo, head)
@@ -871,6 +872,17 @@ end
 local function merge_queue_head_all(repo, base_branch)
   local head, entries = core.merge_queue_head(repo, base_branch)
   return head, entries or {}
+end
+
+local function chain_merge_queue_if_non_empty(repo, branches, merged_pr_number)
+  local next_head = merge_queue_head_all(repo, branches.integration)
+  if next_head == nil then
+    core.log_line("info", "merge", "merge", "GATE", { "outcome=quiescent", "reason=merge-queue-empty-after-progress", "pass=poll" })
+  else
+    local payload = core.merge_queue_tick_payload(repo, merged_pr_number, next_head)
+    core.log_raise("merge", tostring(next_head.proposal_id or "merge"), "devloop_merge_queue_tick", payload)
+    raise("devloop_merge_queue_tick", payload)
+  end
 end
 
 local function process_merge_queue_tick(event)
@@ -942,7 +954,8 @@ local function process_merge_queue_tick(event)
       write_mode = write_mode,
     })
     if outcome ~= nil and outcome.status == "merged" then
-      run_batch_window(repo, branches, merge_ready, entries, { write_mode = write_mode })
+      local last_merged_pr_number = run_batch_window(repo, branches, merge_ready, entries, { write_mode = write_mode })
+      chain_merge_queue_if_non_empty(repo, branches, last_merged_pr_number or outcome.pr_number)
     end
   end)
 end

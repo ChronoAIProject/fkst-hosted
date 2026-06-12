@@ -480,6 +480,7 @@ return {
     mock_merged_pr_view(second)
     mock_issue_close_for(second)
     mock_current_base_head("abc125")
+    mock_queue_list({})
 
     local result = run_merge_queue_tick(opts("merge-batch-window-disjoint", {
       FKST_GITHUB_WRITE = "1",
@@ -510,6 +511,8 @@ return {
     mock_diff_name_only(7, { "packages/a.lua" })
     mock_current_base_head("abc124")
     mock_candidate_head_contains_base(second, false)
+    mock_queue_list({ 8 })
+    mock_queue_pr(second, "2026-06-03T01:01:00Z")
 
     local result = run_merge_queue_tick(opts("merge-batch-window-current-base-missing", {
       FKST_GITHUB_WRITE = "1",
@@ -519,6 +522,39 @@ return {
     t.eq(count_calls("gh pr merge"), 1)
     t.eq(count_calls("gh issue close"), 1)
     t.eq(count_calls("gh pr diff '8' --repo 'owner/repo' --name-only"), 0)
+    local chained = find_raise(result.raises, "devloop_merge_queue_tick")
+    t.is_true(chained ~= nil)
+    t.eq(chained.payload.schema, "github-devloop.merge-queue-tick.v1")
+    t.eq(chained.payload.cause.merged_pr_number, 7)
+    t.eq(chained.payload.cause.next_pr_number, 8)
+    t.is_true(chained.payload.dedup_key:find("merged-pr/7/next-pr/8/fed789", 1, true) ~= nil)
+  end,
+
+  test_merge_queue_self_requeue_is_quiescent_when_queue_empty_after_progress = function()
+    local first = event_for_pr(7, 42, "2026-06-03T00-00-00Z", "def456")
+    mock_bot_env()
+    mock_write_env_many(64)
+    mock_repo_env()
+    mock_queue_list({ 7 })
+    mock_queue_pr(first, "2026-06-03T01:00:00Z")
+    mock_merge_pr_view(first)
+    mock_claimed_issue_for_event(first, 2)
+    mock_merge_pr_view(first)
+    mock_merge_pr_view(first)
+    mock_merge_command(first)
+    mock_merged_pr_view(first)
+    mock_issue_close_for(first)
+    mock_diff_name_only(7, { "packages/a.lua" })
+    mock_current_base_head("abc124")
+    mock_queue_list({})
+
+    local result = run_merge_queue_tick(opts("merge-queue-self-requeue-empty", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_REPO = "owner/repo",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(find_raise(result.raises, "devloop_merge_queue_tick"), nil)
   end,
 
   test_merge_batch_window_stops_on_overlapping_files = function()
@@ -542,6 +578,8 @@ return {
     mock_current_base_head("abc124")
     mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/shared.lua" })
+    mock_queue_list({ 8 })
+    mock_queue_pr(second, "2026-06-03T01:01:00Z")
 
     local result = run_merge_queue_tick(opts("merge-batch-window-overlap", {
       FKST_GITHUB_WRITE = "1",
@@ -550,7 +588,10 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
     t.eq(count_calls("gh issue close"), 1)
-    t.eq(#result.raises, 2)
+    local chained = find_raise(result.raises, "devloop_merge_queue_tick")
+    t.is_true(chained ~= nil)
+    t.eq(chained.payload.cause.merged_pr_number, 7)
+    t.eq(chained.payload.cause.next_pr_number, 8)
   end,
 
   test_merge_batch_window_stops_when_candidate_gate_fails = function()
@@ -577,6 +618,8 @@ return {
     mock_write_env("1")
     mock_claimed_issue_for_event(second, 1)
     mock_merge_pr_view(second, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_queue_list({ 8 })
+    mock_queue_pr(second, "2026-06-03T01:01:00Z", "fixing", second.version .. "/fix/1")
 
     local result = run_merge_queue_tick(opts("merge-batch-window-gate-fails", {
       FKST_GITHUB_WRITE = "1",
@@ -616,6 +659,9 @@ return {
     mock_write_env("1")
     mock_claimed_issue_for_event(second, 1)
     mock_merge_pr_view(second, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_queue_list({ 8, 9 })
+    mock_queue_pr(second, "2026-06-03T01:01:00Z", "fixing", second.version .. "/fix/1")
+    mock_queue_pr(third, "2026-06-03T01:02:00Z")
 
     local result = run_merge_queue_tick(opts("merge-batch-window-no-skip-after-gate-fail", {
       FKST_GITHUB_WRITE = "1",
