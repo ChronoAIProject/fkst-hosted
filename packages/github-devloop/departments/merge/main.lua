@@ -611,6 +611,40 @@ local function files_disjoint_from_window(files, merged_files)
   return true, "disjoint", nil
 end
 
+local function current_base_head(branches)
+  local base_head, reason = core.current_base_head(branches.integration)
+  if base_head == nil then
+    return nil, reason
+  end
+  return base_head, "current-base-ok"
+end
+
+local function head_contains_base(base_head, entry)
+  local head_sha = tostring(entry and entry.head_sha or "")
+  if not core.is_safe_head_sha(base_head)
+    or not core.is_safe_head_sha(head_sha)
+    or not core.is_safe_branch(entry and entry.head_branch) then
+    return false, "unsafe-current-base"
+  end
+  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", entry.head_branch), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    return false, "candidate-head-fetch-failed"
+  end
+  local fetched_head = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
+  if fetched_head.exit_code ~= 0 then
+    return false, "candidate-head-underivable"
+  end
+  local fetched_sha = tostring(fetched_head.stdout or ""):gsub("%s+$", "")
+  if fetched_sha ~= head_sha then
+    return false, "candidate-head-changed"
+  end
+  local result = exec_sync({ cmd = core.git_is_ancestor_cmd(base_head, head_sha), timeout = 30 })
+  if result.exit_code == 0 then
+    return true, "current-base-contained"
+  end
+  return false, "current-base-not-contained"
+end
+
 local function run_batch_window(repo, branches, first_merge_ready, queue_entries)
   local entries = queue_entries or {}
   if #entries <= 1 then
@@ -625,6 +659,7 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
   local merged_files = {}
   local merged_count = 1
   local started = false
+  local required_base_head = nil
   for _, entry in ipairs(entries) do
     if not started then
       if tostring(entry.pr_number) == tostring(first_merge_ready.pr_number)
@@ -634,6 +669,28 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
         if not record_merged_files(repo, entry, merged_files) then
           return
         end
+        local previous_base_head = tostring(entry.base_sha or "")
+        local base_head, base_reason = current_base_head(branches)
+        if base_head == nil then
+          log_batch_window(first_merge_ready.proposal_id, {
+            "action=stop",
+            "pr=" .. tostring(entry.pr_number),
+            "reason=" .. tostring(base_reason),
+            "size=" .. tostring(merged_count),
+          })
+          return
+        end
+        if previous_base_head == base_head then
+          log_batch_window(first_merge_ready.proposal_id, {
+            "action=stop",
+            "pr=" .. tostring(entry.pr_number),
+            "reason=current-base-not-advanced",
+            "base=" .. tostring(base_head),
+            "size=" .. tostring(merged_count),
+          })
+          return
+        end
+        required_base_head = base_head
       end
     else
       if entry.state ~= "merge-ready" then
@@ -641,6 +698,18 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
           "action=stop",
           "pr=" .. tostring(entry.pr_number),
           "reason=lane-state-" .. tostring(entry.state),
+          "size=" .. tostring(merged_count),
+        })
+        return
+      end
+      local base_ok, base_reason = head_contains_base(required_base_head, entry)
+      if not base_ok then
+        log_batch_window(entry.proposal_id, {
+          "action=stop",
+          "pr=" .. tostring(entry.pr_number),
+          "reason=" .. tostring(base_reason),
+          "base=" .. tostring(required_base_head or ""),
+          "head=" .. tostring(entry.head_sha or ""),
           "size=" .. tostring(merged_count),
         })
         return
@@ -701,6 +770,28 @@ local function run_batch_window(repo, branches, first_merge_ready, queue_entries
       end
       table.insert(merged_files, files)
       merged_count = merged_count + 1
+      local previous_base_head = tostring(files.base_sha or "")
+      local base_head, base_reason = current_base_head(branches)
+      if base_head == nil then
+        log_batch_window(entry.proposal_id, {
+          "action=stop",
+          "pr=" .. tostring(entry.pr_number),
+          "reason=" .. tostring(base_reason),
+          "size=" .. tostring(merged_count),
+        })
+        return
+      end
+      if previous_base_head == base_head then
+        log_batch_window(entry.proposal_id, {
+          "action=stop",
+          "pr=" .. tostring(entry.pr_number),
+          "reason=current-base-not-advanced",
+          "base=" .. tostring(base_head),
+          "size=" .. tostring(merged_count),
+        })
+        return
+      end
+      required_base_head = base_head
     end
   end
 

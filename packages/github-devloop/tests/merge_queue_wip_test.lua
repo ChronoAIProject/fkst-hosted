@@ -127,6 +127,37 @@ local function mock_diff_name_only(pr_number, paths)
   })
 end
 
+local function mock_current_base_head(base_sha)
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = tostring(base_sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_candidate_head_contains_base(event, contains)
+  t.mock_command("git fetch 'origin' '" .. branch_for_pr(event.pr_number) .. "'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+    stdout = tostring(event.reviewed_head_sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git merge-base --is-ancestor", {
+    stdout = "",
+    stderr = "",
+    exit_code = contains == false and 1 or 0,
+  })
+end
+
 local function mock_merge_command(event)
   t.mock_command("gh pr comment '" .. tostring(event.pr_number) .. "' --repo 'owner/repo' --body-file", {
     stdout = "commented\n",
@@ -256,6 +287,8 @@ return {
     mock_merged_pr_view(first)
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/a.lua" })
+    mock_current_base_head("abc124")
+    mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_merge_pr_view(second)
     mock_write_env("1")
@@ -266,12 +299,38 @@ return {
     mock_merge_command(second)
     mock_merged_pr_view(second)
     mock_issue_close_for(second)
+    mock_current_base_head("abc125")
 
     local result = run_merge(first, opts("merge-batch-window-disjoint", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 2)
     t.eq(count_calls("gh issue close"), 2)
     t.eq(#result.raises, 4)
+  end,
+
+  test_merge_batch_window_stops_when_candidate_head_lacks_current_base = function()
+    local first = event_for_pr(7, 42, "2026-06-03T00-00-00Z", "def456")
+    local second = event_for_pr(8, 43, "2026-06-03T00-01-00Z", "fed789")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_merge_pr_view(first)
+    mock_queue_list({ 7, 8 })
+    mock_queue_pr(second, "2026-06-03T01:01:00Z")
+    mock_merge_pr_view(first)
+    mock_write_env("1")
+    mock_merge_pr_view(first)
+    mock_merge_command(first)
+    mock_merged_pr_view(first)
+    mock_issue_close_for(first)
+    mock_diff_name_only(7, { "packages/a.lua" })
+    mock_current_base_head("abc124")
+    mock_candidate_head_contains_base(second, false)
+
+    local result = run_merge(first, opts("merge-batch-window-current-base-missing", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(count_calls("gh issue close"), 1)
+    t.eq(count_calls("gh pr diff '8' --repo 'owner/repo' --name-only"), 0)
   end,
 
   test_merge_batch_window_stops_on_overlapping_files = function()
@@ -289,6 +348,8 @@ return {
     mock_merged_pr_view(first)
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/shared.lua" })
+    mock_current_base_head("abc124")
+    mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/shared.lua" })
 
     local result = run_merge(first, opts("merge-batch-window-overlap", { FKST_GITHUB_WRITE = "1" }))
@@ -313,6 +374,8 @@ return {
     mock_merged_pr_view(first)
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/a.lua" })
+    mock_current_base_head("abc124")
+    mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_write_env("1")
     mock_write_env("1")
@@ -343,6 +406,8 @@ return {
     mock_merged_pr_view(first)
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/a.lua" })
+    mock_current_base_head("abc124")
+    mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_write_env("1")
     mock_write_env("1")

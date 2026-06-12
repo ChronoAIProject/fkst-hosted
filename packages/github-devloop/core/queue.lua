@@ -129,6 +129,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
     review_proposal_id = fact.review_proposal_id,
     review_dedup_key = fact.review_dedup_key,
     state = state.state,
+    head_branch = pr.head_ref_name,
     head_sha = fact.head_sha,
     base_sha = pr.base_ref_oid,
     merge_ready_created_at = fact.comment_created_at or "",
