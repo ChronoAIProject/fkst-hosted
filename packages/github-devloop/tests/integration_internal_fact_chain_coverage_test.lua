@@ -217,6 +217,32 @@ local function assert_same_fixing_raise(left, right)
   t.eq(left.payload.source_ref.ref, right.payload.source_ref.ref)
 end
 
+local function assert_declared_merge_gate_fixing_replay_field_set(payload)
+  local row = core.restart_transition_row("fixing")
+  t.is_true(row ~= nil)
+  local expected = {}
+  local expected_count = 0
+  for field in pairs(row.payload_fields or {}) do
+    expected[field] = true
+    expected_count = expected_count + 1
+  end
+  t.eq(expected.review_proposal_id, true)
+  t.eq(expected.review_dedup_key, true)
+  t.eq(expected.reviewed_head_sha, true)
+  t.eq(expected.gate_baseline_sha, true)
+  t.eq(expected.source_ref, true)
+
+  local actual_count = 0
+  for field in pairs(payload or {}) do
+    t.eq(expected[field], true)
+    actual_count = actual_count + 1
+  end
+  for field in pairs(expected) do
+    t.is_true(payload[field] ~= nil)
+  end
+  t.eq(actual_count, expected_count)
+end
+
 local function run_observe_pr_direct(run_opts)
   mock_branch_config_env()
   return t.run_department("departments/observe_pr/main.lua", {
@@ -632,6 +658,7 @@ return {
     t.eq(fixing_raise.payload.gate_baseline_sha, fixture.gate_baseline_sha)
     t.is_true(fixing_raise.payload.gate_failure_excerpt:find("rollup-red", 1, true) ~= nil)
     t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
+    assert_declared_merge_gate_fixing_replay_field_set(fixing_raise.payload)
     local defective_replay = core.build_replayed_fixing_payload({
       proposal_id = event.proposal_id,
       impl_version = fixture.fixing_version,

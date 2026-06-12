@@ -416,6 +416,17 @@ function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, versio
   }
 end
 
+function M.build_current_head_reviewing_payload(origin, pr_number, current_pr, state, source_ref)
+  local review_proposal_id = M.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  if M.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
+    return nil
+  end
+  return M.build_devloop_reviewing_payload({
+    proposal_id = origin.proposal_id,
+    impl_version = state.version,
+  }, pr_number, source_ref, state.version)
+end
+
 function M.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
   local proposal_id = ready.proposal_id
   if proposal_id == nil then

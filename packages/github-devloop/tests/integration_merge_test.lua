@@ -733,16 +733,17 @@ return {
     t.eq(fixing_payload.gate_failure_excerpt, "merge-state-dirty")
   end,
 
-  test_merge_unstable_merge_state_errors_for_retry_without_fixing = function()
+  test_merge_unstable_pending_rollup_errors_for_retry_without_fixing = function()
     local event = merge_ready()
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local rollup_json = '[{"__typename":"CheckRun","completedAt":null,"conclusion":null,"detailsUrl":"https://example.invalid/checks/verify","name":"verify","startedAt":"2026-06-03T02:03:04Z","status":"IN_PROGRESS","workflowName":"ci"}]'
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
+    mock_pr_merge_rollup({ origin_marker }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
 
-    local result = run_merge(event, opts("merge-unstable-merge-state", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_merge(event, opts("merge-unstable-pending-rollup", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr merge"), 0)
