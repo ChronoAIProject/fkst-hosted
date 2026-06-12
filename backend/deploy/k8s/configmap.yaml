@@ -32,3 +32,11 @@ data:
   FKST_TAKEOVER_SCAN_INTERVAL_SECS: "5"
   FKST_TAKEOVER_GRACE_SECS: "2"
   FKST_PLACEMENT_MAX_LOAD: "0"
+  # Authentication (NyxID JWT). FKST_AUTH_ENABLED defaults to true (fail-closed);
+  # FKST_AUTH_NYXID_BASE_URL is required when enabled and lives here as a
+  # non-secret endpoint URL (e.g. https://nyxid.example.com). Credentials are
+  # never in the ConfigMap — only the public JWKS endpoint.
+  FKST_AUTH_ENABLED: "true"
+  FKST_AUTH_NYXID_BASE_URL: "https://nyxid.example.com"
+  FKST_AUTH_ISSUER: "nyxid"
+  FKST_AUTH_JWKS_CACHE_TTL_SECS: "300"

@@ -1,5 +1,6 @@
 //! Shared application state passed to every handler.
 
+use crate::auth::AuthMode;
 use crate::config::Config;
 use crate::db::Db;
 use crate::packages::PackageRepository;
@@ -18,4 +19,7 @@ pub struct AppState {
     /// Single-pod session orchestration (sessions module); HTTP handlers go
     /// through this, never raw Mongo or the engine runner.
     pub sessions: SessionService,
+    /// Authentication mode: disabled (local dev) or enabled with NyxID
+    /// settings. Determines whether the JWT middleware is active.
+    pub auth_mode: AuthMode,
 }

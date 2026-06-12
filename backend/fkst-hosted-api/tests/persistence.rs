@@ -8,6 +8,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use bson::doc;
+use fkst_hosted_api::auth::AuthMode;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{
     Db, IDX_LEASES_EXPIRES_AT, IDX_SESSIONS_PACKAGE_NAME, IDX_SESSIONS_POD_ID, IDX_SESSIONS_STATUS,
@@ -292,7 +293,9 @@ async fn health_endpoints_reflect_mongo_liveness() {
         db,
         packages,
         sessions,
-    });
+        auth_mode: AuthMode::Disabled,
+    })
+    .expect("router");
 
     // Mongo up: exact 200 body.
     let response = router

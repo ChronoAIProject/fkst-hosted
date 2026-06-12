@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use fkst_hosted_api::auth::AuthMode;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
@@ -42,7 +43,9 @@ async fn test_router() -> axum::Router {
         db,
         packages,
         sessions,
+        auth_mode: AuthMode::Disabled,
     })
+    .expect("router")
 }
 
 async fn assert_degraded(path: &str) {

@@ -206,12 +206,20 @@ async fn main() -> ExitCode {
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
-    let app = build_router(AppState {
+    let auth_mode = config.auth.clone();
+    let app = match build_router(AppState {
         config,
         db,
         packages,
         sessions: sessions.clone(),
-    });
+        auth_mode,
+    }) {
+        Ok(router) => router,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to build router");
+            return ExitCode::FAILURE;
+        }
+    };
     tracing::info!("router built");
 
     // 6. Bind and serve with graceful shutdown.
