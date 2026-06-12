@@ -163,6 +163,7 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
       core.state_marker(event.proposal_id, "implementing", ready_payload.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now())),
     })
 
     local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-issue-ready-self-heal-advanced"))
@@ -174,7 +175,9 @@ return {
     mock_issue_implement_raw({ "fkst-dev:implementing" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
       core.state_marker(event.proposal_id, "implementing", ready_payload.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now())),
       core.implementing_marker(event.proposal_id, ready_payload.dedup_key, branch, "abc123", "dev", "def456"),
+      core.pr_link_marker(event.proposal_id, 7, branch, ready_payload.dedup_key, "dev"),
     })
     local implemented = run_implement(ready_payload, opts("implement-ready-self-heal-advanced"))
     t.eq(implemented.exit_code, 0)

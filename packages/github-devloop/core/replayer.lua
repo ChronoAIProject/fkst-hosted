@@ -185,6 +185,9 @@ local function require_marker_fact(facts, family)
   if family == "implementing" then
     return M.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
+  if family == "implement-attempt" then
+    return M.latest_implement_attempt_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
   if family == "merge-ready" then
     local current_pr = current_pr_fact(facts)
     if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
@@ -218,6 +221,9 @@ local function gather_fetch_before_compare_fact(facts, entity, family)
     end
     facts.decompose_children = M.parse_decompose_child_issue_list(child_list.stdout)
     return facts.decompose_children
+  end
+  if family == "branch-head" then
+    return true
   end
   error("github-devloop: unsupported replay fetch-before-compare fact family: " .. tostring(family))
 end
@@ -513,6 +519,28 @@ local function replay_ready(dept, issue, state, row, facts)
   return true
 end
 
+local function replay_implementing(dept, issue, state, row, facts)
+  local proposal_id = facts.proposal_id
+  local attempt = facts["implement-attempt"]
+  if attempt == nil then
+    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-attempt-marker)", "implement attempt marker is not visible")
+  end
+  local started = tonumber(attempt.started_at)
+  local age = started ~= nil and (now() - started) or 0
+  if age < 7200 then
+    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(attempt-live)", "implement attempt is still inside the liveness budget")
+  end
+  local payload = M.build_devloop_ready_payload({
+    proposal_id = proposal_id,
+    dedup_key = state.version,
+    source_ref = issue.source_ref,
+  })
+  M.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(liveness-expired)", "implement attempt exceeded liveness budget")
+  return raise_effects(dept, proposal_id, "implementing", state.version, { add = {}, remove = {} }, {
+    { queue = "devloop_ready", payload = payload },
+  })
+end
+
 local function replay_pr_open(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local link = facts.link
@@ -723,6 +751,7 @@ end
 local replayers = {
   thinking = replay_thinking,
   ready = replay_ready,
+  implementing = replay_implementing,
   ["pr-open"] = replay_pr_open,
   fixing = replay_fixing,
   ["review-meta"] = replay_review_meta,

@@ -36,6 +36,7 @@ local marker_fields = {
   },
   ["dependency-release"] = { proposal = true, version = true },
   implementing = { proposal = true, dedup = true, branch = true, head_sha = true, base_branch = true, base_sha = true },
+  ["implement-attempt"] = { proposal = true, dedup = true, attempt = true, started_at = true },
   ["pr-link"] = { proposal = true, pr = true, branch = true, impl_version = true, base_branch = true },
   ["review-result"] = {
     proposal = true,
@@ -157,6 +158,7 @@ local transition_table = {
     required_facts = {
       fact("state", "marker-read"),
       fact("implementing", "marker-read"),
+      fact("implement-attempt", "marker-read"),
       fact("branch-head", "fetch-before-compare"),
     },
     payload_fields = {
@@ -168,10 +170,10 @@ local transition_table = {
       source_ref = "source_ref:issue",
     },
     version_identity = "implementing.dedup",
-    effects = effect({ "github-proxy.github_entity_changed" }, "open-pr payload is complete when implementing marker and fetched branch head agree"),
-    marker_facts = "state:v1 implementing plus implementing:v1",
-    kickoff = "github-proxy.github_entity_changed",
-    replay = "Branch poll re-derives PR open or impl-failed from branch/worktree facts.",
+    effects = effect({ "devloop_ready" }, "implementing replay is complete only after PR link or branch progress is visible; otherwise the bounded implement attempt lease is retried"),
+    marker_facts = "state:v1 implementing plus implementing:v1 and implement-attempt:v1",
+    kickoff = "devloop_ready",
+    replay = "Observe re-raises devloop_ready only when the implement attempt is past its liveness budget; implement then re-derives PR link, remote branch, local branch, or bounded retry.",
   },
   {
     from_state = "pr-open",

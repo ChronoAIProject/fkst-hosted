@@ -464,6 +464,11 @@ return {
     }, ready.proposal_id, ready.dedup_key))
     t.eq(core.is_safe_branch("devloop-owner-repo-42-01HY"), true)
     t.eq(core.is_safe_branch("../bad"), false)
+    local attempt_marker = core.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 2, "123")
+    local attempt = core.latest_implement_attempt_fact({ attempt_marker }, ready.proposal_id, ready.dedup_key)
+    t.eq(attempt.attempt, 2)
+    t.eq(attempt.started_at, "123")
+    t.eq(core.implement_attempt_count({ attempt_marker }, ready.proposal_id, ready.dedup_key), 2)
 
     local failed = core.impl_failure_marker(ready.proposal_id, ready.dedup_key, "codex-failed")
     t.eq(core.has_impl_failure_marker({ failed }, ready.proposal_id, ready.dedup_key), true)

@@ -369,7 +369,11 @@ return {
 
   test_implement_marker_present_skips_idempotently = function()
     local event = ready()
-    mock_issue_implement({ "fkst-dev:implementing" }, { core.state_marker(event.proposal_id, "implementing", event.dedup_key) })
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.pr_link_marker(event.proposal_id, 7, branch, event.dedup_key, "dev"),
+    })
 
     local result = run_implement(event, opts("implement-idempotent"))
     t.eq(result.exit_code, 0)
@@ -380,7 +384,11 @@ return {
 
   test_implement_implementing_marker_skips_before_ready_gate = function()
     local event = ready()
-    mock_issue_implement({ "fkst-dev:implementing" }, { core.state_marker(event.proposal_id, "implementing", event.dedup_key) })
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.pr_link_marker(event.proposal_id, 7, branch, event.dedup_key, "dev"),
+    })
 
     local result = run_implement(event, opts("implement-implementing-marker-replay"))
     t.eq(result.exit_code, 0)

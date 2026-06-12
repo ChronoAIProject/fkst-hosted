@@ -22,6 +22,7 @@ M.spec = {
 local observe_replay_states = {
   thinking = true,
   ready = true,
+  implementing = true,
   ["pr-open"] = true,
   fixing = true,
   ["review-meta"] = true,

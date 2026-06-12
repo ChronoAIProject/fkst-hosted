@@ -475,7 +475,7 @@ function M.build_impl_failed_label_request(repo, issue_number, ready, reason)
   )
 end
 
-function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha)
+function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid implementing branch")
   end
@@ -489,6 +489,7 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
     error("github-devloop: invalid implementing base_sha")
   end
   local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
+  local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "")
   local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)
   return {
     schema = "github-proxy.v1",
@@ -501,6 +502,7 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
       .. "\n" .. M.comment_string("base_branch_label") .. tostring(base_branch)
       .. "\n" .. M.comment_string("base_head_label") .. tostring(base_sha)
       .. "\n\n" .. state_marker
+      .. "\n" .. attempt_marker
       .. "\n" .. marker,
     dedup_key = M._dedup_key({
       "implement",
