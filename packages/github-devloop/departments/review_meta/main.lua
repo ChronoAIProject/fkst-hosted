@@ -120,6 +120,20 @@ function pipeline(event)
         reason = "Review-meta codex output was unparseable.",
       }
     end
+    local is_reflection = review_meta.mode == "fix-reflection"
+    local allowed_action = false
+    if is_reflection then
+      allowed_action = parsed.action == "continue" or parsed.action == "spec-gap"
+    else
+      allowed_action = parsed.action == "fix" or parsed.action == "block" or parsed.action == "spec-amendment"
+    end
+    if not allowed_action then
+      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "invalid-action-for-mode")
+      parsed = {
+        action = is_reflection and "spec-gap" or "block",
+        reason = "Review-meta codex output used an action outside this decision mode.",
+      }
+    end
     if parsed.action == "fix"
       and not core._is_bounded_string(parsed.blocking_gap, core._max_blocking_gap_len) then
       core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "missing-blocking-gap")
@@ -130,7 +144,7 @@ function pipeline(event)
     end
     core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
 
-    local to_state = parsed.action == "fix" and "fixing" or "blocked"
+    local to_state = (parsed.action == "fix" or parsed.action == "continue") and "fixing" or "blocked"
     local exit_version = core.next_review_meta_action_version(review_meta.version)
     local comment_request = core.build_review_meta_comment_request(repo, issue_number, review_meta, parsed.action, parsed.reason, exit_version, parsed.blocking_gap)
     local label_request = nil
@@ -138,7 +152,7 @@ function pipeline(event)
       label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
     end
     local spec_issue_request = nil
-    if parsed.action == "spec-amendment" then
+    if parsed.action == "spec-amendment" or parsed.action == "spec-gap" then
       spec_issue_request = core.build_spec_amendment_issue_create_request(
         repo,
         issue_number,
@@ -159,7 +173,7 @@ function pipeline(event)
       table.insert(raised, "github-proxy.github_issue_create_request")
     end
     local fix_payload = nil
-    if parsed.action == "fix" then
+    if parsed.action == "fix" or parsed.action == "continue" then
       local _, _, _, reviewed_head_sha = core.parse_pr_review_proposal_id(review_meta.review_proposal_id)
       fix_payload = core.build_devloop_fixing_payload({
         proposal_id = review_meta.proposal_id,
@@ -168,7 +182,7 @@ function pipeline(event)
         review_proposal_id = review_meta.review_proposal_id,
         review_dedup_key = review_meta.dedup_key,
         reviewed_head_sha = reviewed_head_sha,
-        blocking_gap = parsed.blocking_gap,
+        blocking_gap = parsed.blocking_gap or review_meta.blocking_gap,
       }, review_meta.source_ref)
       table.insert(raised, "devloop_fixing")
     end

@@ -461,6 +461,21 @@ function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issu
   }
 end
 
+function M.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+  local payload = M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+  payload.mode = "fix-reflection"
+  payload.fix_round = fix_round
+  payload.dedup_key = M._dedup_key({
+    "fix-reflection",
+    tostring(issue_proposal_id),
+    tostring(issue_version),
+    tostring(pr_number),
+    tostring(fix_round),
+    tostring(unresolved.dedup_key),
+  })
+  return payload
+end
+
 function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, review_fact, source_ref)
   return {
     schema = "github-devloop.merge-ready.v1",

@@ -104,6 +104,26 @@ function M.review_meta_marker(issue_proposal_id, dedup_key, action, version, blo
     .. '" -->'
 end
 
+function M.fix_reflection_marker(issue_proposal_id, dedup_key, verdict, version, fix_round)
+  if verdict ~= "checkpoint" and verdict ~= "continue" and verdict ~= "spec-gap" then
+    error("github-devloop: invalid fix reflection verdict")
+  end
+  local n = valid_round(fix_round)
+  if n == nil then
+    error("github-devloop: invalid fix reflection round")
+  end
+  local version_field = ""
+  if version ~= nil then
+    version_field = '" version="' .. tostring(version)
+  end
+  return '<!-- fkst:github-devloop:fix-reflection:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" verdict="' .. tostring(verdict)
+    .. version_field
+    .. '" fix_round="' .. tostring(n)
+    .. '" -->'
+end
+
 function M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
   if not M._is_git_sha(old_head_sha) or not M._is_git_sha(new_head_sha) then
     error("github-devloop: invalid fix head sha")

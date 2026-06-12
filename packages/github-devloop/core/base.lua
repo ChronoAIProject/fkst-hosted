@@ -167,7 +167,15 @@ local function has_value(values, expected)
 end
 
 local function is_review_meta_action(value)
-  return value == "fix" or value == "block" or value == "spec-amendment"
+  return value == "fix"
+    or value == "block"
+    or value == "spec-amendment"
+    or value == "continue"
+    or value == "spec-gap"
+end
+
+local function fix_reflection_checkpoint_round()
+  return 3
 end
 
 local function is_path_safe_key(value, limit)
@@ -940,6 +948,7 @@ M._is_bounded_string = is_bounded_string
 M.truncate_utf8 = sdk_truncate_utf8
 M._has_value = has_value
 M._is_review_meta_action = is_review_meta_action
+M.fix_reflection_checkpoint_round = fix_reflection_checkpoint_round
 M._is_path_safe_key = is_path_safe_key
 M._is_git_ref_safe = is_git_ref_safe
 M._is_git_sha = is_git_sha
