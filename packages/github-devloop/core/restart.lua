@@ -8,6 +8,12 @@ local source_ref_derivations = {
   pr = true,
 }
 
+local payload_derivations = {
+  ["literal:github-devloop.fixing.v1"] = true,
+  ["dedup:replayed-fixing"] = true,
+  ["comment_body:fix-feedback"] = true,
+}
+
 local marker_fields = {
   state = { proposal = true, state = true, version = true, stage_rank = true, effects = true },
   ["converge-round"] = {
@@ -79,6 +85,7 @@ local marker_fields = {
     base_head_sha = true,
     proof = true,
   },
+  ["impl-failure"] = { proposal = true, reason = true, attempt = true, dedup = true },
   merging = { proposal = true, pr = true, version = true, head_sha = true },
   decomposed = { proposal = true, version = true, pr = true, count = true },
 }
@@ -176,6 +183,24 @@ local transition_table = {
     replay = "Branch poll re-derives PR open or impl-failed from branch/worktree facts.",
   },
   {
+    from_state = "impl-failed",
+    to_states = { "implementing" },
+    driving_queue = "devloop_ready",
+    payload_builder = M.build_devloop_ready_payload,
+    dedup_shape = "ready/<state.version> with impl_retry_attempt=<impl-failure.attempt+1>",
+    required_facts = { fact("state", "marker-read"), fact("impl-failure", "marker-read"), fact("dependency-release", "marker-read") },
+    payload_fields = {
+      proposal_id = "marker:state.proposal",
+      dedup_key = "marker:impl-failure.dedup",
+      source_ref = "source_ref:issue",
+    },
+    version_identity = "strip_transition_version_suffixes(state.version)",
+    effects = effect({ "devloop_ready" }, "impl-failed replay is complete when trusted codex-failed impl-failure attempt is below the retry ceiling"),
+    marker_facts = "state:v1 impl-failed plus impl-failure:v1 reason=codex-failed attempt<N",
+    kickoff = "devloop_ready",
+    replay = "Observe re-raises ready/<version> after one observe tick for bounded codex-failed implementation retries.",
+  },
+  {
     from_state = "pr-open",
     to_states = { "reviewing" },
     driving_queue = "devloop_reviewing",
@@ -237,14 +262,16 @@ local transition_table = {
       fact("pr-head", "fetch-before-compare"),
     },
     payload_fields = {
+      schema = "literal:github-devloop.fixing.v1",
       proposal_id = "marker:state.proposal",
       pr_number = "marker:pr-link.pr",
       version = "marker:state.version",
       review_proposal_id = "marker:merge-gate.review_proposal",
       review_dedup_key = "marker:merge-gate.review_dedup",
       reviewed_head_sha = "marker:merge-gate.head_sha",
+      dedup_key = "dedup:replayed-fixing",
       gate_baseline_sha = "marker:merge-gate.gate_baseline_sha",
-      blocking_gap = "marker:review-result.gap",
+      gate_failure_excerpt = "comment_body:fix-feedback",
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
@@ -309,7 +336,11 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(merge-ready.version)",
-    effects = effect({ "devloop_merge_ready" }, "merge-ready replay is complete when head-bound approval and fetched PR head match"),
+    effects = effect(
+      { "review-carry-over-marker", "devloop_merge_ready" },
+      "merge-ready replay is complete when head-bound approval and fetched PR head match, or when review_carry_over_marker proves the carried approval marker was written",
+      "review_carry_over_marker"
+    ),
     marker_facts = "state:v1 merge-ready plus merge-ready:v1",
     kickoff = "devloop_merge_ready",
     replay = "PR observe or merge retry re-derives merge-ready from head-bound approval facts.",
@@ -429,6 +460,9 @@ local function field_reference_error(reference)
     end
     return "unknown source_ref derivation " .. derivation
   end
+  if payload_derivations[tostring(reference or "")] == true then
+    return nil
+  end
   return "unsupported payload field source " .. tostring(reference)
 end
 
@@ -456,6 +490,8 @@ local default_consumer_sources = {
   "packages/github-devloop/departments/decompose/main.lua",
   "packages/github-devloop/departments/observe_pr/main.lua",
   "packages/github-devloop/departments/observe_issue/main.lua",
+  "packages/github-devloop/core/replayer.lua",
+  "packages/github-devloop/core/requests.lua",
 }
 
 local function source_contains_any(paths, needle)

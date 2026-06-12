@@ -51,6 +51,10 @@ function M.gh_issue_list_observe_cmd(repo, label)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
 
+function M.gh_issue_list_dependency_reconcile_cmd(repo)
+  return M.gh_issue_list_observe_cmd(repo, M._blocked_on_dependency_label)
+end
+
 function M.gh_dashboard_issue_list_cmd(repo, label)
   local selected_label = tostring(label or "")
   if selected_label == "" then

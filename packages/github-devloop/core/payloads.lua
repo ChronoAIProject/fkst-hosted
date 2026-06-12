@@ -389,6 +389,13 @@ function M.build_devloop_ready_payload(source)
   if framing ~= nil then
     payload.framing = framing
   end
+  local attempt = tonumber(source.impl_retry_attempt)
+  if attempt ~= nil then
+    if attempt < 1 or attempt ~= math.floor(attempt) or attempt > M._max_impl_retry_attempts then
+      error("github-devloop: invalid implementation retry attempt")
+    end
+    payload.impl_retry_attempt = attempt
+  end
   return payload
 end
 
@@ -407,6 +414,17 @@ function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, versio
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
+end
+
+function M.build_current_head_reviewing_payload(origin, pr_number, current_pr, state, source_ref)
+  local review_proposal_id = M.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  if M.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
+    return nil
+  end
+  return M.build_devloop_reviewing_payload({
+    proposal_id = origin.proposal_id,
+    impl_version = state.version,
+  }, pr_number, source_ref, state.version)
 end
 
 function M.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)

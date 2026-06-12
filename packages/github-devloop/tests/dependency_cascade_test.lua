@@ -244,6 +244,14 @@ local function run_implement()
   }, h.opts("dependency-implement"))
 end
 
+local function run_dependency_reconcile()
+  return t.run_department("departments/dependency_reconcile/main.lua", {
+    queue = "devloop_dependency_reconcile_tick",
+    payload = { schema = "github-devloop.v1" },
+    ts = "2026-06-03T01:32:03Z",
+  }, h.opts("dependency-reconcile"))
+end
+
 local function find_raise(raises, queue, predicate)
   for _, item in ipairs(raises or {}) do
     if item.queue == queue and (predicate == nil or predicate(item.payload)) then
@@ -582,6 +590,59 @@ return {
     t.is_true(clear ~= nil)
   end,
 
+  test_dependency_reconcile_requeues_dependency_held_issues_without_updated_at_bump = function()
+    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = repo,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        core.dependency_wait_marker(proposal_id, version, { 7 }),
+      }
+    )
+    local result = run_dependency_reconcile()
+    t.eq(result.exit_code, 0)
+    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
+    t.is_true(raised ~= nil)
+    t.eq(raised.payload.type, "issue")
+    t.eq(raised.payload.repo, repo)
+    t.eq(raised.payload.number, 42)
+    t.eq(raised.payload.updated_at, "2026-06-03T01:02:03Z")
+    t.eq(raised.payload.source, "dependency-reconcile")
+    t.eq(raised.payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(tostring(raised.payload.dedup_key):find("dependency%-reconcile", 1) ~= nil)
+  end,
+
+  test_dependency_reconcile_skips_label_without_trusted_hold_marker = function()
+    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = repo,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+      }
+    )
+    local result = run_dependency_reconcile()
+    t.eq(result.exit_code, 0)
+    t.eq(has_queue(result.raises, "github-proxy.github_entity_changed"), false)
+  end,
+
   test_consensus_result_holds_completed_blocker_without_waiver = function()
     mock_result_issue()
     mock_blocked_by(42, { { number = 58, state = "CLOSED", state_reason = "COMPLETED" } })
@@ -591,6 +652,28 @@ return {
     t.eq(has_queue(result.raises, "devloop_ready"), false)
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-wait:v1"))
     t.is_true(has_marker(result.raises, 'reason="dependency-waiver-required"'))
+  end,
+
+  test_trusted_dependency_waiver_command_creates_waiver_and_requeues_ready = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "fkst: dependency-waiver 60",
+        "github-devloop dependency hold: waiting\n\nReason: dependency-waiver-required\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 60 }, "waiting", "dependency-waiver-required"),
+      }
+    )
+    mock_blocked_by(42, { { number = 60, state = "CLOSED", state_reason = "COMPLETED" } })
+    mock_blocker_issue(60, "ready")
+    local result = run_observe()
+    t.eq(result.exit_code, 0)
+    t.is_true(has_queue(result.raises, "devloop_ready"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-waiver:v1"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:operator-command:v1"))
+    t.is_true(has_marker(result.raises, 'command="dependency-waiver"'))
+    t.is_true(has_marker(result.raises, 'blocker="60"'))
+    t.is_true(has_marker(result.raises, 'reason="operator-waiver"'))
   end,
 
   test_observe_issue_releases_completed_blocker_with_waiver = function()
