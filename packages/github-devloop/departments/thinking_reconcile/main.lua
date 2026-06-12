@@ -78,7 +78,7 @@ function pipeline(event)
     return
   end
 
-  local list = core.gh_exec({ cmd = core.gh_issue_list_observe_cmd(repo, core._enabled_label), timeout = 60 })
+  local list = core.gh_exec({ cmd = core.gh_issue_list_observe_cmd(repo), timeout = 60 })
   if list.exit_code ~= 0 then
     error("github-devloop: gh thinking reconcile issue list failed: " .. tostring(list.stderr))
   end

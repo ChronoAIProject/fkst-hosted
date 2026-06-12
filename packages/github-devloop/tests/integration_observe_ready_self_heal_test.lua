@@ -88,12 +88,19 @@ local function merge_gate_fix_marker(event)
   )
 end
 
+local function fresh_thinking_marker(proposal_id, version)
+  return {
+    body = core.state_marker(proposal_id, "thinking", version),
+    created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+  }
+end
+
 return {
   test_observe_issue_reraises_thinking_proposal_for_poll_self_heal = function()
     local event = issue()
     local original = core.build_proposal(event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(original.proposal_id, "thinking", original.dedup_key),
+      fresh_thinking_marker(original.proposal_id, original.dedup_key),
     })
 
     local first = run_observe(event, opts("observe-issue-thinking-self-heal-1"))
@@ -106,7 +113,7 @@ return {
     t.eq(first_proposal.source_ref.ref, "owner/repo#issue/42")
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(original.proposal_id, "thinking", original.dedup_key),
+      fresh_thinking_marker(original.proposal_id, original.dedup_key),
     })
     local same = run_observe(event, opts("observe-issue-thinking-self-heal-same-fact"))
     t.eq(same.exit_code, 0)
@@ -117,7 +124,7 @@ return {
 
     local updated_event = issue({ updated_at = "2026-06-03T01:02:04Z" })
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(original.proposal_id, "thinking", original.dedup_key),
+      fresh_thinking_marker(original.proposal_id, original.dedup_key),
     })
     local second = run_observe(updated_event, opts("observe-issue-thinking-self-heal-2"))
     t.eq(second.exit_code, 0)
@@ -139,7 +146,7 @@ return {
       { angle = "minimal", verdict = "abstain", digest = "needs-narrower-scope" },
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(original.proposal_id, "thinking", base_version),
+      fresh_thinking_marker(original.proposal_id, base_version),
       core.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests),
     })
 
@@ -161,7 +168,7 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key .. "/loop/1"),
-        created_at = "2026-06-03T00:00:00Z",
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
       },
     })
 
@@ -175,13 +182,34 @@ return {
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
   end,
 
+  test_observe_issue_timeout_redrives_plain_thinking_before_replay = function()
+    local event = issue()
+    local original = core.build_proposal(event)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      {
+        body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
+        created_at = "2026-06-03T00:00:00Z",
+      },
+    })
+
+    local result = run_observe(event, opts("observe-issue-thinking-timeout-redrive", {
+      now = "2026-06-03T02:00:00Z",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local proposal = find_raise(result.raises, "consensus.proposal").payload
+    t.eq(proposal.proposal_id, original.proposal_id)
+    t.eq(proposal.dedup_key, original.dedup_key .. "/replay/timeout/thinking/1")
+    t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
+  end,
+
   test_thinking_reconcile_requeues_thinking_issues_without_updated_at_bump = function()
     t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
       stdout = "owner/repo",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label), {
+    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo"), {
       stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
       stderr = "",
       exit_code = 0,
@@ -203,13 +231,13 @@ return {
     t.is_true(tostring(raised.payload.dedup_key):find("thinking%-reconcile", 1) ~= nil)
   end,
 
-  test_thinking_reconcile_uses_enabled_scan_and_trusted_marker_not_label_hint = function()
+  test_thinking_reconcile_uses_open_scan_and_trusted_marker_not_label_hint = function()
     t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
       stdout = "owner/repo",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label), {
+    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo"), {
       stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
       stderr = "",
       exit_code = 0,
