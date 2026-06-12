@@ -171,6 +171,45 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
       end
     end
   end
+  marker_pattern = "<!%-%- fkst:github%-devloop:fix%-reflection:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      local verdict = marker:match('verdict="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local round = tonumber(marker:match('fix_round="(%d+)"'))
+      local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
+      local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      if marker_issue == tostring(issue_proposal_id)
+        and verdict == "checkpoint"
+        and marker_version == tostring(issue_version)
+        and tostring(review_pr_number or "") == tostring(pr_number)
+        and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
+        and tostring(reviewed_head_sha or "") == tostring(head_sha)
+        and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
+        local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+        if reject_fact == nil
+          or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
+          or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
+          or not M._is_bounded_string(reject_fact.blocking_gap, M._max_blocking_gap_len) then
+          return nil
+        end
+        local reflection_dedup = M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, marker_dedup)
+        return {
+          proposal_id = review_proposal,
+          dedup_key = reflection_dedup,
+          review_dedup_key = marker_dedup,
+          source_ref = M.pr_source_ref(repo, pr_number),
+          pr_number = tonumber(pr_number),
+          n = tonumber(n) or 0,
+          mode = "fix-reflection",
+          fix_round = round,
+          blocking_gap = reject_fact.blocking_gap,
+        }
+      end
+    end
+  end
   local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
   local _, reject_pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
   if reject_fact ~= nil

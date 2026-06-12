@@ -128,7 +128,9 @@ function M.build_sync_conflict_prompt(conflict)
 end
 
 function M.build_review_meta_prompt(review_meta, current_issue, content_manifest)
-  local prompt = require("prompts.review_meta")
+  local prompt = review_meta.mode == "fix-reflection"
+    and require("prompts.fix_reflection")
+    or require("prompts.review_meta")
   local comments = table.concat(M.comment_bodies(current_issue.comments), "\n\n--- comment ---\n\n")
   if #comments > M._max_comments_len then
     comments = M.truncate_utf8(comments, M._max_comments_len)
@@ -137,6 +139,7 @@ function M.build_review_meta_prompt(review_meta, current_issue, content_manifest
   return M.render_prompt_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(review_meta.proposal_id),
     review_proposal_id = M.neutralize_untrusted_prompt_text(review_meta.review_proposal_id),
+    fix_round = M.neutralize_untrusted_prompt_text(review_meta.fix_round or review_meta.n or ""),
     title = M.neutralize_untrusted_prompt_text(current_issue.title),
     content_fetch_block = local_context_block(M, content_manifest),
     comments = M.neutralize_untrusted_prompt_text(comments),
