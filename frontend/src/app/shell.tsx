@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NewGoalModal } from '../components/new-goal/new-goal-modal';
+
+export interface ShellOutletContext {
+  onNewGoal?: () => void;
+}
 
 export function nextCondensed(prev: boolean, y: number): boolean {
   if (y > 140) {
@@ -20,6 +25,12 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Shell() {
   const [condensed, setCondensed] = useState(false);
+  const [isNewGoalOpen, setIsNewGoalOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setIsNewGoalOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -73,6 +84,16 @@ export function Shell() {
             </nav>
 
             <div className="flex items-center gap-2 ml-auto">
+              {condensed && (
+                <button
+                  type="button"
+                  onClick={() => setIsNewGoalOpen(true)}
+                  className="font-ui font-semibold text-[12.5px] bg-amber text-amber-ink rounded-control px-3.5 py-[7px] flex-shrink-0 transition-colors hover:brightness-[1.06] cursor-pointer"
+                >
+                  + New goal
+                </button>
+              )}
+
               <div className="font-mono text-[11.5px] text-ghost border border-line bg-raise px-2 py-1 rounded-chip flex items-center gap-1.5 tabular-nums">
                 <span className="w-1.5 h-1.5 rounded-full bg-ghost" />
                 <span>github — unknown</span>
@@ -98,9 +119,11 @@ export function Shell() {
 
         {/* main content */}
         <main className="py-6">
-          <Outlet />
+          <Outlet context={{ onNewGoal: () => setIsNewGoalOpen(true) } as ShellOutletContext} />
         </main>
       </div>
+
+      <NewGoalModal open={isNewGoalOpen} onOpenChange={setIsNewGoalOpen} />
     </div>
   );
 }
