@@ -57,6 +57,30 @@ function M.is_supported_decompose(payload)
     or (M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
       and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
       and M._is_git_sha(payload.head_sha))
+  local forward_dedup = M._dedup_key({
+    "decompose",
+    tostring(payload.proposal_id),
+    tostring(payload.version),
+  })
+  local replay_dedup = M._dedup_key({
+    "decompose",
+    "replay",
+    tostring(payload.proposal_id),
+    tostring(payload.version),
+    tostring(payload.pr_number),
+    tostring(payload.expected_child_count or "unknown"),
+    tostring(payload.completed_child_count or "unknown"),
+  })
+  local has_replay_counts = payload.expected_child_count ~= nil or payload.completed_child_count ~= nil
+  local valid_replay_counts = not has_replay_counts
+    or (tonumber(payload.expected_child_count) ~= nil
+      and tonumber(payload.completed_child_count) ~= nil
+      and tonumber(payload.expected_child_count) >= 1
+      and tonumber(payload.expected_child_count) <= max_decompose_issues
+      and tonumber(payload.completed_child_count) >= 0
+      and tonumber(payload.completed_child_count) < tonumber(payload.expected_child_count)
+      and tonumber(payload.expected_child_count) % 1 == 0
+      and tonumber(payload.completed_child_count) % 1 == 0)
   return payload.schema == "github-devloop.decompose.v1"
     and repo ~= nil
     and issue_number ~= nil
@@ -67,11 +91,9 @@ function M.is_supported_decompose(payload)
     and tonumber(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.version)
     and M._is_path_safe_key(payload.dedup_key, M._max_dedup_len)
-    and tostring(payload.dedup_key) == M._dedup_key({
-      "decompose",
-      tostring(payload.proposal_id),
-      tostring(payload.version),
-    })
+    and valid_replay_counts
+    and ((not has_replay_counts and tostring(payload.dedup_key) == forward_dedup)
+      or (has_replay_counts and tostring(payload.dedup_key) == replay_dedup))
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
@@ -221,9 +243,9 @@ function M.decompose_children_complete(comments, issues, proposal_id, version, p
   return completed_count >= count, completed_count
 end
 
-function M.build_decompose_replay_payload(fact, comments, source_ref)
+function M.build_decompose_replay_payload(fact, comments, source_ref, completed_count)
   local feedback = M.fixing_replay_feedback_fact(comments, fact.proposal_id, fact.version)
-  return M.build_devloop_decompose_payload({
+  local payload = M.build_devloop_decompose_payload({
     proposal_id = fact.proposal_id,
     pr_number = fact.pr_number,
     issue_version = fact.version,
@@ -233,6 +255,18 @@ function M.build_decompose_replay_payload(fact, comments, source_ref)
     round = M.version_fix_round(fact.version),
     source_ref = source_ref,
   })
+  payload.expected_child_count = fact.count
+  payload.completed_child_count = tonumber(completed_count) or 0
+  payload.dedup_key = M._dedup_key({
+    "decompose",
+    "replay",
+    tostring(fact.proposal_id),
+    tostring(fact.version),
+    tostring(fact.pr_number),
+    tostring(payload.expected_child_count),
+    tostring(payload.completed_child_count),
+  })
+  return payload
 end
 
 function M.decompose_child_marker(proposal_id, version, pr_number, index)

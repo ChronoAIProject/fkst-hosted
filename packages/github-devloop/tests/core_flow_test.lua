@@ -368,6 +368,31 @@ return {
     t.eq(completed[3], true)
   end,
 
+  test_decompose_replay_dedup_binds_child_completion_identity = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1/fix/2/fix/3"
+    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, core._strip_latest_fix_version_suffix(version), "def456")
+    local review_dedup = "consensus:" .. review_proposal .. "/review"
+    local comments = {
+      core.merge_gate_marker(proposal_id, 7, version, review_proposal, review_dedup, "def456", nil, "rollup-red"),
+    }
+    local fact = {
+      proposal_id = proposal_id,
+      version = version,
+      pr_number = 7,
+      count = 3,
+    }
+
+    local zero = core.build_decompose_replay_payload(fact, comments, source_ref(), 0)
+    local partial = core.build_decompose_replay_payload(fact, comments, source_ref(), 2)
+
+    t.is_true(zero.dedup_key ~= partial.dedup_key)
+    t.is_true(zero.dedup_key:find("/3/0", 1, true) ~= nil)
+    t.is_true(partial.dedup_key:find("/3/2", 1, true) ~= nil)
+    t.eq(core.is_supported_decompose(zero), true)
+    t.eq(core.is_supported_decompose(partial), true)
+  end,
+
   test_ready_and_implementation_helpers = function()
     local source = reached({
       framing = "Only include bounded issue comments; defer raising bounds.",
@@ -633,6 +658,32 @@ return {
     t.is_true(prompt:find("Do not finish with failing tests.", 1, true) ~= nil)
     t.is_true(prompt:find("rollup-red feedback", 1, true) ~= nil)
     t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
+  end,
+
+  test_replayed_fixing_dedup_binds_merge_gate_fact_identity = function()
+    local origin = {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1",
+    }
+    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, origin.impl_version, "def456")
+    local feedback = {
+      review_proposal_id = review_proposal,
+      review_dedup_key = "consensus:" .. review_proposal .. "/review",
+      reviewed_head_sha = "def456",
+      blocking_gap = "rollup red",
+    }
+    local defective = core.build_replayed_fixing_payload(origin, 7, feedback, source_ref())
+    local corrected = core.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
+      gate_baseline_sha = "828df8d3",
+    }), source_ref())
+
+    t.eq(defective.gate_baseline_sha, nil)
+    t.eq(corrected.gate_baseline_sha, "828df8d3")
+    t.is_true(defective.dedup_key ~= corrected.dedup_key)
+    t.is_true(defective.dedup_key:find("/nobase/def456", 1, true) ~= nil)
+    t.is_true(corrected.dedup_key:find("/828df8d3/def456", 1, true) ~= nil)
+    t.eq(core.is_supported_fixing(defective), true)
+    t.eq(core.is_supported_fixing(corrected), true)
   end,
 
   test_fix_prompt_uses_custom_test_command_host_fact = function()

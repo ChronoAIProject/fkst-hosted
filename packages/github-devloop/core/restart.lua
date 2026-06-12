@@ -209,7 +209,7 @@ local transition_table = {
     to_states = { "reviewing", "review-meta" },
     driving_queue = "devloop_fixing",
     payload_builder = M.build_devloop_fixing_payload,
-    dedup_shape = "fixing/<proposal_id>/<version>/<pr>/<review_dedup>",
+    dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<reviewed_head_sha>",
     required_facts = {
       fact("state", "marker-read"),
       fact("pr-link", "marker-read"),
@@ -330,7 +330,7 @@ local transition_table = {
     to_states = {},
     driving_queue = "devloop_decompose",
     payload_builder = M.build_decompose_replay_payload,
-    dedup_shape = "decompose/replay/<proposal_id>/<version>/<pr>",
+    dedup_shape = "forward:decompose/<proposal_id>/<version>; replay:decompose/replay/<proposal_id>/<version>/<pr>/<expected_child_count>/<completed_child_count>",
     required_facts = {
       fact("state", "marker-read"),
       fact("pr-link", "marker-read"),
