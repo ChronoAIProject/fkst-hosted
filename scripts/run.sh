@@ -5,9 +5,9 @@
 #       Run fkst-framework --self-test once, then conformance + test for flat
 #       packages. Composed packages skip single-package conformance and still
 #       run tests. Full test also runs composed graph conformance. This is the
-#       single CI and local test entrypoint. Test mode is hermetic: ambient
-#       FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT are overridden with fresh temp
-#       directories, and FKST_GITHUB_WRITE is cleared, so local runs predict CI.
+#       single CI and local test entrypoint. FKST_RUNTIME_ROOT and
+#       FKST_DURABLE_ROOT default to .fkst/runtime and
+#       .fkst/durable, and FKST_GITHUB_WRITE is cleared, so local runs predict CI.
 #
 #   scripts/run.sh check
 #       Run hermetic repository checks only. Does not resolve or execute BIN.
@@ -27,28 +27,32 @@
 #       env, e.g.:
 #         PACKAGE_CONFIG=value scripts/run.sh run example-package example_department
 #       Reuses $FKST_RUNTIME_ROOT if already set (run twice with the same one to
-#       observe dedup), else uses a fresh temp dir. Never sets FKST_GITHUB_WRITE,
-#       so a read-only inbound dogfood stays read-only.
+#       observe dedup), else uses .fkst/runtime. Never sets FKST_GITHUB_WRITE, so
+#       a read-only inbound dogfood stays read-only.
 #
 #   scripts/run.sh supervise <package>
 #       Start the real fkst-framework supervise event loop for one package.
-#       Uses fresh temporary FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT directories
-#       and requires FKST_RATE_POOL_ROOT from the host so named external-command
+#       Uses .fkst/runtime and .fkst/durable by default and requires
+#       FKST_RATE_POOL_ROOT from the host so named external-command
 #       rate pools are shared across supervise instances. Runs in the foreground
 #       until Ctrl-C. FKST_PROJECT_ROOT can override the default project root of
-#       packages/<package>.
+#       .fkst/packages/<package>.
 #
 #   scripts/run.sh build
 #       Local-only helper: update the fkst-substrate dev checkout and build
 #       fkst-framework. test/run/supervise ensure a traceable local BIN is built
 #       from the current fkst-substrate working tree before running.
 #
-# fkst-framework binary resolution (priority): $BIN > repo .env `BIN=` > PATH >
+# fkst-framework binary resolution (priority): $BIN > repo .fkst/env `BIN=` > PATH >
 # sibling ../fkst-substrate/target/debug/fkst-framework > pinned source cache
 # clone/build fallback.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FKST_DIR="$ROOT/.fkst"
+PACKAGES_ROOT="$FKST_DIR/packages"
+DEFAULT_RUNTIME_ROOT="$FKST_DIR/runtime"
+DEFAULT_DURABLE_ROOT="$FKST_DIR/durable"
 
 # shellcheck source=scripts/bin_bootstrap.sh
 . "$ROOT/scripts/bin_bootstrap.sh"
@@ -132,7 +136,9 @@ check_test_file_coverage() {
 
   (
     cd "$ROOT"
-    find packages \( -path '*/tests/*_test.lua' -o -path '*/departments/*/*_test.lua' \) -type f -print | LC_ALL=C sort -u
+    find -H "$PACKAGES_ROOT" \( -path '*/tests/*_test.lua' -o -path '*/departments/*/*_test.lua' \) -type f -print \
+      | while IFS= read -r path; do printf 'packages/%s\n' "${path#"$PACKAGES_ROOT"/}"; done \
+      | LC_ALL=C sort -u
   ) > "$expected"
 
   python3 - "$report_dir" <<'PY' | LC_ALL=C sort -u > "$actual"
@@ -235,13 +241,11 @@ cmd_test() {
   local target="${1:-}" ran=0 fail=0 pkg name
   local report_dir report_file
 
-  trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}"' EXIT
-  TEST_HERMETIC_RUNTIME_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-rt.XXXXXX")"
-  TEST_HERMETIC_DURABLE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-durable.XXXXXX")"
-  export FKST_RUNTIME_ROOT="$TEST_HERMETIC_RUNTIME_ROOT"
-  export FKST_DURABLE_ROOT="$TEST_HERMETIC_DURABLE_ROOT"
+  mkdir -p "$DEFAULT_RUNTIME_ROOT" "$DEFAULT_DURABLE_ROOT"
+  export FKST_RUNTIME_ROOT="${FKST_RUNTIME_ROOT:-$DEFAULT_RUNTIME_ROOT}"
+  export FKST_DURABLE_ROOT="${FKST_DURABLE_ROOT:-$DEFAULT_DURABLE_ROOT}"
   unset FKST_GITHUB_WRITE
-  echo "test hermetic: FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT (ambient overridden)"
+  echo "test roots: FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT"
 
   report_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-reports.XXXXXX")"
 
@@ -255,7 +259,7 @@ cmd_test() {
     fail=$((fail + 1))
   fi
 
-  for pkg in "$ROOT"/packages/*/; do
+  for pkg in "$PACKAGES_ROOT"/*/; do
     [ -d "$pkg" ] || continue
     name="$(basename "$pkg")"
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
@@ -302,7 +306,7 @@ cmd_test() {
 
 collect_composed_package() {
   local name="$1" pkg dep
-  pkg="$ROOT/packages/$name"
+  pkg="$PACKAGES_ROOT/$name"
   [ -d "$pkg" ] || { echo "error: composed package dependency not found: $name" >&2; return 1; }
   case " ${COMPOSED_SEEN[*]-} " in
     *" $name "*) return 0 ;;
@@ -322,7 +326,7 @@ collect_composed_package() {
 cmd_test_composed() {
   local pkg name args
   COMPOSED_SEEN=()
-  for pkg in "$ROOT"/packages/*/; do
+  for pkg in "$PACKAGES_ROOT"/*/; do
     [ -d "$pkg" ] || continue
     [ -f "$pkg/composed.deps" ] || continue
     name="$(basename "$pkg")"
@@ -335,7 +339,7 @@ cmd_test_composed() {
 
   args=()
   for name in "${COMPOSED_SEEN[@]}"; do
-    args+=(--package-root "$ROOT/packages/$name")
+    args+=(--package-root "$PACKAGES_ROOT/$name")
   done
   echo "=== composed conformance ==="
   "$BIN" conformance --project-root "$ROOT" "${args[@]}"
@@ -404,7 +408,7 @@ cmd_run() {
     event="$inline_event"
   fi
 
-  local pkgdir="$ROOT/packages/$pkg" lua
+  local pkgdir="$PACKAGES_ROOT/$pkg" lua
   lua="$pkgdir/departments/$dept/main.lua"
   [ -f "$lua" ] || { echo "error: no department at $lua" >&2; exit 1; }
 
@@ -412,7 +416,8 @@ cmd_run() {
   if [ -n "${FKST_RUNTIME_ROOT:-}" ]; then
     rt="$FKST_RUNTIME_ROOT"
   else
-    rt="$(mktemp -d "${TMPDIR:-/tmp}/fkst-run.XXXXXX")"; fresh=1
+    rt="$DEFAULT_RUNTIME_ROOT"; fresh=1
+    mkdir -p "$rt"
   fi
   export FKST_RUNTIME_ROOT="$rt"
 
@@ -461,13 +466,14 @@ cmd_supervise() {
       exit 1
       ;;
   esac
-  local pkgdir="$ROOT/packages/$pkg"
+  local pkgdir="$PACKAGES_ROOT/$pkg"
   [ -d "$pkgdir" ] || { echo "error: no package at $pkgdir" >&2; exit 1; }
 
   local project_root rt durable
   project_root="${FKST_PROJECT_ROOT:-$pkgdir}"
-  rt="$(mktemp -d "${TMPDIR:-/tmp}/fkst-supervise-rt.XXXXXX")"
-  durable="$(mktemp -d "${TMPDIR:-/tmp}/fkst-supervise-durable.XXXXXX")"
+  rt="${FKST_RUNTIME_ROOT:-$DEFAULT_RUNTIME_ROOT}"
+  durable="${FKST_DURABLE_ROOT:-$DEFAULT_DURABLE_ROOT}"
+  mkdir -p "$rt" "$durable"
   if [ "$rt" = "$durable" ]; then
     echo "error: FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT resolved to the same directory" >&2
     exit 1
