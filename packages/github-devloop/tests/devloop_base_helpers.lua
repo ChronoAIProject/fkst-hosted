@@ -364,10 +364,10 @@ local function run_decompose(payload, run_opts)
   }, run_opts)
 end
 
-local function run_implement(payload, run_opts)
+local function run_implement(payload, run_opts, queue)
   mock_branch_config_env()
   return t.run_department("departments/implement/main.lua", {
-    queue = "devloop_ready",
+    queue = queue or "devloop_ready",
     payload = payload,
   }, run_opts)
 end

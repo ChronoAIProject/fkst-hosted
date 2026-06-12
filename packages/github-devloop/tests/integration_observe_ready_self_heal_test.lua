@@ -152,6 +152,7 @@ return {
       dedup_key = event.dedup_key,
       source_ref = event.source_ref,
     }).dedup_key)
+    t.is_nil(ready_raise.payload.ready_hand_off)
     t.eq(count_calls("--json title,body,comments,labels,state"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
