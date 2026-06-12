@@ -252,6 +252,54 @@ local function run_utf8_truncation(root)
   }
 end
 
+local function run_stale_manifest_files(root)
+  local fixtures = {}
+  local args = build_args(root, fixtures)
+  local ref = core.context_fetch_ref_from_bundle(args)
+  local old_bundle = core.build_context_bundle(args)
+  os.remove(old_bundle.issue_path)
+  local ok, err = pcall(core.context_bundle_manifest_from_ref, ref, args.exec)
+  return {
+    ok = ok,
+    error = tostring(err or ""),
+    stale = core.is_stale_generation_context_error(err),
+    class = core.stale_generation_context_error_class(),
+  }
+end
+
+local function run_stale_manifest_rebuild(root)
+  local old_root = root .. "/old"
+  local fresh_root = root .. "/fresh"
+  local proposal_id = "github-devloop/issue/owner/repo/42"
+  local version = "owner/repo#issue#42@2026-06-03T01-02-03Z"
+  local old_fixtures = {
+    issue_outputs = {
+      '{"title":"Old issue","body":"old","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[],"comments":[]}\n',
+    },
+  }
+  local fresh_fixtures = {
+    issue_outputs = {
+      '{"title":"Fresh issue","body":"fresh","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[],"comments":[]}\n',
+    },
+  }
+  local old_args = build_args(old_root, old_fixtures, { proposal_id = proposal_id, version = version })
+  local old_ref = core.context_fetch_ref_from_bundle(old_args)
+  local old_bundle = core.build_context_bundle(old_args)
+  os.remove(old_bundle.issue_path)
+
+  local stale_ok, stale_err = pcall(core.context_bundle_manifest_from_ref, old_ref, old_args.exec)
+  local fresh_args = build_args(fresh_root, fresh_fixtures, { proposal_id = proposal_id, version = version })
+  local fresh_ref = core.context_fetch_ref_from_bundle(fresh_args)
+  local fresh_manifest = core.context_bundle_manifest_from_ref(fresh_ref, fresh_args.exec)
+  return {
+    stale_ok = stale_ok,
+    stale = core.is_stale_generation_context_error(stale_err),
+    same_ref = old_ref == fresh_ref,
+    fresh_manifest = fresh_manifest,
+    fresh_fetch_count = count_calls(fresh_fixtures.calls, "gh issue view"),
+  }
+end
+
 function pipeline(event)
   local payload = event.payload or {}
   local root = payload.root
@@ -267,6 +315,10 @@ function pipeline(event)
     raise("context_bundle_probe_result", run_publish_unique_on_invalid(root))
   elseif payload.mode == "utf8_truncation" then
     raise("context_bundle_probe_result", run_utf8_truncation(root))
+  elseif payload.mode == "stale_manifest_files" then
+    raise("context_bundle_probe_result", run_stale_manifest_files(root))
+  elseif payload.mode == "stale_manifest_rebuild" then
+    raise("context_bundle_probe_result", run_stale_manifest_rebuild(root))
   else
     error("unknown context bundle probe mode")
   end

@@ -32,6 +32,13 @@ end
 
 local function wrapped_error_class(message)
   local lower = tostring(message or ""):lower()
+  if lower:find("stale_generation_context", 1, true) ~= nil
+    or lower:find("context bundle manifest cache miss", 1, true) ~= nil
+    or lower:find("context bundle manifest files are unreadable", 1, true) ~= nil
+    or lower:find("runtime context cache miss", 1, true) ~= nil
+    or lower:find("runtime context manifest file is unreadable", 1, true) ~= nil then
+    return "stale-generation-context"
+  end
   if lower:find("codex failed", 1, true) ~= nil
     or lower:find("spawn_codex", 1, true) ~= nil
     or lower:find("codex exec", 1, true) ~= nil then

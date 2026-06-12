@@ -22,6 +22,18 @@ return {
     }).error_class, "unknown-error")
   end,
 
+  test_stale_generation_context_errors_have_terminal_class = function()
+    local message = "github-devloop: error_class=stale_generation_context context bundle manifest cache miss"
+
+    t.eq(core.error_fact_class(message), "stale-generation-context")
+    t.eq(core.error_fact_class("consensus: runtime context cache miss"), "stale-generation-context")
+    t.eq(core.build_error_fact({
+      queue = "consensus.proposal",
+      message = message,
+      terminal = true,
+    }).error_class, "stale-generation-context")
+  end,
+
   test_fingerprint_is_stable_across_timestamp_sha_and_tmp_path_noise = function()
     local first = core.error_fact_fingerprint({
       queue = "devloop_fixing",
