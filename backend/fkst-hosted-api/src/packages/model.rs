@@ -48,8 +48,10 @@ pub struct PackageFile {
 /// `packages` collection document: `_id` is the package name.
 ///
 /// Effectively immutable in v1: `create` writes it once; reads never mutate.
-/// `updated_at` equals `created_at` at creation and is reserved for a future
-/// edit feature.
+/// `updated_at` equals `created_at` at creation and diverges on each
+/// successful replace (PUT / PUT-archive). Sessions materialize package files
+/// at spawn (snapshot semantics): a PUT affects only sessions started
+/// afterwards; no running-session invalidation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Package {
     #[serde(rename = "_id")]

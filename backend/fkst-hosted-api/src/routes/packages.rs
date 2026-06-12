@@ -1,22 +1,41 @@
-//! Package HTTP API: `POST/GET /api/v1/packages` and
-//! `GET /api/v1/packages/{name}`.
+//! Package HTTP API: CRUD + zip archive upload for `/api/v1/packages`.
+//!
+//! Endpoints:
+//! - `POST   /api/v1/packages`              — create (JSON)
+//! - `GET    /api/v1/packages`              — list names
+//! - `GET    /api/v1/packages/{name}`       — fetch one
+//! - `PUT    /api/v1/packages/{name}`       — update (JSON)
+//! - `DELETE /api/v1/packages/{name}`       — delete (204)
+//! - `POST   /api/v1/packages/{name}/archive`  — create from zip
+//! - `PUT    /api/v1/packages/{name}/archive`   — replace from zip
 //!
 //! This is purely the web edge: wire DTOs, the body-size limit, and the
 //! status mapping. All authoritative validation (name rule, path-safety
 //! security guards, size caps, engine-entry rule) lives in the packages
 //! domain (`NewPackage::validate` / `PackageRepository`) and is surfaced
 //! here through `From<PackageError> for AppError`.
+//!
+//! # Update semantics (snapshot)
+//!
+//! Sessions materialize package files **at spawn** — a PUT affects only
+//! sessions started afterwards; no running-session invalidation. No engine
+//! interaction occurs during update.
 
+use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::{header, HeaderName, HeaderValue, StatusCode};
-use axum::routing::get;
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::routing::{get, put};
 use axum::{Json, Router};
+use bson::doc;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthContext;
 use crate::authz::{Action, Ownership};
+use crate::distribution::active_status_bson;
 use crate::error::AppError;
-use crate::packages::{is_valid_name, NewPackage, Package, PackageFile, MAX_TOTAL_CONTENT_BYTES};
+use crate::packages::{
+    is_valid_name, package_from_zip, NewPackage, Package, PackageFile, MAX_TOTAL_CONTENT_BYTES,
+};
 use crate::routes::extract::AppJson;
 use crate::routes::rfc3339;
 use crate::state::AppState;
@@ -36,6 +55,8 @@ use crate::state::AppState;
 /// body too large"` via [`AppJson`] (deliberately not `413`).
 pub const MAX_REQUEST_BODY_BYTES: usize = MAX_TOTAL_CONTENT_BYTES + 4 * 1024 * 1024;
 
+// ---- DTOs ---------------------------------------------------------------
+
 /// Request body for `POST /api/v1/packages`. Unlike the forgiving domain
 /// `NewPackage`, the API edge denies unknown fields so client typos (e.g.
 /// `"file"` for `"files"`) fail loudly with a `400`.
@@ -50,6 +71,17 @@ pub struct CreatePackageRequest {
     /// must be an admin or member of that org.
     #[serde(default)]
     pub org_id: Option<String>,
+}
+
+/// Request body for `PUT /api/v1/packages/{name}`. The name comes from the
+/// URL path only (not the body), so body typos on the name field are
+/// structurally impossible. Unknown fields are denied.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdatePackageRequest {
+    pub files: Vec<PackageFile>,
+    #[serde(default)]
+    pub composed_deps: Vec<String>,
 }
 
 /// Response body for `POST /api/v1/packages` (201).
@@ -90,6 +122,85 @@ impl TryFrom<Package> for PackageResponse {
         })
     }
 }
+
+// ---- Helpers ------------------------------------------------------------
+
+/// Validate a package name from a URL path segment. Returns `AppError::Validation`
+/// on failure.
+fn validate_path_name(name: &str) -> Result<(), AppError> {
+    if !is_valid_name(name) {
+        tracing::warn!(name = ?name, "package name rejected");
+        return Err(AppError::Validation(
+            "invalid package name: must fully match [A-Za-z0-9_-]+".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Verify that the Content-Type header is `application/zip`.
+fn require_zip_content_type(headers: &HeaderMap) -> Result<(), AppError> {
+    let ct = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    // Compare only the media type, ignoring parameters like charset/boundary.
+    let media_type = ct.split(';').next().unwrap_or("").trim();
+    if media_type != "application/zip" {
+        return Err(AppError::Validation(
+            "Content-Type must be application/zip".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Check whether a package has active sessions or a live lease.
+/// Returns `Ok(())` if clear, `Err(AppError::Conflict)` otherwise.
+///
+/// The check-then-delete TOCTOU window is accepted: the engine driver already
+/// handles "package disappeared before start" gracefully, and the reaper
+/// fails active sessions whose package vanished.
+async fn check_active_usage(state: &AppState, name: &str) -> Result<(), AppError> {
+    // Check for live lease.
+    let lease_filter = doc! {
+        "_id": name,
+        "expires_at": { "$gt": bson::DateTime::now() }
+    };
+    let has_live_lease = state
+        .db
+        .leases()
+        .find_one(lease_filter)
+        .await
+        .map_err(AppError::Mongo)?
+        .is_some();
+
+    if has_live_lease {
+        return Err(AppError::Conflict(format!(
+            "package {name} has an active session or live lease"
+        )));
+    }
+
+    // Check for active sessions.
+    let session_filter = doc! {
+        "package_name": name,
+        "status": { "$in": active_status_bson() }
+    };
+    let active_count = state
+        .db
+        .sessions()
+        .count_documents(session_filter)
+        .await
+        .map_err(AppError::Mongo)?;
+
+    if active_count > 0 {
+        return Err(AppError::Conflict(format!(
+            "package {name} has an active session or live lease"
+        )));
+    }
+
+    Ok(())
+}
+
+// ---- Handlers -----------------------------------------------------------
 
 /// `POST /api/v1/packages`: validate (domain), insert, answer `201` with a
 /// `Location` header. Duplicates are arbitrated solely by the Mongo `_id`
@@ -191,13 +302,187 @@ async fn get_one(
     }
 }
 
+/// `PUT /api/v1/packages/{name}`: atomically replace files and composed_deps.
+///
+/// The name comes from the path; `created_at` and ownership fields are
+/// untouched. Requires write permission on the package. Snapshot semantics:
+/// only sessions started after this call see the new files.
+async fn update(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(name): Path<String>,
+    AppJson(body): AppJson<UpdatePackageRequest>,
+) -> Result<Json<PackageResponse>, AppError> {
+    validate_path_name(&name)?;
+
+    // Fetch existing for authz check.
+    let existing = state
+        .packages
+        .get(&name)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("package not found: {name}")))?;
+
+    let ownership = Ownership {
+        owner_user_id: existing.owner_user_id.as_deref(),
+        org_id: existing.org_id.as_deref(),
+    };
+    state
+        .authz
+        .authorize(&ctx, ownership, Action::Write, "package", &name)
+        .await?;
+
+    tracing::debug!(
+        name = %name,
+        files = body.files.len(),
+        composed_deps = body.composed_deps.len(),
+        "package update requested"
+    );
+
+    let new_package = NewPackage {
+        name,
+        files: body.files,
+        composed_deps: body.composed_deps,
+    };
+    let updated = state.packages.replace(new_package).await?;
+    Ok(Json(PackageResponse::try_from(updated)?))
+}
+
+/// `DELETE /api/v1/packages/{name}`: remove a package.
+///
+/// Returns `409` when the package has an active session or a live lease.
+/// Requires manage permission on the package.
+async fn delete_one(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(name): Path<String>,
+) -> Result<StatusCode, AppError> {
+    validate_path_name(&name)?;
+
+    // Fetch existing for authz check.
+    let existing = state
+        .packages
+        .get(&name)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("package not found: {name}")))?;
+
+    let ownership = Ownership {
+        owner_user_id: existing.owner_user_id.as_deref(),
+        org_id: existing.org_id.as_deref(),
+    };
+    state
+        .authz
+        .authorize(&ctx, ownership, Action::Manage, "package", &name)
+        .await?;
+
+    // Active-usage guard. The check-then-delete TOCTOU window is accepted:
+    // the engine driver handles "package disappeared before start" and the
+    // reaper fails sessions whose package vanished.
+    check_active_usage(&state, &name).await?;
+
+    let deleted = state.packages.delete(&name).await?;
+    if deleted {
+        tracing::info!(name = %name, "package deleted");
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound(format!("package not found: {name}")))
+    }
+}
+
+/// `POST /api/v1/packages/{name}/archive`: create a package from a zip archive.
+///
+/// The body must be raw `application/zip` bytes. Stamps ownership exactly
+/// like JSON create (honors the `org_id` convention; archive create has no
+/// body fields, so org attachment is a non-goal for this path).
+async fn archive_create(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Result<
+    (
+        StatusCode,
+        [(HeaderName, HeaderValue); 1],
+        Json<CreatePackageResponse>,
+    ),
+    AppError,
+> {
+    validate_path_name(&name)?;
+    require_zip_content_type(&headers)?;
+
+    tracing::debug!(name = %name, size = body.len(), "package archive create requested");
+
+    let new_package = package_from_zip(&name, &body).map_err(AppError::Validation)?;
+
+    let created = state
+        .packages
+        .create(new_package, &ctx.user_id, None)
+        .await?;
+
+    let location = HeaderValue::try_from(format!("/api/v1/packages/{}", created.name))
+        .expect("validated package name is ASCII and header-safe");
+    Ok((
+        StatusCode::CREATED,
+        [(header::LOCATION, location)],
+        Json(CreatePackageResponse { name: created.name }),
+    ))
+}
+
+/// `PUT /api/v1/packages/{name}/archive`: replace a package from a zip archive.
+///
+/// The body must be raw `application/zip` bytes. Requires write permission
+/// on the package. Snapshot semantics: only sessions started after this call
+/// see the new files.
+async fn archive_replace(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Result<Json<PackageResponse>, AppError> {
+    validate_path_name(&name)?;
+    require_zip_content_type(&headers)?;
+
+    // Fetch existing for authz check.
+    let existing = state
+        .packages
+        .get(&name)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("package not found: {name}")))?;
+
+    let ownership = Ownership {
+        owner_user_id: existing.owner_user_id.as_deref(),
+        org_id: existing.org_id.as_deref(),
+    };
+    state
+        .authz
+        .authorize(&ctx, ownership, Action::Write, "package", &name)
+        .await?;
+
+    tracing::debug!(name = %name, size = body.len(), "package archive replace requested");
+
+    let new_package = package_from_zip(&name, &body).map_err(AppError::Validation)?;
+
+    let updated = state.packages.replace(new_package).await?;
+    Ok(Json(PackageResponse::try_from(updated)?))
+}
+
+// ---- Router -------------------------------------------------------------
+
 /// Package routes, to be nested under `/api/v1`. The body-limit layer is
 /// scoped to these routes only (GETs carry no body; the limit is harmless
 /// there and keeps the layer wiring simple).
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/packages", get(list).post(create))
-        .route("/packages/:name", get(get_one))
+        .route(
+            "/packages/:name",
+            get(get_one).put(update).delete(delete_one),
+        )
+        .route(
+            "/packages/:name/archive",
+            put(archive_replace).post(archive_create),
+        )
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
 }
 

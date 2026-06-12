@@ -6,10 +6,12 @@
 //! optional `core.lua`, and optional `composed.deps`. This module owns the
 //! `packages` collection shape and its validation gate.
 
+pub mod archive;
 pub mod error;
 pub mod model;
 pub mod repository;
 
+pub use archive::package_from_zip;
 pub use error::PackageError;
 pub use model::{
     is_valid_name, NewPackage, Package, PackageFile, MAX_COMPOSED_DEPS, MAX_COMPOSED_DEP_LEN,

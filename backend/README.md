@@ -121,6 +121,49 @@ never echoed to the client.
 > `timeoutSeconds: 6` or higher). Otherwise the probe times out before the
 > handler can answer with the diagnostic 503 body.
 
+## Package API endpoints
+
+All package endpoints require authentication (bearer token). Session
+materialization uses **snapshot semantics**: sessions materialize package
+files at spawn — a PUT affects only sessions started afterwards.
+
+| Method | Path | Status | Description |
+|--------|------|--------|-------------|
+| `POST` | `/api/v1/packages` | 201 | Create package (JSON body with `name`, `files`, optional `composed_deps`, `org_id`) |
+| `GET` | `/api/v1/packages` | 200 | List visible package names (ascending) |
+| `GET` | `/api/v1/packages/{name}` | 200 | Fetch one package |
+| `PUT` | `/api/v1/packages/{name}` | 200 | Replace `files` and `composed_deps` (JSON body; `created_at` and ownership untouched) |
+| `DELETE` | `/api/v1/packages/{name}` | 204 | Delete package (409 if active session or live lease exists) |
+| `POST` | `/api/v1/packages/{name}/archive` | 201 | Create package from zip archive (`Content-Type: application/zip`) |
+| `PUT` | `/api/v1/packages/{name}/archive` | 200 | Replace package from zip archive (`Content-Type: application/zip`) |
+
+### Zip archive upload
+
+Upload a zip file as raw `application/zip` bytes (not multipart):
+
+```sh
+curl --data-binary @pkg.zip \
+  -H "Content-Type: application/zip" \
+  -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/api/v1/packages/my-pkg/archive
+```
+
+Constraints enforced during zip extraction:
+- Max 256 file entries (plus one optional root `composed.deps`)
+- Per-file content: max 1 MiB
+- Total decoded content: max 12 MiB (zip-bomb guard)
+- All content must be valid UTF-8
+- Root `fkst.env` is rejected (host-owned file)
+- Root `composed.deps` is parsed into `composed_deps` (not stored as a file)
+- Path rules enforced by `NewPackage::validate` (no `..`, `/`, `\`, control chars)
+
+### Authorization
+
+- **Read**: owner, org viewer+, admin scope
+- **Write** (PUT, PUT-archive): owner, org member+, admin scope
+- **Manage** (DELETE): owner, org admin, admin scope
+- Foreign private packages return 404 (anti-enumeration)
+
 ## Testing
 
 ```sh
@@ -145,15 +188,27 @@ backend/
     ├── src/
     │   ├── main.rs         # entrypoint: JSON tracing, config, Mongo connect, graceful shutdown
     │   ├── lib.rs          # module exports (binary + integration tests share them)
+    │   ├── auth/           # NyxID JWT authentication: JWKS cache, verification, middleware
+    │   ├── authz.rs        # Resource authorization: owner/org role policy
     │   ├── config.rs       # typed Config from env (FKST_HOSTED_* + MONGODB_*)
     │   ├── db.rs           # Db handle: typed collections, ping, idempotent indexes, URI redaction
+    │   ├── distribution/   # Session distribution, health view, reaper
+    │   ├── engine/         # Engine runner (process management)
     │   ├── error.rs        # AppError -> canonical JSON error envelope
-    │   ├── models.rs       # BSON document models (packages, sessions, leases)
+    │   ├── github_app/     # GitHub App integration (tokens, repo access)
+    │   ├── journal/        # Session journaling to GitHub
+    │   ├── leases/         # Per-package lease store (mutual exclusion)
+    │   ├── models.rs       # BSON document models (sessions, leases)
+    │   ├── nyxid/          # NyxID client (org-role lookups)
+    │   ├── packages/       # Package domain: models, validation, repository, zip archive
+    │   ├── reconcile/      # Boot-time orphan temp-dir sweep
     │   ├── router.rs       # routes + middleware (request-id, trace, CORS, timeout)
-    │   ├── state.rs        # AppState { config, db }
-    │   └── routes/
-    │       └── health.rs   # GET /health, GET /api/v1/health
+    │   ├── routes/         # HTTP handlers: health, packages, sessions
+    │   ├── sessions/       # Session lifecycle service
+    │   └── state.rs        # AppState { config, db, packages, sessions, authz }
     └── tests/
+        ├── auth_api.rs     # JWT auth integration tests
         ├── health.rs       # router-level tests (no Docker)
-        └── persistence.rs  # testcontainers Mongo tests (skip without Docker)
+        ├── packages_api.rs # Package CRUD + CORS integration tests
+        └── packages_archive.rs # Zip archive upload integration tests
 ```

@@ -53,7 +53,8 @@ pub enum AppError {
 }
 
 /// Map packages-domain errors onto the unified type: `Validation` -> 400,
-/// `Duplicate` -> 409, `Db` -> 500 (driver text logged, never echoed).
+/// `Duplicate` -> 409, `NotFound` -> 404, `Db` -> 500 (driver text logged,
+/// never echoed).
 impl From<crate::packages::PackageError> for AppError {
     fn from(err: crate::packages::PackageError) -> Self {
         use crate::packages::PackageError;
@@ -61,6 +62,9 @@ impl From<crate::packages::PackageError> for AppError {
             PackageError::Validation(message) => AppError::Validation(message),
             PackageError::Duplicate(name) => {
                 AppError::Conflict(format!("package already exists: {name}"))
+            }
+            PackageError::NotFound(name) => {
+                AppError::NotFound(format!("package not found: {name}"))
             }
             PackageError::Db(source) => AppError::Mongo(source),
         }
