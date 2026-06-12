@@ -340,15 +340,10 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
       end
       local reviewing_version = core.next_fix_version(state.version)
       if not core.has_state_marker(fact_comments, origin.proposal_id, "reviewing", reviewing_version) then
-        local fix_payload = core.build_devloop_fixing_payload({
+        local fix_payload = core.build_replayed_fixing_payload({
           proposal_id = origin.proposal_id,
           impl_version = state.version,
-        }, pr_number, {
-          review_proposal_id = feedback.review_proposal_id,
-          review_dedup_key = feedback.review_dedup_key,
-          reviewed_head_sha = feedback.reviewed_head_sha,
-          blocking_gap = feedback.blocking_gap,
-        }, source_ref)
+        }, pr_number, feedback, source_ref)
         core.log_line("info", "observe_pr", origin.proposal_id, "SELFHEAL", {
           "state=fixing",
           "queue=devloop_fixing",

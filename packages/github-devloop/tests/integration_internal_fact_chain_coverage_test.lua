@@ -155,6 +155,7 @@ local function live_305_merge_gate_fix_marker_substream(event)
   local version = "ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-11T18-15-40Z/loop/1/fix/1/fix/2/fix/3/fix/4/fix/5/fix/6/fix/7/fix/8"
   local fixing_version = version .. "/fix/9"
   local head_sha = "54320f09e8f4f602b1df9a13e6bcf70998da8f1f"
+  local gate_baseline_sha = "828df8d3"
   local review_proposal = "github-devloop/pr-review/ChronoAIProject-fkst-packages-2376452037/305/ready-consensus-github-devloo-0324026905/" .. head_sha
   local review_dedup = "consensus:" .. review_proposal .. "/review"
   event.proposal_id = proposal_id
@@ -163,9 +164,10 @@ local function live_305_merge_gate_fix_marker_substream(event)
   event.review_proposal_id = review_proposal
   event.review_dedup_key = review_dedup
   event.reviewed_head_sha = head_sha
+  event.gate_baseline_sha = gate_baseline_sha
   event.source_ref = core.pr_source_ref(repo, pr_number)
   event.dedup_key = core._dedup_key({ "merge-ready", proposal_id, version, tostring(pr_number), head_sha })
-  local merge_gate = 'github-devloop merge gate failed: rollup-red\nReproduce locally with `scripts/run.sh test` from the repository root.\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" state="fixing" version="' .. fixing_version .. '" stage_rank="700" -->\n<!-- fkst:github-devloop:merge-gate:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" pr="305" version="' .. fixing_version .. '" review_proposal="' .. review_proposal .. '" review_dedup="' .. review_dedup .. '" head_sha="' .. head_sha .. '" reason="rollup-red" -->'
+  local merge_gate = 'github-devloop merge gate failed: rollup-red\nReproduce locally with `scripts/run.sh test` from the repository root.\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" state="fixing" version="' .. fixing_version .. '" stage_rank="700" -->\n<!-- fkst:github-devloop:merge-gate:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" pr="305" version="' .. fixing_version .. '" review_proposal="' .. review_proposal .. '" review_dedup="' .. review_dedup .. '" head_sha="' .. head_sha .. '" gate_baseline_sha="' .. gate_baseline_sha .. '" reason="rollup-red" -->'
   return {
     repo = repo,
     issue_number = issue_number,
@@ -188,6 +190,7 @@ local function live_305_merge_gate_fix_marker_substream(event)
     fixing_version = fixing_version,
     review_proposal = review_proposal,
     review_dedup = review_dedup,
+    gate_baseline_sha = gate_baseline_sha,
   }
 end
 
@@ -209,6 +212,8 @@ local function assert_same_fixing_raise(left, right)
   t.eq(left.payload.review_proposal_id, right.payload.review_proposal_id)
   t.eq(left.payload.review_dedup_key, right.payload.review_dedup_key)
   t.eq(left.payload.reviewed_head_sha, right.payload.reviewed_head_sha)
+  t.eq(left.payload.gate_baseline_sha, right.payload.gate_baseline_sha)
+  t.eq(left.payload.gate_failure_excerpt, right.payload.gate_failure_excerpt)
   t.eq(left.payload.source_ref.ref, right.payload.source_ref.ref)
 end
 
@@ -618,7 +623,16 @@ return {
     t.eq(fixing_raise.payload.review_proposal_id, fixture.review_proposal)
     t.eq(fixing_raise.payload.review_dedup_key, fixture.review_dedup)
     t.eq(fixing_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
+    t.eq(fixing_raise.payload.gate_baseline_sha, fixture.gate_baseline_sha)
+    t.is_true(fixing_raise.payload.gate_failure_excerpt:find("rollup-red", 1, true) ~= nil)
     t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
+    local matching_fact = core.merge_gate_fix_fact(fixture.pr_comments, event.proposal_id, fixture.fixing_version, {
+      review_proposal_id = fixture.review_proposal,
+      review_dedup_key = fixture.review_dedup,
+      gate_baseline_sha = fixing_raise.payload.gate_baseline_sha,
+      match_gate_baseline_sha = true,
+    })
+    t.eq(matching_fact.gate_baseline_sha, fixing_raise.payload.gate_baseline_sha)
 
     mock_bot_env()
     mock_pr_origin(with_non_marker_comments(fixture.pr_comments, "pr-305"), fixture.branch, fixture.head_sha)

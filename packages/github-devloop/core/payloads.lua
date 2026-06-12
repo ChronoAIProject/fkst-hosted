@@ -440,6 +440,17 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   return payload
 end
 
+function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref)
+  return M.build_devloop_fixing_payload(origin, pr_number, {
+    review_proposal_id = feedback.review_proposal_id,
+    review_dedup_key = feedback.review_dedup_key,
+    reviewed_head_sha = feedback.reviewed_head_sha,
+    blocking_gap = feedback.blocking_gap,
+    gate_baseline_sha = feedback.gate_baseline_sha,
+    gate_failure_excerpt = feedback.review_reason,
+  }, source_ref)
+end
+
 function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)
   return {
     schema = "github-devloop.review-meta.v1",
