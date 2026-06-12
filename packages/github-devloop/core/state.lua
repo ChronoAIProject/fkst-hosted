@@ -40,8 +40,9 @@ function M.state_marker(proposal_id, state, version, effects)
     .. '" state="' .. tostring(state)
     .. '" version="' .. tostring(version)
     .. '" stage_rank="' .. tostring(M._state_stage_rank[state])
+    .. '"'
     .. effects_field
-    .. '" -->'
+    .. ' -->'
 end
 
 function M.version_order_key(version)

@@ -341,6 +341,15 @@ return {
     local thinking_marker = core.state_marker(proposal_id, "thinking", "v1")
     t.is_true(thinking_marker:find('fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="thinking" version="v1"', 1, true) ~= nil)
     t.is_true(thinking_marker:find('stage_rank="100"', 1, true) ~= nil)
+    local ready_effects_marker = core.state_marker(proposal_id, "ready", "v2", "result-marker,ready-label,devloop-ready")
+    t.eq(
+      ready_effects_marker,
+      '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="ready" version="v2" stage_rank="500" effects="result-marker,ready-label,devloop-ready" -->'
+    )
+    local ready_effects_state = core.current_state({ ready_effects_marker }, proposal_id)
+    t.eq(ready_effects_state.state, "ready")
+    t.eq(ready_effects_state.version, "v2")
+    t.eq(ready_effects_state.stage_rank, core.stage_rank("ready"))
     local comments = {
       core.state_marker(proposal_id, "thinking", "v1"),
       core.state_marker(proposal_id, "ready", "v2"),
@@ -447,6 +456,7 @@ return {
     t.is_true(comment.body:find('fkst:github-devloop:result:v1 proposal="github-devloop/issue/owner/repo/42"', 1, true) ~= nil)
     t.is_true(comment.body:find('fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="ready"', 1, true) ~= nil)
     t.is_true(comment.body:find('effects="result-marker,ready-label,devloop-ready"', 1, true) ~= nil)
+    t.is_true(comment.body:find('stage_rank="500" effects="result-marker,ready-label,devloop-ready"', 1, true) ~= nil)
     local comment_version = tostring(completed.dedup_key):gsub(":", "-")
     t.eq(
       comment.dedup_key,
