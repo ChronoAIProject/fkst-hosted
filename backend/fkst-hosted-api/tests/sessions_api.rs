@@ -15,6 +15,7 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use bson::doc;
 use fkst_hosted_api::auth::AuthMode;
+use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
@@ -123,6 +124,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         packages,
         sessions: sessions.clone(),
         auth_mode: AuthMode::Disabled,
+        authz: Authorizer::disabled(),
     })
     .expect("router");
     TestApp {
@@ -670,6 +672,8 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         runtime_dir: None,
         error: None,
         run_key: None,
+        owner_user_id: None,
+        org_id: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,

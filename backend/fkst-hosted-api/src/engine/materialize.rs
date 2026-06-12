@@ -390,6 +390,8 @@ mod tests {
             name: "demo".to_string(),
             files: vec![file("departments/hello/main.lua", "x")],
             composed_deps: vec!["dep-a".to_string()],
+            owner_user_id: None,
+            org_id: None,
             created_at: bson::DateTime::from_millis(0),
             updated_at: bson::DateTime::from_millis(0),
         };

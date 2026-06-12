@@ -43,6 +43,14 @@ pub struct SessionDoc {
     /// before journaling existed stay byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_key: Option<String>,
+    /// User who owns this session. Omitted for legacy pre-auth docs
+    /// (grandfathered open to any authenticated principal).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_user_id: Option<String>,
+    /// Organization this session belongs to (inherited from the package).
+    /// Omitted when the session is personal or the package has no org.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
     pub created_at: bson::DateTime,
     pub started_at: Option<bson::DateTime>,
     pub stopped_at: Option<bson::DateTime>,
@@ -79,6 +87,8 @@ mod tests {
             runtime_dir: Some("/tmp/run".to_string()),
             error: None,
             run_key: None,
+            owner_user_id: None,
+            org_id: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
             stopped_at: None,
@@ -193,5 +203,45 @@ mod tests {
             raw.get("stopped_at").expect("stopped_at present"),
             &Bson::Null
         );
+    }
+
+    // ---- ownership field serde tests ----
+
+    #[test]
+    fn ownership_fields_are_omitted_when_absent() {
+        let raw = bson::to_document(&sample_session()).expect("serialize");
+        assert!(
+            !raw.contains_key("owner_user_id"),
+            "owner_user_id must be omitted when absent"
+        );
+        assert!(
+            !raw.contains_key("org_id"),
+            "org_id must be omitted when absent"
+        );
+    }
+
+    #[test]
+    fn ownership_fields_round_trip_when_set() {
+        let mut doc = sample_session();
+        doc.owner_user_id = Some("user-42".to_string());
+        doc.org_id = Some("org-1".to_string());
+        let raw = bson::to_document(&doc).expect("serialize");
+        assert_eq!(
+            raw.get_str("owner_user_id").expect("owner_user_id"),
+            "user-42"
+        );
+        assert_eq!(raw.get_str("org_id").expect("org_id"), "org-1");
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn legacy_docs_without_ownership_fields_still_deserialize() {
+        let mut raw = bson::to_document(&sample_session()).expect("serialize");
+        raw.remove("owner_user_id");
+        raw.remove("org_id");
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back.owner_user_id, None);
+        assert_eq!(back.org_id, None);
     }
 }

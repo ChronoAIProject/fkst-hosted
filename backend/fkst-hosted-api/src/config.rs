@@ -95,6 +95,10 @@ mod defaults {
     pub(super) fn auth_jwks_cache_ttl_secs() -> u64 {
         300
     }
+
+    pub(super) fn nyxid_org_cache_ttl_secs() -> u64 {
+        30
+    }
 }
 
 /// `FKST_HOSTED_*`-prefixed variables (HTTP/server settings).
@@ -114,6 +118,9 @@ struct HttpVars {
 /// without a store is misconfigured and must fail closed at startup.
 /// `GITHUB_TOKEN` rides this unprefixed pass too (secret; optional —
 /// without it GitHub journaling degrades to Mongo-only with a warn).
+/// `NYXID_CLIENT_ID` / `NYXID_CLIENT_SECRET` also ride this pass (platform
+/// credentials are unprefixed, following the `GITHUB_TOKEN` precedent).
+/// Both-or-neither: only one set is a config error naming the missing var.
 #[derive(Deserialize)]
 struct MongoVars {
     mongodb_uri: String,
@@ -123,6 +130,10 @@ struct MongoVars {
     mongodb_server_selection_timeout_ms: u64,
     #[serde(default)]
     github_token: Option<String>,
+    #[serde(default)]
+    nyxid_client_id: Option<String>,
+    #[serde(default)]
+    nyxid_client_secret: Option<String>,
 }
 
 /// `FKST_JOURNAL_*` / `FKST_RAISED_*` variables (journaling settings; envy
@@ -163,6 +174,8 @@ struct AuthVars {
     auth_audience: Option<String>,
     #[serde(default = "defaults::auth_jwks_cache_ttl_secs")]
     auth_jwks_cache_ttl_secs: u64,
+    #[serde(default = "defaults::nyxid_org_cache_ttl_secs")]
+    nyxid_org_cache_ttl_secs: u64,
 }
 
 /// Runtime configuration assembled from both envy passes.
@@ -223,6 +236,16 @@ pub struct Config {
     /// Authentication mode: disabled (local dev) or enabled with NyxID
     /// settings. Env: `FKST_AUTH_ENABLED` (default true = fail-closed).
     pub auth: AuthMode,
+    /// NyxID service-account client ID for org APIs. Env: `NYXID_CLIENT_ID`.
+    /// Both-or-neither with `nyxid_client_secret`. Optional: absent means
+    /// org features degrade gracefully (owner-only policy).
+    pub nyxid_client_id: Option<String>,
+    /// NyxID service-account client secret (SECRET). Env:
+    /// `NYXID_CLIENT_SECRET`. Both-or-neither with `nyxid_client_id`.
+    pub nyxid_client_secret: Option<SecretString>,
+    /// TTL in seconds for the NyxID org-role and user-orgs caches.
+    /// Env: `FKST_NYXID_ORG_CACHE_TTL_SECS`. Default 30, zero rejected.
+    pub nyxid_org_cache_ttl_secs: u64,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -255,6 +278,12 @@ impl fmt::Debug for Config {
                 &self.github_token.as_ref().map(|_| "<redacted>"),
             )
             .field("auth", &self.auth)
+            .field("nyxid_client_id", &self.nyxid_client_id)
+            .field(
+                "nyxid_client_secret",
+                &self.nyxid_client_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("nyxid_org_cache_ttl_secs", &self.nyxid_org_cache_ttl_secs)
             .finish()
     }
 }
@@ -280,6 +309,9 @@ impl Default for Config {
             raised_max_line_bytes: defaults::raised_max_line_bytes(),
             github_token: None,
             auth: AuthMode::Disabled,
+            nyxid_client_id: None,
+            nyxid_client_secret: None,
+            nyxid_org_cache_ttl_secs: defaults::nyxid_org_cache_ttl_secs(),
         }
     }
 }
@@ -347,6 +379,22 @@ impl Config {
                 "MONGODB_SERVER_SELECTION_TIMEOUT_MS must be at least 1".to_string(),
             ));
         }
+        // Both-or-neither: NYXID_CLIENT_ID and NYXID_CLIENT_SECRET.
+        let (nyxid_client_id, nyxid_client_secret) =
+            match (mongo.nyxid_client_id, mongo.nyxid_client_secret) {
+                (Some(id), Some(secret)) => (Some(id), Some(SecretString::from(secret))),
+                (None, None) => (None, None),
+                (Some(_), None) => {
+                    return Err(AppError::Config(
+                        "NYXID_CLIENT_SECRET must be set when NYXID_CLIENT_ID is set".to_string(),
+                    ));
+                }
+                (None, Some(_)) => {
+                    return Err(AppError::Config(
+                        "NYXID_CLIENT_ID must be set when NYXID_CLIENT_SECRET is set".to_string(),
+                    ));
+                }
+            };
 
         // Authentication settings pass (FKST_AUTH_* with the FKST_ prefix).
         let auth: AuthVars = envy::prefixed(JOURNAL_ENV_PREFIX)
@@ -355,6 +403,11 @@ impl Config {
         if auth.auth_jwks_cache_ttl_secs == 0 {
             return Err(AppError::Config(
                 "FKST_AUTH_JWKS_CACHE_TTL_SECS must be at least 1".to_string(),
+            ));
+        }
+        if auth.nyxid_org_cache_ttl_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_NYXID_ORG_CACHE_TTL_SECS must be at least 1".to_string(),
             ));
         }
         let auth_mode = if auth.auth_enabled {
@@ -397,6 +450,9 @@ impl Config {
             raised_max_line_bytes: journal.raised_max_line_bytes,
             github_token: mongo.github_token.map(SecretString::from),
             auth: auth_mode,
+            nyxid_client_id,
+            nyxid_client_secret,
+            nyxid_org_cache_ttl_secs: auth.nyxid_org_cache_ttl_secs,
         })
     }
 
@@ -745,6 +801,109 @@ mod tests {
         assert!(matches!(err, AppError::Config(_)));
         assert!(
             err.to_string().contains("FKST_AUTH_JWKS_CACHE_TTL_SECS"),
+            "error must name the variable, got: {err}"
+        );
+    }
+
+    // ---- NyxID client credential tests ----------------------------------------
+
+    #[test]
+    fn nyxid_creds_both_set_are_accepted() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("NYXID_CLIENT_ID", "sa_test"),
+            ("NYXID_CLIENT_SECRET", "sas_test"),
+        ]))
+        .expect("both set");
+        assert_eq!(config.nyxid_client_id.as_deref(), Some("sa_test"));
+        assert!(config.nyxid_client_secret.is_some());
+    }
+
+    #[test]
+    fn nyxid_creds_neither_set_is_accepted() {
+        let config =
+            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("neither set");
+        assert!(config.nyxid_client_id.is_none());
+        assert!(config.nyxid_client_secret.is_none());
+    }
+
+    #[test]
+    fn nyxid_client_id_without_secret_is_a_config_error() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("NYXID_CLIENT_ID", "sa_test"),
+        ]))
+        .expect_err("id without secret must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("NYXID_CLIENT_SECRET"),
+            "error must name the missing variable, got: {err}"
+        );
+    }
+
+    #[test]
+    fn nyxid_client_secret_without_id_is_a_config_error() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("NYXID_CLIENT_SECRET", "sas_test"),
+        ]))
+        .expect_err("secret without id must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("NYXID_CLIENT_ID"),
+            "error must name the missing variable, got: {err}"
+        );
+    }
+
+    #[test]
+    fn nyxid_client_secret_never_appears_in_debug() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("NYXID_CLIENT_ID", "sa_test"),
+            ("NYXID_CLIENT_SECRET", "sas_should_not_leak"),
+        ]))
+        .expect("both set");
+        let rendered = format!("{config:?}");
+        assert!(
+            !rendered.contains("sas_should_not_leak"),
+            "secret leaked in debug"
+        );
+        assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
+    fn nyxid_org_cache_ttl_defaults_to_30() {
+        let config =
+            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        assert_eq!(config.nyxid_org_cache_ttl_secs, 30);
+    }
+
+    #[test]
+    fn nyxid_org_cache_ttl_is_overridable() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_NYXID_ORG_CACHE_TTL_SECS", "60"),
+        ]))
+        .expect("override");
+        assert_eq!(config.nyxid_org_cache_ttl_secs, 60);
+    }
+
+    #[test]
+    fn zero_nyxid_org_cache_ttl_is_a_config_error_naming_the_variable() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_NYXID_ORG_CACHE_TTL_SECS", "0"),
+        ]))
+        .expect_err("zero TTL must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_NYXID_ORG_CACHE_TTL_SECS"),
             "error must name the variable, got: {err}"
         );
     }

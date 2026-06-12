@@ -40,3 +40,6 @@ data:
   FKST_AUTH_NYXID_BASE_URL: "https://nyxid.example.com"
   FKST_AUTH_ISSUER: "nyxid"
   FKST_AUTH_JWKS_CACHE_TTL_SECS: "300"
+  # NyxID org-role and user-orgs cache TTL (seconds). Controls how stale
+  # org membership data may be before a refresh. Default 30; zero rejected.
+  FKST_NYXID_ORG_CACHE_TTL_SECS: "30"

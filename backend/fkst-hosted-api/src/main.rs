@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use std::sync::Arc;
 
+use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
 use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost, SelfOnlyHealth};
@@ -207,12 +208,45 @@ async fn main() -> ExitCode {
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let auth_mode = config.auth.clone();
+
+    // Build the NyxID client and Authorizer. Only construct a NyxIdClient
+    // when auth is enabled AND both service-account credentials are present.
+    let authz = match (
+        &auth_mode,
+        &config.nyxid_client_id,
+        &config.nyxid_client_secret,
+    ) {
+        (fkst_hosted_api::auth::AuthMode::Enabled(settings), Some(id), Some(secret)) => {
+            match fkst_hosted_api::nyxid::NyxIdClient::new(
+                &settings.base_url,
+                id.clone(),
+                secret.clone(),
+                std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
+            ) {
+                Ok(client) => {
+                    tracing::info!("NyxID org features enabled");
+                    Authorizer::new(Some(client))
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "failed to build NyxID client");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        (fkst_hosted_api::auth::AuthMode::Enabled(_), None, None) => {
+            tracing::warn!("NyxID org features disabled: NYXID_CLIENT_ID/SECRET not configured");
+            Authorizer::new(None)
+        }
+        _ => Authorizer::disabled(),
+    };
+
     let app = match build_router(AppState {
         config,
         db,
         packages,
         sessions: sessions.clone(),
         auth_mode,
+        authz,
     }) {
         Ok(router) => router,
         Err(error) => {

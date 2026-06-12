@@ -57,6 +57,12 @@ use crate::sessions::repo::{status_bson, SessionRepo};
 /// domain bound).
 const MAX_PACKAGE_NAME_BYTES: usize = 128;
 
+/// Ownership information stamped onto a new session.
+pub struct SessionOwner {
+    pub owner_user_id: String,
+    pub org_id: Option<String>,
+}
+
 /// Cap on the `error` field persisted to a failed session (truncated at a
 /// char boundary; the full text is logged).
 const MAX_ERROR_BYTES: usize = 4096;
@@ -181,13 +187,21 @@ impl SessionService {
         &self.inner.repo
     }
 
-    /// Create a session for `package_name`: validate, check the package
-    /// exists, insert the `pending` document, then hand off — single-pod:
-    /// spawn the driver inline; distributed: place the session (the chosen
-    /// pod's driver picks it up; a live lease for another session is a
-    /// `409`). Returns the created document immediately (the driver
-    /// advances it asynchronously).
-    pub async fn create(&self, package_name: &str) -> Result<SessionDoc, AppError> {
+    /// Create a session for `package_name` with the given ownership:
+    /// validate, check the package exists, insert the `pending` document,
+    /// then hand off — single-pod: spawn the driver inline; distributed:
+    /// place the session (the chosen pod's driver picks it up; a live lease
+    /// for another session is a `409`). Returns the created document
+    /// immediately (the driver advances it asynchronously).
+    ///
+    /// TOCTOU between route-level authorize and service-level create is
+    /// benign: the package is read again inside `exists` and the owner is
+    /// stamped from the caller's context, not re-read from the package.
+    pub async fn create(
+        &self,
+        package_name: &str,
+        owner: SessionOwner,
+    ) -> Result<SessionDoc, AppError> {
         if !is_valid_name(package_name) || package_name.len() > MAX_PACKAGE_NAME_BYTES {
             tracing::warn!(
                 package_name_bytes = package_name.len(),
@@ -215,6 +229,8 @@ impl SessionService {
             runtime_dir: None,
             error: None,
             run_key: None,
+            owner_user_id: Some(owner.owner_user_id),
+            org_id: owner.org_id,
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,

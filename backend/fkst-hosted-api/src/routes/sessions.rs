@@ -11,10 +11,14 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AuthContext;
+use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::models::{SessionDoc, SessionStatus};
+use crate::packages::is_valid_name;
 use crate::routes::extract::AppJson;
 use crate::routes::rfc3339;
+use crate::sessions::SessionOwner;
 use crate::state::AppState;
 
 /// Request body for `POST /api/v1/sessions`. Unknown fields fail loudly.
@@ -52,6 +56,10 @@ pub struct SessionView {
     pub pid: Option<i32>,
     pub runtime_dir: Option<String>,
     pub error: Option<String>,
+    /// Owner user ID (explicit null for legacy sessions).
+    pub owner_user_id: Option<String>,
+    /// Organization ID (explicit null for personal sessions).
+    pub org_id: Option<String>,
     pub created_at: String,
     pub started_at: Option<String>,
     pub stopped_at: Option<String>,
@@ -70,6 +78,8 @@ impl TryFrom<&SessionDoc> for SessionView {
             pid: doc.pid,
             runtime_dir: doc.runtime_dir.clone(),
             error: doc.error.clone(),
+            owner_user_id: doc.owner_user_id.clone(),
+            org_id: doc.org_id.clone(),
             created_at: rfc3339(doc.created_at)?,
             started_at: doc.started_at.map(rfc3339).transpose()?,
             stopped_at: doc.stopped_at.map(rfc3339).transpose()?,
@@ -91,6 +101,7 @@ fn parse_session_id(raw: &str) -> Result<bson::Uuid, AppError> {
 /// answer `201` with a `Location` header immediately.
 async fn create(
     State(state): State<AppState>,
+    ctx: AuthContext,
     AppJson(request): AppJson<CreateSessionRequest>,
 ) -> Result<
     (
@@ -100,7 +111,53 @@ async fn create(
     ),
     AppError,
 > {
-    let session = state.sessions.create(&request.package_name).await?;
+    // Validate package name format before DB lookup (catches bad names
+    // early with 400, distinct from 404 for valid-but-absent names).
+    if !is_valid_name(&request.package_name)
+        || request.package_name.len() > 128
+        || request.package_name.is_empty()
+    {
+        return Err(AppError::Validation(
+            "invalid package name: must fully match [A-Za-z0-9_-]+ and be at most 128 bytes"
+                .to_string(),
+        ));
+    }
+
+    // Fetch the package first (need its ownership for authz check).
+    let package = state
+        .packages
+        .get(&request.package_name)
+        .await?
+        .ok_or_else(|| {
+            AppError::NotFound(format!("package not found: {}", request.package_name))
+        })?;
+
+    // Authorize Write on the package.
+    let ownership = Ownership {
+        owner_user_id: package.owner_user_id.as_deref(),
+        org_id: package.org_id.as_deref(),
+    };
+    state
+        .authz
+        .authorize(
+            &ctx,
+            ownership,
+            Action::Write,
+            "package",
+            &request.package_name,
+        )
+        .await?;
+
+    let session = state
+        .sessions
+        .create(
+            &request.package_name,
+            SessionOwner {
+                owner_user_id: ctx.user_id.clone(),
+                org_id: package.org_id.clone(),
+            },
+        )
+        .await?;
     let id = session.id.to_string();
     // The id is a canonical lowercase hyphenated UUID: ASCII, header-safe.
     let location = HeaderValue::try_from(format!("/api/v1/sessions/{id}"))
@@ -118,11 +175,20 @@ async fn create(
 /// `GET /api/v1/sessions/{id}`: full status projection or `404`.
 async fn get_one(
     State(state): State<AppState>,
+    ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<Json<SessionView>, AppError> {
     let id = parse_session_id(&id)?;
     match state.sessions.get(id).await? {
         Some(session) => {
+            let ownership = Ownership {
+                owner_user_id: session.owner_user_id.as_deref(),
+                org_id: session.org_id.as_deref(),
+            };
+            state
+                .authz
+                .authorize(&ctx, ownership, Action::Read, "session", &id.to_string())
+                .await?;
             tracing::debug!(session_id = %id, status = ?session.status, "session fetched");
             Ok(Json(SessionView::try_from(&session)?))
         }
@@ -134,16 +200,32 @@ async fn get_one(
 /// real transition and the idempotent no-op; `404` for an unknown id.
 async fn stop(
     State(state): State<AppState>,
+    ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<StopResponse>), AppError> {
     let id = parse_session_id(&id)?;
-    state.sessions.request_stop(id).await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(StopResponse {
-            status: SessionStatus::Stopping,
-        }),
-    ))
+    // Fetch the session for authorization.
+    let session = state.sessions.get(id).await?;
+    match session {
+        Some(session) => {
+            let ownership = Ownership {
+                owner_user_id: session.owner_user_id.as_deref(),
+                org_id: session.org_id.as_deref(),
+            };
+            state
+                .authz
+                .authorize(&ctx, ownership, Action::Write, "session", &id.to_string())
+                .await?;
+            state.sessions.request_stop(id).await?;
+            Ok((
+                StatusCode::ACCEPTED,
+                Json(StopResponse {
+                    status: SessionStatus::Stopping,
+                }),
+            ))
+        }
+        None => Err(AppError::NotFound(format!("session not found: {id}"))),
+    }
 }
 
 /// Session routes, to be nested under `/api/v1`.
@@ -195,6 +277,8 @@ mod tests {
             runtime_dir: None,
             error: None,
             run_key: None,
+            owner_user_id: None,
+            org_id: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: None,
             stopped_at: None,
@@ -207,6 +291,8 @@ mod tests {
             "pid",
             "runtime_dir",
             "error",
+            "owner_user_id",
+            "org_id",
             "started_at",
             "stopped_at",
         ] {

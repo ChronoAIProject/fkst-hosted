@@ -77,6 +77,8 @@ fn session(status: SessionStatus, runtime_dir: Option<&Path>) -> SessionDoc {
         runtime_dir: runtime_dir.map(|p| p.to_string_lossy().to_string()),
         error: None,
         run_key: None,
+        owner_user_id: None,
+        org_id: None,
         created_at: bson::DateTime::now(),
         started_at: Some(bson::DateTime::now()),
         stopped_at: None,

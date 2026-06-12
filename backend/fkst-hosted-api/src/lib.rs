@@ -5,6 +5,7 @@
 //! the application without a real TCP bind.
 
 pub mod auth;
+pub mod authz;
 pub mod config;
 pub mod db;
 pub mod distribution;
@@ -13,6 +14,7 @@ pub mod error;
 pub mod journal;
 pub mod leases;
 pub mod models;
+pub mod nyxid;
 pub mod packages;
 pub mod reconcile;
 pub mod router;
