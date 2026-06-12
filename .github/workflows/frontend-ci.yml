@@ -62,3 +62,7 @@ jobs:
       - name: test
         if: steps.gate.outputs.skip != 'true'
         run: npm run test
+
+      - name: build-storybook
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run build-storybook
