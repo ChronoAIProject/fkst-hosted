@@ -137,6 +137,10 @@ function M.pr_transition_lock_key(repo, pr_number)
   return "github-devloop/transition/" .. M.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
 end
 
+function M.merge_lane_lock_key(repo)
+  return "github-devloop/merge-lane/" .. M.sanitize_key(repo, false)
+end
+
 function M.parse_entity_proposal_id(proposal_id)
   local repo, issue_number = M.parse_proposal_id(proposal_id)
   if repo ~= nil then

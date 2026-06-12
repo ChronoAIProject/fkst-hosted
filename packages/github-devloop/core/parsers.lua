@@ -103,6 +103,23 @@ function M.parse_issue_list_intake(stdout, limit)
   return issues
 end
 
+function M.parse_issue_number_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local issues = {}
+  if type(decoded) ~= "table" then
+    return issues
+  end
+  each_paginated_item(decoded, function(issue)
+    local number = type(issue) == "table" and tonumber(issue.number) or nil
+    if number ~= nil then
+      table.insert(issues, {
+        number = number,
+      })
+    end
+  end)
+  return issues
+end
+
 local function parse_numbered_list(stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
@@ -187,6 +204,10 @@ function M.parse_pr_list_freshness(stdout)
     end
   end)
   return prs
+end
+
+function M.parse_pr_list_merge_queue(stdout)
+  return M.parse_pr_list_head_base(stdout)
 end
 
 function M.parse_issue_view_result(stdout)

@@ -51,6 +51,15 @@ function M.gh_issue_list_observe_cmd(repo, label)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
 
+function M.gh_issue_list_wip_cmd(repo)
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --label " .. M._shell_single_quote(M._enabled_label)
+    .. " --limit 100"
+    .. " --json number"
+end
+
 function M.gh_issue_list_dependency_reconcile_cmd(repo)
   return M.gh_issue_list_observe_cmd(repo, M._blocked_on_dependency_label)
 end
@@ -166,6 +175,16 @@ end
 function M.gh_pr_list_freshness_cmd(repo)
   return "gh api --paginate --slurp "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
+end
+
+function M.gh_pr_list_merge_queue_cmd(repo, base)
+  if not M._is_git_ref_safe(base) then
+    error("github-devloop: invalid merge queue base branch")
+  end
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo)
+      .. "/pulls?state=open&base=" .. url_encode(base)
+      .. "&per_page=100")
 end
 
 function M.gh_issue_view_cmd(repo, issue_number, fields)
