@@ -3,6 +3,7 @@ local S = {}
 function S.install(M)
 local conflict_hotspot_threshold = 3
 local conflict_hotspot_window_days = 7
+local conflict_hotspot_window_seconds = conflict_hotspot_window_days * 24 * 60 * 60
 local max_conflict_log_bytes = 200000
 local max_conflict_evidence = 8
 
@@ -23,6 +24,10 @@ local function conflict_path_key(path)
     key = M.truncate_utf8(key, 140 - #suffix):gsub("%-+$", "") .. suffix
   end
   return key
+end
+
+local function current_conflict_timestamp()
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", now())
 end
 
 function M.conflict_file_paths_from_unmerged(stdout)
@@ -58,6 +63,7 @@ function M.log_conflict_files(dept, proposal_id, pr_number, unmerged_stdout)
   end
   for _, path in ipairs(paths) do
     M.log_line("info", dept or "fix", proposal_id, "CONFLICT_FILE", {
+      "ts=" .. current_conflict_timestamp(),
       "conflict_file=" .. path,
       "pr=" .. tostring(pr_number or ""),
       "proposal_id=" .. tostring(proposal_id or "unknown"),
@@ -66,18 +72,35 @@ function M.log_conflict_files(dept, proposal_id, pr_number, unmerged_stdout)
   return paths
 end
 
+local function parse_conflict_timestamp(text)
+  local timestamp = tostring(text or ""):match("ts=(%d%d%d%d%-%d%d%-%d%dT%d%d[:%-]%d%d[:%-]%d%dZ)")
+    or tostring(text or ""):match("(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ)")
+  local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+  if seconds == nil then
+    return nil, nil
+  end
+  return timestamp, seconds
+end
+
 local function parse_conflict_log_line(line)
   local text = tostring(line or "")
   if text:find("tag=CONFLICT_FILE", 1, true) == nil then
     return nil
   end
+  local timestamp, timestamp_seconds = parse_conflict_timestamp(text)
   local file = text:match("conflict_file=([^%s]+)")
   local pr = text:match("pr=(%d+)")
   local proposal_id = text:match("proposal_id=([^%s]+)") or text:match("proposal=([^%s]+)")
-  if file == nil or pr == nil or proposal_id == nil or not is_safe_conflict_path(file) then
+  if timestamp_seconds == nil
+    or file == nil
+    or pr == nil
+    or proposal_id == nil
+    or not is_safe_conflict_path(file) then
     return nil
   end
   return {
+    timestamp = timestamp,
+    timestamp_seconds = timestamp_seconds,
     file = file,
     pr = tonumber(pr),
     proposal_id = proposal_id,
@@ -100,25 +123,28 @@ function M.parse_conflict_file_facts(log_text)
   return facts
 end
 
-local function conflict_hotspots(facts, threshold)
+local function conflict_hotspots(facts, threshold, now_seconds)
+  local cutoff_seconds = (tonumber(now_seconds) or now()) - conflict_hotspot_window_seconds
   local by_file = {}
   for _, fact in ipairs(facts or {}) do
-    local item = by_file[fact.file]
-    if item == nil then
-      item = {
-        file = fact.file,
-        prs = {},
-        pr_seen = {},
-        evidence = {},
-      }
-      by_file[fact.file] = item
-    end
-    if fact.pr ~= nil and not item.pr_seen[fact.pr] then
-      item.pr_seen[fact.pr] = true
-      table.insert(item.prs, fact.pr)
-    end
-    if #item.evidence < max_conflict_evidence then
-      table.insert(item.evidence, fact)
+    if fact.timestamp_seconds ~= nil and fact.timestamp_seconds >= cutoff_seconds then
+      local item = by_file[fact.file]
+      if item == nil then
+        item = {
+          file = fact.file,
+          prs = {},
+          pr_seen = {},
+          evidence = {},
+        }
+        by_file[fact.file] = item
+      end
+      if fact.pr ~= nil and not item.pr_seen[fact.pr] then
+        item.pr_seen[fact.pr] = true
+        table.insert(item.prs, fact.pr)
+      end
+      if #item.evidence < max_conflict_evidence then
+        table.insert(item.evidence, fact)
+      end
     end
   end
   local result = {}
@@ -158,6 +184,7 @@ local function hotspot_body(hotspot)
   for _, fact in ipairs(hotspot.evidence or {}) do
     table.insert(lines, "- conflict_file=" .. tostring(fact.file)
       .. " pr=" .. tostring(fact.pr)
+      .. " ts=" .. tostring(fact.timestamp or "")
       .. " proposal_id=" .. tostring(fact.proposal_id))
   end
   table.insert(lines, "")
@@ -220,7 +247,7 @@ function M.observe_conflict_hotspots(repo)
     return { facts = 0, hotspots = 0, raised = 0 }
   end
   local facts = M.parse_conflict_file_facts(result.stdout)
-  local hotspots = conflict_hotspots(facts, conflict_hotspot_threshold)
+  local hotspots = conflict_hotspots(facts, conflict_hotspot_threshold, now())
   local raised = 0
   for _, hotspot in ipairs(hotspots) do
     local request = M.build_conflict_hotspot_issue_create_request(repo, hotspot)

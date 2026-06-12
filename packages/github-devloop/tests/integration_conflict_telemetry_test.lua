@@ -100,6 +100,16 @@ local function find_raise(raises, queue)
   return nil
 end
 
+local function conflict_log_line(issue_number, pr_number, file, timestamp)
+  local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(issue_number)
+  return "github-devloop dept=fix proposal_id=" .. proposal_id
+    .. " tag=CONFLICT_FILE"
+    .. " ts=" .. tostring(timestamp)
+    .. " conflict_file=" .. tostring(file)
+    .. " pr=" .. tostring(pr_number)
+    .. " proposal_id=" .. proposal_id
+end
+
 return {
   test_unmerged_paths_are_deduped_into_safe_conflict_files = function()
     local paths = core.conflict_file_paths_from_unmerged(table.concat({
@@ -119,10 +129,10 @@ return {
     mock_empty_observe_lists()
     t.mock_command("tail -n 200 /var/log/fkst-devloop.log", {
       stdout = table.concat({
-        "github-devloop dept=fix proposal_id=github-devloop/issue/owner/repo/10 tag=CONFLICT_FILE conflict_file=packages/github-devloop/core/payloads.lua pr=101 proposal_id=github-devloop/issue/owner/repo/10",
-        "github-devloop dept=fix proposal_id=github-devloop/issue/owner/repo/11 tag=CONFLICT_FILE conflict_file=packages/github-devloop/core/payloads.lua pr=102 proposal_id=github-devloop/issue/owner/repo/11",
-        "github-devloop dept=fix proposal_id=github-devloop/issue/owner/repo/12 tag=CONFLICT_FILE conflict_file=packages/github-devloop/core/payloads.lua pr=103 proposal_id=github-devloop/issue/owner/repo/12",
-        "github-devloop dept=fix proposal_id=github-devloop/issue/owner/repo/13 tag=CONFLICT_FILE conflict_file=packages/github-devloop/core/validators.lua pr=104 proposal_id=github-devloop/issue/owner/repo/13",
+        conflict_log_line(10, 101, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 60)),
+        conflict_log_line(11, 102, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 3600)),
+        conflict_log_line(12, 103, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 6 * 24 * 60 * 60)),
+        conflict_log_line(13, 104, "packages/github-devloop/core/validators.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 60)),
       }, "\n") .. "\n",
       stderr = "",
       exit_code = 0,
@@ -164,14 +174,35 @@ return {
     mock_empty_observe_lists()
     t.mock_command("tail -n 200 /var/log/fkst-devloop.log", {
       stdout = table.concat({
-        "github-devloop dept=fix proposal_id=github-devloop/issue/owner/repo/10 tag=CONFLICT_FILE conflict_file=packages/github-devloop/core/payloads.lua pr=101 proposal_id=github-devloop/issue/owner/repo/10",
-        "github-devloop dept=fix proposal_id=github-devloop/issue/owner/repo/11 tag=CONFLICT_FILE conflict_file=packages/github-devloop/core/payloads.lua pr=102 proposal_id=github-devloop/issue/owner/repo/11",
+        conflict_log_line(10, 101, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 60)),
+        conflict_log_line(11, 102, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 3600)),
       }, "\n") .. "\n",
       stderr = "",
       exit_code = 0,
     })
 
     local result = run_observability(opts("conflict-below-threshold", {
+      FKST_DEVLOOP_CONFLICT_LOG_CMD = "tail -n 200 /var/log/fkst-devloop.log",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+  end,
+
+  test_observability_ignores_conflicts_outside_sliding_window = function()
+    mock_env({ FKST_DEVLOOP_CONFLICT_LOG_CMD = "tail -n 200 /var/log/fkst-devloop.log" })
+    mock_empty_observe_lists()
+    t.mock_command("tail -n 200 /var/log/fkst-devloop.log", {
+      stdout = table.concat({
+        conflict_log_line(10, 101, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 8 * 24 * 60 * 60)),
+        conflict_log_line(11, 102, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 9 * 24 * 60 * 60)),
+        conflict_log_line(12, 103, "packages/github-devloop/core/payloads.lua", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 10 * 24 * 60 * 60)),
+      }, "\n") .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_observability(opts("conflict-outside-window", {
       FKST_DEVLOOP_CONFLICT_LOG_CMD = "tail -n 200 /var/log/fkst-devloop.log",
     }))
 
