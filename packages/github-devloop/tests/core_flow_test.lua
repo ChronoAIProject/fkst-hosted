@@ -54,11 +54,11 @@ return {
       "implementing",
       "pr-open",
       "reviewing",
-      "review-converge",
       "fixing",
       "review-meta",
       "merge-ready",
       "merging",
+      "blocked",
     }
     for _, state in ipairs(expected) do
       local row = core.restart_completeness_audit_for_state(state)
