@@ -177,32 +177,33 @@ end
 
 local function edit_existing_comment(M, repo, target, path, existing, replace_marker, bot_login)
   if existing == nil or existing.id == nil then
-    return false
+    return false, "missing-id"
   end
 
   local ok, err = M.gh_exec_result(M.gh_comment_edit_cmd(repo, existing.id, path), 30, "gh comment edit")
   if ok then
-    return true
+    return true, nil
   end
 
   if not is_gh_not_found(err.result) then
     error(err.message)
   end
 
-  log.warn("github-proxy: gh comment edit failed: error_class=stale-comment-target")
+  log.warn("github-proxy: gh comment edit returned 404; re-reading comments before classification")
   local comments = load_comments(M, target, repo)
   local refreshed = M.trusted_comment_with_fragment(comments, replace_marker, bot_login)
   if refreshed == nil or refreshed.id == nil then
-    return false
+    log.warn("github-proxy: gh comment edit target is stale: error_class=stale-comment-target")
+    return false, "stale-comment-target"
   end
 
   local refreshed_ok, refreshed_err = M.gh_exec_result(M.gh_comment_edit_cmd(repo, refreshed.id, path), 30, "gh comment edit")
   if refreshed_ok then
-    return true
+    return true, nil
   end
   if is_gh_not_found(refreshed_err.result) then
-    log.warn("github-proxy: refreshed gh comment edit failed: error_class=stale-comment-target")
-    return false
+    log.warn("github-proxy: refreshed gh comment edit target is stale: error_class=stale-comment-target")
+    return false, "stale-comment-target"
   end
   error(refreshed_err.message)
 end
@@ -242,10 +243,13 @@ function M.write_comment_request(payload, target)
     local body = tostring(payload.body) .. "\n\n" .. M.comment_marker(payload.dedup_key) .. "\n"
     local path = "/tmp/fkst-github-proxy-" .. runtime_id .. ".md"
     file.write(path, body)
-    if edit_existing_comment(M, repo, target, path, existing, tostring(replace_marker or ""), bot_login) then
+    local edited, edit_status = edit_existing_comment(M, repo, target, path, existing, tostring(replace_marker or ""), bot_login)
+    if edited then
       return
     end
-    if existing ~= nil then
+    if edit_status == "stale-comment-target" then
+      log.warn("github-proxy: creating a fresh comment after stale comment edit target")
+    elseif existing ~= nil then
       log.warn("github-proxy: replace marker comment missing id; creating a fresh comment")
     end
     M.gh_exec(target.comment_cmd(repo, target.number, path), 30, target.comment_label)
