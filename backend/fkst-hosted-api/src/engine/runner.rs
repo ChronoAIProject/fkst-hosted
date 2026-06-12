@@ -334,8 +334,7 @@ impl SessionRunner {
                 "description": goal.description,
                 "repo": goal.repo,
             });
-            std::fs::write(&goal_json_path, goal_json.to_string())
-                .map_err(RunnerError::Io)?;
+            std::fs::write(&goal_json_path, goal_json.to_string()).map_err(RunnerError::Io)?;
             tracing::debug!(
                 goal_id = %goal.goal_id,
                 path = %goal_json_path.display(),
@@ -347,8 +346,7 @@ impl SessionRunner {
             let token_str = secrecy::ExposeSecret::expose_secret(&goal.github_token);
             {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::write(&token_path, token_str.as_bytes())
-                    .map_err(RunnerError::Io)?;
+                std::fs::write(&token_path, token_str.as_bytes()).map_err(RunnerError::Io)?;
                 std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))
                     .map_err(RunnerError::Io)?;
             }
@@ -1360,12 +1358,18 @@ esac
             packages: vec![pkg.clone()],
             goal: None,
         };
-        let mut session = runner.start_with_spec(&spec).await.expect("start_with_spec");
+        let mut session = runner
+            .start_with_spec(&spec)
+            .await
+            .expect("start_with_spec");
 
         // Same checks as the classic start test.
         assert_eq!(session.package_dirs.len(), 1);
         assert_eq!(session.package_dir, session.package_dirs[0]);
-        assert!(session.package_dir.join("departments/hello/main.lua").is_file());
+        assert!(session
+            .package_dir
+            .join("departments/hello/main.lua")
+            .is_file());
         assert!(session.runtime_dir.join("durable").is_dir());
         assert_eq!(runner.status(&mut session), LiveStatus::Running);
 
@@ -1441,8 +1445,12 @@ esac
         let mut session = runner.start_with_spec(&spec).await.expect("start multi");
 
         assert_eq!(session.package_dirs.len(), 2);
-        assert!(session.package_dirs[0].join("departments/hello/main.lua").is_file());
-        assert!(session.package_dirs[1].join("departments/world/main.lua").is_file());
+        assert!(session.package_dirs[0]
+            .join("departments/hello/main.lua")
+            .is_file());
+        assert!(session.package_dirs[1]
+            .join("departments/world/main.lua")
+            .is_file());
         assert_eq!(session.package_dir, session.package_dirs[0]);
 
         // The stub echoes its argv to stdout; verify multi-root flags.
@@ -1460,7 +1468,9 @@ esac
 
         // No goal env set.
         let token_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
-            .await.expect("token line").expect("channel open");
+            .await
+            .expect("token line")
+            .expect("channel open");
         assert_eq!(token_line, b"GITHUB_TOKEN=UNSET");
 
         let pid = session.pid;
@@ -1486,7 +1496,10 @@ esac
             goal: None,
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
-        assert!(matches!(err, RunnerError::ConformanceFailed { code: 1, .. }));
+        assert!(matches!(
+            err,
+            RunnerError::ConformanceFailed { code: 1, .. }
+        ));
         assert_eq!(fkst_entries(temp_root.path()), 0, "all dirs cleaned");
     }
 
@@ -1517,7 +1530,10 @@ esac
             packages: vec![minimal_package()],
             goal: Some(goal),
         };
-        let mut session = runner.start_with_spec(&spec).await.expect("start goal session");
+        let mut session = runner
+            .start_with_spec(&spec)
+            .await
+            .expect("start goal session");
 
         // goal.json written to runtime dir.
         let goal_json_path = session.runtime_dir.join("goal.json");
@@ -1538,21 +1554,30 @@ esac
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&token_path).expect("metadata").permissions().mode();
+            let mode = fs::metadata(&token_path)
+                .expect("metadata")
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600, "token file must be mode 0600");
         }
 
         // The stub echoes env vars; verify goal env is set.
         let mut stdout = session.take_stdout().expect("stdout");
         let _argv_line = tokio::time::timeout(Duration::from_secs(20), stdout.recv())
-            .await.expect("argv line").expect("channel open");
+            .await
+            .expect("argv line")
+            .expect("channel open");
         let token_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
-            .await.expect("token line").expect("channel open");
+            .await
+            .expect("token line")
+            .expect("channel open");
         let token_str = String::from_utf8(token_line).expect("utf8");
         assert_eq!(token_str, "GITHUB_TOKEN=ghp_test_token_12345");
 
         let goal_file_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
-            .await.expect("goal file line").expect("channel open");
+            .await
+            .expect("goal file line")
+            .expect("channel open");
         let goal_file_str = String::from_utf8(goal_file_line).expect("utf8");
         assert!(
             goal_file_str.starts_with("FKST_GOAL_FILE="),
@@ -1561,7 +1586,9 @@ esac
         assert!(goal_file_str.contains("goal.json"));
 
         let token_file_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
-            .await.expect("token file line").expect("channel open");
+            .await
+            .expect("token file line")
+            .expect("channel open");
         let token_file_str = String::from_utf8(token_file_line).expect("utf8");
         assert!(
             token_file_str.starts_with("FKST_GITHUB_TOKEN_FILE="),
@@ -1607,6 +1634,10 @@ esac
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));
-        assert_eq!(fkst_entries(temp_root.path()), 0, "no dirs on validation fail");
+        assert_eq!(
+            fkst_entries(temp_root.path()),
+            0,
+            "no dirs on validation fail"
+        );
     }
 }

@@ -907,8 +907,14 @@ echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
 sleep 30"#,
         );
 
-        let mut spawned =
-            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn stub supervise");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn stub supervise");
         std::env::remove_var("FKST_PACKAGE_ROOT");
 
         // Own process group: PGID == PID.
@@ -968,7 +974,14 @@ echo "event runtime running handles=3" >&2
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn raiser");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn raiser");
         let first = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
             .await
             .expect("first stdout line within 20s")
@@ -1004,7 +1017,14 @@ echo "pkgroots: ${FKST_PACKAGE_ROOTS:-UNSET}"
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn");
         let mut lines: Vec<String> = Vec::new();
         while lines.len() < 5 {
             let line = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
@@ -1048,7 +1068,14 @@ echo "after-blast"
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn");
         let blast = tokio::time::timeout(Duration::from_secs(30), spawned.stdout_lines.recv())
             .await
             .expect("blast line within 30s")
@@ -1086,7 +1113,14 @@ sleep 30"#,
             ),
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn");
         drop(std::mem::replace(
             &mut spawned.stdout_lines,
             tokio::sync::mpsc::channel(1).1,
@@ -1117,7 +1151,14 @@ echo "after-blast" >&2
 sleep 30"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn blaster");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn blaster");
         let stderr = spawned.output.clone();
         assert!(
             wait_until(|| stderr.snapshot().contains("after-blast")).await,
@@ -1177,8 +1218,14 @@ echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]"
 sleep 30"#,
         );
 
-        let mut spawned =
-            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn stdout-ready stub");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn stdout-ready stub");
         let output = spawned.output.clone();
         assert!(
             wait_until(|| is_ready(&output.snapshot())).await,
@@ -1206,8 +1253,14 @@ echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
 sleep 30"#,
         );
 
-        let mut spawned =
-            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn stderr-ready stub");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn stderr-ready stub");
         let output = spawned.output.clone();
         assert!(
             wait_until(|| is_ready(&output.snapshot())).await,
@@ -1234,8 +1287,14 @@ echo "thread 'main' (1) panicked at src/consumer.rs:1:1:" >&2
 sleep 30"#,
         );
 
-        let mut spawned =
-            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn panic stub");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn panic stub");
         let output = spawned.output.clone();
         assert!(
             wait_until(|| is_panicked(&output.snapshot())).await,
@@ -1268,8 +1327,14 @@ echo "WARN department consumer thread exited" >&2
 sleep 30"#,
         );
 
-        let mut spawned =
-            spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn half-alive stub");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn half-alive stub");
         let output = spawned.output.clone();
         // Wait until the runtime-running marker has definitely been drained.
         assert!(
@@ -1305,7 +1370,14 @@ echo "grandchild: $!" >&2
 wait"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn group");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn group");
         let stderr = spawned.output.clone();
         assert!(
             wait_until(|| stderr.snapshot().contains("grandchild: ")).await,
@@ -1348,7 +1420,14 @@ echo "trap installed" >&2
 while true; do sleep 1; done"#,
         );
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn ignorer");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn ignorer");
         // Only signal once the stub has confirmed its TERM trap is live.
         let stderr = spawned.output.clone();
         assert!(
@@ -1370,7 +1449,14 @@ while true; do sleep 1; done"#,
         let rt = tempfile::tempdir().expect("rt dir");
         let script = stub(dir.path(), "instant-exit.sh", "exit 0");
 
-        let mut spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn");
         // Let the stub exit on its own; it stays a zombie until reaped (no
         // try_wait yet), which on Darwin makes its group EPERM-unsignalable.
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1591,7 +1677,14 @@ exit 1"#,
         let rt = tempfile::tempdir().expect("rt dir");
         let script = stub(dir.path(), "sleeper.sh", "sleep 30");
 
-        let spawned = spawn_supervise(&script, pkg.path(), &[pkg.path().to_path_buf()], rt.path(), None).expect("spawn");
+        let spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            None,
+        )
+        .expect("spawn");
         let pid = spawned.pid;
         let guard = ChildGroupGuard::new(spawned.child, pid);
         let mut child = guard.defuse(); // ownership handed back: drop is a no-op

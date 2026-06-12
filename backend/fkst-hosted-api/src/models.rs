@@ -313,10 +313,7 @@ mod tests {
             !raw.contains_key("goal_id"),
             "goal_id must be omitted when None"
         );
-        assert!(
-            !raw.contains_key("repo"),
-            "repo must be omitted when None"
-        );
+        assert!(!raw.contains_key("repo"), "repo must be omitted when None");
         assert!(
             !raw.contains_key("triggered_by"),
             "triggered_by must be omitted when None"

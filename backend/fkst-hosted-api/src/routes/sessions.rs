@@ -374,7 +374,9 @@ mod tests {
         assert_eq!(body["id"], doc.id.to_string());
         assert_eq!(body["status"], "pending");
         // package_names always present, at least one entry.
-        let names = body["package_names"].as_array().expect("package_names array");
+        let names = body["package_names"]
+            .as_array()
+            .expect("package_names array");
         assert_eq!(names.len(), 1, "falls back to [package_name]");
         assert_eq!(names[0], "demo");
     }

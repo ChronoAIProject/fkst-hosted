@@ -223,7 +223,10 @@ pub fn materialize_package(pkg: &PreparedPackage, base: &Path) -> Result<TempDir
 /// `base`. Each package is validated and materialized individually. On ANY error
 /// all previously-created dirs are dropped (cleaned by RAII), so no partial
 /// tree is ever leaked.
-pub fn materialize_packages(pkgs: &[PreparedPackage], base: &Path) -> Result<Vec<TempDir>, RunnerError> {
+pub fn materialize_packages(
+    pkgs: &[PreparedPackage],
+    base: &Path,
+) -> Result<Vec<TempDir>, RunnerError> {
     let mut dirs = Vec::with_capacity(pkgs.len());
     for pkg in pkgs {
         match materialize_package(pkg, base) {
@@ -238,10 +241,7 @@ pub fn materialize_packages(pkgs: &[PreparedPackage], base: &Path) -> Result<Vec
             }
         }
     }
-    tracing::info!(
-        package_count = dirs.len(),
-        "session.prepare.packages"
-    );
+    tracing::info!(package_count = dirs.len(), "session.prepare.packages");
     Ok(dirs)
 }
 

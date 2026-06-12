@@ -314,18 +314,9 @@ async fn get_one(
     // Read-repair: if status is triggered/running but there is no active
     // session, or the session is terminal, repair to stopped/failed.
     if matches!(goal.status, GoalStatus::Triggered | GoalStatus::Running) {
-        let needs_repair = if goal.active_session_id.is_none() {
-            // Triggered with no active_session_id: only repair if older than
-            // 5 minutes (give the trigger flow time to complete).
-            if goal.status == GoalStatus::Triggered {
-                let age = bson::DateTime::now().timestamp_millis() - goal.updated_at.timestamp_millis();
-                age > 300_000 // 5 minutes
-            } else {
-                true
-            }
-        } else {
+        let needs_repair = if let Some(session_id) = goal.active_session_id {
             // Check if the session is terminal.
-            match state.sessions.get(goal.active_session_id.unwrap()).await {
+            match state.sessions.get(session_id).await {
                 Ok(Some(session)) => {
                     matches!(
                         session.status,
@@ -335,6 +326,16 @@ async fn get_one(
                 }
                 Ok(None) => true, // Session gone
                 Err(_) => false,  // Don't repair on DB error
+            }
+        } else {
+            // No active_session_id: only repair if older than 5 minutes
+            // (give the trigger flow time to complete).
+            if goal.status == GoalStatus::Triggered {
+                let age =
+                    bson::DateTime::now().timestamp_millis() - goal.updated_at.timestamp_millis();
+                age > 300_000 // 5 minutes
+            } else {
+                true
             }
         };
 
@@ -629,15 +630,8 @@ async fn trigger(
     // Read-repair: if status is triggered/running and active_session_id is
     // terminal or absent, CAS the goal to stopped/failed first.
     if matches!(goal.status, GoalStatus::Triggered | GoalStatus::Running) {
-        let needs_repair = if goal.active_session_id.is_none() {
-            if goal.status == GoalStatus::Triggered {
-                let age = bson::DateTime::now().timestamp_millis() - goal.updated_at.timestamp_millis();
-                age > 300_000 // 5 minutes
-            } else {
-                true
-            }
-        } else {
-            match state.sessions.get(goal.active_session_id.unwrap()).await {
+        let needs_repair = if let Some(session_id) = goal.active_session_id {
+            match state.sessions.get(session_id).await {
                 Ok(Some(session)) => {
                     matches!(
                         session.status,
@@ -648,6 +642,11 @@ async fn trigger(
                 Ok(None) => true,
                 Err(_) => false,
             }
+        } else if goal.status == GoalStatus::Triggered {
+            let age = bson::DateTime::now().timestamp_millis() - goal.updated_at.timestamp_millis();
+            age > 300_000 // 5 minutes
+        } else {
+            true
         };
 
         if needs_repair {
@@ -702,8 +701,13 @@ async fn trigger(
     };
 
     // Validate repo shape.
-    validate_goal_fields("dummy", "dummy", &["dummy".to_string()], Some(&effective_repo))
-        .map_err(AppError::Validation)?;
+    validate_goal_fields(
+        "dummy",
+        "dummy",
+        &["dummy".to_string()],
+        Some(&effective_repo),
+    )
+    .map_err(AppError::Validation)?;
 
     // Re-validate every package_names entry exists + caller can_use_package.
     for name in &goal.package_names {
@@ -715,9 +719,7 @@ async fn trigger(
                     .can_use_package(&ctx, name, p.owner_user_id.as_deref(), p.org_id.as_deref())
                     .await;
                 if !can_use {
-                    return Err(AppError::Forbidden(format!(
-                        "package not usable: {name}"
-                    )));
+                    return Err(AppError::Forbidden(format!("package not usable: {name}")));
                 }
             }
             None => {
@@ -729,14 +731,9 @@ async fn trigger(
     }
 
     // Step 3: Mint installation token.
-    let github_app = state
-        .github_app
-        .as_ref()
-        .ok_or_else(|| {
-            AppError::Unprocessable(
-                "github app not configured; cannot trigger goals".to_string(),
-            )
-        })?;
+    let github_app = state.github_app.as_ref().ok_or_else(|| {
+        AppError::Unprocessable("github app not configured; cannot trigger goals".to_string())
+    })?;
     let repo_ref_str = format!("{}/{}", effective_repo.owner, effective_repo.name);
     // The token is minted here but not yet stored (the GoalDrive will handle
     // token refresh in a later step). For now, just validate the app is

@@ -409,8 +409,7 @@ impl SessionService {
             GoalStatus::Stopped,
             GoalStatus::Failed,
         ];
-        let repo_bson = bson::to_bson(&Some(trigger.repo.clone()))
-            .expect("RepoRef serializes");
+        let repo_bson = bson::to_bson(&Some(trigger.repo.clone())).expect("RepoRef serializes");
         let cas_set = doc! {
             "status": bson::to_bson(&GoalStatus::Triggered).expect("GoalStatus serializes"),
             "repo": repo_bson,
@@ -419,16 +418,10 @@ impl SessionService {
         let _goal_after_cas = goals
             .transition_status(trigger.goal_id, &triggerable, cas_set)
             .await?
-            .ok_or_else(|| {
-                AppError::Conflict("goal already triggered or running".to_string())
-            })?;
+            .ok_or_else(|| AppError::Conflict("goal already triggered or running".to_string()))?;
 
         // Step 5: Insert SessionDoc (pending).
-        let first_package = trigger
-            .package_names
-            .first()
-            .cloned()
-            .unwrap_or_default();
+        let first_package = trigger.package_names.first().cloned().unwrap_or_default();
         let session = SessionDoc {
             id: bson::Uuid::new(),
             package_name: first_package,
@@ -538,9 +531,7 @@ impl SessionService {
         }
 
         // Step 7: Set active_session_id on goal (CAS guarded to triggered).
-        let active_set = goals
-            .set_active_session(trigger.goal_id, session.id)
-            .await;
+        let active_set = goals.set_active_session(trigger.goal_id, session.id).await;
         if !active_set.unwrap_or(false) {
             // The goal may have been concurrently modified; the session is
             // already created and will be picked up by the driver/reaper. Log
@@ -798,7 +789,15 @@ async fn drive(
     fencing_token: Option<i64>,
     mut goal_info: Option<GoalDrive>,
 ) {
-    let release = drive_inner(&inner, id, &package_name, stop_rx, fencing_token, &mut goal_info).await;
+    let release = drive_inner(
+        &inner,
+        id,
+        &package_name,
+        stop_rx,
+        fencing_token,
+        &mut goal_info,
+    )
+    .await;
     if !release {
         return;
     }
@@ -895,7 +894,14 @@ async fn drive_inner(
     let package = match inner.packages.get(package_name).await {
         Ok(Some(package)) => package,
         Ok(None) => {
-            fail_session(inner, id, &fence, "package disappeared before start", goal_info).await;
+            fail_session(
+                inner,
+                id,
+                &fence,
+                "package disappeared before start",
+                goal_info,
+            )
+            .await;
             return true;
         }
         Err(error) => {
@@ -989,7 +995,14 @@ async fn drive_inner(
 
     // Goal-status sync: triggered -> running (best-effort CAS).
     if let Some(ref gi) = goal_info {
-        goal_status_sync(inner, gi.goal_id, id, &[GoalStatus::Triggered], GoalStatus::Running).await;
+        goal_status_sync(
+            inner,
+            gi.goal_id,
+            id,
+            &[GoalStatus::Triggered],
+            GoalStatus::Running,
+        )
+        .await;
     }
 
     // Update goal drive token_path now that the runtime dir is known.
@@ -1423,26 +1436,24 @@ async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
             use secrecy::ExposeSecret;
             let token_str = token.expose_secret();
             match tokio::fs::write(&tmp_path, token_str.as_bytes()).await {
-                Ok(()) => {
-                    match tokio::fs::rename(&tmp_path, &drive.token_path).await {
-                        Ok(()) => {
-                            drive.minted_at = std::time::Instant::now();
-                            tracing::info!(
-                                goal_id = %drive.goal_id,
-                                "github token refreshed"
-                            );
-                        }
-                        Err(error) => {
-                            tracing::warn!(
-                                goal_id = %drive.goal_id,
-                                path = %drive.token_path.display(),
-                                error = %error,
-                                "token rename failed; retrying next tick"
-                            );
-                            let _ = tokio::fs::remove_file(&tmp_path).await;
-                        }
+                Ok(()) => match tokio::fs::rename(&tmp_path, &drive.token_path).await {
+                    Ok(()) => {
+                        drive.minted_at = std::time::Instant::now();
+                        tracing::info!(
+                            goal_id = %drive.goal_id,
+                            "github token refreshed"
+                        );
                     }
-                }
+                    Err(error) => {
+                        tracing::warn!(
+                            goal_id = %drive.goal_id,
+                            path = %drive.token_path.display(),
+                            error = %error,
+                            "token rename failed; retrying next tick"
+                        );
+                        let _ = tokio::fs::remove_file(&tmp_path).await;
+                    }
+                },
                 Err(error) => {
                     tracing::warn!(
                         goal_id = %drive.goal_id,

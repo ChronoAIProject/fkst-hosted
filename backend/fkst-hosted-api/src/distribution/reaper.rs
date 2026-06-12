@@ -169,11 +169,7 @@ impl Distributor {
                 continue;
             };
             let lease_key = session.lease_key();
-            if let Err(error) = self
-                .store_for(pod_id)
-                .release(&lease_key, token)
-                .await
-            {
+            if let Err(error) = self.store_for(pod_id).release(&lease_key, token).await {
                 tracing::error!(
                     lease_key = %lease_key,
                     session_id = %session.id,
@@ -471,11 +467,7 @@ impl Distributor {
                 continue;
             };
             let lease_key = session.lease_key();
-            match self
-                .leases
-                .holds_current(&lease_key, token)
-                .await
-            {
+            match self.leases.holds_current(&lease_key, token).await {
                 Ok(true) => {
                     tracing::debug!(
                         session_id = %session.id,
