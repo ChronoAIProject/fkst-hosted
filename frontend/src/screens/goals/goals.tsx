@@ -401,7 +401,7 @@ export function Goals({
                       <td className="py-3 px-3.5">
                         <span className={cn(
                           "font-mono text-[11px] border border-line-2 rounded-[6px] px-2 py-0.5 bg-[color-mix(in_oklab,var(--raise)_60%,transparent)] text-dim",
-                          r.action === 'merge' && "text-red border-[color-mix(in_oklab,var(--red)_45%,var(--line))] font-medium"
+                          r.action.startsWith('merge') && "text-red border-[color-mix(in_oklab,var(--red)_45%,var(--line))] font-medium"
                         )}>
                           {r.action}
                         </span>
