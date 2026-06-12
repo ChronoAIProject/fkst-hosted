@@ -1,15 +1,16 @@
 import React from 'react';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { PackagesView, default as PackagesScreen } from './packages-screen';
+import { PackagesView, default as PackagesScreen, deriveTopology } from './packages-screen';
+import { SessionRegistryProvider, useSessionRegistry } from '../../lib/hooks/session-registry';
 
 // MSW Server Setup
 const server = setupServer();
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
+beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -26,7 +27,9 @@ function createTestWrapper() {
     },
   });
   return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <SessionRegistryProvider>{children}</SessionRegistryProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -179,7 +182,111 @@ describe('PackagesScreen (F1 - List & Detail) Tests', () => {
       const hasNoPulse = skeletons.every((s) => !s.classList.contains(pulseClass));
       expect(hasNoPulse).toBe(true);
     });
+
+    describe('deriveTopology unit tests', () => {
+      it('correctly extracts departments and raisers from matching file paths', () => {
+        const pkg = {
+          name: 'test-pkg',
+          files: [
+            { path: 'departments/dept-a/main.lua', content: '' },
+            { path: 'departments/dept-b/main.lua', content: '' },
+            { path: 'raisers/raiser-x.lua', content: '' },
+            { path: 'raisers/raiser-y.lua', content: '' },
+          ],
+          composed_deps: [],
+          created_at: '',
+          updated_at: '',
+        };
+
+        const result = deriveTopology(pkg);
+        expect(result.departments).toEqual(['dept-a', 'dept-b']);
+        expect(result.raisers).toEqual(['raiser-x', 'raiser-y']);
+      });
+
+      it('ignores non-matching or nested file paths', () => {
+        const pkg = {
+          name: 'test-pkg',
+          files: [
+            { path: 'departments/dept-a/sub/main.lua', content: '' },
+            { path: 'departments/main.lua', content: '' },
+            { path: 'raisers/sub/raiser-x.lua', content: '' },
+            { path: 'other/main.lua', content: '' },
+          ],
+          composed_deps: [],
+          created_at: '',
+          updated_at: '',
+        };
+
+        const result = deriveTopology(pkg);
+        expect(result.departments).toEqual([]);
+        expect(result.raisers).toEqual([]);
+      });
+    });
+
+    describe('Topology Composed Graph & Read/Write Tri-Panel render tests', () => {
+      it('renders unknown wiring with note and tri-panel contents', () => {
+        render(
+          <PackagesView
+            isLoadingList={false}
+            listError={null}
+            packageNames={['my-pkg']}
+            selectedPkgName="my-pkg"
+            packagesData={{
+              'my-pkg': {
+                isLoading: false,
+                pkg: {
+                  name: 'my-pkg',
+                  files: [
+                    { path: 'departments/dept-z/main.lua', content: '' },
+                    { path: 'raisers/raiser-w.lua', content: '' },
+                  ],
+                  composed_deps: ['other-pkg'],
+                  created_at: '',
+                  updated_at: '',
+                },
+              },
+            }}
+          />
+        );
+
+        // Verify select dropdown header info
+        expect(screen.getByText(/nodes = departments · edges = queues/)).toBeInTheDocument();
+
+        // Verify derived raiser name and fallback note
+        expect(screen.getByText('raiser-w')).toBeInTheDocument();
+        expect(screen.getAllByText(/\(declared in Lua, not parsed\)/i).length).toBeGreaterThan(0);
+
+        // Verify derived department name and wiring unknown note
+        expect(screen.getAllByText('dept-z').length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/\(wiring declared in Lua; not parsed by this console\)/i).length).toBeGreaterThan(0);
+
+        // Verify tri-panel content
+        expect(screen.getByText('Read-only')).toBeInTheDocument();
+        expect(screen.getByText('FE manages')).toBeInTheDocument();
+        expect(screen.getByText('Business writes')).toBeInTheDocument();
+        expect(screen.getByText('runtime read-only')).toBeInTheDocument();
+        expect(screen.getByText('applied via restart')).toBeInTheDocument();
+        expect(screen.getByText('REAL posture required')).toBeInTheDocument();
+      });
+    });
   });
+
+// Registry Initializer for Testing
+function RegistryInitializer({
+  packageName,
+  sessionId,
+  children,
+}: {
+  packageName: string;
+  sessionId: string;
+  children: React.ReactNode;
+}) {
+  const { registerSession } = useSessionRegistry();
+  React.useEffect(() => {
+    registerSession(packageName, sessionId);
+  }, [packageName, sessionId, registerSession]);
+  return <>{children}</>;
+}
 
   describe('PackagesScreen (Container Integration)', () => {
     it('fetches packages list and details via lifted useQueries', async () => {
@@ -216,6 +323,277 @@ describe('PackagesScreen (F1 - List & Detail) Tests', () => {
       // Badges resolved
       expect(screen.getByText('flat')).toBeInTheDocument();
       expect(screen.getByText('composed')).toBeInTheDocument();
+    });
+
+    it('renders Switch toggle, defaults to enabled for non-special package, and shows target-state note initially', async () => {
+      server.use(
+        http.get('*/api/v1/packages', () => {
+          return HttpResponse.json(['pkg-a']);
+        }),
+        http.get('*/api/v1/packages/pkg-a', () => {
+          return HttpResponse.json({
+            name: 'pkg-a',
+            files: [],
+            composed_deps: [],
+            created_at: '',
+            updated_at: '',
+          });
+        })
+      );
+
+      render(<PackagesScreen />, { wrapper: createTestWrapper() });
+
+      // Wait for details query to resolve by finding the switch toggle
+      const switchToggle = await screen.findByLabelText('Toggle target state for pkg-a');
+      expect(switchToggle).toBeInTheDocument();
+
+      // "enabled" label and target-state intent warning note should be present initially
+      expect(screen.getByText('enabled')).toBeInTheDocument();
+      expect(
+        screen.getByText('target state — applies via session restart; no enable endpoint in v1')
+      ).toBeInTheDocument();
+
+      // Toggle it
+      fireEvent.click(switchToggle);
+
+      // Verify "disabled" label is rendered, and target-state note remains
+      expect(screen.getByText('disabled')).toBeInTheDocument();
+      expect(
+        screen.getByText('target state — applies via session restart; no enable endpoint in v1')
+      ).toBeInTheDocument();
+    });
+
+    describe('Session Cycling Flow (F4)', () => {
+      it('disables Apply button and shows gap copy when session ID is not known', async () => {
+        server.use(
+          http.get('*/api/v1/packages', () => {
+            return HttpResponse.json(['pkg-b']);
+          }),
+          http.get('*/api/v1/packages/pkg-b', () => {
+            return HttpResponse.json({
+              name: 'pkg-b',
+              files: [
+                { path: 'departments/dept-b/main.lua', content: '' }
+              ],
+              composed_deps: [],
+              created_at: '',
+              updated_at: '',
+            });
+          })
+        );
+
+        render(<PackagesScreen />, { wrapper: createTestWrapper() });
+
+        // Wait for details to load by waiting for the gap copy to appear
+        const gapCopy = await screen.findByText(/pkg-b · current session id not exposed/i);
+        expect(gapCopy).toBeInTheDocument();
+
+        // Apply button should be disabled
+        const applyBtn = screen.getByRole('button', { name: /Apply changes to pkg-b · stop & restart session/i });
+        expect(applyBtn).toBeDisabled();
+      });
+
+      it('executes happy path stop & restart flow (3-phase progress)', async () => {
+        const queryClient = new QueryClient({
+          defaultOptions: {
+            queries: {
+              retry: false,
+              refetchOnWindowFocus: false,
+              refetchOnReconnect: false,
+              refetchOnMount: false,
+            },
+          },
+        });
+        const customWrapper = ({ children }: { children: React.ReactNode }) => (
+          <QueryClientProvider client={queryClient}>
+            <SessionRegistryProvider>{children}</SessionRegistryProvider>
+          </QueryClientProvider>
+        );
+
+        let stopCalled = false;
+        let getSessionCallCount = 0;
+        let createCalled = false;
+
+        server.use(
+          http.get('*/api/v1/packages', () => {
+            return HttpResponse.json(['pkg-b']);
+          }),
+          http.get('*/api/v1/packages/pkg-b', () => {
+            return HttpResponse.json({
+              name: 'pkg-b',
+              files: [
+                { path: 'departments/dept-b/main.lua', content: '' }
+              ],
+              composed_deps: [],
+              created_at: '',
+              updated_at: '',
+            });
+          }),
+          http.post('*/api/v1/sessions/session-123/stop', () => {
+            stopCalled = true;
+            return HttpResponse.json({ message: 'Stop requested' }, { status: 202 });
+          }),
+          http.get('*/api/v1/sessions/session-123', () => {
+            getSessionCallCount++;
+            if (getSessionCallCount === 1) {
+              return HttpResponse.json({ id: 'session-123', status: 'stopping' });
+            } else {
+              return HttpResponse.json({ id: 'session-123', status: 'stopped' });
+            }
+          }),
+          http.post('*/api/v1/sessions', async ({ request }) => {
+            const body = await request.json() as { package_name: string };
+            expect(body.package_name).toBe('pkg-b');
+            createCalled = true;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return HttpResponse.json({ id: 'session-456', status: 'pending' }, { status: 201 });
+          })
+        );
+
+        render(
+          <RegistryInitializer packageName="pkg-b" sessionId="session-123">
+            <PackagesScreen />
+          </RegistryInitializer>,
+          { wrapper: customWrapper }
+        );
+
+        // Wait for Apply button to be enabled (details resolved & session ID registered)
+        const applyBtn = await screen.findByRole('button', { name: /Apply changes to pkg-b · stop & restart session/i });
+        await waitFor(() => expect(applyBtn).not.toBeDisabled());
+
+        // Click Apply
+        fireEvent.click(applyBtn);
+
+        // Phase 1: stop requested
+        await screen.findByText('pkg-b · stop requested (202 ack) →');
+        expect(stopCalled).toBe(true);
+
+        // Phase 2: waiting for stopped
+        await screen.findByText('pkg-b · waiting for stopped →');
+
+        // Manually refetch the session query to simulate the 2-second poll firing
+        await queryClient.refetchQueries({ queryKey: ['sessions', 'session-123'] });
+
+        // Phase 3: starting new session
+        await screen.findByText('pkg-b · starting new session →');
+        await waitFor(() => expect(createCalled).toBe(true));
+
+        // Returns to idle (no progress indicators)
+        await waitFor(() => {
+          expect(screen.queryByText(/stop requested/)).toBeNull();
+          expect(screen.queryByText(/waiting for stopped/)).toBeNull();
+          expect(screen.queryByText(/starting new session/)).toBeNull();
+        });
+      });
+
+      it('displays conflict copy when create session returns 409', async () => {
+        let createCallCount = 0;
+
+        server.use(
+          http.get('*/api/v1/packages', () => {
+            return HttpResponse.json(['pkg-b']);
+          }),
+          http.get('*/api/v1/packages/pkg-b', () => {
+            return HttpResponse.json({
+              name: 'pkg-b',
+              files: [
+                { path: 'departments/dept-b/main.lua', content: '' }
+              ],
+              composed_deps: [],
+              created_at: '',
+              updated_at: '',
+            });
+          }),
+          http.post('*/api/v1/sessions/session-123/stop', () => {
+            return HttpResponse.json({ message: 'Stop requested' }, { status: 202 });
+          }),
+          http.get('*/api/v1/sessions/session-123', () => {
+            return HttpResponse.json({ id: 'session-123', status: 'stopped' });
+          }),
+          http.post('*/api/v1/sessions', () => {
+            createCallCount++;
+            return HttpResponse.json(
+              { error: 'conflict', message: "package already has a live session; its id isn't exposed by the v1 API, so it can't be stopped from here." },
+              { status: 409 }
+            );
+          })
+        );
+
+        render(
+          <RegistryInitializer packageName="pkg-b" sessionId="session-123">
+            <PackagesScreen />
+          </RegistryInitializer>,
+          { wrapper: createTestWrapper() }
+        );
+
+        // Wait for Apply button to be enabled (details resolved & session ID registered)
+        const applyBtn = await screen.findByRole('button', { name: /Apply changes to pkg-b · stop & restart session/i });
+        await waitFor(() => expect(applyBtn).not.toBeDisabled());
+
+        // Click Apply
+        fireEvent.click(applyBtn);
+
+        // Wait for the conflict error text to appear
+        expect(
+          await screen.findByText("pkg-b · session stopped, but restart failed — package already has a live session; its id isn't exposed by the v1 API, so it can't be stopped from here.")
+        ).toBeInTheDocument();
+        expect(createCallCount).toBe(1);
+      });
+
+      it('allows canceling during the session cycling flow', async () => {
+        server.use(
+          http.get('*/api/v1/packages', () => {
+            return HttpResponse.json(['pkg-b']);
+          }),
+          http.get('*/api/v1/packages/pkg-b', () => {
+            return HttpResponse.json({
+              name: 'pkg-b',
+              files: [
+                { path: 'departments/dept-b/main.lua', content: '' }
+              ],
+              composed_deps: [],
+              created_at: '',
+              updated_at: '',
+            });
+          }),
+          http.post('*/api/v1/sessions/session-123/stop', () => {
+            return HttpResponse.json({ message: 'Stop requested' }, { status: 202 });
+          })
+        );
+
+        render(
+          <RegistryInitializer packageName="pkg-b" sessionId="session-123">
+            <PackagesScreen />
+          </RegistryInitializer>,
+          { wrapper: createTestWrapper() }
+        );
+
+        // Wait for Apply button to be enabled
+        const applyBtn = await screen.findByRole('button', { name: /Apply changes to pkg-b · stop & restart session/i });
+        await waitFor(() => expect(applyBtn).not.toBeDisabled());
+
+        // Click Apply
+        fireEvent.click(applyBtn);
+
+        // Wait for stopping progress indicator to appear
+        const stopIndicator = await screen.findByText('pkg-b · stop requested (202 ack) →');
+        expect(stopIndicator).toBeInTheDocument();
+
+        // Cancel button should be visible
+        const cancelBtn = screen.getByRole('button', { name: /Cancel/i });
+        expect(cancelBtn).toBeInTheDocument();
+
+        // Click Cancel
+        fireEvent.click(cancelBtn);
+
+        // Verify status copies disappear and Apply button is restored/enabled
+        await waitFor(() => {
+          expect(screen.queryByText(/stop requested/)).toBeNull();
+          expect(screen.queryByText(/waiting for stopped/)).toBeNull();
+          expect(screen.queryByText(/starting new session/)).toBeNull();
+        });
+        expect(applyBtn).not.toBeDisabled();
+      });
     });
   });
 });
