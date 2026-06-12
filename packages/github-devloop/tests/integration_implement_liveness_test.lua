@@ -151,4 +151,52 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
+
+  test_observe_reraises_old_implementing_marker_without_attempt_marker = function()
+    local event = ready({
+      dedup_key = "ready/consensus-github-devloop/issue/owner/repo/42/2026-01-01T00-00-00Z",
+    })
+    local branch = deterministic_branch_for(event)
+    local comments = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implementing_marker(event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123"),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-old-no-attempt"))
+    t.eq(result.exit_code, 0)
+    local raised = find_raise(result.raises, "devloop_ready")
+    t.eq(raised.payload.proposal_id, event.proposal_id)
+    t.eq(raised.payload.dedup_key, "ready/" .. event.dedup_key)
+  end,
+
+  test_observe_skips_implementing_state_marker_without_progress_facts = function()
+    local event = ready({
+      dedup_key = "ready/consensus-github-devloop/issue/owner/repo/42/2026-01-01T00-00-00Z",
+    })
+    local comments = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-no-progress-facts"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+  end,
+
+  test_observe_skips_recent_implementing_marker_without_attempt_marker = function()
+    local event = ready({
+      dedup_key = "ready/consensus-github-devloop/issue/owner/repo/42/2999-01-01T00-00-00Z",
+    })
+    local branch = deterministic_branch_for(event)
+    local comments = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implementing_marker(event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123"),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-recent-no-attempt"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+  end,
 }

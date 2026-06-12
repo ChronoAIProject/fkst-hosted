@@ -387,17 +387,8 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
   end
 
   local replay_issue = {}
-  for key, value in pairs(issue) do
-    replay_issue[key] = value
-  end
-  replay_issue.content_fetch = M.context_fetch_ref_from_bundle({
-    dept = "observe_issue",
-    repo = issue.repo,
-    issue_number = issue.number,
-    proposal_id = proposal_id,
-    version = state.version,
-    tick = event_ts,
-  })
+  for key, value in pairs(issue) do replay_issue[key] = value end
+  replay_issue.content_fetch = M.context_fetch_ref_from_bundle({ dept = "observe_issue", repo = issue.repo, issue_number = issue.number, proposal_id = proposal_id, version = state.version, tick = event_ts })
   local proposal = M.build_board_proposal(replay_issue, event_ts)
   proposal.dedup_key = state.version
   return M.validate_proposal(proposal) and proposal or nil
@@ -476,11 +467,7 @@ end
 
 local function replay_ready(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
-  local fields = resolve_payload_fields(row, state, {
-    issue = issue,
-    state = state,
-    proposal_id = proposal_id,
-  })
+  local fields = resolve_payload_fields(row, state, { issue = issue, state = state, proposal_id = proposal_id })
   local ready_payload = M.build_devloop_ready_payload({
     proposal_id = fields.proposal_id,
     dedup_key = fields.dedup_key,
@@ -523,15 +510,7 @@ local function replay_ready(dept, issue, state, row, facts)
       M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
     end
     if dependency_hold == nil then
-      M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_hold_comment_request(
-        issue.repo,
-        issue.number,
-        proposal_id,
-        state.version,
-        gate,
-        marker,
-        issue.source_ref
-      ))
+      M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_hold_comment_request(issue.repo, issue.number, proposal_id, state.version, gate, marker, issue.source_ref))
       M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
         issue.repo,
         issue.number,
@@ -557,13 +536,7 @@ local function replay_ready(dept, issue, state, row, facts)
   local raised = { "devloop_ready" }
   local command_comment_request = nil
   if command ~= nil then
-    command_comment_request = M.build_operator_issue_reready_comment_request(
-      issue.repo,
-      issue.number,
-      command,
-      "ready",
-      issue.source_ref
-    )
+    command_comment_request = M.build_operator_issue_reready_comment_request(issue.repo, issue.number, command, "ready", issue.source_ref)
     table.insert(raised, "github-proxy.github_issue_comment_request")
   end
   M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "applied(replay)", "dependency gate is satisfied")
@@ -578,11 +551,16 @@ end
 local function replay_implementing(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local attempt = facts["implement-attempt"]
+  local started_at = attempt and attempt.started_at
   if attempt == nil then
-    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-attempt-marker)", "implement attempt marker is not visible")
+    if facts.implementing == nil then
+      return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-attempt-marker)", "implement attempt marker is not visible")
+    end
+    local marker_updated_at = M.version_updated_at(state.version)
+    if marker_updated_at ~= "" then started_at = M.iso_timestamp_epoch_seconds(marker_updated_at) end
   end
-  local started = tonumber(attempt.started_at)
-  local age = started ~= nil and (now() - started) or 0
+  local started = tonumber(started_at)
+  local age = started ~= nil and (now() - started) or 7200
   if age < 7200 then
     return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(attempt-live)", "implement attempt is still inside the liveness budget")
   end
@@ -1011,9 +989,7 @@ function M.replay_from_table(dept, entity, state, table_row, facts)
     return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(state)", "current state does not match restart transition table row")
   end
   local replay = replayers[row.from_state]
-  if replay == nil then
-    return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(replayer)", "restart transition table row is not replayable by this department")
-  end
+  if replay == nil then return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(replayer)", "restart transition table row is not replayable by this department") end
   local replay_facts = gather_required_facts(row, entity, state, facts or {})
   return replay(dept, entity, state, row, replay_facts)
 end
