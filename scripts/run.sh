@@ -12,6 +12,10 @@
 #   scripts/run.sh check
 #       Run hermetic repository checks only. Does not resolve or execute BIN.
 #
+#   scripts/run.sh doctor
+#       Run read-only preflight checks for git/cargo/rustc, fkst-framework BIN,
+#       codex, gh auth, and relevant FKST_* host facts.
+#
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
 #
@@ -141,7 +145,7 @@ ensure_fresh_bin() {
 }
 
 usage() {
-  sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 cmd_check() {
@@ -149,6 +153,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_test.py"
   python3 -B "$ROOT/scripts/bin_cache_test.py"
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py"
+  python3 -B "$ROOT/scripts/doctor_test.py"
 }
 
 check_test_file_coverage() {
@@ -540,6 +545,7 @@ cmd_build() {
 main() {
   case "${1:-}" in
     check) shift; cmd_check "$@" ;;
+    doctor) shift; "$BASH" "$ROOT/scripts/doctor.sh" "$@" ;;
     test) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
     test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
     run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
