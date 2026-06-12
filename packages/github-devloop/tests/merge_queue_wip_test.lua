@@ -43,6 +43,12 @@ local function mock_repo_env()
   })
 end
 
+local function mock_write_env_many(times)
+  for _ = 1, times do
+    mock_write_env("1")
+  end
+end
+
 local function merge_comments_with_origin(event, origin_marker)
   local comments = { origin_marker }
   for _, comment in ipairs(merge_comments(event)) do
@@ -101,6 +107,20 @@ local function comments_for(event, created_at, state, state_version)
     }))
   end
   return table.concat(rendered, ",")
+end
+
+local function mock_claimed_issue_for_event(event, times)
+  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  for _ = 1, times or 1 do
+    t.mock_command(core.gh_issue_view_merge_cmd("owner/repo", entity.issue_number), {
+      stdout = string.format(
+        '{"title":"Implement decision recorder","state":"OPEN","labels":[{"name":"fkst-dev:merge-ready"}],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+        comments_for(event, "2026-06-03T01:00:00Z")
+      ),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_queue_pr(event, created_at, state, state_version, mergeable, merge_state, rollup_state, rollup_conclusion, base_sha)
@@ -353,6 +373,7 @@ return {
     mock_queue_pr(current, "2026-06-03T02:00:00Z")
     mock_pr_merge(merge_comments_with_origin(current, origin_marker))
     mock_write_env("1")
+    mock_claimed_issue_for_event(current, 2)
     mock_pr_merge(merge_comments_with_origin(current, origin_marker))
     mock_pr_merge(merge_comments_with_origin(current, origin_marker))
     mock_merging_comment()
@@ -383,6 +404,7 @@ return {
     mock_queue_list({ 9, 7 })
     mock_queue_pr_red(older, "2026-06-03T01:00:00Z")
     mock_merge_pr_view(older, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_claimed_issue_for_event(older, 1)
     mock_pr_merge(merge_comments_for_event(older), branch_for_pr(9), "aabb11", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     t.mock_command("git fetch origin 'pull/9/merge'", {
       stdout = "",
@@ -410,6 +432,7 @@ return {
     mock_queue_pr(current, "2026-06-03T02:00:00Z")
     mock_pr_merge(merge_comments_with_origin(current, origin_marker))
     mock_write_env("1")
+    mock_claimed_issue_for_event(current, 2)
     mock_pr_merge(merge_comments_with_origin(current, origin_marker))
     mock_pr_merge(merge_comments_with_origin(current, origin_marker))
     mock_merging_comment()
@@ -433,13 +456,13 @@ return {
     local first = event_for_pr(7, 42, "2026-06-03T00-00-00Z", "def456")
     local second = event_for_pr(8, 43, "2026-06-03T00-01-00Z", "fed789")
     mock_bot_env()
-    mock_write_env("1")
+    mock_write_env_many(64)
     mock_repo_env()
     mock_queue_list({ 7, 8 })
     mock_queue_pr(first, "2026-06-03T01:00:00Z")
     mock_queue_pr(second, "2026-06-03T01:01:00Z")
     mock_merge_pr_view(first)
-    mock_write_env("1")
+    mock_claimed_issue_for_event(first, 2)
     mock_merge_pr_view(first)
     mock_merge_pr_view(first)
     mock_merge_command(first)
@@ -450,9 +473,7 @@ return {
     mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_merge_pr_view(second)
-    mock_write_env("1")
-    mock_write_env("1")
-    mock_write_env("1")
+    mock_claimed_issue_for_event(second, 2)
     mock_merge_pr_view(second)
     mock_merge_pr_view(second)
     mock_merge_command(second)
@@ -474,13 +495,13 @@ return {
     local first = event_for_pr(7, 42, "2026-06-03T00-00-00Z", "def456")
     local second = event_for_pr(8, 43, "2026-06-03T00-01-00Z", "fed789")
     mock_bot_env()
-    mock_write_env("1")
+    mock_write_env_many(64)
     mock_repo_env()
     mock_queue_list({ 7, 8 })
     mock_queue_pr(first, "2026-06-03T01:00:00Z")
     mock_queue_pr(second, "2026-06-03T01:01:00Z")
     mock_merge_pr_view(first)
-    mock_write_env("1")
+    mock_claimed_issue_for_event(first, 2)
     mock_merge_pr_view(first)
     mock_merge_pr_view(first)
     mock_merge_command(first)
@@ -511,6 +532,7 @@ return {
     mock_queue_pr(second, "2026-06-03T01:01:00Z")
     mock_merge_pr_view(first)
     mock_write_env("1")
+    mock_claimed_issue_for_event(first, 2)
     mock_merge_pr_view(first)
     mock_merge_pr_view(first)
     mock_merge_command(first)
@@ -542,6 +564,7 @@ return {
     mock_queue_pr(second, "2026-06-03T01:01:00Z")
     mock_merge_pr_view(first)
     mock_write_env("1")
+    mock_claimed_issue_for_event(first, 2)
     mock_merge_pr_view(first)
     mock_merge_pr_view(first)
     mock_merge_command(first)
@@ -552,8 +575,7 @@ return {
     mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_write_env("1")
-    mock_write_env("1")
-    mock_write_env("1")
+    mock_claimed_issue_for_event(second, 1)
     mock_merge_pr_view(second, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
 
     local result = run_merge_queue_tick(opts("merge-batch-window-gate-fails", {
@@ -579,6 +601,7 @@ return {
     mock_queue_pr(third, "2026-06-03T01:02:00Z")
     mock_merge_pr_view(first)
     mock_write_env("1")
+    mock_claimed_issue_for_event(first, 2)
     mock_merge_pr_view(first)
     mock_merge_pr_view(first)
     mock_merge_command(first)
@@ -591,6 +614,7 @@ return {
     mock_write_env("1")
     mock_write_env("1")
     mock_write_env("1")
+    mock_claimed_issue_for_event(second, 1)
     mock_merge_pr_view(second, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
 
     local result = run_merge_queue_tick(opts("merge-batch-window-no-skip-after-gate-fail", {

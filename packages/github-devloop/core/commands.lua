@@ -21,7 +21,7 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --repo " .. M._shell_single_quote(repo)
     .. " --state open"
     .. " --limit " .. tostring(math.floor(bounded_limit))
-    .. " --json number,title,body,updatedAt,labels"
+    .. " --json number,title,body,updatedAt,labels,assignees"
 end
 
 function M.gh_issue_list_decompose_children_cmd(repo, proposal_id)
@@ -46,7 +46,11 @@ function M.gh_issue_list_recent_closed_cmd(repo, limit)
 end
 
 function M.gh_issue_list_observe_cmd(repo, label)
-  local selected_label = label or M._enabled_label
+  if label == nil or tostring(label) == "" then
+    return "gh api --paginate --slurp "
+      .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
+  end
+  local selected_label = label
   return "gh api --paginate --slurp "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
 end
@@ -198,15 +202,19 @@ function M.gh_issue_view_cmd(repo, issue_number, fields)
 end
 
 function M.gh_issue_view_intake_scan_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "labels,comments,state")
+  return M.gh_issue_view_cmd(repo, issue_number, "labels,comments,state,assignees")
 end
 
 function M.gh_issue_view_intake_judge_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,body,updatedAt,labels,comments,state")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,body,updatedAt,labels,comments,state,assignees")
 end
 
 function M.gh_issue_view_state_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "labels,state,comments")
+  return M.gh_issue_view_cmd(repo, issue_number, "labels,state,comments,assignees")
+end
+
+function M.gh_issue_view_claim_cmd(repo, issue_number)
+  return M.gh_issue_view_cmd(repo, issue_number, "assignees")
 end
 
 function M.gh_issue_view_result_cmd(repo, issue_number)
@@ -254,7 +262,7 @@ function M.gh_issue_view_review_loop_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_merge_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,state")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,state,assignees")
 end
 
 function M.gh_issue_view_observe_cmd(repo, issue_number)

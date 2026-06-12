@@ -50,6 +50,22 @@ local function log_gate(merge_ready, outcome, reason)
   core.log_line("info", "merge", merge_ready.proposal_id, "GATE", fields)
 end
 
+local function verify_issue_claim_before_merge_write(repo, issue_number, merge_ready)
+  if issue_number == nil then
+    return true
+  end
+  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_merge_cmd(repo, issue_number), timeout = 30 })
+  if issue_view.exit_code ~= 0 then
+    error("github-devloop: gh issue merge view failed: " .. tostring(issue_view.stderr))
+  end
+  local current_issue = core.parse_issue_view_merge(issue_view.stdout)
+  if core.issue_claim_state(current_issue and current_issue.assignees, core.claim_owner()) == "self" then
+    return true
+  end
+  core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "claim", "merge-write", "skip-claim-lost", "CLAIM lost before merge external write")
+  return false
+end
+
 local function require_consensus_review_approve(comments, merge_ready)
   local ok, reason = core.review_result_approval_matches_event(comments, merge_ready)
   if ok then
@@ -320,6 +336,7 @@ end
 
 local function process_merge_ready_locked(repo, issue_number, merge_ready, branches, initial_pr, options)
   local enforce_queue = options == nil or options.enforce_queue ~= false
+  local write_mode = options and options.write_mode or nil
   local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
   if entity == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
@@ -394,7 +411,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-foreign(pr-origin)", "PR origin/link does not match immutable PR branch")
     return
   end
-  local write_enabled = core.write_mode() == "real"
+  local write_enabled = (write_mode or core.write_mode()) == "real"
   local pr_ok, pr_reason = assert_open_same_repo_pr(merge_ready, current_pr, repo, origin.branch, merge_ready.reviewed_head_sha)
   if not pr_ok then
     if is_merged_pr(current_pr)
@@ -453,6 +470,9 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
 
   if not write_enabled then
     log_gate(merge_ready, "dry-run", "merge requires FKST_GITHUB_WRITE=1")
+    return
+  end
+  if not verify_issue_claim_before_merge_write(repo, issue_number, merge_ready) then
     return
   end
   if not require_consensus_review_approve(current_pr.comments, merge_ready) then
@@ -525,6 +545,9 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   if not write_enabled then
     log_gate(merge_ready, "dry-run", "write-time FKST_GITHUB_WRITE missing")
+    return
+  end
+  if not verify_issue_claim_before_merge_write(repo, issue_number, merge_ready) then
     return
   end
   log_gate(merge_ready, "write-ready", "write-time FKST_GITHUB_WRITE=1 and trusted review-result approve")
@@ -660,154 +683,159 @@ local function head_contains_base(base_head, entry)
   return false, "current-base-not-contained"
 end
 
-local function run_batch_window(repo, branches, first_merge_ready, queue_entries)
-  local entries = queue_entries or {}
-  if #entries <= 1 then
+local function find_queue_entry(entries, merge_ready)
+  for index, entry in ipairs(entries or {}) do
+    if tostring(entry.pr_number) == tostring(merge_ready.pr_number)
+      and tostring(entry.proposal_id or "") == tostring(merge_ready.proposal_id or "")
+      and tostring(entry.version or "") == tostring(merge_ready.version or "") then
+      return entry, index
+    end
+  end
+  return nil, nil
+end
+
+local function run_batch_window(repo, branches, first_merge_ready, queue_entries, options)
+  local first_entry, first_index = find_queue_entry(queue_entries, first_merge_ready)
+  if first_entry == nil or first_index == nil then
     log_batch_window(first_merge_ready.proposal_id, {
       "action=complete",
       "size=1",
-      "reason=no-candidates",
+      "reason=head-not-initial-queue",
     })
     return
   end
 
   local merged_files = {}
   local merged_count = 1
-  local started = false
-  local required_base_head = nil
-  for _, entry in ipairs(entries) do
-    if not started then
-      if tostring(entry.pr_number) == tostring(first_merge_ready.pr_number)
-        and tostring(entry.proposal_id or "") == tostring(first_merge_ready.proposal_id or "")
-        and tostring(entry.version or "") == tostring(first_merge_ready.version or "") then
-        started = true
-        if not record_merged_files(repo, entry, merged_files) then
-          return
-        end
-        local previous_base_head = tostring(entry.base_sha or "")
-        local base_head, base_reason = current_base_head(branches)
-        if base_head == nil then
-          log_batch_window(first_merge_ready.proposal_id, {
-            "action=stop",
-            "pr=" .. tostring(entry.pr_number),
-            "reason=" .. tostring(base_reason),
-            "size=" .. tostring(merged_count),
-          })
-          return
-        end
-        if previous_base_head == base_head then
-          log_batch_window(first_merge_ready.proposal_id, {
-            "action=stop",
-            "pr=" .. tostring(entry.pr_number),
-            "reason=current-base-not-advanced",
-            "base=" .. tostring(base_head),
-            "size=" .. tostring(merged_count),
-          })
-          return
-        end
-        required_base_head = base_head
-      end
-    else
-      if entry.state ~= "merge-ready" then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=lane-state-" .. tostring(entry.state),
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
-      local base_ok, base_reason = head_contains_base(required_base_head, entry)
-      if not base_ok then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=" .. tostring(base_reason),
-          "base=" .. tostring(required_base_head or ""),
-          "head=" .. tostring(entry.head_sha or ""),
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
-      local files, file_reason = core.merge_queue_changed_files(repo, entry)
-      if files == nil then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=" .. tostring(file_reason),
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
-      local disjoint, path, conflicting_pr = files_disjoint_from_window(files, merged_files)
-      if not disjoint then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=file-overlap",
-          "path=" .. tostring(path),
-          "conflicting_pr=" .. tostring(conflicting_pr),
-          "base=" .. tostring(files.base_sha or ""),
-          "head=" .. tostring(files.head_sha or ""),
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
+  if not record_merged_files(repo, first_entry, merged_files) then
+    return
+  end
+
+  local previous_base_head = tostring(first_entry.base_sha or "")
+  local required_base_head, base_reason = current_base_head(branches)
+  if required_base_head == nil then
+    log_batch_window(first_merge_ready.proposal_id, {
+      "action=stop",
+      "pr=" .. tostring(first_entry.pr_number),
+      "reason=" .. tostring(base_reason),
+      "size=" .. tostring(merged_count),
+    })
+    return
+  end
+  if previous_base_head == required_base_head then
+    log_batch_window(first_merge_ready.proposal_id, {
+      "action=stop",
+      "pr=" .. tostring(first_entry.pr_number),
+      "reason=current-base-not-advanced",
+      "base=" .. tostring(required_base_head),
+      "size=" .. tostring(merged_count),
+    })
+    return
+  end
+
+  for index = first_index + 1, #(queue_entries or {}) do
+    local entry = queue_entries[index]
+    if entry.state ~= "merge-ready" then
       log_batch_window(entry.proposal_id, {
-        "action=try",
+        "action=stop",
         "pr=" .. tostring(entry.pr_number),
-        "reason=disjoint",
+        "reason=lane-state-" .. tostring(entry.state),
+        "size=" .. tostring(merged_count),
+      })
+      return
+    end
+    local base_ok, head_base_reason = head_contains_base(required_base_head, entry)
+    if not base_ok then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=" .. tostring(head_base_reason),
+        "base=" .. tostring(required_base_head or ""),
+        "head=" .. tostring(entry.head_sha or ""),
+        "size=" .. tostring(merged_count),
+      })
+      return
+    end
+    local files, file_reason = core.merge_queue_changed_files(repo, entry)
+    if files == nil then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=" .. tostring(file_reason),
+        "size=" .. tostring(merged_count),
+      })
+      return
+    end
+    local disjoint, path, conflicting_pr = files_disjoint_from_window(files, merged_files)
+    if not disjoint then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=file-overlap",
+        "path=" .. tostring(path),
+        "conflicting_pr=" .. tostring(conflicting_pr),
         "base=" .. tostring(files.base_sha or ""),
         "head=" .. tostring(files.head_sha or ""),
-        "files=" .. tostring(#files.paths),
+        "size=" .. tostring(merged_count),
       })
-      local merge_ready = core.merge_ready_payload_from_queue_entry(entry, core.pr_source_ref(repo, entry.pr_number))
-      if merge_ready == nil then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=invalid-merge-ready-payload",
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
-      merge_ready._merge_pass = "poll"
-      local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
-      local outcome = process_merge_ready_locked(repo, entity and entity.issue_number or nil, merge_ready, branches, nil, { enforce_queue = false })
-      if outcome == nil or outcome.status ~= "merged" then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=gate-not-merged",
-          "outcome=" .. tostring(outcome and outcome.status or "held"),
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
-      table.insert(merged_files, files)
-      merged_count = merged_count + 1
-      local previous_base_head = tostring(files.base_sha or "")
-      local base_head, base_reason = current_base_head(branches)
-      if base_head == nil then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=" .. tostring(base_reason),
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
-      if previous_base_head == base_head then
-        log_batch_window(entry.proposal_id, {
-          "action=stop",
-          "pr=" .. tostring(entry.pr_number),
-          "reason=current-base-not-advanced",
-          "base=" .. tostring(base_head),
-          "size=" .. tostring(merged_count),
-        })
-        return
-      end
-      required_base_head = base_head
+      return
+    end
+    log_batch_window(entry.proposal_id, {
+      "action=try",
+      "pr=" .. tostring(entry.pr_number),
+      "reason=disjoint",
+      "base=" .. tostring(files.base_sha or ""),
+      "head=" .. tostring(files.head_sha or ""),
+      "files=" .. tostring(#files.paths),
+    })
+    local merge_ready = core.merge_ready_payload_from_queue_entry(entry, core.pr_source_ref(repo, entry.pr_number))
+    if merge_ready == nil then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=invalid-merge-ready-payload",
+        "size=" .. tostring(merged_count),
+      })
+      return
+    end
+    merge_ready._merge_pass = "poll"
+    local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
+    local outcome = process_merge_ready_locked(repo, entity and entity.issue_number or nil, merge_ready, branches, nil, {
+      enforce_queue = false,
+      write_mode = options and options.write_mode or nil,
+    })
+    if outcome == nil or outcome.status ~= "merged" then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=gate-not-merged",
+        "outcome=" .. tostring(outcome and outcome.status or "held"),
+        "size=" .. tostring(merged_count),
+      })
+      return
+    end
+    table.insert(merged_files, files)
+    merged_count = merged_count + 1
+    previous_base_head = tostring(files.base_sha or "")
+    required_base_head, base_reason = current_base_head(branches)
+    if required_base_head == nil then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=" .. tostring(base_reason),
+        "size=" .. tostring(merged_count),
+      })
+      return
+    end
+    if previous_base_head == required_base_head then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=current-base-not-advanced",
+        "base=" .. tostring(required_base_head),
+        "size=" .. tostring(merged_count),
+      })
+      return
     end
   end
 
@@ -898,9 +926,13 @@ local function process_merge_queue_tick(event)
     merge_ready._merge_pass = "poll"
     core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
     local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
-    local outcome = process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches, nil, { enforce_queue = false })
+    local write_mode = core.write_mode()
+    local outcome = process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches, nil, {
+      enforce_queue = false,
+      write_mode = write_mode,
+    })
     if outcome ~= nil and outcome.status == "merged" then
-      run_batch_window(repo, branches, merge_ready, entries)
+      run_batch_window(repo, branches, merge_ready, entries, { write_mode = write_mode })
     end
   end)
 end

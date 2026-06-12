@@ -25,6 +25,7 @@ M.spec = {
 local observe_replay_states = {
   thinking = true,
   ready = true,
+  implementing = true,
   ["pr-open"] = true,
   fixing = true,
   ["review-meta"] = true,
@@ -50,11 +51,22 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     snapshot = snapshot,
     event_ts = event_ts,
   }
+  if observe_replay_states[state.state] and state.state == "thinking" then
+    if issue_state ~= nil
+      and issue_state.state == state.state
+      and tostring(issue_state.version or "") == tostring(state.version or "")
+      and core.liveness_timeout_due(row, state, now()) then
+      if core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts) then
+        return true
+      end
+    end
+    return core.replay_from_table("observe_issue", issue, state, row, facts)
+  end
   if observe_replay_states[state.state]
     and core.replay_from_table("observe_issue", issue, state, row, facts) then
     return true
   end
-  if observe_replay_states[state.state] then
+  if observe_replay_states[state.state] and state.state ~= "thinking" then
     return false
   end
   if issue_state == nil
@@ -63,6 +75,21 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     return false
   end
   return core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts)
+end
+
+local function ensure_managed_issue_claim(issue, proposal_id, current, state)
+  local claim_state = core.issue_claim_state(current.assignees, core.claim_owner())
+  if claim_state == "other" then
+    core.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
+    return false
+  end
+  if core.maybe_release_stale_self_claim("observe_issue", issue.repo, issue.number, current, proposal_id, state) then
+    return core.claim_issue_for_management("observe_issue", issue.repo, issue.number, { assignees = {} }, proposal_id)
+  end
+  if claim_state == "self" then
+    return true
+  end
+  return core.claim_issue_for_management("observe_issue", issue.repo, issue.number, current, proposal_id)
 end
 
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
@@ -342,6 +369,9 @@ function pipeline(event)
     local state = snapshot.state
     local issue_state = core.current_state(current.comments, proposal_id)
     if state.state ~= nil then
+      if not ensure_managed_issue_claim(issue, proposal_id, current, state) then
+        return
+      end
       if maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event.ts) then
         return
       end
@@ -375,6 +405,9 @@ function pipeline(event)
     if transition == "pending" then
       core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "unmanaged state marker pending for observe")
       error("github-devloop: unmanaged state marker pending for observe; retrying")
+    end
+    if not core.claim_issue_for_management("observe_issue", issue.repo, issue.number, current, proposal_id) then
+      return
     end
     core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
 

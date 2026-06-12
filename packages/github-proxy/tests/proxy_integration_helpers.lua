@@ -129,7 +129,15 @@ local function mock_label_view(labels)
   })
 end
 
-local function mock_pr_open_guard(labels, comments)
+local function assignees_json(assignees)
+  local rendered = {}
+  for _, assignee in ipairs(assignees or { "fkst-test-bot" }) do
+    table.insert(rendered, string.format('{"login":"%s"}', json_string(assignee)))
+  end
+  return table.concat(rendered, ",")
+end
+
+local function mock_pr_open_guard(labels, comments, assignees)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
@@ -142,8 +150,8 @@ local function mock_pr_open_guard(labels, comments)
       table.insert(rendered_comments, comment_json(comment, "fkst-test-bot"))
     end
   end
-  t.mock_command("--json labels,comments", {
-    stdout = '{"labels":[' .. table.concat(rendered_labels, ",") .. '],"comments":[' .. table.concat(rendered_comments, ",") .. "]}\n",
+  t.mock_command("--json labels,comments,assignees", {
+    stdout = '{"labels":[' .. table.concat(rendered_labels, ",") .. '],"comments":[' .. table.concat(rendered_comments, ",") .. '],"assignees":[' .. assignees_json(assignees) .. "]}\n",
     stderr = "",
     exit_code = 0,
   })
