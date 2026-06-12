@@ -799,6 +799,8 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     "fixing",
     tostring(merge_ready.proposal_id),
     tostring(merge_ready.version),
+    tostring(fix_version),
+    tostring(predecessor_set or "nopred"),
     safe_reason,
   }), source_ref)
 end

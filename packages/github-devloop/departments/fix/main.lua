@@ -198,7 +198,7 @@ local function merge_speculative_predecessors_for_fix(worktree, repo, integratio
     return nil, current_set
   end
   if tostring(current_set) ~= tostring(fix.predecessor_set) then
-    return nil, "predecessor-set-mismatch"
+    return nil, "predecessor-set-mismatch", current_set
   end
   if #predecessors == 0 then
     return nil, "not-speculative"
@@ -286,6 +286,60 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
     fix_summary = bounded_fix_summary(summary),
     clear_fix_summary = true,
   })
+end
+
+local function raise_stale_speculation_refix(repo, issue_number, fix, current_state, current_predecessor_set, reason)
+  local next_version = core.next_fix_version(fix.version)
+  local merge_ready = {
+    proposal_id = fix.proposal_id,
+    pr_number = fix.pr_number,
+    version = core._strip_latest_fix_version_suffix(fix.version),
+    review_proposal_id = fix.review_proposal_id,
+    review_dedup_key = fix.review_dedup_key,
+    reviewed_head_sha = fix.reviewed_head_sha,
+    dedup_key = fix.dedup_key,
+  }
+  local comment_request = core.build_merge_gate_fix_comment_request(
+    repo,
+    issue_number,
+    merge_ready,
+    next_version,
+    fix.gate_failure_excerpt or fix.blocking_gap or reason,
+    fix.gate_baseline_sha,
+    fix.source_ref,
+    current_predecessor_set
+  )
+  local label_request = issue_number ~= nil and core.build_state_label_request(
+    repo,
+    issue_number,
+    "fixing",
+    fix.dedup_key .. "/label/refix/" .. tostring(core.version_fix_round(next_version)),
+    core.issue_source_ref(repo, issue_number)
+  ) or nil
+  local refix_payload = core.build_devloop_fixing_payload({
+    proposal_id = fix.proposal_id,
+    impl_version = next_version,
+  }, fix.pr_number, {
+    review_proposal_id = fix.review_proposal_id,
+    review_dedup_key = fix.review_dedup_key,
+    reviewed_head_sha = fix.reviewed_head_sha,
+    blocking_gap = fix.blocking_gap,
+    gate_baseline_sha = fix.gate_baseline_sha,
+    predecessor_set = current_predecessor_set,
+    gate_failure_excerpt = fix.gate_failure_excerpt,
+  }, fix.source_ref)
+  local add_labels, remove_labels = core.state_label_changes("fixing")
+  core.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
+  core.log_apply("fix", fix.proposal_id, "fixing", next_version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_fixing",
+  })
+  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if label_request ~= nil then
+    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  core.log_raise("fix", fix.proposal_id, "devloop_fixing", refix_payload)
 end
 
 local function raise_work_card(repo, fix, card)
@@ -516,8 +570,19 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    local merge_context, speculative_reason = merge_speculative_predecessors_for_fix(worktree, repo, branches.integration, fix, current_pr)
+    local merge_context, speculative_reason, speculative_current_set = merge_speculative_predecessors_for_fix(worktree, repo, branches.integration, fix, current_pr)
     if merge_context == nil and speculative_reason ~= "not-speculative" then
+      if speculative_reason == "predecessor-set-mismatch" then
+        raise_stale_speculation_refix(
+          repo,
+          issue_number,
+          fix,
+          state,
+          speculative_current_set or "none",
+          "speculative predecessor set changed"
+        )
+        return
+      end
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(" .. tostring(speculative_reason) .. ")", "speculative predecessor set is no longer current")
       return
     end

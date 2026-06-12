@@ -28,8 +28,8 @@ end
 
 local function predecessor_identity(entry)
   return "pr" .. tostring(entry.pr_number)
-    .. "-" .. tostring(entry.proposal_id)
-    .. "-" .. tostring(entry.version)
+    .. "-" .. M.safe_version_segment(entry.proposal_id)
+    .. "-" .. M.safe_version_segment(entry.version)
     .. "-" .. tostring(entry.head_sha)
 end
 

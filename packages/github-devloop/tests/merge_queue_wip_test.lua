@@ -11,6 +11,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_write_env = h.mock_write_env
 local mock_issue_merge = h.mock_issue_merge
 local mock_issue_implement = h.mock_issue_implement
+local mock_issue_fix_for_event = h.mock_issue_fix_for_event
 local mock_pr_merge = h.mock_pr_merge
 local mock_pr_fix = h.mock_pr_fix
 local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
@@ -230,21 +231,30 @@ return {
     t.eq(result.exit_code, 0)
     local fixing_raise = find_raise(result.raises, "devloop_fixing")
     t.is_true(fixing_raise ~= nil)
-    t.eq(fixing_raise.payload.predecessor_set, "pr5-" .. older.proposal_id .. "-" .. older.version .. "-" .. older.reviewed_head_sha)
+    t.eq(
+      fixing_raise.payload.predecessor_set,
+      "pr5-" .. core.safe_version_segment(older.proposal_id) .. "-" .. core.safe_version_segment(older.version) .. "-" .. older.reviewed_head_sha
+    )
     t.eq(count_calls("gh pr merge"), 0)
   end,
 
-  test_speculative_fix_skips_when_predecessor_set_changed = function()
-    local event = fix_event_for_pr(7, 42, "2026-06-03T01-02-03Z", "def456", "pr5-github-devloop/issue/owner/repo/41-old-aaa111")
+  test_speculative_fix_rederives_when_predecessor_set_changed = function()
+    local event = fix_event_for_pr(7, 42, "2026-06-03T01-02-03Z", "def456", "stale-pr5-old-aaa111")
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     local feedback = merge_gate_comment_for_fix(event, "mergeable-conflicting")
     local current_predecessor = event_for_pr(6, 43, "2026-06-03T00-30-00Z", "bbb222")
+    local current_merge_ready = event_for_pr(7, 42, "2026-06-03T01-02-03Z", "def456")
     mock_bot_env()
     mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+    }, branch, event.version)
     mock_pr_fix({ origin_marker, feedback }, branch, "def456")
-    mock_queue_list({ 6 })
+    mock_queue_list({ 6, 7 })
     mock_queue_pr(current_predecessor, "2026-06-03T01:30:00Z")
+    mock_queue_pr(current_merge_ready, "2026-06-03T02:00:00Z", "fixing", event.version)
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
       stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
       stderr = "",
@@ -252,11 +262,21 @@ return {
     })
     mock_existing_fix_worktree(branch, "def456")
 
-    local result = run_fix(event, opts("fix-speculative-predecessor-stale", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_fix(event, opts("fix-speculative-predecessor-rederive", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git push origin"), 0)
-    t.eq(#result.raises, 0)
+    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    t.is_true(fixing_raise ~= nil)
+    t.eq(fixing_raise.payload.version, core.next_fix_version(event.version))
+    t.eq(
+      fixing_raise.payload.predecessor_set,
+      "pr6-" .. core.safe_version_segment(current_predecessor.proposal_id) .. "-" .. core.safe_version_segment(current_predecessor.version) .. "-" .. current_predecessor.reviewed_head_sha
+    )
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(comment_raise ~= nil)
+    t.is_true(comment_raise.payload.body:find('state="fixing" version="' .. core.next_fix_version(event.version) .. '"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('predecessor_set="' .. fixing_raise.payload.predecessor_set .. '"', 1, true) ~= nil)
   end,
 
   test_wip_cap_blocks_new_implementation_before_codex = function()
