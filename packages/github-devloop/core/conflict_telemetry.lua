@@ -171,6 +171,22 @@ local function hotspot_body(hotspot)
   return body
 end
 
+local function hotspot_parent_comment_target(repo, hotspot)
+  for _, fact in ipairs(hotspot and hotspot.evidence or {}) do
+    local entity = M.parse_entity_proposal_id(fact.proposal_id)
+    if entity ~= nil
+      and entity.kind == "issue"
+      and tostring(entity.repo or "") == tostring(repo or "")
+      and entity.issue_number ~= nil then
+      return {
+        repo = repo,
+        issue_number = entity.issue_number,
+      }
+    end
+  end
+  return nil
+end
+
 function M.build_conflict_hotspot_issue_create_request(repo, hotspot)
   local key = conflict_path_key(hotspot.file)
   return {
@@ -184,6 +200,7 @@ function M.build_conflict_hotspot_issue_create_request(repo, hotspot)
       tostring(repo or ""),
       key,
     }),
+    parent_comment_target = hotspot_parent_comment_target(repo, hotspot),
     source_ref = {
       kind = "external",
       ref = tostring(repo or "") .. "#conflict-hotspot/" .. key,

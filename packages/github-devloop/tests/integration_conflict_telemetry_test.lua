@@ -140,6 +140,8 @@ return {
     t.eq(payload.repo, "owner/repo")
     t.eq(payload.title, "Split conflict hotspot: packages/github-devloop/core/payloads.lua")
     t.eq(payload.dedup_key, "conflict-hotspot/owner/repo/packages-github-devloop-core-payloads.lua")
+    t.eq(payload.parent_comment_target.repo, "owner/repo")
+    t.eq(payload.parent_comment_target.issue_number, "10")
     t.eq(payload.source_ref.kind, "external")
     t.eq(payload.source_ref.ref, "owner/repo#conflict-hotspot/packages-github-devloop-core-payloads.lua")
     t.is_true(payload.body:find("Distinct PRs: 3 (101, 102, 103)", 1, true) ~= nil)
