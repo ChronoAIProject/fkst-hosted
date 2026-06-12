@@ -255,7 +255,7 @@ end
 function pipeline(event)
   local fix = event.payload or {}
   if not core.is_supported_fixing(fix) then
-    core.log_entry("fix", event, "unknown", fix.dedup_key)
+    core.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
     core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return
   end

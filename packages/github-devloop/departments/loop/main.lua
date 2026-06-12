@@ -30,7 +30,7 @@ end
 function pipeline(event)
   local unresolved = event.payload or {}
   if not core.is_supported_unresolved(unresolved) then
-    core.log_entry("loop", event, "unknown", unresolved.dedup_key)
+    core.log_entry("loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
     core.log_cas_decision("loop", "unknown", { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
