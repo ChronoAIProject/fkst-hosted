@@ -94,6 +94,15 @@ return {
     t.eq(reason, "mergeable-conflicting")
   end,
 
+  test_merge_gate_reason_class_controls_pr_merge_ref_verification = function()
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-red"), true)
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-red: test: COMPLETED/FAILURE"), true)
+    t.eq(core.merge_gate_reason_class("merge-state-unstable-with-failing-checks"), "rollup-red")
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("merge-state-unstable-with-failing-checks"), true)
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("mergeable-conflicting"), false)
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-pending"), false)
+  end,
+
   test_unstable_with_completed_failure_routes_to_ci_red = function()
     local ok, reason = core.evaluate_ci_merge_gate(pr({
       merge_state_status = "UNSTABLE",
