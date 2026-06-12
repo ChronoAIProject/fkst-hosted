@@ -8,6 +8,7 @@ M.spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
     "devloop_ready",
+    "devloop_ready_session",
   },
   fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
@@ -67,6 +68,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       table.insert(raised, "github-proxy.github_issue_comment_request")
     end
     table.insert(raised, "devloop_ready")
+    table.insert(raised, "devloop_ready_session")
   else
     if dependency_comment_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_comment_request")
@@ -98,6 +100,12 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
   end
   core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready", reason, "result effects complete or recoverable")
   core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(reached))
+  local ready_payload = {}
+  for key, value in pairs(reached) do
+    ready_payload[key] = value
+  end
+  ready_payload.include_ready_hand_off = true
+  core.log_raise("consensus_result", reached.proposal_id, "devloop_ready_session", core.build_devloop_ready_payload(ready_payload))
 end
 
 function pipeline(event)

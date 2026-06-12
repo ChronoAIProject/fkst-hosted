@@ -405,7 +405,20 @@ return {
     t.eq(core.is_supported_ready(ready), true)
     local ready_without_framing = core.build_devloop_ready_payload(reached())
     t.is_nil(ready_without_framing.framing)
+    t.is_nil(ready_without_framing.ready_hand_off)
     t.eq(core.is_supported_ready(ready_without_framing), true)
+    local ready_with_hand_off = core.build_devloop_ready_payload(copy_table(reached(), {
+      include_ready_hand_off = true,
+    }))
+    t.eq(ready_with_hand_off.ready_hand_off.version, ready_with_hand_off.dedup_key)
+    t.eq(core.is_supported_ready(ready_with_hand_off), true)
+    ready_with_hand_off.ready_hand_off.version = "ready/other"
+    t.eq(core.is_supported_ready(ready_with_hand_off), false)
+    ready_with_hand_off = core.build_devloop_ready_payload(copy_table(reached(), {
+      include_ready_hand_off = true,
+      impl_retry_attempt = 2,
+    }))
+    t.eq(core.is_supported_ready(ready_with_hand_off), false)
 
     t.eq(core.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
     local deterministic_branch = core.implement_branch("owner/repo", "42", ready.dedup_key)
