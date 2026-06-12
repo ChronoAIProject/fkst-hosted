@@ -8,7 +8,7 @@ local function mock_bot(login, write_mode)
     stderr = "",
     exit_code = 0,
   })
-  for _ = 1, 3 do
+  for _ = 1, 6 do
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
       stdout = write_mode or "",
       stderr = "",
@@ -163,6 +163,52 @@ return {
     t.eq(released, true)
     t.eq(count_calls("gh issue view '42' --repo 'owner/repo' --json assignees"), 1)
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
+  end,
+
+  test_timeout_release_can_be_followed_by_reclaim = function()
+    mock_bot("fkst-test-bot", "1")
+    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
+      stdout = assignees_json({ "fkst-test-bot" }),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue edit '42' --repo 'owner/repo' --remove-assignee 'fkst-test-bot'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue edit '42' --repo 'owner/repo' --add-assignee 'fkst-test-bot'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
+      stdout = assignees_json({ "fkst-test-bot" }),
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local released = core.maybe_release_stale_self_claim(
+      "claim_contract",
+      "owner/repo",
+      42,
+      { assignees = { { login = "fkst-test-bot" } } },
+      "github-devloop/issue/owner/repo/42",
+      state("thinking")
+    )
+    local reclaimed = core.claim_issue_for_management(
+      "claim_contract",
+      "owner/repo",
+      42,
+      { assignees = {} },
+      "github-devloop/issue/owner/repo/42"
+    )
+
+    t.eq(released, true)
+    t.eq(reclaimed, true)
+    t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
+    t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
+    t.eq(count_calls("gh issue view '42' --repo 'owner/repo' --json assignees"), 2)
   end,
 
   test_timeout_release_skips_when_fresh_read_is_not_self_only = function()
