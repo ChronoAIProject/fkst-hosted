@@ -453,6 +453,8 @@ function M.dependency_gate_note_markers(proposal_id, version, gate_result)
   for _, note in ipairs(gate_result.notes) do
     if type(note) == "table" and note.kind == "dependency-void" then
       table.insert(lines, M.dependency_void_marker(proposal_id, version, note.blocker_number, note.reason))
+    elseif type(note) == "table" and note.kind == "dependency-waiver" then
+      table.insert(lines, M.dependency_waiver_marker(proposal_id, version, note.blocker_number, note.reason))
     end
   end
   return table.concat(lines, "\n")

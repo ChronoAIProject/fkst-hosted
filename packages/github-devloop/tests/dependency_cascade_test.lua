@@ -609,6 +609,9 @@ return {
     t.eq(released.exit_code, 0)
     t.is_true(has_queue(released.raises, "devloop_ready"))
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
+    t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-waiver:v1"))
+    t.is_true(has_marker(released.raises, 'blocker="59"'))
+    t.is_true(has_marker(released.raises, 'reason="completed_without_merged_marker"'))
   end,
 
   test_observe_issue_existing_hold_still_waiting_does_not_refresh = function()
