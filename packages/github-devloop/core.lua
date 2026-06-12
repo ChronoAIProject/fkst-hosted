@@ -39,5 +39,6 @@ require("core.observability").install(M)
 require("core.ensure_repo").install(M)
 require("core.context_bundle").install(M)
 require("core.operator_commands").install(M)
+require("core.claims").install(M)
 
 return M
