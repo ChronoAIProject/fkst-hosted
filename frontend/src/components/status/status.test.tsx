@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { StateDot } from './state-dot';
-import { StateBadge, type StateBadgeState } from './state-badge';
+import { StateBadge, type StateBadgeProps, type StateBadgeState } from './state-badge';
 import { CiGlyph, type CiStatus } from './ci-glyph';
 import { VitalsCell } from './vitals-cell';
 import { PostureChip } from './posture-chip';
