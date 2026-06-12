@@ -197,4 +197,46 @@ return {
     t.eq(derivations.pr, true)
     t.eq(derivations.entity, true)
   end,
+
+  test_replay_payload_fields_resolve_from_declared_table_map = function()
+    local state = {
+      state = "fixing",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z",
+    }
+    local fields = core.resolve_replay_payload_fields(table_by_state().fixing, state, {
+      issue = {
+        repo = "owner/repo",
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      },
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      link = {
+        pr_number = 7,
+      },
+      feedback = {
+        review_proposal_id = "github-devloop/pr-review/owner/repo/7/v/def456",
+        review_dedup_key = "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review",
+        reviewed_head_sha = "def456",
+        gate_baseline_sha = "abc123",
+        blocking_gap = "missing guard",
+      },
+    })
+    t.eq(fields.proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(fields.pr_number, 7)
+    t.eq(fields.version, state.version)
+    t.eq(fields.review_proposal_id, "github-devloop/pr-review/owner/repo/7/v/def456")
+    t.eq(fields.review_dedup_key, "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review")
+    t.eq(fields.reviewed_head_sha, "def456")
+    t.eq(fields.gate_baseline_sha, "abc123")
+    t.eq(fields.blocking_gap, "missing guard")
+    t.eq(fields.source_ref.ref, "owner/repo#pr/7")
+  end,
+
+  test_observe_issue_replay_is_table_driven = function()
+    local text = file.read("packages/github-devloop/departments/observe_issue/main.lua")
+    t.is_true(text:find("core.replay_from_table", 1, true) ~= nil)
+    t.eq(text:find("build_replayed_fixing_payload", 1, true), nil)
+    t.eq(text:find("build_devloop_review_meta_payload", 1, true), nil)
+    t.eq(text:find("build_decompose_replay_payload", 1, true), nil)
+    t.eq(text:find("build_devloop_reviewing_payload", 1, true), nil)
+  end,
 }
