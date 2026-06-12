@@ -1,7 +1,6 @@
 local core = require("core")
 
 local M = {}
-local ai_sentinel = "⟦AI:FKST⟧"
 
 M.spec = {
   consumes = { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" },
@@ -93,322 +92,38 @@ local function issue_comments_for_origin(origin)
   return core.parse_issue_view_result(issue_view.stdout).comments
 end
 
-local function has_reviewing_marker_for_comments(comments, proposal_id, version)
-  return core.has_state_marker(comments, proposal_id, "reviewing", version)
-end
-
-local function has_reviewing_marker(issue_comments, pr_comments, proposal_id, version)
-  return has_reviewing_marker_for_comments(issue_comments, proposal_id, version)
-    or has_reviewing_marker_for_comments(pr_comments, proposal_id, version)
-end
-
-local function run_git(cmd, timeout, label)
-  local result = exec_sync({ cmd = cmd, timeout = timeout })
-  if result.exit_code ~= 0 then
-    return nil, tostring(label or "git command") .. " failed: " .. tostring(result.stderr)
-  end
-  return result
-end
-
-local function current_base_head(origin)
-  local fetch_result, fetch_error = run_git(core.git_fetch_branch_cmd("origin", origin.base_branch), 60, "git base fetch")
-  if fetch_result == nil then
-    return nil, fetch_error
-  end
-  local head_result, head_error = run_git(core.git_remote_branch_head_cmd("origin", origin.base_branch), 30, "git base head")
-  if head_result == nil then
-    return nil, head_error
-  end
-  local base_head = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(base_head) then
-    return nil, "unsafe base head"
-  end
-  return base_head
-end
-
-local function has_empty_resolution_delta(approved_head_sha, base_head_sha, new_head_sha)
-  local result = exec_sync({
-    cmd = core.git_merge_tree_empty_delta_cmd(approved_head_sha, base_head_sha, new_head_sha),
-    timeout = 120,
-  })
-  if result.exit_code == 0 then
-    return true, "empty"
-  end
-  return false, tostring(result.stderr or "")
-end
-
-local function current_head_review_payload(origin, pr_number, current_pr, state, source_ref)
-  local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
-  if core.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
-    return nil
-  end
-  return core.build_devloop_reviewing_payload({
-    proposal_id = origin.proposal_id,
-    impl_version = state.version,
-  }, pr_number, source_ref, state.version)
-end
-
-local function build_review_carry_over_comment_request(origin, pr_number, version, carry, source_ref)
-  local state_marker = core.state_marker(origin.proposal_id, "merge-ready", version)
-  local review_marker = core.review_result_marker(carry.new_review_proposal_id, origin.proposal_id, "approve", carry.new_review_dedup_key)
-  local merge_marker = core.merge_ready_marker(origin.proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
-  local carry_marker = core.review_carry_over_marker(
-    origin.proposal_id,
-    version,
-    carry.old_review_proposal_id,
-    carry.old_review_dedup_key,
-    carry.approved_head_sha,
-    carry.new_review_proposal_id,
-    carry.new_review_dedup_key,
-    carry.new_head_sha,
-    carry.base_head_sha
-  )
-  return core.build_entity_comment_request({
-    kind = "pr",
-    repo = origin.repo,
-    number = pr_number,
-  }, "github-devloop PR review approval carried over"
-    .. "\nResolution delta proof: merge-tree-empty-delta"
-    .. "\nApproved head: " .. tostring(carry.approved_head_sha)
-    .. "\nNew head: " .. tostring(carry.new_head_sha)
-    .. "\nBase head: " .. tostring(carry.base_head_sha)
-    .. "\n\n" .. state_marker
-    .. "\n" .. review_marker
-    .. "\n" .. merge_marker
-    .. "\n" .. carry_marker
-    .. "\n" .. ai_sentinel, core._dedup_key({
-    "review-carry-over",
-    "comment",
-    tostring(origin.proposal_id),
-    tostring(version),
-    tostring(carry.approved_head_sha),
-    tostring(carry.new_head_sha),
-  }), source_ref)
-end
-
-local function maybe_carry_over_approved_head(origin, pr_number, current_pr, state, source_ref)
-  if state.state ~= "merge-ready" then
-    return false
-  end
-  if tostring(current_pr.state or ""):lower() ~= "open" then
-    return false
-  end
-  if not core.is_safe_head_sha(current_pr.head_sha) then
-    return false
-  end
-  local fact = core.merge_ready_fact(current_pr.comments, origin.proposal_id, state.version, pr_number)
-  if fact == nil or tostring(fact.head_sha or "") == tostring(current_pr.head_sha or "") then
-    return false
-  end
-  local approved = {
-    proposal_id = origin.proposal_id,
-    pr_number = pr_number,
-    version = state.version,
-    review_proposal_id = fact.review_proposal_id,
-    review_dedup_key = fact.review_dedup_key,
-    reviewed_head_sha = fact.head_sha,
-  }
-  local approval_ok = core.review_result_approval_matches_event(current_pr.comments, approved)
-  if not approval_ok then
-    return false
-  end
-  local base_head, base_error = current_base_head(origin)
-  if base_head == nil then
-    core.log_cas_decision("observe_pr", origin.proposal_id, state, "merge-ready", "reviewing", "skip-stale(carry-over-proof-unavailable)", base_error)
-    local reviewing_payload = current_head_review_payload(origin, pr_number, current_pr, state, source_ref)
-    if reviewing_payload ~= nil then
-      core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
-    end
-    return true
-  end
-  local empty_delta, delta_reason = has_empty_resolution_delta(fact.head_sha, base_head, current_pr.head_sha)
-  if not empty_delta then
-    core.log_cas_decision("observe_pr", origin.proposal_id, state, "merge-ready", "reviewing", "skip-stale(non-empty-resolution-delta)", delta_reason)
-    local reviewing_payload = current_head_review_payload(origin, pr_number, current_pr, state, source_ref)
-    if reviewing_payload ~= nil then
-      core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
-    end
-    return true
-  end
-  local new_review_proposal = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
-  if core.has_any_review_result_marker(current_pr.comments, new_review_proposal, origin.proposal_id) then
-    return false
-  end
-  local carry = {
-    old_review_proposal_id = fact.review_proposal_id,
-    old_review_dedup_key = fact.review_dedup_key,
-    approved_head_sha = fact.head_sha,
-    new_review_proposal_id = new_review_proposal,
-    new_review_dedup_key = new_review_dedup,
-    new_head_sha = current_pr.head_sha,
-    base_head_sha = base_head,
-  }
-  local comment_request = build_review_carry_over_comment_request(origin, pr_number, state.version, carry, source_ref)
-  local merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, pr_number, state.version, {
-    review_proposal_id = new_review_proposal,
-    review_dedup_key = new_review_dedup,
-    reviewed_head_sha = current_pr.head_sha,
-  }, source_ref)
-  core.log_cas_decision("observe_pr", origin.proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
-  core.log_apply("observe_pr", origin.proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
-    "github-proxy.github_pr_comment_request",
-    "devloop_merge_ready",
-  })
-  core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  core.log_raise("observe_pr", origin.proposal_id, "devloop_merge_ready", merge_payload)
-  return true
-end
-
 local function raise_current_state(origin, pr_number, current_pr, state, source_ref, known_issue_comments)
-  if maybe_carry_over_approved_head(origin, pr_number, current_pr, state, source_ref) then
-    return
+  if state.state == "fixing" and tostring(current_pr.state or ""):lower() ~= "open" then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(pr-closed)", "re-derived PR is not open")
+    return false
   end
-  if state.state == "reviewing" then
-    local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
-    if not core.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
-      local reviewing_payload = core.build_devloop_reviewing_payload(origin, pr_number, source_ref, state.version)
-      core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
-        "devloop_reviewing",
-      })
-      core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
-    end
-    return
+  local issue_comments = known_issue_comments
+  if issue_comments == nil and state.state == "fixing" then
+    issue_comments = issue_comments_for_origin(origin)
   end
-  if state.state == "fixing" then
-    if tostring(current_pr.state or ""):lower() ~= "open" then
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(pr-closed)", "re-derived PR is not open")
-      return
-    end
-    local issue_comments = known_issue_comments or issue_comments_for_origin(origin)
-    local fact_comments = issue_comments or current_pr.comments
-    local feedback = core.fixing_replay_feedback_fact(fact_comments, origin.proposal_id, state.version)
-    if feedback == nil and issue_comments ~= nil then
-      feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version)
-    end
-    if feedback == nil then
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(no-trusted-fix-feedback)", "trusted fix feedback marker is not visible")
-      return
-    end
-    if feedback.review_proposal_id ~= nil and feedback.reviewed_head_sha ~= nil then
-      if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
-        local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", origin.branch), timeout = 60 })
-        if fetch_result.exit_code ~= 0 then
-          core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
-          error("github-devloop: PR head changed before fix replay and deterministic branch head is not readable")
-        end
-        local branch_head = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
-        if branch_head.exit_code ~= 0 then
-          core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
-          error("github-devloop: PR head changed before fix replay and deterministic branch head is not readable")
-        end
-        local intended_head_sha = tostring(branch_head.stdout or ""):gsub("%s+$", "")
-        if not core.is_safe_head_sha(intended_head_sha) then
-          error("github-devloop: unsafe PR origin branch head sha")
-        end
-        if tostring(current_pr.head_sha or "") == intended_head_sha
-          and tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
-          local reviewing_version = core.next_fix_version(state.version)
-          if has_reviewing_marker(fact_comments, current_pr.comments, origin.proposal_id, reviewing_version) then
-            core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "skip-idempotent(reviewing marker already visible)", "reviewing state marker for recovered head is already visible")
-            return
-          end
-          local fix = {
-            proposal_id = origin.proposal_id,
-            pr_number = pr_number,
-            version = state.version,
-            review_proposal_id = feedback.review_proposal_id,
-            review_dedup_key = feedback.review_dedup_key,
-            reviewed_head_sha = feedback.reviewed_head_sha,
-            source_ref = source_ref,
-          }
-          core.raise_fix_reviewing({
-            dept = "observe_pr",
-            repo = origin.repo,
-            issue_number = origin.issue_number,
-            fix = fix,
-            old_head_sha = feedback.reviewed_head_sha,
-            new_head_sha = current_pr.head_sha,
-            new_version = reviewing_version,
-            reason = "push already visible; self-healing missing reviewing marker",
-            current_state = state,
-          })
-          return
-        end
-        core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
-        return
-      end
-      local reviewing_version = core.next_fix_version(state.version)
-      if not core.has_state_marker(fact_comments, origin.proposal_id, "reviewing", reviewing_version) then
-        local fix_payload = core.build_replayed_fixing_payload({
-          proposal_id = origin.proposal_id,
-          impl_version = state.version,
-        }, pr_number, feedback, source_ref)
-        core.log_line("info", "observe_pr", origin.proposal_id, "SELFHEAL", {
-          "state=fixing",
-          "queue=devloop_fixing",
-          "dedup_key=" .. tostring(fix_payload.dedup_key or ""),
-        })
-        core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
-          "devloop_fixing",
-        })
-        core.log_raise("observe_pr", origin.proposal_id, "devloop_fixing", fix_payload)
-      else
-        core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "reviewing", "skip-idempotent(reviewing marker already visible)", "reviewing state marker for fix is already visible")
-      end
-    else
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-foreign(fix-feedback-binding)", "trusted fix feedback marker lacks review binding")
-    end
-    return
+  if state.state == "blocked" and core.decomposed_fact(current_pr.comments, origin.proposal_id, state.version, pr_number) == nil then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
+    return false
   end
-  if state.state == "merge-ready" or state.state == "merging" then
-    local fact = core.merge_ready_fact(current_pr.comments, origin.proposal_id, state.version, pr_number, current_pr.head_sha)
-    if fact ~= nil then
-      local merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, fact.pr_number, state.version, {
-        review_proposal_id = fact.review_proposal_id,
-        review_dedup_key = fact.review_dedup_key,
-        reviewed_head_sha = fact.head_sha,
-      }, source_ref)
-      core.log_apply("observe_pr", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
-        "devloop_merge_ready",
-      })
-      core.log_raise("observe_pr", origin.proposal_id, "devloop_merge_ready", merge_payload)
-    end
-    return
-  end
-  if state.state == "blocked" and origin.issue_number ~= nil then
-    local fact_comments = current_pr.comments or {}
-    local decomposed = core.decomposed_fact(fact_comments, origin.proposal_id, state.version, pr_number)
-    if decomposed == nil then
-      return
-    end
-    local child_list = core.gh_exec({ cmd = core.gh_issue_list_decompose_children_cmd(origin.repo, origin.proposal_id), timeout = 30 })
-    if child_list.exit_code ~= 0 then
-      error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
-    end
-    local complete, completed_count = core.decompose_children_complete(
-      fact_comments,
-      core.parse_decompose_child_issue_list(child_list.stdout),
-      origin.proposal_id,
-      decomposed.version,
-      decomposed.pr_number,
-      decomposed.count
-    )
-    if complete then
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed children already visible)", "decompose children are complete")
-      return
-    end
-    local payload = core.build_decompose_replay_payload(decomposed, fact_comments, source_ref, completed_count)
-    if payload == nil then
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
-      return
-    end
-    core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "applied(decomposed-children-missing)", "decomposed marker count exceeds derived child count " .. tostring(completed_count))
-    core.log_apply("observe_pr", origin.proposal_id, "blocked", state.version, { add = {}, remove = {} }, {
-      "devloop_decompose",
-    })
-    core.log_raise("observe_pr", origin.proposal_id, "devloop_decompose", payload)
-  end
+  local issue_source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref
+  return core.replay_from_table("observe_pr", {
+    repo = origin.repo,
+    number = origin.issue_number,
+    source_ref = issue_source_ref,
+    _replay_issue_comments = issue_comments,
+  }, state, core.restart_transition_row(state.state), {
+    proposal_id = origin.proposal_id,
+    current = { comments = issue_comments or {} },
+    current_pr = current_pr,
+    link = {
+      proposal_id = origin.proposal_id,
+      pr_number = pr_number,
+      branch = origin.branch,
+      impl_version = origin.impl_version,
+      base_branch = origin.base_branch,
+    },
+    source_ref = source_ref,
+  })
 end
 
 local function is_stalled_reviewing(current_pr, origin, pr_number, state)
@@ -559,8 +274,9 @@ function pipeline(event)
       local issue_state = core.current_entity_state(issue_comments, origin.proposal_id)
       if issue_state.state == "fixing" then
         core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
-        raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, issue_comments)
-        maybe_label_hint(origin, issue_state, core.issue_source_ref(origin.repo, origin.issue_number))
+        if raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, issue_comments) then
+          maybe_label_hint(origin, issue_state, core.issue_source_ref(origin.repo, origin.issue_number))
+        end
         return
       end
     end
@@ -569,8 +285,9 @@ function pipeline(event)
     end
     if state.state ~= nil and state.state ~= "pr-open" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
-      raise_current_state(origin, pr.number, current_pr, state, source_ref)
-      maybe_label_hint(origin, state, core.issue_source_ref(origin.repo, origin.issue_number))
+      if raise_current_state(origin, pr.number, current_pr, state, source_ref) then
+        maybe_label_hint(origin, state, core.issue_source_ref(origin.repo, origin.issue_number))
+      end
       return
     end
 
