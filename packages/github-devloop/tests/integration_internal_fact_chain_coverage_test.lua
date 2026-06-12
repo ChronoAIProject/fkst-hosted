@@ -91,6 +91,43 @@ local function mock_decompose_child_issue_list(event, indexes)
   })
 end
 
+local function live_308_decompose_reconcile_stream(event)
+  return {
+    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    core.state_marker(event.proposal_id, "blocked", event.version),
+    core.fix_reconcile_marker(event.proposal_id, event.version, "drop"),
+    core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+  }
+end
+
+local function live_305_merge_gate_fix_stream(event, fixing_version)
+  local review_proposal = core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, event.reviewed_head_sha)
+  local review_dedup = "consensus:" .. review_proposal .. "/review"
+  local merge_gate = core.merge_gate_marker(
+    event.proposal_id,
+    event.pr_number,
+    fixing_version,
+    review_proposal,
+    review_dedup,
+    event.reviewed_head_sha,
+    nil,
+    "rollup-red"
+  )
+  return {
+    pr_comments = {
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      core.state_marker(event.proposal_id, "reviewing", event.version),
+      merge_gate,
+    },
+    issue_comments = {
+      core.state_marker(event.proposal_id, "fixing", fixing_version),
+      merge_gate,
+    },
+    review_proposal = review_proposal,
+    review_dedup = review_dedup,
+  }
+end
+
 local function run_observe_pr_direct(run_opts)
   mock_branch_config_env()
   return t.run_department("departments/observe_pr/main.lua", {
@@ -412,4 +449,59 @@ return {
     t.eq(decompose.payload.head_sha, event.head_sha)
     t.eq(decompose.payload.source_ref.ref, "owner/repo#pr/7")
   end,
-}
+
+  test_observe_pr_live_308_decompose_reconcile_replay_does_not_require_fix_feedback = function()
+    local event = core.build_devloop_decompose_payload(h.fix_reconcile({
+      issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705",
+    }))
+    event.review_proposal_id = nil
+    event.review_dedup_key = nil
+    event.head_sha = nil
+    local comments = live_308_decompose_reconcile_stream(event)
+    mock_bot_env()
+    mock_pr_origin(comments)
+    mock_issue_result_view({ "fkst-dev:blocked" }, {
+      core.state_marker(event.proposal_id, "blocked", event.version),
+    })
+    mock_decompose_child_issue_list(event, {})
+
+    local result = run_observe_pr_direct(opts("observe-pr-live-308-decompose-reconcile-replay"))
+
+    t.eq(result.exit_code, 0)
+    local decompose = find_raise(result.raises, "devloop_decompose")
+    t.eq(decompose.payload.schema, "github-devloop.decompose.v1")
+    t.eq(decompose.payload.proposal_id, event.proposal_id)
+    t.eq(decompose.payload.version, event.version)
+    t.eq(decompose.payload.pr_number, event.pr_number)
+    t.eq(decompose.payload.review_proposal_id, nil)
+    t.eq(decompose.payload.review_dedup_key, nil)
+    t.eq(decompose.payload.head_sha, nil)
+    t.eq(decompose.payload.source_ref.ref, "owner/repo#pr/7")
+  end,
+
+  test_observe_pr_live_305_merge_gate_fixing_replay_reaches_issue_fixing_state = function()
+    local event = merge_ready()
+    local fixing_version = core.next_fix_version(event.version)
+    local fixture = live_305_merge_gate_fix_stream(event, fixing_version)
+    mock_bot_env()
+    mock_pr_origin(fixture.pr_comments)
+    mock_issue_result_view({ "fkst-dev:fixing" }, fixture.issue_comments)
+
+    local result = h.run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:05Z",
+      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+    }, opts("observe-pr-live-305-merge-gate-fixing-replay"))
+
+    t.eq(result.exit_code, 0)
+    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
+    t.eq(fixing_raise.payload.version, fixing_version)
+    t.eq(fixing_raise.payload.review_proposal_id, fixture.review_proposal)
+    t.eq(fixing_raise.payload.review_dedup_key, fixture.review_dedup)
+    t.eq(fixing_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
+  end,
+	}
