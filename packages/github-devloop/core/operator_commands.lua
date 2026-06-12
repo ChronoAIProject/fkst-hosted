@@ -34,7 +34,7 @@ end
 local function parse_command(body)
   local line = first_command_line(body)
   local command = line:match("^fkst:%s*([%w_-]+)")
-  if command == "rereview" or command == "reready" or command == "reintake" then
+  if command == "rereview" or command == "reready" or command == "reintake" or command == "reimplement" then
     return command
   end
   return nil
@@ -96,7 +96,10 @@ end
 
 function M.operator_command_marker(command, outcome, reason)
   if type(command) ~= "table"
-    or (command.command ~= "rereview" and command.command ~= "reready" and command.command ~= "reintake") then
+    or (command.command ~= "rereview"
+      and command.command ~= "reready"
+      and command.command ~= "reintake"
+      and command.command ~= "reimplement") then
     error("github-devloop: invalid operator command marker")
   end
   if outcome ~= "applied" and outcome ~= "refused" then
@@ -160,6 +163,25 @@ function M.build_operator_issue_reready_comment_request(repo, issue_number, comm
     tostring(command.key),
     "applied",
     tostring(outcome_reason or "reready"),
+  }), source_ref)
+end
+
+function M.build_operator_issue_reimplement_comment_request(repo, issue_number, command, attempt, source_ref)
+  local marker = M.operator_command_marker(command, "applied", "reimplement")
+  return M.build_entity_comment_request({
+    kind = "issue",
+    repo = repo,
+    number = issue_number,
+  }, "github-devloop operator command accepted: reimplement"
+    .. "\n\nRetry attempt: " .. tostring(attempt)
+    .. "\n\n" .. marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "operator-command",
+    "comment",
+    tostring(command.key),
+    "applied",
+    "reimplement",
+    tostring(attempt),
   }), source_ref)
 end
 

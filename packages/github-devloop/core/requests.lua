@@ -512,8 +512,9 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
   }
 end
 
-function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail)
+function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
   local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
+  local retry_attempt = tonumber(attempt) or 1
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
     text = M.truncate_utf8(text, M._max_impl_output_len)
@@ -523,7 +524,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
   end
   text = M.neutralize_untrusted_comment_text(text)
 
-  local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason)
+  local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason, attempt)
   local state_marker = M.state_marker(ready.proposal_id, "impl-failed", ready.dedup_key)
   return {
     schema = "github-proxy.v1",
@@ -538,6 +539,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
       "comment",
       "failure",
       safe_reason,
+      tostring(retry_attempt),
       tostring(ready.dedup_key),
     }),
     source_ref = M.normalize_source_ref(ready.source_ref),
@@ -881,6 +883,44 @@ function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_
     tostring(merge_ready.proposal_id),
     tostring(new_version),
     tostring(new_head_sha),
+  }), source_ref)
+end
+
+function M.build_review_carry_over_comment_request(repo, pr_number, issue_proposal_id, version, carry, source_ref)
+  local state_marker = M.state_marker(issue_proposal_id, "merge-ready", version)
+  local review_marker = M.review_result_marker(carry.new_review_proposal_id, issue_proposal_id, "approve", carry.new_review_dedup_key)
+  local merge_marker = M.merge_ready_marker(issue_proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
+  local carry_marker = M.review_carry_over_marker(
+    issue_proposal_id,
+    version,
+    carry.old_review_proposal_id,
+    carry.old_review_dedup_key,
+    carry.approved_head_sha,
+    carry.new_review_proposal_id,
+    carry.new_review_dedup_key,
+    carry.new_head_sha,
+    carry.base_head_sha
+  )
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = pr_number,
+  }, "github-devloop PR review approval carried over"
+    .. "\nResolution delta proof: merge-tree-empty-delta"
+    .. "\nApproved head: " .. tostring(carry.approved_head_sha)
+    .. "\nNew head: " .. tostring(carry.new_head_sha)
+    .. "\nBase head: " .. tostring(carry.base_head_sha)
+    .. "\n\n" .. state_marker
+    .. "\n" .. review_marker
+    .. "\n" .. merge_marker
+    .. "\n" .. carry_marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "review-carry-over",
+    "comment",
+    tostring(issue_proposal_id),
+    tostring(version),
+    tostring(carry.approved_head_sha),
+    tostring(carry.new_head_sha),
   }), source_ref)
 end
 
