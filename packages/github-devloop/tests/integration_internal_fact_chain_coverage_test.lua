@@ -221,21 +221,29 @@ local function assert_declared_merge_gate_fixing_replay_field_set(payload)
   local row = core.restart_transition_row("fixing")
   t.is_true(row ~= nil)
   local expected = {}
+  local expected_count = 0
   for field, reference in pairs(row.payload_fields or {}) do
-    if tostring(reference or ""):find("marker:merge-gate.", 1, true) == 1 then
+    local text = tostring(reference or "")
+    if text:find("marker:merge-gate.", 1, true) == 1 or text == "source_ref:pr" then
       expected[field] = true
+      expected_count = expected_count + 1
     end
   end
   t.eq(expected.review_proposal_id, true)
   t.eq(expected.review_dedup_key, true)
   t.eq(expected.reviewed_head_sha, true)
   t.eq(expected.gate_baseline_sha, true)
+  t.eq(expected.source_ref, true)
+
   local actual_count = 0
-  local expected_count = 0
+  for field in pairs(payload or {}) do
+    if expected[field] == true then
+      t.eq(expected[field], true)
+      actual_count = actual_count + 1
+    end
+  end
   for field in pairs(expected) do
-    expected_count = expected_count + 1
     t.is_true(payload[field] ~= nil)
-    actual_count = actual_count + 1
   end
   t.eq(actual_count, expected_count)
 end
