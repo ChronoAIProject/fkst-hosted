@@ -283,6 +283,41 @@ impl GoalRepo {
         Ok(matched)
     }
 
+    /// Persist a created repo reference onto a triggered goal. CAS guarded:
+    /// only succeeds when the goal's status is `triggered`. Returns `true`
+    /// when the update matched, `false` otherwise. Used by the create-new-repo
+    /// trigger path to link the freshly created repo back to the goal.
+    pub async fn set_repo(
+        &self,
+        goal_id: bson::Uuid,
+        repo: &super::model::RepoRef,
+    ) -> Result<bool, crate::error::AppError> {
+        let filter = doc! {
+            "_id": goal_id,
+            "status": bson::to_bson(&GoalStatus::Triggered).expect("GoalStatus serializes"),
+        };
+        let update = doc! {
+            "$set": {
+                "repo": bson::to_bson(repo).expect("RepoRef serializes"),
+                "updated_at": bson::DateTime::now(),
+            }
+        };
+
+        let result = self
+            .coll
+            .update_one(filter, update)
+            .await
+            .map_err(|e| log_db_error("set_repo", e))?;
+
+        let matched = result.matched_count > 0;
+        tracing::debug!(
+            goal_id = %goal_id,
+            matched,
+            "set_repo attempted"
+        );
+        Ok(matched)
+    }
+
     /// Raw CAS update with a caller-provided filter and update document.
     /// Returns `true` when the update matched a document, `false` otherwise.
     /// Used by the driver's best-effort goal-status sync writes where the

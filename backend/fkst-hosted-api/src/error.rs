@@ -71,6 +71,58 @@ impl From<crate::packages::PackageError> for AppError {
     }
 }
 
+/// Map repo-creation-domain errors onto the unified type:
+/// - NameTaken -> 409 Conflict
+/// - AuthFailed -> 403 Forbidden
+/// - RateLimited -> 503 Unavailable
+/// - NyxIdUnavailable -> 503 Unavailable
+/// - ExchangeRejected -> 401 Unauthorized
+/// - Upstream -> 502 Bad Gateway (mapped as 503 Unavailable)
+/// - Malformed -> 500 Internal
+impl From<crate::goals::CreateRepoError> for AppError {
+    fn from(err: crate::goals::CreateRepoError) -> Self {
+        use crate::goals::CreateRepoError;
+        match err {
+            CreateRepoError::NameTaken(name) => {
+                AppError::Conflict(format!("repository name already exists: {name}"))
+            }
+            CreateRepoError::AuthFailed(detail) => {
+                tracing::warn!(detail = %detail, "github auth failure during repo creation");
+                AppError::Forbidden(
+                    "github authorization failed: cannot create repository".to_string(),
+                )
+            }
+            CreateRepoError::RateLimited => {
+                AppError::Unavailable("github rate limited; retry later".to_string())
+            }
+            CreateRepoError::NyxIdUnavailable(detail) => {
+                tracing::error!(detail = %detail, "nyxid unavailable during repo creation");
+                AppError::Unavailable(
+                    "credential proxy unavailable; cannot create repository".to_string(),
+                )
+            }
+            CreateRepoError::ExchangeRejected(detail) => {
+                tracing::warn!(detail = %detail, "token exchange rejected during repo creation");
+                AppError::Unauthorized(
+                    "token exchange rejected: cannot create repository".to_string(),
+                )
+            }
+            CreateRepoError::Upstream { status, message } => {
+                tracing::error!(status, message = %message, "upstream error during repo creation");
+                AppError::Unavailable(format!(
+                    "github returned error {status}; cannot create repository"
+                ))
+            }
+            CreateRepoError::Malformed(detail) => {
+                tracing::error!(detail = %detail, "malformed github response");
+                AppError::Internal(anyhow::anyhow!(
+                    "malformed github response during repo creation: {detail}"
+                ))
+            }
+        }
+    }
+}
+
 /// Stable JSON error envelope: `{"error": "<code>", "message": "<text>"}`.
 #[derive(Debug, Serialize)]
 struct ErrorEnvelope {
