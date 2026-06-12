@@ -160,7 +160,7 @@ end
 function pipeline(event)
   local conflict = event.payload or {}
   if not core.is_supported_sync_conflict(conflict) then
-    core.log_entry("sync_conflict", event, "branch-sync", conflict.dedup_key)
+    core.log_entry("sync_conflict", event, "branch-sync", core.payload_field(conflict, "dedup_key"))
     core.log_cas_decision("sync_conflict", "branch-sync", { state = nil, version = nil }, "conflict", "resolved", "skip-foreign(payload)", "unsupported sync conflict payload")
     return
   end

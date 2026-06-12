@@ -80,8 +80,10 @@ local function fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
   return merge_product_sha
 end
 
-local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha)
-  fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha, merge_gate_reason)
+  if core.merge_gate_reason_requires_pr_merge_product(merge_gate_reason) then
+    fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+  end
   local base_head = expected_baseline_sha
   if base_head == nil then
     local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
@@ -97,6 +99,12 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   if not core.is_safe_head_sha(base_head) then
     error("github-devloop: unsafe integration head")
   end
+  local result = {
+    target_branch = integration_branch,
+    target_sha = base_head,
+    conflicted = false,
+    unmerged_paths = "",
+  }
   local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
   if merge_result.exit_code ~= 0 then
     local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
@@ -106,13 +114,36 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
     if tostring(unmerged_result.stdout or "") == "" then
       error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
     end
+    result.conflicted = true
+    result.unmerged_paths = tostring(unmerged_result.stdout or "")
     core.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
       "integration_branch=" .. tostring(integration_branch),
       "integration_sha=" .. tostring(base_head),
       "reason=integration merge requires codex conflict resolution",
     })
   end
-  return base_head
+  return result
+end
+
+local function assert_no_unmerged_paths(worktree)
+  local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+  if unmerged_result.exit_code ~= 0 then
+    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+  end
+  if tostring(unmerged_result.stdout or "") ~= "" then
+    error("github-devloop: fix left target merge conflicts unresolved")
+  end
+end
+
+local function assert_no_conflict_markers(worktree)
+  local markers_result = exec_sync({ cmd = core.git_conflict_markers_cmd(worktree), timeout = 30 })
+  if markers_result.exit_code == 1 then
+    return
+  end
+  if markers_result.exit_code == 0 then
+    error("github-devloop: fix left conflict markers unresolved")
+  end
+  error("github-devloop: git conflict marker check failed: " .. tostring(markers_result.stderr))
 end
 
 local function raise_review_meta(repo, issue_number, fix, reason, detail)
@@ -150,26 +181,37 @@ local function bounded_fix_summary(value)
 end
 
 local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
-  local new_version = core.next_fix_version(fix.version)
-  fix.fix_summary = bounded_fix_summary(summary)
-  core.log_cas_decision("fix", fix.proposal_id, { state = "fixing", version = fix.version }, "fixing", "reviewing", "applied", reason)
-  local comment_request = core.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
-  local label_request = core.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
-  local add_labels, remove_labels = core.state_label_changes("reviewing")
-  local reviewing_payload = core.build_devloop_reviewing_payload({
-    proposal_id = fix.proposal_id,
-    impl_version = new_version,
-  }, fix.pr_number, fix.source_ref)
-  core.log_apply("fix", fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_reviewing",
+  core.raise_fix_reviewing({
+    dept = "fix",
+    repo = repo,
+    issue_number = issue_number,
+    fix = fix,
+    old_head_sha = old_head_sha,
+    new_head_sha = new_head_sha,
+    reason = reason,
+    fix_summary = bounded_fix_summary(summary),
+    clear_fix_summary = true,
   })
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  if issue_number ~= nil then
-    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  end
-  core.log_raise("fix", fix.proposal_id, "devloop_reviewing", reviewing_payload)
+end
+
+local function raise_work_card(repo, fix, card)
+  local request = core.build_work_card_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = fix.pr_number,
+  }, {
+    proposal_id = fix.proposal_id,
+    role = "fix",
+    version = fix.version,
+    round = core.version_fix_round(fix.version),
+    started_at = card.started_at,
+    finished_at = card.finished_at,
+    outcome = card.outcome,
+    gate_baseline_sha = fix.gate_baseline_sha,
+    last_stage = fix.blocking_gap or fix.gate_failure_excerpt,
+    source_ref = fix.source_ref,
+  })
+  core.log_work_card("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", request)
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)
@@ -213,7 +255,7 @@ end
 function pipeline(event)
   local fix = event.payload or {}
   if not core.is_supported_fixing(fix) then
-    core.log_entry("fix", event, "unknown", fix.dedup_key)
+    core.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
     core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -273,7 +315,16 @@ function pipeline(event)
     end
     local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
-      merge_gate_fact = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
+      local merge_gate_candidate = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
+      merge_gate_fact = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
+        review_proposal_id = fix.review_proposal_id,
+        review_dedup_key = fix.review_dedup_key,
+        gate_baseline_sha = fix.gate_baseline_sha,
+        match_gate_baseline_sha = true,
+      })
+      if merge_gate_fact == nil then
+        merge_gate_fact = merge_gate_candidate
+      end
     end
     if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
@@ -366,7 +417,20 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    merge_integration_for_fix(worktree, fix.pr_number, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
+    local merge_context = merge_integration_for_fix(
+      worktree,
+      fix.pr_number,
+      branches.integration,
+      merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil,
+      merge_gate_fact and merge_gate_fact.reason or nil
+    )
+    if merge_context.conflicted then
+      core.log_conflict_files("fix", fix.proposal_id, fix.pr_number, merge_context.unmerged_paths)
+    end
+    local codex_started_at = now()
+    raise_work_card(repo, fix, {
+      started_at = codex_started_at,
+    })
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "fix",
@@ -378,7 +442,7 @@ function pipeline(event)
       tick = event.ts,
     })
     local result = spawn_codex_sync({
-      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing, content_fetch),
+      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing, content_fetch, merge_context),
       worktree = worktree,
     })
     if type(result) ~= "table" or result.exit_code ~= 0 then
@@ -388,9 +452,16 @@ function pipeline(event)
         source_ref = fix.source_ref,
         terminal = false,
       })
+      raise_work_card(repo, fix, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "failed: codex-failed",
+      })
       error("github-devloop: fix codex failed: " .. tostring(stderr))
     end
     core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=completed", nil)
+    assert_no_unmerged_paths(worktree)
+    assert_no_conflict_markers(worktree)
 
     local status = exec_sync({ cmd = core.git_status_cmd(worktree), timeout = 30 })
     if status.exit_code ~= 0 then
@@ -434,6 +505,11 @@ function pipeline(event)
           error("github-devloop: pushed PR head verification failed")
         end
 
+        raise_work_card(repo, fix, {
+          started_at = codex_started_at,
+          finished_at = now(),
+          outcome = "completed: existing head pushed",
+        })
         raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, existing_head_sha, "existing fix commit pushed and PR head verified", result.stdout or result.stderr)
         return
       end
@@ -441,6 +517,11 @@ function pipeline(event)
         queue = event.queue,
         source_ref = fix.source_ref,
         terminal = false,
+      })
+      raise_work_card(repo, fix, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "escalated: no-fix",
       })
       raise_review_meta(repo, issue_number, fix, "no-fix", result.stdout or result.stderr)
       return
@@ -450,7 +531,13 @@ function pipeline(event)
     if add_result.exit_code ~= 0 then
       error("github-devloop: git add failed: " .. tostring(add_result.stderr))
     end
-    local commit_result = exec_sync({ cmd = core.git_commit_cmd(worktree, "Fix github-devloop review feedback"), timeout = 60 })
+    local commit_result = exec_sync({
+      cmd = core.git_commit_cmd(worktree, core.fix_commit_subject(
+        issue_number,
+        core.commit_issue_subject_snapshot(repo, issue_number)
+      )),
+      timeout = 60,
+    })
     if commit_result.exit_code ~= 0 then
       error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))
     end
@@ -470,6 +557,11 @@ function pipeline(event)
       error("github-devloop: unsafe fix head_sha")
     end
     if new_head_sha == fix.reviewed_head_sha then
+      raise_work_card(repo, fix, {
+        started_at = codex_started_at,
+        finished_at = now(),
+        outcome = "escalated: no-new-head",
+      })
       raise_review_meta(repo, issue_number, fix, "no-new-head", result.stdout or result.stderr)
       return
     end
@@ -508,6 +600,11 @@ function pipeline(event)
       error("github-devloop: pushed PR head verification failed")
     end
 
+    raise_work_card(repo, fix, {
+      started_at = codex_started_at,
+      finished_at = now(),
+      outcome = "completed: pushed for re-review",
+    })
     raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, new_head_sha, "fix pushed and PR head verified", result.stdout or result.stderr)
   end)
 end

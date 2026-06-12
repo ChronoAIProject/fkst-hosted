@@ -119,9 +119,17 @@ end
 function M.log_entry(dept, event, proposal_id, dedup_key)
   M.log_line("info", dept, proposal_id, "ENTRY", {
     "queue=" .. tostring(event and event.queue or "unknown"),
+    "payload_type=" .. type(event and event.payload),
     "version=" .. tostring(dedup_key or ""),
     "dedup_key=" .. tostring(dedup_key or ""),
   })
+end
+
+function M.payload_field(payload, key)
+  if type(payload) ~= "table" then
+    return nil
+  end
+  return payload[key]
 end
 
 function M.log_cas_decision(dept, proposal_id, current, from_state, to_state, outcome, reason)
@@ -167,6 +175,7 @@ end
 function M.log_raise(dept, proposal_id, queue, payload)
   if queue == "github-proxy.github_issue_label_request"
     or queue == "github-proxy.github_issue_comment_request"
+    or queue == "github-proxy.github_pr_comment_request"
     or queue == "github-proxy.github_issue_create_request"
     or queue == "github-proxy.github_pr_open_request" then
     M.log_outbound(dept, proposal_id, queue, payload)

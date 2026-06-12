@@ -1,5 +1,9 @@
 local M = {}
 
+function M.persistence_class()
+  return "judgment_pipeline"
+end
+
 local default_angles = { "minimal", "structural", "delete" }
 local max_angles = 4
 local max_key_len = 200
@@ -15,6 +19,7 @@ local max_narrowed_question_len = 2000
 local max_digest_len = 600
 local max_prior_round_digests = 12
 local max_scratch_slug_len = 120
+local stale_generation_context_error_class = "stale_generation_context"
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 local gap_label = "⟦FKST:GAP⟧"
@@ -28,11 +33,9 @@ local function read_env_command(name)
   end
   return 'printf %s "$' .. name .. '"'
 end
-
 function M.read_env_command(name)
   return read_env_command(name)
 end
-
 function M.read_env(name, exec)
   local run = exec or exec_sync
   if type(run) ~= "function" then
@@ -44,11 +47,9 @@ function M.read_env(name, exec)
   end
   return out.stdout
 end
-
 local function one_line(value)
   return tostring(value or ""):gsub("%s+", " ")
 end
-
 local function normalized_error_message(value)
   local text = one_line(value):lower()
   text = text:gsub("%d%d%d%d%-%d%d%-%d%d[tT ]%d%d:%d%d:%d%d%.?%d*Z?", "<time>")
@@ -58,7 +59,6 @@ local function normalized_error_message(value)
   text = text:gsub("%s+", " ")
   return text
 end
-
 local function stable_hash(value)
   local hash = 5381
   for index = 1, #value do
@@ -66,7 +66,6 @@ local function stable_hash(value)
   end
   return "fp-" .. tostring(hash)
 end
-
 local function source_ref_field(source_ref)
   if type(source_ref) == "table" then
     return one_line(source_ref.kind) .. ":" .. one_line(source_ref.ref)
@@ -76,7 +75,6 @@ local function source_ref_field(source_ref)
   end
   return nil
 end
-
 function M.error_fingerprint(error_class, queue, dept, message)
   return stable_hash(table.concat({
     tostring(error_class or "unknown-error"),
@@ -85,7 +83,6 @@ function M.error_fingerprint(error_class, queue, dept, message)
     normalized_error_message(message),
   }, "|"))
 end
-
 function M.error_fact_fields(error_class, queue, dept, message, context)
   local fields = {
     "error_class=" .. one_line(error_class or "unknown-error"),
@@ -103,21 +100,18 @@ function M.error_fact_fields(error_class, queue, dept, message, context)
   end
   return fields
 end
-
 function M.error_class_from_message(message)
   local text = tostring(message or "")
   local class = text:match("consensus: ([%w%-]+):")
     or text:match("consensus: ([%w%-]+) failed:")
   return class or "caught-failure"
 end
-
 function M.log_error_fact(level, dept, tag, error_class, queue, message, context)
   local fields = M.error_fact_fields(error_class, queue, dept, message, context)
   table.insert(fields, "queue=" .. one_line(queue))
   table.insert(fields, "error=" .. one_line(message))
   log[level or "warn"]("consensus dept=" .. one_line(dept) .. " tag=" .. one_line(tag or "FAILURE") .. " " .. table.concat(fields, " "))
 end
-
 local function event_source_ref(event)
   if type(event) == "table" and event.source_ref ~= nil then
     return event.source_ref
@@ -128,7 +122,6 @@ local function event_source_ref(event)
   end
   return nil
 end
-
 function M.wrap_pipeline_failure(dept, fn)
   return function(event)
     local ok, err = pcall(fn, event)
@@ -142,22 +135,18 @@ function M.wrap_pipeline_failure(dept, fn)
     error(err, 0)
   end
 end
-
 function M.verdict_mode(proposal)
   if type(proposal) == "table" and proposal.verdict_mode == "gate" then
     return "gate"
   end
   return "converge"
 end
-
 local function trim(value)
   return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
-
 local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end
-
 local function is_path_safe_key(value)
   if not is_bounded_string(value, max_key_len) then
     return false
@@ -181,10 +170,8 @@ local function is_path_safe_key(value)
   end
   return true
 end
-
 local function neutralize_untrusted_prompt_text(text)
   local value = tostring(text or "")
-
   local function neutralize_line(line)
     if line:match("^%s*" .. verdict_label) ~= nil
       or line:match("^%s*" .. reply_label) ~= nil
@@ -195,7 +182,6 @@ local function neutralize_untrusted_prompt_text(text)
     end
     return line
   end
-
   local output = {}
   local start = 1
   while true do
@@ -204,12 +190,10 @@ local function neutralize_untrusted_prompt_text(text)
       table.insert(output, neutralize_line(value:sub(start)))
       break
     end
-
     table.insert(output, neutralize_line(value:sub(start, newline - 1)))
     table.insert(output, "\n")
     start = newline + 1
   end
-
   return table.concat(output)
 end
 
@@ -238,7 +222,7 @@ local function assert_manifest_files_readable(manifest)
     end
     local handle = io.open(path, "r")
     if handle == nil then
-      error("consensus: runtime context manifest file is unreadable")
+      error("consensus: error_class=" .. stale_generation_context_error_class .. " runtime context manifest file is unreadable")
     end
     handle:close()
   end
@@ -270,13 +254,28 @@ local function resolve_content_manifest(content_fetch)
   end
   local manifest = cache_get(key)
   if type(manifest) ~= "string" or manifest == "" then
-    error("consensus: runtime context cache miss")
+    error("consensus: error_class=" .. stale_generation_context_error_class .. " runtime context cache miss")
   end
   if #manifest > max_content_fetch_len then
     error("consensus: runtime context manifest is overlong")
   end
   assert_manifest_files_readable(manifest)
   return manifest
+end
+
+function M.stale_generation_context_error_class()
+  return stale_generation_context_error_class
+end
+
+function M.is_stale_generation_context_error(err)
+  local text = tostring(err or "")
+  if text:find("error_class=" .. stale_generation_context_error_class, 1, true) ~= nil then
+    return true
+  end
+  if text:find("runtime context cache miss", 1, true) ~= nil then
+    return true
+  end
+  return text:find("runtime context manifest file is unreadable", 1, true) ~= nil
 end
 
 local function normalize_round(value)
@@ -289,7 +288,6 @@ local function normalize_round(value)
   end
   return number
 end
-
 local function bounded(value, limit)
   local text = trim(value)
   if #text > limit then

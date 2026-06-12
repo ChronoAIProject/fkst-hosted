@@ -41,7 +41,7 @@ function pipeline(event)
   local input = open_pr_context(event)
   local raw = event.payload or {}
   if input == nil then
-    core.log_entry("open_pr", event, "unknown", raw.dedup_key)
+    core.log_entry("open_pr", event, "unknown", core.payload_field(raw, "dedup_key"))
     core.log_cas_decision("open_pr", "unknown", { state = nil, version = nil }, "implementing", "pr-open", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -58,7 +58,7 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local view = core.gh_exec({ cmd = core.gh_issue_view_open_pr_cmd(input.repo, input.issue_number), timeout = 30 })
+    local view = core.fetch_issue_view_open_pr(input.repo, input.issue_number, raw.updated_at)
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue open-pr view failed: " .. tostring(view.stderr))
     end
@@ -113,8 +113,11 @@ function pipeline(event)
       error("github-devloop: unsafe implementing branch head")
     end
     if head_sha ~= fact.head_sha then
-      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-foreign(head)", "branch head moved past implementing fact")
-      return
+      local ancestry = exec_sync({ cmd = core.git_is_ancestor_cmd(fact.head_sha, head_sha), timeout = 30 })
+      if ancestry.exit_code ~= 0 then
+        core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-foreign(head)", "branch head is not descended from implementing fact")
+        return
+      end
     end
 
     local write_enabled = core.write_mode() == "real"
@@ -131,7 +134,7 @@ function pipeline(event)
     end
 
     core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", core.cas_outcome(state, "apply", state.version), "write gate satisfied; opening PR")
-    local pr_request = core.build_pr_open_request(input.repo, input.issue_number, proposal_id, state, current_issue.title, fact.branch, fact.head_sha, branches.integration)
+    local pr_request = core.build_pr_open_request(input.repo, input.issue_number, proposal_id, state, current_issue.title, fact.branch, head_sha, branches.integration)
     core.log_apply("open_pr", proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
       "github-proxy.github_pr_open_request",
     })

@@ -153,6 +153,13 @@ local function comment_cases()
   }
   local gate = { kind = "waiting", reason = "waiting-on-dependency" }
   local dependency_marker = core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 }, gate.kind, gate.reason)
+  local dependency_void_gate = {
+    kind = "satisfied",
+    reason = "dependency-void",
+    notes = {
+      { kind = "dependency-void", blocker_number = 7, reason = "not_planned" },
+    },
+  }
   local merge_ready = merge_ready_payload()
   local decompose = {
     proposal_id = issue_proposal_id,
@@ -192,6 +199,7 @@ local function comment_cases()
     { id = "fix-review-meta", request = core.build_fix_review_meta_comment_request("owner/repo", "42", fix, "no-fix", "") },
     { id = "review-meta", request = core.build_review_meta_comment_request("owner/repo", "42", review_meta_payload(), "fix", "Run another fix pass.", issue_version .. "/fix/1", "missing guard") },
     { id = "dependency-hold", request = core.build_dependency_hold_comment_request("owner/repo", "42", issue_proposal_id, issue_version, gate, dependency_marker, source_ref()) },
+    { id = "dependency-release", request = core.build_dependency_release_comment_request("owner/repo", "42", issue_proposal_id, issue_version, dependency_void_gate, source_ref()) },
     { id = "merging", request = { body = core.build_merging_comment_body(merge_ready) } },
     { id = "merged", request = { body = core.build_merged_comment_body(merge_ready) } },
     { id = "decomposed", request = { body = core.decomposed_comment_body(decompose, 2) } },
@@ -236,6 +244,8 @@ local audited_english_skeletons = {
   "github-devloop fix escalated to review-meta: ",
   "github-devloop review-meta action: ",
   "github-devloop dependency hold: ",
+  "github-devloop dependency release: ",
+  "Acknowledged as a tracking umbrella. Individual waves should enter the pipeline as separate issues; this issue stays open for tracking.",
   "github-devloop is merging PR #",
   "github-devloop merged PR #",
   "github-devloop decomposed blocked PR into ",
@@ -326,6 +336,13 @@ return {
     t.eq(core.current_state(issue_comments, issue_proposal_id).state, "ready")
     t.eq(core.has_result_marker(issue_comments, issue_proposal_id, "approve", "consensus:v1"), true)
     t.eq(core.dependency_hold_fact(issue_comments, issue_proposal_id).marker_kind, "dependency-wait")
+    t.eq(core.dependency_waiver_fact({
+      {
+        body = "noise " .. cjk_probe .. "\n"
+          .. core.dependency_waiver_marker(issue_proposal_id, issue_version, 7, "operator-waiver"),
+        author_login = core.trusted_bot_login(),
+      },
+    }, issue_proposal_id, issue_version, 7).reason, "operator-waiver")
     t.eq(core.review_reject_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
     t.eq(core.review_meta_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
     t.eq(core.merge_gate_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").reviewed_head_sha, "def456")

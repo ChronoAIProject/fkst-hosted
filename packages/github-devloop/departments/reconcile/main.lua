@@ -3,7 +3,7 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "devloop_reconcile", "devloop_review_reconcile", "devloop_fix_reconcile" },
+  consumes = { "devloop_reconcile", "devloop_review_reconcile", "devloop_fix_reconcile", "devloop_timeout_reconcile" },
   produces = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_pr_comment_request",
@@ -26,10 +26,31 @@ local function emit_blocked_reconcile(kind, proposal_id, state, version, action,
   end
 end
 
+local function build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
+  local version = core.timeout_reconcile_state_version(reconcile.issue_version, reconcile.state, reconcile.round)
+  local marker = core.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action)
+  local state_marker = core.state_marker(reconcile.proposal_id, "blocked", version)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop timeout reconcile action: " .. tostring(action)
+      .. "\n\nReason:\n" .. tostring(reason or "")
+      .. "\n\n" .. state_marker .. "\n" .. marker
+      .. "\n" .. "⟦AI:FKST⟧",
+    dedup_key = core._dedup_key({
+      "timeout-reconcile",
+      "comment",
+      tostring(reconcile.dedup_key),
+    }),
+    source_ref = core.normalize_source_ref(reconcile.source_ref),
+  }
+end
+
 local function pipeline_thinking(event)
   local reconcile = event.payload or {}
   if not core.is_supported_reconcile(reconcile) then
-    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "thinking", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -90,7 +111,7 @@ end
 local function pipeline_review(event)
   local reconcile = event.payload or {}
   if not core.is_supported_review_reconcile(reconcile) then
-    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -161,7 +182,7 @@ end
 local function pipeline_fix(event)
   local reconcile = event.payload or {}
   if not core.is_supported_fix_reconcile(reconcile) then
-    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -229,12 +250,64 @@ local function pipeline_fix(event)
   end)
 end
 
+local function pipeline_timeout(event)
+  local reconcile = event.payload or {}
+  if not core.is_supported_timeout_reconcile(reconcile) then
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "timeout", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
+    return
+  end
+
+  core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
+  local repo, issue_number = core.parse_proposal_id(reconcile.proposal_id)
+  local lock_key = core.transition_lock_key(reconcile.proposal_id)
+  if lock_key == nil then
+    core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, reconcile.state, "blocked", "skip-foreign(proposal_id)", "no transition lock key")
+    return
+  end
+
+  with_lock(lock_key, function()
+    core.assert_trusted_bot_configured()
+
+    local view = core.gh_exec({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
+    if view.exit_code ~= 0 then
+      error("github-devloop: gh issue timeout reconcile view failed: " .. tostring(view.stderr))
+    end
+
+    local current = core.parse_issue_view_loop(view.stdout)
+    core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
+    local state = core.current_state(current.comments, reconcile.proposal_id)
+    local version = core.timeout_reconcile_state_version(reconcile.issue_version, reconcile.state, reconcile.round)
+    if core.has_timeout_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round) then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(timeout reconcile marker already visible)", "timeout reconcile result marker for incoming version is already visible")
+      return
+    end
+    if state.state ~= reconcile.state or tostring(state.version or "") ~= tostring(reconcile.issue_version) then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(version-mismatch)", "timeout reconcile event does not match canonical state marker")
+      return
+    end
+
+    local action = "drop"
+    local reason = "state-output-obligation-timeout-after-" .. tostring(reconcile.round) .. "-attempts"
+    local comment_request = build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
+    local label_request = core.build_state_label_request(repo, issue_number, "blocked", core._dedup_key({
+      "timeout-reconcile",
+      "label",
+      tostring(reconcile.dedup_key),
+    }), reconcile.source_ref)
+    emit_blocked_reconcile(reconcile.state, reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
+  end)
+end
+
 function pipeline(event)
-  local payload = event.payload or {}
-  if payload.schema == "github-devloop.review-reconcile.v1" then
+  local schema = core.payload_field(event and event.payload, "schema")
+  if schema == "github-devloop.timeout-reconcile.v1" then
+    return pipeline_timeout(event)
+  end
+  if schema == "github-devloop.review-reconcile.v1" then
     return pipeline_review(event)
   end
-  if payload.schema == "github-devloop.fix-reconcile.v1" then
+  if schema == "github-devloop.fix-reconcile.v1" then
     return pipeline_fix(event)
   end
   return pipeline_thinking(event)

@@ -23,6 +23,14 @@ function M.prompt_preamble(exec)
   }, "\n")
 end
 
+function M.review_observation_boundary_clause()
+  return "Review observation boundary: CI status, mergeability, branch protection, and head-binding are enforced by a later deterministic merge gate and are OUT OF REVIEW SCOPE. Do not demand or verify those gate-owned facts during review; judge whether the PR diff correctly addresses the named failing check, blocking gap, and agreed issue bounds."
+end
+
+function M.short_review_observation_boundary_clause()
+  return "Review boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review."
+end
+
 local function github_entity_history_line()
   return "Before judging, read the local context files named below. They may be large, so read them in segments as needed. They contain the complete fetched GitHub history for this delivery; prior review verdicts, fix notes, and convergence rounds recorded there are your memory of earlier rounds. Judge what changed relative to them; do not re-litigate settled points."
 end
@@ -53,6 +61,27 @@ local function bounded_gap(M, gap)
     value = M.truncate_utf8(value, M._max_blocking_gap_len)
   end
   return value
+end
+
+local function target_merge_context(M, merge_context)
+  if type(merge_context) ~= "table" then
+    return "sync_clean"
+  end
+  local target_branch = M.neutralize_untrusted_prompt_text(merge_context.target_branch or "")
+  local target_sha = M.neutralize_untrusted_prompt_text(merge_context.target_sha or "")
+  if merge_context.conflicted ~= true then
+    return "sync_clean target_branch=" .. target_branch .. " target_sha=" .. target_sha
+  end
+  local paths = M.neutralize_untrusted_prompt_text(merge_context.unmerged_paths or "")
+    :gsub("%s+", " ")
+    :gsub("^%s+", "")
+    :gsub("%s+$", "")
+  if #paths > 600 then
+    paths = M.truncate_utf8(paths, 600)
+  end
+  return "sync_conflict target_branch=" .. target_branch
+    .. " target_sha=" .. target_sha
+    .. " unmerged_paths=" .. paths
 end
 
 local function local_context_block(M, manifest, fallback)
@@ -92,7 +121,7 @@ function M.build_implement_prompt(proposal_id, current, framing, content_manifes
   }, nil, { entity_history = true })
 end
 
-function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_manifest)
+function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_manifest, merge_context)
   local prompt = require("prompts.fix")
   return M.render_prompt_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(fix.proposal_id),
@@ -102,8 +131,10 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     blocking_gap = bounded_gap(M, fix.blocking_gap),
     title = M.neutralize_untrusted_prompt_text(current_issue.title),
     test_command = M.test_command(),
+    target_merge_context = target_merge_context(M, merge_context),
     content_fetch_block = local_context_block(M, content_manifest),
     review_feedback = M.neutralize_untrusted_prompt_text(review_reason),
+    review_observation_boundary = M.review_observation_boundary_clause(),
   }, nil, { entity_history = true })
 end
 
@@ -119,7 +150,9 @@ function M.build_sync_conflict_prompt(conflict)
 end
 
 function M.build_review_meta_prompt(review_meta, current_issue, content_manifest)
-  local prompt = require("prompts.review_meta")
+  local prompt = review_meta.mode == "fix-reflection"
+    and require("prompts.fix_reflection")
+    or require("prompts.review_meta")
   local comments = table.concat(M.comment_bodies(current_issue.comments), "\n\n--- comment ---\n\n")
   if #comments > M._max_comments_len then
     comments = M.truncate_utf8(comments, M._max_comments_len)
@@ -128,9 +161,11 @@ function M.build_review_meta_prompt(review_meta, current_issue, content_manifest
   return M.render_prompt_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(review_meta.proposal_id),
     review_proposal_id = M.neutralize_untrusted_prompt_text(review_meta.review_proposal_id),
+    fix_round = M.neutralize_untrusted_prompt_text(review_meta.fix_round or review_meta.n or ""),
     title = M.neutralize_untrusted_prompt_text(current_issue.title),
     content_fetch_block = local_context_block(M, content_manifest),
     comments = M.neutralize_untrusted_prompt_text(comments),
+    review_observation_boundary = M.review_observation_boundary_clause(),
   }, nil, { entity_history = true })
 end
 
@@ -159,7 +194,7 @@ function M.build_decompose_prompt(decompose, current_issue, content_manifest)
 end
 
 local function is_intake_action(value)
-  return value == "enable" or value == "decline" or value == "escalate-to-class"
+  return value == "enable" or value == "track" or value == "decline" or value == "escalate-to-class"
 end
 
 function M.parse_intake_action(stdout)
@@ -171,17 +206,30 @@ function M.parse_intake_action(stdout)
   while #lines > 0 and M._trim(lines[#lines]) == "" do
     table.remove(lines)
   end
-  if #lines ~= 2 then
+  if #lines ~= 2 and #lines ~= 3 then
     return nil
   end
 
   local action = lines[1]:match("^" .. M._intake_label .. " (enable)$")
+    or lines[1]:match("^" .. M._intake_label .. " (track)$")
     or lines[1]:match("^" .. M._intake_label .. " (decline)$")
     or lines[1]:match("^" .. M._intake_label .. " (escalate%-to%-class)$")
-  local reason = lines[2]:match("^" .. M._reason_label .. " (.+)$")
+  local service_class = nil
+  local reason_line = lines[2]
+  if #lines == 3 then
+    if lines[2]:match("^⟦FKST:CLASS⟧ ") == nil then
+      return nil
+    end
+    service_class = lines[2]:match("^⟦FKST:CLASS⟧ (expedite)$")
+      or lines[2]:match("^⟦FKST:CLASS⟧ (standard)$")
+      or lines[2]:match("^⟦FKST:CLASS⟧ (background)$")
+    reason_line = lines[3]
+  end
+  local reason = reason_line:match("^" .. M._reason_label .. " (.+)$")
   if action == nil or not is_intake_action(action) then
     return nil
   end
+  service_class = M.normalize_intake_service_class(service_class)
   if reason == nil or M._trim(reason) == "" then
     return nil
   end
@@ -190,6 +238,7 @@ function M.parse_intake_action(stdout)
   end
   return {
     action = action,
+    service_class = service_class,
     reason = M._trim(reason),
   }
 end

@@ -28,6 +28,143 @@ local function bounded_control_text(M, value, limit)
   return text
 end
 
+local gate_owned_gap_patterns = {
+  "ci%s+green",
+  "ci%s+status",
+  "green%s+ci",
+  "green%s+gate",
+  "statuscheckrollup",
+  "status%s+check",
+  "merge%s+gate",
+  "mergeability",
+  "mergeable",
+  "merge%s+state",
+  "branch%s+protection",
+  "head%-bound",
+  "head%s+bound",
+  "%f[%w]head%f[%W]",
+  "same%s+head",
+  "required%s+checks",
+  "check%s+runs",
+}
+
+local implementation_gap_patterns = {
+  "bug",
+  "broken",
+  "crash",
+  "regression",
+  "missing%s+test",
+  "missing%s+guard",
+  "missing%s+implementation",
+  "missing%s+parser",
+  "missing%s+validation",
+  "incorrect",
+  "wrong",
+  "unsafe",
+  "leak",
+  "race",
+  "idempot",
+  "retry",
+  "payload",
+  "contract",
+  "diff",
+  "code",
+  "logic",
+}
+
+local out_of_contract_gap_patterns = {
+  "beyond%s+the%s+issue",
+  "beyond%s+issue",
+  "outside%s+the%s+issue",
+  "outside%s+issue",
+  "outside%s+the%s+stated%s+scope",
+  "outside%s+stated%s+scope",
+  "beyond%s+the%s+stated%s+scope",
+  "beyond%s+stated%s+scope",
+  "outside%s+the%s+acceptance%s+bound",
+  "outside%s+acceptance%s+bound",
+  "beyond%s+the%s+acceptance%s+bound",
+  "beyond%s+acceptance%s+bound",
+  "not%s+in%s+the%s+issue",
+  "not%s+part%s+of%s+the%s+issue",
+  "not%s+stated%s+in%s+the%s+issue",
+  "not%s+an%s+issue%s+requirement",
+  "unstated%s+requirement",
+  "new%s+requirement",
+  "spec%s+amendment",
+  "spec%-amendment",
+}
+
+function M.is_gate_owned_review_gap(gap)
+  local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
+  if text == "" then
+    return false
+  end
+  local has_gate_fact = false
+  for _, pattern in ipairs(gate_owned_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      has_gate_fact = true
+      break
+    end
+  end
+  if not has_gate_fact then
+    return false
+  end
+  for _, pattern in ipairs(implementation_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      return false
+    end
+  end
+  return true
+end
+
+function M.is_out_of_contract_review_gap(gap)
+  local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
+  if text == "" then
+    return false
+  end
+  for _, pattern in ipairs(out_of_contract_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function commit_subject_title(M, current)
+  if type(current) ~= "table" then
+    return nil
+  end
+  local title = tostring(current.title or "")
+    :gsub("%c", " ")
+    :gsub("%s+", " ")
+    :gsub("^%s+", "")
+    :gsub("%s+$", "")
+  if title == "" then
+    return nil
+  end
+  title = M._neutralize_fkst_markers(title)
+  return title
+end
+
+local function bounded_commit_subject(M, prefix, issue_number, current)
+  local subject = tostring(prefix) .. " #" .. tostring(issue_number)
+  local title = commit_subject_title(M, current)
+  if title ~= nil then
+    local title_prefix = subject .. ": "
+    local room = 200 - #title_prefix
+    if room > 0 then
+      if #title > room then
+        title = M.truncate_utf8(title, room)
+      end
+      if title ~= "" then
+        subject = title_prefix .. title
+      end
+    end
+  end
+  return subject
+end
+
 local function board_digest_issue_list_cmd(M, repo)
   return "gh issue list"
     .. " --repo " .. M._shell_single_quote(repo)
@@ -239,20 +376,50 @@ function M.append_board_digest_to_proposal(proposal, repo, tick)
 end
 
 function M.build_devloop_ready_payload(source)
+  local ready_version = M._dedup_key({
+    "ready",
+    tostring(source.dedup_key),
+  })
   local payload = {
     schema = "github-devloop.ready.v1",
     proposal_id = source.proposal_id,
-    dedup_key = M._dedup_key({
-      "ready",
-      tostring(source.dedup_key),
-    }),
+    dedup_key = ready_version,
     source_ref = M.normalize_source_ref(source.source_ref),
   }
+  if source.include_ready_hand_off == true then
+    payload.ready_hand_off = {
+      kind = "own-ready-state-marker",
+      proposal_id = source.proposal_id,
+      state = "ready",
+      version = ready_version,
+      stage_rank = M.stage_rank("ready"),
+      effects = "result-marker,ready-label,devloop-ready",
+    }
+  end
   local framing = bounded_framing(M, source.framing)
   if framing ~= nil then
     payload.framing = framing
   end
+  local attempt = tonumber(source.impl_retry_attempt)
+  if attempt ~= nil then
+    if attempt < 1 or attempt ~= math.floor(attempt) or attempt > M._max_impl_retry_attempts then
+      error("github-devloop: invalid implementation retry attempt")
+    end
+    payload.impl_retry_attempt = attempt
+  end
   return payload
+end
+
+function M.is_ready_hand_off(hand_off, ready)
+  if type(hand_off) ~= "table" or type(ready) ~= "table" then
+    return false
+  end
+  return hand_off.kind == "own-ready-state-marker"
+    and hand_off.proposal_id == ready.proposal_id
+    and hand_off.state == "ready"
+    and hand_off.version == ready.dedup_key
+    and hand_off.stage_rank == M.stage_rank("ready")
+    and hand_off.effects == "result-marker,ready-label,devloop-ready"
 end
 
 function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, version)
@@ -270,6 +437,17 @@ function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, versio
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
+end
+
+function M.build_current_head_reviewing_payload(origin, pr_number, current_pr, state, source_ref)
+  local review_proposal_id = M.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  if M.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
+    return nil
+  end
+  return M.build_devloop_reviewing_payload({
+    proposal_id = origin.proposal_id,
+    impl_version = state.version,
+  }, pr_number, source_ref, state.version)
 end
 
 function M.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
@@ -339,6 +517,38 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   return payload
 end
 
+local function replay_fact_sha(value, fallback)
+  if value ~= nil then
+    if not M._is_git_sha(value) then
+      error("github-devloop: invalid replay fact sha")
+    end
+    return tostring(value)
+  end
+  return fallback
+end
+
+function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref)
+  local payload = M.build_devloop_fixing_payload(origin, pr_number, {
+    review_proposal_id = feedback.review_proposal_id,
+    review_dedup_key = feedback.review_dedup_key,
+    reviewed_head_sha = feedback.reviewed_head_sha,
+    blocking_gap = feedback.blocking_gap,
+    gate_baseline_sha = feedback.gate_baseline_sha,
+    gate_failure_excerpt = feedback.review_reason,
+  }, source_ref)
+  payload.dedup_key = M._dedup_key({
+    "fixing",
+    "replay",
+    tostring(origin.proposal_id),
+    tostring(payload.version),
+    tostring(pr_number),
+    tostring(feedback.review_dedup_key),
+    replay_fact_sha(feedback.gate_baseline_sha, "nobase"),
+    replay_fact_sha(feedback.reviewed_head_sha, "nohead"),
+  })
+  return payload
+end
+
 function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)
   return {
     schema = "github-devloop.review-meta.v1",
@@ -360,7 +570,35 @@ function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issu
   }
 end
 
+function M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
+  return M._dedup_key({
+    "fix-reflection",
+    tostring(issue_proposal_id),
+    tostring(issue_version),
+    tostring(pr_number),
+    tostring(fix_round),
+    tostring(review_dedup_key),
+  })
+end
+
+function M.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+  local review_dedup_key = unresolved.review_dedup_key or unresolved.dedup_key
+  local payload = M.build_devloop_review_meta_payload({
+    proposal_id = unresolved.proposal_id,
+    dedup_key = review_dedup_key,
+    source_ref = unresolved.source_ref,
+  }, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+  payload.mode = "fix-reflection"
+  payload.fix_round = fix_round
+  payload.dedup_key = M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
+  return payload
+end
+
 function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, review_fact, source_ref)
+  local current_head_sha = review_fact and review_fact.current_head_sha
+  if current_head_sha == nil then
+    current_head_sha = review_fact and review_fact.reviewed_head_sha
+  end
   return {
     schema = "github-devloop.merge-ready.v1",
     proposal_id = issue_proposal_id,
@@ -375,6 +613,7 @@ function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, versi
       tostring(version),
       tostring(pr_number),
       tostring(review_fact and review_fact.review_dedup_key or "review"),
+      tostring(current_head_sha or "nohead"),
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
@@ -481,6 +720,8 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
+    .. "\n" .. M.short_review_observation_boundary_clause()
+    .. "\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment."
     .. "\nRead the local context bundle before judging."
   local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
   local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
@@ -488,7 +729,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     body = body
       .. "\nPrior review ledger:\n"
       .. ledger
-      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix."
+      .. "\nJudge whether THE NAMED GAP is closed; new objections only for fix regressions inside the issue's stated bounds. For rollup-red or failing-check re-review, scope the question to the diff change and the named failing check, not to restoration of gate state."
   end
   if #body > M._max_body_len then
     error("github-devloop: PR review proposal exceeds bounded body")
@@ -521,6 +762,14 @@ end
 
 function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch)
   return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch), repo, tick)
+end
+
+function M.implement_commit_subject(issue_number, current)
+  return bounded_commit_subject(M, "auto-implement", issue_number, current)
+end
+
+function M.fix_commit_subject(issue_number, current)
+  return bounded_commit_subject(M, "auto-fix", issue_number, current)
 end
 end
 

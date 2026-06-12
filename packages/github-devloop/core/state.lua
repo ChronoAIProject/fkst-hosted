@@ -17,7 +17,7 @@ function M.state_label(state)
   return M._label_by_state[state]
 end
 
-function M.state_marker(proposal_id, state, version)
+function M.state_marker(proposal_id, state, version, effects)
   if state ~= "thinking"
     and state ~= "ready"
     and state ~= "implementing"
@@ -32,11 +32,17 @@ function M.state_marker(proposal_id, state, version)
     and state ~= "blocked" then
     error("github-devloop: invalid state")
   end
+  local effects_field = ""
+  if effects ~= nil and tostring(effects) ~= "" then
+    effects_field = ' effects="' .. tostring(effects):gsub('"', "'") .. '"'
+  end
   return '<!-- fkst:github-devloop:state:v1 proposal="' .. tostring(proposal_id)
     .. '" state="' .. tostring(state)
     .. '" version="' .. tostring(version)
     .. '" stage_rank="' .. tostring(M._state_stage_rank[state])
-    .. '" -->'
+    .. '"'
+    .. effects_field
+    .. ' -->'
 end
 
 function M.version_order_key(version)
@@ -125,6 +131,39 @@ function M.version_review_loop_round(version)
   return max_n
 end
 
+function M.version_timeout_round(version, state_name)
+  local max_n = 0
+  local state = tostring(state_name or "")
+  if state == "" then
+    return 0
+  end
+  local escaped = state:gsub("%-", "%%-")
+  for n in tostring(version or ""):gmatch("/timeout/" .. escaped .. "/(%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  for n in tostring(version or ""):gmatch("%-timeout%-" .. escaped .. "%-(%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
+function M.version_reimplement_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]reimplement[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
 function M.next_fix_version(version)
   local base = tostring(version or "")
   local next_n = M.version_fix_round(base) + 1
@@ -160,6 +199,7 @@ local function version_sort_key(version, stage_rank)
     primary = version_primary_key(version),
     loop_n = M.version_loop_round(version),
     fix_n = M.version_fix_round(version),
+    reimplement_n = M.version_reimplement_round(version),
     review_loop_n = M.version_review_loop_round(version),
     review_meta_action_n = M.version_review_meta_action_round(version),
     stage_rank = tonumber(stage_rank) or 0,
@@ -180,6 +220,9 @@ local function compare_version_keys(left, right)
   end
   if left.fix_n ~= right.fix_n then
     return left.fix_n > right.fix_n and 1 or -1
+  end
+  if left.reimplement_n ~= right.reimplement_n then
+    return left.reimplement_n > right.reimplement_n and 1 or -1
   end
   if left.review_meta_action_n ~= right.review_meta_action_n then
     return left.review_meta_action_n > right.review_meta_action_n and 1 or -1
@@ -206,15 +249,30 @@ local function strip_transition_version_suffixes(version)
   while previous ~= text do
     previous = text
     text = text
+      :gsub("/rereview/%d+/[0-9A-Fa-f]+$", "")
+      :gsub("%-rereview%-%d+%-[0-9A-Fa-f]+$", "")
+      :gsub("/review%-meta/%d+$", "")
+      :gsub("%-review%-meta%-%d+$", "")
       :gsub("/review%-meta%-action/%d+$", "")
       :gsub("%-review%-meta%-action%-%d+$", "")
       :gsub("/review%-loop/%d+$", "")
       :gsub("%-review%-loop%-%d+$", "")
+      :gsub("/review/%d+$", "")
+      :gsub("%-review%-%d+$", "")
       :gsub("/fix/%d+$", "")
       :gsub("%-fix%-%d+$", "")
+      :gsub("/timeout/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
+      :gsub("/reimplement/%d+$", "")
+      :gsub("%-reimplement%-%d+$", "")
+      :gsub("/loop/%d+$", "")
+      :gsub("%-loop%-%d+$", "")
   end
   return text
 end
+
+-- Normalize a transition version to its stable lineage base.
+M.strip_transition_version_suffixes = strip_transition_version_suffixes
 
 local function strip_latest_fix_version_suffix(version)
   return tostring(version or "")
@@ -230,6 +288,9 @@ local function compare_same_base_transition_versions(incoming_version, current_v
   end
   if incoming_key.fix_n ~= current_key.fix_n then
     return incoming_key.fix_n > current_key.fix_n and 1 or -1
+  end
+  if incoming_key.reimplement_n ~= current_key.reimplement_n then
+    return incoming_key.reimplement_n > current_key.reimplement_n and 1 or -1
   end
   if incoming_key.review_meta_action_n ~= current_key.review_meta_action_n then
     return incoming_key.review_meta_action_n > current_key.review_meta_action_n and 1 or -1
@@ -250,8 +311,8 @@ local function compare_transition_versions(incoming_version, current_version)
   if current_version == nil then
     return 1
   end
-  local incoming_base = strip_transition_version_suffixes(incoming_version)
-  local current_base = strip_transition_version_suffixes(current_version)
+  local incoming_base = M.strip_transition_version_suffixes(incoming_version)
+  local current_base = M.strip_transition_version_suffixes(current_version)
   if versions_equivalent(incoming_base, current_base) then
     return compare_same_base_transition_versions(incoming_version, current_version)
   end

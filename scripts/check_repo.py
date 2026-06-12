@@ -63,6 +63,25 @@ GH_RATE_POOL_FUNCTION_RE = re.compile(
     r"\bfunction\b[^\n]*\bgh_rate_pool\b|\bgh_rate_pool\b\s*=\s*function\b"
 )
 GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
+PERSISTENCE_CLASS_RE = re.compile(
+    r"\bfunction\s+M\s*\.\s*persistence_class\s*\([^)]*\)\s*"
+    r"return\s*(?P<quote>[\"'])(?P<class>[A-Za-z0-9_]+)(?P=quote)",
+    re.DOTALL,
+)
+ALLOWED_PERSISTENCE_CLASSES = {
+    "saga",
+    "stateless_adapter",
+    "judgment_pipeline",
+    "composed_judgment_pipeline",
+}
+SAGA_RECOVERY_TOKENS = (
+    "fkst:github-devloop:state:v1",
+    "current_entity_state",
+    "restart_completeness",
+    "transition_status",
+    "versioned_transition_status",
+    "cyclic_transition_status",
+)
 HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
 BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
@@ -80,11 +99,20 @@ def repo_root() -> Path:
 
 
 def rel(root: Path, path: Path) -> str:
+    packages_view = packages_root(root)
+    try:
+        return "packages/" + path.relative_to(packages_view).as_posix()
+    except ValueError:
+        pass
     return path.relative_to(root).as_posix()
 
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def packages_root(root: Path) -> Path:
+    return root / ".fkst" / "packages"
 
 
 def line_count(path: Path) -> int:
@@ -325,6 +353,18 @@ def unguarded_graphql_first_connection_lines(text: str) -> list[int]:
     return lines
 
 
+def unguarded_rest_per_page_lines(text: str) -> list[int]:
+    lines: list[int] = []
+    source_lines = text.splitlines()
+    for index, line in enumerate(source_lines):
+        if "per_page=100" not in line:
+            continue
+        window = "\n".join(source_lines[max(0, index - 3) : index + 2])
+        if "gh api" not in window or "--paginate" not in window:
+            lines.append(index + 1)
+    return lines
+
+
 def hidden_text_string_char_lines(text: str) -> list[int]:
     stripped = strip_lua_comments_and_strings(text)
     lines: list[int] = []
@@ -428,8 +468,7 @@ def hidden_text_encoded_literal_lines(text: str) -> list[int]:
 
 
 def check_line_limit(root: Path, violations: list[str]) -> None:
-    for scan_root_name in ("packages", "scripts"):
-        scan_root = root / scan_root_name
+    for scan_root in (packages_root(root), root / "scripts"):
         if not scan_root.exists():
             continue
         for path in sorted(scan_root.rglob("*")):
@@ -445,7 +484,7 @@ def check_line_limit(root: Path, violations: list[str]) -> None:
 
 
 def package_dirs(root: Path) -> list[Path]:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return []
     return [path for path in sorted(packages.iterdir()) if path.is_dir()]
@@ -690,7 +729,7 @@ def check_helper_reachability(root: Path, violations: list[str]) -> None:
 
 
 def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
@@ -704,8 +743,23 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
             )
 
 
+def check_rest_pagination_guards(root: Path, warnings: list[str]) -> None:
+    packages = packages_root(root)
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file():
+            continue
+        for line in unguarded_rest_per_page_lines(read_text(path)):
+            add(
+                warnings,
+                "G5",
+                f"{rel(root, path)}:{line} REST per_page=100 read lacks gh api --paginate; possible fail-open truncation",
+            )
+
+
 def check_hidden_text_encoded_literals(root: Path, violations: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
@@ -736,7 +790,7 @@ def gh_rate_pool_sizing_lines(text: str) -> list[int]:
 
 
 def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
@@ -765,6 +819,47 @@ def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
             )
 
 
+def package_persistence_class(core_path: Path) -> str | None:
+    match = PERSISTENCE_CLASS_RE.search(read_text(core_path))
+    if match is None:
+        return None
+    return match.group("class")
+
+
+def check_persistence_classes(root: Path, violations: list[str]) -> None:
+    for pkg in package_dirs(root):
+        core_path = pkg / "core.lua"
+        if not core_path.exists():
+            continue
+        declared = package_persistence_class(core_path)
+        if declared is None:
+            add(
+                violations,
+                "G8",
+                f"{rel(root, core_path)} must declare M.persistence_class()",
+            )
+            continue
+        if declared not in ALLOWED_PERSISTENCE_CLASSES:
+            add(
+                violations,
+                "G8",
+                f"{rel(root, core_path)} declares unsupported persistence class: {declared}",
+            )
+        if declared == "saga":
+            continue
+        for path in sorted(pkg.rglob("*.lua")):
+            if not path.is_file() or "tests" in path.relative_to(pkg).parts:
+                continue
+            text = read_text(path)
+            for token in SAGA_RECOVERY_TOKENS:
+                if token in text:
+                    add(
+                        violations,
+                        "G8",
+                        f"{rel(root, path)} uses saga recovery token {token!r} but {pkg.name} is {declared}",
+                    )
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -774,9 +869,11 @@ def main() -> int:
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
+    check_rest_pagination_guards(root, warnings)
     check_hidden_text_encoded_literals(root, violations)
     check_gh_rate_pool_sizing(root, violations)
     check_error_class_prefixes(root, warnings)
+    check_persistence_classes(root, violations)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

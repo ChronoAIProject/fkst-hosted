@@ -41,7 +41,7 @@ local function issue_view_json(labels, comments, state)
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   return string.format(
-    '{"title":"Implement dependency cascade","state":"%s","labels":[%s],"comments":[%s]}\n',
+    '{"title":"Implement dependency cascade","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
     json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
@@ -54,7 +54,7 @@ local function observe_issue_state_json(labels, comments, state)
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   return string.format(
-    '{"state":"%s","labels":[%s],"comments":[%s]}\n',
+    '{"state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
     json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
@@ -64,10 +64,12 @@ end
 local function blocked_by_json(nodes)
   local rendered = {}
   for _, node in ipairs(nodes or {}) do
+    local state_reason = node.state_reason or node.stateReason or ""
     table.insert(rendered, string.format(
-      '{"number":%s,"state":"%s","repository":{"nameWithOwner":"%s"}}',
+      '{"number":%s,"state":"%s","stateReason":"%s","repository":{"nameWithOwner":"%s"}}',
       tostring(node.number),
       json_string(node.state or "OPEN"),
+      json_string(state_reason),
       json_string(node.repo or repo)
     ))
   end
@@ -117,6 +119,23 @@ local function mock_blocker_issue(issue_number, state_name)
     stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',
     stderr = "",
     exit_code = 0,
+  })
+end
+
+local function dependency_waiver_comment(blocker_number, waiver_version)
+  return core.dependency_waiver_marker(
+    proposal_id,
+    waiver_version or version,
+    blocker_number,
+    "operator-waiver"
+  )
+end
+
+local function mock_blocker_issue_failure(issue_number)
+  t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
+    stdout = "",
+    stderr = "issue view failed",
+    exit_code = 1,
   })
 end
 
@@ -174,8 +193,8 @@ local function mock_result_issue(labels, comments)
 end
 
 local function mock_observe_issue(labels, comments)
-  t.mock_command(core.gh_issue_view_state_cmd(repo, 42), {
-    stdout = observe_issue_state_json(labels or { "fkst-dev:enabled", "fkst-dev:ready" }, comments or {
+  t.mock_command(core.gh_issue_view_entity_cmd(repo, 42), {
+    stdout = issue_view_json(labels or { "fkst-dev:enabled", "fkst-dev:ready" }, comments or {
       core.state_marker(proposal_id, "ready", version),
     }),
     stderr = "",
@@ -225,6 +244,14 @@ local function run_implement()
   }, h.opts("dependency-implement"))
 end
 
+local function run_dependency_reconcile()
+  return t.run_department("departments/dependency_reconcile/main.lua", {
+    queue = "devloop_dependency_reconcile_tick",
+    payload = { schema = "github-devloop.v1" },
+    ts = "2026-06-03T01:32:03Z",
+  }, h.opts("dependency-reconcile"))
+end
+
 local function find_raise(raises, queue, predicate)
   for _, item in ipairs(raises or {}) do
     if item.queue == queue and (predicate == nil or predicate(item.payload)) then
@@ -252,6 +279,16 @@ local function has_marker(raises, marker_text)
   return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
     return tostring(payload.body or ""):find(marker_text, 1, true) ~= nil
   end) ~= nil
+end
+
+local function count_calls(needle)
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 return {
@@ -282,32 +319,89 @@ return {
   end,
 
   test_dependency_gate_waiting_for_open_blocker = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 11 } })
+    mock_blocked_by(11, {})
+    mock_blocker_issue(11, "ready")
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "waiting")
-    t.eq(gate.unmet[1], 7)
+    t.eq(gate.unmet[1], 11)
   end,
 
   test_dependency_gate_satisfied_for_merged_blocker = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "merged")
+    mock_blocked_by(42, { { number = 12 } })
+    mock_blocked_by(12, {})
+    mock_blocker_issue(12, "merged")
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, true)
     t.eq(gate.kind, "satisfied")
   end,
 
+  test_dependency_gate_caches_terminal_merged_blocker = function()
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
+    mock_blocked_by_failure(17)
+    mock_blocker_issue(17, "merged")
+    local first = core.dependency_gate(repo, 42)
+    t.eq(first.ok, true)
+    t.eq(first.kind, "satisfied")
+    local graphql_calls_after_first = count_calls("gh api graphql")
+    t.eq(graphql_calls_after_first, 1)
+
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
+    mock_blocked_by_failure(17)
+    local second = core.dependency_gate(repo, 42)
+    t.eq(second.ok, true)
+    t.eq(second.kind, "satisfied")
+    t.eq(count_calls("gh api graphql"), graphql_calls_after_first + 1)
+
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" }, { number = 18 } })
+    mock_blocked_by(18, {})
+    mock_blocker_issue(18, "ready")
+    local changed_root_edges = core.dependency_gate(repo, 42)
+    t.eq(changed_root_edges.ok, false)
+    t.eq(changed_root_edges.kind, "waiting")
+    t.eq(changed_root_edges.unmet[1], 18)
+
+    mock_blocked_by(42, { { number = 17, state = "CLOSED" } })
+    mock_blocked_by(17, {})
+    mock_blocker_issue_failure(17)
+    local third = core.dependency_gate(repo, 42)
+    t.eq(third.ok, true)
+    t.eq(third.kind, "satisfied")
+
+    t.eq(core.merged_blocker_cache_key(repo, 17), "github-devloop/dependency/merged/owner/repo/issue/17")
+  end,
+
+  test_dependency_gate_does_not_cache_waiting_blocker = function()
+    local graphql_calls_before = count_calls("gh api graphql")
+    local issue_view_calls_before = count_calls(core.gh_issue_view_observe_cmd(repo, 27))
+    mock_blocked_by(42, { { number = 27 } })
+    mock_blocked_by(27, {})
+    mock_blocker_issue(27, "ready")
+    local first = core.dependency_gate(repo, 42)
+    t.eq(first.ok, false)
+    t.eq(first.kind, "waiting")
+    t.eq(first.unmet[1], 27)
+
+    mock_blocked_by(42, { { number = 27 } })
+    mock_blocked_by(27, {})
+    mock_blocker_issue(27, "ready")
+    local second = core.dependency_gate(repo, 42)
+    t.eq(second.ok, false)
+    t.eq(second.kind, "waiting")
+    t.eq(second.unmet[1], 27)
+    t.eq(count_calls("gh api graphql"), graphql_calls_before + 4)
+    t.eq(count_calls(core.gh_issue_view_observe_cmd(repo, 27)), issue_view_calls_before + 2)
+  end,
+
   test_dependency_gate_satisfied_for_pr_stream_merged_blocker = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    local link = mock_blocker_issue_with_pr_link(7, 8, "pr-open")
-    mock_blocker_pr(7, 8, link, {
-      core.pr_origin_marker(link.proposal_id, 7, link.branch, link.impl_version, link.base_branch),
+    mock_blocked_by(42, { { number = 31, state = "CLOSED" } })
+    mock_blocked_by_failure(31)
+    local link = mock_blocker_issue_with_pr_link(31, 32, "pr-open")
+    mock_blocker_pr(31, 32, link, {
+      core.pr_origin_marker(link.proposal_id, 31, link.branch, link.impl_version, link.base_branch),
       core.state_marker(link.proposal_id, "merged", "merge-version-7"),
-      core.merged_marker(link.proposal_id, 8, "merge-version-7", "def456"),
+      core.merged_marker(link.proposal_id, 32, "merge-version-7", "def456"),
     })
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, true)
@@ -315,40 +409,75 @@ return {
   end,
 
   test_dependency_gate_waits_when_linked_pr_has_no_merged_fact = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    local link = mock_blocker_issue_with_pr_link(7, 8, "pr-open")
-    mock_blocker_pr(7, 8, link, {
-      core.pr_origin_marker(link.proposal_id, 7, link.branch, link.impl_version, link.base_branch),
+    mock_blocked_by(42, { { number = 33 } })
+    mock_blocked_by(33, {})
+    local link = mock_blocker_issue_with_pr_link(33, 34, "pr-open")
+    mock_blocker_pr(33, 34, link, {
+      core.pr_origin_marker(link.proposal_id, 33, link.branch, link.impl_version, link.base_branch),
       core.state_marker(link.proposal_id, "merge-ready", "merge-version-7"),
     })
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "waiting")
-    t.eq(gate.unmet[1], 7)
+    t.eq(gate.unmet[1], 33)
+  end,
+
+  test_dependency_gate_closed_completed_without_merge_requires_waiver = function()
+    mock_blocked_by(42, { { number = 28, state = "CLOSED", state_reason = "COMPLETED" } })
+    mock_blocker_issue(28, "ready")
+    local gate = core.dependency_gate(repo, 42)
+    t.eq(gate.ok, false)
+    t.eq(gate.kind, "waiting")
+    t.eq(gate.reason, "dependency-waiver-required")
+    t.eq(gate.unmet[1], 28)
+  end,
+
+  test_dependency_gate_closed_completed_with_waiver_is_satisfied = function()
+    mock_blocked_by(42, { { number = 29, state = "CLOSED", state_reason = "COMPLETED" } })
+    mock_blocker_issue(29, "ready")
+    local gate = core.dependency_gate(repo, 42, {
+      proposal_id = proposal_id,
+      version = version,
+      comments = {
+        dependency_waiver_comment(29),
+      },
+    })
+    t.eq(gate.ok, true)
+    t.eq(gate.kind, "satisfied")
+    t.eq(gate.reason, "dependency-waiver")
+  end,
+
+  test_dependency_gate_closed_not_planned_voids_edge = function()
+    mock_blocked_by(42, { { number = 30, state = "CLOSED", state_reason = "NOT_PLANNED" } })
+    local gate = core.dependency_gate(repo, 42)
+    t.eq(gate.ok, true)
+    t.eq(gate.kind, "satisfied")
+    t.eq(gate.reason, "dependency-void")
+    t.eq(gate.notes[1].kind, "dependency-void")
+    t.eq(gate.notes[1].blocker_number, 30)
   end,
 
   test_dependency_gate_pr_stream_fetch_failure_fails_closed = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue_with_pr_link(7, 8, "pr-open")
-    mock_blocker_pr_failure(8)
+    mock_blocked_by(42, { { number = 35 } })
+    mock_blocked_by(35, {})
+    mock_blocker_issue_with_pr_link(35, 36, "pr-open")
+    mock_blocker_pr_failure(36)
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "unresolvable")
-    t.eq(gate.unmet[1], 7)
+    t.eq(gate.unmet[1], 35)
   end,
 
   test_dependency_gate_cycle = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, { { number = 42 } })
+    mock_blocked_by(42, { { number = 37 } })
+    mock_blocked_by(37, { { number = 42 } })
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, false)
     t.eq(gate.kind, "cycle")
   end,
 
   test_dependency_gate_cross_repo_and_failures_unresolvable = function()
-    mock_blocked_by(42, { { number = 7, repo = "other/repo" } })
+    mock_blocked_by(42, { { number = 41, repo = "other/repo" } })
     local cross_repo = core.dependency_gate(repo, 42)
     t.eq(cross_repo.ok, false)
     t.eq(cross_repo.kind, "unresolvable")
@@ -375,9 +504,9 @@ return {
 
   test_consensus_result_holds_for_unmet_dependency = function()
     mock_result_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 51 } })
+    mock_blocked_by(51, {})
+    mock_blocker_issue(51, "ready")
     local result = run_result()
     t.eq(result.exit_code, 0)
     t.eq(has_queue(result.raises, "devloop_ready"), false)
@@ -390,9 +519,9 @@ return {
 
   test_consensus_result_raises_ready_for_satisfied_dependency = function()
     mock_result_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "merged")
+    mock_blocked_by(42, { { number = 52 } })
+    mock_blocked_by(52, {})
+    mock_blocker_issue(52, "merged")
     local result = run_result()
     t.eq(result.exit_code, 0)
     t.is_true(has_queue(result.raises, "devloop_ready"))
@@ -400,9 +529,9 @@ return {
 
   test_observe_issue_ready_holds_then_cascades_when_satisfied = function()
     mock_observe_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 53 } })
+    mock_blocked_by(53, {})
+    mock_blocker_issue(53, "ready")
     local held = run_observe()
     t.eq(held.exit_code, 0)
     t.eq(has_queue(held.raises, "devloop_ready"), false)
@@ -413,12 +542,12 @@ return {
       {
         core.state_marker(proposal_id, "ready", version),
         "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
-          .. core.dependency_wait_marker(proposal_id, version, { 7 }),
+          .. core.dependency_wait_marker(proposal_id, version, { 53 }),
       }
     )
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "merged")
+    mock_blocked_by(42, { { number = 53 } })
+    mock_blocked_by(53, {})
+    mock_blocker_issue(53, "merged")
     local cascaded = run_observe()
     t.eq(cascaded.exit_code, 0)
     t.is_true(has_queue(cascaded.raises, "devloop_ready"))
@@ -427,6 +556,145 @@ return {
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
     end)
     t.is_true(clear ~= nil)
+  end,
+
+  test_consensus_result_releases_not_planned_blocker_with_void_audit = function()
+    mock_result_issue()
+    mock_blocked_by(42, { { number = 56, state = "CLOSED", state_reason = "NOT_PLANNED" } })
+    local result = run_result()
+    t.eq(result.exit_code, 0)
+    t.is_true(has_queue(result.raises, "devloop_ready"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-release:v1"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-void:v1"))
+    t.is_true(has_marker(result.raises, 'blocker="56"'))
+  end,
+
+  test_observe_issue_hold_releases_not_planned_blocker_with_void_audit = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 57 }),
+      }
+    )
+    mock_blocked_by(42, { { number = 57, state = "CLOSED", state_reason = "NOT_PLANNED" } })
+    local released = run_observe()
+    t.eq(released.exit_code, 0)
+    t.is_true(has_queue(released.raises, "devloop_ready"))
+    t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
+    t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-void:v1"))
+    local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
+      return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
+    end)
+    t.is_true(clear ~= nil)
+  end,
+
+  test_dependency_reconcile_requeues_dependency_held_issues_without_updated_at_bump = function()
+    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = repo,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        core.dependency_wait_marker(proposal_id, version, { 7 }),
+      }
+    )
+    local result = run_dependency_reconcile()
+    t.eq(result.exit_code, 0)
+    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
+    t.is_true(raised ~= nil)
+    t.eq(raised.payload.type, "issue")
+    t.eq(raised.payload.repo, repo)
+    t.eq(raised.payload.number, 42)
+    t.eq(raised.payload.updated_at, "2026-06-03T01:02:03Z")
+    t.eq(raised.payload.source, "dependency-reconcile")
+    t.eq(raised.payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(tostring(raised.payload.dedup_key):find("dependency%-reconcile", 1) ~= nil)
+  end,
+
+  test_dependency_reconcile_skips_label_without_trusted_hold_marker = function()
+    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = repo,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+      }
+    )
+    local result = run_dependency_reconcile()
+    t.eq(result.exit_code, 0)
+    t.eq(has_queue(result.raises, "github-proxy.github_entity_changed"), false)
+  end,
+
+  test_consensus_result_holds_completed_blocker_without_waiver = function()
+    mock_result_issue()
+    mock_blocked_by(42, { { number = 58, state = "CLOSED", state_reason = "COMPLETED" } })
+    mock_blocker_issue(58, "ready")
+    local result = run_result()
+    t.eq(result.exit_code, 0)
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-wait:v1"))
+    t.is_true(has_marker(result.raises, 'reason="dependency-waiver-required"'))
+  end,
+
+  test_trusted_dependency_waiver_command_creates_waiver_and_requeues_ready = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "fkst: dependency-waiver 60",
+        "github-devloop dependency hold: waiting\n\nReason: dependency-waiver-required\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 60 }, "waiting", "dependency-waiver-required"),
+      }
+    )
+    mock_blocked_by(42, { { number = 60, state = "CLOSED", state_reason = "COMPLETED" } })
+    mock_blocker_issue(60, "ready")
+    local result = run_observe()
+    t.eq(result.exit_code, 0)
+    t.is_true(has_queue(result.raises, "devloop_ready"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-waiver:v1"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:operator-command:v1"))
+    t.is_true(has_marker(result.raises, 'command="dependency-waiver"'))
+    t.is_true(has_marker(result.raises, 'blocker="60"'))
+    t.is_true(has_marker(result.raises, 'reason="operator-waiver"'))
+  end,
+
+  test_observe_issue_releases_completed_blocker_with_waiver = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        dependency_waiver_comment(59),
+        "github-devloop dependency hold: waiting\n\nReason: dependency-waiver-required\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 59 }, "waiting", "dependency-waiver-required"),
+      }
+    )
+    mock_blocked_by(42, { { number = 59, state = "CLOSED", state_reason = "COMPLETED" } })
+    mock_blocker_issue(59, "ready")
+    local released = run_observe()
+    t.eq(released.exit_code, 0)
+    t.is_true(has_queue(released.raises, "devloop_ready"))
+    t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
+    t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-waiver:v1"))
+    t.is_true(has_marker(released.raises, 'blocker="59"'))
+    t.is_true(has_marker(released.raises, 'reason="completed_without_merged_marker"'))
   end,
 
   test_observe_issue_existing_hold_still_waiting_does_not_refresh = function()
@@ -450,8 +718,8 @@ return {
 
   test_cycle_holds_with_cycle_marker = function()
     mock_result_issue()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, { { number = 42 } })
+    mock_blocked_by(42, { { number = 54 } })
+    mock_blocked_by(54, { { number = 42 } })
     local result = run_result()
     t.eq(result.exit_code, 0)
     t.eq(has_queue(result.raises, "devloop_ready"), false)
@@ -569,9 +837,9 @@ return {
   end,
 
   test_implement_backstop_returns_without_implementing = function()
-    mock_blocked_by(42, { { number = 7 } })
-    mock_blocked_by(7, {})
-    mock_blocker_issue(7, "ready")
+    mock_blocked_by(42, { { number = 55 } })
+    mock_blocked_by(55, {})
+    mock_blocker_issue(55, "ready")
     mock_implement_issue()
     local result = run_implement()
     t.eq(result.exit_code, 0)

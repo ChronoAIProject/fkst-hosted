@@ -219,6 +219,22 @@ local function mock_git_status(stdout, exit_code, stderr)
   })
 end
 
+local function mock_no_unmerged_paths()
+  t.mock_command("ls-files -u", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_no_conflict_markers()
+  t.mock_command("grep -n -I -E", {
+    stdout = "",
+    stderr = "",
+    exit_code = 1,
+  })
+end
+
 local function mock_existing_fix_worktree(branch, head, path, merge)
   local worktree = path or "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/fix-worktree"
   t.mock_command("git worktree list --porcelain", {
@@ -253,6 +269,24 @@ local function mock_existing_fix_worktree(branch, head, path, merge)
       stderr = merge.unmerged_stderr or "",
       exit_code = merge.unmerged_exit_code or 0,
     })
+  end
+  if merge ~= nil and merge.post_codex_unmerged_stdout ~= nil then
+    t.mock_command("ls-files -u", {
+      stdout = merge.post_codex_unmerged_stdout,
+      stderr = merge.post_codex_unmerged_stderr or "",
+      exit_code = merge.post_codex_unmerged_exit_code or 0,
+    })
+  else
+    mock_no_unmerged_paths()
+  end
+  if merge ~= nil and merge.post_codex_conflict_markers_stdout ~= nil then
+    t.mock_command("grep -n -I -E", {
+      stdout = merge.post_codex_conflict_markers_stdout,
+      stderr = merge.post_codex_conflict_markers_stderr or "",
+      exit_code = merge.post_codex_conflict_markers_exit_code or 0,
+    })
+  else
+    mock_no_conflict_markers()
   end
   return worktree
 end
@@ -300,6 +334,8 @@ local function mock_missing_fix_worktree(branch, head, path)
     stderr = "",
     exit_code = 0,
   })
+  mock_no_unmerged_paths()
+  mock_no_conflict_markers()
   return worktree
 end
 
@@ -346,6 +382,8 @@ local function mock_outside_runtime_fix_worktree(branch, head, path)
     stderr = "",
     exit_code = 0,
   })
+  mock_no_unmerged_paths()
+  mock_no_conflict_markers()
   return worktree
 end
 
@@ -403,15 +441,25 @@ local function count_calls(needle)
   return count
 end
 
-local function find_raise(raises, queue)
+local function is_work_card_raise(raised)
+  return raised ~= nil
+    and type(raised.payload) == "table"
+    and tostring(raised.payload.body or ""):find("fkst:github-devloop:work-card:v1", 1, true) ~= nil
+end
+
+local function find_raise(raises, queue, predicate)
   for _, raised in ipairs(raises or {}) do
-    if raised.queue == queue then
+    if raised.queue == queue
+      and (predicate ~= nil or not is_work_card_raise(raised))
+      and (predicate == nil or predicate(raised.payload, raised)) then
       return raised
     end
   end
   if queue == "github-proxy.github_issue_comment_request" then
     for _, raised in ipairs(raises or {}) do
-      if raised.queue == "github-proxy.github_pr_comment_request" then
+      if raised.queue == "github-proxy.github_pr_comment_request"
+        and (predicate ~= nil or not is_work_card_raise(raised))
+        and (predicate == nil or predicate(raised.payload, raised)) then
         return raised
       end
     end

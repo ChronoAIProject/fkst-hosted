@@ -106,6 +106,9 @@ local function guard_pr_open_write(repo, payload, bot_login)
   )
 
   local issue = core.parse_issue_state(view.stdout)
+  if not core.verify_issue_claim_in_issue(issue, payload, repo, payload.issue_number, "github_pr_open") then
+    return nil
+  end
   local state = core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
   local has_pr_open_marker = core.has_devloop_pr_open_marker(issue.comments, payload.proposal_id, payload.impl_version, bot_login)
   if has_pr_open_marker then
@@ -127,7 +130,6 @@ local function guard_pr_open_write(repo, payload, bot_login)
     return nil
   end
   if tostring(fact.branch) ~= tostring(payload.branch)
-    or tostring(fact.head_sha) ~= tostring(payload.head_sha)
     or tostring(fact.base_branch) ~= tostring(payload.base_branch) then
     log.warn("github-proxy: PR open skipped because request does not match implementing fact marker")
     return nil
@@ -142,9 +144,16 @@ local function guard_pr_open_write(repo, payload, bot_login)
     log.warn("github-proxy: PR open skipped because branch ref output is invalid")
     return nil
   end
-  if current_head ~= fact.head_sha then
-    log.warn("github-proxy: PR open skipped because branch head moved past implementing fact")
+  if current_head ~= tostring(payload.head_sha):lower() then
+    log.warn("github-proxy: PR open skipped because request head does not match current branch head")
     return nil
+  end
+  if current_head ~= tostring(fact.head_sha):lower() then
+    local ancestry = exec_sync({ cmd = core.git_is_ancestor_cmd(fact.head_sha, current_head), timeout = 30 })
+    if ancestry.exit_code ~= 0 then
+      log.warn("github-proxy: PR open skipped because branch head is not descended from implementing fact")
+      return nil
+    end
   end
 
   return {

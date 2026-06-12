@@ -88,6 +88,9 @@ function pipeline(event)
         .. describe_labels(add_labels, remove_labels))
       return
     end
+    if not core.verify_issue_claim_before_write(payload, repo, payload.issue_number, "github_issue_label") then
+      return
+    end
 
     local changed = core.apply_issue_labels(repo, payload.issue_number, add_labels, remove_labels)
     if changed ~= true then

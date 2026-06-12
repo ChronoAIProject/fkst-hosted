@@ -84,6 +84,115 @@ local function read_current_pr(repo, pr_number)
   return core.parse_pr_view_origin(pr_view.stdout)
 end
 
+local function read_decompose_issue(repo, issue_number)
+  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_decompose_cmd(repo, issue_number), timeout = 30 })
+  if issue_view.exit_code ~= 0 then
+    error("github-devloop: gh issue decompose view failed: " .. tostring(issue_view.stderr))
+  end
+  return core.parse_issue_view_decompose(issue_view.stdout)
+end
+
+local function read_decompose_child_issues(repo, proposal_id)
+  local child_list = core.gh_exec({ cmd = core.gh_issue_list_decompose_children_cmd(repo, proposal_id), timeout = 30 })
+  if child_list.exit_code ~= 0 then
+    error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
+  end
+  return core.parse_decompose_child_issue_list(child_list.stdout)
+end
+
+local function plan_current_decompose(event, repo, issue_number, decompose)
+  local current_issue = read_decompose_issue(repo, issue_number)
+  local depth = core.decompose_lineage_depth(current_issue.body)
+  if depth >= core.max_decompose_depth() then
+    return current_issue, nil, "depth-cap"
+  end
+  decompose.current_issue_body = current_issue.body
+  local content_fetch = core.context_fetch_from_bundle({
+    dept = "decompose",
+    repo = repo,
+    issue_number = issue_number,
+    pr_number = decompose.pr_number,
+    proposal_id = decompose.proposal_id,
+    version = decompose.dedup_key,
+    tick = event.ts,
+  })
+  local issues = decompose_plan(decompose, current_issue, content_fetch)
+  if #issues < 1 then
+    issues = core.fallback_decompose_plan(decompose)
+  end
+  return current_issue, issues, nil
+end
+
+local function raise_issue_create(repo, decompose, issue, index)
+  local create_request = core.build_issue_create_request(repo, decompose, issue, index)
+  core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_issue_create_request", create_request)
+end
+
+local function heal_missing_children(event, repo, issue_number, decompose, state, decomposed, parent_comments)
+  local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
+  local completed = core.decompose_child_fact_indexes(
+    {},
+    child_issues,
+    decompose.proposal_id,
+    decompose.version,
+    decompose.pr_number,
+    {}
+  )
+  local child_body_missing = {}
+  for index = 1, decomposed.count do
+    if not completed[index] then
+      table.insert(child_body_missing, index)
+    end
+  end
+  if #child_body_missing == 0 then
+    core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
+    return
+  end
+
+  local _, issues, reason = plan_current_decompose(event, repo, issue_number, decompose)
+  if reason == "depth-cap" then
+    core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(decomposed children missing)", "decomposed marker is visible but child issues are missing")
+    error("github-devloop: decomposed marker visible but child issues are missing")
+  end
+  local count = math.min(#issues, decomposed.count)
+  if count < decomposed.count then
+    local fallback = core.fallback_decompose_plan(decompose)
+    for index = count + 1, decomposed.count do
+      issues[index] = fallback[1]
+    end
+  end
+
+  local dedup_by_index = {}
+  for index = 1, decomposed.count do
+    dedup_by_index[index] = core.build_issue_create_request(repo, decompose, issues[index], index).dedup_key
+  end
+  completed = core.decompose_child_fact_indexes(
+    parent_comments,
+    child_issues,
+    decompose.proposal_id,
+    decompose.version,
+    decompose.pr_number,
+    dedup_by_index
+  )
+  local missing = {}
+  for index = 1, decomposed.count do
+    if not completed[index] then
+      table.insert(missing, index)
+    end
+  end
+  if #missing == 0 then
+    core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
+    return
+  end
+
+  core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
+    "github-proxy.github_issue_create_request",
+  })
+  for _, index in ipairs(missing) do
+    raise_issue_create(repo, decompose, issues[index], index)
+  end
+end
+
 local function write_decomposed_marker(repo, decompose, count)
   local path = marker_body_file(repo, decompose.pr_number)
   file.write(path, core.decomposed_comment_body(decompose, count))
@@ -101,7 +210,7 @@ end
 function pipeline(event)
   local decompose = event.payload or {}
   if not core.is_supported_decompose(decompose) then
-    core.log_entry("decompose", event, "unknown", decompose.dedup_key)
+    core.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
     core.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -139,32 +248,23 @@ function pipeline(event)
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(blocked-fix-reconcile-not-visible)", "blocked/fix-reconcile marker is not yet visible")
       error("github-devloop: blocked fix reconcile marker not yet visible for decompose; retrying")
     end
-    if core.has_decomposed_marker(current_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then
-      core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker already visible)", "decompose already applied")
+    local decomposed = core.decomposed_fact(
+      current_pr.comments,
+      decompose.proposal_id,
+      decompose.version,
+      decompose.pr_number
+    )
+    if decomposed ~= nil then
+      heal_missing_children(event, repo, issue_number, decompose, state, decomposed, current_pr.comments)
       return
     end
 
-    local issue_view = core.gh_exec({ cmd = core.gh_issue_view_decompose_cmd(repo, issue_number), timeout = 30 })
-    if issue_view.exit_code ~= 0 then
-      error("github-devloop: gh issue decompose view failed: " .. tostring(issue_view.stderr))
-    end
-    local current_issue = core.parse_issue_view_decompose(issue_view.stdout)
+    local current_issue, issues, reason = plan_current_decompose(event, repo, issue_number, decompose)
     local depth = core.decompose_lineage_depth(current_issue.body)
-    if depth >= core.max_decompose_depth() then
+    if reason == "depth-cap" or depth >= core.max_decompose_depth() then
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-depth-cap(decompose-lineage)", "decompose lineage depth cap reached")
       return
     end
-    decompose.current_issue_body = current_issue.body
-    local content_fetch = core.context_fetch_from_bundle({
-      dept = "decompose",
-      repo = repo,
-      issue_number = issue_number,
-      pr_number = decompose.pr_number,
-      proposal_id = decompose.proposal_id,
-      version = decompose.dedup_key,
-      tick = event.ts,
-    })
-    local issues = decompose_plan(decompose, current_issue, content_fetch)
     local count = math.min(#issues, core.max_decompose_issues())
     if count < 1 then
       issues = core.fallback_decompose_plan(decompose)
@@ -181,8 +281,7 @@ function pipeline(event)
       "github-proxy.github_issue_create_request",
     })
     for index = 1, count do
-      local create_request = core.build_issue_create_request(repo, decompose, issues[index], index)
-      core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_issue_create_request", create_request)
+      raise_issue_create(repo, decompose, issues[index], index)
     end
   end)
 end

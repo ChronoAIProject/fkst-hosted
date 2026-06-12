@@ -85,6 +85,24 @@ error(prefix .. detail)
         self.assertEqual(self.warning_lines(source), [])
 
 
+class RestPaginationGuardTest(unittest.TestCase):
+    def warning_lines(self, source: str) -> list[int]:
+        return check_repo.unguarded_rest_per_page_lines(source)
+
+    def test_warns_fixed_rest_page_without_paginate(self) -> None:
+        source = """
+local cmd = "gh api 'repos/o/r/issues?state=open&per_page=100'"
+"""
+        self.assertEqual(self.warning_lines(source), [2])
+
+    def test_allows_paginated_rest_read(self) -> None:
+        source = """
+local cmd = "gh api --paginate --slurp "
+  .. shell_quote("repos/o/r/issues?state=open&per_page=100")
+"""
+        self.assertEqual(self.warning_lines(source), [])
+
+
 class HiddenTextGuardTest(unittest.TestCase):
     def hidden_lines(self, source: str) -> list[int]:
         return check_repo.hidden_text_encoded_literal_lines(source)
@@ -184,9 +202,20 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertIn('python3 -B "$ROOT/scripts/check_repo.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_cache_test.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/bin_bootstrap_test.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/doctor_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
+
+
+class RepositoryInterfaceContractTest(unittest.TestCase):
+    def test_repository_checks_scan_fkst_packages_view(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+
+        self.assertEqual(check_repo.packages_root(root), root / ".fkst" / "packages")
 
 
 if __name__ == "__main__":

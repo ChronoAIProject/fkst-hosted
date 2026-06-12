@@ -1,80 +1,81 @@
 local S = {}
+local registry = require("core.registry")
 
 function S.install(M)
 
-local audit = {
-  {
-    state = "thinking",
-    marker_facts = "state:v1 thinking plus optional converge-round:v1",
-    kickoff = "consensus.proposal",
-    replay = "Initial thinking reuses the state version as proposal dedup; convergence replays the next /loop/N from the latest complete converge-round marker.",
-  },
-  {
-    state = "ready",
-    marker_facts = "state:v1 ready",
-    kickoff = "devloop_ready",
-    replay = "Raise ready/<version> after dependency gate re-derives satisfied blockers.",
-  },
-  {
-    state = "implementing",
-    marker_facts = "state:v1 implementing plus implementing:v1",
-    kickoff = "github-proxy.github_entity_changed",
-    replay = "Branch poll re-derives PR open or impl-failed from branch/worktree facts.",
-  },
-  {
-    state = "pr-open",
-    marker_facts = "state:v1 pr-open plus pr-link:v1",
-    kickoff = "devloop_reviewing",
-    replay = "Observe re-fetches the linked PR and raises review for the linked PR head.",
-  },
-  {
-    state = "reviewing",
-    marker_facts = "state:v1 reviewing plus PR head facts",
-    kickoff = "devloop_reviewing",
-    replay = "PR observe re-derives review kickoff from current PR head and issue version.",
-  },
-  {
-    state = "review-converge",
-    marker_facts = "state:v1 reviewing plus review-converge-round:v1",
-    kickoff = "consensus.proposal",
-    replay = "Review loop replays the next /review-loop/N from the latest complete review-converge marker.",
-  },
-  {
-    state = "fixing",
-    marker_facts = "state:v1 fixing plus review-result/review-meta/merge-gate feedback, or current PR head for deterministic renormalization",
-    kickoff = "devloop_fixing or devloop_reviewing",
-    replay = "Observe re-raises fix when a trusted feedback fact is parseable; otherwise it re-enters reviewing for the current head.",
-  },
-  {
-    state = "review-meta",
-    marker_facts = "state:v1 review-meta plus review proposal encoded in version/dedup",
-    kickoff = "devloop_review_meta",
-    replay = "Observe re-raises review-meta using the review proposal, PR number, issue version, and original dedup.",
-  },
-  {
-    state = "merge-ready",
-    marker_facts = "state:v1 merge-ready plus merge-ready:v1",
-    kickoff = "devloop_merge_ready",
-    replay = "PR observe or merge retry re-derives merge-ready from head-bound approval facts.",
-  },
-  {
-    state = "merging",
-    marker_facts = "state:v1 merging plus merging:v1",
-    kickoff = "devloop_merge_ready",
-    replay = "Merge retry re-derives completion or repair from PR mergeability and head facts.",
-  },
+local source_ref_derivations = {
+  entity = true,
+  issue = true,
+  pr = true,
 }
 
+local payload_derivations = {
+  ["literal:github-devloop.fixing.v1"] = true,
+  ["dedup:replayed-fixing"] = true,
+  ["comment_body:fix-feedback"] = true,
+}
+
+local marker_fields = registry.load_indexed_map("core.restart.marker_fields.index", "family")
+
+local required_replay_payload_fields = registry.load_indexed_map("core.restart.required_replay_payload_fields.index", "state")
+
+local function fact(family, freshness)
+  return { family = family, freshness = freshness }
+end
+
+local function obligation(kinds, exits)
+  return {
+    kinds = kinds,
+    exits = exits,
+  }
+end
+
+local function effect(kinds, completeness, completeness_derivation)
+  local declared_kinds = kinds
+  if type(kinds) ~= "table" then
+    declared_kinds = {}
+    for index = 1, tonumber(kinds) or 0 do
+      declared_kinds[index] = "effect-" .. tostring(index)
+    end
+  end
+  return {
+    intent_count = #declared_kinds,
+    kinds = declared_kinds,
+    completeness = completeness,
+    completeness_derivation = completeness_derivation,
+  }
+end
+
+local function budget(minutes)
+  return { minutes = minutes }
+end
+
+local function timeout(queue)
+  return {
+    action = "redrive",
+    queue = queue,
+    escalate_after_attempts = 3,
+  }
+end
+
+local transition_table = registry.load_indexed_array("core.restart.transitions.index", "from_state", M, {
+  fact = fact,
+  obligation = obligation,
+  effect = effect,
+  budget = budget,
+  timeout = timeout,
+})
+
 local audit_by_state = {}
-for _, row in ipairs(audit) do
-  audit_by_state[row.state] = row
+for _, row in ipairs(transition_table) do
+  audit_by_state[row.from_state] = row
 end
 
 function M.restart_completeness_audit()
   local rows = {}
-  for _, row in ipairs(audit) do
+  for _, row in ipairs(transition_table) do
     table.insert(rows, {
-      state = row.state,
+      state = row.from_state,
       marker_facts = row.marker_facts,
       kickoff = row.kickoff,
       replay = row.replay,
@@ -85,6 +86,108 @@ end
 
 function M.restart_completeness_audit_for_state(state)
   return audit_by_state[state]
+end
+
+function M.restart_transition_table()
+  return transition_table
+end
+
+function M.restart_durable_marker_fields()
+  return marker_fields
+end
+
+function M.restart_source_ref_derivations()
+  return source_ref_derivations
+end
+
+function M.restart_required_replay_payload_fields()
+  return required_replay_payload_fields
+end
+
+local function field_reference_error(reference)
+  local marker_family, attr = tostring(reference or ""):match("^marker:([^%.]+)%.(.+)$")
+  if marker_family ~= nil then
+    if marker_fields[marker_family] == nil then
+      return "unknown marker family " .. marker_family
+    end
+    if marker_fields[marker_family][attr] ~= true then
+      return "unknown marker attr " .. marker_family .. "." .. attr
+    end
+    return nil
+  end
+  local derivation = tostring(reference or ""):match("^source_ref:(.+)$")
+  if derivation ~= nil then
+    if source_ref_derivations[derivation] == true then
+      return nil
+    end
+    return "unknown source_ref derivation " .. derivation
+  end
+  if payload_derivations[tostring(reference or "")] == true then
+    return nil
+  end
+  return "unsupported payload field source " .. tostring(reference)
+end
+
+function M.restart_field_coverage_errors(rows)
+  local errors = {}
+  for _, row in ipairs(rows or transition_table) do
+    local required_fields = required_replay_payload_fields[row.from_state] or {}
+    for field, reason in pairs(required_fields) do
+      if (row.payload_fields or {})[field] == nil then
+        table.insert(errors, tostring(row.from_state or "?") .. "." .. tostring(field) .. ": missing required replay payload field: " .. tostring(reason))
+      end
+    end
+    for field, reference in pairs(row.payload_fields or {}) do
+      local err = field_reference_error(reference)
+      if err ~= nil then
+        table.insert(errors, tostring(row.from_state or "?") .. "." .. tostring(field) .. ": " .. err)
+      end
+    end
+  end
+  return errors
+end
+
+local default_consumer_sources = {
+  "packages/github-devloop/departments/consensus_result/main.lua",
+  "packages/github-devloop/departments/decompose/main.lua",
+  "packages/github-devloop/departments/observe_pr/main.lua",
+  "packages/github-devloop/departments/observe_issue/main.lua",
+  "packages/github-devloop/core/replayer.lua",
+  "packages/github-devloop/core/requests.lua",
+}
+
+local function source_contains_any(paths, needle)
+  if needle == nil or needle == "" then
+    return false
+  end
+  for _, path in ipairs(paths or {}) do
+    local ok, text = pcall(file.read, path)
+    if ok and tostring(text or ""):find(tostring(needle), 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.restart_effect_contract_errors(rows, consumer_sources)
+  local errors = {}
+  local sources = consumer_sources or default_consumer_sources
+  for _, row in ipairs(rows or transition_table) do
+    local effects = row.effects or {}
+    local kinds = effects.kinds or {}
+    local count = tonumber(effects.intent_count) or #kinds
+    if count > 1 then
+      if type(kinds) ~= "table" or #kinds ~= count then
+        table.insert(errors, tostring(row.from_state or "?") .. ": multi-effect row must enumerate declared effects")
+      end
+      if type(effects.completeness_derivation) ~= "string" or effects.completeness_derivation == "" then
+        table.insert(errors, tostring(row.from_state or "?") .. ": multi-effect row must declare a completeness derivation")
+      elseif not source_contains_any(sources, effects.completeness_derivation) then
+        table.insert(errors, tostring(row.from_state or "?") .. ": completeness derivation is not called by consumer sources")
+      end
+    end
+  end
+  return errors
 end
 
 function M.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
@@ -171,6 +274,45 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
       end
     end
   end
+  marker_pattern = "<!%-%- fkst:github%-devloop:fix%-reflection:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_dedup = marker:match('dedup="([^"]*)"')
+      local verdict = marker:match('verdict="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local round = tonumber(marker:match('fix_round="(%d+)"'))
+      local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
+      local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      if marker_issue == tostring(issue_proposal_id)
+        and verdict == "checkpoint"
+        and marker_version == tostring(issue_version)
+        and tostring(review_pr_number or "") == tostring(pr_number)
+        and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
+        and tostring(reviewed_head_sha or "") == tostring(head_sha)
+        and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
+        local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+        if reject_fact == nil
+          or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
+          or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
+          or not M._is_bounded_string(reject_fact.blocking_gap, M._max_blocking_gap_len) then
+          return nil
+        end
+        local reflection_dedup = M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, marker_dedup)
+        return {
+          proposal_id = review_proposal,
+          dedup_key = reflection_dedup,
+          review_dedup_key = marker_dedup,
+          source_ref = M.pr_source_ref(repo, pr_number),
+          pr_number = tonumber(pr_number),
+          n = tonumber(n) or 0,
+          mode = "fix-reflection",
+          fix_round = round,
+          blocking_gap = reject_fact.blocking_gap,
+        }
+      end
+    end
+  end
   local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
   local _, reject_pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
   if reject_fact ~= nil
@@ -211,7 +353,15 @@ end
 function M.fixing_version_matches_link(issue_version, link_version)
   local current = tostring(issue_version or "")
   local linked = tostring(link_version or "")
-  return current == linked or M._strip_latest_fix_version_suffix(current) == linked
+  if current == linked or M._strip_latest_fix_version_suffix(current) == linked then
+    return true
+  end
+  local current_base = M.strip_transition_version_suffixes(current)
+  local linked_base = M.strip_transition_version_suffixes(linked)
+  if current_base == "" or linked_base == "" then
+    return false
+  end
+  return M.safe_version_segment(current_base) == M.safe_version_segment(linked_base)
 end
 
 end

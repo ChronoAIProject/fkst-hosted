@@ -263,7 +263,7 @@ return {
     t.is_nil(minimal_call.stdin:find("runtime-cache:consensus-test/context", 1, true))
   end,
 
-  test_runtime_cache_context_manifest_missing_file_fails_closed = function()
+  test_runtime_cache_context_manifest_missing_file_ack_drops_without_judgment = function()
     mock_judgment_runtime()
     local run_opts = opts("stdin-runtime-cache-missing-file")
     seed_cache("consensus-test/missing-context", "Issue JSON: /tmp/fkst-packages-test/consensus/missing-file.json", run_opts)
@@ -272,7 +272,43 @@ return {
       content_fetch = "runtime-cache:consensus-test/missing-context",
     }), run_opts)
 
-    t.eq(result.exit_code, 1)
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_runtime_cache_context_cache_miss_is_terminal_ack_drop = function()
+    mock_judgment_runtime()
+
+    local result = run_decide(proposal({
+      content_fetch = "runtime-cache:consensus-test/stale-missing-context",
+    }), opts("stdin-runtime-cache-stale-miss"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(#codex_calls(), 0)
+  end,
+
+  test_runtime_cache_context_unreadable_manifest_file_is_terminal_ack_drop = function()
+    mock_judgment_runtime()
+    local run_opts = opts("stdin-runtime-cache-stale-file")
+    local root = run_opts.env.FKST_RUNTIME_ROOT
+    os.execute("mkdir -p " .. shell_single_quote(root .. "/ctx"))
+    local issue = assert(io.open(root .. "/ctx/issue.json", "w"))
+    issue:write("issue")
+    issue:close()
+    local notice = assert(io.open(root .. "/ctx/UNTRUSTED-NOTICE.txt", "w"))
+    notice:write("notice")
+    notice:close()
+    seed_cache("consensus-test/stale-file", "Untrusted notice: " .. root .. "/ctx/UNTRUSTED-NOTICE.txt\nIssue JSON: " .. root .. "/ctx/issue.json", run_opts)
+    os.remove(root .. "/ctx/issue.json")
+
+    local result = run_decide(proposal({
+      content_fetch = "runtime-cache:consensus-test/stale-file",
+    }), run_opts)
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
     t.eq(#codex_calls(), 0)
   end,
 

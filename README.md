@@ -2,7 +2,7 @@
 
 这是官方 fkst 包库。库 B 只放可复用的官方脚本包，不承载 host 业务仓的状态，也不扩展引擎 surface。
 
-每个官方公司放在 `packages/<name>/`。package-root 的固定结构是：
+运行时包根视图是 `.fkst/packages/`。在本仓中它是指向开发树 `packages/` 的相对 symlink；宿主仓可以直接把运行时包放在 `.fkst/packages/` 下。每个 package-root 的固定结构是：
 
 - `departments/<department>/main.lua`
 - `raisers/<raiser>.lua`
@@ -14,47 +14,51 @@
 ```sh
 fkst-framework run <department-main.lua> \
   --project-root <host-root> \
-  --package-root /Users/auric/fkst-packages/packages/<name> \
+  --package-root /Users/auric/fkst-packages/.fkst/packages/<name> \
   --event '<event-json>'
 ```
 
 包库里有两类 package：
 
 - **flat 平包**：自洽、自有裸名队列、0 外部 package namespace 引用，可单根 `conformance + test`。当前 flat 包有 `github-proxy` 与 `consensus`。
-- **composed 包**：作为一等包放在 `packages/<name>/`，用于组合/适配兄弟包，department 可引用 `<pkg>.<queue>`；必须用 `composed.deps` 声明所组合的兄弟包，并通过组合 conformance 校验。当前 composed 包有 `autochrono`、`github-autochrono` 与 `github-devloop`。
+- **composed 包**：作为一等包放在 `.fkst/packages/<name>/` 运行时视图下，用于组合/适配兄弟包，department 可引用 `<pkg>.<queue>`；必须用 `composed.deps` 声明所组合的兄弟包，并通过组合 conformance 校验。当前 composed 包有 `autochrono`、`github-autochrono` 与 `github-devloop`。
 
 引擎按 package-root 目录 basename 建命名空间。flat 包内队列写裸名；composed 包的 glue 队列按 `<pkg>.<queue>` 引用兄弟包。`composed.deps` 只是本仓测试组合的最小约定，不是版本解析、部署依赖或 override manifest。
 
-本机配置（`fkst-framework` 二进制路径等）放在库根的 `.env`（已 gitignore）。首次使用先从 `env.example` 复制并填好本机路径：
+本机配置（`fkst-framework` 二进制路径等）放在库根的 `.fkst/env`（已 gitignore）。首次使用先从 `.fkst/env.example` 复制并填好本机路径：
 
 ```sh
-cp env.example .env   # 然后编辑 .env，把 BIN 指向你的 fkst-framework
+cp .fkst/env.example .fkst/env   # 然后编辑 .fkst/env，把 BIN 指向你的 fkst-framework
 ```
 
-通用脚本 `scripts/run.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.env` 的 `BIN=` > PATH > 同级 `../fkst-substrate`）：
+通用脚本 `scripts/run.sh`（从库根运行；自动解析 `fkst-framework` 二进制：`$BIN` > `.fkst/env` 的 `BIN=` > PATH > 同级 `../fkst-substrate` > `.fkst/substrate-ref` pinned source cache fallback）：
 
 ```sh
 scripts/run.sh test                 # self-test，所有包测试；flat 跑单根 conformance，composed 跳单根 conformance；最后跑组合 conformance；等价 CI
 scripts/run.sh test github-proxy    # 只跑某个包；flat 跑 conformance + test
 scripts/run.sh test-composed        # 只跑 composed 包及其递归 deps 的组合 conformance
+scripts/run.sh doctor               # read-only preflight for git/cargo/rustc, BIN self-test, codex, gh auth, and FKST_* host facts
 
 # 通用一次性跑某部门：解码 RAISED 事件 + dump <RT> 树。包特定配置走 env。
 # github-proxy 的只读入站 dogfood（拿真 gh 打真仓，不写 GitHub）：
 FKST_GITHUB_REPO=ChronoAIProject/fkst-substrate scripts/run.sh run github-proxy github_poll
 
-# 真实前台事件循环：脚本创建临时 FKST_RUNTIME_ROOT 和独立 FKST_DURABLE_ROOT。
+# 真实前台事件循环：未设置时脚本使用 .fkst/runtime 和 .fkst/durable。
 # FKST_RATE_POOL_ROOT 必须由 host 设置为所有 supervise 实例共享的绝对路径。
-# 可用 FKST_PROJECT_ROOT 覆盖默认 project-root（packages/<pkg>）。
+# 可用 FKST_PROJECT_ROOT 覆盖默认 project-root（.fkst/packages/<pkg>）。
 FKST_GITHUB_REPO=owner/repo FKST_RATE_POOL_ROOT=/var/lib/fkst/rate-pools scripts/run.sh supervise github-proxy
 
 # 本地 test/run/supervise 会对可溯源到 ../fkst-substrate 的 BIN 做 freshness 自动构建；
-# CI 不自动 build，FKST_NO_AUTOBUILD=1 可跳过。显式 build 仍会 git pull && cargo build。
+# 若所有既有 BIN 来源都缺失，非 CI 本地会按 .fkst/substrate-ref clone/build 到 per-pin cache；
+# 显式 BIN/.fkst/env BIN 无效会直接报错，CI 不自动 build，FKST_NO_AUTOBUILD=1 会禁用 clone/build fallback。
 scripts/run.sh build
 ```
 
-`run` 用临时（或复用已设的）`FKST_RUNTIME_ROOT`、绝不设 `FKST_GITHUB_WRITE`，所以只读 dogfood 保持只读；同一 `FKST_RUNTIME_ROOT` 连跑两次可看去重。脚本对任何 `packages/<pkg>/departments/<dept>` 通用，不写死 github-proxy。
+`doctor` is a read-only preflight command. It prints one grep-friendly `DOCTOR <item> ok|missing hint=...` line per check, returns non-zero for missing hard dependencies, and never performs package-manager installs, login, credential writes, GitHub writes, or runtime state mutation. 中文补充：它只报告当前 host fact 和明确人工修复命令；登录/授权仍由人执行。
 
-`supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并设置彼此不同的临时 `FKST_RUNTIME_ROOT` / `FKST_DURABLE_ROOT`。真实 supervise 还会 fail-closed 要求 `FKST_RATE_POOL_ROOT` 是 host 提供的绝对路径；每个消耗同一 GitHub 配额的实例必须指向同一个目录。
+`run` 用 `.fkst/runtime`（或复用已设的 `FKST_RUNTIME_ROOT`）、绝不设 `FKST_GITHUB_WRITE`，所以只读 dogfood 保持只读；同一 `FKST_RUNTIME_ROOT` 连跑两次可看去重。脚本对任何 `.fkst/packages/<pkg>/departments/<dept>` 通用，不写死 github-proxy。
+
+`supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并在未设置时使用彼此不同的 `.fkst/runtime` / `.fkst/durable`。真实 supervise 还会 fail-closed 要求 `FKST_RATE_POOL_ROOT` 是 host 提供的绝对路径；每个消耗同一 GitHub 配额的实例必须指向同一个目录。
 
 本库不做版本化 manifest、root-list 或 override DSL。图由固定的 `departments/` 和 `raisers/` 目录扫描得到。flat 包可独立加载；composed 包显式承担跨包 wiring，并用 `composed.deps` 告诉测试脚本组合 conformance 需要一起加载哪些兄弟包。
 
@@ -76,9 +80,9 @@ scripts/run.sh build
 
 `scripts/run.sh check` 只运行仓库静态守卫，不解析也不执行 `BIN`。`scripts/run.sh test` 与 `scripts/run.sh test-composed` 会先运行这些守卫，再进入引擎真实测试；CI 仍只调用 `scripts/run.sh test`。
 
-静态守卫由 `scripts/check_repo.py` 实现，只扫描 `packages/` 与 `scripts/`，不会广泛扫描仓库根，也不会扫 CI checkout 到根目录的 `fkst-substrate/`。这是快速、密闭、best-effort 的静态 lint，只负责不需要引擎的仓库形状约束；它不是完整 Lua parser，也不判断引擎实际会从 returned table 顶层枚举哪些 `test_` key。这个事实由下方 G5 的引擎真实输出检查负责；更深的 engine-loader-based Lua audit 已列入 engine-PR backlog。当前静态守卫包括：
+静态守卫由 `scripts/check_repo.py` 实现，只扫描 `.fkst/packages/` 运行时包视图与 `scripts/`，不会广泛扫描仓库根，也不会扫 CI checkout 到根目录的 `fkst-substrate/`。这是快速、密闭、best-effort 的静态 lint，只负责不需要引擎的仓库形状约束；它不是完整 Lua parser，也不判断引擎实际会从 returned table 顶层枚举哪些 `test_` key。这个事实由下方 G5 的引擎真实输出检查负责；更深的 engine-loader-based Lua audit 已列入 engine-PR backlog。当前静态守卫包括：
 
-- `packages/` 与 `scripts/` 下的 `.lua`、`.sh`、`.py`、`.rs` 源文件硬上限 1000 行；超过即失败，先按职责拆分或删除重复代码。
+- `.fkst/packages/` 与 `scripts/` 下的 `.lua`、`.sh`、`.py`、`.rs` 源文件硬上限 1000 行；超过即失败，先按职责拆分或删除重复代码。
 - `packages/*/tests/` 下的 Lua 文件只能命名为 `*_test.lua` 或 `*_helpers.lua`。
 - 对 `*_test.lua` 做 best-effort “看起来有 `test_<name> = function` 定义”的提示；这只是早期 lint，不作为引擎枚举真相。
 - 对单个 `*_test.lua` 内 best-effort 识别到的 top-level `test_<name>` key 做重复检查；常见 assignment form（如 `test_x = ...`、`["test_x"] = ...`、`M.test_x = ...`、`M["test_x"] = ...`）与常见 function-definition form（如 `function test_x() ... end`、`function M.test_x() ... end`、`function M:test_x() ... end`）都会归一到同一个 key，重复即 G2 失败，避免 Lua table 覆盖导致早期测试静默丢失。
@@ -106,7 +110,7 @@ engine-PR backlog：
 - 出站：`departments/github_comment/main.lua` 消费 host 注入的 `github_issue_comment_request`；`departments/github_issue_label/main.lua` 消费 `github_issue_label_request` 并调用 `gh issue edit --add-label/--remove-label`。两者默认 dry-run；只有 `FKST_GITHUB_WRITE=1` 时才会写回 GitHub。
 - 入站缓存：每个实体用可读路径 key `github-proxy/<type>/<repo>/<num>` 读写引擎 `cache_get` / `cache_set`，例如 `github-proxy/issue/owner/repo/42`。缓存值只保存最新 `updated_at` 并覆盖写入，因此不会积累 marker。
 - 变更检测：poll 到的新 `updated_at` 与缓存不同就先 raise `github_entity_changed`，再 `cache_set`。事件包含 `schema`、`type`（`issue` 或 `pr`）、`repo`、`number`、`title`、`url`、`state`、`updated_at`、`dedup_key`、`source`，以及 `source_ref`（`{kind="external", ref="<repo>#<type>/<number>"}`）。如果 raise 后、写缓存前崩溃，下次 tick 会再次 raise 同一个 `dedup_key`；下游按 `dedup_key` 幂等。
-- 对齐 substrate 的持久投递引擎：`source_ref` 是稳定的实体指针，可靠消费者据此**回源 derive 当前实体**（如 `gh issue view`）而非信任可能过期的 payload；事件被路由到可靠订阅时引擎也要求带它。`payload` 里的实体字段是 best-effort 快照、便于轻量消费。真实运行（`fkst-framework supervise`）需配 `FKST_DURABLE_ROOT`（见 `env.example`）。
+- 对齐 substrate 的持久投递引擎：`source_ref` 是稳定的实体指针，可靠消费者据此**回源 derive 当前实体**（如 `gh issue view`）而非信任可能过期的 payload；事件被路由到可靠订阅时引擎也要求带它。`payload` 里的实体字段是 best-effort 快照、便于轻量消费。真实运行（`fkst-framework supervise`）需配 `FKST_DURABLE_ROOT`（见 `.fkst/env.example`）。
 - 轮询窗口：list polling 受 `gh` 默认返回数量限制；窗口外的实体可能不会被本轮重新检查。这是 best-effort 入站信号，下游应从 durable GitHub state 重新推导最终状态。
 - 并发：每个实体更新都包在 `with_lock("github-proxy/<type>/<repo>/<num>", fn)` 内，避免同一实体的 cache 比较和写入交错。
 - 注释幂等：写回评论时在 body 末尾附加 HTML marker，写前先读取现有 comments 并检查 marker。
@@ -164,10 +168,10 @@ github-proxy.github_entity_changed
 ```sh
 fkst-framework conformance \
   --project-root /Users/auric/fkst-packages \
-  --package-root /Users/auric/fkst-packages/packages/github-autochrono \
-  --package-root /Users/auric/fkst-packages/packages/github-proxy \
-  --package-root /Users/auric/fkst-packages/packages/autochrono \
-  --package-root /Users/auric/fkst-packages/packages/consensus
+  --package-root /Users/auric/fkst-packages/.fkst/packages/github-autochrono \
+  --package-root /Users/auric/fkst-packages/.fkst/packages/github-proxy \
+  --package-root /Users/auric/fkst-packages/.fkst/packages/autochrono \
+  --package-root /Users/auric/fkst-packages/.fkst/packages/consensus
 ```
 
 ## github-devloop

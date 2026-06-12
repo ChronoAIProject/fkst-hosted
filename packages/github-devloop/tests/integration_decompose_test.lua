@@ -59,6 +59,38 @@ local function mock_pr_comment_write(exit_code)
   })
 end
 
+local function mock_child_issue_list(event, indexes)
+  local rendered = {}
+  for _, index in ipairs(indexes or {}) do
+    table.insert(rendered, string.format(
+      '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
+      100 + index,
+      index,
+      h.json_string(core.decompose_child_marker(event.proposal_id, event.version, event.pr_number, index)),
+      100 + index
+    ))
+  end
+  t.mock_command(core.gh_issue_list_decompose_children_cmd("owner/repo", event.proposal_id), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function issue_created_marker(dedup_key, issue_number)
+  return '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. tostring(dedup_key)
+    .. '" issue="' .. tostring(issue_number)
+    .. '" -->'
+end
+
+local function child_dedup_key(event, index)
+  event.current_issue_body = "Original body"
+  return core.build_issue_create_request("owner/repo", event, {
+    title = "Child " .. tostring(index),
+    body = "Child body " .. tostring(index),
+  }, index).dedup_key
+end
+
 blocked_comments = function(event, extra)
   local comments = {
     core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
@@ -197,13 +229,64 @@ return {
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
       core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 1),
+      issue_created_marker(child_dedup_key(event, 1), "101"),
     }))
+    mock_child_issue_list(event, { 1 })
 
     local result = run_decompose(event, opts("decompose-idempotent"))
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls(core.gh_issue_list_decompose_children_cmd("owner/repo", event.proposal_id)), 1)
+  end,
+
+  test_decompose_marker_visible_reraises_missing_children = function()
+    local event = decompose_event()
+    mock_bot_env()
+    mock_write_env_real()
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
+      title = "Original large issue",
+      body = "Original body that describes too much scope.",
+    })
+    h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
+      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
+    }))
+    mock_child_issue_list(event, {})
+    mock_decompose_codex(two_issue_json)
+
+    local result = run_decompose(event, opts("decompose-idempotent-heal-zero"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].payload.title, "Extract a minimal retry helper")
+    t.eq(result.raises[2].payload.title, "Wire retry helper into one call site")
+    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_decompose_marker_visible_reraises_only_partial_missing_child = function()
+    local event = decompose_event()
+    mock_bot_env()
+    mock_write_env_real()
+    mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
+      title = "Original large issue",
+      body = "Original body that describes too much scope.",
+    })
+    h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
+      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+      issue_created_marker(child_dedup_key(event, 1), "101"),
+    }))
+    mock_child_issue_list(event, { 3 })
+    mock_decompose_codex([[{"issues":[{"title":"One","body":"Smaller scope: one.\nNon-goals: none.\nAcceptance: one."},{"title":"Two","body":"Smaller scope: two.\nNon-goals: none.\nAcceptance: two."},{"title":"Three","body":"Smaller scope: three.\nNon-goals: none.\nAcceptance: three."}]}]])
+
+    local result = run_decompose(event, opts("decompose-idempotent-heal-partial"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.title, "Two")
+    t.is_true(result.raises[1].payload.body:find('index="2"', 1, true) ~= nil)
+    t.eq(count_calls("gh pr comment"), 0)
   end,
 
   test_decompose_marker_write_failure_does_not_raise_creates = function()

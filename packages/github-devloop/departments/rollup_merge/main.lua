@@ -10,8 +10,8 @@ M.spec = {
 
 local function log_skip(payload, reason)
   core.log_line("info", "rollup_merge", "rollup", "GATE", {
-    "repo=" .. tostring(payload.repo),
-    "pr=" .. tostring(payload.pr_number),
+    "repo=" .. tostring(core.payload_field(payload, "repo")),
+    "pr=" .. tostring(core.payload_field(payload, "pr_number")),
     "outcome=skip",
     "reason=" .. tostring(reason),
   })
@@ -20,7 +20,7 @@ end
 function pipeline(event)
   local payload = event.payload or {}
   if not core.is_supported_rollup_ready(payload) then
-    core.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
+    core.log_entry("rollup_merge", event, "rollup", core.payload_field(payload, "dedup_key"))
     log_skip(payload, "unsupported-payload")
     return
   end

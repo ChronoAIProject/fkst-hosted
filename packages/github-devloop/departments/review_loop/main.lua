@@ -80,7 +80,7 @@ end
 function pipeline(event)
   local unresolved = event.payload or {}
   if not core.is_supported_pr_review_unresolved(unresolved) then
-    core.log_entry("review_loop", event, "unknown", unresolved.dedup_key)
+    core.log_entry("review_loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
     core.log_cas_decision("review_loop", "unknown", { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end

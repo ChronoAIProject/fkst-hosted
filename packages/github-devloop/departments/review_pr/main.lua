@@ -5,6 +5,7 @@ local M = {}
 M.spec = {
   consumes = { "devloop_reviewing" },
   produces = {
+    "github-proxy.github_pr_comment_request",
     "consensus.proposal",
   },
   stall_window = "30s",
@@ -14,7 +15,7 @@ M.spec = {
 function pipeline(event)
   local reviewing = event.payload or {}
   if not core.is_supported_reviewing(reviewing) then
-    core.log_entry("review_pr", event, "unknown", reviewing.dedup_key)
+    core.log_entry("review_pr", event, "unknown", core.payload_field(reviewing, "dedup_key"))
     core.log_cas_decision("review_pr", "unknown", { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -97,9 +98,24 @@ function pipeline(event)
     end
 
     core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "applied", "raising PR diff review proposal")
-    core.log_apply("review_pr", reviewing.proposal_id, nil, nil, { add = {}, remove = {} }, {
-      "consensus.proposal",
+    local card_request = core.build_work_card_comment_request({
+      kind = "pr",
+      repo = repo,
+      number = reviewing.pr_number,
+    }, {
+      proposal_id = reviewing.proposal_id,
+      role = "review",
+      version = reviewing.version,
+      round = core.version_fix_round(reviewing.version),
+      started_at = now(),
+      source_ref = pr_source_ref,
     })
+    local raised = { "consensus.proposal" }
+    if core.write_mode() == "real" then
+      table.insert(raised, 1, "github-proxy.github_pr_comment_request")
+    end
+    core.log_apply("review_pr", reviewing.proposal_id, nil, nil, { add = {}, remove = {} }, raised)
+    core.log_work_card("review_pr", reviewing.proposal_id, "github-proxy.github_pr_comment_request", card_request)
     core.log_raise("review_pr", reviewing.proposal_id, "consensus.proposal", proposal)
   end)
 end

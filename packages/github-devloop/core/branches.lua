@@ -75,6 +75,69 @@ function M.git_trees_equal_quiet_cmd(sha_a, sha_b)
     .. M._shell_single_quote(require_safe_sha("tree compare sha", sha_b))
 end
 
+function M.git_merge_tree_empty_delta_cmd(approved_head_sha, base_head_sha, new_head_sha)
+  local approved = require_safe_sha("approved head sha", approved_head_sha)
+  local base = require_safe_sha("base head sha", base_head_sha)
+  local new_head = require_safe_sha("new head sha", new_head_sha)
+  return "tmp_tree=$(git merge-tree --write-tree "
+    .. M._shell_single_quote(approved)
+    .. " "
+    .. M._shell_single_quote(base)
+    .. ") && git diff --quiet \"$tmp_tree\" "
+    .. M._shell_single_quote(new_head)
+end
+
+local function run_git(cmd, timeout, label)
+  local result = exec_sync({ cmd = cmd, timeout = timeout })
+  if result.exit_code ~= 0 then
+    return nil, tostring(label or "git command") .. " failed: " .. tostring(result.stderr)
+  end
+  return result
+end
+
+function M.current_base_head(base_branch)
+  local fetch_result, fetch_error = run_git(M.git_fetch_branch_cmd("origin", base_branch), 60, "git base fetch")
+  if fetch_result == nil then
+    return nil, fetch_error
+  end
+  local head_result, head_error = run_git(M.git_remote_branch_head_cmd("origin", base_branch), 30, "git base head")
+  if head_result == nil then
+    return nil, head_error
+  end
+  local base_head = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if not M.is_safe_head_sha(base_head) then
+    return nil, "unsafe base head"
+  end
+  return base_head
+end
+
+function M.has_empty_resolution_delta(approved_head_sha, base_head_sha, new_head_sha)
+  local result = exec_sync({
+    cmd = M.git_merge_tree_empty_delta_cmd(approved_head_sha, base_head_sha, new_head_sha),
+    timeout = 120,
+  })
+  if result.exit_code == 0 then
+    return true, "empty"
+  end
+  return false, tostring(result.stderr or "")
+end
+
+function M.current_branch_head_sha(branch)
+  local fetch_result = exec_sync({ cmd = M.git_fetch_branch_cmd("origin", branch), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    return nil
+  end
+  local head_result = exec_sync({ cmd = M.git_fetch_head_commit_cmd(), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    return nil
+  end
+  local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if not M.is_safe_head_sha(head_sha) then
+    error("github-devloop: unsafe PR origin branch head sha")
+  end
+  return head_sha
+end
+
 function M.git_push_branch_force_with_lease_cmd(branch, new_sha, expected_old_sha)
   local safe_branch = require_safe_branch("push branch", branch)
   local safe_new_sha = require_safe_sha("new branch sha", new_sha)
@@ -124,6 +187,14 @@ function M.git_diff_cached_check_cmd(worktree)
     return "git diff --cached --check"
   end
   return "git -C " .. M._shell_single_quote(worktree) .. " diff --cached --check"
+end
+
+function M.git_conflict_markers_cmd(worktree)
+  local pattern = M._shell_single_quote("^(" .. "<<<<" .. "<<<" .. "|===" .. "====|" .. ">>>>" .. ">>>" .. ")")
+  if worktree == nil then
+    return "git grep -n -I -E " .. pattern .. " -- ."
+  end
+  return "git -C " .. M._shell_single_quote(worktree) .. " grep -n -I -E " .. pattern .. " -- ."
 end
 
 function M.git_commit_message_file_cmd(worktree, message_file)

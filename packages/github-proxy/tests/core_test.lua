@@ -22,6 +22,19 @@ return {
     t.eq(key, "github-proxy/issue/owner/repo/12")
   end,
 
+  test_entity_view_cache_key = function()
+    local key = core.entity_view_cache_key("owner/repo", "issue", 12, "2026-06-03T01:02:03Z")
+    t.eq(key, "github-proxy/view/owner/repo/issue/12/2026-06-03T01-02-03Z")
+    t.eq(
+      core.gh_issue_view_entity_cmd("owner/repo", 12),
+      "gh issue view '12' --repo 'owner/repo' --json title,body,comments,labels,state,updatedAt"
+    )
+    t.eq(
+      core.gh_pr_view_entity_cmd("owner/repo", 7),
+      "gh pr view '7' --repo 'owner/repo' --json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+    )
+  end,
+
   test_entity_dedup_key = function()
     local key = core.entity_dedup_key("owner/repo", "pr", 12, "2026-06-03T01:02:03Z")
     t.eq(key, "owner/repo#pr#12@2026-06-03T01:02:03Z")
@@ -147,7 +160,7 @@ return {
   end,
 
   test_parse_entity_list = function()
-    local entities = core.parse_entity_list('[{"number":7,"title":"Fix \\"x\\"","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]')
+    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix \\"x\\"","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]]')
     t.eq(#entities, 1)
     t.eq(entities[1].number, 7)
     t.eq(entities[1].title, 'Fix "x"')
@@ -159,7 +172,7 @@ return {
   end,
 
   test_parse_entity_list_accepts_string_labels = function()
-    local entities = core.parse_entity_list('[{"number":7,"title":"Fix","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN","labels":["one","two"]}]')
+    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","labels":["one","two"]}]]')
     t.eq(#entities[1].labels, 2)
     t.eq(entities[1].labels[1], "one")
     t.eq(entities[1].labels[2], "two")
@@ -170,11 +183,28 @@ return {
     t.eq(#entities, 0)
   end,
 
+  test_parse_entity_list_empty_slurped_page = function()
+    local entities = core.parse_entity_list("[[]]")
+    t.eq(#entities, 0)
+  end,
+
+  test_parse_entity_list_skips_malformed_rest_items = function()
+    local entities = core.parse_entity_list('[[{},{"number":7,"title":"Fix","html_url":"https://example.test/7"}]]')
+    t.eq(#entities, 1)
+    t.eq(entities[1].number, 7)
+  end,
+
   test_parse_entity_list_accepts_updated_at = function()
     local entities = core.parse_entity_list('[{"number":8,"title":"Snake case","url":"https://example.test/8","updated_at":"2026-06-03T04:05:06Z","state":"OPEN"}]')
     t.eq(#entities, 1)
     t.eq(entities[1].updated_at, "2026-06-03T04:05:06Z")
     t.eq(core.parse_issue_list("[]")[1], nil)
+  end,
+
+  test_parse_issue_list_skips_rest_pull_request_shadows = function()
+    local entities = core.parse_issue_list('[[{"number":8,"title":"Issue","html_url":"https://example.test/issues/8","updated_at":"2026-06-03T04:05:06Z","state":"open"},{"number":9,"title":"PR","html_url":"https://example.test/pull/9","updated_at":"2026-06-03T04:05:07Z","state":"open","pull_request":{"url":"https://api.example.test/pulls/9"}}]]')
+    t.eq(#entities, 1)
+    t.eq(entities[1].number, 8)
   end,
 
   test_gh_exec_returns_success_result = function()
@@ -343,19 +373,19 @@ return {
   test_gh_commands_are_quoted = function()
     t.eq(
       core.gh_issue_list_cmd("owner/repo"),
-      "gh issue list --repo 'owner/repo' --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
+      "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'"
     )
     t.eq(
       core.gh_pr_list_cmd("owner/repo"),
-      "gh pr list --repo 'owner/repo' --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'"
     )
     t.eq(
       core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY"),
-      "gh pr list --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --state open --json number,url,headRefName,baseRefName,state"
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Adevloop-owner-repo-42-01HY&per_page=100'"
     )
     t.eq(
       core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY", "dev"),
-      "gh pr list --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --base 'dev' --state open --json number,url,headRefName,baseRefName,state"
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Adevloop-owner-repo-42-01HY&per_page=100&base=dev'"
     )
     t.eq(
       core.git_push_branch_cmd("devloop-owner-repo-42-01HY"),
@@ -384,6 +414,10 @@ return {
     local listed = core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","baseRefName":"dev","state":"OPEN"}]', "devloop-owner-repo-42-01HY")
     t.eq(listed.number, 7)
     t.eq(listed.base_ref_name, "dev")
+    local rest_listed = core.parse_pr_list_for_head('[[{"number":8,"html_url":"https://example.test/8","head":{"ref":"devloop-owner-repo-42-01HY"},"base":{"ref":"dev"},"state":"open"}]]', "devloop-owner-repo-42-01HY")
+    t.eq(rest_listed.number, 8)
+    t.eq(rest_listed.url, "https://example.test/8")
+    t.eq(rest_listed.base_ref_name, "dev")
     t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","state":"CLOSED"}]', "devloop-owner-repo-42-01HY"), nil)
     t.eq(
       core.gh_pr_view_head_oid_cmd("owner/repo", 7),
@@ -417,6 +451,7 @@ return {
     )
     local expected_label_colors = {
       ["fkst-dev:enabled"] = "1D76DB",
+      ["fkst-dev:tracking"] = "C5DEF5",
       ["fkst-dev:thinking"] = "8250DF",
       ["fkst-dev:ready"] = "0E8A16",
       ["fkst-dev:implementing"] = "FBCA04",

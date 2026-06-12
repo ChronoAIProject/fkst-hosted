@@ -32,7 +32,7 @@ function pipeline(event)
         error(result_or_err.message)
       end
     else
-      local entities = core.parse_entity_list(result_or_err.stdout)
+      local entities = core.parse_entity_list(result_or_err.stdout, entity_type.type)
       for _, entity in ipairs(entities) do
         local key = core.entity_cache_key(repo, entity_type.type, entity.number)
         with_lock(key, function()
@@ -50,6 +50,7 @@ function pipeline(event)
               state = entity.state,
               labels = entity.labels,
               updated_at = entity.updated_at,
+              view_cache_key = core.entity_view_cache_key(repo, entity_type.type, entity.number, entity.updated_at),
               dedup_key = dedup_key,
               source = "gh",
               -- Durable-delivery: stable pointer so a reliable consumer can
