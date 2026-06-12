@@ -74,6 +74,24 @@ fn sample_new_package(name: &str) -> NewPackage {
     }
 }
 
+/// Insert a legacy package directly into MongoDB (no owner_user_id, no org_id).
+/// This simulates a pre-auth document that predates the ownership system.
+async fn insert_legacy_package(database: &mongodb::Database, name: &str) {
+    let now = bson::DateTime::now();
+    let doc = bson::doc! {
+        "_id": name,
+        "files": [{ "path": "departments/x/main.lua", "content": "return {}" }],
+        "composed_deps": [],
+        "created_at": now,
+        "updated_at": now,
+    };
+    database
+        .collection::<bson::Document>(PACKAGES_COLLECTION)
+        .insert_one(doc)
+        .await
+        .expect("insert legacy package");
+}
+
 #[tokio::test]
 async fn ensure_indexes_is_idempotent_and_adds_nothing_beyond_implicit_id() {
     if !docker_available() {
@@ -362,4 +380,109 @@ async fn case_variant_package_names_are_distinct_documents() {
     assert_ne!(found_upper, found_lower);
     assert_eq!(found_upper.name, "MY-PKG");
     assert_eq!(found_lower.name, "my-pkg");
+}
+
+// ---- list_visible tests ----
+
+#[tokio::test]
+async fn list_visible_returns_all_three_for_owner_and_org_member() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, database, repository) = repo().await;
+    repository.ensure_indexes().await.expect("indexes");
+
+    // (a) owned by user_A
+    repository
+        .create(sample_new_package("pkg-a"), "user_A", None)
+        .await
+        .expect("create pkg-a");
+    // (b) in org_X (owned by someone else)
+    repository
+        .create(sample_new_package("pkg-b"), "other", Some("org_X"))
+        .await
+        .expect("create pkg-b");
+    // (c) legacy — no owner
+    insert_legacy_package(&database, "pkg-c").await;
+
+    let visible = repository
+        .list_visible("user_A", &["org_X".to_string()])
+        .await
+        .expect("list_visible");
+    assert_eq!(
+        visible,
+        vec![
+            "pkg-a".to_string(),
+            "pkg-b".to_string(),
+            "pkg-c".to_string()
+        ],
+        "user_A in org_X should see all three packages"
+    );
+}
+
+#[tokio::test]
+async fn list_visible_returns_org_and_legacy_for_org_member_not_owner() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, database, repository) = repo().await;
+    repository.ensure_indexes().await.expect("indexes");
+
+    // (a) owned by user_A (NOT user_B)
+    repository
+        .create(sample_new_package("pkg-a"), "user_A", None)
+        .await
+        .expect("create pkg-a");
+    // (b) in org_X
+    repository
+        .create(sample_new_package("pkg-b"), "other", Some("org_X"))
+        .await
+        .expect("create pkg-b");
+    // (c) legacy
+    insert_legacy_package(&database, "pkg-c").await;
+
+    let visible = repository
+        .list_visible("user_B", &["org_X".to_string()])
+        .await
+        .expect("list_visible");
+    assert_eq!(
+        visible,
+        vec!["pkg-b".to_string(), "pkg-c".to_string()],
+        "user_B in org_X should see org package + legacy only"
+    );
+}
+
+#[tokio::test]
+async fn list_visible_returns_legacy_only_for_user_with_no_orgs() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, database, repository) = repo().await;
+    repository.ensure_indexes().await.expect("indexes");
+
+    // (a) owned by user_A
+    repository
+        .create(sample_new_package("pkg-a"), "user_A", None)
+        .await
+        .expect("create pkg-a");
+    // (b) in org_X
+    repository
+        .create(sample_new_package("pkg-b"), "other", Some("org_X"))
+        .await
+        .expect("create pkg-b");
+    // (c) legacy
+    insert_legacy_package(&database, "pkg-c").await;
+
+    let visible = repository
+        .list_visible("user_C", &[])
+        .await
+        .expect("list_visible");
+    assert_eq!(
+        visible,
+        vec!["pkg-c".to_string()],
+        "user_C with no orgs should see only the legacy package"
+    );
 }
