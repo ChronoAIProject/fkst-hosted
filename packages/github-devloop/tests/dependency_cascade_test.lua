@@ -233,6 +233,14 @@ local function run_implement()
   }, h.opts("dependency-implement"))
 end
 
+local function run_dependency_reconcile()
+  return t.run_department("departments/dependency_reconcile/main.lua", {
+    queue = "devloop_dependency_reconcile_tick",
+    payload = { schema = "github-devloop.v1" },
+    ts = "2026-06-03T01:32:03Z",
+  }, h.opts("dependency-reconcile"))
+end
+
 local function find_raise(raises, queue, predicate)
   for _, item in ipairs(raises or {}) do
     if item.queue == queue and (predicate == nil or predicate(item.payload)) then
@@ -502,6 +510,30 @@ return {
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
     end)
     t.is_true(clear ~= nil)
+  end,
+
+  test_dependency_reconcile_requeues_dependency_held_issues_without_updated_at_bump = function()
+    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = repo,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
+      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local result = run_dependency_reconcile()
+    t.eq(result.exit_code, 0)
+    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
+    t.is_true(raised ~= nil)
+    t.eq(raised.payload.type, "issue")
+    t.eq(raised.payload.repo, repo)
+    t.eq(raised.payload.number, 42)
+    t.eq(raised.payload.updated_at, "2026-06-03T01:02:03Z")
+    t.eq(raised.payload.source, "dependency-reconcile")
+    t.eq(raised.payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(tostring(raised.payload.dedup_key):find("dependency%-reconcile", 1) ~= nil)
   end,
 
   test_observe_issue_existing_hold_still_waiting_does_not_refresh = function()
