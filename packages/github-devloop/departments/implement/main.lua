@@ -15,8 +15,8 @@ M.spec = {
   stall_window = "10m",
 }
 
-local function raise_impl_failed(repo, issue_number, ready, reason, detail)
-  local comment_request = core.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail)
+local function raise_impl_failed(repo, issue_number, ready, reason, detail, attempt)
+  local comment_request = core.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
   local label_request = core.build_impl_failed_label_request(repo, issue_number, ready, reason)
   local add_labels, remove_labels = core.state_label_changes("impl-failed")
   core.log_apply("implement", ready.proposal_id, "impl-failed", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
@@ -131,6 +131,15 @@ local function local_branch_fact(base_head, branch, base_branch, dedup_key)
     base_branch = base_branch,
     base_sha = base_head,
   }
+end
+
+local function ready_for_implementation_version(ready, version)
+  local copy = {}
+  for key, value in pairs(ready or {}) do
+    copy[key] = value
+  end
+  copy.dedup_key = version
+  return copy
 end
 
 local function raise_work_card(repo, issue_number, ready, card)
@@ -279,7 +288,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       outcome = "failed: codex-failed",
       base_sha = base_head,
     })
-    raise_impl_failed(repo, issue_number, ready, "codex-failed", stderr)
+    raise_impl_failed(repo, issue_number, ready, "codex-failed", stderr, attempt)
     return
   end
   core.log_codex_result("implement", ready.proposal_id, "implement", result, "result=completed", nil)
@@ -318,7 +327,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       outcome = "failed: no-changes",
       base_sha = base_head,
     })
-    raise_impl_failed(repo, issue_number, ready, "no-changes", detail)
+    raise_impl_failed(repo, issue_number, ready, "no-changes", detail, attempt)
     return
   end
 
@@ -383,12 +392,6 @@ function pipeline(event)
     return
   end
 
-  local gate = core.dependency_gate(repo, issue_number)
-  if not gate.ok then
-    core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "hold-dependency-backstop", gate.reason)
-    return
-  end
-
   local lock_key = core.implement_lock_key(ready.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "no transition lock key")
@@ -397,7 +400,6 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
-    local branches = core.branch_config()
 
     local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
     if view.exit_code ~= 0 then
@@ -407,54 +409,78 @@ function pipeline(event)
     local current = core.parse_issue_view_implement(view.stdout)
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
     local state = core.current_state(current.comments, ready.proposal_id)
-    if state.state == "impl-failed" then
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at terminal)", "implementation failed marker already visible")
+    local gate = core.dependency_gate(repo, issue_number, {
+      proposal_id = ready.proposal_id,
+      version = ready.dedup_key,
+      comments = current.comments,
+    })
+    if not gate.ok then
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-dependency-backstop", gate.reason)
       return
     end
-    local branch = core.implement_branch(repo, issue_number, ready.dedup_key)
-    local fact = core.implementing_fact(current.comments, ready.proposal_id, ready.dedup_key)
+
+    local branches = core.branch_config()
+    local implementation_version = core.implementation_attempt_version(ready.dedup_key, ready.impl_retry_attempt)
+    local branch_version = core.implementation_base_version(ready.dedup_key)
+    local marker_ready = ready_for_implementation_version(ready, implementation_version)
+    local branch = core.implement_branch(repo, issue_number, branch_version)
+
     if state.state == "implementing" then
-      if tostring(state.version or "") ~= tostring(ready.dedup_key or "") then
+      if tostring(state.version or "") ~= tostring(marker_ready.dedup_key or "") then
         core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "ready event does not match current implementing version")
         return
       end
       local link = core.pr_link_fact(current.comments, ready.proposal_id)
-      if link ~= nil and tostring(link.impl_version or "") == tostring(ready.dedup_key) then
+      if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
         core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "pr-open", "skip-idempotent(pr-link-visible)", "linked PR fact is already visible")
         return
       end
+      local fact = core.implementing_fact(current.comments, ready.proposal_id, marker_ready.dedup_key)
       local progress = nil
       if fact ~= nil then
         progress = remote_branch_fact(fact.branch, fact.base_branch, fact)
       else
         progress = remote_branch_fact(branch, branches.integration, {
           proposal_id = ready.proposal_id,
-          dedup_key = ready.dedup_key,
+          dedup_key = marker_ready.dedup_key,
         })
       end
       if progress ~= nil then
         progress.proposal_id = ready.proposal_id
-        progress.dedup_key = ready.dedup_key
-        raise_open_pr_from_fact(repo, issue_number, ready, progress, "implementing remote branch progress is visible")
+        progress.dedup_key = marker_ready.dedup_key
+        raise_open_pr_from_fact(repo, issue_number, marker_ready, progress, "implementing remote branch progress is visible")
         return
       end
-      local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, ready.dedup_key)
+      local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, marker_ready.dedup_key)
       if attempts >= MAX_IMPLEMENT_ATTEMPTS then
         core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "impl-failed", "applied(attempts-exhausted)", "implementation attempts exhausted with no PR or branch progress")
-        raise_impl_failed(repo, issue_number, ready, "retry-exhausted", "No linked PR or remote implementation branch was visible after " .. tostring(attempts) .. " attempts.")
+        raise_impl_failed(repo, issue_number, marker_ready, "retry-exhausted", "No linked PR or remote implementation branch was visible after " .. tostring(attempts) .. " attempts.", attempts)
         return
       end
       local base_head = prepare_base(branches)
-      local local_progress = local_branch_fact(base_head, branch, branches.integration, ready.dedup_key)
+      local local_progress = local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
       if local_progress ~= nil then
         local_progress.proposal_id = ready.proposal_id
-        raise_open_pr_from_fact(repo, issue_number, ready, local_progress, "local implementation branch progress is visible")
+        raise_open_pr_from_fact(repo, issue_number, marker_ready, local_progress, "local implementation branch progress is visible")
         return
       end
       core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(retry-no-progress)", "no PR or branch progress is visible; retrying implementation attempt")
-      return run_attempt(repo, issue_number, ready, current, branches, branch, base_head, attempts + 1, event.ts)
+      return run_attempt(repo, issue_number, marker_ready, current, branches, branch, base_head, attempts + 1, event.ts)
     end
-    local transition = core.versioned_transition_status(state, { "ready" }, "implementing", ready.dedup_key)
+
+    local retry_failure = nil
+    if state.state == "impl-failed" and ready.impl_retry_attempt ~= nil and state.version == ready.dedup_key then
+      retry_failure = core.impl_failure_fact(current.comments, ready.proposal_id, ready.dedup_key)
+      if retry_failure ~= nil and tonumber(ready.impl_retry_attempt) <= tonumber(retry_failure.attempt or 1) then
+        core.log_cas_decision("implement", ready.proposal_id, state, "impl-failed", "implementing", "skip-idempotent(retry-not-advanced)", "implementation retry event does not advance the failure attempt")
+        return
+      end
+    elseif state.state == "implementing" or state.state == "impl-failed" then
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation fact marker already visible")
+      return
+    end
+    local expected_states = retry_failure ~= nil and { "impl-failed" } or { "ready" }
+    local transition = core.versioned_transition_status(state, expected_states, "implementing", ready.dedup_key)
     if transition == "idempotent" or transition == "stale" then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
@@ -472,7 +498,7 @@ function pipeline(event)
       "reason=implementation fact marker absent for this version",
     })
 
-    run_attempt(repo, issue_number, ready, current, branches, branch, prepare_base(branches), 1, event.ts)
+    run_attempt(repo, issue_number, marker_ready, current, branches, branch, prepare_base(branches), ready.impl_retry_attempt or 1, event.ts)
   end)
 end
 

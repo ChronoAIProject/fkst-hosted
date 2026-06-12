@@ -179,10 +179,12 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_bootstrap_test.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/doctor_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
 
 
 if __name__ == "__main__":

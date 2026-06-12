@@ -34,8 +34,19 @@ end
 local function parse_command(body)
   local line = first_command_line(body)
   local command = line:match("^fkst:%s*([%w_-]+)")
-  if command == "rereview" or command == "reready" or command == "reintake" then
-    return command
+  if command == "rereview" or command == "reready" or command == "reintake" or command == "reimplement" then
+    return {
+      command = command,
+    }
+  end
+  if command == "dependency-waiver" then
+    local number = tonumber(line:match("^fkst:%s*dependency%-waiver%s+(%d+)%s*$") or "")
+    if M._is_positive_pr_number(number) then
+      return {
+        command = command,
+        blocker_number = math.floor(number),
+      }
+    end
   end
   return nil
 end
@@ -46,19 +57,20 @@ function M.operator_command_fact(comments, command_name)
   end
   local latest = nil
   for index, comment in ipairs(comments) do
-    local command = parse_command(M._comment_body(comment))
-    if command == command_name then
+    local parsed = parse_command(M._comment_body(comment))
+    if parsed ~= nil and parsed.command == command_name then
       if M._is_trusted_comment(comment) then
         latest = {
-          command = command,
+          command = parsed.command,
           key = command_key(comment, index),
           author_login = M._comment_author_login(comment),
           created_at = M._comment_created_at(comment),
           body = M._comment_body(comment),
+          blocker_number = parsed.blocker_number,
         }
       else
         M.log_line("info", "operator_command", "IGNORED", {
-          "command=" .. tostring(command),
+          "command=" .. tostring(parsed.command),
           "reason=untrusted-author",
           "ignored_author=" .. tostring(M._comment_author_login(comment) or ""),
           "trusted_bot=" .. tostring(M.trusted_bot_login()),
@@ -96,7 +108,11 @@ end
 
 function M.operator_command_marker(command, outcome, reason)
   if type(command) ~= "table"
-    or (command.command ~= "rereview" and command.command ~= "reready" and command.command ~= "reintake") then
+    or (command.command ~= "rereview"
+      and command.command ~= "reready"
+      and command.command ~= "reintake"
+      and command.command ~= "reimplement"
+      and command.command ~= "dependency-waiver") then
     error("github-devloop: invalid operator command marker")
   end
   if outcome ~= "applied" and outcome ~= "refused" then
@@ -160,6 +176,46 @@ function M.build_operator_issue_reready_comment_request(repo, issue_number, comm
     tostring(command.key),
     "applied",
     tostring(outcome_reason or "reready"),
+  }), source_ref)
+end
+
+function M.build_operator_issue_reimplement_comment_request(repo, issue_number, command, attempt, source_ref)
+  local marker = M.operator_command_marker(command, "applied", "reimplement")
+  return M.build_entity_comment_request({
+    kind = "issue",
+    repo = repo,
+    number = issue_number,
+  }, "github-devloop operator command accepted: reimplement"
+    .. "\n\nRetry attempt: " .. tostring(attempt)
+    .. "\n\n" .. marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "operator-command",
+    "comment",
+    tostring(command.key),
+    "applied",
+    "reimplement",
+    tostring(attempt),
+  }), source_ref)
+end
+
+function M.build_operator_issue_dependency_waiver_comment_request(repo, issue_number, command, proposal_id, version, blocker_number, source_ref)
+  local waiver_marker = M.dependency_waiver_marker(proposal_id, version, blocker_number, "operator-waiver")
+  local command_marker = M.operator_command_marker(command, "applied", "dependency-waiver")
+  return M.build_entity_comment_request({
+    kind = "issue",
+    repo = repo,
+    number = issue_number,
+  }, "github-devloop operator command accepted: dependency-waiver"
+    .. "\n\n" .. waiver_marker
+    .. "\n" .. command_marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "operator-command",
+    "comment",
+    tostring(command.key),
+    "applied",
+    "dependency-waiver",
+    tostring(version),
+    tostring(blocker_number),
   }), source_ref)
 end
 

@@ -315,6 +315,28 @@ function M.build_dependency_hold_comment_request(repo, issue_number, proposal_id
   }
 end
 
+function M.build_dependency_release_comment_request(repo, issue_number, proposal_id, version, gate, source_ref)
+  local reason = M.neutralize_untrusted_comment_text(gate and gate.reason or "satisfied")
+  if reason == "" then
+    reason = "satisfied"
+  end
+  local note_markers = M.dependency_gate_note_markers(proposal_id, version, gate)
+  local markers = M.dependency_release_marker(proposal_id, version)
+  if note_markers ~= "" then
+    markers = markers .. "\n" .. note_markers
+  end
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = M.comment_string("dependency_release_prefix") .. reason
+      .. "\n\n" .. M.comment_string("reason_inline_label") .. reason
+      .. "\n\n" .. markers,
+    dedup_key = M._dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(version), reason }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
 function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
   local version = M.reconcile_state_version(reconcile.base_version, reconcile.round)
   local marker = M.reconcile_marker(reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
@@ -532,8 +554,9 @@ function M.build_implement_attempt_comment_request(repo, issue_number, ready, at
   }
 end
 
-function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail)
+function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
   local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
+  local retry_attempt = tonumber(attempt) or 1
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
     text = M.truncate_utf8(text, M._max_impl_output_len)
@@ -543,7 +566,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
   end
   text = M.neutralize_untrusted_comment_text(text)
 
-  local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason)
+  local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason, attempt)
   local state_marker = M.state_marker(ready.proposal_id, "impl-failed", ready.dedup_key)
   return {
     schema = "github-proxy.v1",
@@ -558,6 +581,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
       "comment",
       "failure",
       safe_reason,
+      tostring(retry_attempt),
       tostring(ready.dedup_key),
     }),
     source_ref = M.normalize_source_ref(ready.source_ref),
