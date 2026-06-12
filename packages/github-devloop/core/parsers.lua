@@ -764,6 +764,12 @@ function M.pr_mergeable(pr)
     if merge_state == "" then
       return false, "missing-mergeability"
     end
+    if merge_state == "UNSTABLE" then
+      local rollup_green, rollup_reason = M.pr_rollup_green(pr)
+      if not rollup_green and (rollup_reason == "rollup-red" or rollup_reason == "rollup-pending") then
+        return true, "mergeable"
+      end
+    end
     return false, "merge-state-" .. merge_state:lower()
   end
   return true, "mergeable"
