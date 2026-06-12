@@ -94,6 +94,40 @@ return {
     t.eq(reason, "mergeable-conflicting")
   end,
 
+  test_unstable_with_completed_failure_routes_to_ci_red = function()
+    local ok, reason = core.evaluate_ci_merge_gate(pr({
+      merge_state_status = "UNSTABLE",
+      status_check_rollup = {
+        { name = "verify", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }))
+    t.eq(ok, false)
+    t.eq(reason, "rollup-red")
+  end,
+
+  test_unstable_with_pending_check_remains_transient_wait = function()
+    local ok, reason = core.evaluate_ci_merge_gate(pr({
+      merge_state_status = "UNSTABLE",
+      status_check_rollup = {
+        { name = "verify", state = "IN_PROGRESS", conclusion = "" },
+      },
+    }))
+    t.eq(ok, false)
+    t.eq(reason, "rollup-pending")
+  end,
+
+  test_unstable_without_rollup_remains_merge_state_wait = function()
+    local ok, reason = core.evaluate_ci_merge_gate(pr({
+      merge_state_status = "UNSTABLE",
+      status_check_rollup = {},
+    }), {
+      repo = "owner/repo",
+    })
+    t.eq(ok, false)
+    t.eq(reason, "merge-state-unstable")
+    t.eq(#t.command_calls(), 0)
+  end,
+
   test_rollup_failure_gate_sha_comes_from_failed_checks = function()
     local sha = "abc123"
     t.eq(core.rollup_failure_gate_sha(pr({
