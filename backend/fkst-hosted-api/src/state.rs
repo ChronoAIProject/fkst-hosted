@@ -4,6 +4,7 @@ use crate::auth::AuthMode;
 use crate::authz::Authorizer;
 use crate::config::Config;
 use crate::db::Db;
+use crate::github_app::GithubAppTokens;
 use crate::packages::PackageRepository;
 use crate::sessions::SessionService;
 
@@ -26,4 +27,8 @@ pub struct AppState {
     /// Authorization facade: wraps NyxID client (if configured) for org-role
     /// lookups, ownership enforcement, and the `allows()` policy.
     pub authz: Authorizer,
+    /// GitHub App token service: `None` when `FKST_GITHUB_APP_ID` is unset
+    /// (module disabled). Wired into `AppState` so a bad PEM fails at deploy
+    /// time and the trigger issue consumes it with zero re-plumbing.
+    pub github_app: Option<GithubAppTokens>,
 }

@@ -382,6 +382,7 @@ async fn authz_app_with_db() -> AuthzTestAppWithDb {
         sessions,
         auth_mode,
         authz: Authorizer::new(Some(nyxid_client)),
+        github_app: None,
     })
     .expect("router");
 
