@@ -190,7 +190,10 @@ function M.git_diff_cached_check_cmd(worktree)
 end
 
 function M.git_conflict_markers_cmd(worktree)
-  local pattern = M._shell_single_quote("^(<<<<<<<|=======|>>>>>>>)")
+  local left = string.rep("<", 7)
+  local middle = string.rep("=", 7)
+  local right = string.rep(">", 7)
+  local pattern = M._shell_single_quote("^(" .. left .. "|" .. middle .. "|" .. right .. ")")
   if worktree == nil then
     return "git grep -n -I -E " .. pattern .. " -- ."
   end
