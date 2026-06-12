@@ -27,9 +27,9 @@ local function full_issue_view(labels, comments, extra)
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,body,comments,labels,state", {
+  t.mock_command("--json title,body,comments,labels,state,updatedAt,assignees", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","state":"%s","updatedAt":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","body":"%s","state":"%s","updatedAt":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
       h.json_string(fields.title or "Implement decision recorder"),
       h.json_string(fields.body or ""),
       h.json_string(fields.state or "OPEN"),

@@ -244,6 +244,11 @@ function M.write_comment_request(payload, target)
       log.info("github-proxy: comment marker already present")
       return
     end
+    local claim_issue_number = target.kind == "issue" and target.number or payload.issue_number
+    if claim_issue_number ~= nil
+      and not M.verify_issue_claim_before_write(payload, repo, claim_issue_number, target.kind == "pr" and "github_pr_comment" or "github_comment") then
+      return
+    end
 
     local body = tostring(payload.body) .. "\n\n" .. M.comment_marker(payload.dedup_key) .. "\n"
     local path = "/tmp/fkst-github-proxy-" .. runtime_id .. ".md"
