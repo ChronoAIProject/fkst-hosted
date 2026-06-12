@@ -32,7 +32,7 @@ pub(crate) const ACTIVE_STATUSES: [SessionStatus; 4] = [
 ];
 
 /// The active statuses as their BSON wire strings, for `$in` filters.
-pub(crate) fn active_status_bson() -> Vec<Bson> {
+pub fn active_status_bson() -> Vec<Bson> {
     ACTIVE_STATUSES.iter().map(|s| status_bson(*s)).collect()
 }
 

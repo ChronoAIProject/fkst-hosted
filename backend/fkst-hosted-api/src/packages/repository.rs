@@ -1,6 +1,7 @@
 //! MongoDB-backed repository for the `packages` collection.
 
 use bson::doc;
+use mongodb::options::ReturnDocument;
 use mongodb::Collection;
 use serde::Deserialize;
 
@@ -236,5 +237,76 @@ impl PackageRepository {
             "visible packages listed"
         );
         Ok(names)
+    }
+
+    /// Atomically replace the mutable fields of an existing package.
+    ///
+    /// `$set`s `files`, `composed_deps`, and `updated_at` via
+    /// `find_one_and_update` with `ReturnDocument::After`. Ownership fields
+    /// (`owner_user_id`, `org_id`) and `created_at` are intentionally
+    /// untouched. Returns `PackageError::NotFound` when no document matches.
+    pub async fn replace(&self, new_package: NewPackage) -> Result<Package, PackageError> {
+        if let Err(reason) = new_package.validate() {
+            tracing::warn!(name = ?new_package.name, reason = %reason, "package validation rejected");
+            return Err(PackageError::Validation(reason));
+        }
+
+        let now = bson::DateTime::now();
+        let update = doc! {
+            "$set": {
+                "files": bson::to_bson(&new_package.files).map_err(|e| {
+                    tracing::error!(error = %e, "bson serialization of files failed");
+                    PackageError::Validation("failed to serialize files".to_string())
+                })?,
+                "composed_deps": bson::to_bson(&new_package.composed_deps).map_err(|e| {
+                    tracing::error!(error = %e, "bson serialization of composed_deps failed");
+                    PackageError::Validation("failed to serialize composed_deps".to_string())
+                })?,
+                "updated_at": now,
+            }
+        };
+
+        let updated = self
+            .collection
+            .find_one_and_update(doc! { "_id": &new_package.name }, update)
+            .return_document(ReturnDocument::After)
+            .await
+            .map_err(|error| log_db_error("replace", error))?;
+
+        match updated {
+            Some(package) => {
+                let total_content_bytes: usize =
+                    package.files.iter().map(|file| file.content.len()).sum();
+                tracing::info!(
+                    name = %package.name,
+                    files = package.files.len(),
+                    total_content_bytes,
+                    "package replaced"
+                );
+                Ok(package)
+            }
+            None => {
+                tracing::warn!(name = %new_package.name, "package not found for replace");
+                Err(PackageError::NotFound(new_package.name))
+            }
+        }
+    }
+
+    /// Delete a package by name. Returns `Ok(true)` when a document was
+    /// deleted, `Ok(false)` when absent.
+    pub async fn delete(&self, name: &str) -> Result<bool, PackageError> {
+        let result = self
+            .collection
+            .delete_one(doc! { "_id": name })
+            .await
+            .map_err(|error| log_db_error("delete", error))?;
+
+        let deleted = result.deleted_count > 0;
+        if deleted {
+            tracing::info!(name = %name, "package deleted");
+        } else {
+            tracing::debug!(name = %name, "package not found for delete");
+        }
+        Ok(deleted)
     }
 }
