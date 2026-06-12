@@ -18,6 +18,7 @@ local mock_comment_view_failure = h.mock_comment_view_failure
 local mock_label_view = h.mock_label_view
 local mock_pr_open_guard = h.mock_pr_open_guard
 local mock_branch_head = h.mock_branch_head
+local mock_branch_head_descends = h.mock_branch_head_descends
 local mock_non_branch_ref_head = h.mock_non_branch_ref_head
 local mock_comment_write = h.mock_comment_write
 local mock_label_write = h.mock_label_write
@@ -241,17 +242,67 @@ return {
     t.eq(count_calls("gh issue edit"), 1)
   end,
 
-  test_pr_open_request_skips_when_branch_moved_past_recorded_head = function()
+  test_pr_open_request_allows_current_descendant_head = function()
+    local event = pr_open_event()
+    event.payload.head_sha = "def456"
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_open_guard(nil, pr_open_guard_comments())
+    mock_branch_head("def456")
+    mock_branch_head_descends(true)
+    mock_pr_head_list("[]\n")
+    mock_git_push()
+    mock_pr_create(7)
+    mock_pr_head_state("def456", "OPEN")
+    mock_comment_view("existing issue comment")
+    mock_comment_write()
+    mock_pr_comment_view("existing pr comment")
+    mock_pr_comment_write()
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
+    mock_label_write()
+
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-descendant-head", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git show-ref --verify refs/heads"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 1)
+    t.eq(count_calls("git push -u origin"), 1)
+    t.eq(count_calls("gh pr create"), 1)
+    t.eq(result.raises[2].payload.head_sha, "def456")
+  end,
+
+  test_pr_open_request_skips_when_branch_head_is_not_descendant = function()
+    local event = pr_open_event()
+    event.payload.head_sha = "def456"
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_open_guard(nil, pr_open_guard_comments())
+    mock_branch_head("def456")
+    mock_branch_head_descends(false)
+
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-branch-not-descendant", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git show-ref --verify refs/heads"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 1)
+    t.eq(count_calls("git push -u origin"), 0)
+    t.eq(count_calls("gh pr create"), 0)
+  end,
+
+  test_pr_open_request_skips_when_payload_head_does_not_match_current_branch = function()
     mock_write_env("1")
     mock_bot_env()
     mock_pr_open_guard(nil, pr_open_guard_comments())
     mock_branch_head("def456")
 
-    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-branch-moved", {
+    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-payload-head-stale", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("git show-ref --verify refs/heads"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 0)
     t.eq(count_calls("git push -u origin"), 0)
     t.eq(count_calls("gh pr create"), 0)
   end,
