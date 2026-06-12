@@ -92,7 +92,8 @@ function pipeline(event)
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
     local effective_decision = reached.decision
     local gate_owned_reject = reached.decision == "reject" and core.is_gate_owned_review_gap(reached.blocking_gap)
-    if gate_owned_reject then
+    local out_of_contract_reject = reached.decision == "reject" and core.is_out_of_contract_review_gap(reached.blocking_gap)
+    if gate_owned_reject or out_of_contract_reject then
       effective_decision = "approve"
     end
     local issue_version = state.version
@@ -146,14 +147,19 @@ function pipeline(event)
     end
     core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
     local comment_reached = reached
-    if gate_owned_reject then
+    if gate_owned_reject or out_of_contract_reject then
       comment_reached = {}
       for key, value in pairs(reached) do
         comment_reached[key] = value
       end
       comment_reached.decision = "approve"
+      local advisory_reason = "rejected only for gate-owned fact: "
+      if out_of_contract_reject then
+        advisory_reason = "rejected only for demand beyond the stated issue bounds: "
+      end
       comment_reached.body = tostring(reached.body or "")
-        .. "\n\nAdvisory (out-of-contract): rejected only for gate-owned fact: "
+        .. "\n\nAdvisory (out-of-contract): "
+        .. advisory_reason
         .. tostring(reached.blocking_gap or "")
       comment_reached.blocking_gap = nil
     end

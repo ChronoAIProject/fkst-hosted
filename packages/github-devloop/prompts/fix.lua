@@ -3,6 +3,8 @@ return {
 
 Repository state:
 - You are already running inside the deterministic PR branch worktree.
+- The current target branch has already been merged into this worktree before this fix round starts.
+- If that target merge produced conflicts, resolving every conflict is part of this same fix round's named work; leave no conflict markers or unmerged paths before finishing.
 - Make only the code changes needed to address the review feedback.
 - Do not push.
 - Do not open, close, or edit pull requests.
@@ -12,6 +14,7 @@ Repository state:
 - Do not finish with failing tests. If the suite cannot run because the engine BIN is unreachable, report that environment failure explicitly instead of claiming success.
 - For merge-gate CI failures such as failing CI checks or rollup-red feedback, first reproduce the failure locally with `{{test_command}}`, then fix it to green.
 - Apply the SMALLEST change that closes the named blocking gap: {{blocking_gap}}.
+- Target branch merge context: {{target_merge_context}}
 - Do not address advisory comments.
 - Do not broaden scope.
 - State in your summary which gap you closed.

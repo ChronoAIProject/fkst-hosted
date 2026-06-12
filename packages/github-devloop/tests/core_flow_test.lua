@@ -658,6 +658,19 @@ return {
     t.is_true(prompt:find("Do not finish with failing tests.", 1, true) ~= nil)
     t.is_true(prompt:find("rollup-red feedback", 1, true) ~= nil)
     t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
+    t.is_true(prompt:find("current target branch has already been merged", 1, true) ~= nil)
+    t.is_true(prompt:find("Target branch merge context: sync_clean", 1, true) ~= nil)
+
+    local conflict_prompt = core.build_fix_prompt(fix, {
+      title = "Fix parser",
+    }, "Review says the implementation raised the bounds.", fix.framing, manifest, {
+      target_branch = "dev",
+      target_sha = "abc123",
+      conflicted = true,
+      unmerged_paths = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
+    })
+    t.is_true(conflict_prompt:find("Target branch merge context: sync_conflict target_branch=dev target_sha=abc123", 1, true) ~= nil)
+    t.is_true(conflict_prompt:find("packages/github-devloop/core.lua", 1, true) ~= nil)
   end,
 
   test_replayed_fixing_dedup_binds_merge_gate_fact_identity = function()

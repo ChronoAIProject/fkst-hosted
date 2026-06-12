@@ -54,7 +54,7 @@ local function comment_id(comment)
   if type(comment) ~= "table" then
     return nil
   end
-  local id = comment.id or comment.databaseId or comment.database_id
+  local id = comment.databaseId or comment.database_id or comment.id
   if id == nil or tostring(id) == "" then
     return nil
   end
@@ -152,7 +152,7 @@ function M.gh_comment_edit_cmd(repo, comment_id_value, body_file)
   end
   return "gh api --method PATCH "
     .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/comments/" .. tostring(comment_id_value))
-    .. " --field body@" .. shell_single_quote(body_file)
+    .. " --field body=@" .. shell_single_quote(body_file)
 end
 
 function M.write_comment_request(payload, target)

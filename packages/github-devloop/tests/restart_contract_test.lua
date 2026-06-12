@@ -221,4 +221,138 @@ return {
     t.eq(derivations.pr, true)
     t.eq(derivations.entity, true)
   end,
+
+  test_replay_payload_fields_resolve_from_declared_table_map = function()
+    local state = {
+      state = "fixing",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z",
+    }
+    local fields = core.resolve_replay_payload_fields(table_by_state().fixing, state, {
+      issue = {
+        repo = "owner/repo",
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      },
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      link = {
+        pr_number = 7,
+      },
+      feedback = {
+        review_proposal_id = "github-devloop/pr-review/owner/repo/7/v/def456",
+        review_dedup_key = "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review",
+        reviewed_head_sha = "def456",
+        gate_baseline_sha = "abc123",
+        blocking_gap = "missing guard",
+      },
+    })
+    t.eq(fields.proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(fields.pr_number, 7)
+    t.eq(fields.version, state.version)
+    t.eq(fields.review_proposal_id, "github-devloop/pr-review/owner/repo/7/v/def456")
+    t.eq(fields.review_dedup_key, "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review")
+    t.eq(fields.reviewed_head_sha, "def456")
+    t.eq(fields.gate_baseline_sha, "abc123")
+    t.eq(fields.blocking_gap, "missing guard")
+    t.eq(fields.source_ref.ref, "owner/repo#pr/7")
+  end,
+
+  test_replayer_gathers_fetch_before_compare_pr_facts_from_table = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z"
+    local issue = {
+      repo = "owner/repo",
+      number = 42,
+      source_ref = core.issue_source_ref("owner/repo", 42),
+    }
+    local state = {
+      state = "pr-open",
+      version = version,
+    }
+    local issue_comments = {
+      { body = core.state_marker(proposal_id, "pr-open", version), author_login = "fkst-test-bot" },
+      { body = core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"), author_login = "fkst-test-bot" },
+    }
+    t.mock_command(core.gh_pr_view_observe_cmd("owner/repo", 7), {
+      stdout = '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local gathered = core.gather_replay_required_facts(table_by_state()["pr-open"], issue, state, {
+      proposal_id = proposal_id,
+      current = { comments = issue_comments },
+      snapshot = {
+        comments = issue_comments,
+        prs = {
+          {
+            number = 7,
+            current = {
+              head_sha = "stale",
+              head_ref_name = "stale",
+              base_ref_name = "dev",
+              state = "OPEN",
+              comments = {},
+            },
+          },
+        },
+      },
+    })
+    t.eq(gathered.snapshot.prs[1].current.head_sha, "def456")
+    t.eq(#t.command_calls(), 1)
+  end,
+
+  test_replayer_fetch_before_compare_ignores_caller_fresh_flag = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z"
+    local issue = {
+      repo = "owner/repo",
+      number = 42,
+      source_ref = core.issue_source_ref("owner/repo", 42),
+    }
+    local state = {
+      state = "pr-open",
+      version = version,
+    }
+    local issue_comments = {
+      { body = core.state_marker(proposal_id, "pr-open", version), author_login = "fkst-test-bot" },
+      { body = core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"), author_login = "fkst-test-bot" },
+    }
+    t.mock_command(core.gh_pr_view_observe_cmd("owner/repo", 7), {
+      stdout = '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local gathered = core.gather_replay_required_facts(table_by_state()["pr-open"], issue, state, {
+      proposal_id = proposal_id,
+      current = { comments = issue_comments },
+      snapshot = {
+        fresh = true,
+        fetch_before_compare = {
+          ["pr-head"] = true,
+        },
+        comments = issue_comments,
+        prs = {
+          {
+            number = 7,
+            current = {
+              head_sha = "stale",
+              head_ref_name = "stale",
+              base_ref_name = "dev",
+              state = "OPEN",
+              comments = {},
+            },
+          },
+        },
+      },
+    })
+    t.eq(gathered.snapshot.prs[1].current.head_sha, "def456")
+    t.eq(#t.command_calls(), 1)
+  end,
+
+  test_observe_issue_replay_is_table_driven = function()
+    local text = file.read("packages/github-devloop/departments/observe_issue/main.lua")
+    t.is_true(text:find("core.replay_from_table", 1, true) ~= nil)
+    t.eq(text:find("build_replayed_fixing_payload", 1, true), nil)
+    t.eq(text:find("build_devloop_review_meta_payload", 1, true), nil)
+    t.eq(text:find("build_decompose_replay_payload", 1, true), nil)
+    t.eq(text:find("build_devloop_reviewing_payload", 1, true), nil)
+  end,
 }

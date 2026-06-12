@@ -72,6 +72,29 @@ local implementation_gap_patterns = {
   "logic",
 }
 
+local out_of_contract_gap_patterns = {
+  "beyond%s+the%s+issue",
+  "beyond%s+issue",
+  "outside%s+the%s+issue",
+  "outside%s+issue",
+  "outside%s+the%s+stated%s+scope",
+  "outside%s+stated%s+scope",
+  "beyond%s+the%s+stated%s+scope",
+  "beyond%s+stated%s+scope",
+  "outside%s+the%s+acceptance%s+bound",
+  "outside%s+acceptance%s+bound",
+  "beyond%s+the%s+acceptance%s+bound",
+  "beyond%s+acceptance%s+bound",
+  "not%s+in%s+the%s+issue",
+  "not%s+part%s+of%s+the%s+issue",
+  "not%s+stated%s+in%s+the%s+issue",
+  "not%s+an%s+issue%s+requirement",
+  "unstated%s+requirement",
+  "new%s+requirement",
+  "spec%s+amendment",
+  "spec%-amendment",
+}
+
 function M.is_gate_owned_review_gap(gap)
   local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
   if text == "" then
@@ -93,6 +116,19 @@ function M.is_gate_owned_review_gap(gap)
     end
   end
   return true
+end
+
+function M.is_out_of_contract_review_gap(gap)
+  local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
+  if text == "" then
+    return false
+  end
+  for _, pattern in ipairs(out_of_contract_gap_patterns) do
+    if text:find(pattern) ~= nil then
+      return true
+    end
+  end
+  return false
 end
 
 local function commit_subject_title(M, current)
@@ -639,6 +675,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
     .. "\n" .. M.short_review_observation_boundary_clause()
+    .. "\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment."
     .. "\nRead the local context bundle before judging."
   local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
   local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
@@ -646,7 +683,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     body = body
       .. "\nPrior review ledger:\n"
       .. ledger
-      .. "\nJudge whether THE NAMED GAP is closed; new objections only for regressions introduced by the fix. For rollup-red or failing-check re-review, scope the question to the diff change and the named failing check, not to restoration of gate state."
+      .. "\nJudge whether THE NAMED GAP is closed; new objections only for fix regressions inside the issue's stated bounds. For rollup-red or failing-check re-review, scope the question to the diff change and the named failing check, not to restoration of gate state."
   end
   if #body > M._max_body_len then
     error("github-devloop: PR review proposal exceeds bounded body")

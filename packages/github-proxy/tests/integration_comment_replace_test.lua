@@ -31,7 +31,7 @@ local function event(extra)
 end
 
 local function mock_comment_edit()
-  t.mock_command("gh api --method PATCH", {
+  t.mock_command("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-pr-7.md'", {
     stdout = "",
     stderr = "",
     exit_code = 0,
@@ -44,7 +44,8 @@ return {
     mock_bot_env()
     mock_pr_comment_view({
       {
-        id = "123456",
+        id = "IC_kwDOSwWu288AAAABF40Vmg",
+        databaseId = 123456,
         body = "old card\n" .. event().payload.replace_marker,
         author_login = "fkst-test-bot",
       },
@@ -58,7 +59,8 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 1)
-    t.eq(count_calls("gh api --method PATCH"), 1)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
+    t.eq(count_calls("issues/comments/IC_kwDOSwWu288AAAABF40Vmg"), 0)
     t.eq(count_calls("gh pr comment"), 0)
   end,
 
@@ -80,7 +82,7 @@ return {
   end,
 
   test_parse_issue_comments_preserves_comment_id = function()
-    local comments = core.parse_issue_comments('{"comments":[{"id":"999","body":"hello","author":{"login":"fkst-test-bot"}}]}')
+    local comments = core.parse_issue_comments('{"comments":[{"id":"IC_kwabc","databaseId":999,"body":"hello","author":{"login":"fkst-test-bot"}}]}')
     t.eq(comments[1].id, "999")
     t.eq(core.trusted_comment_with_fragment(comments, "hello", "fkst-test-bot").id, "999")
   end,
