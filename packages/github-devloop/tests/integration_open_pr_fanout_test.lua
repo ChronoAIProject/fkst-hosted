@@ -9,6 +9,7 @@ local source_ref = h.source_ref
 local run_open_pr = h.run_open_pr
 local mock_issue_open_pr = h.mock_issue_open_pr
 local mock_branch_exists = h.mock_branch_exists
+local mock_branch_head_descends = h.mock_branch_head_descends
 local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
@@ -89,6 +90,55 @@ return {
     t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
     t.eq(pr_raise.payload.head_sha, "abc123")
     t.eq(pr_raise.payload.impl_version, impl_version)
+  end,
+
+  test_open_pr_entity_change_opens_at_current_descendant_head = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "def456")
+    mock_branch_head_descends(true)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+
+    local result = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-descendant-head", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local pr_raise = find_raise(result.raises, "github-proxy.github_pr_open_request")
+    t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
+    t.eq(pr_raise.payload.head_sha, "def456")
+    t.eq(pr_raise.payload.impl_version, impl_version)
+    t.eq(count_calls("show-ref --verify --quiet"), 1)
+    t.eq(count_calls("rev-parse --verify"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 1)
+  end,
+
+  test_open_pr_entity_change_refuses_non_descendant_head = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "def456")
+    mock_branch_head_descends(false)
+    mock_bot_env()
+    mock_write_env("1")
+
+    local result = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-non-descendant-head", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("show-ref --verify --quiet"), 1)
+    t.eq(count_calls("rev-parse --verify"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 1)
   end,
 
   test_open_pr_skips_entity_changed_with_no_state_marker = function()
