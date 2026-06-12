@@ -8,7 +8,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/scripts/bin_bootstrap.sh"
 
 DOCTOR_FAIL=0
-DOCTOR_RESOLVED_BIN=""
 
 doctor_emit() {
   local item="$1" state="$2" detail="${3:-}"
@@ -47,72 +46,13 @@ doctor_check_tool() {
   doctor_ok "$tool" "path=$path version=${version:-unknown}"
 }
 
-doctor_resolve_bin_readonly() {
-  local candidate=""
-  DOCTOR_RESOLVED_BIN=""
-
-  if [ -n "${BIN:-}" ]; then
-    if [ -x "$BIN" ]; then
-      DOCTOR_RESOLVED_BIN="$BIN"
-      return 0
-    fi
-    doctor_missing "bin" "hint=explicit BIN is not executable: $BIN"
-    return 1
-  fi
-
-  if [ -f "$ROOT/.env" ]; then
-    candidate="$(grep -E '^BIN=' "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-    candidate="${candidate%%[[:space:]]#*}"
-    candidate="${candidate%\"}"; candidate="${candidate#\"}"; candidate="${candidate%\'}"; candidate="${candidate#\'}"
-    if [ -n "$candidate" ]; then
-      if [ -x "$candidate" ]; then
-        DOCTOR_RESOLVED_BIN="$candidate"
-        return 0
-      fi
-      doctor_missing "bin" "hint=.env BIN is not executable: $candidate"
-      return 1
-    fi
-  fi
-
-  if candidate="$(command -v fkst-framework 2>/dev/null)"; then
-    DOCTOR_RESOLVED_BIN="$candidate"
-    return 0
-  fi
-
-  candidate="$ROOT/../fkst-substrate/target/debug/fkst-framework"
-  if [ -x "$candidate" ]; then
-    DOCTOR_RESOLVED_BIN="$candidate"
-    return 0
-  fi
-
-  if [ -z "${FKST_NO_AUTOBUILD:-}" ] && [ -f "$ROOT/.fkst-substrate-ref" ]; then
-    local pin owner repo ref cache_root cache_bin
-    pin="$(bootstrap_read_pin "$ROOT" 2>/dev/null || true)"
-    if [ -n "$pin" ]; then
-      {
-        IFS= read -r owner
-        IFS= read -r repo
-        IFS= read -r ref
-      } < <(bootstrap_parse_pin "$pin" 2>/dev/null || true)
-      cache_root="$(bootstrap_cache_root 2>/dev/null || true)"
-      if [ -n "${owner:-}" ] && [ -n "${repo:-}" ] && [ -n "${ref:-}" ] && [ -n "$cache_root" ]; then
-        cache_bin="$(bootstrap_cache_bin_path "$ROOT" "$cache_root" "$owner" "$repo" "$ref" 2>/dev/null || true)"
-        if [ -x "$cache_bin" ]; then
-          DOCTOR_RESOLVED_BIN="$cache_bin"
-          return 0
-        fi
-      fi
-    fi
-  fi
-
-  doctor_missing "bin" "hint=set BIN to an executable fkst-framework, put fkst-framework on PATH, build ../fkst-substrate, or run scripts/run.sh build"
-  return 1
-}
-
 doctor_check_bin() {
   local resolved
-  doctor_resolve_bin_readonly || return 0
-  resolved="$DOCTOR_RESOLVED_BIN"
+  if ! resolve_bin_contract "$ROOT" "readonly"; then
+    doctor_missing "bin" "hint=$RESOLVE_BIN_ERROR"
+    return 0
+  fi
+  resolved="$RESOLVED_BIN"
   doctor_ok "bin" "path=$resolved"
   if "$resolved" --self-test >/dev/null 2>&1; then
     doctor_ok "bin-self-test" "path=$resolved"

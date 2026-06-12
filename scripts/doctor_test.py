@@ -173,6 +173,13 @@ class DoctorScriptTest(unittest.TestCase):
         source = (REPO_ROOT / "scripts" / "doctor.sh").read_text(encoding="utf-8")
         self.assertNotIn("--install", source)
 
+    def test_doctor_reuses_shared_bin_resolution_contract(self) -> None:
+        source = (REPO_ROOT / "scripts" / "doctor.sh").read_text(encoding="utf-8")
+        self.assertIn('resolve_bin_contract "$ROOT" "readonly"', source)
+        self.assertNotIn("doctor_resolve_bin", source)
+        self.assertNotIn("command -v fkst-framework", source)
+        self.assertNotIn("../fkst-substrate/target/debug/fkst-framework", source)
+
 
 if __name__ == "__main__":
     unittest.main()

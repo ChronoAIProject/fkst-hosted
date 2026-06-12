@@ -54,46 +54,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/scripts/bin_bootstrap.sh"
 
 resolve_bin() {
-  if [ -n "${BIN:-}" ]; then
-    if [ ! -x "$BIN" ]; then
-      echo "error: explicit BIN is not executable: $BIN" >&2
-      exit 1
-    fi
-    export BIN
-    return 0
-  fi
-
-  if [ -f "$ROOT/.env" ]; then
-    # `|| true`: no BIN= line is fine under set -o pipefail. Strip optional
-    # surrounding quotes and a trailing ` # comment`.
-    BIN="$(grep -E '^BIN=' "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-    BIN="${BIN%%[[:space:]]#*}"
-    BIN="${BIN%\"}"; BIN="${BIN#\"}"; BIN="${BIN%\'}"; BIN="${BIN#\'}"
-    if [ -n "${BIN:-}" ]; then
-      if [ ! -x "$BIN" ]; then
-        echo "error: .env BIN is not executable: $BIN" >&2
-        exit 1
-      fi
-      export BIN
-      return 0
-    fi
-  fi
-
-  if command -v fkst-framework >/dev/null 2>&1; then
-    BIN="$(command -v fkst-framework)"
-  elif [ -x "$ROOT/../fkst-substrate/target/debug/fkst-framework" ]; then
-    BIN="$ROOT/../fkst-substrate/target/debug/fkst-framework"
-  fi
-
-  if [ -z "${BIN:-}" ] || [ ! -x "$BIN" ]; then
+  if ! resolve_bin_contract "$ROOT" "bootstrap"; then
+    echo "error: $RESOLVE_BIN_ERROR" >&2
     if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
-      echo "error: fkst-framework binary is not executable in CI: ${BIN:-<unset>}" >&2
       echo "  CI must build fkst-substrate and inject BIN; scripts/run.sh will not build in CI." >&2
-      exit 1
     fi
-    echo "fkst-framework binary not found in \$BIN, .env, PATH, or ../fkst-substrate; bootstrapping pinned source" >&2
-    BIN="$(bootstrap_bin_on_total_miss "$ROOT")"
+    exit 1
   fi
+  BIN="$RESOLVED_BIN"
   export BIN
 }
 
