@@ -23,6 +23,15 @@ local function enables_pipeline(action)
   return action == "enable"
 end
 
+local function has_devloop_state_label(labels)
+  for _, label in ipairs(labels or {}) do
+    if core._state_labels[tostring(label)] then
+      return true
+    end
+  end
+  return false
+end
+
 local function judgment_worktree(role, identity)
   local runtime = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
   if runtime.exit_code ~= 0 then
@@ -65,12 +74,43 @@ function pipeline(event)
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-closed", "issue is not open")
       return
     end
+    local reintake_command = core.operator_command_fact(current.comments, "reintake")
+    local has_pending_reintake = reintake_command ~= nil and not core.has_operator_command_response(current.comments, reintake_command)
+    if has_pending_reintake and not core.has_intake_decision_marker(current.comments, candidate.proposal_id) then
+      local refusal = core.build_operator_issue_command_refusal_request(
+        repo,
+        issue_number,
+        reintake_command,
+        "reintake requires an existing intake decision",
+        candidate.source_ref
+      )
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "refused(reintake-no-intake-decision)", "operator reintake requires an existing intake decision")
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
+      return
+    end
+    if has_pending_reintake and (core.is_opted_in(current.labels) or has_devloop_state_label(current.labels)) then
+      local refusal = core.build_operator_issue_command_refusal_request(
+        repo,
+        issue_number,
+        reintake_command,
+        "reintake requires no active devloop state",
+        candidate.source_ref
+      )
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "refused(reintake-active-state)", "operator reintake requires no active devloop state")
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
+      return
+    end
+    if has_pending_reintake then
+      local expected = core.build_devloop_intake_candidate_payload(repo, issue_number, reintake_command.created_at)
+      if tostring(candidate.dedup_key or "") ~= tostring(expected.dedup_key or "") then
+        core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command timestamp")
+        return
+      end
+    end
     if core.is_opted_in(current.labels) then
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
       return
     end
-    local reintake_command = core.operator_command_fact(current.comments, "reintake")
-    local has_pending_reintake = reintake_command ~= nil and not core.has_operator_command_response(current.comments, reintake_command)
     if core.has_intake_decision_marker(current.comments, candidate.proposal_id) and not has_pending_reintake then
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-idempotent(intake marker already visible)", "trusted intake decision marker exists")
       return
