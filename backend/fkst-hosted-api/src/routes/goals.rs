@@ -1,19 +1,21 @@
 //! Goals HTTP API: CRUD for `/api/v1/goals`.
 //!
 //! Endpoints:
-//! - `POST   /api/v1/goals`         — create a goal (201)
-//! - `GET    /api/v1/goals`         — list goals (200, paginated)
-//! - `GET    /api/v1/goals/{id}`    — fetch one goal (200)
-//! - `PATCH  /api/v1/goals/{id}`    — partial update (200)
-//! - `DELETE /api/v1/goals/{id}`    — delete (204)
+//! - `POST   /api/v1/goals`             — create a goal (201)
+//! - `GET    /api/v1/goals`             — list goals (200, paginated)
+//! - `GET    /api/v1/goals/{id}`        — fetch one goal (200)
+//! - `PATCH  /api/v1/goals/{id}`        — partial update (200)
+//! - `DELETE /api/v1/goals/{id}`        — delete (204)
+//! - `POST   /api/v1/goals/{id}/trigger` — trigger a goal (202)
 //!
 //! This is purely the web edge: wire DTOs, UUID parsing, authz checks, and
 //! status mapping. Validation logic lives in the goals domain module.
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use bson::doc;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthContext;
@@ -25,6 +27,7 @@ use crate::goals::{
 };
 use crate::routes::extract::AppJson;
 use crate::routes::rfc3339;
+use crate::sessions::GoalTriggerInfo;
 use crate::state::AppState;
 
 /// Statuses that allow mutation of package_names, repo, and deletion.
@@ -106,6 +109,24 @@ pub struct ListGoalsQuery {
     pub status: Option<String>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
+}
+
+/// Request body for `POST /api/v1/goals/{id}/trigger`. Unknown fields denied.
+/// The `repo` field is optional: when absent, the goal's stored repo is used.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TriggerRequest {
+    #[serde(default)]
+    pub repo: Option<RepoRefBody>,
+}
+
+/// Response body for `POST /api/v1/goals/{id}/trigger` (202).
+#[derive(Debug, Serialize)]
+pub struct TriggerResponse {
+    pub goal_id: String,
+    pub session_id: String,
+    pub goal_status: GoalStatus,
+    pub session_status: &'static str,
 }
 
 impl TryFrom<GoalDoc> for GoalView {
@@ -270,14 +291,15 @@ async fn list(
     Ok(Json(views))
 }
 
-/// `GET /api/v1/goals/{id}`: fetch one goal.
+/// `GET /api/v1/goals/{id}`: fetch one goal. Performs read-repair for
+/// dangling triggered/running goals with no active session.
 async fn get_one(
     State(state): State<AppState>,
     ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<Json<GoalView>, AppError> {
     let uuid = parse_goal_uuid(&id)?;
-    let goal = state
+    let mut goal = state
         .goals
         .get(uuid)
         .await?
@@ -288,6 +310,64 @@ async fn get_one(
         .authz
         .authorize(&ctx, ownership, Action::Read, "goal", &id)
         .await?;
+
+    // Read-repair: if status is triggered/running but there is no active
+    // session, or the session is terminal, repair to stopped/failed.
+    if matches!(goal.status, GoalStatus::Triggered | GoalStatus::Running) {
+        let needs_repair = if let Some(session_id) = goal.active_session_id {
+            // Check if the session is terminal.
+            match state.sessions.get(session_id).await {
+                Ok(Some(session)) => {
+                    matches!(
+                        session.status,
+                        crate::models::SessionStatus::Stopped
+                            | crate::models::SessionStatus::Failed
+                    )
+                }
+                Ok(None) => true, // Session gone
+                Err(_) => false,  // Don't repair on DB error
+            }
+        } else {
+            // No active_session_id: only repair if older than 5 minutes
+            // (give the trigger flow time to complete).
+            if goal.status == GoalStatus::Triggered {
+                let age =
+                    bson::DateTime::now().timestamp_millis() - goal.updated_at.timestamp_millis();
+                age > 300_000 // 5 minutes
+            } else {
+                true
+            }
+        };
+
+        if needs_repair {
+            let repair_status = match goal.status {
+                GoalStatus::Triggered => GoalStatus::Stopped,
+                GoalStatus::Running => GoalStatus::Failed,
+                _ => goal.status,
+            };
+            tracing::info!(
+                goal_id = %id,
+                from = ?goal.status,
+                to = ?repair_status,
+                "read-repair: goal has dangling active session"
+            );
+            if let Some(repaired) = state
+                .goals
+                .transition_status(
+                    uuid,
+                    &[goal.status],
+                    doc! {
+                        "status": bson::to_bson(&repair_status).expect("GoalStatus serializes"),
+                        "active_session_id": bson::Bson::Null,
+                        "updated_at": bson::DateTime::now(),
+                    },
+                )
+                .await?
+            {
+                goal = repaired;
+            }
+        }
+    }
 
     tracing::debug!(goal_id = %id, "goal fetched");
     Ok(Json(GoalView::try_from(goal)?))
@@ -506,6 +586,198 @@ async fn delete_one(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /api/v1/goals/{id}/trigger`: trigger a goal, creating a new session.
+/// Returns 202 on success.
+///
+/// Authorization: caller is the goal owner OR the goal has an org_id and the
+/// caller's org role is admin or member (viewers excluded).
+async fn trigger(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(id): Path<String>,
+    AppJson(body): AppJson<TriggerRequest>,
+) -> Result<(StatusCode, Json<TriggerResponse>), AppError> {
+    let uuid = parse_goal_uuid(&id)?;
+
+    // Step 1: Load goal.
+    let mut goal = state
+        .goals
+        .get(uuid)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("goal not found: {id}")))?;
+
+    // Authorization check: owner can always trigger; org members (admin,
+    // member) can trigger org goals — NOT viewers.
+    {
+        let ownership = goal_ownership(&goal);
+        // Owner or admin-scope: always allowed (checked by authorize with Write
+        // action). For non-owners with an org, we need to check org membership
+        // at member+ level.
+        if ownership.owner_user_id != Some(ctx.user_id.as_str())
+            && !ctx.has_scope(crate::authz::ADMIN_SCOPE)
+        {
+            if let Some(ref org_id) = goal.org_id {
+                state.authz.require_org_writer(&ctx, org_id).await?;
+            } else {
+                // Not the owner, no org — forbidden.
+                return Err(AppError::Forbidden(
+                    "insufficient permissions: only the owner can trigger this goal".to_string(),
+                ));
+            }
+        }
+    }
+
+    // Read-repair: if status is triggered/running and active_session_id is
+    // terminal or absent, CAS the goal to stopped/failed first.
+    if matches!(goal.status, GoalStatus::Triggered | GoalStatus::Running) {
+        let needs_repair = if let Some(session_id) = goal.active_session_id {
+            match state.sessions.get(session_id).await {
+                Ok(Some(session)) => {
+                    matches!(
+                        session.status,
+                        crate::models::SessionStatus::Stopped
+                            | crate::models::SessionStatus::Failed
+                    )
+                }
+                Ok(None) => true,
+                Err(_) => false,
+            }
+        } else if goal.status == GoalStatus::Triggered {
+            let age = bson::DateTime::now().timestamp_millis() - goal.updated_at.timestamp_millis();
+            age > 300_000 // 5 minutes
+        } else {
+            true
+        };
+
+        if needs_repair {
+            let repair_status = match goal.status {
+                GoalStatus::Triggered => GoalStatus::Stopped,
+                GoalStatus::Running => GoalStatus::Failed,
+                _ => goal.status,
+            };
+            tracing::info!(
+                goal_id = %id,
+                from = ?goal.status,
+                to = ?repair_status,
+                "read-repair: goal has dangling active session during trigger"
+            );
+            if let Some(repaired) = state
+                .goals
+                .transition_status(
+                    uuid,
+                    &[goal.status],
+                    doc! {
+                        "status": bson::to_bson(&repair_status).expect("GoalStatus serializes"),
+                        "active_session_id": bson::Bson::Null,
+                        "updated_at": bson::DateTime::now(),
+                    },
+                )
+                .await?
+            {
+                goal = repaired;
+            }
+        } else {
+            // Still actively triggered or running — conflict.
+            return Err(AppError::Conflict(
+                "goal already triggered or running".to_string(),
+            ));
+        }
+    }
+
+    // Step 2: Resolve effective repo.
+    let effective_repo = match body.repo {
+        Some(ref r) => RepoRef {
+            owner: r.owner.clone(),
+            name: r.name.clone(),
+        },
+        None => match goal.repo.clone() {
+            Some(r) => r,
+            None => {
+                return Err(AppError::Unprocessable(
+                    "no repo specified and goal has no stored repo".to_string(),
+                ));
+            }
+        },
+    };
+
+    // Validate repo shape.
+    validate_goal_fields(
+        "dummy",
+        "dummy",
+        &["dummy".to_string()],
+        Some(&effective_repo),
+    )
+    .map_err(AppError::Validation)?;
+
+    // Re-validate every package_names entry exists + caller can_use_package.
+    for name in &goal.package_names {
+        let pkg = state.packages.get(name).await?;
+        match pkg {
+            Some(p) => {
+                let can_use = state
+                    .authz
+                    .can_use_package(&ctx, name, p.owner_user_id.as_deref(), p.org_id.as_deref())
+                    .await;
+                if !can_use {
+                    return Err(AppError::Forbidden(format!("package not usable: {name}")));
+                }
+            }
+            None => {
+                return Err(AppError::Unprocessable(format!(
+                    "package not found: {name}"
+                )));
+            }
+        }
+    }
+
+    // Step 3: Mint installation token.
+    let github_app = state.github_app.as_ref().ok_or_else(|| {
+        AppError::Unprocessable("github app not configured; cannot trigger goals".to_string())
+    })?;
+    let repo_ref_str = format!("{}/{}", effective_repo.owner, effective_repo.name);
+    // The token is minted here but not yet stored (the GoalDrive will handle
+    // token refresh in a later step). For now, just validate the app is
+    // installed by minting a token (this serves as the installation check).
+    github_app
+        .token_for_repo(&repo_ref_str, None)
+        .await
+        .map_err(AppError::from)?;
+
+    // Steps 4-8: Delegate to SessionService::create_for_goal.
+    let trigger_info = GoalTriggerInfo {
+        goal_id: goal.id,
+        repo: RepoRef {
+            owner: effective_repo.owner,
+            name: effective_repo.name,
+        },
+        package_names: goal.package_names.clone(),
+        owner_user_id: goal.owner_user_id.clone(),
+        org_id: goal.org_id.clone(),
+        prior_status: goal.status,
+    };
+
+    let result = state
+        .sessions
+        .create_for_goal(&state.goals, trigger_info)
+        .await?;
+
+    tracing::info!(
+        goal_id = %goal.id,
+        session_id = %result.session_id,
+        "goal triggered"
+    );
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(TriggerResponse {
+            goal_id: goal.id.to_string(),
+            session_id: result.session_id.to_string(),
+            goal_status: result.goal_status,
+            session_status: "pending",
+        }),
+    ))
+}
+
 // ---- Router ---------------------------------------------------------------
 
 /// Goal routes, nested under `/api/v1`.
@@ -513,6 +785,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/goals", get(list).post(create))
         .route("/goals/:id", get(get_one).patch(update).delete(delete_one))
+        .route("/goals/:id/trigger", post(trigger))
 }
 
 #[cfg(test)]
@@ -562,5 +835,45 @@ mod tests {
         let view = GoalView::try_from(doc).expect("view");
         let body = serde_json::to_value(&view).unwrap();
         assert_eq!(body["status"], "not_started");
+    }
+
+    // ---- Trigger DTO tests ----
+
+    #[test]
+    fn trigger_request_accepts_empty_body() {
+        let req: TriggerRequest = serde_json::from_str("{}").expect("empty body");
+        assert!(req.repo.is_none());
+    }
+
+    #[test]
+    fn trigger_request_accepts_repo() {
+        let req: TriggerRequest =
+            serde_json::from_str(r#"{"repo":{"owner":"acme","name":"site"}}"#).expect("with repo");
+        let repo = req.repo.expect("repo");
+        assert_eq!(repo.owner, "acme");
+        assert_eq!(repo.name, "site");
+    }
+
+    #[test]
+    fn trigger_request_rejects_unknown_fields() {
+        let result = serde_json::from_str::<TriggerRequest>(r#"{"bogus":1}"#);
+        assert!(result.is_err(), "unknown fields must be rejected");
+    }
+
+    #[test]
+    fn trigger_response_serializes_to_documented_shape() {
+        let goal_id = bson::Uuid::new();
+        let session_id = bson::Uuid::new();
+        let resp = TriggerResponse {
+            goal_id: goal_id.to_string(),
+            session_id: session_id.to_string(),
+            goal_status: GoalStatus::Triggered,
+            session_status: "pending",
+        };
+        let body = serde_json::to_value(&resp).unwrap();
+        assert_eq!(body["goal_id"], goal_id.to_string());
+        assert_eq!(body["session_id"], session_id.to_string());
+        assert_eq!(body["goal_status"], "triggered");
+        assert_eq!(body["session_status"], "pending");
     }
 }

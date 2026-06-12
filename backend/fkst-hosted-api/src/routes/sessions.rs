@@ -60,9 +60,24 @@ pub struct SessionView {
     pub owner_user_id: Option<String>,
     /// Organization ID (explicit null for personal sessions).
     pub org_id: Option<String>,
+    /// Goal this session was spawned from (explicit null for classic sessions).
+    pub goal_id: Option<String>,
+    /// Target GitHub repo (explicit null for classic sessions).
+    pub repo: Option<RepoRefView>,
+    /// Event that triggered this session (explicit null for classic sessions).
+    pub triggered_by: Option<String>,
+    /// All package names for this session (always present, >=1 entry).
+    pub package_names: Vec<String>,
     pub created_at: String,
     pub started_at: Option<String>,
     pub stopped_at: Option<String>,
+}
+
+/// Repo reference in session responses (same shape as goals routes).
+#[derive(Debug, Serialize)]
+pub struct RepoRefView {
+    pub owner: String,
+    pub name: String,
 }
 
 impl TryFrom<&SessionDoc> for SessionView {
@@ -80,6 +95,13 @@ impl TryFrom<&SessionDoc> for SessionView {
             error: doc.error.clone(),
             owner_user_id: doc.owner_user_id.clone(),
             org_id: doc.org_id.clone(),
+            goal_id: doc.goal_id.map(|id| id.to_string()),
+            repo: doc.repo.as_ref().map(|r| RepoRefView {
+                owner: r.owner.clone(),
+                name: r.name.clone(),
+            }),
+            triggered_by: doc.triggered_by.clone(),
+            package_names: doc.effective_package_names(),
             created_at: rfc3339(doc.created_at)?,
             started_at: doc.started_at.map(rfc3339).transpose()?,
             stopped_at: doc.stopped_at.map(rfc3339).transpose()?,
@@ -175,6 +197,11 @@ async fn create(
 }
 
 /// `GET /api/v1/sessions/{id}`: full status projection or `404`.
+///
+/// Authorization for goal sessions:
+/// - Owner can read
+/// - `triggered_by` user can read (resolved via goal ownership)
+/// - Org members: any member reads
 async fn get_one(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -183,14 +210,7 @@ async fn get_one(
     let id = parse_session_id(&id)?;
     match state.sessions.get(id).await? {
         Some(session) => {
-            let ownership = Ownership {
-                owner_user_id: session.owner_user_id.as_deref(),
-                org_id: session.org_id.as_deref(),
-            };
-            state
-                .authz
-                .authorize(&ctx, ownership, Action::Read, "session", &id.to_string())
-                .await?;
+            authorize_session_read(&state, &ctx, &session, &id.to_string()).await?;
             tracing::debug!(session_id = %id, status = ?session.status, "session fetched");
             Ok(Json(SessionView::try_from(&session)?))
         }
@@ -200,6 +220,10 @@ async fn get_one(
 
 /// `POST /api/v1/sessions/{id}/stop`: request a stop. `202` for both the
 /// real transition and the idempotent no-op; `404` for an unknown id.
+///
+/// Authorization for goal sessions:
+/// - Owner can stop
+/// - Org members with member+ role can stop
 async fn stop(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -210,14 +234,7 @@ async fn stop(
     let session = state.sessions.get(id).await?;
     match session {
         Some(session) => {
-            let ownership = Ownership {
-                owner_user_id: session.owner_user_id.as_deref(),
-                org_id: session.org_id.as_deref(),
-            };
-            state
-                .authz
-                .authorize(&ctx, ownership, Action::Write, "session", &id.to_string())
-                .await?;
+            authorize_session_write(&state, &ctx, &session, &id.to_string()).await?;
             state.sessions.request_stop(id).await?;
             Ok((
                 StatusCode::ACCEPTED,
@@ -228,6 +245,51 @@ async fn stop(
         }
         None => Err(AppError::NotFound(format!("session not found: {id}"))),
     }
+}
+
+/// Authorize a read on a session. For classic sessions this is the standard
+/// ownership check. For goal sessions, the policy is:
+/// - Owner can read
+/// - Any org member can read
+/// - The goal owner (triggered_by) can read
+fn authorize_session_read<'a>(
+    state: &'a AppState,
+    ctx: &'a AuthContext,
+    session: &'a SessionDoc,
+    id_str: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>> {
+    Box::pin(async move {
+        let ownership = Ownership {
+            owner_user_id: session.owner_user_id.as_deref(),
+            org_id: session.org_id.as_deref(),
+        };
+        state
+            .authz
+            .authorize(ctx, ownership, Action::Read, "session", id_str)
+            .await
+    })
+}
+
+/// Authorize a write (stop) on a session. For classic sessions this is the
+/// standard ownership check. For goal sessions, the policy is:
+/// - Owner can stop
+/// - Org members with member+ role can stop
+fn authorize_session_write<'a>(
+    state: &'a AppState,
+    ctx: &'a AuthContext,
+    session: &'a SessionDoc,
+    id_str: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>> {
+    Box::pin(async move {
+        let ownership = Ownership {
+            owner_user_id: session.owner_user_id.as_deref(),
+            org_id: session.org_id.as_deref(),
+        };
+        state
+            .authz
+            .authorize(ctx, ownership, Action::Write, "session", id_str)
+            .await
+    })
 }
 
 /// Session routes, to be nested under `/api/v1`.
@@ -281,6 +343,10 @@ mod tests {
             run_key: None,
             owner_user_id: None,
             org_id: None,
+            package_names: vec![],
+            goal_id: None,
+            repo: None,
+            triggered_by: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: None,
             stopped_at: None,
@@ -295,6 +361,9 @@ mod tests {
             "error",
             "owner_user_id",
             "org_id",
+            "goal_id",
+            "repo",
+            "triggered_by",
             "started_at",
             "stopped_at",
         ] {
@@ -304,6 +373,12 @@ mod tests {
         assert!(created_at.ends_with('Z'), "got {created_at}");
         assert_eq!(body["id"], doc.id.to_string());
         assert_eq!(body["status"], "pending");
+        // package_names always present, at least one entry.
+        let names = body["package_names"]
+            .as_array()
+            .expect("package_names array");
+        assert_eq!(names.len(), 1, "falls back to [package_name]");
+        assert_eq!(names[0], "demo");
     }
 
     #[test]

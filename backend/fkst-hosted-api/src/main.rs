@@ -182,6 +182,7 @@ async fn main() -> ExitCode {
         JournalConfig::from_config(&config),
         MongoProgressStore::new(&db.database),
     );
+
     match distributor.fail_orphans_at_boot().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),
         Err(error) => {
@@ -283,6 +284,16 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // 5a-bis. Enable goal support in the session service: goal-status sync
+    //         writes + token refresh. Requires both the goals repo and the
+    //         GitHub App tokens service.
+    if let Some(ref gh_app) = github_app {
+        sessions.enable_goal_support(goals.clone(), gh_app.clone());
+        tracing::info!("goal support enabled in session service");
+    } else {
+        tracing::info!("github app not configured; goal support disabled in session service");
+    }
 
     let app = match build_router(AppState {
         config,

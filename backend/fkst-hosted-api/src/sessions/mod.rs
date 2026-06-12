@@ -14,4 +14,4 @@ pub mod repo;
 pub mod service;
 
 pub use repo::SessionRepo;
-pub use service::{SessionOwner, SessionService};
+pub use service::{GoalTriggerInfo, GoalTriggerResult, SessionOwner, SessionService};

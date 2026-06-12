@@ -25,6 +25,7 @@ pub const IDX_SESSIONS_STATUS: &str = "sessions_status";
 pub const IDX_SESSIONS_POD_ID: &str = "sessions_pod_id";
 pub const IDX_SESSIONS_OWNER_USER_ID: &str = "sessions_owner_user_id";
 pub const IDX_SESSIONS_ORG_ID: &str = "sessions_org_id";
+pub const IDX_SESSIONS_GOAL_ID: &str = "sessions_goal_id";
 pub const IDX_LEASES_EXPIRES_AT: &str = "leases_expires_at";
 
 /// Cheap-to-clone handle to the Mongo database (`mongodb::Database` is
@@ -117,6 +118,7 @@ impl Db {
             (doc! { "pod_id": 1 }, IDX_SESSIONS_POD_ID),
             (doc! { "owner_user_id": 1 }, IDX_SESSIONS_OWNER_USER_ID),
             (doc! { "org_id": 1 }, IDX_SESSIONS_ORG_ID),
+            (doc! { "goal_id": 1 }, IDX_SESSIONS_GOAL_ID),
         ];
         self.sessions()
             .create_indexes(
