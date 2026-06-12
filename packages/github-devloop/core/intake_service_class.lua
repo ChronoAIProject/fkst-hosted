@@ -44,6 +44,23 @@ function M.intake_service_class_label_changes(value)
   return add, remove
 end
 
+function M.build_intake_service_class_label_request(repo, issue_number, candidate)
+  local add_labels, remove_labels = M.intake_service_class_label_changes(candidate and candidate.service_class)
+  return M.build_label_request(
+    repo,
+    issue_number,
+    add_labels,
+    remove_labels,
+    M._dedup_key({
+      "intake",
+      "class-label",
+      tostring(candidate and candidate.proposal_id or ""),
+      tostring(candidate and candidate.dedup_key or ""),
+    }),
+    candidate and candidate.source_ref
+  )
+end
+
 end
 
 return S

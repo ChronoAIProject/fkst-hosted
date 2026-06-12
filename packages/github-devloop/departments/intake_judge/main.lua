@@ -179,21 +179,14 @@ function pipeline(event)
     end
     candidate.service_class = parsed.service_class
     comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason, parsed.service_class)
+    table.insert(raised, "github-proxy.github_issue_label_request")
+    local class_add, class_remove = core.intake_service_class_label_changes(parsed.service_class)
+    local apply_add = { class_add[1] }
+    local apply_remove = class_remove
     if enables_pipeline(parsed.action) then
-      table.insert(raised, "github-proxy.github_issue_label_request")
+      table.insert(apply_add, 1, core._enabled_label)
     elseif tracks_umbrella(parsed.action) then
-      table.insert(raised, "github-proxy.github_issue_label_request")
-    end
-    local apply_add = {}
-    local apply_remove = {}
-    if enables_pipeline(parsed.action) then
-      local class_add, class_remove = core.intake_service_class_label_changes(parsed.service_class)
-      apply_add = { core._enabled_label, class_add[1] }
-      apply_remove = class_remove
-    elseif tracks_umbrella(parsed.action) then
-      local class_add, class_remove = core.intake_service_class_label_changes(parsed.service_class)
-      apply_add = { core._tracking_label, class_add[1] }
-      apply_remove = class_remove
+      table.insert(apply_add, 1, core._tracking_label)
     end
     core.log_apply("intake_judge", candidate.proposal_id, parsed.action, candidate.dedup_key, {
       add = apply_add,
@@ -225,6 +218,9 @@ function pipeline(event)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
     elseif tracks_umbrella(parsed.action) then
       local label_request = core.build_intake_tracking_label_request(repo, issue_number, candidate)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    else
+      local label_request = core.build_intake_service_class_label_request(repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
     end
   end)
