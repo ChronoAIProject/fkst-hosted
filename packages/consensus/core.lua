@@ -25,6 +25,7 @@ local max_narrowed_question_len = 2000
 local max_digest_len = 600
 local max_prior_round_digests = 12
 local max_scratch_slug_len = 120
+local stale_generation_context_error_class = "stale_generation_context"
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 local gap_label = "⟦FKST:GAP⟧"
@@ -150,7 +151,7 @@ local function assert_manifest_files_readable(manifest)
     end
     local handle = io.open(path, "r")
     if handle == nil then
-      error("consensus: runtime context manifest file is unreadable")
+      error("consensus: error_class=" .. stale_generation_context_error_class .. " runtime context manifest file is unreadable")
     end
     handle:close()
   end
@@ -182,13 +183,28 @@ local function resolve_content_manifest(content_fetch)
   end
   local manifest = cache_get(key)
   if type(manifest) ~= "string" or manifest == "" then
-    error("consensus: runtime context cache miss")
+    error("consensus: error_class=" .. stale_generation_context_error_class .. " runtime context cache miss")
   end
   if #manifest > max_content_fetch_len then
     error("consensus: runtime context manifest is overlong")
   end
   assert_manifest_files_readable(manifest)
   return manifest
+end
+
+function M.stale_generation_context_error_class()
+  return stale_generation_context_error_class
+end
+
+function M.is_stale_generation_context_error(err)
+  local text = tostring(err or "")
+  if text:find("error_class=" .. stale_generation_context_error_class, 1, true) ~= nil then
+    return true
+  end
+  if text:find("runtime context cache miss", 1, true) ~= nil then
+    return true
+  end
+  return text:find("runtime context manifest file is unreadable", 1, true) ~= nil
 end
 
 local function normalize_round(value)
