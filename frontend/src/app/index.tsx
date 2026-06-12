@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Shell } from './shell';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -13,8 +14,8 @@ const queryClient = new QueryClient({
 function ScreenPending({ name }: { name: string }) {
   return (
     <div>
-      <h1>{name}</h1>
-      <p>screen pending</p>
+      <h1 className="text-modal-title font-semibold text-fg">{name}</h1>
+      <p className="text-body text-faint mt-2">screen pending</p>
     </div>
   );
 }
@@ -22,31 +23,37 @@ function ScreenPending({ name }: { name: string }) {
 const router = createBrowserRouter([
   {
     path: '/',
-    element: <Navigate to="/overview" replace />,
-  },
-  {
-    path: '/overview',
-    element: <ScreenPending name="Overview" />,
-  },
-  {
-    path: '/goals',
-    element: <ScreenPending name="Goals" />,
-  },
-  {
-    path: '/goals/:id',
-    element: <ScreenPending name="Goal Details" />,
-  },
-  {
-    path: '/packages',
-    element: <ScreenPending name="Packages" />,
-  },
-  {
-    path: '/settings',
-    element: <ScreenPending name="Settings" />,
-  },
-  {
-    path: '/runs',
-    element: <Navigate to="/goals?view=activity" replace />,
+    element: <Shell />,
+    children: [
+      {
+        path: '',
+        element: <Navigate to="/overview" replace />,
+      },
+      {
+        path: 'overview',
+        element: <ScreenPending name="Overview" />,
+      },
+      {
+        path: 'goals',
+        element: <ScreenPending name="Goals" />,
+      },
+      {
+        path: 'goals/:id',
+        element: <ScreenPending name="Goal Details" />,
+      },
+      {
+        path: 'packages',
+        element: <ScreenPending name="Packages" />,
+      },
+      {
+        path: 'settings',
+        element: <ScreenPending name="Settings" />,
+      },
+      {
+        path: 'runs',
+        element: <Navigate to="/goals?view=activity" replace />,
+      },
+    ],
   },
 ]);
 
