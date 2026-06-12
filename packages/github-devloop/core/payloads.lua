@@ -461,18 +461,27 @@ function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issu
   }
 end
 
-function M.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
-  local payload = M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
-  payload.mode = "fix-reflection"
-  payload.fix_round = fix_round
-  payload.dedup_key = M._dedup_key({
+function M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
+  return M._dedup_key({
     "fix-reflection",
     tostring(issue_proposal_id),
     tostring(issue_version),
     tostring(pr_number),
     tostring(fix_round),
-    tostring(unresolved.dedup_key),
+    tostring(review_dedup_key),
   })
+end
+
+function M.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+  local review_dedup_key = unresolved.review_dedup_key or unresolved.dedup_key
+  local payload = M.build_devloop_review_meta_payload({
+    proposal_id = unresolved.proposal_id,
+    dedup_key = review_dedup_key,
+    source_ref = unresolved.source_ref,
+  }, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+  payload.mode = "fix-reflection"
+  payload.fix_round = fix_round
+  payload.dedup_key = M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
   return payload
 end
 

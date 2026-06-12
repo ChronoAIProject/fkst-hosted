@@ -195,9 +195,11 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
           or not M._is_bounded_string(reject_fact.blocking_gap, M._max_blocking_gap_len) then
           return nil
         end
+        local reflection_dedup = M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, marker_dedup)
         return {
           proposal_id = review_proposal,
-          dedup_key = marker_dedup,
+          dedup_key = reflection_dedup,
+          review_dedup_key = marker_dedup,
           source_ref = M.pr_source_ref(repo, pr_number),
           pr_number = tonumber(pr_number),
           n = tonumber(n) or 0,

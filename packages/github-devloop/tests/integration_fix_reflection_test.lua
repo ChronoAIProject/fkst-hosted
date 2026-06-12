@@ -105,6 +105,12 @@ return {
     local review_version = core._strip_latest_fix_version_suffix(issue_version)
     local review_proposal = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
     local review_dedup = "consensus:" .. review_proposal .. "/review"
+    local fresh_payload = core.build_devloop_fix_reflection_payload({
+      proposal_id = review_proposal,
+      dedup_key = review_dedup,
+      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+    }, "github-devloop/issue/owner/repo/42", issue_version, 7, 3, { kind = "external", ref = "owner/repo#pr/7" })
+    fresh_payload.blocking_gap = "missing regression guard"
     local comments = {
       {
         author_login = core._test_bot_login,
@@ -121,6 +127,16 @@ return {
     t.eq(fact.mode, "fix-reflection")
     t.eq(fact.fix_round, 3)
     t.eq(fact.blocking_gap, "missing regression guard")
+    t.eq(fact.review_dedup_key, review_dedup)
+    t.eq(fact.dedup_key, fresh_payload.dedup_key)
+
+    local replay_payload = core.build_devloop_fix_reflection_payload(fact, "github-devloop/issue/owner/repo/42", issue_version, fact.pr_number, fact.fix_round, fact.source_ref)
+    replay_payload.blocking_gap = fact.blocking_gap
+    t.eq(replay_payload.dedup_key, fresh_payload.dedup_key)
+    t.eq(replay_payload.review_dedup_key, fresh_payload.review_dedup_key)
+    t.eq(replay_payload.mode, fresh_payload.mode)
+    t.eq(replay_payload.fix_round, fresh_payload.fix_round)
+    t.eq(replay_payload.blocking_gap, fresh_payload.blocking_gap)
   end,
 
   test_fix_reflection_spec_gap_blocks_and_files_spec_amendment = function()

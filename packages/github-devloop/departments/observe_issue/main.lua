@@ -349,7 +349,13 @@ local function raise_review_meta_replay(issue, proposal_id, state, link, snapsho
     core.log_cas_decision("observe_issue", proposal_id, state, "review-meta", "review-meta", "skip-foreign(review-meta)", "review-meta recovery facts are not visible")
     return
   end
-  local payload = core.build_devloop_review_meta_payload(fact, proposal_id, state.version, fact.pr_number, fact.n, fact.source_ref)
+  local payload = nil
+  if fact.mode == "fix-reflection" then
+    payload = core.build_devloop_fix_reflection_payload(fact, proposal_id, state.version, fact.pr_number, fact.fix_round or fact.n, fact.source_ref)
+    payload.blocking_gap = fact.blocking_gap
+  else
+    payload = core.build_devloop_review_meta_payload(fact, proposal_id, state.version, fact.pr_number, fact.n, fact.source_ref)
+  end
   core.log_apply("observe_issue", proposal_id, "review-meta", state.version, { add = {}, remove = {} }, {
     "devloop_review_meta",
   })
