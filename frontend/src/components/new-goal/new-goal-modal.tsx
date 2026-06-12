@@ -180,7 +180,7 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
               </DialogClose>
               <button
                 type="submit"
-                className="font-sans font-semibold text-[12.5px] text-amber-ink bg-amber border-0 rounded-[9px] px-[15px] py-2 cursor-pointer transition-all duration-120 ease hover:not-disabled:brightness-[1.06] disabled:cursor-not-allowed disabled:opacity-[0.62]"
+                className="font-sans font-semibold text-[12.5px] text-amber-ink bg-amber border-0 rounded-[9px] px-[15px] py-2 cursor-pointer transition-all hover:not-disabled:brightness-[1.06] disabled:cursor-not-allowed disabled:opacity-[0.62]"
                 disabled
                 data-testid="submit-button"
               >
