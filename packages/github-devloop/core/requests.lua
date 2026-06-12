@@ -512,8 +512,9 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
   }
 end
 
-function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail)
+function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
   local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
+  local retry_attempt = tonumber(attempt) or 1
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
     text = M.truncate_utf8(text, M._max_impl_output_len)
@@ -523,7 +524,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
   end
   text = M.neutralize_untrusted_comment_text(text)
 
-  local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason)
+  local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason, attempt)
   local state_marker = M.state_marker(ready.proposal_id, "impl-failed", ready.dedup_key)
   return {
     schema = "github-proxy.v1",
@@ -538,6 +539,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
       "comment",
       "failure",
       safe_reason,
+      tostring(retry_attempt),
       tostring(ready.dedup_key),
     }),
     source_ref = M.normalize_source_ref(ready.source_ref),

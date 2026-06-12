@@ -185,6 +185,9 @@ local function require_marker_fact(facts, family)
   if family == "implementing" then
     return M.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
+  if family == "impl-failure" then
+    return M.impl_failure_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
   if family == "merge-ready" then
     local current_pr = current_pr_fact(facts)
     if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
@@ -237,6 +240,8 @@ local function store_gathered_marker_fact(facts, family, value)
     facts.feedback = facts.feedback or value
   elseif family == "decomposed" then
     facts.decomposed = value
+  elseif family == "impl-failure" then
+    facts.impl_failure = value
   end
 end
 
@@ -419,7 +424,7 @@ local function replay_ready(dept, issue, state, row, facts)
     state = state,
     proposal_id = proposal_id,
   })
-  local ready_payload = M.build_devloop_ready_payload({
+  local ready_payload = facts.ready_payload or M.build_devloop_ready_payload({
     proposal_id = fields.proposal_id,
     dedup_key = fields.dedup_key,
     source_ref = fields.source_ref,
@@ -511,6 +516,36 @@ local function replay_ready(dept, issue, state, row, facts)
   end
   M.log_raise(dept, proposal_id, "devloop_ready", ready_payload)
   return true
+end
+
+local function replay_impl_failed(dept, issue, state, row, facts)
+  local proposal_id = facts.proposal_id
+  local failure = facts.impl_failure
+  if not M.impl_failure_retry_allowed(failure) then
+    return log_skip(dept, proposal_id, state, "impl-failed", "implementing", "skip-idempotent(retry-limit)", "implementation failure is not a bounded codex retry candidate")
+  end
+  local fields = resolve_payload_fields(row, state, {
+    issue = issue,
+    state = state,
+    proposal_id = proposal_id,
+    ["impl-failure"] = failure,
+  })
+  local retry_state = {
+    state = "ready",
+    version = fields.dedup_key,
+  }
+  local replay_facts = {}
+  for key, value in pairs(facts or {}) do
+    replay_facts[key] = value
+  end
+  replay_facts.current = replay_facts.current or { comments = {}, labels = {} }
+  replay_facts.ready_payload = M.build_devloop_ready_payload({
+    proposal_id = fields.proposal_id,
+    dedup_key = fields.dedup_key,
+    source_ref = fields.source_ref,
+    impl_retry_attempt = M.next_impl_retry_attempt(failure),
+  })
+  return replay_ready(dept, issue, retry_state, M.restart_transition_row("ready"), replay_facts)
 end
 
 local function replay_pr_open(dept, issue, state, row, facts)
@@ -723,6 +758,7 @@ end
 local replayers = {
   thinking = replay_thinking,
   ready = replay_ready,
+  ["impl-failed"] = replay_impl_failed,
   ["pr-open"] = replay_pr_open,
   fixing = replay_fixing,
   ["review-meta"] = replay_review_meta,
