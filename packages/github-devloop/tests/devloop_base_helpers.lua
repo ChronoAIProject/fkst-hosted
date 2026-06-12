@@ -468,6 +468,11 @@ end
 
 local function run_merge(payload, run_opts)
   mock_branch_config_env()
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&base=dev&per_page=100'", {
+    stdout = string.format('[{"number":%d,"state":"open","base":{"ref":"dev"}}]\n', tonumber(payload and payload.pr_number) or 7),
+    stderr = "",
+    exit_code = 0,
+  })
   return t.run_department("departments/merge/main.lua", {
     queue = "devloop_merge_ready",
     payload = payload,
