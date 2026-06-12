@@ -34,8 +34,11 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
   })
 end
 
-local function comments_for(event, created_at)
+local function comments_for(event, created_at, state, state_version)
   local comments = merge_comments(event, "devloop-owner-repo-" .. tostring(event.pr_number), event.version)
+  if state ~= nil then
+    table.insert(comments, core.state_marker(event.proposal_id, state, state_version or event.version))
+  end
   local rendered = {}
   for _, comment in ipairs(comments) do
     table.insert(rendered, render_comment({
@@ -47,14 +50,14 @@ local function comments_for(event, created_at)
   return table.concat(rendered, ",")
 end
 
-local function mock_queue_pr(event, created_at)
+local function mock_queue_pr(event, created_at, state, state_version)
   t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
       '{"headRefName":"devloop-owner-repo-%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"abc123","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
       json_string(event.pr_number),
       json_string(event.reviewed_head_sha),
       json_string(created_at),
-      comments_for(event, created_at)
+      comments_for(event, created_at, state, state_version)
     ),
     stderr = "",
     exit_code = 0,
@@ -132,6 +135,23 @@ return {
     mock_queue_pr(older, "2026-06-03T01:00:00Z")
 
     local result = run_merge(current, opts("merge-queue-non-head", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
+  end,
+
+  test_fixing_head_still_occupies_merge_queue_lane = function()
+    local current = merge_ready()
+    local older = event_for_pr(9, 44, "2026-06-03T00-00-00Z", "aaa111")
+    local origin_marker = core.pr_origin_marker(current.proposal_id, "42", "devloop-owner-repo-42-01HY", current.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(current))
+    mock_pr_merge({ origin_marker })
+    mock_queue_list({ 9 })
+    mock_queue_pr(older, "2026-06-03T01:00:00Z", "fixing", older.version .. "/fix/1")
+
+    local result = run_merge(current, opts("merge-queue-fixing-head", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)

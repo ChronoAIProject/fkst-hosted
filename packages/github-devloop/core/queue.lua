@@ -11,6 +11,12 @@ local active_wip_states = {
   merging = true,
 }
 
+local merge_queue_lane_states = {
+  fixing = true,
+  ["merge-ready"] = true,
+  merging = true,
+}
+
 local function compare_merge_queue_entries(left, right)
   local left_created = tostring(left.merge_ready_created_at or "")
   local right_created = tostring(right.merge_ready_created_at or "")
@@ -42,6 +48,14 @@ local function current_any_entity_state(M, entity_comments)
   }
 end
 
+local function merge_ready_version_for_lane_state(M, state)
+  local version = tostring((state or {}).version or "")
+  if state ~= nil and state.state == "fixing" and M._strip_latest_fix_version_suffix ~= nil then
+    return M._strip_latest_fix_version_suffix(version)
+  end
+  return version
+end
+
 local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
   if type(pr) ~= "table" or tostring(pr.state or ""):upper() ~= "OPEN" then
     return nil
@@ -50,19 +64,20 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
     return nil
   end
   local state = current_any_entity_state(M, pr.comments)
-  if state.state ~= "merge-ready" and state.state ~= "merging" then
+  if not merge_queue_lane_states[state.state] then
     return nil
   end
-  local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", state.version, pr_number)
+  local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number)
   if fact == nil then
     for _, comment in ipairs(M._trusted_marker_comments(pr.comments)) do
       for marker in M._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
         local marker_issue = marker:match('proposal="([^"]+)"')
         if marker_issue ~= nil then
           local candidate_state = M.current_entity_state(pr.comments, marker_issue)
-          if (candidate_state.state == "merge-ready" or candidate_state.state == "merging")
-            and tostring(candidate_state.version or "") == tostring(marker:match('version="([^"]*)"') or "") then
-            fact = M.merge_ready_fact(pr.comments, marker_issue, candidate_state.version, pr_number)
+          local merge_ready_version = merge_ready_version_for_lane_state(M, candidate_state)
+          if merge_queue_lane_states[candidate_state.state]
+            and tostring(merge_ready_version or "") == tostring(marker:match('version="([^"]*)"') or "") then
+            fact = M.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number)
             state = candidate_state
             break
           end
