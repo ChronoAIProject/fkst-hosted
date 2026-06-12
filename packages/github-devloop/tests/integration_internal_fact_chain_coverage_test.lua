@@ -222,12 +222,9 @@ local function assert_declared_merge_gate_fixing_replay_field_set(payload)
   t.is_true(row ~= nil)
   local expected = {}
   local expected_count = 0
-  for field, reference in pairs(row.payload_fields or {}) do
-    local text = tostring(reference or "")
-    if text:find("marker:merge-gate.", 1, true) == 1 or text == "source_ref:pr" then
-      expected[field] = true
-      expected_count = expected_count + 1
-    end
+  for field in pairs(row.payload_fields or {}) do
+    expected[field] = true
+    expected_count = expected_count + 1
   end
   t.eq(expected.review_proposal_id, true)
   t.eq(expected.review_dedup_key, true)
@@ -237,10 +234,8 @@ local function assert_declared_merge_gate_fixing_replay_field_set(payload)
 
   local actual_count = 0
   for field in pairs(payload or {}) do
-    if expected[field] == true then
-      t.eq(expected[field], true)
-      actual_count = actual_count + 1
-    end
+    t.eq(expected[field], true)
+    actual_count = actual_count + 1
   end
   for field in pairs(expected) do
     t.is_true(payload[field] ~= nil)

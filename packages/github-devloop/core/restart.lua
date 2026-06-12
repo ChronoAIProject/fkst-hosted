@@ -8,6 +8,12 @@ local source_ref_derivations = {
   pr = true,
 }
 
+local payload_derivations = {
+  ["literal:github-devloop.fixing.v1"] = true,
+  ["dedup:replayed-fixing"] = true,
+  ["comment_body:fix-feedback"] = true,
+}
+
 local marker_fields = {
   state = { proposal = true, state = true, version = true, stage_rank = true, effects = true },
   ["converge-round"] = {
@@ -235,14 +241,16 @@ local transition_table = {
       fact("pr-head", "fetch-before-compare"),
     },
     payload_fields = {
+      schema = "literal:github-devloop.fixing.v1",
       proposal_id = "marker:state.proposal",
       pr_number = "marker:pr-link.pr",
       version = "marker:state.version",
       review_proposal_id = "marker:merge-gate.review_proposal",
       review_dedup_key = "marker:merge-gate.review_dedup",
       reviewed_head_sha = "marker:merge-gate.head_sha",
+      dedup_key = "dedup:replayed-fixing",
       gate_baseline_sha = "marker:merge-gate.gate_baseline_sha",
-      blocking_gap = "marker:review-result.gap",
+      gate_failure_excerpt = "comment_body:fix-feedback",
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
@@ -430,6 +438,9 @@ local function field_reference_error(reference)
       return nil
     end
     return "unknown source_ref derivation " .. derivation
+  end
+  if payload_derivations[tostring(reference or "")] == true then
+    return nil
   end
   return "unsupported payload field source " .. tostring(reference)
 end

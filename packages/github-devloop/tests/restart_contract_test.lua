@@ -241,7 +241,6 @@ return {
         review_dedup_key = "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review",
         reviewed_head_sha = "def456",
         gate_baseline_sha = "abc123",
-        blocking_gap = "missing guard",
       },
     })
     t.eq(fields.proposal_id, "github-devloop/issue/owner/repo/42")
@@ -251,7 +250,6 @@ return {
     t.eq(fields.review_dedup_key, "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review")
     t.eq(fields.reviewed_head_sha, "def456")
     t.eq(fields.gate_baseline_sha, "abc123")
-    t.eq(fields.blocking_gap, "missing guard")
     t.eq(fields.source_ref.ref, "owner/repo#pr/7")
   end,
 
