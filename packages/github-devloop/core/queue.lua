@@ -26,6 +26,13 @@ local function compare_merge_queue_entries(left, right)
   return tonumber(left.pr_number or 0) < tonumber(right.pr_number or 0)
 end
 
+local function predecessor_identity(entry)
+  return "pr" .. tostring(entry.pr_number)
+    .. "-" .. tostring(entry.proposal_id)
+    .. "-" .. tostring(entry.version)
+    .. "-" .. tostring(entry.head_sha)
+end
+
 local function current_any_entity_state(M, entity_comments)
   local best = nil
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
@@ -133,6 +140,47 @@ function M.merge_queue_head(repo, base_branch, current)
   end
   table.sort(entries, compare_merge_queue_entries)
   return entries[1], entries
+end
+
+function M.merge_queue_predecessors(repo, base_branch, current)
+  local _, entries = M.merge_queue_head(repo, base_branch, current)
+  local predecessors = {}
+  local found = false
+  local current_pr_number = tostring((current or {}).pr_number or "")
+  for _, entry in ipairs(entries or {}) do
+    if tostring(entry.pr_number or "") == current_pr_number then
+      found = true
+      break
+    end
+    table.insert(predecessors, entry)
+  end
+  if not found then
+    return nil, "not-in-merge-queue"
+  end
+  return predecessors, "ok"
+end
+
+function M.merge_queue_position(repo, base_branch, current)
+  local predecessors, reason = M.merge_queue_predecessors(repo, base_branch, current)
+  if predecessors == nil then
+    return nil, reason
+  end
+  return {
+    is_head = #predecessors == 0,
+    predecessors = predecessors,
+    predecessor_set = M.merge_queue_predecessor_set(predecessors),
+  }, "ok"
+end
+
+function M.merge_queue_predecessor_set(entries)
+  local values = {}
+  for _, entry in ipairs(entries or {}) do
+    table.insert(values, predecessor_identity(entry))
+  end
+  if #values == 0 then
+    return "none"
+  end
+  return table.concat(values, ".")
 end
 
 function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)

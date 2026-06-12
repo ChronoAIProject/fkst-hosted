@@ -125,6 +125,100 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   return result
 end
 
+local function merge_result_context(target_branch, target_sha)
+  return {
+    target_branch = target_branch,
+    target_sha = target_sha,
+    conflicted = false,
+    unmerged_paths = "",
+  }
+end
+
+local function append_unmerged_paths(left, right)
+  if tostring(left or "") == "" then
+    return tostring(right or "")
+  end
+  if tostring(right or "") == "" then
+    return tostring(left or "")
+  end
+  return tostring(left) .. "\n" .. tostring(right)
+end
+
+local function merge_sha_for_fix(worktree, sha, context, log_values)
+  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, sha), timeout = 120 })
+  if merge_result.exit_code == 0 then
+    return context
+  end
+  local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+  if unmerged_result.exit_code ~= 0 then
+    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+  end
+  if tostring(unmerged_result.stdout or "") == "" then
+    error("github-devloop: git target merge failed: " .. tostring(merge_result.stderr))
+  end
+  context.conflicted = true
+  context.unmerged_paths = append_unmerged_paths(context.unmerged_paths, unmerged_result.stdout)
+  core.log_line("info", "fix", "merge-target", "MERGE_SKEW", log_values)
+  return context
+end
+
+local function fetch_verified_pr_head(pr_number, expected_head_sha)
+  local fetch_result = exec_sync({ cmd = core.git_fetch_pr_head_ref_cmd("origin", pr_number), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR head ref fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local head_result = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    error("github-devloop: git PR head ref head failed: " .. tostring(head_result.stderr))
+  end
+  local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if head_sha ~= tostring(expected_head_sha) then
+    error("github-devloop: PR head ref does not match merge queue predecessor")
+  end
+  return head_sha
+end
+
+local function current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
+  local predecessors, reason = core.merge_queue_predecessors(repo, integration_branch, {
+    pr_number = fix.pr_number,
+    pr = current_pr,
+  })
+  if predecessors == nil then
+    return nil, reason
+  end
+  return predecessors, core.merge_queue_predecessor_set(predecessors)
+end
+
+local function merge_speculative_predecessors_for_fix(worktree, repo, integration_branch, fix, current_pr)
+  if fix.predecessor_set == nil then
+    return nil, "not-speculative"
+  end
+  local predecessors, current_set = current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
+  if predecessors == nil then
+    return nil, current_set
+  end
+  if tostring(current_set) ~= tostring(fix.predecessor_set) then
+    return nil, "predecessor-set-mismatch"
+  end
+  if #predecessors == 0 then
+    return nil, "not-speculative"
+  end
+  local context = merge_result_context("speculative:" .. integration_branch, current_set)
+  for _, predecessor in ipairs(predecessors) do
+    if not core.is_safe_head_sha(predecessor.head_sha) then
+      error("github-devloop: unsafe speculative predecessor head")
+    end
+    local predecessor_head = fetch_verified_pr_head(predecessor.pr_number, predecessor.head_sha)
+    context = merge_sha_for_fix(worktree, predecessor_head, context, {
+      "integration_branch=" .. tostring(integration_branch),
+      "predecessor_pr=" .. tostring(predecessor.pr_number),
+      "predecessor_head=" .. tostring(predecessor_head),
+      "reason=speculative predecessor merge requires codex conflict resolution",
+    })
+  end
+  return context, "ok"
+end
+
 local function assert_no_unmerged_paths(worktree)
   local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
   if unmerged_result.exit_code ~= 0 then
@@ -416,14 +510,26 @@ function pipeline(event)
       current_issue = core.parse_issue_view_fix(issue_view.stdout)
     end
 
+    if merge_gate_fact ~= nil and tostring(merge_gate_fact.predecessor_set or "") ~= tostring(fix.predecessor_set or "") then
+      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(predecessor-marker-mismatch)", "fix event does not match canonical merge-gate predecessor set")
+      return
+    end
+
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    local merge_context = merge_integration_for_fix(
-      worktree,
-      fix.pr_number,
-      branches.integration,
-      merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil,
-      merge_gate_fact and merge_gate_fact.reason or nil
-    )
+    local merge_context, speculative_reason = merge_speculative_predecessors_for_fix(worktree, repo, branches.integration, fix, current_pr)
+    if merge_context == nil and speculative_reason ~= "not-speculative" then
+      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(" .. tostring(speculative_reason) .. ")", "speculative predecessor set is no longer current")
+      return
+    end
+    if merge_context == nil then
+      merge_context = merge_integration_for_fix(
+        worktree,
+        fix.pr_number,
+        branches.integration,
+        merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil,
+        merge_gate_fact and merge_gate_fact.reason or nil
+      )
+    end
     if merge_context.conflicted then
       core.log_conflict_files("fix", fix.proposal_id, fix.pr_number, merge_context.unmerged_paths)
     end

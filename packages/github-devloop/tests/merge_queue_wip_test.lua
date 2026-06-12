@@ -5,20 +5,67 @@ local opts = h.opts
 local merge_ready = h.merge_ready
 local ready = h.ready
 local run_merge = h.run_merge
+local run_fix = h.run_fix
 local run_implement = h.run_implement
 local mock_bot_env = h.mock_bot_env
 local mock_write_env = h.mock_write_env
 local mock_issue_merge = h.mock_issue_merge
 local mock_issue_implement = h.mock_issue_implement
 local mock_pr_merge = h.mock_pr_merge
+local mock_pr_fix = h.mock_pr_fix
 local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
+local mock_existing_fix_worktree = h.mock_existing_fix_worktree
 local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
+local mock_git_commit = h.mock_git_commit
+local mock_git_push = h.mock_git_push
 local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
+
+local function fix_event_for_pr(pr_number, issue_number, version_time, head_sha, predecessor_set)
+  local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/" .. tostring(version_time) .. "/fix/1"
+  local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(issue_number)
+  local review_version = version:gsub("/fix/1$", "")
+  local review_proposal_id = core.pr_review_proposal_id("owner/repo", pr_number, review_version, head_sha)
+  local payload = {
+    schema = "github-devloop.fixing.v1",
+    proposal_id = proposal_id,
+    pr_number = pr_number,
+    version = version,
+    review_proposal_id = review_proposal_id,
+    review_dedup_key = "consensus:" .. review_proposal_id .. "/review",
+    reviewed_head_sha = head_sha,
+    blocking_gap = "merge gate conflict",
+    gate_baseline_sha = "abc123",
+    gate_failure_excerpt = "mergeable-conflicting",
+    predecessor_set = predecessor_set,
+    dedup_key = "fixing/" .. tostring(proposal_id) .. "/" .. tostring(pr_number) .. "/" .. tostring(version_time),
+    source_ref = {
+      kind = "external",
+      ref = "owner/repo#pr/" .. tostring(pr_number),
+    },
+  }
+  return payload
+end
+
+local function merge_gate_comment_for_fix(event, reason)
+  return "github-devloop merge gate failed: " .. tostring(reason or "mergeable-conflicting")
+    .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
+    .. "\n" .. core.merge_gate_marker(
+      event.proposal_id,
+      event.pr_number,
+      event.version,
+      event.review_proposal_id,
+      event.review_dedup_key,
+      event.reviewed_head_sha,
+      event.gate_baseline_sha,
+      reason or "mergeable-conflicting",
+      event.predecessor_set
+    )
+end
 
 local function event_for_pr(pr_number, issue_number, version_time, head_sha)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/" .. tostring(version_time)
@@ -100,6 +147,11 @@ local function mock_wip_issue_state(issue_number, state)
   })
 end
 
+local function mock_merge_pr_view(event, branch, head_sha, mergeable, merge_state)
+  local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+  mock_pr_merge(merge_comments(event, branch, event.version, { origin_marker }), branch, head_sha, "OPEN", nil, nil, mergeable, merge_state)
+end
+
 return {
   test_merge_queue_head_orders_by_trusted_merge_ready_time_then_pr_number = function()
     local older = event_for_pr(9, 44, "2026-06-03T00-00-00Z", "aaa111")
@@ -155,6 +207,56 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
+  end,
+
+  test_non_head_conflicting_pr_enters_speculative_fixing = function()
+    local older = event_for_pr(5, 41, "2026-06-03T00-00-00Z", "aaa111")
+    local current = merge_ready({
+      pr_number = 7,
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    })
+    local branch = core.implement_branch("owner/repo", "42", current.version)
+    mock_bot_env()
+    mock_write_env("1")
+    mock_merge_pr_view(current, branch, "def456", "CONFLICTING", "DIRTY")
+    mock_queue_list({ 5 })
+    mock_queue_pr(older, "2026-06-03T01:00:00Z")
+    mock_write_env("1")
+
+    local result = run_merge(current, opts("merge-queue-speculative-fix", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    t.is_true(fixing_raise ~= nil)
+    t.eq(fixing_raise.payload.predecessor_set, "pr5-" .. older.proposal_id .. "-" .. older.version .. "-" .. older.reviewed_head_sha)
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
+
+  test_speculative_fix_skips_when_predecessor_set_changed = function()
+    local event = fix_event_for_pr(7, 42, "2026-06-03T01-02-03Z", "def456", "pr5-github-devloop/issue/owner/repo/41-old-aaa111")
+    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local feedback = merge_gate_comment_for_fix(event, "mergeable-conflicting")
+    local current_predecessor = event_for_pr(6, 43, "2026-06-03T00-30-00Z", "bbb222")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_pr_fix({ origin_marker, feedback }, branch, "def456")
+    mock_queue_list({ 6 })
+    mock_queue_pr(current_predecessor, "2026-06-03T01:30:00Z")
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+      stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_existing_fix_worktree(branch, "def456")
+
+    local result = run_fix(event, opts("fix-speculative-predecessor-stale", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git push origin"), 0)
+    t.eq(#result.raises, 0)
   end,
 
   test_wip_cap_blocks_new_implementation_before_codex = function()

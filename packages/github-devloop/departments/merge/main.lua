@@ -102,11 +102,25 @@ local function gate_baseline_sha_for_reason(proposal_id, pr_number, pr, reason)
   return gate_baseline_sha_from_pr(pr)
 end
 
-local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason)
+local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
   local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
   local fix_version = core.fix_version_from_review_version(current_state.version)
   local gate_baseline_sha = gate_baseline_sha_for_reason(merge_ready.proposal_id, merge_ready.pr_number, current_pr, reason)
-  local comment_request = core.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref)
+  local predecessor_set = nil
+  if queue_position ~= nil then
+    predecessor_set = queue_position.predecessor_set
+  else
+    local branches = core.branch_config()
+    local position, predecessor_reason = core.merge_queue_position(repo, branches.integration, {
+      pr_number = merge_ready.pr_number,
+      pr = current_pr,
+    })
+    if position == nil then
+      error("github-devloop: merge queue predecessor derivation failed: " .. tostring(predecessor_reason))
+    end
+    predecessor_set = position.predecessor_set
+  end
+  local comment_request = core.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
   local label_request = issue_number ~= nil and core.build_state_label_request(
     repo,
     issue_number,
@@ -122,6 +136,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
     review_dedup_key = merge_ready.review_dedup_key,
     reviewed_head_sha = merge_ready.reviewed_head_sha,
     gate_baseline_sha = gate_baseline_sha,
+    predecessor_set = predecessor_set,
     gate_failure_excerpt = reason,
   }, source_ref)
   local add_labels, remove_labels = core.state_label_changes("fixing")
@@ -422,10 +437,34 @@ function pipeline(event)
       return
     end
 
-    local queue_ok, queue_reason = core.merge_queue_allows_event(repo, branches.integration, merge_ready, current_pr)
-    if not queue_ok then
+    local queue_position, queue_reason = core.merge_queue_position(repo, branches.integration, {
+      pr_number = merge_ready.pr_number,
+      pr = current_pr,
+    })
+    if queue_position == nil then
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "hold-merge-queue", queue_reason)
       log_gate(merge_ready, "dry-run", queue_reason)
+      return
+    end
+    if not queue_position.is_head then
+      local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
+      if not mergeable and core.is_not_mergeable_reason(mergeable_reason) then
+        if not write_enabled then
+          log_gate(merge_ready, "dry-run", "speculative fix requires FKST_GITHUB_WRITE=1")
+          return
+        end
+        local capacity_ok, capacity_reason = core.wip_capacity_allows_start(repo, issue_number)
+        if not capacity_ok then
+          core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "fixing", "hold-wip-cap", capacity_reason)
+          log_gate(merge_ready, "dry-run", capacity_reason)
+          return
+        end
+        log_gate(merge_ready, "fixing", "speculative-" .. tostring(mergeable_reason))
+        raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason, queue_position)
+        return
+      end
+      core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "hold-merge-queue", "merge-queue-non-head")
+      log_gate(merge_ready, "dry-run", "merge-queue-non-head")
       return
     end
 
@@ -452,7 +491,7 @@ function pipeline(event)
         error("github-devloop: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
       end
       log_gate(merge_ready, "fixing", mergeable_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason, queue_position)
       return
     end
 
@@ -482,7 +521,7 @@ function pipeline(event)
       end
       local fix_reason = core.rollup_red_fix_reason(current_pr, rollup_reason)
       log_gate(merge_ready, "fixing", fix_reason)
-      raise_fixing(repo, issue_number, merge_ready, state, current_pr, fix_reason)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, fix_reason, queue_position)
       return
     end
 
@@ -552,12 +591,12 @@ function pipeline(event)
     if not merge_ok and core.is_ci_red_reason(merge_reason) then
       local fix_reason = core.rollup_red_fix_reason(merge_rechecked_pr, merge_reason)
       log_gate(merge_ready, "fixing", fix_reason)
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, fix_reason)
+      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, fix_reason, queue_position)
       return
     end
     if not merge_ok and core.is_not_mergeable_reason(merge_reason) then
       log_gate(merge_ready, "fixing", merge_reason)
-      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason)
+      raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason, queue_position)
       return
     end
     if not merge_ok and (merge_reason == "rollup-pending" or merge_reason == "mergeable-unknown") then
