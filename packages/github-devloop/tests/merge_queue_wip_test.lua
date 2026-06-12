@@ -557,6 +557,47 @@ return {
     t.eq(find_raise(result.raises, "devloop_merge_queue_tick"), nil)
   end,
 
+  test_merge_queue_chained_unknown_mergeability_retries_to_completion = function()
+    local next = event_for_pr(8, 43, "2026-06-03T00-01-00Z", "fed789")
+    mock_bot_env()
+    mock_write_env_many(64)
+    mock_repo_env()
+    mock_queue_list({ 8 })
+    mock_queue_pr(next, "2026-06-03T01:01:00Z")
+    mock_merge_pr_view(next, "OPEN", "UNKNOWN", "CLEAN")
+
+    local retry = run_merge_queue_tick(opts("merge-queue-self-requeue-unknown", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_REPO = "owner/repo",
+    }))
+    t.eq(retry.exit_code, 1)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(retry.raises, "devloop_fixing"), nil)
+
+    mock_bot_env()
+    mock_write_env_many(64)
+    mock_repo_env()
+    mock_queue_list({ 8 })
+    mock_queue_pr(next, "2026-06-03T01:01:00Z")
+    mock_merge_pr_view(next)
+    mock_merge_pr_view(next)
+    mock_merge_pr_view(next)
+    mock_merge_command(next)
+    mock_merged_pr_view(next)
+    mock_issue_close_for(next)
+    mock_diff_name_only(8, { "packages/b.lua" })
+    mock_current_base_head("abc124")
+    mock_queue_list({})
+
+    local completed = run_merge_queue_tick(opts("merge-queue-self-requeue-unknown-retry", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_REPO = "owner/repo",
+    }))
+    t.eq(completed.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(find_raise(completed.raises, "devloop_fixing"), nil)
+  end,
+
   test_merge_batch_window_stops_on_overlapping_files = function()
     local first = event_for_pr(7, 42, "2026-06-03T00-00-00Z", "def456")
     local second = event_for_pr(8, 43, "2026-06-03T00-01-00Z", "fed789")
