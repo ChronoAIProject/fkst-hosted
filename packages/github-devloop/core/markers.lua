@@ -258,6 +258,31 @@ function M.merge_ready_marker(issue_proposal_id, pr_number, version, review_prop
     .. '" -->'
 end
 
+function M.review_carry_over_marker(issue_proposal_id, version, old_review_proposal_id, old_review_dedup_key, approved_head_sha, new_review_proposal_id, new_review_dedup_key, new_head_sha, base_head_sha)
+  if not M._is_git_sha(approved_head_sha)
+    or not M._is_git_sha(new_head_sha)
+    or not M._is_git_sha(base_head_sha) then
+    error("github-devloop: invalid review carry-over marker")
+  end
+  if not M._is_bounded_string(version, M._max_dedup_len)
+    or not M._is_bounded_string(old_review_proposal_id, M._max_key_len)
+    or not M._is_bounded_string(old_review_dedup_key, M._max_dedup_len)
+    or not M._is_bounded_string(new_review_proposal_id, M._max_key_len)
+    or not M._is_bounded_string(new_review_dedup_key, M._max_dedup_len) then
+    error("github-devloop: invalid review carry-over marker")
+  end
+  return '<!-- fkst:github-devloop:review-carry-over:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" old_review_proposal="' .. tostring(old_review_proposal_id)
+    .. '" old_review_dedup="' .. tostring(old_review_dedup_key)
+    .. '" approved_head_sha="' .. tostring(approved_head_sha)
+    .. '" new_review_proposal="' .. tostring(new_review_proposal_id)
+    .. '" new_review_dedup="' .. tostring(new_review_dedup_key)
+    .. '" new_head_sha="' .. tostring(new_head_sha)
+    .. '" base_head_sha="' .. tostring(base_head_sha)
+    .. '" proof="merge-tree-empty-delta" -->'
+end
+
 function M.merged_marker(issue_proposal_id, pr_number, version, head_sha)
   if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
     error("github-devloop: invalid merged marker")
@@ -478,7 +503,7 @@ function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
   return nil
 end
 
-function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number)
+function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
   if type(comments) ~= "table" then
     return nil
   end
@@ -494,6 +519,7 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
       if marker_issue == tostring(issue_proposal_id)
         and (pr_number == nil or tostring(marker_pr) == tostring(pr_number))
         and tostring(marker_version) == tostring(issue_version)
+        and (head_sha == nil or tostring(marker_head_sha) == tostring(head_sha))
         and M._is_bounded_string(marker_review_proposal, M._max_key_len)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
         and M._is_git_sha(marker_head_sha) then
