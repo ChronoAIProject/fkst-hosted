@@ -884,6 +884,44 @@ function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_
   }), source_ref)
 end
 
+function M.build_review_carry_over_comment_request(repo, pr_number, issue_proposal_id, version, carry, source_ref)
+  local state_marker = M.state_marker(issue_proposal_id, "merge-ready", version)
+  local review_marker = M.review_result_marker(carry.new_review_proposal_id, issue_proposal_id, "approve", carry.new_review_dedup_key)
+  local merge_marker = M.merge_ready_marker(issue_proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
+  local carry_marker = M.review_carry_over_marker(
+    issue_proposal_id,
+    version,
+    carry.old_review_proposal_id,
+    carry.old_review_dedup_key,
+    carry.approved_head_sha,
+    carry.new_review_proposal_id,
+    carry.new_review_dedup_key,
+    carry.new_head_sha,
+    carry.base_head_sha
+  )
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = pr_number,
+  }, "github-devloop PR review approval carried over"
+    .. "\nResolution delta proof: merge-tree-empty-delta"
+    .. "\nApproved head: " .. tostring(carry.approved_head_sha)
+    .. "\nNew head: " .. tostring(carry.new_head_sha)
+    .. "\nBase head: " .. tostring(carry.base_head_sha)
+    .. "\n\n" .. state_marker
+    .. "\n" .. review_marker
+    .. "\n" .. merge_marker
+    .. "\n" .. carry_marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "review-carry-over",
+    "comment",
+    tostring(issue_proposal_id),
+    tostring(version),
+    tostring(carry.approved_head_sha),
+    tostring(carry.new_head_sha),
+  }), source_ref)
+end
+
 function M.build_merging_comment_body(merge_ready)
   return M.comment_string("is_merging_pr_prefix") .. tostring(merge_ready.pr_number)
     .. "\n\n" .. M.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)

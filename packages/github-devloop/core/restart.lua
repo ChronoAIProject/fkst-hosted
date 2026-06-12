@@ -307,7 +307,11 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(merge-ready.version)",
-    effects = effect({ "devloop_merge_ready" }, "merge-ready replay is complete when head-bound approval and fetched PR head match"),
+    effects = effect(
+      { "review-carry-over-marker", "devloop_merge_ready" },
+      "merge-ready replay is complete when head-bound approval and fetched PR head match, or when review_carry_over_marker proves the carried approval marker was written",
+      "review_carry_over_marker"
+    ),
     marker_facts = "state:v1 merge-ready plus merge-ready:v1",
     kickoff = "devloop_merge_ready",
     replay = "PR observe or merge retry re-derives merge-ready from head-bound approval facts.",
@@ -454,6 +458,8 @@ local default_consumer_sources = {
   "packages/github-devloop/departments/decompose/main.lua",
   "packages/github-devloop/departments/observe_pr/main.lua",
   "packages/github-devloop/departments/observe_issue/main.lua",
+  "packages/github-devloop/core/replayer.lua",
+  "packages/github-devloop/core/requests.lua",
 }
 
 local function source_contains_any(paths, needle)
