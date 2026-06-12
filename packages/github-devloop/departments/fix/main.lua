@@ -264,7 +264,16 @@ function pipeline(event)
     end
     local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
-      merge_gate_fact = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
+      local merge_gate_candidate = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
+      merge_gate_fact = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
+        review_proposal_id = fix.review_proposal_id,
+        review_dedup_key = fix.review_dedup_key,
+        gate_baseline_sha = fix.gate_baseline_sha,
+        match_gate_baseline_sha = true,
+      })
+      if merge_gate_fact == nil then
+        merge_gate_fact = merge_gate_candidate
+      end
     end
     if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
