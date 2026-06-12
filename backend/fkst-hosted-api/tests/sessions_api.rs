@@ -14,6 +14,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use bson::doc;
+use fkst_hosted_api::auth::AuthMode;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
@@ -121,7 +122,9 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         db: db.clone(),
         packages,
         sessions: sessions.clone(),
-    });
+        auth_mode: AuthMode::Disabled,
+    })
+    .expect("router");
     TestApp {
         _container: container,
         _stub_dir: stub_dir,

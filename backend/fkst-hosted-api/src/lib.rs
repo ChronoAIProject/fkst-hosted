@@ -4,6 +4,7 @@
 //! routes) so both the binary entrypoint and the integration tests can build
 //! the application without a real TCP bind.
 
+pub mod auth;
 pub mod config;
 pub mod db;
 pub mod distribution;

@@ -9,6 +9,7 @@ use std::fmt;
 use secrecy::SecretString;
 use serde::Deserialize;
 
+use crate::auth::{AuthMode, NyxIdAuthSettings};
 use crate::db::redact_mongodb_uri;
 use crate::error::AppError;
 
@@ -79,6 +80,21 @@ mod defaults {
     pub(super) fn raised_max_line_bytes() -> usize {
         1_048_576
     }
+
+    pub(super) fn auth_enabled() -> bool {
+        // Default true: fail-closed at startup. Explicit `false` is a conscious
+        // local-dev choice (the operator must set `FKST_AUTH_ENABLED=false` to
+        // disable authentication).
+        true
+    }
+
+    pub(super) fn auth_issuer() -> String {
+        "nyxid".to_string()
+    }
+
+    pub(super) fn auth_jwks_cache_ttl_secs() -> u64 {
+        300
+    }
 }
 
 /// `FKST_HOSTED_*`-prefixed variables (HTTP/server settings).
@@ -131,6 +147,22 @@ struct JournalVars {
     raised_identity_pointers: String,
     #[serde(default = "defaults::raised_max_line_bytes")]
     raised_max_line_bytes: usize,
+}
+
+/// `FKST_AUTH_*`-prefixed variables (authentication settings; envy pass with
+/// the `FKST_` prefix).
+#[derive(Debug, Deserialize)]
+struct AuthVars {
+    #[serde(default = "defaults::auth_enabled")]
+    auth_enabled: bool,
+    #[serde(default)]
+    auth_nyxid_base_url: Option<String>,
+    #[serde(default = "defaults::auth_issuer")]
+    auth_issuer: String,
+    #[serde(default)]
+    auth_audience: Option<String>,
+    #[serde(default = "defaults::auth_jwks_cache_ttl_secs")]
+    auth_jwks_cache_ttl_secs: u64,
 }
 
 /// Runtime configuration assembled from both envy passes.
@@ -188,6 +220,9 @@ pub struct Config {
     /// redacted from Debug). Env: `GITHUB_TOKEN`. Optional: absent =>
     /// GitHub journaling is disabled (Mongo-only, warn).
     pub github_token: Option<SecretString>,
+    /// Authentication mode: disabled (local dev) or enabled with NyxID
+    /// settings. Env: `FKST_AUTH_ENABLED` (default true = fail-closed).
+    pub auth: AuthMode,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -219,6 +254,7 @@ impl fmt::Debug for Config {
                 "github_token",
                 &self.github_token.as_ref().map(|_| "<redacted>"),
             )
+            .field("auth", &self.auth)
             .finish()
     }
 }
@@ -243,6 +279,7 @@ impl Default for Config {
             raised_identity_pointers: defaults::raised_identity_pointers(),
             raised_max_line_bytes: defaults::raised_max_line_bytes(),
             github_token: None,
+            auth: AuthMode::Disabled,
         }
     }
 }
@@ -294,7 +331,7 @@ impl Config {
             ));
         }
 
-        let mongo: MongoVars = envy::from_iter(vars).map_err(|e| match e {
+        let mongo: MongoVars = envy::from_iter(vars.clone()).map_err(|e| match e {
             // Name the exact env var so the fail-closed startup error is
             // actionable (envy reports the lowercase field name).
             envy::Error::MissingValue(field) => {
@@ -310,6 +347,36 @@ impl Config {
                 "MONGODB_SERVER_SELECTION_TIMEOUT_MS must be at least 1".to_string(),
             ));
         }
+
+        // Authentication settings pass (FKST_AUTH_* with the FKST_ prefix).
+        let auth: AuthVars = envy::prefixed(JOURNAL_ENV_PREFIX)
+            .from_iter(vars.iter().cloned())
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        if auth.auth_jwks_cache_ttl_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_AUTH_JWKS_CACHE_TTL_SECS must be at least 1".to_string(),
+            ));
+        }
+        let auth_mode = if auth.auth_enabled {
+            let base_url = match auth.auth_nyxid_base_url {
+                Some(url) => url.trim_end_matches('/').to_string(),
+                None => {
+                    return Err(AppError::Config(
+                        "FKST_AUTH_NYXID_BASE_URL must be set when FKST_AUTH_ENABLED=true"
+                            .to_string(),
+                    ));
+                }
+            };
+            let audience = auth.auth_audience.unwrap_or_else(|| base_url.clone());
+            AuthMode::Enabled(NyxIdAuthSettings {
+                base_url,
+                issuer: auth.auth_issuer,
+                audience,
+                jwks_cache_ttl: std::time::Duration::from_secs(auth.auth_jwks_cache_ttl_secs),
+            })
+        } else {
+            AuthMode::Disabled
+        };
 
         Ok(Config {
             port: http.port,
@@ -329,6 +396,7 @@ impl Config {
             raised_identity_pointers: journal.raised_identity_pointers,
             raised_max_line_bytes: journal.raised_max_line_bytes,
             github_token: mongo.github_token.map(SecretString::from),
+            auth: auth_mode,
         })
     }
 
@@ -354,7 +422,8 @@ mod tests {
 
     #[test]
     fn defaults_apply_when_only_mongodb_uri_is_set() {
-        let config = Config::from_vars(vars(&[URI])).expect("defaults should deserialize");
+        let config = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
+            .expect("defaults should deserialize");
         assert_eq!(config.port, 8080);
         assert_eq!(config.bind_addr, "0.0.0.0");
         assert_eq!(config.log_level, "info");
@@ -362,11 +431,13 @@ mod tests {
         assert_eq!(config.mongodb_uri, "mongodb://localhost:27017");
         assert_eq!(config.mongodb_db, "fkst_hosted");
         assert_eq!(config.mongodb_server_selection_timeout_ms, 5000);
+        assert!(matches!(config.auth, AuthMode::Disabled));
     }
 
     #[test]
     fn default_impl_matches_env_defaults() {
-        let from_env = Config::from_vars(vars(&[URI])).expect("defaults should deserialize");
+        let from_env = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
+            .expect("defaults should deserialize");
         let from_default = Config::default();
         assert_eq!(from_default.port, from_env.port);
         assert_eq!(from_default.bind_addr, from_env.bind_addr);
@@ -395,48 +466,77 @@ mod tests {
 
     #[test]
     fn port_is_overridable() {
-        let config = Config::from_vars(vars(&[URI, ("FKST_HOSTED_PORT", "9090")])).unwrap();
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_PORT", "9090"),
+        ]))
+        .unwrap();
         assert_eq!(config.port, 9090);
     }
 
     #[test]
     fn bind_addr_is_overridable() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_HOSTED_BIND_ADDR", "127.0.0.1")])).unwrap();
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_BIND_ADDR", "127.0.0.1"),
+        ]))
+        .unwrap();
         assert_eq!(config.bind_addr, "127.0.0.1");
     }
 
     #[test]
     fn log_level_is_overridable() {
-        let config = Config::from_vars(vars(&[URI, ("FKST_HOSTED_LOG_LEVEL", "debug")])).unwrap();
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_LOG_LEVEL", "debug"),
+        ]))
+        .unwrap();
         assert_eq!(config.log_level, "debug");
     }
 
     #[test]
     fn request_timeout_secs_is_overridable() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "5")])).unwrap();
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "5"),
+        ]))
+        .unwrap();
         assert_eq!(config.request_timeout_secs, 5);
     }
 
     #[test]
     fn mongodb_uri_is_read_from_env() {
-        let config =
-            Config::from_vars(vars(&[("MONGODB_URI", "mongodb://mongo.svc:27017")])).unwrap();
+        let config = Config::from_vars(vars(&[
+            ("MONGODB_URI", "mongodb://mongo.svc:27017"),
+            ("FKST_AUTH_ENABLED", "false"),
+        ]))
+        .unwrap();
         assert_eq!(config.mongodb_uri, "mongodb://mongo.svc:27017");
     }
 
     #[test]
     fn mongodb_db_is_overridable() {
-        let config = Config::from_vars(vars(&[URI, ("MONGODB_DB", "other_db")])).unwrap();
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("MONGODB_DB", "other_db"),
+        ]))
+        .unwrap();
         assert_eq!(config.mongodb_db, "other_db");
     }
 
     #[test]
     fn mongodb_server_selection_timeout_ms_is_overridable() {
-        let config =
-            Config::from_vars(vars(&[URI, ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "750")]))
-                .unwrap();
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "750"),
+        ]))
+        .unwrap();
         assert_eq!(config.mongodb_server_selection_timeout_ms, 750);
     }
 
@@ -452,8 +552,12 @@ mod tests {
 
     #[test]
     fn zero_mongodb_selection_timeout_is_a_config_error() {
-        let err = Config::from_vars(vars(&[URI, ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "0")]))
-            .expect_err("zero selection timeout must fail");
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "0"),
+        ]))
+        .expect_err("zero selection timeout must fail");
         assert!(matches!(err, AppError::Config(_)));
         assert!(
             err.to_string()
@@ -464,8 +568,12 @@ mod tests {
 
     #[test]
     fn zero_request_timeout_is_a_config_error() {
-        let err = Config::from_vars(vars(&[URI, ("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "0")]))
-            .expect_err("zero timeout must fail");
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "0"),
+        ]))
+        .expect_err("zero timeout must fail");
         assert!(matches!(err, AppError::Config(_)));
         assert!(err.to_string().contains("FKST_HOSTED_REQUEST_TIMEOUT_SECS"));
     }
@@ -479,7 +587,8 @@ mod tests {
 
     #[test]
     fn journal_defaults_apply_when_unset() {
-        let config = Config::from_vars(vars(&[URI])).expect("defaults");
+        let config =
+            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert_eq!(config.journal_flush_interval_ms, 2000);
         assert_eq!(config.journal_flush_max_batch, 50);
         assert!(config.journal_github_enabled);
@@ -499,6 +608,7 @@ mod tests {
     fn journal_vars_are_overridable() {
         let config = Config::from_vars(vars(&[
             URI,
+            ("FKST_AUTH_ENABLED", "false"),
             ("FKST_JOURNAL_FLUSH_INTERVAL_MS", "500"),
             ("FKST_JOURNAL_FLUSH_MAX_BATCH", "10"),
             ("FKST_JOURNAL_GITHUB_ENABLED", "false"),
@@ -529,7 +639,8 @@ mod tests {
             ("FKST_JOURNAL_CAS_MAX_RETRIES", "0"),
             ("FKST_RAISED_MAX_LINE_BYTES", "0"),
         ] {
-            let err = Config::from_vars(vars(&[URI, (var, value)])).expect_err("zero must fail");
+            let err = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false"), (var, value)]))
+                .expect_err("zero must fail");
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
         }
@@ -544,8 +655,12 @@ mod tests {
 
     #[test]
     fn github_token_is_read_and_never_appears_in_debug() {
-        let config = Config::from_vars(vars(&[URI, ("GITHUB_TOKEN", "ghp_sneaky_value")]))
-            .expect("token config");
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("GITHUB_TOKEN", "ghp_sneaky_value"),
+        ]))
+        .expect("token config");
         assert!(config.github_token.is_some());
         let rendered = format!("{config:?}");
         assert!(!rendered.contains("ghp_sneaky_value"), "token leaked");
@@ -561,5 +676,76 @@ mod tests {
         let rendered = format!("{config:?}");
         assert!(!rendered.contains("hunter2"), "debug leaked the password");
         assert!(rendered.contains("mongodb://<redacted>@mongo.svc:27017"));
+    }
+
+    // ---- auth configuration tests ----------------------------------------------
+
+    #[test]
+    fn auth_enabled_without_base_url_is_a_config_error_naming_the_variable() {
+        let err = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "true")]))
+            .expect_err("enabled without base URL must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_AUTH_NYXID_BASE_URL"),
+            "error must name the variable, got: {err}"
+        );
+    }
+
+    #[test]
+    fn auth_enabled_with_base_url_builds_enabled_mode() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "true"),
+            ("FKST_AUTH_NYXID_BASE_URL", "https://nyxid.example.com/"),
+        ]))
+        .expect("enabled with base URL");
+        match config.auth {
+            AuthMode::Enabled(ref settings) => {
+                // Trailing slash must be trimmed.
+                assert_eq!(settings.base_url, "https://nyxid.example.com");
+                assert_eq!(settings.issuer, "nyxid");
+                // Audience defaults to base_url (after trim).
+                assert_eq!(settings.audience, "https://nyxid.example.com");
+                assert_eq!(settings.jwks_cache_ttl, std::time::Duration::from_secs(300));
+            }
+            AuthMode::Disabled => panic!("expected Enabled, got Disabled"),
+        }
+    }
+
+    #[test]
+    fn auth_issuer_and_audience_are_overridable() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "true"),
+            ("FKST_AUTH_NYXID_BASE_URL", "https://nyxid.example.com"),
+            ("FKST_AUTH_ISSUER", "custom-issuer"),
+            ("FKST_AUTH_AUDIENCE", "my-audience"),
+            ("FKST_AUTH_JWKS_CACHE_TTL_SECS", "600"),
+        ]))
+        .expect("auth overrides");
+        match config.auth {
+            AuthMode::Enabled(ref settings) => {
+                assert_eq!(settings.issuer, "custom-issuer");
+                assert_eq!(settings.audience, "my-audience");
+                assert_eq!(settings.jwks_cache_ttl, std::time::Duration::from_secs(600));
+            }
+            AuthMode::Disabled => panic!("expected Enabled"),
+        }
+    }
+
+    #[test]
+    fn zero_jwks_cache_ttl_is_a_config_error_naming_the_variable() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "true"),
+            ("FKST_AUTH_NYXID_BASE_URL", "https://nyxid.example.com"),
+            ("FKST_AUTH_JWKS_CACHE_TTL_SECS", "0"),
+        ]))
+        .expect_err("zero JWKS cache TTL must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_AUTH_JWKS_CACHE_TTL_SECS"),
+            "error must name the variable, got: {err}"
+        );
     }
 }
