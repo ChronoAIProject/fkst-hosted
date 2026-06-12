@@ -791,6 +791,7 @@ end
 
 local fkst_dev_label_colors = {
   ["fkst-dev:enabled"] = "1D76DB",
+  ["fkst-dev:tracking"] = "C5DEF5",
   ["fkst-dev:thinking"] = "8250DF",
   ["fkst-dev:ready"] = "0E8A16",
   ["fkst-dev:implementing"] = "FBCA04",

@@ -23,6 +23,10 @@ local function enables_pipeline(action)
   return action == "enable"
 end
 
+local function tracks_umbrella(action)
+  return action == "track"
+end
+
 local function has_devloop_state_label(labels)
   for _, label in ipairs(labels or {}) do
     if core._state_labels[tostring(label)] then
@@ -49,14 +53,14 @@ function pipeline(event)
   local candidate = event.payload or {}
   if not core.is_supported_intake_candidate(candidate) then
     core.log_entry("intake_judge", event, "unknown", candidate.dedup_key)
-    core.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
+    core.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
   core.log_entry("intake_judge", event, candidate.proposal_id, candidate.dedup_key)
   local repo, issue_number = core.parse_issue_source_ref(candidate.source_ref)
   if repo == nil then
-    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-foreign(source_ref)", "invalid source_ref")
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(source_ref)", "invalid source_ref")
     return
   end
 
@@ -71,7 +75,7 @@ function pipeline(event)
     local current = core.parse_issue_view_intake_judge(view.stdout)
     core.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
     if current.state ~= "OPEN" then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-closed", "issue is not open")
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
       return
     end
     local reintake_command = core.operator_command_fact(current.comments, "reintake")
@@ -84,7 +88,7 @@ function pipeline(event)
         "reintake requires an existing intake decision",
         candidate.source_ref
       )
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "refused(reintake-no-intake-decision)", "operator reintake requires an existing intake decision")
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-no-intake-decision)", "operator reintake requires an existing intake decision")
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
       return
     end
@@ -96,23 +100,23 @@ function pipeline(event)
         "reintake requires no active devloop state",
         candidate.source_ref
       )
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "refused(reintake-active-state)", "operator reintake requires no active devloop state")
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-active-state)", "operator reintake requires no active devloop state")
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
       return
     end
     if has_pending_reintake then
       local expected = core.build_devloop_intake_candidate_payload(repo, issue_number, reintake_command.created_at)
       if tostring(candidate.dedup_key or "") ~= tostring(expected.dedup_key or "") then
-        core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command timestamp")
+        core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command timestamp")
         return
       end
     end
     if core.is_opted_in(current.labels) then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
       return
     end
     if core.has_intake_decision_marker(current.comments, candidate.proposal_id) and not has_pending_reintake then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|decline", "skip-idempotent(intake marker already visible)", "trusted intake decision marker exists")
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-idempotent(intake marker already visible)", "trusted intake decision marker exists")
       return
     end
 
@@ -173,9 +177,11 @@ function pipeline(event)
     comment_request = core.build_intake_decision_comment_request(repo, issue_number, candidate, parsed.action, parsed.reason)
     if enables_pipeline(parsed.action) then
       table.insert(raised, "github-proxy.github_issue_label_request")
+    elseif tracks_umbrella(parsed.action) then
+      table.insert(raised, "github-proxy.github_issue_label_request")
     end
     core.log_apply("intake_judge", candidate.proposal_id, parsed.action, candidate.dedup_key, {
-      add = enables_pipeline(parsed.action) and { core._enabled_label } or {},
+      add = enables_pipeline(parsed.action) and { core._enabled_label } or (tracks_umbrella(parsed.action) and { core._tracking_label } or {}),
       remove = {},
     }, raised)
     if command_comment_request ~= nil then
@@ -201,6 +207,9 @@ function pipeline(event)
     end
     if enables_pipeline(parsed.action) then
       local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    elseif tracks_umbrella(parsed.action) then
+      local label_request = core.build_intake_tracking_label_request(repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
     end
   end)
