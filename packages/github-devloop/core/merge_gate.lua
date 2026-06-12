@@ -64,13 +64,13 @@ function M.evaluate_ci_status_gate(pr, opts)
 end
 
 function M.evaluate_ci_merge_gate(pr, opts)
-  local green, green_reason = M.evaluate_ci_status_gate(pr, opts)
-  if not green then
-    return false, green_reason
-  end
   local mergeable, mergeable_reason = M.pr_mergeable(pr)
   if not mergeable then
     return false, mergeable_reason
+  end
+  local green, green_reason = M.evaluate_ci_status_gate(pr, opts)
+  if not green then
+    return false, green_reason
   end
   return true, "merge-gate-ok"
 end
