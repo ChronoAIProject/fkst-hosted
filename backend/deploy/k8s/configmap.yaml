@@ -43,3 +43,9 @@ data:
   # NyxID org-role and user-orgs cache TTL (seconds). Controls how stale
   # org membership data may be before a refresh. Default 30; zero rejected.
   FKST_NYXID_ORG_CACHE_TTL_SECS: "30"
+  # GitHub App integration (optional; unset = disabled).
+  # FKST_GITHUB_APP_ID: "12345"
+  # FKST_GITHUB_APP_SLUG: "fkst-hosted"
+  # The private key PEM goes in the Secret (FKST_GITHUB_APP_PRIVATE_KEY_PEM),
+  # or mount a file and set FKST_GITHUB_APP_PRIVATE_KEY_PATH here.
+  # FKST_GITHUB_APP_PRIVATE_KEY_PATH: "/etc/fkst-github-app/key.pem"

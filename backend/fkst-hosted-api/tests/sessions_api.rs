@@ -125,6 +125,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         sessions: sessions.clone(),
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
+        github_app: None,
     })
     .expect("router");
     TestApp {

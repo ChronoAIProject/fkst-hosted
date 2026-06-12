@@ -798,6 +798,7 @@ dependencies = [
  "jsonwebtoken",
  "mongodb",
  "nix",
+ "once_cell",
  "rand 0.8.6",
  "regex",
  "reqwest",

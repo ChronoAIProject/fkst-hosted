@@ -240,6 +240,32 @@ async fn main() -> ExitCode {
         _ => Authorizer::disabled(),
     };
 
+    // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must
+    //     never reach a live session).
+    let github_app = match fkst_hosted_api::github_app::GithubAppConfig::load_from_env() {
+        Ok(Some(config)) => {
+            let app_id = config.app_id;
+            match fkst_hosted_api::github_app::GithubAppTokens::new(&config) {
+                Ok(tokens) => {
+                    tracing::info!(app_id, "github app enabled");
+                    Some(tokens)
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "failed to initialize github app tokens");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        Ok(None) => {
+            tracing::info!("github app disabled (FKST_GITHUB_APP_ID not set)");
+            None
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "failed to load github app configuration");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let app = match build_router(AppState {
         config,
         db,
@@ -247,6 +273,7 @@ async fn main() -> ExitCode {
         sessions: sessions.clone(),
         auth_mode,
         authz,
+        github_app,
     }) {
         Ok(router) => router,
         Err(error) => {

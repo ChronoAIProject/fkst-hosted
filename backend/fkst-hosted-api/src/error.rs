@@ -46,6 +46,10 @@ pub enum AppError {
     /// Authorization failure (insufficient permissions). Renders as 403.
     #[error("forbidden: {0}")]
     Forbidden(String),
+    /// The request cannot be processed due to a semantic issue (e.g. a
+    /// dependent resource is missing or in an invalid state). Renders as 422.
+    #[error("unprocessable: {0}")]
+    Unprocessable(String),
 }
 
 /// Map packages-domain errors onto the unified type: `Validation` -> 400,
@@ -92,6 +96,53 @@ impl From<crate::auth::AuthError> for AppError {
     }
 }
 
+/// Map GitHub-App-domain errors onto the unified type:
+/// - NotInstalled / InstallationGone / TokenRequestRejected -> 422 Unprocessable
+/// - AppAuth / InvalidKey -> 500 Internal
+/// - RateLimited -> 503 Unavailable
+/// - InvalidRepoRef -> 400 Validation
+/// - Http -> 500 Internal
+impl From<crate::github_app::GithubAppError> for AppError {
+    fn from(err: crate::github_app::GithubAppError) -> Self {
+        use crate::github_app::GithubAppError;
+        match err {
+            GithubAppError::NotInstalled {
+                owner_repo,
+                install_url,
+            } => {
+                let hint = install_url
+                    .map(|url| format!(" ({url})"))
+                    .unwrap_or_else(|| {
+                        " (ask an admin to install the fkst-hosted GitHub App)".to_string()
+                    });
+                AppError::Unprocessable(format!("github app not installed on {owner_repo}{hint}"))
+            }
+            GithubAppError::InstallationGone { owner_repo } => AppError::Unprocessable(format!(
+                "github app installation vanished for {owner_repo}"
+            )),
+            GithubAppError::TokenRequestRejected(detail) => {
+                tracing::error!(detail = %detail, "github token request rejected");
+                AppError::Unprocessable("github token request rejected".to_string())
+            }
+            GithubAppError::AppAuth => AppError::Internal(anyhow::anyhow!(
+                "github app auth failed (key or app id rejected)"
+            )),
+            GithubAppError::InvalidKey => {
+                AppError::Internal(anyhow::anyhow!("invalid github app private key"))
+            }
+            GithubAppError::RateLimited(reset_secs) => {
+                AppError::Unavailable(format!("github rate limited; retry after {reset_secs}s"))
+            }
+            GithubAppError::InvalidRepoRef => {
+                AppError::Validation("invalid repository reference".to_string())
+            }
+            GithubAppError::Http(context) => {
+                AppError::Internal(anyhow::anyhow!("github http error: {context}"))
+            }
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message, www_authenticate) = match &self {
@@ -113,6 +164,12 @@ impl IntoResponse for AppError {
                 (StatusCode::UNAUTHORIZED, "unauthorized", msg.clone(), true)
             }
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, "forbidden", msg.clone(), false),
+            AppError::Unprocessable(msg) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unprocessable",
+                msg.clone(),
+                false,
+            ),
             AppError::Config(_)
             | AppError::Mongo(_)
             | AppError::Bson(_)
@@ -342,5 +399,139 @@ mod tests {
         assert_eq!(body["message"], "internal server error");
         assert!(!body.to_string().contains("envy"));
         assert!(!body.to_string().contains("FOO"));
+    }
+
+    #[tokio::test]
+    async fn unprocessable_renders_422() {
+        let (status, body, _headers) =
+            render(AppError::Unprocessable("semantic issue".into())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"], "unprocessable");
+        assert_eq!(body["message"], "semantic issue");
+    }
+
+    #[tokio::test]
+    async fn github_app_not_installed_renders_422_with_hint() {
+        let err: AppError = crate::github_app::GithubAppError::NotInstalled {
+            owner_repo: "acme/site".to_string(),
+            install_url: Some("https://github.com/apps/fkst-hosted/installations/new".to_string()),
+        }
+        .into();
+        let (status, body, _headers) = render(err).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"], "unprocessable");
+        let msg = body["message"].as_str().expect("message");
+        assert!(msg.contains("acme/site"), "message: {msg}");
+        assert!(msg.contains("fkst-hosted"), "message: {msg}");
+    }
+
+    #[tokio::test]
+    async fn github_app_not_installed_without_slug_gives_admin_hint() {
+        let err: AppError = crate::github_app::GithubAppError::NotInstalled {
+            owner_repo: "acme/site".to_string(),
+            install_url: None,
+        }
+        .into();
+        let (status, body, _headers) = render(err).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let msg = body["message"].as_str().expect("message");
+        assert!(msg.contains("ask an admin"), "message: {msg}");
+    }
+
+    #[tokio::test]
+    async fn github_app_rate_limited_renders_503() {
+        let err: AppError = crate::github_app::GithubAppError::RateLimited(120).into();
+        let (status, body, _headers) = render(err).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"], "unavailable");
+        assert!(body["message"].as_str().unwrap().contains("rate limited"));
+    }
+
+    #[tokio::test]
+    async fn github_app_token_rejected_detail_never_reaches_client() {
+        let err: AppError =
+            crate::github_app::GithubAppError::TokenRequestRejected("secret detail".to_string())
+                .into();
+        let (status, body, _headers) = render(err).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            !body.to_string().contains("secret detail"),
+            "rejected detail must not leak: {}",
+            body
+        );
+    }
+
+    #[tokio::test]
+    async fn github_app_auth_and_key_errors_render_500() {
+        for err in [
+            AppError::from(crate::github_app::GithubAppError::AppAuth),
+            AppError::from(crate::github_app::GithubAppError::InvalidKey),
+            AppError::from(crate::github_app::GithubAppError::Http(
+                "network failure".to_string(),
+            )),
+        ] {
+            let (status, body, _headers) = render(err).await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(body["error"], "internal");
+            assert_eq!(body["message"], "internal server error");
+        }
+    }
+
+    #[tokio::test]
+    async fn github_app_invalid_repo_ref_renders_400() {
+        let err: AppError = crate::github_app::GithubAppError::InvalidRepoRef.into();
+        let (status, body, _headers) = render(err).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "invalid_request");
+    }
+
+    #[tokio::test]
+    async fn no_error_or_debug_output_contains_minted_token_or_key() {
+        use crate::github_app::GithubAppError;
+        let secret_token = "ghs_SECRET_INSTALLATION_TOKEN_12345";
+        let secret_pem = "-----BEGIN RSA PRIVATE KEY-----\nSECRET\n-----END RSA PRIVATE KEY-----";
+        let errors: Vec<GithubAppError> = vec![
+            GithubAppError::NotInstalled {
+                owner_repo: "a/b".to_string(),
+                install_url: None,
+            },
+            GithubAppError::InstallationGone {
+                owner_repo: "a/b".to_string(),
+            },
+            GithubAppError::AppAuth,
+            GithubAppError::RateLimited(60),
+            GithubAppError::TokenRequestRejected(format!("permission denied for {secret_token}")),
+            GithubAppError::InvalidKey,
+            GithubAppError::InvalidRepoRef,
+            GithubAppError::Http(format!("request failed with {secret_pem}")),
+        ];
+        for err in &errors {
+            let display = format!("{err}");
+            let debug = format!("{err:?}");
+            assert!(
+                !display.contains(secret_token),
+                "Display leaked token: {display}"
+            );
+            assert!(!debug.contains(secret_token), "Debug leaked token: {debug}");
+            assert!(
+                !display.contains(secret_pem),
+                "Display leaked key: {display}"
+            );
+            assert!(!debug.contains(secret_pem), "Debug leaked key: {debug}");
+        }
+        // The AppError mapping also must not leak.
+        for err in &errors {
+            let app_err: AppError = err.clone().into();
+            let display = format!("{app_err}");
+            let debug = format!("{app_err:?}");
+            assert!(
+                !display.contains(secret_token),
+                "AppError Display leaked token: {display}"
+            );
+            assert!(
+                !debug.contains(secret_token),
+                "AppError Debug leaked token: {debug}"
+            );
+        }
     }
 }
