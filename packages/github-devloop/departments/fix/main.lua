@@ -97,6 +97,12 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   if not core.is_safe_head_sha(base_head) then
     error("github-devloop: unsafe integration head")
   end
+  local result = {
+    target_branch = integration_branch,
+    target_sha = base_head,
+    conflicted = false,
+    unmerged_paths = "",
+  }
   local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
   if merge_result.exit_code ~= 0 then
     local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
@@ -106,13 +112,25 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
     if tostring(unmerged_result.stdout or "") == "" then
       error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
     end
+    result.conflicted = true
+    result.unmerged_paths = tostring(unmerged_result.stdout or "")
     core.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
       "integration_branch=" .. tostring(integration_branch),
       "integration_sha=" .. tostring(base_head),
       "reason=integration merge requires codex conflict resolution",
     })
   end
-  return base_head
+  return result
+end
+
+local function assert_no_unmerged_paths(worktree)
+  local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+  if unmerged_result.exit_code ~= 0 then
+    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+  end
+  if tostring(unmerged_result.stdout or "") ~= "" then
+    error("github-devloop: fix left target merge conflicts unresolved")
+  end
 end
 
 local function raise_review_meta(repo, issue_number, fix, reason, detail)
@@ -366,7 +384,7 @@ function pipeline(event)
     end
 
     local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    merge_integration_for_fix(worktree, fix.pr_number, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
+    local merge_context = merge_integration_for_fix(worktree, fix.pr_number, branches.integration, merge_gate_fact and merge_gate_fact.gate_baseline_sha or nil)
     core.log_codex_start("fix", fix.proposal_id, "fix")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "fix",
@@ -378,7 +396,7 @@ function pipeline(event)
       tick = event.ts,
     })
     local result = spawn_codex_sync({
-      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing, content_fetch),
+      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing, content_fetch, merge_context),
       worktree = worktree,
     })
     if type(result) ~= "table" or result.exit_code ~= 0 then
@@ -387,6 +405,7 @@ function pipeline(event)
       error("github-devloop: fix codex failed: " .. tostring(stderr))
     end
     core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=completed", nil)
+    assert_no_unmerged_paths(worktree)
 
     local status = exec_sync({ cmd = core.git_status_cmd(worktree), timeout = 30 })
     if status.exit_code ~= 0 then

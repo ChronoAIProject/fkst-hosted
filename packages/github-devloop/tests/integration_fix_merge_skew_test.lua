@@ -51,6 +51,7 @@ return {
       stdout = "",
       stderr = "CONFLICT (content): Merge conflict in packages/github-devloop/core.lua\n",
       unmerged_stdout = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
+      post_codex_unmerged_stdout = "",
     })
     t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "abc123\n", stderr = "", exit_code = 0 })
@@ -83,9 +84,19 @@ return {
     t.is_true(merge_index ~= nil)
     t.is_true(codex_index ~= nil)
     t.is_true(merge_index < codex_index)
+    local saw_conflict_prompt = false
+    for _, call in ipairs(t.command_calls()) do
+      if call.rendered:find("codex exec", 1, true) ~= nil
+        and tostring(call.stdin or ""):find("sync_conflict target_branch=dev target_sha=abc123", 1, true) ~= nil
+        and tostring(call.stdin or ""):find("packages/github-devloop/core.lua", 1, true) ~= nil then
+        saw_conflict_prompt = true
+      end
+    end
+    t.eq(saw_conflict_prompt, true)
     t.eq(count_calls("git fetch 'origin' 'dev'"), 0)
     t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 1)
     t.eq(count_calls("refs/remotes/'origin'/'dev'^{commit}"), 0)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
+    t.eq(count_calls("ls-files -u"), 2)
   end,
 }

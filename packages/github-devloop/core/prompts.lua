@@ -63,6 +63,27 @@ local function bounded_gap(M, gap)
   return value
 end
 
+local function target_merge_context(M, merge_context)
+  if type(merge_context) ~= "table" then
+    return "sync_clean"
+  end
+  local target_branch = M.neutralize_untrusted_prompt_text(merge_context.target_branch or "")
+  local target_sha = M.neutralize_untrusted_prompt_text(merge_context.target_sha or "")
+  if merge_context.conflicted ~= true then
+    return "sync_clean target_branch=" .. target_branch .. " target_sha=" .. target_sha
+  end
+  local paths = M.neutralize_untrusted_prompt_text(merge_context.unmerged_paths or "")
+    :gsub("%s+", " ")
+    :gsub("^%s+", "")
+    :gsub("%s+$", "")
+  if #paths > 600 then
+    paths = M.truncate_utf8(paths, 600)
+  end
+  return "sync_conflict target_branch=" .. target_branch
+    .. " target_sha=" .. target_sha
+    .. " unmerged_paths=" .. paths
+end
+
 local function local_context_block(M, manifest, fallback)
   if manifest == nil or manifest == "" then
     return fallback or "No local context bundle is available; use only the provided prompt and worktree context."
@@ -100,7 +121,7 @@ function M.build_implement_prompt(proposal_id, current, framing, content_manifes
   }, nil, { entity_history = true })
 end
 
-function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_manifest)
+function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_manifest, merge_context)
   local prompt = require("prompts.fix")
   return M.render_prompt_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(fix.proposal_id),
@@ -110,6 +131,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     blocking_gap = bounded_gap(M, fix.blocking_gap),
     title = M.neutralize_untrusted_prompt_text(current_issue.title),
     test_command = M.test_command(),
+    target_merge_context = target_merge_context(M, merge_context),
     content_fetch_block = local_context_block(M, content_manifest),
     review_feedback = M.neutralize_untrusted_prompt_text(review_reason),
     review_observation_boundary = M.review_observation_boundary_clause(),

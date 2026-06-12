@@ -219,6 +219,14 @@ local function mock_git_status(stdout, exit_code, stderr)
   })
 end
 
+local function mock_no_unmerged_paths()
+  t.mock_command("ls-files -u", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_existing_fix_worktree(branch, head, path, merge)
   local worktree = path or "/tmp/fkst-packages-test/github-devloop/runtime/worktrees/fix-worktree"
   t.mock_command("git worktree list --porcelain", {
@@ -253,6 +261,15 @@ local function mock_existing_fix_worktree(branch, head, path, merge)
       stderr = merge.unmerged_stderr or "",
       exit_code = merge.unmerged_exit_code or 0,
     })
+  end
+  if merge ~= nil and merge.post_codex_unmerged_stdout ~= nil then
+    t.mock_command("ls-files -u", {
+      stdout = merge.post_codex_unmerged_stdout,
+      stderr = merge.post_codex_unmerged_stderr or "",
+      exit_code = merge.post_codex_unmerged_exit_code or 0,
+    })
+  else
+    mock_no_unmerged_paths()
   end
   return worktree
 end
@@ -300,6 +317,7 @@ local function mock_missing_fix_worktree(branch, head, path)
     stderr = "",
     exit_code = 0,
   })
+  mock_no_unmerged_paths()
   return worktree
 end
 
@@ -346,6 +364,7 @@ local function mock_outside_runtime_fix_worktree(branch, head, path)
     stderr = "",
     exit_code = 0,
   })
+  mock_no_unmerged_paths()
   return worktree
 end
 
