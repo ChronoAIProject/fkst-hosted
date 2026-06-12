@@ -66,6 +66,15 @@ local function find_comment_body(raises, needle)
   return nil
 end
 
+local function has_value(values, expected)
+  for _, value in ipairs(values or {}) do
+    if tostring(value) == tostring(expected) then
+      return true
+    end
+  end
+  return false
+end
+
 local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
@@ -379,7 +388,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {})
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded implementation task.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ expedite\n⟦FKST:REASON⟧ Clear bounded implementation task.")
 
     local result = run_judge(payload, opts("intake-positive"))
     t.eq(result.exit_code, 0)
@@ -388,9 +397,29 @@ return {
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.is_true(comment.body:find('fkst:github-devloop:intake-decision:v1', 1, true) ~= nil)
     t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
+    t.is_true(comment.body:find('class="expedite"', 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
-    t.eq(#label.remove_labels, 0)
+    t.eq(label.add_labels[2], "fkst-class:expedite")
+    t.is_true(has_value(label.remove_labels, "fkst-class:standard"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
     assert_intake_judgment_call()
+  end,
+
+  test_judge_standard_class_is_default_and_replaces_other_class_labels = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-class:expedite" }, {})
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded implementation task.")
+
+    local result = run_judge(payload, opts("intake-standard-default"))
+    t.eq(result.exit_code, 0)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:enabled")
+    t.eq(label.add_labels[2], "fkst-class:standard")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
   end,
 
   test_judge_negative_and_malformed_codex_write_comment_only = function()
@@ -415,6 +444,25 @@ return {
     t.eq(#malformed.raises, 1)
     t.is_true(find_raise(malformed.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="decline"', 1, true) ~= nil)
     t.is_nil(find_raise(malformed.raises, "github-proxy.github_issue_label_request"))
+  end,
+
+  test_judge_tracking_background_class_writes_display_label_only = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-class:standard" }, {})
+    mock_intake_codex("⟦FKST:INTAKE⟧ track\n⟦FKST:CLASS⟧ background\n⟦FKST:REASON⟧ Umbrella tracker issue; individual waves should be separate proposals.")
+
+    local result = run_judge(payload, opts("intake-track-background"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('decision="track"', 1, true) ~= nil)
+    t.is_true(comment.body:find('class="background"', 1, true) ~= nil)
+    t.eq(label.add_labels[1], "fkst-dev:tracking")
+    t.eq(label.add_labels[2], "fkst-class:background")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:standard"))
   end,
 
   test_judge_escalate_to_class_creates_carrier_links_and_folds_instance = function()
@@ -603,7 +651,9 @@ return {
     t.is_true(comment.body:find("Acknowledged as a tracking umbrella", 1, true) ~= nil)
     t.is_true(comment.body:find("individual waves", 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:tracking")
-    t.eq(#label.remove_labels, 0)
+    t.eq(label.add_labels[2], "fkst-class:standard")
+    t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
+    t.is_true(has_value(label.remove_labels, "fkst-class:background"))
     t.eq(count_calls("codex exec"), 1)
   end,
 
