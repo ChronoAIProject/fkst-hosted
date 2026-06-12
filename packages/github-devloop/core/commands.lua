@@ -239,7 +239,7 @@ function M.gh_issue_view_merge_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_observe_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state,stateReason")
 end
 
 function M.gh_pr_view_origin_cmd(repo, pr_number)

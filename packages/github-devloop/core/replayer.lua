@@ -393,7 +393,7 @@ local function replay_thinking(dept, issue, state, row, facts)
   })
 end
 
-local function raise_dependency_release(dept, issue, proposal_id, state, current, ready_payload, command_comment_request)
+local function raise_dependency_release(dept, issue, proposal_id, state, current, ready_payload, command_comment_request, gate)
   local raised = { "devloop_ready" }
   local has_blocked_label = M.has_label(current.labels, M._blocked_on_dependency_label)
   local release_fact = M.dependency_release_fact(current.comments, proposal_id, state.version)
@@ -411,15 +411,14 @@ local function raise_dependency_release(dept, issue, proposal_id, state, current
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
   end
   if release_fact == nil then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", {
-      schema = "github-proxy.v1",
-      repo = issue.repo,
-      issue_number = issue.number,
-      body = "github-devloop dependency release: satisfied\n\nReason: satisfied\n\n"
-        .. M.dependency_release_marker(proposal_id, state.version),
-      dedup_key = M._dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(state.version) }),
-      source_ref = M.normalize_source_ref(issue.source_ref),
-    })
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_release_comment_request(
+      issue.repo,
+      issue.number,
+      proposal_id,
+      state.version,
+      gate,
+      issue.source_ref
+    ))
   end
   if has_blocked_label then
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
@@ -450,7 +449,11 @@ local function replay_ready(dept, issue, state, row, facts)
   local current = facts.current
   local command = facts.command
   local dependency_hold = M.dependency_hold_fact(current.comments, proposal_id)
-  local gate = M.dependency_gate(issue.repo, issue.number)
+  local gate = M.dependency_gate(issue.repo, issue.number, {
+    proposal_id = proposal_id,
+    version = state.version,
+    comments = current.comments,
+  })
   if dependency_hold ~= nil then
     M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "recheck-dependency-hold", dependency_hold.reason)
   end
@@ -505,7 +508,7 @@ local function replay_ready(dept, issue, state, row, facts)
     return #raised > 0
   end
   if dependency_hold ~= nil then
-    M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "release-dependency-hold", "satisfied")
+    M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "release-dependency-hold", gate.reason)
     local command_comment_request = command ~= nil and M.build_operator_issue_reready_comment_request(
       issue.repo,
       issue.number,
@@ -513,7 +516,7 @@ local function replay_ready(dept, issue, state, row, facts)
       "dependency-release",
       issue.source_ref
     ) or nil
-    return raise_dependency_release(dept, issue, proposal_id, state, current, ready_payload, command_comment_request)
+    return raise_dependency_release(dept, issue, proposal_id, state, current, ready_payload, command_comment_request, gate)
   end
   local raised = { "devloop_ready" }
   local command_comment_request = nil
