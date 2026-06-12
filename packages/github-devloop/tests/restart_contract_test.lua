@@ -75,6 +75,14 @@ local function table_by_state()
   return by_state
 end
 
+local function rows_by_state(rows)
+  local by_state = {}
+  for _, row in ipairs(rows or {}) do
+    by_state[row.from_state] = row
+  end
+  return by_state
+end
+
 local function allowed_extra_transition(state, next_state)
   return state == "reviewing" and next_state == "blocked"
 end
@@ -166,13 +174,11 @@ return {
 
   test_restart_field_coverage_catches_374_shape_missing_gate_baseline = function()
     local rows = copy_rows(core.restart_transition_table())
-    local marker_fields = core.restart_durable_marker_fields()
-    marker_fields["merge-gate"].gate_baseline_sha = nil
+    rows_by_state(rows).fixing.payload_fields.gate_baseline_sha = nil
     local errors = core.restart_field_coverage_errors(rows)
-    marker_fields["merge-gate"].gate_baseline_sha = true
     t.eq(#errors, 1)
     t.is_true(errors[1]:find("fixing.gate_baseline_sha", 1, true) ~= nil)
-    t.is_true(errors[1]:find("merge-gate.gate_baseline_sha", 1, true) ~= nil)
+    t.is_true(errors[1]:find("missing required replay payload field", 1, true) ~= nil)
   end,
 
   test_declared_marker_fields_exist_in_marker_builders = function()

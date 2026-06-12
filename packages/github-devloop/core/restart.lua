@@ -81,6 +81,12 @@ local marker_fields = {
   decomposed = { proposal = true, version = true, pr = true, count = true },
 }
 
+local required_replay_payload_fields = {
+  fixing = {
+    gate_baseline_sha = "build_replayed_fixing_payload copies merge-gate.gate_baseline_sha",
+  },
+}
+
 local function fact(family, freshness)
   return { family = family, freshness = freshness }
 end
@@ -379,6 +385,10 @@ function M.restart_source_ref_derivations()
   return source_ref_derivations
 end
 
+function M.restart_required_replay_payload_fields()
+  return required_replay_payload_fields
+end
+
 local function field_reference_error(reference)
   local marker_family, attr = tostring(reference or ""):match("^marker:([^%.]+)%.(.+)$")
   if marker_family ~= nil then
@@ -403,6 +413,12 @@ end
 function M.restart_field_coverage_errors(rows)
   local errors = {}
   for _, row in ipairs(rows or transition_table) do
+    local required_fields = required_replay_payload_fields[row.from_state] or {}
+    for field, reason in pairs(required_fields) do
+      if (row.payload_fields or {})[field] == nil then
+        table.insert(errors, tostring(row.from_state or "?") .. "." .. tostring(field) .. ": missing required replay payload field: " .. tostring(reason))
+      end
+    end
     for field, reference in pairs(row.payload_fields or {}) do
       local err = field_reference_error(reference)
       if err ~= nil then
