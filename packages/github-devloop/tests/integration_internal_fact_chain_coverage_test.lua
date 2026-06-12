@@ -74,6 +74,7 @@ local function mock_issue_result_view(labels, comments)
 end
 
 local function mock_decompose_child_issue_list(event, indexes)
+  local repo = core.parse_proposal_id(event.proposal_id)
   local rendered = {}
   for _, index in ipairs(indexes or {}) do
     table.insert(rendered, string.format(
@@ -84,7 +85,7 @@ local function mock_decompose_child_issue_list(event, indexes)
       100 + index
     ))
   end
-  t.mock_command(core.gh_issue_list_decompose_children_cmd("owner/repo", event.proposal_id), {
+  t.mock_command(core.gh_issue_list_decompose_children_cmd(repo or "owner/repo", event.proposal_id), {
     stdout = "[" .. table.concat(rendered, ",") .. "]\n",
     stderr = "",
     exit_code = 0,
@@ -92,40 +93,66 @@ local function mock_decompose_child_issue_list(event, indexes)
 end
 
 local function live_308_decompose_reconcile_stream(event)
-  local proposal_id = "github-devloop/issue/owner/repo/42"
-  local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705"
+  local repo = "ChronoAIProject/fkst-packages"
+  local issue_number = "285"
+  local pr_number = 308
+  local branch = "devloop/issue/ChronoAIProject/fkst-packages/285/ready-consensus-github-devloop-issue-ChronoAIProject-fkst-packages-285-2026-06-10T13-45-26Z"
+  local proposal_id = "github-devloop/issue/ChronoAIProject/fkst-packages/285"
+  local version = "ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705"
   event.proposal_id = proposal_id
+  event.pr_number = pr_number
   event.version = version
   event.dedup_key = core._dedup_key({ "decompose", proposal_id, version })
+  event.source_ref = core.pr_source_ref(repo, pr_number)
   return {
-    'github-devloop implementation PR for issue #285\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/repo/42" issue="42" branch="devloop-owner-repo-42-01HY" impl_version="ready/consensus-github-devloop/issue/owner/repo/42/2026-06-10T13-45-26Z" base_branch="dev" -->',
-    'github-devloop fix-loop reconcile decision: drop\n\nReason:\nfix-loop-max-rounds-after-14-rounds\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="blocked" version="' .. version .. '" stage_rank="800" -->\n<!-- fkst:github-devloop:fix-reconcile:v1 proposal="github-devloop/issue/owner/repo/42" version="' .. version .. '" round="14" action="drop" dedup="fix-reconcile:' .. version .. '" -->\n' .. "⟦AI:FKST⟧",
-    'github-devloop decomposed blocked PR into 3 follow-up issue(s)\n\n<!-- fkst:github-devloop:decomposed:v1 proposal="github-devloop/issue/owner/repo/42" version="' .. version .. '" pr="7" count="3" -->',
+    source_ref = event.source_ref,
+    repo = repo,
+    issue_number = issue_number,
+    pr_number = pr_number,
+    branch = branch,
+    head_sha = "780d3705780d3705780d3705780d3705780d3705",
+    comments = {
+      'github-devloop implementation PR for issue #285\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/285" issue="285" branch="' .. branch .. '" impl_version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-10T13-45-26Z" base_branch="dev" -->',
+      'github-devloop PR is ready for review\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/285" state="reviewing" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3" stage_rank="675" -->',
+      'github-devloop fix reconcile action: drop\n\nReason:\nfix-loop-max-rounds-after-14-rounds\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/285" state="blocked" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705" stage_rank="800" -->\n<!-- fkst:github-devloop:fix-reconcile:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/285" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705" round="14" action="drop" dedup="fix-reconcile:ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705" -->\n⟦AI:FKST⟧',
+      'github-devloop decomposed blocked PR into 3 follow-up issue(s)\n\n<!-- fkst:github-devloop:decomposed:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/285" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-10T13-45-26Z/fix/14/review-loop/3/rereview/3/780d3705" pr="308" count="3" -->',
+    },
   }
 end
 
-local function live_305_merge_gate_fix_stream(event, fixing_version)
-  local proposal_id = "github-devloop/issue/owner/repo/42"
-  local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-09T18-20-31Z"
-  local head_sha = "def456"
-  local review_proposal = "github-devloop/pr-review/owner-repo/7/ready-consensus-github-devloop-issue-owner-repo-42-2026-06-09T18-20-31Z/def456"
+local function live_305_merge_gate_fix_stream(event)
+  local repo = "ChronoAIProject/fkst-packages"
+  local issue_number = "300"
+  local pr_number = 305
+  local branch = "devloop/issue/ChronoAIProject/fkst-packages/300/ready-consensus-github-devloop-issue-ChronoAIProject-fkst-packages-300-2026-06-09T18-20-31Z"
+  local proposal_id = "github-devloop/issue/ChronoAIProject/fkst-packages/300"
+  local version = "ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-09T18-20-31Z"
+  local head_sha = "3053053053053053053053053053053053053053"
+  local review_proposal = "github-devloop/pr-review/ChronoAIProject-fkst-packages-2376452037/305/ready-consensus-github-devloo-3053053053/" .. head_sha
   local review_dedup = "consensus:" .. review_proposal .. "/review"
-  fixing_version = version .. "/fix/1"
+  local fixing_version = version .. "/fix/1"
   event.proposal_id = proposal_id
+  event.pr_number = pr_number
   event.version = version
   event.review_proposal_id = review_proposal
   event.review_dedup_key = review_dedup
   event.reviewed_head_sha = head_sha
-  event.dedup_key = core._dedup_key({ "merge-ready", proposal_id, version, "7", head_sha })
-  local merge_gate = 'github-devloop merge gate failed: rollup-red\nReproduce locally: scripts/run.sh test\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="fixing" version="' .. fixing_version .. '" stage_rank="700" -->\n<!-- fkst:github-devloop:merge-gate:v1 proposal="github-devloop/issue/owner/repo/42" pr="7" version="' .. fixing_version .. '" review_proposal="' .. review_proposal .. '" review_dedup="' .. review_dedup .. '" head_sha="def456" reason="rollup-red" -->'
+  event.source_ref = core.pr_source_ref(repo, pr_number)
+  event.dedup_key = core._dedup_key({ "merge-ready", proposal_id, version, tostring(pr_number), head_sha })
+  local merge_gate = 'github-devloop merge gate failed: rollup-red\nReproduce locally with `scripts/run.sh test` from the repository root.\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" state="fixing" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-09T18-20-31Z/fix/1" stage_rank="700" -->\n<!-- fkst:github-devloop:merge-gate:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" pr="305" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-09T18-20-31Z/fix/1" review_proposal="' .. review_proposal .. '" review_dedup="' .. review_dedup .. '" head_sha="3053053053053053053053053053053053053053" reason="rollup-red" -->'
   return {
+    repo = repo,
+    issue_number = issue_number,
+    pr_number = pr_number,
+    branch = branch,
+    head_sha = head_sha,
     pr_comments = {
-      'github-devloop implementation PR for issue #300\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/repo/42" issue="42" branch="devloop-owner-repo-42-01HY" impl_version="' .. version .. '" base_branch="dev" -->',
-      'github-devloop PR is ready for review\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="reviewing" version="' .. version .. '" stage_rank="675" -->',
+      'github-devloop implementation PR for issue #300\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" issue="300" branch="' .. branch .. '" impl_version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-09T18-20-31Z" base_branch="dev" -->',
+      'github-devloop PR is ready for review\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" state="reviewing" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-09T18-20-31Z" stage_rank="675" -->',
       merge_gate,
     },
     issue_comments = {
-      'github-devloop PR fix is in progress\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="fixing" version="' .. fixing_version .. '" stage_rank="700" -->',
+      'github-devloop PR fix is in progress\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" state="fixing" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-09T18-20-31Z/fix/1" stage_rank="700" -->',
       merge_gate,
     },
     fixing_version = fixing_version,
@@ -146,6 +173,14 @@ local function run_observe_pr_direct(run_opts)
       dedup_key = "owner/repo#pr#7@2026-06-04T01:02:04Z",
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     },
+  }, run_opts)
+end
+
+local function run_observe_pr_payload(payload, run_opts)
+  mock_branch_config_env()
+  return t.run_department("departments/observe_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = payload,
   }, run_opts)
 end
 
@@ -461,15 +496,22 @@ return {
     event.review_proposal_id = nil
     event.review_dedup_key = nil
     event.head_sha = nil
-    local comments = live_308_decompose_reconcile_stream(event)
+    local fixture = live_308_decompose_reconcile_stream(event)
     mock_bot_env()
-    mock_pr_origin(comments)
+    mock_pr_origin(fixture.comments, fixture.branch, fixture.head_sha)
     mock_issue_result_view({ "fkst-dev:blocked" }, {
       core.state_marker(event.proposal_id, "blocked", event.version),
     })
     mock_decompose_child_issue_list(event, {})
 
-    local result = run_observe_pr_direct(opts("observe-pr-live-308-decompose-reconcile-replay"))
+    local result = run_observe_pr_payload({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = fixture.repo,
+      number = fixture.pr_number,
+      dedup_key = "ChronoAIProject/fkst-packages#pr#308@2026-06-12T04:15:40Z",
+      source_ref = fixture.source_ref,
+    }, opts("observe-pr-live-308-decompose-reconcile-replay"))
 
     t.eq(result.exit_code, 0)
     local decompose = find_raise(result.raises, "devloop_decompose")
@@ -480,33 +522,32 @@ return {
     t.eq(decompose.payload.review_proposal_id, nil)
     t.eq(decompose.payload.review_dedup_key, nil)
     t.eq(decompose.payload.head_sha, nil)
-    t.eq(decompose.payload.source_ref.ref, "owner/repo#pr/7")
+    t.eq(decompose.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/308")
   end,
 
   test_observe_pr_live_305_merge_gate_fixing_replay_reaches_issue_fixing_state = function()
     local event = merge_ready()
-    local fixing_version = core.next_fix_version(event.version)
-    local fixture = live_305_merge_gate_fix_stream(event, fixing_version)
-    fixing_version = fixture.fixing_version
+    local fixture = live_305_merge_gate_fix_stream(event)
     mock_bot_env()
-    mock_pr_origin(fixture.pr_comments)
+    mock_pr_origin(fixture.pr_comments, fixture.branch, fixture.head_sha)
     mock_issue_result_view({ "fkst-dev:fixing" }, fixture.issue_comments)
 
-    local result = h.run_observe_pr({
+    local result = run_observe_pr_payload({
       schema = "github-proxy.v1",
       type = "pr",
-      repo = "owner/repo",
-      number = 7,
-      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:05Z",
-      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+      repo = fixture.repo,
+      number = fixture.pr_number,
+      dedup_key = "ChronoAIProject/fkst-packages#pr#305@2026-06-12T04:15:39Z",
+      source_ref = core.pr_source_ref(fixture.repo, fixture.pr_number),
     }, opts("observe-pr-live-305-merge-gate-fixing-replay"))
 
     t.eq(result.exit_code, 0)
     local fixing_raise = find_raise(result.raises, "devloop_fixing")
     t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
-    t.eq(fixing_raise.payload.version, fixing_version)
+    t.eq(fixing_raise.payload.version, fixture.fixing_version)
     t.eq(fixing_raise.payload.review_proposal_id, fixture.review_proposal)
     t.eq(fixing_raise.payload.review_dedup_key, fixture.review_dedup)
     t.eq(fixing_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
+    t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
   end,
 	}
