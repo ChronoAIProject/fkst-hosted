@@ -4,6 +4,16 @@ function S.install(M)
 
 local max_dashboard_edges = 8
 local max_worst_offenders = 3
+local work_card_runtime_states = {
+  implementing = true,
+  fixing = true,
+  reviewing = true,
+  ["review-meta"] = true,
+}
+
+local function pattern_escape(value)
+  return tostring(value or ""):gsub("([^%w])", "%%%1")
+end
 
 local function state_marker_stage_rank(marker, state)
   local explicit_rank = tonumber(marker:match('stage_rank="(%d+)"'))
@@ -41,6 +51,82 @@ local function append_state_markers(markers, comments, proposal_id)
       end
     end
   end
+end
+
+local function append_entity_comments(list, comments)
+  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+    table.insert(list, comment)
+  end
+end
+
+local function trusted_entity_comments(entity)
+  local comments = {}
+  append_entity_comments(comments, entity and entity.parent_issue and entity.parent_issue.comments or {})
+  append_entity_comments(comments, entity and entity.pr and entity.pr.comments or {})
+  return comments
+end
+
+local function comment_seconds(comment)
+  local _, seconds = parse_marker_time(comment)
+  return seconds
+end
+
+local function timestamp_between(value, first, second)
+  local seconds = tonumber(value)
+  return seconds ~= nil
+    and seconds >= tonumber(first or 0)
+    and seconds <= tonumber(second or 0)
+end
+
+local function marker_attr(marker, name)
+  return tostring(marker or ""):match(tostring(name) .. '="([^"]*)"')
+end
+
+local function has_marker_between(entity, proposal_id, marker_kind, version, from_seconds, to_seconds)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:" .. pattern_escape(marker_kind) .. ":v1.-%-%->"
+  for _, comment in ipairs(trusted_entity_comments(entity)) do
+    if timestamp_between(comment_seconds(comment), from_seconds, to_seconds) then
+      for marker in M._comment_body(comment):gmatch(marker_pattern) do
+        if marker_attr(marker, "proposal") == tostring(proposal_id)
+          and (version == nil or marker_attr(marker, "version") == tostring(version)) then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+local function has_dependency_marker_between(entity, proposal_id, version, from_seconds, to_seconds)
+  for _, marker_kind in ipairs({
+    "dependency-wait",
+    "dependency-cycle",
+    "dependency-unresolvable",
+    "dependency-release",
+  }) do
+    if has_marker_between(entity, proposal_id, marker_kind, version, from_seconds, to_seconds) then
+      return true
+    end
+  end
+  return false
+end
+
+function M.state_gap_wait_class(entity, previous, marker)
+  if previous == nil or marker == nil then
+    return "unattributed"
+  end
+  if previous.state == "ready"
+    and has_dependency_marker_between(entity, previous.proposal_id, previous.version, previous.created_seconds, marker.created_seconds) then
+    return "dependency-gate"
+  end
+  if work_card_runtime_states[previous.state] == true
+    and has_marker_between(entity, previous.proposal_id, "work-card", nil, previous.created_seconds, marker.created_seconds) then
+    return "codex-runtime"
+  end
+  if previous.state == "merge-ready" and marker.state == "merging" then
+    return "merge-queue"
+  end
+  return "unattributed"
 end
 
 local function marker_sort_key(marker)
@@ -89,7 +175,7 @@ function M.state_gap_edges_for_entity(entity)
     if previous ~= nil and previous.state ~= marker.state and marker.created_seconds >= previous.created_seconds then
       local gap_seconds = marker.created_seconds - previous.created_seconds
       local status, budget_seconds = budget_status(previous.state, gap_seconds)
-      table.insert(edges, {
+      local edge = {
         proposal_id = entity.proposal_id,
         issue_number = entity.issue_number,
         from_state = previous.state,
@@ -100,7 +186,9 @@ function M.state_gap_edges_for_entity(entity)
         to_created_at = marker.created_at,
         budget_seconds = budget_seconds,
         budget_status = status,
-      })
+      }
+      edge.wait_class = M.state_gap_wait_class(entity, previous, marker)
+      table.insert(edges, edge)
     end
     previous = marker
   end
@@ -142,6 +230,7 @@ function M.state_gap_report(entities)
         to_state = edge.to_state,
         values = {},
         offenders = {},
+        wait_class_counts = {},
         over_budget_count = 0,
         near_budget_count = 0,
         budget_seconds = edge.budget_seconds,
@@ -149,6 +238,8 @@ function M.state_gap_report(entities)
       local bucket = by_edge[edge.edge]
       table.insert(bucket.values, edge.gap_seconds)
       table.insert(bucket.offenders, edge)
+      local wait_class = tostring(edge.wait_class or "unattributed")
+      bucket.wait_class_counts[wait_class] = (bucket.wait_class_counts[wait_class] or 0) + 1
       if edge.budget_status == "over-budget" then
         bucket.over_budget_count = bucket.over_budget_count + 1
       elseif edge.budget_status == "near-budget" then
@@ -177,6 +268,7 @@ function M.state_gap_report(entities)
       budget_seconds = bucket.budget_seconds,
       over_budget_count = bucket.over_budget_count,
       near_budget_count = bucket.near_budget_count,
+      wait_class_counts = bucket.wait_class_counts,
       offenders = bucket.offenders,
     })
   end
@@ -197,6 +289,7 @@ function M.state_gap_log_line(edge)
     "gap_seconds=" .. tostring(edge and edge.gap_seconds or 0),
     "budget_seconds=" .. tostring(edge and edge.budget_seconds or ""),
     "budget_status=" .. tostring(edge and edge.budget_status or "unknown"),
+    "wait_class=" .. tostring(edge and edge.wait_class or "unattributed"),
     "from_created_at=" .. tostring(edge and edge.from_created_at or ""),
     "to_created_at=" .. tostring(edge and edge.to_created_at or ""),
   }, " ")
@@ -241,6 +334,30 @@ local function offender_summary(offenders)
   return table.concat(parts, ", ")
 end
 
+local function wait_class_summary(counts)
+  local rows = {}
+  for class, count in pairs(counts or {}) do
+    table.insert(rows, {
+      class = tostring(class),
+      count = tonumber(count) or 0,
+    })
+  end
+  table.sort(rows, function(a, b)
+    if a.count ~= b.count then
+      return a.count > b.count
+    end
+    return a.class < b.class
+  end)
+  local parts = {}
+  for _, row in ipairs(rows) do
+    table.insert(parts, row.class .. " " .. tostring(row.count))
+  end
+  if #parts == 0 then
+    return "unattributed 0"
+  end
+  return table.concat(parts, ", ")
+end
+
 function M.append_state_gap_dashboard_section(lines, report)
   table.insert(lines, "")
   table.insert(lines, "## State-gap latency")
@@ -264,6 +381,7 @@ function M.append_state_gap_dashboard_section(lines, report)
       .. ", budget " .. budget
       .. ", near " .. tostring(summary.near_budget_count or 0)
       .. ", over " .. tostring(summary.over_budget_count or 0)
+      .. ", classes " .. wait_class_summary(summary.wait_class_counts)
       .. "; worst " .. offender_summary(summary.offenders))
     shown = shown + 1
   end

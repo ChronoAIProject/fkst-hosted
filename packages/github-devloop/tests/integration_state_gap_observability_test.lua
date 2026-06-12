@@ -174,7 +174,45 @@ return {
     t.is_true(logs:find("gap_seconds=3000", 1, true) ~= nil)
     t.is_true(logs:find("budget_seconds=2700", 1, true) ~= nil)
     t.is_true(logs:find("budget_status=over-budget", 1, true) ~= nil)
+    t.is_true(logs:find("wait_class=unattributed", 1, true) ~= nil)
     t.is_true(logs:find("ready->blocked", 1, true) == nil)
+  end,
+
+  test_attributes_dependency_gate_wait_from_trusted_marker_stream = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
+      render_comment(core.dependency_wait_marker(proposal_id, "v1", { 7 }), "fkst-test-bot", "2026-06-03T01:05:00Z"),
+      render_comment(core.dependency_wait_marker(proposal_id, "v1", { 8 }), "mallory", "2026-06-03T01:06:00Z"),
+      render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:50:00Z"),
+    })
+
+    local logs = table.concat(gap_logs(), "\n")
+
+    t.is_true(logs:find("gap_edge=ready->implementing", 1, true) ~= nil)
+    t.is_true(logs:find("wait_class=dependency-gate", 1, true) ~= nil)
+    t.is_true(logs:find("classes dependency-gate 1", 1, true) ~= nil)
+  end,
+
+  test_attributes_codex_runtime_from_work_card_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    mock_env()
+    mock_all_issue_lists({ 42 })
+    mock_pr_list({})
+    mock_issue_view({
+      render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
+      render_comment(core.work_card_marker(proposal_id), "fkst-test-bot", "2026-06-03T01:02:00Z"),
+      render_comment(core.state_marker(proposal_id, "pr-open", "v1"), "fkst-test-bot", "2026-06-03T01:20:00Z"),
+    })
+
+    local logs = table.concat(gap_logs(), "\n")
+
+    t.is_true(logs:find("gap_edge=implementing->pr-open", 1, true) ~= nil)
+    t.is_true(logs:find("wait_class=codex-runtime", 1, true) ~= nil)
+    t.is_true(logs:find("classes codex-runtime 1", 1, true) ~= nil)
   end,
 
   test_dashboard_renders_p50_p95_max_and_worst_offenders = function()
@@ -195,7 +233,7 @@ return {
     local logs = table.concat(gap_logs(), "\n")
 
     t.is_true(logs:find("## State-gap latency", 1, true) ~= nil)
-    t.is_true(logs:find("ready->implementing: count 2, P50 10m 0s, P95 50m 0s, max 50m 0s, budget 45m 0s, near 0, over 1", 1, true) ~= nil)
+    t.is_true(logs:find("ready->implementing: count 2, P50 10m 0s, P95 50m 0s, max 50m 0s, budget 45m 0s, near 0, over 1, classes unattributed 2", 1, true) ~= nil)
     t.is_true(logs:find("worst #42 50m 0s, #43 10m 0s", 1, true) ~= nil)
   end,
 
