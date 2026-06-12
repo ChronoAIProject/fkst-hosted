@@ -18,6 +18,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
   local label_request = core.build_result_label_request(repo, issue_number, reached)
   local dependency_comment_request = nil
   local dependency_label_request = nil
+  local dependency_release_comment_request = nil
   if not gate.ok then
     local version = tostring(reached.dedup_key)
     local marker = gate.kind == "cycle"
@@ -42,6 +43,15 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       core._dedup_key({ "dependency", "label", "hold", tostring(reached.proposal_id), version, tostring(gate.kind) }),
       reached.source_ref
     )
+  elseif core.dependency_gate_has_notes(gate) then
+    dependency_release_comment_request = core.build_dependency_release_comment_request(
+      repo,
+      issue_number,
+      reached.proposal_id,
+      tostring(reached.dedup_key),
+      gate,
+      reached.source_ref
+    )
   end
   table.insert(label_request.remove_labels, core._blocked_on_dependency_label)
 
@@ -53,6 +63,9 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
     table.insert(raised, "github-proxy.github_issue_label_request")
   end
   if gate.ok then
+    if dependency_release_comment_request ~= nil then
+      table.insert(raised, "github-proxy.github_issue_comment_request")
+    end
     table.insert(raised, "devloop_ready")
   else
     if dependency_comment_request ~= nil then
@@ -79,6 +92,9 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", dependency_label_request)
     end
     return
+  end
+  if dependency_release_comment_request ~= nil then
+    core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_release_comment_request)
   end
   core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready", reason, "result effects complete or recoverable")
   core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(reached))
@@ -136,7 +152,11 @@ function pipeline(event)
           reached,
           current,
           state,
-          core.dependency_gate(repo, issue_number),
+          core.dependency_gate(repo, issue_number, {
+            proposal_id = reached.proposal_id,
+            version = reached.dedup_key,
+            comments = current.comments,
+          }),
           "applied(result effects incomplete)"
         )
         return
@@ -150,7 +170,11 @@ function pipeline(event)
     end
     core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, reached.dedup_key), "consensus decision=" .. tostring(reached.decision))
 
-    local gate = core.dependency_gate(repo, issue_number)
+    local gate = core.dependency_gate(repo, issue_number, {
+      proposal_id = reached.proposal_id,
+      version = reached.dedup_key,
+      comments = current.comments,
+    })
     raise_result_effects(repo, issue_number, reached, current, state, gate, core.cas_outcome(state, transition, reached.dedup_key))
   end)
 end

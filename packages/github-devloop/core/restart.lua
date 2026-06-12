@@ -41,6 +41,8 @@ local marker_fields = {
     angle_digests = true,
   },
   ["dependency-release"] = { proposal = true, version = true },
+  ["dependency-void"] = { proposal = true, version = true, blocker = true, reason = true },
+  ["dependency-waiver"] = { proposal = true, version = true, blocker = true, reason = true },
   implementing = { proposal = true, dedup = true, branch = true, head_sha = true, base_branch = true, base_sha = true },
   ["pr-link"] = { proposal = true, pr = true, branch = true, impl_version = true, base_branch = true },
   ["review-result"] = {
