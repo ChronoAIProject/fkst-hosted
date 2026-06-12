@@ -322,7 +322,7 @@ function pipeline(event)
   local repo = entity.repo
   local issue_number = entity.issue_number
 
-  local lock_key = core.transition_lock_key(merge_ready.proposal_id)
+  local lock_key = core.merge_lane_lock_key(repo)
   if lock_key == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return
@@ -419,6 +419,13 @@ function pipeline(event)
         return
       end
       core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(" .. pr_reason .. ")", "write-time PR fact failed")
+      return
+    end
+
+    local queue_ok, queue_reason = core.merge_queue_allows_event(repo, branches.integration, merge_ready, current_pr)
+    if not queue_ok then
+      core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "hold-merge-queue", queue_reason)
+      log_gate(merge_ready, "dry-run", queue_reason)
       return
     end
 
