@@ -441,12 +441,31 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("def456", branch)
 
-    local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"))
+    local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"), "devloop_ready_session")
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
     assert_open_pr_kickoff(result.raises, event, branch, "def456")
     t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_implement_replay_with_ready_hand_off_requires_visible_marker = function()
+    local event = ready()
+    event.ready_hand_off = {
+      kind = "own-ready-state-marker",
+      proposal_id = event.proposal_id,
+      state = "ready",
+      version = event.dedup_key,
+      stage_rank = core.stage_rank("ready"),
+      effects = "result-marker,ready-label,devloop-ready",
+    }
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+
+    local result = run_implement(event, opts("implement-replay-hand-off-marker-pending"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git -C"), 0)
   end,
 
   test_implement_replay_without_ready_hand_off_requires_visible_marker = function()

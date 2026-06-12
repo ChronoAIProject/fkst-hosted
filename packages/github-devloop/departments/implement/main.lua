@@ -3,7 +3,8 @@ local core = require("core")
 local M = {}
 
 M.spec = {
-  consumes = { "devloop_ready" },
+  consumes = { "devloop_ready", "devloop_ready_session" },
+  ephemeral = { "devloop_ready_session" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
@@ -169,8 +170,9 @@ function pipeline(event)
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
     end
+    local accepts_ready_hand_off = event.queue == "devloop_ready_session"
     if transition == "pending" then
-      if retry_failure == nil and ready.impl_retry_attempt == nil and core.is_ready_hand_off(ready.ready_hand_off, ready) then
+      if accepts_ready_hand_off and retry_failure == nil and ready.impl_retry_attempt == nil and core.is_ready_hand_off(ready.ready_hand_off, ready) then
         core.log_cas_decision("implement", ready.proposal_id, {
           state = "ready",
           version = ready.dedup_key,
