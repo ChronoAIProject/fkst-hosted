@@ -92,7 +92,28 @@ local function mock_decompose_child_issue_list(event, indexes)
   })
 end
 
-local function live_308_decompose_reconcile_stream(event)
+local function with_non_marker_comments(comments, id_prefix)
+  local copied = {
+    {
+      id = id_prefix .. "-leading",
+      author_login = "neutral-observer",
+      created_at = "2026-06-12T00:00:00Z",
+      body = "Neutralized production comment without fkst markers.",
+    },
+  }
+  for _, comment in ipairs(comments or {}) do
+    table.insert(copied, comment)
+  end
+  table.insert(copied, {
+    id = id_prefix .. "-trailing",
+    author_login = "neutral-observer",
+    created_at = "2026-06-12T04:00:00Z",
+    body = "Another neutralized production comment without replay markers.",
+  })
+  return copied
+end
+
+local function live_308_decompose_reconcile_marker_substream(event)
   local repo = "ChronoAIProject/fkst-packages"
   local issue_number = "285"
   local pr_number = 308
@@ -114,6 +135,8 @@ local function live_308_decompose_reconcile_stream(event)
     head_sha = head_sha,
     updated_at = "2026-06-12T01:10:51Z",
     observed_at = "2026-06-12T04:15:40Z",
+    -- Runtime logs preserve the trusted marker facts but not complete comment bodies.
+    -- Replay consumes bot-authored fkst markers only; non-marker stream noise is checked below.
     comments = {
       'github-devloop implementation PR for issue #285\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/285" issue="285" branch="' .. branch .. '" impl_version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-11T16-31-07Z" base_branch="dev" -->',
       'github-devloop PR is ready for review\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/285" state="reviewing" version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/285/2026-06-11T16-31-07Z/loop/1/fix/1/fix/2/fix/3/fix/4/fix/5/review-meta-action/1/review-loop/1/rereview/1/66a6dd47225a9564bed391119e2ffbf5e778ac68/fix/6/review-meta-action/2/review-loop/2/rereview/2/66a6dd47225a9564bed391119e2ffbf5e778ac68/fix/7/fix/8/fix/9/fix/10/fix/11/fix/12/fix/13/fix/14/review-loop/3/rereview/3" stage_rank="675" -->',
@@ -123,7 +146,7 @@ local function live_308_decompose_reconcile_stream(event)
   }
 end
 
-local function live_305_merge_gate_fix_stream(event)
+local function live_305_merge_gate_fix_marker_substream(event)
   local repo = "ChronoAIProject/fkst-packages"
   local issue_number = "300"
   local pr_number = 305
@@ -151,6 +174,8 @@ local function live_305_merge_gate_fix_stream(event)
     head_sha = head_sha,
     updated_at = "2026-06-11T23:20:09Z",
     observed_at = "2026-06-12T04:15:39Z",
+    -- Runtime logs preserve the trusted marker facts but not complete comment bodies.
+    -- Replay consumes bot-authored fkst markers only; non-marker stream noise is checked below.
     pr_comments = {
       'github-devloop implementation PR for issue #300\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" issue="300" branch="' .. branch .. '" impl_version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/300/2026-06-11T18-15-40Z" base_branch="dev" -->',
       'github-devloop PR is ready for review\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" state="reviewing" version="' .. version .. '" stage_rank="675" -->',
@@ -164,6 +189,27 @@ local function live_305_merge_gate_fix_stream(event)
     review_proposal = review_proposal,
     review_dedup = review_dedup,
   }
+end
+
+local function assert_same_decompose_raise(left, right)
+  t.eq(left.payload.schema, right.payload.schema)
+  t.eq(left.payload.proposal_id, right.payload.proposal_id)
+  t.eq(left.payload.version, right.payload.version)
+  t.eq(left.payload.pr_number, right.payload.pr_number)
+  t.eq(left.payload.review_proposal_id, right.payload.review_proposal_id)
+  t.eq(left.payload.review_dedup_key, right.payload.review_dedup_key)
+  t.eq(left.payload.head_sha, right.payload.head_sha)
+  t.eq(left.payload.source_ref.ref, right.payload.source_ref.ref)
+end
+
+local function assert_same_fixing_raise(left, right)
+  t.eq(left.payload.schema, right.payload.schema)
+  t.eq(left.payload.proposal_id, right.payload.proposal_id)
+  t.eq(left.payload.version, right.payload.version)
+  t.eq(left.payload.review_proposal_id, right.payload.review_proposal_id)
+  t.eq(left.payload.review_dedup_key, right.payload.review_dedup_key)
+  t.eq(left.payload.reviewed_head_sha, right.payload.reviewed_head_sha)
+  t.eq(left.payload.source_ref.ref, right.payload.source_ref.ref)
 end
 
 local function run_observe_pr_direct(run_opts)
@@ -496,12 +542,12 @@ return {
     t.eq(decompose.payload.source_ref.ref, "owner/repo#pr/7")
   end,
 
-  test_observe_pr_live_308_decompose_reconcile_replay_does_not_require_fix_feedback = function()
+  test_observe_pr_live_308_decompose_reconcile_marker_substream_replay_does_not_require_fix_feedback = function()
     local event = core.build_devloop_decompose_payload(h.fix_reconcile())
     event.review_proposal_id = nil
     event.review_dedup_key = nil
     event.head_sha = nil
-    local fixture = live_308_decompose_reconcile_stream(event)
+    local fixture = live_308_decompose_reconcile_marker_substream(event)
     mock_bot_env()
     mock_pr_origin(fixture.comments, fixture.branch, fixture.head_sha)
     mock_issue_result_view({ "fkst-dev:blocked" }, {
@@ -528,11 +574,30 @@ return {
     t.eq(decompose.payload.review_dedup_key, nil)
     t.eq(decompose.payload.head_sha, nil)
     t.eq(decompose.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/308")
+
+    mock_bot_env()
+    mock_pr_origin(with_non_marker_comments(fixture.comments, "pr-308"), fixture.branch, fixture.head_sha)
+    mock_issue_result_view({ "fkst-dev:blocked" }, {
+      core.state_marker(event.proposal_id, "blocked", event.version),
+    })
+    mock_decompose_child_issue_list(event, {})
+
+    local noisy = run_observe_pr_payload({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = fixture.repo,
+      number = fixture.pr_number,
+      dedup_key = "ChronoAIProject/fkst-packages#pr#308@2026-06-12T04:15:40Z/noisy",
+      source_ref = fixture.source_ref,
+    }, opts("observe-pr-live-308-decompose-reconcile-replay-noisy"))
+
+    t.eq(noisy.exit_code, 0)
+    assert_same_decompose_raise(decompose, find_raise(noisy.raises, "devloop_decompose"))
   end,
 
-  test_observe_pr_live_305_merge_gate_fixing_replay_reaches_issue_fixing_state = function()
+  test_observe_pr_live_305_merge_gate_marker_substream_replay_reaches_issue_fixing_state = function()
     local event = merge_ready()
-    local fixture = live_305_merge_gate_fix_stream(event)
+    local fixture = live_305_merge_gate_fix_marker_substream(event)
     mock_bot_env()
     mock_pr_origin(fixture.pr_comments, fixture.branch, fixture.head_sha)
     mock_issue_result_view({ "fkst-dev:fixing" }, fixture.issue_comments)
@@ -554,5 +619,21 @@ return {
     t.eq(fixing_raise.payload.review_dedup_key, fixture.review_dedup)
     t.eq(fixing_raise.payload.reviewed_head_sha, event.reviewed_head_sha)
     t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
+
+    mock_bot_env()
+    mock_pr_origin(with_non_marker_comments(fixture.pr_comments, "pr-305"), fixture.branch, fixture.head_sha)
+    mock_issue_result_view({ "fkst-dev:fixing" }, with_non_marker_comments(fixture.issue_comments, "issue-300"))
+
+    local noisy = run_observe_pr_payload({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = fixture.repo,
+      number = fixture.pr_number,
+      dedup_key = "ChronoAIProject/fkst-packages#pr#305@2026-06-12T04:15:39Z/noisy",
+      source_ref = core.pr_source_ref(fixture.repo, fixture.pr_number),
+    }, opts("observe-pr-live-305-merge-gate-fixing-replay-noisy"))
+
+    t.eq(noisy.exit_code, 0)
+    assert_same_fixing_raise(fixing_raise, find_raise(noisy.raises, "devloop_fixing"))
   end,
 	}
