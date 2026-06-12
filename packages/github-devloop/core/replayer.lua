@@ -110,6 +110,80 @@ local function find_linked_pr(snapshot, pr_number)
   return nil
 end
 
+local function snapshot_from_issue_comments(repo, proposal_id, comments)
+  return M.linked_entity_snapshot(repo, proposal_id, comments or {})
+end
+
+local function has_required_fact(row, family)
+  for _, required in ipairs(row.required_facts or {}) do
+    if required.freshness ~= "marker-read" and required.freshness ~= "fetch-before-compare" then
+      error("github-devloop: invalid replay fact freshness")
+    end
+    if required.family == family then
+      return true
+    end
+  end
+  return false
+end
+
+local function require_marker_fact(facts, family)
+  if family == "state" then
+    return facts.state
+  end
+  if family == "pr-link" then
+    return facts.link or M.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
+  end
+  if family == "decomposed" then
+    local link = facts.link
+    if link == nil then
+      return nil
+    end
+    return M.decomposed_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, link.pr_number)
+  end
+  return marker_source(facts, family)
+end
+
+local function gather_required_facts(row, entity, state, provided)
+  local gathered = {}
+  for key, value in pairs(provided or {}) do
+    gathered[key] = value
+  end
+  gathered.issue = entity
+  gathered.state = state
+  gathered.proposal_id = gathered.proposal_id or marker_value({ state = state }, "state", "proposal")
+
+  if has_required_fact(row, "pr-head") and (type(gathered.snapshot) ~= "table" or gathered.snapshot.fresh ~= true) then
+    gathered.snapshot = snapshot_from_issue_comments(entity.repo, gathered.proposal_id, gathered.current and gathered.current.comments or {})
+  else
+    gathered.snapshot = gathered.snapshot or {
+      comments = gathered.current and gathered.current.comments or {},
+      prs = {},
+      state = state,
+    }
+  end
+  gathered.link = gathered.link or M.pr_link_fact(gathered.snapshot.comments, gathered.proposal_id)
+
+  if has_required_fact(row, "decompose-children") then
+    local child_list = M.gh_exec({ cmd = M.gh_issue_list_decompose_children_cmd(entity.repo, gathered.proposal_id), timeout = 30 })
+    if child_list.exit_code ~= 0 then
+      error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
+    end
+    gathered.decompose_children = M.parse_decompose_child_issue_list(child_list.stdout)
+  end
+
+  for _, required in ipairs(row.required_facts or {}) do
+    if required.freshness == "marker-read" then
+      gathered[required.family] = require_marker_fact(gathered, required.family)
+    end
+  end
+
+  return gathered
+end
+
+function M.gather_replay_required_facts(row, entity, state, facts)
+  return gather_required_facts(row, entity, state, facts or {})
+end
+
 local function log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
   M.log_cas_decision(dept, proposal_id, state, from_state, to_state, outcome, reason)
   return false
@@ -525,13 +599,9 @@ local function replay_blocked(dept, issue, state, row, facts)
   if decomposed == nil then
     return log_skip(dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
   end
-  local child_list = M.gh_exec({ cmd = M.gh_issue_list_decompose_children_cmd(issue.repo, proposal_id), timeout = 30 })
-  if child_list.exit_code ~= 0 then
-    error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
-  end
   local complete, completed_count = M.decompose_children_complete(
     facts.snapshot.comments,
-    M.parse_decompose_child_issue_list(child_list.stdout),
+    facts.decompose_children or {},
     proposal_id,
     decomposed.version,
     decomposed.pr_number,
@@ -575,17 +645,11 @@ function M.replay_from_table(dept, entity, state, table_row, facts)
   if type(state) ~= "table" or state.state ~= row.from_state then
     return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(state)", "current state does not match restart transition table row")
   end
-  for _, required in ipairs(row.required_facts or {}) do
-    if required.freshness ~= "marker-read" and required.freshness ~= "fetch-before-compare" then
-      error("github-devloop: invalid replay fact freshness")
-    end
-  end
   local replay = replayers[row.from_state]
   if replay == nil then
     return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(replayer)", "restart transition table row is not replayable by this department")
   end
-  local replay_facts = facts or {}
-  replay_facts.issue = entity
+  local replay_facts = gather_required_facts(row, entity, state, facts or {})
   return replay(dept, entity, state, row, replay_facts)
 end
 

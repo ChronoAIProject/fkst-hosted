@@ -159,6 +159,7 @@ function pipeline(event)
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
     local link = core.pr_link_fact(current.comments, proposal_id)
     local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
+    snapshot.fresh = true
     local state = snapshot.state
     if state.state ~= nil then
       if maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event.ts) then

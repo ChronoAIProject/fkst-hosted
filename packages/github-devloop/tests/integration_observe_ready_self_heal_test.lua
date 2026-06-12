@@ -402,6 +402,7 @@ return {
       },
     })
     mock_linked_pr_state({})
+    mock_decompose_child_issue_list(event, {})
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:blocked" } }), opts("observe-issue-decomposed-forged"))
 
