@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { PackagesView, default as PackagesScreen } from './packages-screen';
+import { PackagesView, default as PackagesScreen, deriveTopology } from './packages-screen';
 
 // MSW Server Setup
 const server = setupServer();
@@ -178,6 +178,93 @@ describe('PackagesScreen (F1 - List & Detail) Tests', () => {
       const pulseClass = ['animate', 'pulse'].join('-');
       const hasNoPulse = skeletons.every((s) => !s.classList.contains(pulseClass));
       expect(hasNoPulse).toBe(true);
+    });
+
+    describe('deriveTopology unit tests', () => {
+      it('correctly extracts departments and raisers from matching file paths', () => {
+        const pkg = {
+          name: 'test-pkg',
+          files: [
+            { path: 'departments/dept-a/main.lua', content: '' },
+            { path: 'departments/dept-b/main.lua', content: '' },
+            { path: 'raisers/raiser-x.lua', content: '' },
+            { path: 'raisers/raiser-y.lua', content: '' },
+          ],
+          composed_deps: [],
+          created_at: '',
+          updated_at: '',
+        };
+
+        const result = deriveTopology(pkg);
+        expect(result.departments).toEqual(['dept-a', 'dept-b']);
+        expect(result.raisers).toEqual(['raiser-x', 'raiser-y']);
+      });
+
+      it('ignores non-matching or nested file paths', () => {
+        const pkg = {
+          name: 'test-pkg',
+          files: [
+            { path: 'departments/dept-a/sub/main.lua', content: '' },
+            { path: 'departments/main.lua', content: '' },
+            { path: 'raisers/sub/raiser-x.lua', content: '' },
+            { path: 'other/main.lua', content: '' },
+          ],
+          composed_deps: [],
+          created_at: '',
+          updated_at: '',
+        };
+
+        const result = deriveTopology(pkg);
+        expect(result.departments).toEqual([]);
+        expect(result.raisers).toEqual([]);
+      });
+    });
+
+    describe('Topology Composed Graph & Read/Write Tri-Panel render tests', () => {
+      it('renders unknown wiring with note and tri-panel contents', () => {
+        render(
+          <PackagesView
+            isLoadingList={false}
+            listError={null}
+            packageNames={['my-pkg']}
+            selectedPkgName="my-pkg"
+            packagesData={{
+              'my-pkg': {
+                isLoading: false,
+                pkg: {
+                  name: 'my-pkg',
+                  files: [
+                    { path: 'departments/dept-z/main.lua', content: '' },
+                    { path: 'raisers/raiser-w.lua', content: '' },
+                  ],
+                  composed_deps: ['other-pkg'],
+                  created_at: '',
+                  updated_at: '',
+                },
+              },
+            }}
+          />
+        );
+
+        // Verify select dropdown header info
+        expect(screen.getByText(/nodes = departments · edges = queues/)).toBeInTheDocument();
+
+        // Verify derived raiser name and fallback note
+        expect(screen.getByText('raiser-w')).toBeInTheDocument();
+        expect(screen.getAllByText(/\(declared in Lua, not parsed\)/i).length).toBeGreaterThan(0);
+
+        // Verify derived department name and wiring unknown note
+        expect(screen.getAllByText('dept-z').length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/\(wiring declared in Lua; not parsed by this console\)/i).length).toBeGreaterThan(0);
+
+        // Verify tri-panel content
+        expect(screen.getByText('Read-only')).toBeInTheDocument();
+        expect(screen.getByText('FE manages')).toBeInTheDocument();
+        expect(screen.getByText('Business writes')).toBeInTheDocument();
+        expect(screen.getByText('runtime read-only')).toBeInTheDocument();
+        expect(screen.getByText('applied via restart')).toBeInTheDocument();
+        expect(screen.getByText('REAL posture required')).toBeInTheDocument();
+      });
     });
   });
 

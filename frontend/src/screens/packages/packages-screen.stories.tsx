@@ -13,6 +13,7 @@ export const Populated: Story = {
   args: {
     isLoadingList: false,
     listError: null,
+    selectedPkgName: 'github-devloop',
     packageNames: ['github-proxy', 'consensus', 'autochrono', 'github-devloop'],
     packagesData: {
       'github-proxy': {
@@ -49,7 +50,13 @@ export const Populated: Story = {
         isLoading: false,
         pkg: {
           name: 'github-devloop',
-          files: [],
+          files: [
+            { path: 'departments/intake_scan/main.lua', content: '' },
+            { path: 'departments/intake_judge/main.lua', content: '' },
+            { path: 'departments/implement/main.lua', content: '' },
+            { path: 'raisers/github_poll.lua', content: '' },
+            { path: 'raisers/intake_poll.lua', content: '' },
+          ],
           composed_deps: ['github-proxy', 'consensus'],
           created_at: '2026-06-13T00:00:00Z',
           updated_at: '2026-06-13T00:00:00Z',

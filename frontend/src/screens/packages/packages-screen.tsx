@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePackagesList } from '../../lib/hooks/usePackages';
 import { useQueries } from '@tanstack/react-query';
 import { getPackage } from '../../lib/api/client';
@@ -6,7 +6,57 @@ import { LevelsGrid, LevelsGridCell } from '../../components/layout/levels-grid'
 import { SectionHeading } from '../../components/layout/section-heading';
 import { HairlineList, HairlineRow } from '../../components/layout/hairline-list';
 import { PackageResponse } from '../../lib/api/types';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '../../components/primitives/select';
+import { TriPanel, TriPanelCell } from '../../components/layout/tri-panel';
 import { AddPackageModal } from './add-package-modal';
+
+export interface DerivedTopology {
+  departments: string[];
+  raisers: string[];
+}
+
+export function deriveTopology(pkg?: PackageResponse): DerivedTopology {
+  if (!pkg || !pkg.files) {
+    return { departments: [], raisers: [] };
+  }
+
+  const deptsSet = new Set<string>();
+  const raisersSet = new Set<string>();
+
+  pkg.files.forEach((f) => {
+    const deptMatch = f.path.match(/^departments\/([^/]+)\/main\.lua$/);
+    if (deptMatch && deptMatch[1]) {
+      deptsSet.add(deptMatch[1]);
+    }
+    const raiserMatch = f.path.match(/^raisers\/([^/]+)\.lua$/);
+    if (raiserMatch && raiserMatch[1]) {
+      raisersSet.add(raiserMatch[1]);
+    }
+  });
+
+  return {
+    departments: Array.from(deptsSet).sort(),
+    raisers: Array.from(raisersSet).sort(),
+  };
+}
+
+export function getTopologyEligiblePackages(
+  names: string[],
+  packagesData: Record<string, { pkg?: PackageResponse; isLoading?: boolean; error?: unknown }>
+): string[] {
+  return names.filter((name) => {
+    const detail = packagesData[name];
+    if (!detail || !detail.pkg) return false;
+    const { departments } = deriveTopology(detail.pkg);
+    return (detail.pkg.composed_deps && detail.pkg.composed_deps.length > 0) || departments.length > 0;
+  });
+}
 
 // Presentational View Component (for easy testing & stories)
 export interface PackagesViewProps {
@@ -15,6 +65,11 @@ export interface PackagesViewProps {
   packageNames?: string[];
   packagesData?: Record<string, { pkg?: PackageResponse; isLoading?: boolean; error?: unknown }>;
   onAddPackageClick?: () => void;
+  selectedPkgName?: string;
+  onSelectedPkgChange?: (name: string) => void;
+  sessionStatusCopy?: React.ReactNode;
+  isApplyDisabled?: boolean;
+  onApplyClick?: () => void;
 }
 
 export function PackagesView({
@@ -23,6 +78,11 @@ export function PackagesView({
   packageNames = [],
   packagesData = {},
   onAddPackageClick,
+  selectedPkgName = '',
+  onSelectedPkgChange,
+  sessionStatusCopy,
+  isApplyDisabled = true,
+  onApplyClick,
 }: PackagesViewProps) {
   // Compute flat vs composed counts only if ALL details are resolved
   const allResolved =
@@ -45,6 +105,14 @@ export function PackagesView({
       }
     });
   }
+
+  // Derive list of packages with composed_deps or departments
+  const topologyEligiblePackages = getTopologyEligiblePackages(packageNames, packagesData);
+
+  // Selected package's derived raisers and departments
+  const selectedPkgDetail = selectedPkgName ? packagesData[selectedPkgName]?.pkg : undefined;
+  const { departments: derivedDepts, raisers: derivedRaisers } = deriveTopology(selectedPkgDetail);
+  const selectedPkgComposedDeps = selectedPkgDetail?.composed_deps || [];
 
   return (
     <div className="flex flex-col gap-8 min-w-0">
@@ -138,9 +206,19 @@ export function PackagesView({
             <span className="font-mono text-[11px] text-ghost leading-normal max-[600px]:w-full">
               manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its composed_deps) — changing the set = create a new package revision (create-only store), then cycle the session
             </span>
+            {sessionStatusCopy && (
+              <span className="text-[12px] font-mono text-ghost select-text mr-2">
+                {sessionStatusCopy}
+              </span>
+            )}
             <button
-              disabled
-              className="text-[12.5px] font-semibold text-amber-ink/50 bg-amber/50 border-0 rounded-control px-3.5 py-[7px] cursor-not-allowed transition-all flex-none"
+              disabled={isApplyDisabled}
+              onClick={onApplyClick}
+              className={`text-[12.5px] font-semibold rounded-control px-3.5 py-[7px] transition-all flex-none border-0 ${
+                isApplyDisabled
+                  ? 'text-amber-ink/50 bg-amber/50 cursor-not-allowed'
+                  : 'text-amber-ink bg-amber cursor-pointer hover:brightness-[106%]'
+              }`}
             >
               Apply changes · stop &amp; restart session
             </button>
@@ -185,6 +263,236 @@ export function PackagesView({
             })}
           </HairlineList>
         )}
+      </div>
+
+      {/* COMPOSED GRAPH / TOPOLOGY SECTION */}
+      <div>
+        <SectionHeading count="derived from file paths · scanned at startup">
+          Composed graph · topology
+        </SectionHeading>
+
+        {/* TOPOLOGY VIEW CONTAINER */}
+        <div className="mt-4 border border-line rounded-panel overflow-hidden bg-raise">
+          {/* TOPBAR / SELECTOR */}
+          <div className="flex items-center gap-2.5 flex-wrap p-[13px_20px] border-b border-line font-mono text-[11.5px] text-ghost">
+            <span>active</span>
+            {topologyEligiblePackages.length > 0 ? (
+              <Select
+                value={selectedPkgName}
+                onValueChange={onSelectedPkgChange}
+              >
+                <SelectTrigger
+                  aria-label="Active package"
+                  className="font-mono text-[11.5px] text-amber border-0 bg-transparent p-0 hover:text-amber/80 h-auto"
+                >
+                  <SelectValue placeholder="Select package" />
+                </SelectTrigger>
+                <SelectContent>
+                  {topologyEligiblePackages.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="text-dim">none</span>
+            )}
+            <span>· nodes = departments · edges = queues</span>
+            
+            <span className="min-[981px]:ml-auto flex gap-4 flex-wrap">
+              <span><b>amber</b> queue = cross-package</span>
+              <span><b>green</b> = terminal</span>
+              <span><b>codex</b> = one exec / event</span>
+            </span>
+          </div>
+
+          {/* SOURCES band */}
+          <div className="p-[16px_20px] border-b border-line bg-raise-2/30">
+            <div className="font-mono font-semibold text-[10px] tracking-[0.13em] uppercase text-ghost mb-3">
+              Sources · raisers · cron —
+            </div>
+            {derivedRaisers.length > 0 ? (
+              <div className="grid grid-cols-1 min-[601px]:grid-cols-2 min-[1081px]:grid-cols-4 gap-2.5">
+                {derivedRaisers.map((raiser) => (
+                  <div
+                    key={raiser}
+                    className="min-w-0 border border-line rounded-card p-[11px_13px] bg-raise"
+                  >
+                    <div className="font-mono text-[12px] text-fg break-all">
+                      {raiser}
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 mt-2 font-mono text-[10.5px] text-faint">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber flex-none" />
+                      cadence — <span className="text-[9.5px] text-ghost normal-case">(declared in Lua, not parsed)</span>
+                    </div>
+                    <div className="font-mono text-[10.5px] text-ghost mt-1.5 break-all">
+                      → unknown <span className="text-[9.5px] text-ghost normal-case">(not parsed)</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[12.5px] text-dim font-mono italic">
+                No raisers derived.
+              </div>
+            )}
+          </div>
+
+          {/* PIPELINE / DEPARTMENTS */}
+          <div className="font-mono font-semibold text-[10px] tracking-[0.13em] uppercase text-ghost p-[14px_20px_4px] flex items-center justify-between flex-wrap gap-2">
+            <span>Departments · pipeline order · consumes → produces</span>
+            <span className="normal-case font-normal text-ghost italic select-none">
+              (wiring declared in Lua; not parsed by this console)
+            </span>
+          </div>
+          <div className="p-[6px_20px_18px] flex flex-col">
+            {derivedDepts.length > 0 ? (
+              derivedDepts.map((dept) => (
+                <div
+                  key={dept}
+                  className="grid grid-cols-1 min-[781px]:grid-cols-[140px_minmax(0,1fr)_auto] min-[981px]:grid-cols-[170px_minmax(0,1fr)_auto] gap-3.5 items-start py-[13px] border-t border-line/60 first:border-t-0"
+                >
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <span className="font-mono text-[12.5px] text-fg break-all">
+                      {dept}
+                    </span>
+                    <span className="font-mono font-semibold text-[9.5px] tracking-[0.04em] uppercase text-gold w-max">
+                      wiring unknown
+                    </span>
+                  </div>
+                  
+                  <div className="min-w-0 flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className="font-mono text-[10px] text-ghost w-[62px] flex-none tracking-[0.04em] uppercase">
+                        consumes
+                      </span>
+                      <span className="font-mono text-[11px] text-dim px-2 py-0.5 rounded-[6px] border border-line bg-raise-2 whitespace-nowrap select-none max-w-full overflow-hidden text-ellipsis">
+                        unknown
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className="font-mono text-[10px] text-ghost w-[62px] flex-none tracking-[0.04em] uppercase">
+                        produces
+                      </span>
+                      <span className="font-mono text-[11px] text-dim px-2 py-0.5 rounded-[6px] border border-line bg-raise-2 whitespace-nowrap select-none max-w-full overflow-hidden text-ellipsis">
+                        unknown
+                      </span>
+                    </div>
+                  </div>
+
+                  <span className="font-mono text-[10.5px] text-ghost px-[9px] py-[3px] rounded-[6px] border border-line whitespace-nowrap select-none w-max max-[780px]:mt-2">
+                    unknown
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="text-[12.5px] text-dim font-mono italic py-2">
+                No departments derived.
+              </div>
+            )}
+          </div>
+
+          {/* FOOTNOTE */}
+          <div className="p-[13px_20px] border-t border-line font-mono text-[11.5px] text-ghost leading-relaxed select-none">
+            {selectedPkgName && (
+              <div className="mb-1 text-fg font-medium">
+                {selectedPkgName}
+                {selectedPkgComposedDeps.length > 0 ? ` + ${selectedPkgComposedDeps.join(' + ')}` : ''}
+                {' → one composed graph'}
+              </div>
+            )}
+            <div>
+              edges are queues when declared by Lua; queue wiring is parsed only by the engine at session start — not exposed by the v1 API
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* READ / WRITE BOUNDARY SECTION */}
+      <div>
+        <SectionHeading count="the non-negotiable — what is read-only, what the FE manages, where writes land">
+          Read / write boundary
+        </SectionHeading>
+
+        <TriPanel className="mt-4">
+          <TriPanelCell
+            dotClassName="bg-faint"
+            header="Read-only"
+            title="Package source tree"
+            body={
+              <>
+                The loaded Lua is{' '}
+                <b className="text-fg font-medium">read-only at runtime</b> —
+                even to the engine. Departments have no lifecycle hooks, no
+                shared memory, no persistent state. The graph is scanned{' '}
+                <code className="font-mono text-[11.5px] text-faint">once</code>{' '}
+                at startup.
+              </>
+            }
+            tagSlot={
+              <span className="font-mono text-[11px] px-[9px] py-[3px] rounded-[7px] border border-line-2 text-faint select-none">
+                runtime read-only
+              </span>
+            }
+          />
+          <TriPanelCell
+            dotClassName="bg-amber"
+            header="FE manages"
+            title="Which packages load · topology · posture"
+            body={
+              <>
+                This console sets the package{' '}
+                <b className="text-fg font-medium">set</b>, the composed
+                topology, and the global posture. Changes are{' '}
+                <b className="text-fg font-medium">config</b>, applied on the
+                next supervise{' '}
+                <code className="font-mono text-[11.5px] text-faint">restart</code>{' '}
+                — never a live source edit, never per-goal.
+              </>
+            }
+            tagSlot={
+              <span
+                style={{ borderColor: 'color-mix(in oklab, var(--amber) 35%, var(--line))' }}
+                className="font-mono text-[11px] px-[9px] py-[3px] rounded-[7px] border text-amber select-none"
+              >
+                applied via restart
+              </span>
+            }
+          />
+          <TriPanelCell
+            dotClassName="bg-red"
+            header="Business writes"
+            title="GitHub only · under REAL posture"
+            body={
+              <>
+                Issues, PRs, comments, merges land on{' '}
+                <b className="text-fg font-medium">GitHub</b> — only when{' '}
+                <code className="font-mono text-[11.5px] text-faint">FKST_GITHUB_WRITE</code>{' '}
+                is REAL (global, never per-goal). The redb durable-delivery
+                transport is{' '}
+                <b className="text-fg font-medium">engine-internal</b>, not a
+                business fact store.
+              </>
+            }
+            tagSlot={
+              <span
+                style={{ borderColor: 'color-mix(in oklab, var(--red) 40%, var(--line))' }}
+                className="font-mono text-[11px] px-[9px] py-[3px] rounded-[7px] border text-red select-none"
+              >
+                REAL posture required
+              </span>
+            }
+          />
+        </TriPanel>
+
+        {/* FOOTER */}
+        <div className="mt-8 pt-3.5 border-t border-line flex gap-6 font-mono text-[11px] text-ghost flex-wrap select-none">
+          <span>package set &amp; topology <b>poll-derived</b></span>
+          <span>the graph is parsed by the hosted backend from the <b>loaded package roots</b></span>
+          <span>scan-once at session start · changes apply on <span className="text-gold">session restart</span> · session: pending → validating → running → stopping → stopped / failed</span>
+          <span>state as of <b>unknown — not exposed by the v1 API</b></span>
+        </div>
       </div>
     </div>
   );
@@ -318,7 +626,6 @@ export function PackageRowSkeleton({ name }: { name?: string }) {
   );
 }
 
-// Default Screen Export
 export default function PackagesScreen() {
   const { data: names, isLoading: isLoadingList, error: listError } = usePackagesList();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -344,6 +651,17 @@ export default function PackagesScreen() {
     };
   });
 
+  // Derive list of packages with composed_deps or departments
+  const topologyEligiblePackages = getTopologyEligiblePackages(names || [], packagesData);
+
+  const [selectedPkgName, setSelectedPkgName] = useState<string>('');
+
+  useEffect(() => {
+    if (!selectedPkgName && topologyEligiblePackages.length > 0) {
+      setSelectedPkgName(topologyEligiblePackages[0] || '');
+    }
+  }, [topologyEligiblePackages, selectedPkgName]);
+
   return (
     <>
       <PackagesView
@@ -352,6 +670,8 @@ export default function PackagesScreen() {
         packageNames={names}
         packagesData={packagesData}
         onAddPackageClick={() => setIsAddModalOpen(true)}
+        selectedPkgName={selectedPkgName}
+        onSelectedPkgChange={setSelectedPkgName}
       />
       <AddPackageModal isOpen={isAddModalOpen} onOpenChange={setIsAddModalOpen} />
     </>
