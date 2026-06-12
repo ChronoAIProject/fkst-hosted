@@ -171,6 +171,20 @@ function pipeline(event)
       comment_reached.reflection_checkpoint = true
     end
     local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
+    local card_request = core.build_work_card_comment_request({
+      kind = "pr",
+      repo = origin.repo,
+      number = pr_number,
+    }, {
+      proposal_id = origin.proposal_id,
+      role = "review",
+      version = issue_version,
+      round = core.version_fix_round(issue_version),
+      started_at = event.ts or now(),
+      outcome = "decision: " .. tostring(effective_decision),
+      last_stage = reached.blocking_gap,
+      source_ref = pr_source_ref,
+    })
     local label_request = nil
     if origin.issue_number ~= nil then
       label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, comment_reached, core.issue_source_ref(origin.repo, origin.issue_number))
@@ -179,6 +193,9 @@ function pipeline(event)
     local raised = {
       "github-proxy.github_pr_comment_request",
     }
+    if core.write_mode() == "real" then
+      table.insert(raised, 1, "github-proxy.github_pr_comment_request")
+    end
     if label_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
@@ -212,6 +229,7 @@ function pipeline(event)
       table.insert(raised, "devloop_merge_ready")
     end
     core.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
+    core.log_work_card("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", card_request)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     if origin.issue_number ~= nil then
       core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)

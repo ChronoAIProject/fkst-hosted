@@ -441,15 +441,25 @@ local function count_calls(needle)
   return count
 end
 
-local function find_raise(raises, queue)
+local function is_work_card_raise(raised)
+  return raised ~= nil
+    and type(raised.payload) == "table"
+    and tostring(raised.payload.body or ""):find("fkst:github-devloop:work-card:v1", 1, true) ~= nil
+end
+
+local function find_raise(raises, queue, predicate)
   for _, raised in ipairs(raises or {}) do
-    if raised.queue == queue then
+    if raised.queue == queue
+      and (predicate ~= nil or not is_work_card_raise(raised))
+      and (predicate == nil or predicate(raised.payload, raised)) then
       return raised
     end
   end
   if queue == "github-proxy.github_issue_comment_request" then
     for _, raised in ipairs(raises or {}) do
-      if raised.queue == "github-proxy.github_pr_comment_request" then
+      if raised.queue == "github-proxy.github_pr_comment_request"
+        and (predicate ~= nil or not is_work_card_raise(raised))
+        and (predicate == nil or predicate(raised.payload, raised)) then
         return raised
       end
     end

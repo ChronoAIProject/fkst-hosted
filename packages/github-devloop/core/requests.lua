@@ -389,11 +389,16 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
   if #safe_reason > M._max_meta_reason_len then
     safe_reason = M.truncate_utf8(safe_reason, M._max_meta_reason_len)
   end
+  local detail = ""
+  if decision == "track" then
+    detail = "\n\n" .. M.comment_string("intake_tracking_ack")
+  end
   return {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
     body = M.comment_string("intake_decision_prefix") .. tostring(decision)
+      .. detail
       .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
       .. "\n\n" .. marker,
     dedup_key = M._dedup_key({
@@ -415,6 +420,23 @@ function M.build_intake_enabled_label_request(repo, issue_number, candidate)
     M._dedup_key({
       "intake",
       "label",
+      tostring(candidate.proposal_id),
+      tostring(candidate.dedup_key),
+    }),
+    candidate.source_ref
+  )
+end
+
+function M.build_intake_tracking_label_request(repo, issue_number, candidate)
+  return M.build_label_request(
+    repo,
+    issue_number,
+    { M._tracking_label },
+    {},
+    M._dedup_key({
+      "intake",
+      "label",
+      "tracking",
       tostring(candidate.proposal_id),
       tostring(candidate.dedup_key),
     }),

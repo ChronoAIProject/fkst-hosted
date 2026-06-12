@@ -109,16 +109,16 @@ return {
 
   test_observe_skips_not_opt_in_and_already_stateful = function()
     mock_issue_state({ "bug" })
-    local not_opted = run_observe(issue({ labels = { "bug" } }), opts("observe-no-label"))
-    t.eq(not_opted.exit_code, 0)
-    t.eq(#not_opted.raises, 0)
+    local not_opted = run_observe(issue({ labels = { "bug" } }), opts("observe-no-label")) t.eq(not_opted.exit_code, 0) t.eq(#not_opted.raises, 0)
+
+    mock_issue_state({ "fkst-dev:tracking" })
+    local tracking = run_observe(issue({ labels = { "fkst-dev:tracking" } }), opts("observe-tracking-label")) t.eq(tracking.exit_code, 0) t.eq(#tracking.raises, 0)
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" })
     local thinking = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:thinking" } }), opts("observe-thinking"))
-    t.eq(thinking.exit_code, 0)
-    t.eq(#thinking.raises, 1)
+    t.eq(thinking.exit_code, 0) t.eq(#thinking.raises, 1)
     t.eq(find_raise(thinking.raises, "consensus.proposal").payload.dedup_key, default_marker_version)
-    t.eq(count_calls("gh issue view"), 3)
+    t.eq(count_calls("gh issue view"), 4)
     t.eq(count_calls("--json body"), 0)
   end,
 

@@ -326,7 +326,7 @@ function M.merging_marker(issue_proposal_id, pr_number, version, head_sha)
 end
 
 function M.intake_decision_marker(issue_proposal_id, decision, dedup_key)
-  if decision ~= "enable" and decision ~= "decline" and decision ~= "escalate-to-class" then
+  if decision ~= "enable" and decision ~= "track" and decision ~= "decline" and decision ~= "escalate-to-class" then
     error("github-devloop: invalid intake decision")
   end
   if not M._is_bounded_string(dedup_key, M._max_dedup_len) then
@@ -349,7 +349,7 @@ function M.intake_decision_fact(comments, issue_proposal_id)
       local decision = marker:match('decision="([^"]+)"')
       local dedup = marker:match('dedup="([^"]*)"')
       if marker_issue == tostring(issue_proposal_id)
-        and (decision == "enable" or decision == "decline" or decision == "escalate-to-class")
+        and (decision == "enable" or decision == "track" or decision == "decline" or decision == "escalate-to-class")
         and M._is_bounded_string(dedup, M._max_dedup_len) then
         return {
           proposal_id = marker_issue,
