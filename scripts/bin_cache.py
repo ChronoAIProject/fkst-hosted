@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Final
+import sys
 
 
 _CACHE_PREFIX: Final = "fkst-substrate-bin"
@@ -58,3 +59,15 @@ def substrate_bin_cache_path(cache_root: str | Path, owner: str, repo: str, ref:
         encode_cache_component(ref),
         *_BIN_RELATIVE_PATH,
     )
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 5:
+        print("usage: bin_cache.py <cache-root> <owner> <repo> <ref>", file=sys.stderr)
+        return 2
+    print(substrate_bin_cache_path(argv[1], argv[2], argv[3], argv[4]))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
