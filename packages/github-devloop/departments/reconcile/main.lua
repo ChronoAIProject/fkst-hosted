@@ -50,7 +50,7 @@ end
 local function pipeline_thinking(event)
   local reconcile = event.payload or {}
   if not core.is_supported_reconcile(reconcile) then
-    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "thinking", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -111,7 +111,7 @@ end
 local function pipeline_review(event)
   local reconcile = event.payload or {}
   if not core.is_supported_review_reconcile(reconcile) then
-    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -182,7 +182,7 @@ end
 local function pipeline_fix(event)
   local reconcile = event.payload or {}
   if not core.is_supported_fix_reconcile(reconcile) then
-    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -253,7 +253,7 @@ end
 local function pipeline_timeout(event)
   local reconcile = event.payload or {}
   if not core.is_supported_timeout_reconcile(reconcile) then
-    core.log_entry("reconcile", event, "unknown", reconcile.dedup_key)
+    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "timeout", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end

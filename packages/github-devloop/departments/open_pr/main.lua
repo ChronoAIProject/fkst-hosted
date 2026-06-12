@@ -41,7 +41,7 @@ function pipeline(event)
   local input = open_pr_context(event)
   local raw = event.payload or {}
   if input == nil then
-    core.log_entry("open_pr", event, "unknown", raw.dedup_key)
+    core.log_entry("open_pr", event, "unknown", core.payload_field(raw, "dedup_key"))
     core.log_cas_decision("open_pr", "unknown", { state = nil, version = nil }, "implementing", "pr-open", "skip-foreign(payload)", "unsupported event payload")
     return
   end

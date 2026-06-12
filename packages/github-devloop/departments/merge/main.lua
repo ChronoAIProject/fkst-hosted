@@ -308,7 +308,7 @@ end
 function pipeline(event)
   local merge_ready = event.payload or {}
   if not core.is_supported_merge_ready(merge_ready) then
-    core.log_entry("merge", event, "unknown", merge_ready.dedup_key)
+    core.log_entry("merge", event, "unknown", core.payload_field(merge_ready, "dedup_key"))
     core.log_cas_decision("merge", "unknown", { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(payload)", "unsupported event payload")
     return
   end
