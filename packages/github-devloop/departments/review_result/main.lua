@@ -225,6 +225,7 @@ function pipeline(event)
         review_proposal_id = reached.proposal_id,
         review_dedup_key = reached.dedup_key,
         reviewed_head_sha = reviewed_head_sha,
+        current_head_sha = current_pr.head_sha,
       }, pr_source_ref)
       table.insert(raised, "devloop_merge_ready")
     end

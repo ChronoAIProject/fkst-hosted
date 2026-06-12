@@ -373,7 +373,7 @@ local transition_table = {
     budget = budget(45),
     on_timeout = timeout("devloop_merge_ready"),
     payload_builder = M.build_devloop_merge_ready_payload,
-    dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>",
+    dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>/<current_head>",
     required_facts = {
       fact("state", "marker-read"),
       fact("pr-link", "marker-read"),
@@ -411,7 +411,7 @@ local transition_table = {
     budget = budget(45),
     on_timeout = timeout("devloop_merge_ready"),
     payload_builder = M.build_devloop_merge_ready_payload,
-    dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>",
+    dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>/<current_head>",
     required_facts = {
       fact("state", "marker-read"),
       fact("merge-ready", "marker-read"),
