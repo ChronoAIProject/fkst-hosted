@@ -277,12 +277,31 @@ function M.build_devloop_fix_reconcile_payload(reject_ctx, issue_version)
   }
 end
 
+function M.build_devloop_timeout_reconcile_payload(row, state, proposal_id, source_ref, attempt)
+  return {
+    schema = "github-devloop.timeout-reconcile.v1",
+    proposal_id = proposal_id,
+    state = row.from_state,
+    issue_version = state.version,
+    round = attempt,
+    dedup_key = "timeout-reconcile:" .. tostring(state.version) .. "/timeout-reconcile/" .. tostring(row.from_state) .. "/" .. tostring(attempt),
+    source_ref = {
+      kind = source_ref.kind,
+      ref = source_ref.ref,
+    },
+  }
+end
+
 function M.review_reconcile_state_version(issue_version, round)
   return tostring(issue_version) .. "/review-loop/" .. tostring(round)
 end
 
 function M.fix_reconcile_state_version(issue_version)
   return tostring(issue_version)
+end
+
+function M.timeout_reconcile_state_version(issue_version, state_name, round)
+  return tostring(issue_version) .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(round)
 end
 
 function M.is_supported_review_reconcile(payload)
@@ -321,6 +340,25 @@ function M.is_supported_fix_reconcile(payload)
     and M._is_positive_pr_number(payload.pr_number)
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "fix-reconcile:" .. tostring(payload.issue_version)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
+function M.is_supported_timeout_reconcile(payload)
+  if type(payload) ~= "table" then
+    return false
+  end
+  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local row = M.restart_transition_row(payload.state)
+  return payload.schema == "github-devloop.timeout-reconcile.v1"
+    and repo ~= nil
+    and issue_number ~= nil
+    and row ~= nil
+    and row.terminal == false
+    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and valid_round(payload.round) ~= nil
+    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and tostring(payload.dedup_key) == "timeout-reconcile:" .. tostring(payload.issue_version) .. "/timeout-reconcile/" .. tostring(payload.state) .. "/" .. tostring(payload.round)
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
@@ -391,6 +429,23 @@ function M.fix_reconcile_marker(proposal_id, issue_version, action)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
     .. '" dedup="' .. safe_attr("fix-reconcile:" .. tostring(issue_version), M._max_dedup_len)
+    .. '" -->'
+end
+
+function M.timeout_reconcile_marker(proposal_id, issue_version, state_name, round, action)
+  local n = valid_round(round)
+  if n == nil then
+    error("github-devloop: invalid timeout reconcile round")
+  end
+  if action ~= "drop" then
+    error("github-devloop: invalid timeout reconcile action")
+  end
+  return '<!-- fkst:github-devloop:timeout-reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
+    .. '" version="' .. safe_attr(M.timeout_reconcile_state_version(issue_version, state_name, n), M._max_dedup_len)
+    .. '" state="' .. safe_attr(state_name, max_attr_len)
+    .. '" round="' .. tostring(n)
+    .. '" action="' .. safe_attr(action, max_attr_len)
+    .. '" dedup="' .. safe_attr("timeout-reconcile:" .. tostring(issue_version) .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(n), M._max_dedup_len)
     .. '" -->'
 end
 
@@ -517,6 +572,26 @@ function M.has_fix_reconcile_marker(comments, proposal_id, issue_version)
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == tostring(issue_version)
+        and valid_round(attr(marker, "round")) == n then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_timeout_reconcile_marker(comments, proposal_id, issue_version, state_name, round)
+  local n = valid_round(round)
+  if n == nil or type(comments) ~= "table" then
+    return false
+  end
+  local version = M.timeout_reconcile_state_version(issue_version, state_name, n)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if attr(marker, "proposal") == tostring(proposal_id)
+        and attr(marker, "version") == version
+        and attr(marker, "state") == tostring(state_name)
         and valid_round(attr(marker, "round")) == n then
         return true
       end
