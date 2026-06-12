@@ -25,6 +25,9 @@ pub const TOKEN_PATH: &str = "/oauth/token";
 /// Org list endpoint (caller's own bearer token).
 pub const ORGS_PATH: &str = "/api/v1/orgs";
 
+/// Users endpoint (service-account lookups).
+pub const USERS_PATH: &str = "/api/v1/users";
+
 /// GitHub credential-injection proxy path.
 ///
 /// **UNVERIFIED — confirm against NyxID main.** Kept in one constant so
@@ -477,6 +480,64 @@ impl NyxIdClient {
             .await
             .map_err(|e| http_err("github proxy", e))?;
         Ok(response)
+    }
+
+    /// Check whether a user exists in NyxID via service-account lookup.
+    /// Returns `Ok(true)` when the user is found, `Ok(false)` when not.
+    /// Uses `GET /api/v1/users/{user_id}` via the service token.
+    pub async fn user_exists(&self, user_id: &str) -> Result<bool, NyxIdError> {
+        let token = self.service_token().await?;
+        let url = format!("{}{USERS_PATH}/{user_id}", self.inner.base_url);
+        let response = self
+            .inner
+            .http
+            .get(&url)
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| http_err("user exists", e))?;
+
+        match response.status() {
+            s if s.is_success() => Ok(true),
+            reqwest::StatusCode::NOT_FOUND => Ok(false),
+            status => {
+                tracing::error!(
+                    user_id,
+                    status = %status,
+                    "nyxid user lookup failed"
+                );
+                Err(NyxIdError::Http(format!("user exists status {status}")))
+            }
+        }
+    }
+
+    /// Check whether an organization exists in NyxID via service-account lookup.
+    /// Returns `Ok(true)` when the org is found, `Ok(false)` when not.
+    /// Uses `GET /api/v1/orgs/{org_id}` via the service token.
+    pub async fn org_exists(&self, org_id: &str) -> Result<bool, NyxIdError> {
+        let token = self.service_token().await?;
+        let url = format!("{}{ORGS_PATH}/{org_id}", self.inner.base_url);
+        let response = self
+            .inner
+            .http
+            .get(&url)
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| http_err("org exists", e))?;
+
+        match response.status() {
+            s if s.is_success() => Ok(true),
+            reqwest::StatusCode::NOT_FOUND => Ok(false),
+            status => {
+                tracing::error!(
+                    org_id,
+                    status = %status,
+                    "nyxid org lookup failed"
+                );
+                Err(NyxIdError::Http(format!("org exists status {status}")))
+            }
+        }
     }
 }
 

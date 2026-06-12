@@ -10,6 +10,7 @@ pub mod archive;
 pub mod error;
 pub mod model;
 pub mod repository;
+pub mod shares;
 
 pub use archive::package_from_zip;
 pub use error::PackageError;
@@ -19,3 +20,4 @@ pub use model::{
     PACKAGES_COLLECTION,
 };
 pub use repository::PackageRepository;
+pub use shares::{GranteeKind, ShareDoc, ShareLevel, ShareRepo, PACKAGE_SHARES_COLLECTION};

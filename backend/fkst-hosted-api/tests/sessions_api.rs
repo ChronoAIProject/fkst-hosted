@@ -20,7 +20,7 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::models::{SessionDoc, SessionStatus};
-use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -117,11 +117,13 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
     };
 
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
     let sessions = SessionService::new(SessionRepo::new(&db), packages.clone(), engine);
     let router = build_router(AppState {
         config,
         db: db.clone(),
         packages,
+        shares,
         sessions: sessions.clone(),
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),

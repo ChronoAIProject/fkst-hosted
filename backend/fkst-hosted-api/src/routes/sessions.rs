@@ -132,21 +132,23 @@ async fn create(
             AppError::NotFound(format!("package not found: {}", request.package_name))
         })?;
 
-    // Authorize Write on the package.
-    let ownership = Ownership {
-        owner_user_id: package.owner_user_id.as_deref(),
-        org_id: package.org_id.as_deref(),
-    };
-    state
+    // Session create requires "use" level access (share-aware): owner, org
+    // writer, or use-level share grant. A read-level share grantee can see but
+    // not start sessions.
+    let can_use = state
         .authz
-        .authorize(
+        .can_use_package(
             &ctx,
-            ownership,
-            Action::Write,
-            "package",
             &request.package_name,
+            package.owner_user_id.as_deref(),
+            package.org_id.as_deref(),
         )
-        .await?;
+        .await;
+    if !can_use {
+        return Err(AppError::Forbidden(
+            "insufficient permissions: use-level access required".to_string(),
+        ));
+    }
 
     let session = state
         .sessions

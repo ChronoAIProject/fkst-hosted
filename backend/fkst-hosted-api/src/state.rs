@@ -5,7 +5,7 @@ use crate::authz::Authorizer;
 use crate::config::Config;
 use crate::db::Db;
 use crate::github_app::GithubAppTokens;
-use crate::packages::PackageRepository;
+use crate::packages::{PackageRepository, ShareRepo};
 use crate::sessions::SessionService;
 
 /// Clonable state shared across the router. Every member is cheap to clone
@@ -18,6 +18,10 @@ pub struct AppState {
     /// Repository over the `packages` collection (domain layer owned by the
     /// packages module); HTTP handlers go through this, never raw Mongo.
     pub packages: PackageRepository,
+    /// Repository over the `package_shares` collection (domain layer owned by
+    /// the packages module). Share-aware policy checks and the share HTTP
+    /// handlers go through this.
+    pub shares: ShareRepo,
     /// Single-pod session orchestration (sessions module); HTTP handlers go
     /// through this, never raw Mongo or the engine runner.
     pub sessions: SessionService,

@@ -1,13 +1,16 @@
-//! Package HTTP API: CRUD + zip archive upload for `/api/v1/packages`.
+//! Package HTTP API: CRUD + zip archive upload + sharing for `/api/v1/packages`.
 //!
 //! Endpoints:
 //! - `POST   /api/v1/packages`              — create (JSON)
-//! - `GET    /api/v1/packages`              — list names
+//! - `GET    /api/v1/packages`              — list names (supports `?filter=shared`)
 //! - `GET    /api/v1/packages/{name}`       — fetch one
 //! - `PUT    /api/v1/packages/{name}`       — update (JSON)
-//! - `DELETE /api/v1/packages/{name}`       — delete (204)
+//! - `DELETE /api/v1/packages/{name}`       — delete (204, cascades shares)
 //! - `POST   /api/v1/packages/{name}/archive`  — create from zip
 //! - `PUT    /api/v1/packages/{name}/archive`   — replace from zip
+//! - `POST   /api/v1/packages/{name}/shares`    — create share
+//! - `GET    /api/v1/packages/{name}/shares`    — list shares (manage only)
+//! - `DELETE /api/v1/packages/{name}/shares/{share_id}` — revoke share
 //!
 //! This is purely the web edge: wire DTOs, the body-size limit, and the
 //! status mapping. All authoritative validation (name rule, path-safety
@@ -22,9 +25,9 @@
 //! interaction occurs during update.
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
-use axum::routing::{get, put};
+use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use bson::doc;
 use serde::{Deserialize, Serialize};
@@ -34,7 +37,8 @@ use crate::authz::{Action, Ownership};
 use crate::distribution::active_status_bson;
 use crate::error::AppError;
 use crate::packages::{
-    is_valid_name, package_from_zip, NewPackage, Package, PackageFile, MAX_TOTAL_CONTENT_BYTES,
+    is_valid_name, package_from_zip, GranteeKind, NewPackage, Package, PackageFile, ShareDoc,
+    ShareLevel, MAX_TOTAL_CONTENT_BYTES,
 };
 use crate::routes::extract::AppJson;
 use crate::routes::rfc3339;
@@ -121,6 +125,53 @@ impl TryFrom<Package> for PackageResponse {
             updated_at,
         })
     }
+}
+
+/// Request body for `POST /api/v1/packages/{name}/shares`. Unknown fields
+/// are denied so client typos fail loudly.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateShareRequest {
+    pub grantee_kind: GranteeKind,
+    pub grantee_id: String,
+    pub level: ShareLevel,
+}
+
+/// Response body for share endpoints (mirrors `ShareDoc` with RFC3339
+/// `created_at`).
+#[derive(Debug, Serialize)]
+pub struct ShareView {
+    pub id: String,
+    pub package_name: String,
+    pub grantee_kind: GranteeKind,
+    pub grantee_id: String,
+    pub level: ShareLevel,
+    pub granted_by: String,
+    pub created_at: String,
+}
+
+impl TryFrom<ShareDoc> for ShareView {
+    type Error = AppError;
+
+    fn try_from(share: ShareDoc) -> Result<Self, Self::Error> {
+        Ok(ShareView {
+            id: share.id.to_string(),
+            package_name: share.package_name,
+            grantee_kind: share.grantee_kind,
+            grantee_id: share.grantee_id,
+            level: share.level,
+            granted_by: share.granted_by,
+            created_at: rfc3339(share.created_at)?,
+        })
+    }
+}
+
+/// Query parameters for `GET /api/v1/packages`.
+#[derive(Debug, Deserialize, Default)]
+pub struct ListQuery {
+    /// When `"shared"`, return package names shared with the caller instead
+    /// of the caller's visible packages.
+    pub filter: Option<String>,
 }
 
 // ---- Helpers ------------------------------------------------------------
@@ -256,19 +307,71 @@ async fn create(
 }
 
 /// `GET /api/v1/packages`: flat JSON array of names (repository order:
-/// ascending). Empty store answers `[]`. Filters to visible packages
-/// based on caller identity and org memberships.
+/// ascending). Empty store answers `[]`.
+///
+/// - Without `?filter`: returns visible packages (owned, org, legacy) plus
+///   packages shared with the caller.
+/// - With `?filter=shared`: returns only package names shared with the caller
+///   (deduped user + org grants, sorted ascending).
 async fn list(
     State(state): State<AppState>,
     ctx: AuthContext,
+    Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<String>>, AppError> {
     let org_ids = state.authz.visible_org_ids(&ctx).await?;
-    let names = state.packages.list_visible(&ctx.user_id, &org_ids).await?;
-    tracing::info!(count = names.len(), "packages listed");
-    Ok(Json(names))
+
+    if query.filter.as_deref() == Some("shared") {
+        let names = state
+            .shares
+            .shared_package_names(&ctx.user_id, &org_ids)
+            .await?;
+        tracing::info!(count = names.len(), "shared packages listed");
+        return Ok(Json(names));
+    }
+
+    // Default: visible packages (owned, org, legacy) plus shared-with-me.
+    let visible = state.packages.list_visible(&ctx.user_id, &org_ids).await?;
+    let shared = state
+        .shares
+        .shared_package_names(&ctx.user_id, &org_ids)
+        .await?;
+
+    // Merge and dedupe (both lists are sorted ascending).
+    let mut merged = Vec::with_capacity(visible.len() + shared.len());
+    let mut vi = 0usize;
+    let mut si = 0usize;
+    while vi < visible.len() && si < shared.len() {
+        match visible[vi].cmp(&shared[si]) {
+            std::cmp::Ordering::Less => {
+                merged.push(visible[vi].clone());
+                vi += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                merged.push(visible[vi].clone());
+                vi += 1;
+                si += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                merged.push(shared[si].clone());
+                si += 1;
+            }
+        }
+    }
+    while vi < visible.len() {
+        merged.push(visible[vi].clone());
+        vi += 1;
+    }
+    while si < shared.len() {
+        merged.push(shared[si].clone());
+        si += 1;
+    }
+
+    tracing::info!(count = merged.len(), "packages listed");
+    Ok(Json(merged))
 }
 
-/// `GET /api/v1/packages/{name}`: fetch one package or `404`.
+/// `GET /api/v1/packages/{name}`: fetch one package or `404`. Share-aware:
+/// a `read` or `use` level share grants read access to the grantee.
 async fn get_one(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -287,14 +390,20 @@ async fn get_one(
     }
     match state.packages.get(&name).await? {
         Some(package) => {
-            let ownership = Ownership {
-                owner_user_id: package.owner_user_id.as_deref(),
-                org_id: package.org_id.as_deref(),
-            };
-            state
+            // Share-aware read check: owner, org visibility, or share grant.
+            let can_read = state
                 .authz
-                .authorize(&ctx, ownership, Action::Read, "package", &name)
-                .await?;
+                .can_read_package(
+                    &ctx,
+                    &name,
+                    package.owner_user_id.as_deref(),
+                    package.org_id.as_deref(),
+                )
+                .await;
+            if !can_read {
+                // Anti-enumeration: same response as "not found".
+                return Err(AppError::NotFound(format!("package not found: {name}")));
+            }
             tracing::info!(name = %name, "package fetched");
             Ok(Json(PackageResponse::try_from(package)?))
         }
@@ -350,7 +459,9 @@ async fn update(
 /// `DELETE /api/v1/packages/{name}`: remove a package.
 ///
 /// Returns `409` when the package has an active session or a live lease.
-/// Requires manage permission on the package.
+/// Requires manage permission on the package. Cascades: removes all share
+/// rows for the package (best-effort; orphan rows are harmless because
+/// policy joins through the packages collection).
 async fn delete_one(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -381,6 +492,14 @@ async fn delete_one(
 
     let deleted = state.packages.delete(&name).await?;
     if deleted {
+        // Cascade: delete all shares for this package (best-effort).
+        if let Err(error) = state.shares.delete_for_package(&name).await {
+            tracing::warn!(
+                name = %name,
+                error = %error,
+                "failed to cascade-delete shares for package (orphan rows are harmless)"
+            );
+        }
         tracing::info!(name = %name, "package deleted");
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -467,6 +586,233 @@ async fn archive_replace(
     Ok(Json(PackageResponse::try_from(updated)?))
 }
 
+// ---- Share Handlers -------------------------------------------------------
+
+/// Helper: check if a MongoDB error is a duplicate key error. Used to detect
+/// share duplicates from the unique index.
+fn is_duplicate_key(err: &mongodb::error::Error) -> bool {
+    crate::packages::error::is_duplicate_key(err)
+}
+
+/// `POST /api/v1/packages/{name}/shares`: create a share grant.
+///
+/// Requires manage permission on the package. Validates:
+/// - User grantee: user must exist in NyxID.
+/// - Org grantee: org must exist AND the caller must be a member.
+/// - Self-share (grantee == owner) is rejected.
+/// - Duplicate (same package + grantee) returns 409.
+async fn create_share(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(name): Path<String>,
+    AppJson(body): AppJson<CreateShareRequest>,
+) -> Result<(StatusCode, Json<ShareView>), AppError> {
+    validate_path_name(&name)?;
+
+    // Fetch package for ownership check + self-share guard.
+    let package = state
+        .packages
+        .get(&name)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("package not found: {name}")))?;
+
+    let ownership = Ownership {
+        owner_user_id: package.owner_user_id.as_deref(),
+        org_id: package.org_id.as_deref(),
+    };
+    // All share operations require manage permission.
+    state
+        .authz
+        .authorize(&ctx, ownership, Action::Manage, "package", &name)
+        .await?;
+
+    // Self-share guard.
+    if body.grantee_kind == GranteeKind::User && body.grantee_id == ctx.user_id {
+        return Err(AppError::Validation(
+            "cannot share a package with yourself".to_string(),
+        ));
+    }
+
+    // Grantee validation.
+    match body.grantee_kind {
+        GranteeKind::User => {
+            // User must exist in NyxID.
+            let exists = match state.authz.nyxid() {
+                Some(client) => client
+                    .user_exists(&body.grantee_id)
+                    .await
+                    .map_err(|error| {
+                        tracing::error!(
+                            grantee_id = %body.grantee_id,
+                            error = %error,
+                            "nyxid user_exists lookup failed"
+                        );
+                        AppError::Unavailable("authorization service unavailable".to_string())
+                    })?,
+                None => {
+                    // Without NyxID, cannot validate user existence. Accept
+                    // the grant (open mode).
+                    true
+                }
+            };
+            if !exists {
+                return Err(AppError::Validation(format!(
+                    "user {} does not exist",
+                    body.grantee_id
+                )));
+            }
+        }
+        GranteeKind::Org => {
+            // Caller must be a member of the org.
+            let nyxid = state.authz.nyxid();
+            match nyxid {
+                Some(client) => {
+                    // Check org exists.
+                    let org_exists =
+                        client.org_exists(&body.grantee_id).await.map_err(|error| {
+                            tracing::error!(
+                                org_id = %body.grantee_id,
+                                error = %error,
+                                "nyxid org_exists lookup failed"
+                            );
+                            AppError::Unavailable("authorization service unavailable".to_string())
+                        })?;
+                    if !org_exists {
+                        return Err(AppError::Validation(format!(
+                            "organization {} does not exist",
+                            body.grantee_id
+                        )));
+                    }
+                    // Caller must be a member.
+                    let role = client
+                        .org_role(&body.grantee_id, &ctx.user_id)
+                        .await
+                        .map_err(|error| {
+                            tracing::error!(
+                                org_id = %body.grantee_id,
+                                user_id = %ctx.user_id,
+                                error = %error,
+                                "nyxid org_role lookup failed during share create"
+                            );
+                            AppError::Unavailable("authorization service unavailable".to_string())
+                        })?;
+                    if role.is_none() {
+                        return Err(AppError::Forbidden(
+                            "you are not a member of this organization".to_string(),
+                        ));
+                    }
+                }
+                None => {
+                    // Without NyxID, cannot validate org membership. Reject.
+                    return Err(AppError::Unavailable(
+                        "authorization service unavailable".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    let share = ShareDoc {
+        id: bson::Uuid::new(),
+        package_name: name.clone(),
+        grantee_kind: body.grantee_kind,
+        grantee_id: body.grantee_id,
+        level: body.level,
+        granted_by: ctx.user_id.clone(),
+        created_at: bson::DateTime::now(),
+    };
+
+    let created = state.shares.create(share).await.map_err(|error| {
+        if is_duplicate_key(&error) {
+            AppError::Conflict("share already exists for this grantee".to_string())
+        } else {
+            AppError::Mongo(error)
+        }
+    })?;
+
+    tracing::info!(
+        package = %name,
+        grantee_kind = ?created.grantee_kind,
+        grantee_id = %created.grantee_id,
+        level = ?created.level,
+        "share created"
+    );
+    Ok((StatusCode::CREATED, Json(ShareView::try_from(created)?)))
+}
+
+/// `GET /api/v1/packages/{name}/shares`: list all shares for a package.
+/// Requires manage permission on the package.
+async fn list_shares(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(name): Path<String>,
+) -> Result<Json<Vec<ShareView>>, AppError> {
+    validate_path_name(&name)?;
+
+    let package = state
+        .packages
+        .get(&name)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("package not found: {name}")))?;
+
+    let ownership = Ownership {
+        owner_user_id: package.owner_user_id.as_deref(),
+        org_id: package.org_id.as_deref(),
+    };
+    state
+        .authz
+        .authorize(&ctx, ownership, Action::Manage, "package", &name)
+        .await?;
+
+    let shares = state.shares.list_for_package(&name).await?;
+    let views: Vec<ShareView> = shares
+        .into_iter()
+        .map(ShareView::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Json(views))
+}
+
+/// `DELETE /api/v1/packages/{name}/shares/{share_id}`: revoke a share.
+/// Requires manage permission on the package. The share must belong to the
+/// named package (else 404).
+async fn delete_share(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path((name, share_id)): Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    validate_path_name(&name)?;
+
+    let share_uuid = bson::Uuid::parse_str(&share_id)
+        .map_err(|_| AppError::Validation("invalid share id: must be a UUID".to_string()))?;
+
+    let package = state
+        .packages
+        .get(&name)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("package not found: {name}")))?;
+
+    let ownership = Ownership {
+        owner_user_id: package.owner_user_id.as_deref(),
+        org_id: package.org_id.as_deref(),
+    };
+    state
+        .authz
+        .authorize(&ctx, ownership, Action::Manage, "package", &name)
+        .await?;
+
+    let deleted = state.shares.delete(share_uuid, &name).await?;
+    if deleted {
+        tracing::info!(
+            package = %name,
+            share_id = %share_id,
+            "share revoked"
+        );
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound(format!("share not found: {share_id}")))
+    }
+}
+
 // ---- Router -------------------------------------------------------------
 
 /// Package routes, to be nested under `/api/v1`. The body-limit layer is
@@ -483,6 +829,11 @@ pub fn router() -> Router<AppState> {
             "/packages/:name/archive",
             put(archive_replace).post(archive_create),
         )
+        .route(
+            "/packages/:name/shares",
+            get(list_shares).post(create_share),
+        )
+        .route("/packages/:name/shares/:share_id", delete(delete_share))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
 }
 
