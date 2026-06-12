@@ -8,6 +8,7 @@ require("core.issue_create").install(M)
 require("core.entity_view").install(M)
 require("core.gh_rate").install(M)
 require("core.comment").install(M)
+require("core.claims").install(M)
 
 local allowed_env = {
   FKST_GITHUB_REPO = true,
@@ -307,6 +308,7 @@ function M.parse_issue_state(gh_json_stdout)
   return {
     labels = labels,
     comments = M.parse_issue_comments(gh_json_stdout),
+    assignees = M.assignee_logins(decoded.assignees),
   }
 end
 
@@ -543,7 +545,7 @@ end
 function M.gh_issue_view_pr_open_guard_cmd(repo, issue_number)
   return "gh issue view " .. shell_single_quote(issue_number)
     .. " --repo " .. shell_single_quote(repo)
-    .. " --json labels,comments"
+    .. " --json labels,comments,assignees"
 end
 
 function M.parse_pr_list_for_head(gh_json_stdout, branch)

@@ -41,7 +41,7 @@ local function issue_view_json(labels, comments, state)
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   return string.format(
-    '{"title":"Implement dependency cascade","state":"%s","labels":[%s],"comments":[%s]}\n',
+    '{"title":"Implement dependency cascade","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
     json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
@@ -54,7 +54,7 @@ local function observe_issue_state_json(labels, comments, state)
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   return string.format(
-    '{"state":"%s","labels":[%s],"comments":[%s]}\n',
+    '{"state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
     json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)

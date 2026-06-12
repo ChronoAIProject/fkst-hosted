@@ -79,12 +79,13 @@ local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
     table.insert(rendered, string.format(
-      '{"number":%d,"title":"%s","body":"%s","updatedAt":"%s","labels":[%s]}',
+      '{"number":%d,"title":"%s","body":"%s","updatedAt":"%s","labels":[%s],"assignees":[%s]}',
       issue.number,
       json_string(issue.title or "Issue"),
       json_string(issue.body or ""),
       json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
-      labels_json(issue.labels or {})
+      labels_json(issue.labels or {}),
+      issue.assignees_json or '{"login":"fkst-test-bot"}'
     ))
   end
   return "[" .. table.concat(rendered, ",") .. "]"
@@ -99,9 +100,9 @@ local function mock_issue_list(issues)
 end
 
 local function mock_intake_scan_view(labels, comments, state)
-  t.mock_command("--json labels,comments,state", {
+  t.mock_command("--json labels,comments,state,assignees", {
     stdout = string.format(
-      '{"state":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
       json_string(state or "OPEN"),
       labels_json(labels or {}),
       comments_json(comments or {})
@@ -113,6 +114,19 @@ end
 
 local function mock_intake_judge_view(labels, comments, extra)
   local fields = extra or {}
+  t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
+    stdout = string.format(
+      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+      json_string(fields.title or "Add retry backoff to failed widget sync"),
+      json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
+      json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
+      json_string(fields.state or "OPEN"),
+      labels_json(labels or {}),
+      comments_json(comments or {})
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("--json title,body,updatedAt,labels,comments,state", {
     stdout = string.format(
       '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',

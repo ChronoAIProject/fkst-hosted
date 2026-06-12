@@ -6,6 +6,7 @@ return {
   { module = "dependency_waiver", key = "dependency-waiver" },
   { module = "fix_reflection", key = "fix-reflection" },
   { module = "impl_failure", key = "impl-failure" },
+  { module = "implement_attempt", key = "implement-attempt" },
   { module = "implementing", key = "implementing" },
   { module = "merge_gate", key = "merge-gate" },
   { module = "merge_ready", key = "merge-ready" },

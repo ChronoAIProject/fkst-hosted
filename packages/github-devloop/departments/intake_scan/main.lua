@@ -77,6 +77,9 @@ local function handle_pending_reintake(repo, issue, current, proposal_id)
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires no active devloop state")
     return true
   end
+  if not core.claim_issue_for_management("intake_scan", repo, issue.number, current, proposal_id) then
+    return true
+  end
   local payload = build_candidate(repo, issue, command)
   core.log_apply("intake_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
     "devloop_intake_candidate",
@@ -121,7 +124,8 @@ function pipeline(event)
       if not handle_pending_reintake(repo, issue, current, proposal_id)
         and current.state == "OPEN"
         and not should_skip_known(current.labels)
-        and not core.has_intake_decision_marker(current.comments, proposal_id) then
+        and not core.has_intake_decision_marker(current.comments, proposal_id)
+        and core.claim_issue_for_management("intake_scan", repo, issue_number, current, proposal_id) then
         local payload = build_candidate(repo, issue, nil)
         core.log_apply("intake_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
           "devloop_intake_candidate",
