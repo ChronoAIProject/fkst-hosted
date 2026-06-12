@@ -114,16 +114,31 @@ local function snapshot_from_issue_comments(repo, proposal_id, comments)
   return M.linked_entity_snapshot(repo, proposal_id, comments or {})
 end
 
+local function validate_required_fact(required)
+  if type(required) ~= "table" or type(required.family) ~= "string" or required.family == "" then
+    error("github-devloop: invalid replay required fact")
+  end
+  if required.freshness ~= "marker-read" and required.freshness ~= "fetch-before-compare" then
+    error("github-devloop: invalid replay fact freshness")
+  end
+end
+
 local function has_required_fact(row, family)
   for _, required in ipairs(row.required_facts or {}) do
-    if required.freshness ~= "marker-read" and required.freshness ~= "fetch-before-compare" then
-      error("github-devloop: invalid replay fact freshness")
-    end
+    validate_required_fact(required)
     if required.family == family then
       return true
     end
   end
   return false
+end
+
+local function current_pr_fact(facts)
+  local link = facts.link
+  if link == nil then
+    return nil
+  end
+  return find_linked_pr(facts.snapshot, link.pr_number)
 end
 
 local function require_marker_fact(facts, family)
@@ -133,6 +148,33 @@ local function require_marker_fact(facts, family)
   if family == "pr-link" then
     return facts.link or M.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
   end
+  if family == "converge-round" then
+    local base_version = M.version_loop_round(facts.state.version) > 0 and M.converge_base_version(facts.state.version) or nil
+    return M.latest_complete_converge_round(facts.snapshot.comments, facts.proposal_id, base_version, facts.issue.source_ref)
+  end
+  if family == "dependency-release" then
+    return M.dependency_release_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
+  if family == "review-result" then
+    return M.review_reject_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
+  if family == "review-meta" then
+    local current_pr = current_pr_fact(facts)
+    if current_pr ~= nil and M._is_git_sha(current_pr.head_sha) then
+      return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+    end
+    return M.review_meta_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
+  if family == "fix-reflection" or family == "review-converge-round" then
+    local current_pr = current_pr_fact(facts)
+    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+      return nil
+    end
+    return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+  end
+  if family == "merge-gate" then
+    return M.merge_gate_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
   if family == "decomposed" then
     local link = facts.link
     if link == nil then
@@ -140,7 +182,66 @@ local function require_marker_fact(facts, family)
     end
     return M.decomposed_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, link.pr_number)
   end
-  return marker_source(facts, family)
+  if family == "implementing" then
+    return M.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
+  if family == "merge-ready" then
+    local current_pr = current_pr_fact(facts)
+    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+      return nil
+    end
+    return M.merge_ready_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+  end
+  if family == "merging" then
+    local current_pr = current_pr_fact(facts)
+    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+      return nil
+    end
+    return M.merging_fact(facts.snapshot.comments, facts.proposal_id, facts.link.pr_number, facts.state.version, current_pr.head_sha)
+  end
+  if family == "review-carry-over" then
+    return nil
+  end
+  error("github-devloop: unsupported replay marker fact family: " .. tostring(family))
+end
+
+local function gather_fetch_before_compare_fact(facts, entity, family)
+  if family == "pr-head" then
+    if type(facts.snapshot) ~= "table"
+      or type(facts.snapshot.fetch_before_compare) ~= "table"
+      or facts.snapshot.fetch_before_compare["pr-head"] ~= true then
+      facts.snapshot = snapshot_from_issue_comments(entity.repo, facts.proposal_id, facts.current and facts.current.comments or {})
+    end
+    facts.link = M.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
+    return true
+  end
+  if family == "decompose-children" then
+    local child_list = M.gh_exec({ cmd = M.gh_issue_list_decompose_children_cmd(entity.repo, facts.proposal_id), timeout = 30 })
+    if child_list.exit_code ~= 0 then
+      error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
+    end
+    facts.decompose_children = M.parse_decompose_child_issue_list(child_list.stdout)
+    return facts.decompose_children
+  end
+  error("github-devloop: unsupported replay fetch-before-compare fact family: " .. tostring(family))
+end
+
+local function store_gathered_marker_fact(facts, family, value)
+  facts[family] = value
+  if family == "pr-link" then
+    facts.link = value
+  elseif family == "review-result" then
+    facts.feedback = facts.feedback or value
+  elseif family == "review-meta" then
+    facts.review_meta = facts.review_meta or value
+    facts.feedback = facts.feedback or value
+  elseif family == "fix-reflection" or family == "review-converge-round" then
+    facts.review_meta = facts.review_meta or value
+  elseif family == "merge-gate" then
+    facts.feedback = facts.feedback or value
+  elseif family == "decomposed" then
+    facts.decomposed = value
+  end
 end
 
 local function gather_required_facts(row, entity, state, provided)
@@ -152,28 +253,24 @@ local function gather_required_facts(row, entity, state, provided)
   gathered.state = state
   gathered.proposal_id = gathered.proposal_id or marker_value({ state = state }, "state", "proposal")
 
-  if has_required_fact(row, "pr-head") and (type(gathered.snapshot) ~= "table" or gathered.snapshot.fresh ~= true) then
-    gathered.snapshot = snapshot_from_issue_comments(entity.repo, gathered.proposal_id, gathered.current and gathered.current.comments or {})
-  else
-    gathered.snapshot = gathered.snapshot or {
-      comments = gathered.current and gathered.current.comments or {},
-      prs = {},
-      state = state,
-    }
-  end
-  gathered.link = gathered.link or M.pr_link_fact(gathered.snapshot.comments, gathered.proposal_id)
+  gathered.snapshot = gathered.snapshot or {
+    comments = gathered.current and gathered.current.comments or {},
+    prs = {},
+    state = state,
+  }
 
-  if has_required_fact(row, "decompose-children") then
-    local child_list = M.gh_exec({ cmd = M.gh_issue_list_decompose_children_cmd(entity.repo, gathered.proposal_id), timeout = 30 })
-    if child_list.exit_code ~= 0 then
-      error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
+  for _, required in ipairs(row.required_facts or {}) do
+    validate_required_fact(required)
+    if required.freshness == "fetch-before-compare" then
+      gather_fetch_before_compare_fact(gathered, entity, required.family)
     end
-    gathered.decompose_children = M.parse_decompose_child_issue_list(child_list.stdout)
   end
+
+  gathered.link = gathered.link or M.pr_link_fact(gathered.snapshot.comments, gathered.proposal_id)
 
   for _, required in ipairs(row.required_facts or {}) do
     if required.freshness == "marker-read" then
-      gathered[required.family] = require_marker_fact(gathered, required.family)
+      store_gathered_marker_fact(gathered, required.family, require_marker_fact(gathered, required.family))
     end
   end
 

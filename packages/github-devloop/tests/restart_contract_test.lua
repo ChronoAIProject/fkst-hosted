@@ -299,6 +299,51 @@ return {
     t.eq(#t.command_calls(), 1)
   end,
 
+  test_replayer_fetch_before_compare_ignores_caller_fresh_flag = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z"
+    local issue = {
+      repo = "owner/repo",
+      number = 42,
+      source_ref = core.issue_source_ref("owner/repo", 42),
+    }
+    local state = {
+      state = "pr-open",
+      version = version,
+    }
+    local issue_comments = {
+      { body = core.state_marker(proposal_id, "pr-open", version), author_login = "fkst-test-bot" },
+      { body = core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"), author_login = "fkst-test-bot" },
+    }
+    t.mock_command(core.gh_pr_view_observe_cmd("owner/repo", 7), {
+      stdout = '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local gathered = core.gather_replay_required_facts(table_by_state()["pr-open"], issue, state, {
+      proposal_id = proposal_id,
+      current = { comments = issue_comments },
+      snapshot = {
+        fresh = true,
+        comments = issue_comments,
+        prs = {
+          {
+            number = 7,
+            current = {
+              head_sha = "stale",
+              head_ref_name = "stale",
+              base_ref_name = "dev",
+              state = "OPEN",
+              comments = {},
+            },
+          },
+        },
+      },
+    })
+    t.eq(gathered.snapshot.prs[1].current.head_sha, "def456")
+    t.eq(#t.command_calls(), 1)
+  end,
+
   test_observe_issue_replay_is_table_driven = function()
     local text = file.read("packages/github-devloop/departments/observe_issue/main.lua")
     t.is_true(text:find("core.replay_from_table", 1, true) ~= nil)

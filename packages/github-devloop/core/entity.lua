@@ -105,6 +105,9 @@ function M.linked_entity_snapshot(repo, proposal_id, issue_comments)
     copy_comments(snapshot.comments, current_pr.comments)
   end
   snapshot.state = M.current_entity_state(snapshot.comments, proposal_id)
+  snapshot.fetch_before_compare = {
+    ["pr-head"] = true,
+  }
   return snapshot
 end
 
