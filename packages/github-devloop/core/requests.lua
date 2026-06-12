@@ -169,7 +169,7 @@ end
 
 function M.build_result_comment_request(repo, issue_number, reached)
   local marker = M.result_marker(reached.proposal_id, reached.decision, reached.dedup_key)
-  local state_marker = M.state_marker(reached.proposal_id, "ready", reached.dedup_key)
+  local state_marker = M.state_marker(reached.proposal_id, "ready", reached.dedup_key, "result-marker,ready-label,devloop-ready")
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = build_verdict_summary(reached.angle_results)
   local body = M.comment_string("decision_prefix") .. tostring(reached.decision)
@@ -192,6 +192,14 @@ function M.build_result_comment_request(repo, issue_number, reached)
       .. "/" .. (tostring(reached.dedup_key):gsub(":", "-")),
     source_ref = M.normalize_source_ref(reached.source_ref),
   }
+end
+
+function M.result_effects_complete(current, reached)
+  if type(current) ~= "table" or type(reached) ~= "table" then
+    return false
+  end
+  return M.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key)
+    and M.state_label_hint_matches(current.labels, "ready")
 end
 
 function M.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)

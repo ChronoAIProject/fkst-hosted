@@ -9,7 +9,7 @@ local source_ref_derivations = {
 }
 
 local marker_fields = {
-  state = { proposal = true, state = true, version = true, stage_rank = true },
+  state = { proposal = true, state = true, version = true, stage_rank = true, effects = true },
   ["converge-round"] = {
     proposal = true,
     version = true,
@@ -91,8 +91,20 @@ local function fact(family, freshness)
   return { family = family, freshness = freshness }
 end
 
-local function effect(intent_count, completeness)
-  return { intent_count = intent_count, completeness = completeness }
+local function effect(kinds, completeness, completeness_derivation)
+  local declared_kinds = kinds
+  if type(kinds) ~= "table" then
+    declared_kinds = {}
+    for index = 1, tonumber(kinds) or 0 do
+      declared_kinds[index] = "effect-" .. tostring(index)
+    end
+  end
+  return {
+    intent_count = #declared_kinds,
+    kinds = declared_kinds,
+    completeness = completeness,
+    completeness_derivation = completeness_derivation,
+  }
 end
 
 local transition_table = {
@@ -109,7 +121,7 @@ local transition_table = {
       source_ref = "source_ref:issue",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(1, "consensus proposal dedup is derived from state.version or next complete converge-round"),
+    effects = effect({ "consensus.proposal" }, "consensus proposal dedup is derived from state.version or next complete converge-round"),
     marker_facts = "state:v1 thinking plus optional converge-round:v1",
     kickoff = "consensus.proposal",
     replay = "Initial thinking reuses the state version as proposal dedup; convergence replays the next /loop/N from the latest complete converge-round marker.",
@@ -127,7 +139,11 @@ local transition_table = {
       source_ref = "source_ref:issue",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(1, "ready replay is complete once devloop_ready is raised after dependency gate satisfaction"),
+    effects = effect(
+      { "result-marker", "ready-label", "devloop_ready" },
+      "ready replay is complete only when the result marker and ready label are visible, and observe_issue can re-raise devloop_ready while still ready",
+      "result_effects_complete"
+    ),
     marker_facts = "state:v1 ready",
     kickoff = "devloop_ready",
     replay = "Raise ready/<version> after dependency gate re-derives satisfied blockers.",
@@ -152,7 +168,7 @@ local transition_table = {
       source_ref = "source_ref:issue",
     },
     version_identity = "implementing.dedup",
-    effects = effect(1, "open-pr payload is complete when implementing marker and fetched branch head agree"),
+    effects = effect({ "github-proxy.github_entity_changed" }, "open-pr payload is complete when implementing marker and fetched branch head agree"),
     marker_facts = "state:v1 implementing plus implementing:v1",
     kickoff = "github-proxy.github_entity_changed",
     replay = "Branch poll re-derives PR open or impl-failed from branch/worktree facts.",
@@ -175,7 +191,7 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "pr-link.impl_version",
-    effects = effect(1, "reviewing payload is complete when linked open PR head/base still match the pr-link marker"),
+    effects = effect({ "devloop_reviewing" }, "reviewing payload is complete when linked open PR head/base still match the pr-link marker"),
     marker_facts = "state:v1 pr-open plus pr-link:v1",
     kickoff = "devloop_reviewing",
     replay = "Observe re-fetches the linked PR and raises review for the linked PR head.",
@@ -199,7 +215,7 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(1, "review payload is complete when current PR head is fetched and no head-bound review result exists"),
+    effects = effect({ "devloop_reviewing" }, "review payload is complete when current PR head is fetched and no head-bound review result exists"),
     marker_facts = "state:v1 reviewing plus PR head facts",
     kickoff = "devloop_reviewing",
     replay = "PR observe re-derives review kickoff from current PR head and issue version.",
@@ -230,7 +246,7 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(1, "fixing replay is complete only when trusted feedback marker fields are copied into devloop_fixing"),
+    effects = effect({ "devloop_fixing" }, "fixing replay is complete only when trusted feedback marker fields are copied into devloop_fixing"),
     marker_facts = "state:v1 fixing plus review-result/review-meta/merge-gate feedback, or current PR head for deterministic renormalization",
     kickoff = "devloop_fixing or devloop_reviewing",
     replay = "Observe re-raises fix when a trusted feedback fact is parseable; otherwise it re-enters reviewing for the current head.",
@@ -261,7 +277,7 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(1, "review-meta replay is complete when review proposal, dedup, PR number, and issue version are reconstructed"),
+    effects = effect({ "devloop_review_meta" }, "review-meta replay is complete when review proposal, dedup, PR number, and issue version are reconstructed"),
     marker_facts = "state:v1 review-meta plus review proposal encoded in version/dedup",
     kickoff = "devloop_review_meta",
     replay = "Observe re-raises review-meta using the review proposal, PR number, issue version, and original dedup.",
@@ -291,7 +307,7 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(merge-ready.version)",
-    effects = effect(1, "merge-ready replay is complete when head-bound approval and fetched PR head match"),
+    effects = effect({ "devloop_merge_ready" }, "merge-ready replay is complete when head-bound approval and fetched PR head match"),
     marker_facts = "state:v1 merge-ready plus merge-ready:v1",
     kickoff = "devloop_merge_ready",
     replay = "PR observe or merge retry re-derives merge-ready from head-bound approval facts.",
@@ -320,7 +336,7 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(merge-ready.version)",
-    effects = effect(1, "merging retry is complete when merge-ready and merging markers bind the same fetched PR head"),
+    effects = effect({ "devloop_merge_ready" }, "merging retry is complete when merge-ready and merging markers bind the same fetched PR head"),
     marker_facts = "state:v1 merging plus merging:v1",
     kickoff = "devloop_merge_ready",
     replay = "Merge retry re-derives completion or repair from PR mergeability and head facts.",
@@ -344,7 +360,11 @@ local transition_table = {
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect(1, "blocked decompose replay is complete when child issue count is fetched and incomplete"),
+    effects = effect(
+      { "decomposed-marker", "github-proxy.github_issue_create_request[*]" },
+      "blocked decompose replay is complete only when the decomposed marker count and every declared child issue are derivable",
+      "decompose_children_complete"
+    ),
     marker_facts = "state:v1 blocked plus decomposed:v1 when class decomposition is incomplete",
     kickoff = "devloop_decompose",
     replay = "Observe can replay decomposed blocked issues when deterministic child completion facts are missing.",
@@ -423,6 +443,47 @@ function M.restart_field_coverage_errors(rows)
       local err = field_reference_error(reference)
       if err ~= nil then
         table.insert(errors, tostring(row.from_state or "?") .. "." .. tostring(field) .. ": " .. err)
+      end
+    end
+  end
+  return errors
+end
+
+local default_consumer_sources = {
+  "packages/github-devloop/departments/consensus_result/main.lua",
+  "packages/github-devloop/departments/decompose/main.lua",
+  "packages/github-devloop/departments/observe_pr/main.lua",
+  "packages/github-devloop/departments/observe_issue/main.lua",
+}
+
+local function source_contains_any(paths, needle)
+  if needle == nil or needle == "" then
+    return false
+  end
+  for _, path in ipairs(paths or {}) do
+    local ok, text = pcall(file.read, path)
+    if ok and tostring(text or ""):find(tostring(needle), 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function M.restart_effect_contract_errors(rows, consumer_sources)
+  local errors = {}
+  local sources = consumer_sources or default_consumer_sources
+  for _, row in ipairs(rows or transition_table) do
+    local effects = row.effects or {}
+    local kinds = effects.kinds or {}
+    local count = tonumber(effects.intent_count) or #kinds
+    if count > 1 then
+      if type(kinds) ~= "table" or #kinds ~= count then
+        table.insert(errors, tostring(row.from_state or "?") .. ": multi-effect row must enumerate declared effects")
+      end
+      if type(effects.completeness_derivation) ~= "string" or effects.completeness_derivation == "" then
+        table.insert(errors, tostring(row.from_state or "?") .. ": multi-effect row must declare a completeness derivation")
+      elseif not source_contains_any(sources, effects.completeness_derivation) then
+        table.insert(errors, tostring(row.from_state or "?") .. ": completeness derivation is not called by consumer sources")
       end
     end
   end

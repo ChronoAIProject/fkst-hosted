@@ -119,6 +119,8 @@ return {
       t.is_true(type(row.version_identity) == "string" and row.version_identity ~= "")
       t.is_true(type(row.effects) == "table")
       t.is_true(tonumber(row.effects.intent_count) ~= nil)
+      t.is_true(type(row.effects.kinds) == "table")
+      t.eq(#row.effects.kinds, row.effects.intent_count)
       t.is_true(type(row.effects.completeness) == "string" and row.effects.completeness ~= "")
     end
     t.eq(#core.restart_transition_table(), #expected)
@@ -170,6 +172,28 @@ return {
   test_restart_payload_fields_are_covered_by_durable_fields = function()
     local errors = core.restart_field_coverage_errors()
     t.eq(#errors, 0)
+  end,
+
+  test_multi_effect_rows_declare_and_call_completeness_derivation = function()
+    local by_state = table_by_state()
+    t.eq(by_state.ready.effects.intent_count, 3)
+    t.eq(by_state.ready.effects.kinds[1], "result-marker")
+    t.eq(by_state.ready.effects.kinds[2], "ready-label")
+    t.eq(by_state.ready.effects.kinds[3], "devloop_ready")
+    t.eq(by_state.ready.effects.completeness_derivation, "result_effects_complete")
+    t.eq(by_state.blocked.effects.intent_count, 2)
+    t.eq(by_state.blocked.effects.completeness_derivation, "decompose_children_complete")
+    t.eq(#core.restart_effect_contract_errors(), 0)
+  end,
+
+  test_multi_effect_contract_rejects_marker_only_rows = function()
+    local rows = copy_rows(core.restart_transition_table())
+    local ready = rows_by_state(rows).ready
+    ready.effects.completeness_derivation = nil
+    local errors = core.restart_effect_contract_errors(rows)
+    t.eq(#errors, 1)
+    t.is_true(errors[1]:find("ready", 1, true) ~= nil)
+    t.is_true(errors[1]:find("completeness derivation", 1, true) ~= nil)
   end,
 
   test_restart_field_coverage_catches_374_shape_missing_gate_baseline = function()

@@ -17,7 +17,7 @@ function M.state_label(state)
   return M._label_by_state[state]
 end
 
-function M.state_marker(proposal_id, state, version)
+function M.state_marker(proposal_id, state, version, effects)
   if state ~= "thinking"
     and state ~= "ready"
     and state ~= "implementing"
@@ -32,10 +32,15 @@ function M.state_marker(proposal_id, state, version)
     and state ~= "blocked" then
     error("github-devloop: invalid state")
   end
+  local effects_field = ""
+  if effects ~= nil and tostring(effects) ~= "" then
+    effects_field = ' effects="' .. tostring(effects):gsub('"', "'") .. '"'
+  end
   return '<!-- fkst:github-devloop:state:v1 proposal="' .. tostring(proposal_id)
     .. '" state="' .. tostring(state)
     .. '" version="' .. tostring(version)
     .. '" stage_rank="' .. tostring(M._state_stage_rank[state])
+    .. effects_field
     .. '" -->'
 end
 

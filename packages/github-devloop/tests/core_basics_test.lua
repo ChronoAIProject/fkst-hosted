@@ -446,6 +446,7 @@ return {
     t.is_true(comment.body:find(ai_sentinel, 1, true) ~= nil)
     t.is_true(comment.body:find('fkst:github-devloop:result:v1 proposal="github-devloop/issue/owner/repo/42"', 1, true) ~= nil)
     t.is_true(comment.body:find('fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/42" state="ready"', 1, true) ~= nil)
+    t.is_true(comment.body:find('effects="result-marker,ready-label,devloop-ready"', 1, true) ~= nil)
     local comment_version = tostring(completed.dedup_key):gsub(":", "-")
     t.eq(
       comment.dedup_key,
