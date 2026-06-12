@@ -6,6 +6,7 @@ local max_context_cache_key_len = 180
 local notice_file_name = "UNTRUSTED-NOTICE.txt"
 local context_bundle_cache_prefix = "github-devloop/context-bundle/"
 local context_bundle_manifest_cache_prefix = "github-devloop/context-bundle-manifest/"
+local stale_generation_context_error_class = "stale_generation_context"
 
 local function runtime_root(exec)
   local run = exec or exec_sync
@@ -284,22 +285,43 @@ function M.context_bundle_manifest_ref(key)
   return "runtime-cache:" .. tostring(key)
 end
 
-function M.context_bundle_manifest_from_ref(ref)
+function M.context_bundle_manifest_from_ref(ref, exec)
   local key = tostring(ref or ""):match("^runtime%-cache:(.+)$")
   if key == nil or key == "" then
     return nil
   end
   local manifest = cache_get(key)
   if manifest == nil or manifest == "" then
-    error("github-devloop: context bundle manifest cache miss")
+    error("github-devloop: error_class=" .. stale_generation_context_error_class .. " context bundle manifest cache miss")
   end
-  if not files_are_readable(manifest_paths(manifest)) then
-    error("github-devloop: context bundle manifest files are unreadable")
+  if not files_are_readable(manifest_paths(manifest), exec) then
+    error("github-devloop: error_class=" .. stale_generation_context_error_class .. " context bundle manifest files are unreadable")
   end
   if not manifest_has_notice(manifest_paths(manifest)) then
     error("github-devloop: context bundle manifest notice is missing")
   end
   return manifest
+end
+
+function M.stale_generation_context_error_class()
+  return stale_generation_context_error_class
+end
+
+function M.is_stale_generation_context_error(err)
+  local text = tostring(err or "")
+  if text:find("error_class=" .. stale_generation_context_error_class, 1, true) ~= nil then
+    return true
+  end
+  if text:find("context bundle manifest cache miss", 1, true) ~= nil then
+    return true
+  end
+  if text:find("context bundle manifest files are unreadable", 1, true) ~= nil then
+    return true
+  end
+  if text:find("runtime context cache miss", 1, true) ~= nil then
+    return true
+  end
+  return text:find("runtime context manifest file is unreadable", 1, true) ~= nil
 end
 
 function M.build_context_bundle(args)
