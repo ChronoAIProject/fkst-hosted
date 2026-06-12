@@ -26,9 +26,10 @@ class BootstrapHarness:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "repo"
         self.root.mkdir()
+        (self.root / ".fkst").mkdir()
         (self.root / "scripts").mkdir()
         shutil.copy2(REPO_ROOT / "scripts" / "bin_cache.py", self.root / "scripts" / "bin_cache.py")
-        (self.root / ".fkst-substrate-ref").write_text(pin + "\n", encoding="utf-8")
+        (self.root / ".fkst" / "substrate-ref").write_text(pin + "\n", encoding="utf-8")
         self.fake_bin = Path(self.tmp.name) / "fake-bin"
         self.fake_bin.mkdir()
         self.cache = Path(self.tmp.name) / "cache"
@@ -229,8 +230,8 @@ class RunScriptResolutionContractTest(unittest.TestCase):
     def test_invalid_env_bin_errors_without_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (REPO_ROOT / ".fkst-substrate-ref").read_text(encoding="utf-8")
-            env_path = REPO_ROOT / ".env"
+            (REPO_ROOT / ".fkst" / "substrate-ref").read_text(encoding="utf-8")
+            env_path = REPO_ROOT / ".fkst" / "env"
             original_env = env_path.read_text(encoding="utf-8") if env_path.exists() else None
             env = os.environ.copy()
             env.pop("BIN", None)
@@ -244,7 +245,7 @@ class RunScriptResolutionContractTest(unittest.TestCase):
                 else:
                     env_path.write_text(original_env, encoding="utf-8")
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn(".env BIN is not executable", result.stderr)
+            self.assertIn(".fkst/env BIN is not executable", result.stderr)
             self.assertFalse((Path(tmp) / "cache").exists())
 
 

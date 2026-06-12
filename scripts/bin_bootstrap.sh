@@ -24,7 +24,7 @@ bootstrap_cache_root() {
 }
 
 bootstrap_read_pin() {
-  local repo_root="$1" pin_file="$repo_root/.fkst-substrate-ref" pin
+  local repo_root="$1" pin_file="$repo_root/.fkst/substrate-ref" pin
   [ -f "$pin_file" ] || bootstrap_die "missing fkst-substrate source pin: $pin_file"
   pin="$(sed -n '1p' "$pin_file")"
   pin="${pin%%#*}"
@@ -71,15 +71,15 @@ resolve_bin_contract() {
     return 0
   fi
 
-  if [ -f "$repo_root/.env" ]; then
+  if [ -f "$repo_root/.fkst/env" ]; then
     # `|| true`: no BIN= line is fine under set -o pipefail. Strip optional
     # surrounding quotes and a trailing ` # comment`.
-    candidate="$(grep -E '^BIN=' "$repo_root/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+    candidate="$(grep -E '^BIN=' "$repo_root/.fkst/env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
     candidate="${candidate%%[[:space:]]#*}"
     candidate="${candidate%\"}"; candidate="${candidate#\"}"; candidate="${candidate%\'}"; candidate="${candidate#\'}"
     if [ -n "$candidate" ]; then
       if [ ! -x "$candidate" ]; then
-        RESOLVE_BIN_ERROR=".env BIN is not executable: $candidate"
+        RESOLVE_BIN_ERROR=".fkst/env BIN is not executable: $candidate"
         return 1
       fi
       RESOLVED_BIN="$candidate"
@@ -99,7 +99,7 @@ resolve_bin_contract() {
   fi
 
   if [ "$mode" = "readonly" ]; then
-    if [ -z "${FKST_NO_AUTOBUILD:-}" ] && [ -f "$repo_root/.fkst-substrate-ref" ]; then
+    if [ -z "${FKST_NO_AUTOBUILD:-}" ] && [ -f "$repo_root/.fkst/substrate-ref" ]; then
       pin="$(bootstrap_read_pin "$repo_root" 2>/dev/null || true)"
       if [ -n "$pin" ]; then
         {
@@ -126,7 +126,7 @@ resolve_bin_contract() {
     return 1
   fi
 
-  echo "fkst-framework binary not found in \$BIN, .env, PATH, or ../fkst-substrate; bootstrapping pinned source" >&2
+  echo "fkst-framework binary not found in \$BIN, .fkst/env, PATH, or ../fkst-substrate; bootstrapping pinned source" >&2
   RESOLVED_BIN="$(bootstrap_bin_on_total_miss "$repo_root")" || return $?
   return 0
 }
