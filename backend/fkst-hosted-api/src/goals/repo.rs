@@ -1,10 +1,10 @@
 //! MongoDB-backed repository for the `goals` collection.
 //!
-//! CAS-style mutations: `patch` and `delete` use `find_one_and_update` /
-//! `find_one_and_delete` with status filters so that `package_names` and `repo`
-//! can only be changed when the goal is in an immutable state set
-//! `{not_started, stopped, failed}`. Title and description are editable in any
-//! status.
+//! CAS-style mutations: `patch`, `delete`, `transition_status`, and
+//! `set_active_session` use `find_one_and_update` / `find_one_and_delete` with
+//! status filters so that `package_names` and `repo` can only be changed when
+//! the goal is in an immutable state set `{not_started, stopped, failed}`.
+//! Title and description are editable in any status.
 
 use bson::doc;
 use mongodb::options::{IndexOptions, ReturnDocument};
@@ -211,5 +211,75 @@ impl GoalRepo {
             tracing::debug!(goal_id = %id, "goal not deleted (absent or wrong status)");
         }
         Ok(deleted)
+    }
+
+    /// CAS: transition goal status, used by trigger/stop/fail flows.
+    ///
+    /// Atomically sets `$set: set` on the goal iff its current status is one of
+    /// `from_statuses`. Returns the post-update document, or `None` when the
+    /// filter missed (document absent or status moved on).
+    pub async fn transition_status(
+        &self,
+        id: bson::Uuid,
+        from_statuses: &[GoalStatus],
+        set: bson::Document,
+    ) -> Result<Option<GoalDoc>, crate::error::AppError> {
+        let status_bson: Vec<bson::Bson> = from_statuses
+            .iter()
+            .map(|s| bson::to_bson(s).expect("GoalStatus serializes"))
+            .collect();
+        let filter = doc! {
+            "_id": id,
+            "status": { "$in": status_bson }
+        };
+
+        let updated = self
+            .coll
+            .find_one_and_update(filter, doc! { "$set": set })
+            .return_document(ReturnDocument::After)
+            .await
+            .map_err(|error| log_db_error("transition_status", error))?;
+
+        tracing::debug!(
+            goal_id = %id,
+            from = ?from_statuses,
+            applied = updated.is_some(),
+            "goal status transition attempted"
+        );
+        Ok(updated)
+    }
+
+    /// Set `active_session_id` on a triggered goal (CAS guarded).
+    ///
+    /// Only succeeds when the goal's status is `triggered`. Returns `true` when
+    /// the update matched, `false` otherwise. Used by the trigger flow after
+    /// session creation + placement to link the session back to the goal.
+    pub async fn set_active_session(
+        &self,
+        goal_id: bson::Uuid,
+        session_id: bson::Uuid,
+    ) -> Result<bool, crate::error::AppError> {
+        let filter = doc! {
+            "_id": goal_id,
+            "status": bson::to_bson(&GoalStatus::Triggered).expect("GoalStatus serializes"),
+        };
+        let update = doc! {
+            "$set": { "active_session_id": session_id }
+        };
+
+        let result = self
+            .coll
+            .update_one(filter, update)
+            .await
+            .map_err(|error| log_db_error("set_active_session", error))?;
+
+        let matched = result.matched_count > 0;
+        tracing::debug!(
+            goal_id = %goal_id,
+            session_id = %session_id,
+            matched,
+            "active_session_id set attempted"
+        );
+        Ok(matched)
     }
 }

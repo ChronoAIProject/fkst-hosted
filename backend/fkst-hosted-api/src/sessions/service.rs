@@ -41,6 +41,7 @@ use crate::engine::{
     EngineConfig, LiveStatus, PreparedPackage, RunnerError, RunningSession, SessionRunner,
 };
 use crate::error::AppError;
+use crate::goals::{GoalRepo, GoalStatus, RepoRef};
 use crate::journal::model::LogRef;
 use crate::journal::parse::{parse_raised_line, ParsedLine};
 use crate::journal::store::MongoProgressStore;
@@ -61,6 +62,24 @@ const MAX_PACKAGE_NAME_BYTES: usize = 128;
 pub struct SessionOwner {
     pub owner_user_id: String,
     pub org_id: Option<String>,
+}
+
+/// Information needed to create a session from a goal trigger. The handler
+/// resolves and validates this data before passing it here.
+pub struct GoalTriggerInfo {
+    pub goal_id: bson::Uuid,
+    pub repo: RepoRef,
+    pub package_names: Vec<String>,
+    pub owner_user_id: String,
+    pub org_id: Option<String>,
+    /// The prior goal status before trigger (captured for compensating CAS).
+    pub prior_status: GoalStatus,
+}
+
+/// Outcome of a successful `create_for_goal` call.
+pub struct GoalTriggerResult {
+    pub session_id: bson::Uuid,
+    pub goal_status: GoalStatus,
 }
 
 /// Cap on the `error` field persisted to a failed session (truncated at a
@@ -317,6 +336,184 @@ impl SessionService {
     /// Fetch one session document (pure status projection).
     pub async fn get(&self, id: bson::Uuid) -> Result<Option<SessionDoc>, AppError> {
         self.inner.repo.get(id).await
+    }
+
+    /// Create a session from a goal trigger. Handles steps 4-8 of the trigger
+    /// flow:
+    /// 4. Goal CAS: not_started/stopped/failed -> triggered
+    /// 5. Insert SessionDoc (pending)
+    /// 6. Place via distributor
+    /// 7. Set active_session_id on goal
+    /// 8. Return result
+    ///
+    /// On failure after step 4, a compensating CAS returns the goal to its
+    /// prior status.
+    pub async fn create_for_goal(
+        &self,
+        goals: &GoalRepo,
+        trigger: GoalTriggerInfo,
+    ) -> Result<GoalTriggerResult, AppError> {
+        let now = bson::DateTime::now();
+
+        // Step 4: Goal CAS — not_started/stopped/failed -> triggered.
+        let triggerable = [
+            GoalStatus::NotStarted,
+            GoalStatus::Stopped,
+            GoalStatus::Failed,
+        ];
+        let repo_bson = bson::to_bson(&Some(trigger.repo.clone()))
+            .expect("RepoRef serializes");
+        let cas_set = doc! {
+            "status": bson::to_bson(&GoalStatus::Triggered).expect("GoalStatus serializes"),
+            "repo": repo_bson,
+            "updated_at": now,
+        };
+        let _goal_after_cas = goals
+            .transition_status(trigger.goal_id, &triggerable, cas_set)
+            .await?
+            .ok_or_else(|| {
+                AppError::Conflict("goal already triggered or running".to_string())
+            })?;
+
+        // Step 5: Insert SessionDoc (pending).
+        let first_package = trigger
+            .package_names
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        let session = SessionDoc {
+            id: bson::Uuid::new(),
+            package_name: first_package,
+            status: SessionStatus::Pending,
+            pod_id: None,
+            fencing_token: None,
+            pid: None,
+            runtime_dir: None,
+            error: None,
+            run_key: None,
+            owner_user_id: Some(trigger.owner_user_id.clone()),
+            org_id: trigger.org_id.clone(),
+            package_names: trigger.package_names.clone(),
+            goal_id: Some(trigger.goal_id),
+            repo: Some(trigger.repo.clone()),
+            triggered_by: Some("goal-trigger".to_string()),
+            created_at: now,
+            started_at: None,
+            stopped_at: None,
+        };
+        if let Err(insert_err) = self.inner.repo.insert(&session).await {
+            // Compensating CAS: return goal to prior status.
+            let _ = goals
+                .transition_status(
+                    trigger.goal_id,
+                    &[GoalStatus::Triggered],
+                    doc! {
+                        "status": bson::to_bson(&trigger.prior_status).expect("GoalStatus serializes"),
+                        "updated_at": bson::DateTime::now(),
+                    },
+                )
+                .await;
+            return Err(insert_err);
+        }
+
+        // Step 6: Place via distributor (if configured).
+        if let Some(ref distributor) = self.inner.distribution {
+            let lease_key = session.lease_key();
+            match distributor.place(&lease_key, session.id).await {
+                Ok(placement) if placement.pod_id == distributor.pod_id() => {
+                    // This pod was chosen; spawn the driver.
+                    let mut owned = session.clone();
+                    owned.pod_id = Some(placement.pod_id);
+                    owned.fencing_token = Some(placement.fencing_token);
+                    self.spawn_driver(&owned);
+                }
+                Ok(_placement) => {
+                    // Another pod was chosen; its reaper picks it up.
+                    tracing::info!(
+                        session_id = %session.id,
+                        goal_id = %trigger.goal_id,
+                        "goal session placed on another pod"
+                    );
+                }
+                Err(PlacementError::AlreadyRunning(_)) => {
+                    // Conflict: converge the just-inserted pending doc to
+                    // failed and compensate the goal CAS.
+                    let _ = self
+                        .inner
+                        .repo
+                        .transition(
+                            session.id,
+                            &[SessionStatus::Pending],
+                            doc! {
+                                "status": status_bson(SessionStatus::Failed),
+                                "error": "goal already has a live session",
+                                "stopped_at": bson::DateTime::now(),
+                            },
+                        )
+                        .await;
+                    let _ = goals
+                        .transition_status(
+                            trigger.goal_id,
+                            &[GoalStatus::Triggered],
+                            doc! {
+                                "status": bson::to_bson(&trigger.prior_status).expect("GoalStatus serializes"),
+                                "updated_at": bson::DateTime::now(),
+                            },
+                        )
+                        .await;
+                    return Err(AppError::Conflict(
+                        "goal already has a live session".to_string(),
+                    ));
+                }
+                Err(PlacementError::NoCapacity) => {
+                    // Retriable: session stays pending; the reaper retries.
+                    tracing::warn!(
+                        session_id = %session.id,
+                        goal_id = %trigger.goal_id,
+                        "no capacity at goal trigger; session stays pending for the reaper"
+                    );
+                }
+                Err(error) => {
+                    // Transient failure: session stays pending; the reaper
+                    // retries placement.
+                    tracing::error!(
+                        session_id = %session.id,
+                        goal_id = %trigger.goal_id,
+                        error = %error,
+                        "placement failed at goal trigger; session stays pending for the reaper"
+                    );
+                }
+            }
+        } else {
+            // Single-pod posture: spawn the driver inline.
+            self.spawn_driver(&session);
+        }
+
+        // Step 7: Set active_session_id on goal (CAS guarded to triggered).
+        let active_set = goals
+            .set_active_session(trigger.goal_id, session.id)
+            .await;
+        if !active_set.unwrap_or(false) {
+            // The goal may have been concurrently modified; the session is
+            // already created and will be picked up by the driver/reaper. Log
+            // but do not fail the trigger.
+            tracing::warn!(
+                goal_id = %trigger.goal_id,
+                session_id = %session.id,
+                "active_session_id CAS missed; session is still created"
+            );
+        }
+
+        // Step 8: Return result.
+        tracing::info!(
+            goal_id = %trigger.goal_id,
+            session_id = %session.id,
+            "goal triggered successfully"
+        );
+        Ok(GoalTriggerResult {
+            session_id: session.id,
+            goal_status: GoalStatus::Triggered,
+        })
     }
 
     /// Request a stop. The document CAS runs FIRST (so the intent is durable
