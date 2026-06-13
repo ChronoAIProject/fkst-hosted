@@ -37,6 +37,49 @@ return {
     t.eq(request.replace_marker, core.work_card_marker("github-devloop/issue/owner/repo/42"))
   end,
 
+  test_work_card_formats_epoch_milliseconds_as_sane_iso_8601 = function()
+    local request = core.build_work_card_comment_request({
+      kind = "pr",
+      repo = "owner/repo",
+      number = 7,
+    }, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      role = "review",
+      version = "v1/review/3",
+      round = 3,
+      started_at = 1781296278000,
+      finished_at = 1781296368000,
+      outcome = "decision: approve",
+      source_ref = source_ref(),
+    })
+
+    t.is_true(request.body:find("Started: 2026%-06%-12T20:31:18Z") ~= nil)
+    t.eq(request.body:find("58417", 1, true), nil)
+    t.is_true(request.body:find("Duration: 1m 30s", 1, true) ~= nil)
+  end,
+
+  test_work_card_formats_epoch_microseconds_as_sane_iso_8601 = function()
+    local request = core.build_work_card_comment_request({
+      kind = "pr",
+      repo = "owner/repo",
+      number = 7,
+    }, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      role = "review",
+      version = "v1/review/3",
+      round = 3,
+      started_at = 1781296278000000,
+      finished_at = 1781296368000000,
+      outcome = "decision: approve",
+      source_ref = source_ref(),
+    })
+
+    t.is_true(request.body:find("Started: 2026%-06%-12T20:31:18Z") ~= nil)
+    t.is_true(request.body:find("Started: 20%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ") ~= nil)
+    t.eq(request.body:find("58417", 1, true), nil)
+    t.is_true(request.body:find("Duration: 1m 30s", 1, true) ~= nil)
+  end,
+
   test_review_pr_raises_work_card_with_review_proposal = function()
     local event = h.reviewing()
     h.mock_bot_env()
