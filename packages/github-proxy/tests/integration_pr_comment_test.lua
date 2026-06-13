@@ -96,6 +96,7 @@ return {
     mock_bot_env()
     mock_pr_comment_view({
       {
+        id = "IC_graphql_existing",
         body = "already wrote\n" .. core.comment_marker("review-result/comment/owner/x/7/v1"),
         author = "fkst-test-bot",
       },
@@ -108,7 +109,9 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
     t.eq(count_calls(pr_comment_create), 0)
+    t.eq(#result.raises, 0)
   end,
 
   test_pr_comment_request_real_write_uses_rest_create = function()

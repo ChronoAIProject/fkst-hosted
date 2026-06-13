@@ -541,6 +541,26 @@ return {
     )
     t.eq(reconcile.add_labels[1], "fkst-dev:reviewing")
     t.eq(reconcile.remove_labels[1], "fkst-dev:thinking")
+    local pr_reconcile = core.build_reconcile_pr_state_label_request(
+      "owner/repo",
+      "42",
+      "7",
+      proposal_id,
+      "reviewing",
+      "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      { kind = "external", ref = "owner/repo#pr/7" }
+    )
+    t.eq(pr_reconcile.schema, "github-proxy.label.v1")
+    t.eq(pr_reconcile.target_kind, "pr")
+    t.eq(pr_reconcile.target_number, "7")
+    t.eq(pr_reconcile.pr_number, "7")
+    t.eq(pr_reconcile.issue_number, "42")
+    t.eq(pr_reconcile.expected_proposal_id, proposal_id)
+    t.eq(pr_reconcile.expected_state, "reviewing")
+    t.eq(pr_reconcile.expected_version, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
+    t.eq(pr_reconcile.source_ref.ref, "owner/repo#pr/7")
+    t.eq(pr_reconcile.add_labels[1], "fkst-dev:reviewing")
+    t.eq(pr_reconcile.remove_labels[1], "fkst-dev:thinking")
     t.is_true(#reconcile.remove_labels >= 10)
     t.is_true(reconcile.dedup_key:find("reconcile/label/github-devloop/issue/owner/repo/42/reviewing", 1, true) ~= nil)
 
@@ -597,6 +617,8 @@ return {
     )
     t.eq(core.gh_issue_list_observe_cmd("owner/repo"), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'")
     t.eq(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'")
+    t.eq(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label, 2), "gh api 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100&page=2'")
+    t.eq(core.gh_pr_list_observe_cmd("owner/repo", 1), "gh api 'repos/owner/repo/pulls?state=open&per_page=100&page=1'")
     t.eq(
       core.gh_pr_list_head_base_cmd("owner/repo", "integration/dev", "dev"),
       "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&base=dev&per_page=100'"

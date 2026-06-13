@@ -201,6 +201,7 @@ return {
     })
     mock_decompose_codex(two_issue_json)
     mock_pr_comment_write(0)
+    mock_child_issue_list(event, {})
 
     local result = run_decompose_with_post_marker(event, opts("decompose-two-issues"), 2)
 
@@ -241,16 +242,22 @@ return {
     t.eq(count_calls(core.gh_issue_list_decompose_children_cmd("owner/repo", event.proposal_id)), 1)
   end,
 
-  test_decompose_marker_visible_reraises_missing_children = function()
+  test_decompose_marker_visible_reraises_missing_children_despite_stale_created_marker = function()
     local event = decompose_event()
     mock_bot_env()
     mock_write_env_real()
+    event.current_issue_body = "Original body"
+    local stale_dedup = core.build_issue_create_request("owner/repo", event, {
+      title = "Extract a minimal retry helper",
+      body = "Smaller scope: implement only the retry helper used by the blocked PR.\nNon-goals: do not change the whole workflow.\nAcceptance: helper tests pass.",
+    }, 1).dedup_key
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
       title = "Original large issue",
       body = "Original body that describes too much scope.",
     })
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
       core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
+      issue_created_marker(stale_dedup, "101"),
     }))
     mock_child_issue_list(event, {})
     mock_decompose_codex(two_issue_json)
@@ -275,9 +282,8 @@ return {
     })
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
       core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
-      issue_created_marker(child_dedup_key(event, 1), "101"),
     }))
-    mock_child_issue_list(event, { 3 })
+    mock_child_issue_list(event, { 1, 3 })
     mock_decompose_codex([[{"issues":[{"title":"One","body":"Smaller scope: one.\nNon-goals: none.\nAcceptance: one."},{"title":"Two","body":"Smaller scope: two.\nNon-goals: none.\nAcceptance: two."},{"title":"Three","body":"Smaller scope: three.\nNon-goals: none.\nAcceptance: three."}]}]])
 
     local result = run_decompose(event, opts("decompose-idempotent-heal-partial"))
@@ -320,6 +326,7 @@ return {
     })
     mock_decompose_codex(two_issue_json)
     mock_pr_comment_write(0)
+    mock_child_issue_list(event, {})
 
     local result = run_decompose_with_post_marker(event, opts("decompose-marker-before-create"), 2)
 
@@ -366,6 +373,7 @@ return {
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex("not json")
     mock_pr_comment_write(0)
+    mock_child_issue_list(event, {})
 
     local second = run_decompose_with_post_marker(event, run_opts, 1)
     t.eq(second.exit_code, 0)
@@ -383,6 +391,7 @@ return {
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex([[{"issues":[{"title":"One","body":"Smaller scope: one.\nNon-goals: no extra.\nAcceptance: one."},{"title":"Two","body":"Smaller scope: two.\nNon-goals: no extra.\nAcceptance: two."},{"title":"Three","body":"Smaller scope: three.\nNon-goals: no extra.\nAcceptance: three."},{"title":"Four","body":"Smaller scope: four.\nNon-goals: no extra.\nAcceptance: four."}]}]])
     mock_pr_comment_write(0)
+    mock_child_issue_list(event, {})
 
     local result = run_decompose_with_post_marker(event, opts("decompose-cap-three"), 3)
 

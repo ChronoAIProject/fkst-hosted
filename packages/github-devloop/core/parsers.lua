@@ -108,6 +108,30 @@ function M.parse_issue_list_intake(stdout, limit)
   return issues
 end
 
+function M.parse_issue_list_recent_closed(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local issues = {}
+  if type(decoded) ~= "table" then
+    error("github-devloop: recent closed issue list decode failed")
+  end
+  each_paginated_item(decoded, function(issue)
+    local number = type(issue) == "table" and tonumber(issue.number) or nil
+    local title = type(issue) == "table" and issue.title or nil
+    local closed_at = type(issue) == "table" and (issue.closedAt or issue.closed_at) or nil
+    if number == nil or title == nil or closed_at == nil or type(issue.labels) ~= "table" then
+      error("github-devloop: recent closed issue list item missing required fields")
+    end
+    table.insert(issues, {
+      number = number,
+      title = tostring(title),
+      closed_at = tostring(closed_at),
+      closedAt = tostring(closed_at),
+      labels = label_names(issue.labels),
+    })
+  end)
+  return issues
+end
+
 function M.parse_issue_number_list(stdout)
   local decoded = json.decode(stdout or "[]")
   local issues = {}
@@ -371,6 +395,7 @@ function M.parse_pr_view_origin(stdout)
     base_ref_oid = decoded.baseRefOid or decoded.base_ref_oid,
     state = decoded.state,
     updated_at = decoded.updatedAt or decoded.updated_at,
+    labels = label_names(decoded.labels),
     comments = M.comments_from_json(decoded.comments),
     head_repository = head_repo,
     is_cross_repository = is_cross_repository,

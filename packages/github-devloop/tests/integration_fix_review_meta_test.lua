@@ -501,6 +501,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
 
     local result = run_fix(event, opts("fix-no-changes-review-meta", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)

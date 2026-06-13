@@ -80,7 +80,7 @@ local function origin_matches_pr(origin, current_pr, repo, branches, require_iss
   return true, "ok"
 end
 
-local function maybe_label_hint(origin, state, source_ref)
+local function maybe_issue_label_hint(origin, state, source_ref)
   if origin.issue_number == nil then
     return
   end
@@ -90,6 +90,24 @@ local function maybe_label_hint(origin, state, source_ref)
     "github-proxy.github_issue_label_request",
   })
   core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+end
+
+local function maybe_pr_label_hint(origin, pr_number, current_pr, state, source_ref)
+  if state.state == nil or core.state_label_hint_matches(current_pr.labels, state.state) then
+    return
+  end
+  local label_request = core.build_reconcile_pr_state_label_request(origin.repo, origin.issue_number, pr_number, origin.proposal_id, state.state, state.version, source_ref)
+  local add_labels, remove_labels = core.state_label_changes(state.state)
+  core.log_apply("observe_pr", origin.proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_issue_label_request",
+  })
+  core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+end
+
+local function maybe_label_hints(origin, pr_number, current_pr, state, pr_source_ref_value)
+  local issue_source_ref_value = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or nil
+  maybe_issue_label_hint(origin, state, issue_source_ref_value)
+  maybe_pr_label_hint(origin, pr_number, current_pr, state, pr_source_ref_value)
 end
 
 local function issue_comments_for_origin(origin)
@@ -234,7 +252,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   })
   core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
-  maybe_label_hint(origin, { state = "reviewing", version = new_version }, core.issue_source_ref(origin.repo, origin.issue_number))
+  maybe_label_hints(origin, pr_number, current_pr, { state = "reviewing", version = new_version }, source_ref)
   return true
 end
 
@@ -248,6 +266,20 @@ local function direct_opened_matches_origin(pr, origin, current_pr)
     and tostring(pr.branch or "") == tostring(origin.branch or "")
     and tostring(pr.head_sha or "") == tostring(current_pr.head_sha or "")
     and tostring(pr.base_branch or "") == tostring(origin.base_branch or "")
+end
+
+local function liveness_timeout_state(state)
+  local row = core.restart_transition_row(state and state.state)
+  if row == nil or core.liveness_timeout_due(row, state, now()) ~= true then
+    return state
+  end
+  return {
+    state = state.state,
+    version = core.next_liveness_timeout_version(row, state),
+    proposal_id = state.proposal_id,
+    stage_rank = state.stage_rank,
+    marker_created_at = state.marker_created_at,
+  }
 end
 
 function pipeline(event)
@@ -298,7 +330,7 @@ function pipeline(event)
       if issue_state.state == "fixing" then
         core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
         if raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, issue_comments) then
-          maybe_label_hint(origin, issue_state, core.issue_source_ref(origin.repo, origin.issue_number))
+          maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref)
         end
         return
       end
@@ -307,9 +339,10 @@ function pipeline(event)
       return
     end
     if state.state ~= nil and state.state ~= "pr-open" then
+      local replay_state = pr.source == "poll" and raw.source == "liveness-scan" and liveness_timeout_state(state) or state
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
-      if raise_current_state(origin, pr.number, current_pr, state, source_ref) then
-        maybe_label_hint(origin, state, core.issue_source_ref(origin.repo, origin.issue_number))
+      if raise_current_state(origin, pr.number, current_pr, replay_state, source_ref) then
+        maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref)
       end
       return
     end
@@ -350,7 +383,7 @@ function pipeline(event)
     core.log_apply("observe_pr", origin.proposal_id, "reviewing", origin.impl_version, { add = {}, remove = {} }, raised)
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
-    maybe_label_hint(origin, { state = "reviewing", version = origin.impl_version }, core.issue_source_ref(origin.repo, origin.issue_number))
+    maybe_label_hints(origin, pr.number, current_pr, { state = "reviewing", version = origin.impl_version }, source_ref)
   end)
 end
 

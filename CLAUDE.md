@@ -51,6 +51,22 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 禁令：热路径不得 spawn codex；任何 catch 不得吞原始错误、不得改运行源码树、不得绕过 PR 门控、不得做 reconcile/CAS 级决策。「func1 与 codex 都是函数」的准确含义——`func1: event→effects`（快、确定、可重放）；`codex: facts→issue`（慢、只读输入、受控输出）。
 
+## 活性 ⟂ 安全双检测（错误网抓不到「该发生而没发生」）
+
+错误处理三级模型是**安全（safety）**侧——它抓「发生了坏事」：失败产生结构化错误事实（throw → fail-closed → retry → DLQ → L2 triage 消费）。但它对**活性（liveness）**违例**结构性失明**：「该发生的好事没发生」——一个本该 raise 的事件从未 raise、一个本该跑的 scan 从未跑——**不产生任何错误事实**，日志里没有「一个从未发生的动作」的行号。自驱系统必须**同时**检测两者（Lamport：safety = 坏事永不发生；liveness = 好事终将发生）。错误聚合检测「发生的坏事」、对「没发生的好事」失明；后者只能靠**正向进度断言**，不能靠错误捕获。
+
+活性 bug 的三种伪装（实证根因 #550：merge tick 用裸名比较失配命名空间队列 → scan 永不跑 → 需重试的 PR 永卡 merge-ready → churn 到 `blocked`，三级错误网每级都擦肩）：
+- **benign-return 伪装成成功**：错误路径干净 `return`、投递干净 ACK，引擎视角「处理成功了」→ 无 dead_letter → L2 无米下锅。错误网以失败为键,一次「成功地做错了事」零事实可抓。
+- **consumed-but-unrouted 塌缩进合法 skip**：多队列消费者本就合法 `skip-foreign` 不属于自己的 payload；一个**声明消费**的队列的事件却内部路由不了时被当成 foreign 静默跳过——你无法对 skip-foreign 报警,否则误报每一次合法跳过。
+- **false-terminal（假终态）**：churn 到一个**合法终态**（如 `blocked`），liveness sweep 见终态即判 done → 绿,分不清「该 blocked」与「因上游静默死掉而错误 blocked」。
+
+对策（把活性 bug 转成安全 bug 让错误网能抓 + 正向断言 + harness 保真）：
+- **consumed-but-unrouted 一律 fail-closed**：dispatch on `event.queue` 必须**枚举** consumed 队列,区分「不消费的队列 / foreign payload」（合法跳过）与「声明消费却内部路由不了」（**`error()` fail-closed → dead_letter → L2 抓**）。这是边界资源公理（枚举 + fail-closed）与「错误分类要窄」在事件分发的落地。
+- **非终止态必有正向进度断言**：每个非终态在预算内必须产出进度（活性契约）；**终态携带 WHY**,使假终态（如「从未尝试过 merge 的 blocked」）可被识别,而非被当作已满足。
+- **harness 保真到生产交付语义**：测试必须交付**生产形态**的事件（如命名空间队列名 `pkg.queue`,而非裸名）,否则裸名测试匹配 buggy 比较给假绿——「让问题都在测试解决」要求 harness 不保真即视为缺口。优先用 conformance 不变式机械覆盖整类（每个 consumed 队列用命名空间名派发必须不落 unsupported/skip-foreign fallthrough）,而非逐 dept 手写测试。
+
+参考案例：#550（根因）/ #551（harness 硬化）。这是「先找 harness」doctrine 的硬化：安全网已成熟,活性网才是自驱系统反复栽跟头的盲区。
+
 ## 先找 harness 再执行（harness-first）
 
 解决任何非平凡问题前，先识别支配这类问题的**成熟人类理论 / 工业最佳实践 / prior art**，把方案锚定在它之上，再动手：分布式投递 → at-least-once + 幂等 + DLQ + lease/fencing（Temporal/SQS 形态）；并发状态 → CAS / 乐观并发 / 版本总序；外部系统 → 最终一致假设 + 写前重导；测试 → fail-closed mock + 行为验收。产出（设计、实现、判断）要说明：套用了哪个成熟实践、在哪里**有意**偏离、为什么。最好的 harness 是让 AI 先自动找到 harness 然后再执行——判断管线（intake/consensus/review）同样据此审：无理据偏离成熟实践的方案应被质疑；声称新颖前先证明现有实践不适用。

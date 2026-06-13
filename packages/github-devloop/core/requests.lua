@@ -1,5 +1,4 @@
 local S = {}
-
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
 local display_separator = " — "
@@ -117,6 +116,8 @@ function M.build_label_request(repo, issue_number, add_labels, remove_labels, de
   return M.attach_issue_claim({
     schema = "github-proxy.label.v1",
     repo = repo,
+    target_kind = "issue",
+    target_number = issue_number,
     issue_number = issue_number,
     add_labels = add_labels or {},
     remove_labels = remove_labels or {},
@@ -135,7 +136,7 @@ function M.build_thinking_label_request(issue, proposal)
     issue.repo,
     issue.number,
     "thinking",
-    proposal.dedup_key .. "/label/thinking",
+    tostring(proposal.effect_version or proposal.dedup_key) .. "/label/thinking",
     issue.source_ref
   )
 end
@@ -146,7 +147,7 @@ function M.build_observe_comment_request(issue, proposal)
     repo = issue.repo,
     issue_number = issue.number,
     body = M.comment_string("thinking_started") .. "\n\n"
-      .. M.state_marker(proposal.proposal_id, "thinking", proposal.dedup_key),
+      .. M.state_marker(proposal.proposal_id, "thinking", tostring(proposal.effect_version or proposal.dedup_key)),
     dedup_key = M._dedup_key({
       tostring(proposal.proposal_id),
       "comment",
@@ -167,7 +168,7 @@ function M.build_result_label_request(repo, issue_number, reached)
 end
 function M.build_result_comment_request(repo, issue_number, reached)
   local marker = M.result_marker(reached.proposal_id, reached.decision, reached.dedup_key)
-  local state_marker = M.state_marker(reached.proposal_id, "ready", reached.dedup_key, "result-marker,ready-label,devloop-ready")
+  local state_marker = M.state_marker(reached.proposal_id, "ready", tostring(reached.effect_version or reached.dedup_key), "result-marker,ready-label,devloop-ready")
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = build_verdict_summary(reached.angle_results)
   local body = M.comment_string("decision_prefix") .. tostring(reached.decision)
@@ -981,7 +982,6 @@ function M.build_review_carry_over_comment_request(repo, pr_number, issue_propos
     tostring(carry.new_head_sha),
   }), source_ref)
 end
-
 function M.build_merging_comment_body(merge_ready)
   return M.comment_string("is_merging_pr_prefix") .. tostring(merge_ready.pr_number)
     .. "\n\n" .. M.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)

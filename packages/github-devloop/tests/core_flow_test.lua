@@ -325,7 +325,7 @@ return {
     t.eq(facts[1].verdicts, bare_facts[1].verdicts)
   end,
 
-  test_decompose_child_fact_indexes_use_created_and_trusted_child_facts = function()
+  test_decompose_child_fact_indexes_keep_proxy_marker_legacy_but_completion_uses_live_open_children = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "2026-06-03T01-02-03Z"
     local decompose = core.build_devloop_decompose_payload({
@@ -356,16 +356,32 @@ return {
       {
         body = core.decompose_child_marker(proposal_id, version, 7, 3),
         author_login = "fkst-test-bot",
+        state = "OPEN",
       },
       {
         body = core.decompose_child_marker(proposal_id, version, 7, 2),
         author_login = "someone-else",
+        state = "OPEN",
       },
     }, proposal_id, version, 7, dedup_by_index)
+    local live_completed = core.decompose_child_issue_fact_indexes({
+      {
+        body = core.decompose_child_marker(proposal_id, version, 7, 1),
+        author_login = "fkst-test-bot",
+        state = "CLOSED",
+      },
+      {
+        body = core.decompose_child_marker(proposal_id, version, 7, 3),
+        author_login = "fkst-test-bot",
+        state = "OPEN",
+      },
+    }, proposal_id, version, 7)
 
     t.eq(completed[1], true)
     t.eq(completed[2], nil)
     t.eq(completed[3], true)
+    t.eq(live_completed[1], nil)
+    t.eq(live_completed[3], true)
   end,
 
   test_decompose_replay_dedup_binds_child_completion_identity = function()
@@ -453,12 +469,36 @@ return {
     t.eq(core.git_fetch_head_commit_cmd(), "git rev-parse --verify FETCH_HEAD^{commit}")
     t.eq(core.git_remote_branch_head_cmd("origin", "dev"), "git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}")
     t.is_true(core.git_worktree_add_new_branch_cmd(worktree_path, deterministic_branch, "abc123"):find("git worktree add -b", 1, true) ~= nil)
+    t.eq(
+      core.git_worktree_reset_hard_cmd(worktree_path, deterministic_branch),
+      "git -C '" .. worktree_path .. "' reset --hard refs/heads/'" .. deterministic_branch .. "'"
+    )
+    t.eq(core.git_worktree_clean_cmd(worktree_path), "git -C '" .. worktree_path .. "' clean -fd")
     t.eq(core.git_worktree_list_cmd(), "git worktree list --porcelain")
     t.is_true(core.git_worktree_add_remote_branch_cmd(worktree_path, "origin", deterministic_branch, true):find("git worktree add --force -B", 1, true) ~= nil)
     local list = "worktree /tmp/main\nHEAD abc123\nbranch refs/heads/dev\n\n"
       .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
     t.eq(core.find_worktree_for_branch(list, deterministic_branch), worktree_path)
+    local branch_worktrees = core.find_worktrees_for_branch(list, deterministic_branch)
+    t.eq(#branch_worktrees, 1)
+    t.eq(branch_worktrees[1], worktree_path)
     t.is_nil(core.find_worktree_for_branch(list, deterministic_branch .. "-other"))
+    local stale_worktree_path = "/tmp/fkst-rt-old/worktrees/devloop-owner-repo-42-01HY"
+    local stale_worktree_path_two = "/tmp/fkst-rt-old-two/worktrees/devloop-owner-repo-42-01HY"
+    local current_root_list = "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+      .. "worktree " .. stale_worktree_path_two .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+      .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+    local all_branch_worktrees = core.find_worktrees_for_branch(current_root_list, deterministic_branch)
+    t.eq(#all_branch_worktrees, 3)
+    t.eq(all_branch_worktrees[1], stale_worktree_path)
+    t.eq(all_branch_worktrees[2], stale_worktree_path_two)
+    t.eq(all_branch_worktrees[3], worktree_path)
+    t.eq(core.find_worktree_for_branch_under_runtime(current_root_list, deterministic_branch, "/tmp/fkst-rt"), worktree_path)
+    t.is_nil(core.find_worktree_for_branch_under_runtime(
+      "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n",
+      deterministic_branch,
+      "/tmp/fkst-rt"
+    ))
 
     local marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)

@@ -141,6 +141,30 @@ return {
     t.eq(count_calls("merge-base --is-ancestor"), 1)
   end,
 
+  test_open_pr_redrive_repairs_stale_blocked_state_label = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1"
+    mock_issue_open_pr({ "fkst-dev:blocked" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
+    })
+    mock_bot_env()
+
+    local result = run_open_pr(issue({
+      labels = { "fkst-dev:blocked" },
+      source_ref = source_ref(),
+    }), opts("open-pr-redrive-stale-blocked-label"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:pr-open")
+    t.is_true(h.has_value(label_raise.payload.remove_labels, "fkst-dev:blocked"))
+    t.is_true(h.has_value(label_raise.payload.remove_labels, "fkst-dev:impl-failed"))
+    t.is_true(h.has_value(label_raise.payload.remove_labels, "fkst-dev:merged"))
+    t.eq(h.has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"), false)
+    t.eq(count_calls("show-ref --verify --quiet"), 0)
+    t.eq(count_calls("rev-parse --verify"), 0)
+  end,
+
   test_open_pr_skips_entity_changed_with_no_state_marker = function()
     mock_issue_open_pr({ "fkst-dev:enabled" }, {})
 
@@ -183,7 +207,7 @@ return {
     t.eq(count_calls("rev-parse --verify"), 0)
   end,
 
-  test_issue_entity_view_is_shared_across_event_driven_departments = function()
+  test_marker_bearing_issue_view_is_fresh_across_event_driven_departments = function()
     full_issue_view({ "fkst-dev:ready" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "ready", "ready/version"),
     })
@@ -191,12 +215,14 @@ return {
     local event = issue({ labels = { "fkst-dev:ready" }, updated_at = "2026-06-03T01:02:03Z" })
 
     local observed = run_observe(event, run_opts)
-    issue_updated_at("2026-06-03T01:02:03Z")
+    full_issue_view({ "fkst-dev:ready" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "ready", "ready/version"),
+    })
     local opened = run_open_pr(event, run_opts)
 
     t.eq(observed.exit_code, 0)
     t.eq(opened.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 1)
+    t.eq(count_calls("gh issue view"), 2)
   end,
 
   test_cross_consumer_delayed_retry_refetches_current_issue_truth = function()

@@ -69,6 +69,17 @@ local function comment_id(comment)
   return tostring(id)
 end
 
+local function rest_comment_id(comment)
+  if type(comment) ~= "table" or comment.id == nil then
+    return nil
+  end
+  local id = tostring(comment.id)
+  if id == "" or id:find("^%d+$") == nil then
+    return nil
+  end
+  return id
+end
+
 function M.comment_marker(dedup_key)
   return "<!-- fkst:github-proxy:comment:" .. tostring(dedup_key) .. " -->"
 end
@@ -148,6 +159,51 @@ end
 local function load_comments(M, target, repo)
   local view = M.gh_exec(target.view_comments_cmd(repo, target.number), 30, target.view_label)
   return M.parse_issue_comments(view.stdout)
+end
+
+local function append_rest_comments(comments, value)
+  if type(value) ~= "table" then
+    return
+  end
+  if value.id ~= nil or value.body ~= nil or value.user ~= nil then
+    local id = rest_comment_id(value)
+    if id ~= nil then
+      table.insert(comments, {
+        id = id,
+        body = comment_body(value),
+        author_login = comment_author_login(value),
+      })
+    end
+    return
+  end
+  for _, item in ipairs(value) do
+    append_rest_comments(comments, item)
+  end
+end
+
+local function parse_rest_comments(stdout)
+  local ok, decoded = pcall(json.decode, stdout or "[]")
+  if not ok then
+    return {}
+  end
+  local comments = {}
+  append_rest_comments(comments, decoded)
+  return comments
+end
+
+function M.gh_issue_comments_api_cmd(repo, issue_number)
+  return "gh api --paginate --slurp "
+    .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
+end
+
+local function load_rest_comments(M, target, repo)
+  local view = M.gh_exec(M.gh_issue_comments_api_cmd(repo, target.number), 30, "gh issue comments")
+  return parse_rest_comments(view.stdout)
+end
+
+local function trusted_rest_comment_with_fragment(M, repo, target, fragment, bot_login)
+  local comments = load_rest_comments(M, target, repo)
+  return M.trusted_comment_with_fragment(comments, fragment, bot_login)
 end
 
 function M.gh_pr_comment_cmd(repo, pr_number, body_file)
@@ -268,7 +324,9 @@ function M.write_comment_request(payload, target)
       existing = M.trusted_comment_with_fragment(comments, tostring(replace_marker), bot_login)
     elseif M.has_trusted_marker(comments, payload.dedup_key, bot_login) then
       log.info("github-proxy: comment marker already present")
-      written_comment = M.trusted_comment_with_fragment(comments, M.comment_marker(payload.dedup_key), bot_login)
+      if payload.handoff ~= nil then
+        written_comment = trusted_rest_comment_with_fragment(M, repo, target, M.comment_marker(payload.dedup_key), bot_login)
+      end
       return
     end
     local claim_issue_number = target.kind == "issue" and target.number or payload.issue_number
@@ -283,6 +341,7 @@ function M.write_comment_request(payload, target)
     local edited, edit_status, edited_comment = edit_existing_comment(M, repo, target, path, existing, tostring(replace_marker or ""), bot_login)
     if edited then
       written_comment = edited_comment
+      M.invalidate_entity_after_write(repo, target.kind, target.number)
       return
     end
     if edit_status == stale_comment_target_error_class then
@@ -296,6 +355,7 @@ function M.write_comment_request(payload, target)
       error("github-proxy: comment create did not return a valid comment id")
     end
     written_comment = written
+    M.invalidate_entity_after_write(repo, target.kind, target.number)
   end)
   return written_comment
 end

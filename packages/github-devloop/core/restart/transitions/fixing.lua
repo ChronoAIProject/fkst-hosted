@@ -36,7 +36,11 @@ return function(M, h)
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "devloop_fixing" }, "fixing replay is complete only when trusted feedback marker fields are copied into devloop_fixing"),
+    effects = effect(
+      { "devloop_fixing", "pr-state-label" },
+      "fixing replay is complete only when trusted feedback marker fields are copied into devloop_fixing and the PR-local state label projection is requested",
+      "build_reconcile_pr_state_label_request"
+    ),
     marker_facts = "state:v1 fixing plus review-result/review-meta/merge-gate feedback, or current PR head for deterministic renormalization",
     kickoff = "devloop_fixing or devloop_reviewing",
     replay = "Observe re-raises fix when a trusted feedback fact is parseable; otherwise it re-enters reviewing for the current head.",

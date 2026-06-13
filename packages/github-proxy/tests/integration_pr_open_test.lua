@@ -217,6 +217,11 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
+      stdout = "2026-06-03T01:02:03Z\n",
+      stderr = "",
+      exit_code = 0,
+    })
     local cached = core.fetch_issue_view("owner/x", 42, "2026-06-03T01:02:03Z")
     t.eq(cached.exit_code, 0)
 

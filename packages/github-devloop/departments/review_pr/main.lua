@@ -105,13 +105,14 @@ function pipeline(event)
       current_issue = core.parse_issue_view_review(issue_view.stdout)
     end
     local review_id = core.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
+    local review_dedup_key = core._dedup_key({ review_id, "review" })
     local content_fetch = core.context_fetch_ref_from_bundle({
       dept = "review_pr",
       repo = repo,
       issue_number = issue_number,
       pr_number = reviewing.pr_number,
       proposal_id = review_id,
-      version = core._dedup_key({ review_id, "review" }),
+      version = review_dedup_key,
       tick = event.ts,
     })
     local proposal = core.build_board_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch)
@@ -128,6 +129,7 @@ function pipeline(event)
     }, {
       proposal_id = reviewing.proposal_id,
       role = "review",
+      run_id = core.work_card_run_id({ "review", review_id, review_dedup_key }),
       version = reviewing.version,
       round = core.version_fix_round(reviewing.version),
       started_at = now(),
