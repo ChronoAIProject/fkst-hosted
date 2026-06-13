@@ -229,7 +229,7 @@ return {
     local healed_fixing = find_raise(healed.raises, "devloop_fixing")
     t.is_true(healed_fixing ~= nil)
     t.is_true(healed_fixing.payload.dedup_key ~= original_fixing.payload.dedup_key)
-    t.is_true(healed_fixing.payload.dedup_key:find("/nobase/" .. tostring(original_fixing.payload.reviewed_head_sha), 1, true) ~= nil)
+    t.is_true(healed_fixing.payload.dedup_key:find("/nobase/nopred/" .. tostring(original_fixing.payload.reviewed_head_sha), 1, true) ~= nil)
     t.eq(healed_fixing.payload.review_dedup_key, original_fixing.payload.review_dedup_key)
     t.eq(healed_fixing.payload.reviewed_head_sha, original_fixing.payload.reviewed_head_sha)
   end,

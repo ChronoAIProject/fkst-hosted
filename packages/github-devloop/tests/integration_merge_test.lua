@@ -117,6 +117,10 @@ local function pr_native_merge_ready(extra)
   return value
 end
 
+local function mock_base_head_for_stale_mergeability() t.mock_command("git fetch 'origin' 'dev'", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}", { stdout = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", stderr = "", exit_code = 0 })
+  t.mock_command("git merge-base --is-ancestor 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 'def456'", { stdout = "", stderr = "", exit_code = 1 }) end
+
 return {
   test_merge_ready_green_mergeable_merges_closes_and_marks_merged = function()
     local event = merge_ready()
@@ -705,6 +709,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "DIRTY")
+    mock_base_head_for_stale_mergeability()
 
     local result = run_merge(event, opts("merge-not-mergeable", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -721,6 +726,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker }, "[]", "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "DIRTY")
+    mock_base_head_for_stale_mergeability()
 
     local result = run_merge(event, opts("merge-dirty-missing-status", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)

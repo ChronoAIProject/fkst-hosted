@@ -80,19 +80,17 @@ local function list_open_pr(repo, integration, upstream)
   return prs[1]
 end
 
-local function rollup_body(upstream, integration, ahead)
-  return "Automated rollup from `" .. tostring(integration) .. "` into `" .. tostring(upstream) .. "`.\n\n"
-    .. "Ahead commits: " .. tostring(ahead) .. "\n"
-    .. "Merge policy: CI green and mergeable current PR facts.\n"
-end
-
-local function create_rollup_pr(repo, upstream, integration, ahead)
-  local body_file = "/tmp/fkst-github-devloop-rollup-"
-    .. core._decimal_checksum(repo .. "#" .. upstream .. "#" .. integration)
-    .. ".md"
-  file.write(body_file, rollup_body(upstream, integration, ahead))
+local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, publish_policy)
+  local notes = core.draft_release_notes({
+    repo = repo,
+    upstream_branch = upstream,
+    integration_branch = integration,
+    head_sha = head_sha,
+    ahead = ahead,
+    publish_policy = publish_policy,
+  })
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
-  run_gh_cmd(core.gh_pr_create_cmd(repo, integration, upstream, title, body_file), 60, "gh rollup PR create")
+  run_gh_cmd(core.gh_pr_create_body_cmd(repo, integration, upstream, title, notes), 60, "gh rollup PR create")
 end
 
 function pipeline(event)
@@ -119,6 +117,7 @@ function pipeline(event)
       return
     end
 
+    local integration_head = nil
     local pr = list_open_pr(repo, branches.integration, branches.upstream)
     if pr == nil then
       if cfg.write_mode ~= "real" then
@@ -131,14 +130,22 @@ function pipeline(event)
         })
         return
       end
-      create_rollup_pr(repo, branches.upstream, branches.integration, ahead)
+      integration_head = remote_head(branches.integration)
+      create_rollup_pr(
+        repo,
+        branches.upstream,
+        branches.integration,
+        integration_head,
+        ahead,
+        core.release_notes_publish_policy(cfg)
+      )
       pr = list_open_pr(repo, branches.integration, branches.upstream)
       if pr == nil then
         error("github-devloop: gh rollup PR create/list did not return an open PR")
       end
     end
 
-    local integration_head = remote_head(branches.integration)
+    integration_head = integration_head or remote_head(branches.integration)
     if cfg.rollup_merge == "manual" then
       core.log_line("info", "rollup_scan", "rollup", "POSTURE", {
         "posture=manual",

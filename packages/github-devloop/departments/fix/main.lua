@@ -125,6 +125,100 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   return result
 end
 
+local function merge_result_context(target_branch, target_sha)
+  return {
+    target_branch = target_branch,
+    target_sha = target_sha,
+    conflicted = false,
+    unmerged_paths = "",
+  }
+end
+
+local function append_unmerged_paths(left, right)
+  if tostring(left or "") == "" then
+    return tostring(right or "")
+  end
+  if tostring(right or "") == "" then
+    return tostring(left or "")
+  end
+  return tostring(left) .. "\n" .. tostring(right)
+end
+
+local function merge_sha_for_fix(worktree, sha, context, log_values)
+  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, sha), timeout = 120 })
+  if merge_result.exit_code == 0 then
+    return context
+  end
+  local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+  if unmerged_result.exit_code ~= 0 then
+    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+  end
+  if tostring(unmerged_result.stdout or "") == "" then
+    error("github-devloop: git target merge failed: " .. tostring(merge_result.stderr))
+  end
+  context.conflicted = true
+  context.unmerged_paths = append_unmerged_paths(context.unmerged_paths, unmerged_result.stdout)
+  core.log_line("info", "fix", "merge-target", "MERGE_SKEW", log_values)
+  return context
+end
+
+local function fetch_verified_pr_head(pr_number, expected_head_sha)
+  local fetch_result = exec_sync({ cmd = core.git_fetch_pr_head_ref_cmd("origin", pr_number), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR head ref fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local head_result = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    error("github-devloop: git PR head ref head failed: " .. tostring(head_result.stderr))
+  end
+  local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if head_sha ~= tostring(expected_head_sha) then
+    error("github-devloop: PR head ref does not match merge queue predecessor")
+  end
+  return head_sha
+end
+
+local function current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
+  local predecessors, reason = core.merge_queue_predecessors(repo, integration_branch, {
+    pr_number = fix.pr_number,
+    pr = current_pr,
+  })
+  if predecessors == nil then
+    return nil, reason
+  end
+  return predecessors, core.merge_queue_predecessor_set(predecessors)
+end
+
+local function merge_speculative_predecessors_for_fix(worktree, repo, integration_branch, fix, current_pr)
+  if fix.predecessor_set == nil then
+    return nil, "not-speculative"
+  end
+  local predecessors, current_set = current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
+  if predecessors == nil then
+    return nil, current_set
+  end
+  if tostring(current_set) ~= tostring(fix.predecessor_set) then
+    return nil, "predecessor-set-mismatch", current_set
+  end
+  if #predecessors == 0 then
+    return nil, "not-speculative"
+  end
+  local context = merge_result_context("speculative:" .. integration_branch, current_set)
+  for _, predecessor in ipairs(predecessors) do
+    if not core.is_safe_head_sha(predecessor.head_sha) then
+      error("github-devloop: unsafe speculative predecessor head")
+    end
+    local predecessor_head = fetch_verified_pr_head(predecessor.pr_number, predecessor.head_sha)
+    context = merge_sha_for_fix(worktree, predecessor_head, context, {
+      "integration_branch=" .. tostring(integration_branch),
+      "predecessor_pr=" .. tostring(predecessor.pr_number),
+      "predecessor_head=" .. tostring(predecessor_head),
+      "reason=speculative predecessor merge requires codex conflict resolution",
+    })
+  end
+  return context, "ok"
+end
+
 local function assert_no_unmerged_paths(worktree)
   local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
   if unmerged_result.exit_code ~= 0 then
@@ -194,6 +288,60 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
   })
 end
 
+local function raise_stale_speculation_refix(repo, issue_number, fix, current_state, current_predecessor_set, reason)
+  local next_version = core.next_fix_version(fix.version)
+  local merge_ready = {
+    proposal_id = fix.proposal_id,
+    pr_number = fix.pr_number,
+    version = core._strip_latest_fix_version_suffix(fix.version),
+    review_proposal_id = fix.review_proposal_id,
+    review_dedup_key = fix.review_dedup_key,
+    reviewed_head_sha = fix.reviewed_head_sha,
+    dedup_key = fix.dedup_key,
+  }
+  local comment_request = core.build_merge_gate_fix_comment_request(
+    repo,
+    issue_number,
+    merge_ready,
+    next_version,
+    fix.gate_failure_excerpt or fix.blocking_gap or reason,
+    fix.gate_baseline_sha,
+    fix.source_ref,
+    current_predecessor_set
+  )
+  local label_request = issue_number ~= nil and core.build_state_label_request(
+    repo,
+    issue_number,
+    "fixing",
+    fix.dedup_key .. "/label/refix/" .. tostring(core.version_fix_round(next_version)),
+    core.issue_source_ref(repo, issue_number)
+  ) or nil
+  local refix_payload = core.build_devloop_fixing_payload({
+    proposal_id = fix.proposal_id,
+    impl_version = next_version,
+  }, fix.pr_number, {
+    review_proposal_id = fix.review_proposal_id,
+    review_dedup_key = fix.review_dedup_key,
+    reviewed_head_sha = fix.reviewed_head_sha,
+    blocking_gap = fix.blocking_gap,
+    gate_baseline_sha = fix.gate_baseline_sha,
+    predecessor_set = current_predecessor_set,
+    gate_failure_excerpt = fix.gate_failure_excerpt,
+  }, fix.source_ref)
+  local add_labels, remove_labels = core.state_label_changes("fixing")
+  core.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
+  core.log_apply("fix", fix.proposal_id, "fixing", next_version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_fixing",
+  })
+  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if label_request ~= nil then
+    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  core.log_raise("fix", fix.proposal_id, "devloop_fixing", refix_payload)
+end
+
 local function raise_work_card(repo, fix, card)
   local request = core.build_work_card_comment_request({
     kind = "pr",
@@ -255,13 +403,33 @@ end
 
 local function run_fix_attempt(plan)
   local worktree = branch_worktree(plan.repo, plan.issue_number, plan.fix.version, plan.branch)
-  local merge_context = merge_integration_for_fix(
+  local merge_context, speculative_reason, speculative_current_set = merge_speculative_predecessors_for_fix(
     worktree,
-    plan.fix.pr_number,
+    plan.repo,
     plan.branches.integration,
-    plan.merge_gate_fact and plan.merge_gate_fact.gate_baseline_sha or nil,
-    plan.merge_gate_fact and plan.merge_gate_fact.reason or nil
+    plan.fix,
+    plan.current_pr
   )
+  if merge_context == nil and speculative_reason ~= "not-speculative" then
+    if speculative_reason == "predecessor-set-mismatch" then
+      return {
+        kind = "refix",
+        current_predecessor_set = speculative_current_set or "none",
+        reason = "speculative predecessor set changed",
+      }
+    end
+    core.log_cas_decision("fix", plan.fix.proposal_id, plan.state, "fixing", "reviewing", "skip-stale(" .. tostring(speculative_reason) .. ")", "speculative predecessor set is no longer current")
+    return nil
+  end
+  if merge_context == nil then
+    merge_context = merge_integration_for_fix(
+      worktree,
+      plan.fix.pr_number,
+      plan.branches.integration,
+      plan.merge_gate_fact and plan.merge_gate_fact.gate_baseline_sha or nil,
+      plan.merge_gate_fact and plan.merge_gate_fact.reason or nil
+    )
+  end
   if merge_context.conflicted then
     core.log_conflict_files("fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
   end
@@ -414,6 +582,17 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     return
   end
   recheck_fix_write_gate(repo, fix, branch)
+  if outcome.kind == "refix" then
+    raise_stale_speculation_refix(
+      repo,
+      issue_number,
+      fix,
+      { state = "fixing", version = fix.version },
+      outcome.current_predecessor_set or "none",
+      outcome.reason or "speculative predecessor set changed"
+    )
+    return
+  end
   if outcome.kind == "review-meta" then
     raise_work_card(repo, fix, {
       started_at = outcome.started_at,
@@ -616,15 +795,22 @@ function pipeline(event)
       current_issue = core.parse_issue_view_fix(issue_view.stdout)
     end
 
+    if merge_gate_fact ~= nil and tostring(merge_gate_fact.predecessor_set or "") ~= tostring(fix.predecessor_set or "") then
+      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(predecessor-marker-mismatch)", "fix event does not match canonical merge-gate predecessor set")
+      return
+    end
+
     attempt_plan = {
       repo = repo,
       issue_number = issue_number,
       fix = fix,
       branches = branches,
       branch = branch,
+      current_pr = current_pr,
       current_issue = current_issue,
       feedback_reason = feedback_reason,
       merge_gate_fact = merge_gate_fact,
+      state = state,
       event_ts = event.ts,
       event_queue = event.queue,
     }

@@ -223,6 +223,7 @@ return {
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
     t.eq(core.validate_proposal(proposal), true)
   end,
+
   test_pr_review_helpers = function()
     local repo = fixtures.long_repo()
     local version = fixtures.full_review_issue_version(repo)
