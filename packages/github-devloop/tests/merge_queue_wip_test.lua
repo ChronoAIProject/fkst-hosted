@@ -396,6 +396,35 @@ return {
     t.is_true(find_raise(polled.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
   end,
 
+  test_merge_queue_tick_dispatches_namespaced_queue_to_scan = function()
+    -- Regression: the fanout tick is delivered with a NAMESPACED event.queue
+    -- ("github-devloop.devloop_merge_queue_tick") in production, while the
+    -- department declares the bare name. A bare-only `event.queue ==` compare
+    -- dropped the tick into the per-PR merge_ready branch ("unsupported event
+    -- payload") so the merge-queue scan never ran, and merge-ready PRs that did
+    -- not merge on their first per-PR event were never re-attempted (this was
+    -- the long-standing "merge is slow" symptom). The namespaced tick must still
+    -- reach the scan, which reads the merge queue.
+    mock_bot_env()
+    mock_repo_env()
+    mock_queue_list({})
+    local result = t.run_department("departments/merge/main.lua", {
+      queue = "github-devloop.devloop_merge_queue_tick",
+      payload = { schema = "github-devloop.merge-queue-tick.v1" },
+    }, opts("merge-tick-namespaced-dispatch", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_REPO = "owner/repo",
+    }))
+    t.eq(result.exit_code, 0)
+    local scanned_queue = false
+    for _, call in ipairs(t.command_calls()) do
+      if tostring(call.rendered or ""):find("pulls?state=open&base=dev", 1, true) ~= nil then
+        scanned_queue = true
+      end
+    end
+    t.is_true(scanned_queue)
+  end,
+
   test_merge_queue_poll_yields_red_fixing_head_to_next_green = function()
     local current = merge_ready()
     local older = event_for_pr(9, 44, "2026-06-03T00-00-00Z", "aabb11")

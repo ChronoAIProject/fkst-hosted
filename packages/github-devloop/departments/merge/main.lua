@@ -919,8 +919,22 @@ local function process_merge_queue_tick(event)
     end
   end)
 end
+local function event_on_queue(event, bare_queue)
+  -- Reliable/fanout deliveries carry a namespaced event.queue (e.g.
+  -- "github-devloop.devloop_merge_queue_tick"), while the department declares
+  -- the bare name. Match either form so the scan-tick path is not silently
+  -- dropped into the per-PR merge_ready branch (which then logs "unsupported
+  -- event payload" and never runs the merge-queue scan that re-attempts
+  -- merge-ready PRs which did not merge on their first per-PR event).
+  local queue = type(event) == "table" and event.queue or nil
+  if type(queue) ~= "string" then
+    return false
+  end
+  return queue == bare_queue or queue:sub(-(#bare_queue + 1)) == ("." .. bare_queue)
+end
+
 function pipeline(event)
-  if event.queue == "devloop_merge_queue_tick" then
+  if event_on_queue(event, "devloop_merge_queue_tick") then
     process_merge_queue_tick(event)
     return
   end
