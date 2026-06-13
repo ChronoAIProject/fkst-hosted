@@ -223,6 +223,26 @@ return {
     t.eq(h.count_calls("rm -f --"), 0)
   end,
 
+  test_rollup_scan_no_commits_between_create_failure_noops = function()
+    mock_env("1")
+    mock_fetches()
+    mock_ahead(1)
+    mock_content_diff(true)
+    mock_pr_list(nil)
+    mock_integration_head("def456")
+    mock_release_notes("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel)
+    t.mock_command("gh pr create", {
+      stdout = "",
+      stderr = "pull request create failed: GraphQL: No commits between dev and integration/dev",
+      exit_code = 1,
+    })
+    local result = run_scan(opts("rollup-no-commits-between", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(h.count_calls("gh pr create"), 1)
+    t.eq(h.count_calls("gh api --paginate --slurp 'repos/owner/repo/pulls"), 1)
+  end,
+
   test_rollup_scan_ahead_without_content_diff_skips_pr = function()
     mock_env("1")
     mock_fetches()
