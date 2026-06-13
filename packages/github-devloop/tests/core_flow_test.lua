@@ -455,6 +455,15 @@ return {
       .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
     t.eq(core.find_worktree_for_branch(list, deterministic_branch), worktree_path)
     t.is_nil(core.find_worktree_for_branch(list, deterministic_branch .. "-other"))
+    local stale_worktree_path = "/tmp/fkst-rt-old/worktrees/devloop-owner-repo-42-01HY"
+    local current_root_list = "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+      .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+    t.eq(core.find_worktree_for_branch_under_runtime(current_root_list, deterministic_branch, "/tmp/fkst-rt"), worktree_path)
+    t.is_nil(core.find_worktree_for_branch_under_runtime(
+      "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n",
+      deterministic_branch,
+      "/tmp/fkst-rt"
+    ))
 
     local marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)
