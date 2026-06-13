@@ -62,20 +62,20 @@ local function mock_env(extra)
 end
 
 local function mock_empty_observe_lists()
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'", {
-    stdout = "[[]]\n",
+  t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label, 1), {
+    stdout = "[]\n",
     stderr = "",
     exit_code = 0,
   })
   for _, state in ipairs(core._state_order) do
-    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=" .. core.state_label(state):gsub(":", "%%3A") .. "&per_page=100'", {
-      stdout = "[[]]\n",
+    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core.state_label(state), 1), {
+      stdout = "[]\n",
       stderr = "",
       exit_code = 0,
     })
   end
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'", {
-    stdout = "[[]]\n",
+  t.mock_command(core.gh_pr_list_observe_cmd("owner/repo", 1), {
+    stdout = "[]\n",
     stderr = "",
     exit_code = 0,
   })

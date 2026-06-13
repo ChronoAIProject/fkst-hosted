@@ -11,7 +11,7 @@ M.spec = {
 
 function pipeline(event)
   core.log_entry("observability", event, "github-devloop/observability", "tick")
-  core.observe_devloop_entities()
+  core.observe_devloop_entities(event)
 end
 
 pipeline = core.wrap_pipeline_failure("observability", pipeline)

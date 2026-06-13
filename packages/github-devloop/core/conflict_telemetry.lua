@@ -235,13 +235,13 @@ function M.build_conflict_hotspot_issue_create_request(repo, hotspot)
   }
 end
 
-function M.observe_conflict_hotspots(repo)
+function M.observe_conflict_hotspots(repo, timeout)
   local cmd = M.read_env("FKST_DEVLOOP_CONFLICT_LOG_CMD")
   if cmd == nil or tostring(cmd) == "" then
     log.info("github-devloop dept=observability tag=CONFLICT_HOTSPOT_PATROL action=no-op reason=log-source-unconfigured")
     return { facts = 0, hotspots = 0, raised = 0 }
   end
-  local result = exec_sync({ cmd = cmd, timeout = 30 })
+  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     log.warn("github-devloop dept=observability tag=CONFLICT_HOTSPOT_PATROL action=no-op reason=log-source-failed")
     return { facts = 0, hotspots = 0, raised = 0 }

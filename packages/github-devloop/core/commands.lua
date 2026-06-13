@@ -59,14 +59,32 @@ function M.gh_issue_list_recent_closed_cmd(repo, limit)
     .. " --json number,title,closedAt,labels"
 end
 
-function M.gh_issue_list_observe_cmd(repo, label)
+local function bounded_page_cap(limit)
+  if limit == nil then
+    return nil
+  end
+  local n = tonumber(limit)
+  if n == nil or n ~= math.floor(n) or n < 1 or n > 10 then
+    error("github-devloop: invalid list page cap")
+  end
+  return n
+end
+
+function M.gh_issue_list_observe_cmd(repo, label, page)
+  local selected_page = bounded_page_cap(page)
+  local paginate = "--paginate --slurp "
+  local page_query = ""
+  if selected_page ~= nil then
+    paginate = ""
+    page_query = "&page=" .. tostring(selected_page)
+  end
   if label == nil or tostring(label) == "" then
-    return "gh api --paginate --slurp "
-      .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
+    return "gh api " .. paginate
+      .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100" .. page_query)
   end
   local selected_label = label
-  return "gh api --paginate --slurp "
-    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
+  return "gh api " .. paginate
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100" .. page_query)
 end
 
 function M.gh_issue_list_wip_cmd(repo)
@@ -181,9 +199,16 @@ function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file, etag)
     .. " --input " .. M._shell_single_quote(input_file)
 end
 
-function M.gh_pr_list_observe_cmd(repo)
-  return "gh api --paginate --slurp "
-    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
+function M.gh_pr_list_observe_cmd(repo, page)
+  local selected_page = bounded_page_cap(page)
+  local paginate = "--paginate --slurp "
+  local page_query = ""
+  if selected_page ~= nil then
+    paginate = ""
+    page_query = "&page=" .. tostring(selected_page)
+  end
+  return "gh api " .. paginate
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100" .. page_query)
 end
 
 function M.gh_pr_list_freshness_cmd(repo)

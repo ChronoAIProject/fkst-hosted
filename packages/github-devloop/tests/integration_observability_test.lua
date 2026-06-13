@@ -57,6 +57,14 @@ local function json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
 
+local function observe_issue_list_command(label, page)
+  return core.gh_issue_list_observe_cmd("owner/repo", label, page or 1)
+end
+
+local function observe_pr_list_command(page)
+  return core.gh_pr_list_observe_cmd("owner/repo", page or 1)
+end
+
 local function render_comment(body, author, created_at)
   return string.format(
     '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
@@ -73,15 +81,22 @@ local function mock_all_issue_lists(items)
     local state = type(item) == "table" and item.state or "open"
     table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
   end
-  local stdout = "[[" .. table.concat(rendered, ",") .. "]]\n"
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'", {
+  local stdout = "[" .. table.concat(rendered, ",") .. "]\n"
+  t.mock_command(observe_issue_list_command(core._enabled_label), {
     stdout = stdout,
     stderr = "",
     exit_code = 0,
   })
+  if #rendered >= 100 then
+    t.mock_command(observe_issue_list_command(core._enabled_label, 2), {
+      stdout = "[]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   for _, state in ipairs(core._state_order) do
-    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=" .. core.state_label(state):gsub(":", "%%3A") .. "&per_page=100'", {
-      stdout = "[[]]\n",
+    t.mock_command(observe_issue_list_command(core.state_label(state)), {
+      stdout = "[]\n",
       stderr = "",
       exit_code = 0,
     })
@@ -95,11 +110,18 @@ local function mock_pr_list(items)
     local state = type(item) == "table" and item.state or "open"
     table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
   end
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'", {
-    stdout = "[[" .. table.concat(rendered, ",") .. "]]\n",
+  t.mock_command(observe_pr_list_command(), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
     stderr = "",
     exit_code = 0,
   })
+  if #rendered >= 100 then
+    t.mock_command(observe_pr_list_command(2), {
+      stdout = "[]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_issue_view(comments, state)
@@ -143,6 +165,16 @@ local function first_call(needle)
     end
   end
   return nil
+end
+
+local function calls_matching(needle)
+  local calls = {}
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered:find(needle, 1, true) ~= nil then
+      table.insert(calls, call)
+    end
+  end
+  return calls
 end
 
 local function package_root()
@@ -228,18 +260,6 @@ end
 
 local function version_minutes_ago(minutes)
   return os.date("!%Y-%m-%dT%H-%M-%SZ", now() - (tonumber(minutes) or 0) * 60)
-end
-
-local function call_contains_bad_limit()
-  for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find("observ", 1, true) == nil
-      and (call.rendered:find("issues%?state=open", 1, false) ~= nil
-        or call.rendered:find("pulls%?state=open", 1, false) ~= nil)
-      and call.rendered:find("--limit 100", 1, true) ~= nil then
-      return true
-    end
-  end
-  return false
 end
 
 local function dashboard_hash(body)
@@ -386,7 +406,7 @@ return {
     t.is_true(summary:find("ready=1", 1, true) ~= nil)
     t.eq(count_calls("gh issue view"), 1)
     t.eq(count_calls("gh pr view"), 0)
-    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'"))
+    t.is_true(has_call(observe_issue_list_command(core._enabled_label)))
   end,
 
   test_pr_phase_comment_stream_wins_over_stale_issue_pr_open = function()
@@ -677,7 +697,7 @@ return {
     t.eq(count_calls("gh api --paginate --slurp"), 0)
   end,
 
-  test_enumeration_is_paginated_and_not_fixed_silent_100_cap = function()
+  test_enumeration_uses_explicit_bounded_pages = function()
     mock_env()
     mock_all_issue_lists({})
     mock_pr_list({})
@@ -686,9 +706,54 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'"))
-    t.is_true(has_call("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'"))
-    t.eq(call_contains_bad_limit(), false)
+    t.is_true(has_call(observe_issue_list_command(core._enabled_label)))
+    t.is_true(has_call(observe_pr_list_command()))
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'"), 0)
+  end,
+
+  test_observability_caps_total_entity_views_and_logs_deferred_work = function()
+    local issues = {}
+    local prs = {}
+    for i = 1, 30 do
+      table.insert(issues, i)
+      table.insert(prs, i + 100)
+    end
+    mock_env()
+    mock_all_issue_lists(issues)
+    mock_pr_list(prs)
+    for i = 1, 25 do
+      mock_issue_view({
+        render_comment(core.state_marker("github-devloop/issue/owner/repo/" .. tostring(i), "ready", "2026-06-03T01-02-03Z"), "fkst-test-bot"),
+      })
+      mock_pr_view({})
+    end
+
+    local logs = capture_observability_logs({
+      queue = "devloop_observe_tick",
+      payload = { schema = "github-devloop.observe-tick.v1", cursor = "0" },
+    })
+
+    t.eq(count_calls("gh issue view") + count_calls("gh pr view"), 25)
+    local body = table.concat(logs, "\n")
+    t.is_true(body:find("tag=OBSERVE_DEFERRED", 1, true) ~= nil)
+    t.is_true(body:find("entity_cap=25", 1, true) ~= nil)
+    t.is_true(body:find("listed_issues=30", 1, true) ~= nil)
+    t.is_true(body:find("listed_prs=30", 1, true) ~= nil)
+  end,
+
+  test_observability_gh_calls_have_short_timeouts_and_fail_closed = function()
+    local seen_timeout = nil
+    local ok, err = pcall(function()
+      core.observability_run_cmd("gh issue list", core.observability_limits(), now() + 90, "gh observability issue list", function(spec)
+        seen_timeout = spec.timeout
+        return { stdout = "", stderr = "timed out", exit_code = 124 }
+      end)
+    end)
+
+    t.eq(ok, false)
+    t.eq(seen_timeout, 10)
+    t.is_true(tostring(err):find("gh observability issue list failed", 1, true) ~= nil)
   end,
 
   test_dashboard_dry_run_renders_board_without_github_write = function()
