@@ -12,6 +12,30 @@ M.spec = {
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
+local function reviewing_transition_status(state, reviewing_version)
+  if state == nil or state.version == nil then
+    return "pending"
+  end
+
+  local state_base = core.strip_transition_version_suffixes(state.version)
+  local reviewing_base = core.strip_transition_version_suffixes(reviewing_version)
+  if state.state == "reviewing" then
+    if tostring(state_base) == tostring(reviewing_base) then
+      return "apply"
+    end
+    return "version-mismatch"
+  end
+
+  local canonical_order = core.compare_state_marker_order({
+    state = state.state,
+    version = state_base,
+  }, "reviewing", reviewing_base)
+  if canonical_order < 0 then
+    return "pending"
+  end
+  return "stale"
+end
+
 function pipeline(event)
   local reviewing = event.payload or {}
   if not core.is_supported_reviewing(reviewing) then
@@ -45,8 +69,8 @@ function pipeline(event)
     local current_pr = core.parse_pr_view_origin(pr_view.stdout)
     core.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, reviewing.proposal_id)
-    local marker_order = core.compare_state_marker_order(state, "reviewing", reviewing.version)
-    if marker_order < 0 then
+    local transition = reviewing_transition_status(state, reviewing.version)
+    if transition == "pending" or transition == "version-mismatch" then
       local verified_state = nil
       local hand_off_reason = "missing"
       if reviewing.reviewing_hand_off ~= nil then
@@ -59,10 +83,9 @@ function pipeline(event)
       end
       if verified_state ~= nil then
         state = verified_state
-        marker_order = 0
+        transition = "apply"
         core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "apply(verified-own-reviewing-hand-off)", "reviewing marker comment verified by direct id lookup")
       else
-        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
         if reviewing.reviewing_hand_off ~= nil then
           core.log_line("info", "review_pr", reviewing.proposal_id, "HANDOFF", {
             "state=reviewing",
@@ -70,15 +93,20 @@ function pipeline(event)
             "reason=" .. tostring(hand_off_reason),
           })
         end
+        if transition == "version-mismatch" then
+          core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
+          return
+        end
+        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
         error("github-devloop: reviewing state marker not yet visible for PR review; retrying")
       end
     end
-    if marker_order > 0 or state.state ~= "reviewing" then
+    if transition == "stale" then
       core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale/diverged", "issue is not currently reviewing")
       return
     end
 
-    if core.strip_transition_version_suffixes(state.version) ~= core.strip_transition_version_suffixes(reviewing.version) then
+    if transition == "version-mismatch" then
       core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
       return
     end
