@@ -919,26 +919,7 @@ local function process_merge_queue_tick(event)
     end
   end)
 end
-local function event_on_queue(event, bare_queue)
-  -- Reliable/fanout deliveries carry a namespaced event.queue (e.g.
-  -- "github-devloop.devloop_merge_queue_tick"), while the department declares
-  -- the bare name. Match either form so the scan-tick path is not silently
-  -- dropped into the per-PR merge_ready branch (which then logs "unsupported
-  -- event payload" and never runs the merge-queue scan that re-attempts
-  -- merge-ready PRs which did not merge on their first per-PR event).
-  local queue = type(event) == "table" and event.queue or nil
-  if type(queue) ~= "string" then
-    return false
-  end
-  return queue == bare_queue or queue:sub(-(#bare_queue + 1)) == ("." .. bare_queue)
-end
-
-function pipeline(event)
-  if event_on_queue(event, "devloop_merge_queue_tick") then
-    process_merge_queue_tick(event)
-    return
-  end
-
+local function process_merge_ready_event(event)
   local merge_ready = type(event and event.payload) == "table" and event.payload or {}
   if not core.is_supported_merge_ready(merge_ready) then
     core.log_entry("merge", event, "unknown", core.payload_field(merge_ready, "dedup_key"))
@@ -965,6 +946,15 @@ function pipeline(event)
     local branches = core.branch_config()
     process_merge_ready_locked(repo, issue_number, merge_ready, branches)
   end)
+end
+
+function pipeline(event)
+  core.dispatch_consumed_queue("merge", M.spec, event, {
+    devloop_merge_queue_tick = function()
+      process_merge_queue_tick(event)
+    end,
+    devloop_merge_ready = process_merge_ready_event,
+  })
 end
 pipeline = core.wrap_pipeline_failure("merge", pipeline)
 return M
