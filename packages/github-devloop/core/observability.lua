@@ -159,19 +159,8 @@ local function split_included_headers(stdout)
   return head, body
 end
 
-local function header_value(headers, name)
-  local target = tostring(name or ""):lower()
-  for line in tostring(headers or ""):gmatch("[^\r\n]+") do
-    local key, value = line:match("^%s*([^:]+):%s*(.-)%s*$")
-    if key ~= nil and key:lower() == target then
-      return value
-    end
-  end
-  return nil
-end
-
 local function parse_dashboard_issue_get(stdout)
-  local headers, body = split_included_headers(stdout)
+  local _, body = split_included_headers(stdout)
   local decoded = json.decode(body or "{}")
   if type(decoded) ~= "table" then
     decoded = {}
@@ -190,7 +179,6 @@ local function parse_dashboard_issue_get(stdout)
     author_login = author_login,
     body = tostring(decoded.body or ""),
     updated_at = decoded.updated_at or decoded.updatedAt,
-    etag = header_value(headers, "etag"),
   }
 end
 
@@ -771,6 +759,10 @@ local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
       .. " exit_code=" .. tostring(listed.exit_code))
     error("github-devloop: gh dashboard issue list failed: " .. tostring(listed.stderr))
   end
+  if tostring(listed.stdout or ""):match("^%s*$") then
+    log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED locator=label-list label=" .. dashboard_label .. " reason=empty-output")
+    error("github-devloop: gh dashboard issue list failed: empty output")
+  end
   for _, issue in ipairs(M.parse_dashboard_issue_list(listed.stdout)) do
     if issue.author_login == bot_login
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
@@ -801,7 +793,7 @@ local function write_dashboard_input(repo, title, body)
   return path
 end
 
-function M.publish_observability_dashboard(repo, dashboard, limits, deadline)
+local function publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
   if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
     log.info("github-devloop dept=observability tag=DASHBOARD_DRY_RUN hash=" .. tostring(dashboard.hash))
     log.info(dashboard.body)
@@ -858,24 +850,15 @@ function M.publish_observability_dashboard(repo, dashboard, limits, deadline)
       .. " hash=" .. tostring(dashboard.hash))
     return "stale"
   end
-  if refreshed.etag == nil or tostring(refreshed.etag) == "" then
-    log.info("github-devloop dept=observability tag=DASHBOARD_CAS_MISMATCH issue=" .. tostring(current.number)
-      .. " expected_version=" .. tostring(current_version or "")
-      .. " actual_version=" .. tostring(refreshed_version or "")
-      .. " reason=missing-etag"
-      .. " hash=" .. tostring(dashboard.hash))
-    return "cas-mismatch"
-  end
-
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-  local updated = M.observability_exec(M.gh_dashboard_issue_update_cmd(repo, current.number, path, refreshed.etag), limits, deadline, "gh dashboard issue update")
+  local updated = M.observability_exec(M.gh_dashboard_issue_update_cmd(repo, current.number, path), limits, deadline, "gh dashboard issue update")
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")
     if stderr:find("412", 1, true) ~= nil or stderr:find("Precondition Failed", 1, true) ~= nil then
       log.info("github-devloop dept=observability tag=DASHBOARD_CAS_MISMATCH issue=" .. tostring(current.number)
         .. " expected_version=" .. tostring(refreshed_version or "")
         .. " actual_version=unknown"
-        .. " reason=etag-precondition"
+        .. " reason=patch-precondition"
         .. " hash=" .. tostring(dashboard.hash))
       return "cas-mismatch"
     end
@@ -884,6 +867,17 @@ function M.publish_observability_dashboard(repo, dashboard, limits, deadline)
   log.info("github-devloop dept=observability tag=DASHBOARD_UPDATED issue=" .. tostring(current.number)
     .. " hash=" .. tostring(dashboard.hash))
   return "updated"
+end
+
+function M.publish_observability_dashboard(repo, dashboard, limits, deadline)
+  if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
+    return publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
+  end
+  local outcome = nil
+  with_lock("github-devloop/dashboard/" .. M.safe_repo(repo), function()
+    outcome = publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
+  end)
+  return outcome
 end
 
 function M.observe_entity_log_line(proposal_id, fields)

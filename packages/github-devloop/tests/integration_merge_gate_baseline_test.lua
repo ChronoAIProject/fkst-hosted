@@ -220,8 +220,8 @@ return {
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     t.is_true(defective.dedup_key ~= corrected.dedup_key)
-    t.is_true(defective.dedup_key:find("/nobase/" .. event.reviewed_head_sha, 1, true) ~= nil)
-    t.is_true(corrected.dedup_key:find("/" .. event.gate_baseline_sha .. "/" .. event.reviewed_head_sha, 1, true) ~= nil)
+    t.is_true(defective.dedup_key:find("/nobase/nopred/" .. event.reviewed_head_sha, 1, true) ~= nil)
+    t.is_true(corrected.dedup_key:find("/" .. event.gate_baseline_sha .. "/nopred/" .. event.reviewed_head_sha, 1, true) ~= nil)
     t.eq(corrected.gate_baseline_sha, event.gate_baseline_sha)
 
     mock_bot_env()

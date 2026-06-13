@@ -21,6 +21,7 @@ local function supported_handoff(payload)
   local handoff = payload.handoff
   if handoff.kind == "github-devloop.ready"
     and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.version)
+    and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.marker_version)
     and core._is_bounded_string(handoff.version, core._max_dedup_len)
     and core._has_bounded_source_ref(handoff.source_ref) then
     return handoff
@@ -49,7 +50,7 @@ function pipeline(event)
   if handoff.kind == "github-devloop.ready" then
     local ready = core.build_devloop_ready_payload({
       proposal_id = handoff.proposal_id,
-      dedup_key = handoff.version,
+      dedup_key = handoff.marker_version,
       source_ref = handoff.source_ref,
       include_ready_hand_off = true,
       ready_comment_id = payload.comment_id,

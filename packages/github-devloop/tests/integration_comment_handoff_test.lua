@@ -28,6 +28,7 @@ return {
         kind = "github-devloop.ready",
         proposal_id = "github-devloop/issue/owner/repo/42",
         version = version,
+        marker_version = version,
         source_ref = source_ref,
       },
     }, "comment-handoff-ready")
@@ -38,6 +39,47 @@ return {
     t.eq(ready.schema, "github-devloop.ready.v1")
     t.eq(ready.ready_hand_off.comment_id, "IC_ready_1")
     t.eq(ready.ready_hand_off.marker_version, version)
+    t.eq(ready.ready_hand_off.event_version, ready.dedup_key)
+    t.eq(core.is_supported_ready(ready), true)
+  end,
+
+  test_comment_written_ready_ack_preserves_effect_version_marker_identity = function()
+    local source_ref = core.issue_source_ref("owner/repo", 42)
+    local event_version = "consensus:github-devloop/issue/owner/repo/42/intake/1234567890"
+    local marker_version = "intake/github-devloop/issue/owner/repo/42/2026-06-03T02-02-03Z"
+    local result = run_handoff({
+      schema = "github-proxy.comment-written.v1",
+      repo = "owner/repo",
+      target = "issue",
+      issue_number = 42,
+      comment_id = "IC_ready_effect_1",
+      request_dedup_key = "github-devloop/issue/owner/repo/42/comment/approve/consensus-github-devloop/issue/owner/repo/42/intake/1234567890",
+      dedup_key = "github-devloop/issue/owner/repo/42/comment/approve/written/IC_ready_effect_1",
+      source_ref = source_ref,
+      handoff = {
+        kind = "github-devloop.ready",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        version = event_version,
+        marker_version = marker_version,
+        source_ref = source_ref,
+      },
+    }, "comment-handoff-ready-effect-version")
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local ready = find_raise(result.raises, "devloop_ready").payload
+    t.eq(ready.dedup_key, core.build_devloop_ready_payload({
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      dedup_key = marker_version,
+      source_ref = source_ref,
+    }).dedup_key)
+    t.is_true(ready.dedup_key ~= core.build_devloop_ready_payload({
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      dedup_key = event_version,
+      source_ref = source_ref,
+    }).dedup_key)
+    t.eq(ready.ready_hand_off.comment_id, "IC_ready_effect_1")
+    t.eq(ready.ready_hand_off.marker_version, marker_version)
     t.eq(ready.ready_hand_off.event_version, ready.dedup_key)
     t.eq(core.is_supported_ready(ready), true)
   end,

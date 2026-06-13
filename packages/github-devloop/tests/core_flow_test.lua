@@ -763,14 +763,20 @@ return {
     local corrected = core.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
       gate_baseline_sha = "828df8d3",
     }), source_ref())
+    local new_predecessors = core.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
+      predecessor_set = "pr5-github-devloop/issue/owner/repo/41-ready-aaa111",
+    }), source_ref())
 
     t.eq(defective.gate_baseline_sha, nil)
     t.eq(corrected.gate_baseline_sha, "828df8d3")
     t.is_true(defective.dedup_key ~= corrected.dedup_key)
-    t.is_true(defective.dedup_key:find("/nobase/def456", 1, true) ~= nil)
-    t.is_true(corrected.dedup_key:find("/828df8d3/def456", 1, true) ~= nil)
+    t.is_true(defective.dedup_key ~= new_predecessors.dedup_key)
+    t.is_true(defective.dedup_key:find("/nobase/nopred/def456", 1, true) ~= nil)
+    t.is_true(corrected.dedup_key:find("/828df8d3/nopred/def456", 1, true) ~= nil)
+    t.is_true(new_predecessors.dedup_key:find("/nobase/pr5-github-devloop/issue/owner/repo/41-ready-aaa111/def456", 1, true) ~= nil)
     t.eq(core.is_supported_fixing(defective), true)
     t.eq(core.is_supported_fixing(corrected), true)
+    t.eq(core.is_supported_fixing(new_predecessors), true)
   end,
 
   test_fix_prompt_uses_custom_test_command_host_fact = function()

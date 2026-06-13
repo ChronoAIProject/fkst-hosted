@@ -189,14 +189,9 @@ function M.gh_dashboard_issue_get_cmd(repo, issue_number)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
 end
 
-function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file, etag)
-  local header = ""
-  if etag ~= nil and tostring(etag) ~= "" then
-    header = " --header " .. M._shell_single_quote("If-Match: " .. tostring(etag))
-  end
+function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file)
   return "gh api --method PATCH "
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
-    .. header
     .. " --input " .. M._shell_single_quote(input_file)
 end
 
@@ -522,6 +517,17 @@ function M.git_fetch_pr_merge_ref_cmd(remote, pr_number)
   end
   return "git fetch " .. M._shell_single_quote(remote) .. " "
     .. M._shell_single_quote("refs/pull/" .. tostring(pr_number) .. "/merge")
+end
+
+function M.git_fetch_pr_head_ref_cmd(remote, pr_number)
+  if not M._is_git_ref_safe(remote) then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pull request number")
+  end
+  return "git fetch " .. M._shell_single_quote(remote) .. " "
+    .. M._shell_single_quote("refs/pull/" .. tostring(pr_number) .. "/head")
 end
 
 function M.git_fetch_head_commit_cmd()

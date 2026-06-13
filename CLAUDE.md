@@ -67,6 +67,24 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 参考案例：#550（根因）/ #551（harness 硬化）。这是「先找 harness」doctrine 的硬化：安全网已成熟,活性网才是自驱系统反复栽跟头的盲区。
 
+## 异常向上暴露,直到懂根因的 handler 接手（expose, don't swallow）
+
+非正常路径（异常/错误）的纪律:**异常必须被暴露** —— fail-loud、向上传播、落结构化日志（`error_class`/`fingerprint`/`source_ref`/`attempt`/`terminal`）—— **直到遇到一个实证地懂其根因、且懂正确处置的 handler 把它处理掉**。不得在不理解根因的情况下静默 `skip` / `return` / `catch` 把异常吞掉。被吞的异常既不报错（safety 盲）又常表现为静默缺席（liveness 盲），是自驱系统反复栽跟头的根。
+
+判据 —— 一个 `skip` / `catch` / benign-return 是否合法:
+- **合法**:代码**实证地知道**这是情形 X、且 X 的正确处置就是跳过（如「这个 event 的 payload 实证属于另一个 package、与我无关 → skip-foreign」）。这是一个**理解了根因的 handler 在正确处置**。
+- **非法（latent bug）**:用 `skip`/`retry`/benign-return 当「我不认识这个 → 当作可跳过/可重试」的兜底。这是在**吞掉一个你不理解的异常**、把它伪装成合法处置。本系统的实证病例都是这一形态:#550 把内部路由不了的 tick 当 `skip-foreign(payload): unsupported event payload` 静默 return;#558 把 version-desync 当 `retry-pending` 无界重试（既不暴露又不解决);#556 observability `current==nil` 不问「为何 nil（并发/配额）」就走 create。
+
+规则:
+- **不认识 → 暴露,绝不 skip**。不知道一个 event/error 是什么、或不知如何处置时,**fail-closed**（`error()` 向上传播到 L1 DLQ + L2 triage),而**不是**归类成可跳过。`skip` 必须是**正向、实证的分类**,不是「不匹配/不认识」的默认出口。
+- **handler 必须理解根因才算「处理」**。不理解根因的 catch-and-retry 或 skip-and-continue 不是处理,是**掩盖** —— 它把异常吞进一个既不暴露、又不解决的黑洞。无界重试尤其要加界:重试 N 次仍不成立就不是「最终一致暂态」,而是结构性失配,必须暴露/reconcile 到带 WHY 的终态。
+- **处理一次,由懂的代码处理**。异常不应被多个不懂的中间层各 `catch` 一下又放过;它应一路暴露到唯一懂其根因与处置的 handler。本系统的 handler 链就是三级模型:L1 确定性 fail-closed → DLQ → **L2 triage codex 才是「懂如何处置未知失败」的 handler（facts→issue,而非当场猜测吞掉）**。
+- **错误分类要窄、可 grep、带根因事实**,让上游 handler 能据事实判断自己是否**真的懂**如何处置,而非盲吞。
+
+prior art:Erlang/OTP「let it crash」(不防御式 catch,交给懂恢复策略的 supervisor)、Go 显式 error（handle 或 propagate,`_ = err` 是 smell）、「不要 catch 你处理不了的异常」。与三级错误模型一致(L1 暴露、L2 是懂根因的 handler),与「活性 ⟂ 安全」互补(被吞的异常两面皆盲)。#551 的 conformance 不变式(每个 consumed 队列必须路由或 fail-closed、不得静默 skip-foreign fallthrough)是这条纪律的机械执行;审查存量 `skip-foreign`/`skip-stale`/benign-return 是否「实证合法」还是「吞未知」是持续工作。
+
+参考案例：#550 / #558 / #556。
+
 ## 先找 harness 再执行（harness-first）
 
 解决任何非平凡问题前，先识别支配这类问题的**成熟人类理论 / 工业最佳实践 / prior art**，把方案锚定在它之上，再动手：分布式投递 → at-least-once + 幂等 + DLQ + lease/fencing（Temporal/SQS 形态）；并发状态 → CAS / 乐观并发 / 版本总序；外部系统 → 最终一致假设 + 写前重导；测试 → fail-closed mock + 行为验收。产出（设计、实现、判断）要说明：套用了哪个成熟实践、在哪里**有意**偏离、为什么。最好的 harness 是让 AI 先自动找到 harness 然后再执行——判断管线（intake/consensus/review）同样据此审：无理据偏离成熟实践的方案应被质疑；声称新颖前先证明现有实践不适用。
@@ -109,6 +127,6 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **集成分支拓扑是 github-devloop 的运行姿态，不是可随手改的临时设置**：autonomous 改动先进**集成分支**（`FKST_DEVLOOP_INTEGRATION_BRANCH`）缓冲、再经 rollup PR 受控回 `dev`；`dev` 受保护，autonomous 改动**不直接合进 dev**。运行中**不得擅自切 topology（如 integration→单分支 dev）、不得擅自删/改远程分支**——这些是用户的架构决策，不是助手能定的。删任何远程分支前必须先查谁依赖它（in-flight PR 的 base、tracking 分支）；GitHub 删 base 分支会自动关闭其全部 open PR。
 - **hotfix 就只修那个 bug，不顺手改架构/换运行方式/做破坏性操作**。dogfood/运行中遇到**设计层问题**（如 sync↔rollup ping-pong）按「遇问题提 issue」处理 + 停下确认，**绝不擅自换方案绕过**（尤其不能用"切到 dev 直合"绕过用户刻意设的缓冲/门控）。不可逆/破坏性远程操作（删分支、关 PR、force push、改默认分支）一律先确认，即使 `/goal` 等机制在催"继续"。
 - **引擎 Rust 改动属 fkst-substrate 仓**，不在本仓做；本仓只写/改 Lua package + 测试 + 包文档。引擎需要的新能力（新 SDK 原语等）先在 fkst-substrate 提 PR。
-- 跨文档定位：engine↔package 契约以 fkst-substrate 的 `docs/package-repo-contract.md` 为权威总览，引擎实现细节以其 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md` 为准；本仓 `README.md` 说明包约定与命令，`docs/new-package-repo-bootstrap.md` 是新建 package-repo 的清单。
+- 跨文档定位：engine↔package 契约以 fkst-substrate 的 `docs/package-repo-contract.md` 为权威总览，引擎实现细节以其 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md` 为准；本仓 `README.md` 说明包约定与命令，`docs/user/new-package-repo-bootstrap.md` 是新建 package-repo 的清单。
 
 ⟦AI:FKST⟧

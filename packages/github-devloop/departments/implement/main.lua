@@ -525,7 +525,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   return true
 end
 
-function pipeline(event)
+local function process_ready_event(event)
   local ready = event.payload or {}
   if not core.is_supported_ready(ready) then
     core.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
@@ -720,6 +720,12 @@ function pipeline(event)
       raise_attempt_outcome(repo, issue_number, outcome)
     end
   end)
+end
+
+function pipeline(event)
+  core.dispatch_consumed_queue("implement", M.spec, event, {
+    devloop_ready = process_ready_event,
+  })
 end
 
 pipeline = core.wrap_pipeline_failure("implement", pipeline)

@@ -1,6 +1,49 @@
 local S = {}
 
 function S.install(M)
+local PACKAGE_NAMESPACE = "github-devloop"
+
+local function consumed_queue_set(consumes)
+  local set = {}
+  for _, queue in ipairs(consumes or {}) do
+    if type(queue) == "string" and queue ~= "" then
+      set[queue] = true
+    end
+  end
+  return set
+end
+
+function M.queue_bare_name(queue, package_namespace)
+  if type(queue) ~= "string" then
+    return nil
+  end
+  package_namespace = package_namespace or PACKAGE_NAMESPACE
+  local prefix = package_namespace .. "."
+  if queue:sub(1, #prefix) == prefix then
+    return queue:sub(#prefix + 1)
+  end
+  return queue
+end
+
+function M.event_queue_matches(event, bare_queue, package_namespace)
+  return M.queue_bare_name(type(event) == "table" and event.queue or nil, package_namespace) == bare_queue
+end
+
+function M.dispatch_consumed_queue(dept, spec, event, handlers, package_namespace)
+  local queue = type(event) == "table" and event.queue or nil
+  local bare_queue = M.queue_bare_name(queue, package_namespace)
+  local consumed = consumed_queue_set((spec or {}).consumes)
+  if bare_queue == nil or not consumed[bare_queue] then
+    return false, "foreign"
+  end
+  local handler = type(handlers) == "table" and handlers[bare_queue] or nil
+  if type(handler) ~= "function" then
+    error("github-devloop: consumed-queue-unrouted: dept=" .. tostring(dept) .. " queue=" .. tostring(queue))
+  end
+  handler(event, bare_queue)
+  return true, bare_queue
+end
+
 local active_wip_states = {
   implementing = true,
   ["pr-open"] = true,
@@ -23,6 +66,13 @@ local function compare_merge_queue_entries(left, right)
     return left_created < right_created
   end
   return tonumber(left.pr_number or 0) < tonumber(right.pr_number or 0)
+end
+
+local function predecessor_identity(entry)
+  return "pr" .. tostring(entry.pr_number)
+    .. "-" .. M.safe_version_segment(entry.proposal_id)
+    .. "-" .. M.safe_version_segment(entry.version)
+    .. "-" .. tostring(entry.head_sha)
 end
 
 local function parse_name_only_paths(stdout)
@@ -168,6 +218,98 @@ function M.merge_queue_head(repo, base_branch, current)
   end
   table.sort(entries, compare_merge_queue_entries)
   return entries[1], entries
+end
+
+function M.merge_queue_predecessors(repo, base_branch, current)
+  local _, entries = M.merge_queue_head(repo, base_branch, current)
+  local predecessors = {}
+  local found = false
+  local current_pr_number = tostring((current or {}).pr_number or "")
+  for _, entry in ipairs(entries or {}) do
+    if tostring(entry.pr_number or "") == current_pr_number then
+      found = true
+      break
+    end
+    table.insert(predecessors, entry)
+  end
+  if not found then
+    return nil, "not-in-merge-queue"
+  end
+  return predecessors, "ok"
+end
+
+function M.merge_queue_position(repo, base_branch, current)
+  local predecessors, reason = M.merge_queue_predecessors(repo, base_branch, current)
+  if predecessors == nil then
+    return nil, reason
+  end
+  return {
+    is_head = #predecessors == 0,
+    predecessors = predecessors,
+    predecessor_set = M.merge_queue_predecessor_set(predecessors),
+  }, "ok"
+end
+
+function M.merge_queue_predecessor_set(entries)
+  local values = {}
+  for _, entry in ipairs(entries or {}) do
+    table.insert(values, predecessor_identity(entry))
+  end
+  if #values == 0 then
+    return "none"
+  end
+  return table.concat(values, ".")
+end
+
+local function predecessor_set_entries(predecessor_set)
+  if predecessor_set == nil or predecessor_set == "" or predecessor_set == "none" then
+    return {}
+  end
+  local entries = {}
+  for entry in tostring(predecessor_set):gmatch("[^.]+") do
+    table.insert(entries, entry)
+  end
+  return entries
+end
+
+local function predecessor_head_sha(predecessor)
+  local head_sha = tostring(predecessor or ""):match("([0-9a-fA-F]+)$")
+  if head_sha == nil or not M._is_git_sha(head_sha) then
+    return nil
+  end
+  return head_sha
+end
+
+function M.merge_queue_predecessor_set_matches_current_base(recorded_set, current_set, base_branch)
+  local recorded = predecessor_set_entries(recorded_set)
+  local current = predecessor_set_entries(current_set)
+  if #current > #recorded then
+    return false, "predecessor-set-mismatch"
+  end
+  local offset = #recorded - #current
+  for index, entry in ipairs(current) do
+    if entry ~= recorded[offset + index] then
+      return false, "predecessor-set-mismatch"
+    end
+  end
+  if offset == 0 then
+    return true, "predecessor-set-current"
+  end
+  local base_head, base_reason = M.current_base_head(base_branch)
+  if base_head == nil then
+    return false, base_reason
+  end
+  for index = 1, offset do
+    local head_sha = predecessor_head_sha(recorded[index])
+    if head_sha == nil then
+      return false, "predecessor-set-mismatch"
+    end
+    local result = exec_sync({ cmd = M.git_is_ancestor_cmd(head_sha, base_head), timeout = 30 })
+    if result.exit_code ~= 0 then
+      return false, "predecessor-not-landed"
+    end
+  end
+  return true, "predecessor-set-landed-prefix"
 end
 
 function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)

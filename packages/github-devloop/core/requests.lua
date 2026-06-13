@@ -8,7 +8,6 @@ local max_display_attr_len = 120
 local max_display_block_len = 5000
 local max_verdict_summary_items = 8
 local max_verdict_summary_len = 600
-
 local function bounded_neutralized_text(value, limit)
   local text = tostring(value or "")
   local cap = limit or max_display_digest_len
@@ -185,8 +184,6 @@ function M.build_result_comment_request(repo, issue_number, reached)
     repo = repo,
     issue_number = issue_number,
     body = body,
-    -- Include the consensus M._dedup_key (version) so a new decision/version writes a fresh result
-    -- marker instead of being suppressed by an older same-direction github-proxy comment marker.
     dedup_key = tostring(reached.proposal_id) .. "/comment/" .. tostring(reached.decision)
       .. "/" .. (tostring(reached.dedup_key):gsub(":", "-")),
     source_ref = M.normalize_source_ref(reached.source_ref),
@@ -195,6 +192,7 @@ function M.build_result_comment_request(repo, issue_number, reached)
     kind = "github-devloop.ready",
     proposal_id = reached.proposal_id,
     version = reached.dedup_key,
+    marker_version = tostring(reached.effect_version or reached.dedup_key),
     source_ref = M.normalize_source_ref(reached.source_ref),
   }
   return request
@@ -795,7 +793,7 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
   }), source_ref)
 end
 
-function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref)
+function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
   local safe_reason = M.merge_gate_reason_class(reason)
   local display_reason = M.neutralize_untrusted_comment_text(reason or "gate-failed")
   if display_reason == "" then
@@ -814,7 +812,8 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     merge_ready.review_dedup_key,
     merge_ready.reviewed_head_sha,
     gate_baseline_sha,
-    safe_reason
+    safe_reason,
+    predecessor_set
   )
   return M.build_entity_comment_request({
     kind = "pr",
@@ -829,6 +828,8 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     "fixing",
     tostring(merge_ready.proposal_id),
     tostring(merge_ready.version),
+    tostring(fix_version),
+    tostring(predecessor_set or "nopred"),
     safe_reason,
   }), source_ref)
 end
