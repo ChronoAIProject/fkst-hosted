@@ -210,6 +210,13 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
 
+    def test_full_test_blocks_on_repository_check_before_engine_resolution(self) -> None:
+        source = self.source()
+
+        self.assertIn("elif ! _chk_out=\"$(cmd_check 2>&1)\"; then", source)
+        self.assertIn("printf '%s\\n' \"$_chk_out\"; exit 1", source)
+        self.assertLess(source.index("cmd_check"), source.index("resolve_bin; ensure_fresh_bin; cmd_test"))
+
 
 class RepositoryInterfaceContractTest(unittest.TestCase):
     def test_repository_checks_scan_fkst_packages_view(self) -> None:
