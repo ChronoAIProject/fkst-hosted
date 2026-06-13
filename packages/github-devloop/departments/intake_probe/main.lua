@@ -10,18 +10,44 @@ M.spec = {
 }
 
 local PROBE_LIMIT = 5
-local CURSOR_KEY = "github-devloop/intake-probe/created-at-cursor"
+local CURSOR_KEY = "github-devloop/intake-probe/created-cursor"
 
-local function is_after_cursor(issue, cursor)
-  if cursor == nil or cursor == "" then
+local function parse_cursor(value)
+  local created_at, number = tostring(value or ""):match("^([^\t]+)\t(%d+)$")
+  if created_at == nil then
+    if value ~= nil and tostring(value) ~= "" then
+      return tostring(value), 0
+    end
+    return nil, nil
+  end
+  return created_at, tonumber(number) or 0
+end
+
+local function encode_cursor(created_at, number)
+  if created_at == nil or tostring(created_at) == "" then
+    return nil
+  end
+  return tostring(created_at) .. "\t" .. tostring(tonumber(number) or 0)
+end
+
+local function api_since_from_cursor(created_at)
+  local seconds = core.iso_timestamp_epoch_seconds(created_at)
+  if seconds == nil then
+    return created_at
+  end
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", math.max(0, seconds - 1))
+end
+
+local function is_after_cursor(issue, cursor_created_at, cursor_number)
+  if cursor_created_at == nil or cursor_created_at == "" then
     return true
   end
   local created_at = tostring(issue.created_at or "")
-  return created_at ~= "" and created_at > tostring(cursor)
-end
-
-local function should_advance_cursor(issues, newest_created_at)
-  return newest_created_at ~= nil and #issues < PROBE_LIMIT
+  local number = tonumber(issue.number) or 0
+  return created_at ~= "" and (
+    created_at > tostring(cursor_created_at)
+      or (created_at == tostring(cursor_created_at) and number > (tonumber(cursor_number) or 0))
+  )
 end
 
 local function maybe_raise_candidate(repo, issue)
@@ -58,24 +84,30 @@ function pipeline(event)
     return
   end
 
-  local listed = core.gh_exec({ cmd = core.gh_issue_list_intake_probe_cmd(repo, PROBE_LIMIT), timeout = 30 })
+  local cursor_created_at, cursor_number = parse_cursor(cache_get(CURSOR_KEY))
+  local listed = core.gh_exec({
+    cmd = core.gh_issue_list_intake_probe_cmd(repo, PROBE_LIMIT, api_since_from_cursor(cursor_created_at)),
+    timeout = 30,
+  })
   if listed.exit_code ~= 0 then
     error("github-devloop: intake-probe-list-failed: " .. tostring(listed.stderr))
   end
 
   local issues = core.parse_issue_list_intake(listed.stdout, PROBE_LIMIT)
-  local cursor = cache_get(CURSOR_KEY)
   local newest_created_at = nil
+  local newest_number = nil
   for index, issue in ipairs(issues) do
     if index == 1 and issue.created_at ~= nil then
       newest_created_at = tostring(issue.created_at)
+      newest_number = tonumber(issue.number) or 0
     end
-    if is_after_cursor(issue, cursor) then
+    if is_after_cursor(issue, cursor_created_at, cursor_number) then
       maybe_raise_candidate(repo, issue)
     end
   end
-  if should_advance_cursor(issues, newest_created_at) then
-    cache_set(CURSOR_KEY, newest_created_at)
+  local cursor = encode_cursor(newest_created_at, newest_number)
+  if cursor ~= nil then
+    cache_set(CURSOR_KEY, cursor)
   end
 end
 

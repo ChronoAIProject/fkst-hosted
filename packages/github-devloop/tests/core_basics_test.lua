@@ -583,6 +583,10 @@ return {
       core.gh_issue_list_intake_probe_cmd("owner/repo", 5),
       "gh api 'repos/owner/repo/issues?state=open&sort=created&direction=desc&per_page=5'"
     )
+    t.eq(
+      core.gh_issue_list_intake_probe_cmd("owner/repo", 5, "2026-06-03T01:02:03Z"),
+      "gh api 'repos/owner/repo/issues?state=open&sort=created&direction=desc&per_page=5&since=2026-06-03T01%3A02%3A03Z'"
+    )
     t.eq(core.gh_issue_list_observe_cmd("owner/repo"), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'")
     t.eq(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'")
     t.eq(

@@ -247,6 +247,7 @@ cmd_test() {
   export FKST_RUNTIME_ROOT="$TEST_HERMETIC_RUNTIME_ROOT"
   export FKST_DURABLE_ROOT="$TEST_HERMETIC_DURABLE_ROOT"
   unset FKST_GITHUB_WRITE
+  unset FKST_SUPERVISOR_PID
   echo "test hermetic: FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT (ambient overridden)"
 
   report_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-reports.XXXXXX")"
