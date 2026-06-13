@@ -3,10 +3,10 @@ local t = h.t
 local core = h.core
 
 return {
-  test_invalid_or_missing_intake_service_class_normalizes_to_standard = function()
+  test_invalid_or_missing_intake_service_class_fails_closed = function()
     local parsed = core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ urgent\n⟦FKST:REASON⟧ Invalid class values normalize to standard.")
-    t.eq(parsed.action, "enable")
-    t.eq(parsed.service_class, "standard")
+    t.is_nil(parsed)
+    t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Missing class facts fail closed."))
     t.eq(core.normalize_intake_service_class(nil), "standard")
     t.eq(core.normalize_intake_service_class("EXPEDITE"), "expedite")
   end,
