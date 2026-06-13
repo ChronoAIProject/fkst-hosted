@@ -465,12 +465,36 @@ return {
     t.eq(core.git_fetch_head_commit_cmd(), "git rev-parse --verify FETCH_HEAD^{commit}")
     t.eq(core.git_remote_branch_head_cmd("origin", "dev"), "git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}")
     t.is_true(core.git_worktree_add_new_branch_cmd(worktree_path, deterministic_branch, "abc123"):find("git worktree add -b", 1, true) ~= nil)
+    t.eq(
+      core.git_worktree_reset_hard_cmd(worktree_path, deterministic_branch),
+      "git -C '" .. worktree_path .. "' reset --hard refs/heads/'" .. deterministic_branch .. "'"
+    )
+    t.eq(core.git_worktree_clean_cmd(worktree_path), "git -C '" .. worktree_path .. "' clean -fd")
     t.eq(core.git_worktree_list_cmd(), "git worktree list --porcelain")
     t.is_true(core.git_worktree_add_remote_branch_cmd(worktree_path, "origin", deterministic_branch, true):find("git worktree add --force -B", 1, true) ~= nil)
     local list = "worktree /tmp/main\nHEAD abc123\nbranch refs/heads/dev\n\n"
       .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
     t.eq(core.find_worktree_for_branch(list, deterministic_branch), worktree_path)
+    local branch_worktrees = core.find_worktrees_for_branch(list, deterministic_branch)
+    t.eq(#branch_worktrees, 1)
+    t.eq(branch_worktrees[1], worktree_path)
     t.is_nil(core.find_worktree_for_branch(list, deterministic_branch .. "-other"))
+    local stale_worktree_path = "/tmp/fkst-rt-old/worktrees/devloop-owner-repo-42-01HY"
+    local stale_worktree_path_two = "/tmp/fkst-rt-old-two/worktrees/devloop-owner-repo-42-01HY"
+    local current_root_list = "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+      .. "worktree " .. stale_worktree_path_two .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+      .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+    local all_branch_worktrees = core.find_worktrees_for_branch(current_root_list, deterministic_branch)
+    t.eq(#all_branch_worktrees, 3)
+    t.eq(all_branch_worktrees[1], stale_worktree_path)
+    t.eq(all_branch_worktrees[2], stale_worktree_path_two)
+    t.eq(all_branch_worktrees[3], worktree_path)
+    t.eq(core.find_worktree_for_branch_under_runtime(current_root_list, deterministic_branch, "/tmp/fkst-rt"), worktree_path)
+    t.is_nil(core.find_worktree_for_branch_under_runtime(
+      "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n",
+      deterministic_branch,
+      "/tmp/fkst-rt"
+    ))
 
     local marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)
