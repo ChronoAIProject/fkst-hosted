@@ -214,6 +214,7 @@ function M.run_verified_pr_merge(request)
   if merge_result.exit_code ~= 0 then
     error("github-devloop: gh pr merge failed: " .. tostring(merge_result.stderr))
   end
+  M.invalidate_entity_after_write(repo, "pr", pr_number)
 
   local merged_view = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
   if merged_view.exit_code ~= 0 then

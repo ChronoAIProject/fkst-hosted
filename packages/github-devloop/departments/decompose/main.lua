@@ -200,6 +200,7 @@ local function write_decomposed_marker(repo, decompose, count)
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr decomposed marker comment failed: " .. tostring(result.stderr))
   end
+  core.invalidate_entity_after_write(repo, "pr", decompose.pr_number)
 
   local confirmed_pr = read_current_pr(repo, decompose.pr_number)
   if not core.has_decomposed_marker(confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then

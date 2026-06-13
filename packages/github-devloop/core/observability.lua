@@ -446,12 +446,14 @@ local function reap_orphan_pr(repo, entity)
   if closed.exit_code ~= 0 then
     error("github-devloop: gh orphan PR close failed: " .. tostring(closed.stderr))
   end
+  M.invalidate_entity_after_write(repo, "pr", pr_number)
   local path = reaper_body_path(repo, pr_number, proposal_id)
   file.write(path, reaper_comment_body(proposal_id, pr_number, reason))
   local commented = M.gh_exec({ cmd = M.gh_pr_comment_cmd(repo, pr_number, path), timeout = 30 })
   if commented.exit_code ~= 0 then
     error("github-devloop: gh orphan PR reaper comment failed: " .. tostring(commented.stderr))
   end
+  M.invalidate_entity_after_write(repo, "pr", pr_number)
   log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "closed", reason.code))
 end
 
