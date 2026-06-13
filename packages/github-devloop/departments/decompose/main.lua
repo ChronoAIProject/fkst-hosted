@@ -128,15 +128,35 @@ local function raise_issue_create(repo, decompose, issue, index)
   core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_issue_create_request", create_request)
 end
 
-local function heal_missing_children(event, repo, issue_number, decompose, state, decomposed, parent_comments)
+local function child_completion_check(child_issues, decompose, index)
+  return function()
+    local completed = core.decompose_child_issue_fact_indexes(
+      child_issues,
+      decompose.proposal_id,
+      decompose.version,
+      decompose.pr_number
+    )
+    return completed[index] == true
+  end
+end
+
+local function effect_id_for_create(repo, decompose, issue, index)
+  return core.build_issue_create_request(repo, decompose, issue, index).dedup_key
+end
+
+local function perform_issue_create(repo, decompose, issue, index)
+  return function()
+    raise_issue_create(repo, decompose, issue, index)
+  end
+end
+
+local function heal_missing_children(event, repo, issue_number, decompose, state, decomposed)
   local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
-  local completed = core.decompose_child_fact_indexes(
-    {},
+  local completed = core.decompose_child_issue_fact_indexes(
     child_issues,
     decompose.proposal_id,
     decompose.version,
-    decompose.pr_number,
-    {}
+    decompose.pr_number
   )
   local child_body_missing = {}
   for index = 1, decomposed.count do
@@ -162,18 +182,7 @@ local function heal_missing_children(event, repo, issue_number, decompose, state
     end
   end
 
-  local dedup_by_index = {}
-  for index = 1, decomposed.count do
-    dedup_by_index[index] = core.build_issue_create_request(repo, decompose, issues[index], index).dedup_key
-  end
-  completed = core.decompose_child_fact_indexes(
-    parent_comments,
-    child_issues,
-    decompose.proposal_id,
-    decompose.version,
-    decompose.pr_number,
-    dedup_by_index
-  )
+  completed = core.decompose_child_issue_fact_indexes(child_issues, decompose.proposal_id, decompose.version, decompose.pr_number)
   local missing = {}
   for index = 1, decomposed.count do
     if not completed[index] then
@@ -189,7 +198,11 @@ local function heal_missing_children(event, repo, issue_number, decompose, state
     "github-proxy.github_issue_create_request",
   })
   for _, index in ipairs(missing) do
-    raise_issue_create(repo, decompose, issues[index], index)
+    core.effect_once({
+      effect_id = effect_id_for_create(repo, decompose, issues[index], index),
+      completion_check = child_completion_check(child_issues, decompose, index),
+      perform = perform_issue_create(repo, decompose, issues[index], index),
+    })
   end
 end
 
@@ -256,7 +269,7 @@ function pipeline(event)
       decompose.pr_number
     )
     if decomposed ~= nil then
-      heal_missing_children(event, repo, issue_number, decompose, state, decomposed, current_pr.comments)
+      heal_missing_children(event, repo, issue_number, decompose, state, decomposed)
       return
     end
 
@@ -281,8 +294,13 @@ function pipeline(event)
     core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
       "github-proxy.github_issue_create_request",
     })
+    local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
     for index = 1, count do
-      raise_issue_create(repo, decompose, issues[index], index)
+      core.effect_once({
+        effect_id = effect_id_for_create(repo, decompose, issues[index], index),
+        completion_check = child_completion_check(child_issues, decompose, index),
+        perform = perform_issue_create(repo, decompose, issues[index], index),
+      })
     end
   end)
 end

@@ -325,7 +325,7 @@ return {
     t.eq(facts[1].verdicts, bare_facts[1].verdicts)
   end,
 
-  test_decompose_child_fact_indexes_use_created_and_trusted_child_facts = function()
+  test_decompose_child_fact_indexes_keep_proxy_marker_legacy_but_completion_uses_live_open_children = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "2026-06-03T01-02-03Z"
     local decompose = core.build_devloop_decompose_payload({
@@ -356,16 +356,32 @@ return {
       {
         body = core.decompose_child_marker(proposal_id, version, 7, 3),
         author_login = "fkst-test-bot",
+        state = "OPEN",
       },
       {
         body = core.decompose_child_marker(proposal_id, version, 7, 2),
         author_login = "someone-else",
+        state = "OPEN",
       },
     }, proposal_id, version, 7, dedup_by_index)
+    local live_completed = core.decompose_child_issue_fact_indexes({
+      {
+        body = core.decompose_child_marker(proposal_id, version, 7, 1),
+        author_login = "fkst-test-bot",
+        state = "CLOSED",
+      },
+      {
+        body = core.decompose_child_marker(proposal_id, version, 7, 3),
+        author_login = "fkst-test-bot",
+        state = "OPEN",
+      },
+    }, proposal_id, version, 7)
 
     t.eq(completed[1], true)
     t.eq(completed[2], nil)
     t.eq(completed[3], true)
+    t.eq(live_completed[1], nil)
+    t.eq(live_completed[3], true)
   end,
 
   test_decompose_replay_dedup_binds_child_completion_identity = function()

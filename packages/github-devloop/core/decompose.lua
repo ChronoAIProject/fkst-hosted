@@ -186,27 +186,14 @@ function M.parse_decompose_child_issue_list(stdout)
   return issues
 end
 
-function M.decompose_child_fact_indexes(comments, issues, proposal_id, version, pr_number, dedup_by_index)
+function M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
   local completed = {}
-  local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
-    for marker in M._comment_body(comment):gmatch(created_pattern) do
-      local dedup = marker:match('dedup="([^"]+)"')
-      for index = 1, max_decompose_issues do
-        if type(dedup_by_index) == "table"
-          and dedup_by_index[index] ~= nil
-          and tostring(dedup) == tostring(dedup_by_index[index]) then
-          completed[index] = true
-        end
-      end
-    end
-  end
-
   local child_pattern = "<!%-%- fkst:github%-devloop:decompose%-child:v1.-%-%->"
   for _, issue in ipairs(issues or {}) do
     local body = tostring(type(issue) == "table" and issue.body or "")
     local trusted_child = type(issue) == "table"
       and M.comment_author_login(issue) == M.trusted_bot_login()
+      and tostring(issue.state or ""):upper() == "OPEN"
     if trusted_child then
       for marker in body:gmatch(child_pattern) do
         if marker:match('parent="([^"]+)"') == tostring(proposal_id)
@@ -216,6 +203,25 @@ function M.decompose_child_fact_indexes(comments, issues, proposal_id, version, 
           if index ~= nil and index >= 1 and index <= max_decompose_issues and index % 1 == 0 then
             completed[index] = true
           end
+        end
+      end
+    end
+  end
+  return completed
+end
+
+function M.decompose_child_fact_indexes(comments, issues, proposal_id, version, pr_number, dedup_by_index)
+  local completed = M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
+  local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+    for marker in M._comment_body(comment):gmatch(created_pattern) do
+      local dedup = marker:match('dedup="([^"]+)"')
+      for index = 1, max_decompose_issues do
+        if type(dedup_by_index) == "table"
+          and dedup_by_index[index] ~= nil
+          and tostring(dedup) == tostring(dedup_by_index[index])
+          and not completed[index] then
+          completed[index] = true
         end
       end
     end
@@ -238,7 +244,7 @@ function M.decompose_children_complete(comments, issues, proposal_id, version, p
   if count == nil or count < 1 or count > max_decompose_issues or count % 1 ~= 0 then
     return true, 0
   end
-  local completed = M.decompose_child_fact_indexes(comments, issues, proposal_id, version, pr_number, {})
+  local completed = M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
   local completed_count = decompose_child_count(completed)
   return completed_count >= count, completed_count
 end
