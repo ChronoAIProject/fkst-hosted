@@ -40,6 +40,7 @@ local pr_open_event = h.pr_open_event
 local pr_open_guard_comments = h.pr_open_guard_comments
 local pr_open_visible_comments = h.pr_open_visible_comments
 local reviewing_marker = h.reviewing_marker
+local issue_comment_create = "gh api --method POST 'repos/owner/x/issues/42/comments'"
 
 local function pr_json(number, updated_at, state)
   return string.format(
@@ -473,6 +474,7 @@ return {
     local dry = t.run_department("departments/github_comment/main.lua", event, opts("comment-dry-run"))
     t.eq(dry.exit_code, 0)
     t.eq(count_calls("gh issue comment"), 0)
+    t.eq(count_calls(issue_comment_create), 0)
 
     mock_repo_env()
     mock_write_env("1")
@@ -484,9 +486,7 @@ return {
     }))
     t.eq(write.exit_code, 0)
 
-    -- The mocked `gh issue comment` does not run, so assert on the body file the
-    -- department actually wrote: it must carry the reply text and the HTML
-    -- marker that makes the next poll's comment idempotent.
+    -- The mocked REST comment create does not store the body, so assert on the body file.
     local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
     t.is_true(written:find("fkst reply", 1, true) ~= nil)
     t.is_true(written:find("<!-- fkst:github-proxy:comment:reply-42 -->", 1, true) ~= nil)
@@ -500,9 +500,9 @@ return {
     }))
     t.eq(again.exit_code, 0)
 
-    local comment_calls = calls_matching("gh issue comment")
+    local comment_calls = calls_matching(issue_comment_create)
     t.eq(#comment_calls, 1)
-    t.is_true(comment_calls[1].rendered:find("gh issue comment", 1, true) ~= nil)
+    t.is_true(comment_calls[1].rendered:find(issue_comment_create, 1, true) ~= nil)
     t.eq(comment_calls[1].rendered:find("github.com", 1, true), nil)
     t.eq(count_calls("gh issue view"), 2)
   end,
@@ -539,7 +539,7 @@ return {
     }))
     t.eq(second.exit_code, 0)
 
-    t.eq(count_calls("gh issue comment"), 1)
+    t.eq(count_calls(issue_comment_create), 1)
     local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
     t.is_true(written:find("github-devloop meta action: implement", 1, true) ~= nil)
     t.eq(written:find("github-devloop meta action: block", 1, true), nil)
@@ -573,7 +573,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh issue comment"), 1)
+    t.eq(count_calls(issue_comment_create), 1)
 
     local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
     t.is_true(written:find(state_marker, 1, true) ~= nil)
@@ -607,7 +607,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh issue comment"), 1)
+    t.eq(count_calls(issue_comment_create), 1)
 
     local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
     t.is_true(written:find(state_marker, 1, true) ~= nil)
@@ -658,7 +658,7 @@ return {
 
     local written_v2 = file.read(path)
     t.is_true(written_v2:find(core.comment_marker(dedup_v2), 1, true) ~= nil)
-    t.eq(count_calls("gh issue comment"), 2)
+    t.eq(count_calls(issue_comment_create), 2)
   end,
 
   test_near_max_comment_dedup_boundary_writes = function()
@@ -686,7 +686,7 @@ return {
 
     local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
     t.is_true(written:find(core.comment_marker(dedup), 1, true) ~= nil)
-    t.eq(count_calls("gh issue comment"), 1)
+    t.eq(count_calls(issue_comment_create), 1)
   end,
 
   test_comment_request_uses_payload_repo = function()
@@ -714,9 +714,9 @@ return {
     local view_calls = calls_matching("gh issue view")
     t.eq(#view_calls, 1)
     t.is_true(view_calls[1].rendered:find("--repo 'owner/payload'", 1, true) ~= nil)
-    local comment_calls = calls_matching("gh issue comment")
+    local comment_calls = calls_matching("gh api --method POST")
     t.eq(#comment_calls, 1)
-    t.is_true(comment_calls[1].rendered:find("--repo 'owner/payload'", 1, true) ~= nil)
+    t.is_true(comment_calls[1].rendered:find("repos/owner/payload/issues/42/comments", 1, true) ~= nil)
   end,
 
   test_comment_real_write_failure_errors_for_retry = function()
@@ -734,7 +734,7 @@ return {
     mock_write_env("1")
     mock_bot_env()
     mock_comment_view("existing comment")
-    t.mock_command("gh issue comment", {
+    t.mock_command("gh api --method POST 'repos/owner/x/issues/42/comments' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-issue-42.md'", {
       stdout = "",
       stderr = "forced comment failure",
       exit_code = 1,
@@ -744,7 +744,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("gh issue comment"), 1)
+    t.eq(count_calls(issue_comment_create), 1)
   end,
 
   test_comment_real_write_view_failure_errors_for_retry = function()
@@ -768,7 +768,7 @@ return {
     }))
     t.eq(result.exit_code, 1)
     t.eq(count_calls("gh issue view"), 1)
-    t.eq(count_calls("gh issue comment"), 0)
+    t.eq(count_calls(issue_comment_create), 0)
   end,
 
   test_label_request_dry_run_write_and_rewrite = function()

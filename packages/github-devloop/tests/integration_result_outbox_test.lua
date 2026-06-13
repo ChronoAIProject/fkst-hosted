@@ -27,7 +27,7 @@ return {
     t.eq(ready_raise.payload.schema, "github-devloop.ready.v1")
     t.eq(ready_raise.payload.dedup_key, core.build_devloop_ready_payload(current).dedup_key)
     t.is_nil(ready_raise.payload.ready_hand_off)
-    t.eq(session_raise.payload.ready_hand_off.version, session_raise.payload.dedup_key)
+    t.eq(session_raise.payload.ready_hand_off.event_version, session_raise.payload.dedup_key)
     t.eq(session_raise.payload.ready_hand_off.effects, "result-marker,ready-label,devloop-ready")
   end,
 

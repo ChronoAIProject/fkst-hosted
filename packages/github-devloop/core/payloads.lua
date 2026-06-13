@@ -388,12 +388,14 @@ function M.build_devloop_ready_payload(source)
   }
   if source.include_ready_hand_off == true then
     payload.ready_hand_off = {
-      kind = "own-ready-state-marker",
+      kind = "own-state-marker",
       proposal_id = source.proposal_id,
       state = "ready",
-      version = ready_version,
+      marker_version = source.dedup_key,
+      event_version = ready_version,
       stage_rank = M.stage_rank("ready"),
       effects = "result-marker,ready-label,devloop-ready",
+      comment_id = source.ready_comment_id,
     }
   end
   local framing = bounded_framing(M, source.framing)
@@ -414,17 +416,86 @@ function M.is_ready_hand_off(hand_off, ready)
   if type(hand_off) ~= "table" or type(ready) ~= "table" then
     return false
   end
-  return hand_off.kind == "own-ready-state-marker"
+  return hand_off.kind == "own-state-marker"
     and hand_off.proposal_id == ready.proposal_id
     and hand_off.state == "ready"
-    and hand_off.version == ready.dedup_key
+    and hand_off.event_version == ready.dedup_key
+    and M._is_bounded_string(hand_off.marker_version, M._max_dedup_len)
     and hand_off.stage_rank == M.stage_rank("ready")
     and hand_off.effects == "result-marker,ready-label,devloop-ready"
+    and (hand_off.comment_id == nil or M.is_safe_comment_id(hand_off.comment_id))
+end
+
+function M.is_safe_comment_id(value)
+  local text = tostring(value or "")
+  return text ~= "" and #text <= 80 and text:find("^[%w_%-]+$") ~= nil
+end
+
+function M.is_own_state_marker_hand_off(hand_off, expected)
+  if type(hand_off) ~= "table" or type(expected) ~= "table" then
+    return false
+  end
+  local state = tostring(expected.state or "")
+  return hand_off.kind == "own-state-marker"
+    and hand_off.proposal_id == expected.proposal_id
+    and hand_off.state == state
+    and hand_off.event_version == expected.event_version
+    and hand_off.marker_version == expected.marker_version
+    and hand_off.stage_rank == M.stage_rank(state)
+    and (expected.effects == nil or hand_off.effects == expected.effects)
+    and M.is_safe_comment_id(hand_off.comment_id)
+end
+
+local function state_marker_comment_verified(M, repo, hand_off)
+  if type(hand_off) ~= "table" or not M.is_safe_comment_id(hand_off.comment_id) then
+    return false, "missing-comment-id"
+  end
+  local result = M.gh_exec({ cmd = M.gh_issue_comment_get_cmd(repo, hand_off.comment_id), timeout = 30 })
+  if result.exit_code ~= 0 then
+    return false, "comment-get-failed"
+  end
+  local ok, decoded = pcall(json.decode, result.stdout or "{}")
+  if not ok or type(decoded) ~= "table" then
+    return false, "comment-json-invalid"
+  end
+  local comment = {
+    body = decoded.body,
+    author = decoded.author,
+    author_login = decoded.author_login,
+    created_at = decoded.createdAt or decoded.created_at,
+  }
+  if not M._is_trusted_comment(comment) then
+    return false, "comment-author-untrusted"
+  end
+  local marker = M.state_marker(hand_off.proposal_id, hand_off.state, hand_off.marker_version, hand_off.effects)
+  if M._comment_body(comment):find(marker, 1, true) == nil then
+    return false, "state-marker-missing"
+  end
+  return true, "verified"
+end
+
+function M.verify_own_state_marker_hand_off(repo, hand_off, expected)
+  if not M.is_own_state_marker_hand_off(hand_off, expected) then
+    return false, "payload-mismatch"
+  end
+  return state_marker_comment_verified(M, repo, hand_off)
+end
+
+function M.verified_hand_off_state(repo, hand_off, expected)
+  local ok, reason = M.verify_own_state_marker_hand_off(repo, hand_off, expected)
+  if not ok then
+    return nil, reason
+  end
+  return {
+    state = expected.state,
+    version = expected.event_version,
+    stage_rank = M.stage_rank(expected.state),
+  }, reason
 end
 
 function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, version)
   local review_version = version or origin.impl_version
-  return {
+  local payload = {
     schema = "github-devloop.reviewing.v1",
     proposal_id = origin.proposal_id,
     pr_number = pr_number,
@@ -437,6 +508,18 @@ function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, versio
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
+  if origin.reviewing_comment_id ~= nil then
+    payload.reviewing_hand_off = {
+      kind = "own-state-marker",
+      proposal_id = origin.proposal_id,
+      state = "reviewing",
+      marker_version = review_version,
+      event_version = review_version,
+      stage_rank = M.stage_rank("reviewing"),
+      comment_id = origin.reviewing_comment_id,
+    }
+  end
+  return payload
 end
 
 function M.build_current_head_reviewing_payload(origin, pr_number, current_pr, state, source_ref)

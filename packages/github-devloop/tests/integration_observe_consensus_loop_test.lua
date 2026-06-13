@@ -449,7 +449,7 @@ return {
     t.is_true(comment_raise.payload.body:find('decision="approve"', 1, true) ~= nil)
     t.eq(ready_raise.payload.schema, "github-devloop.ready.v1") t.eq(ready_raise.payload.proposal_id, "github-devloop/issue/owner/repo/42")
     t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
-    t.is_nil(ready_raise.payload.ready_hand_off) t.eq(session_raise.payload.ready_hand_off.version, session_raise.payload.dedup_key)
+    t.is_nil(ready_raise.payload.ready_hand_off) t.eq(session_raise.payload.ready_hand_off.event_version, session_raise.payload.dedup_key)
   end,
 
   test_consensus_result_threads_framing_to_ready_and_implement_prompt = function()

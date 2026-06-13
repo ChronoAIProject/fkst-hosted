@@ -730,6 +730,41 @@ return {
     t.eq(count_calls("gh pr diff"), 0)
   end,
 
+  test_review_pr_accepts_verified_durable_reviewing_hand_off_before_marker_visibility = function()
+    local event = reviewing()
+    event.reviewing_hand_off = {
+      kind = "own-state-marker",
+      proposal_id = event.proposal_id,
+      state = "reviewing",
+      marker_version = event.version,
+      event_version = event.version,
+      stage_rank = core.stage_rank("reviewing"),
+      comment_id = "IC_reviewing_1",
+    }
+    mock_issue_review({ "fkst-dev:reviewing" }, {})
+    mock_pr_origin_sequence({
+      {
+        comments = {
+          core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+        },
+        head = "devloop-owner-repo-42-01HY",
+        head_sha = "def456",
+      },
+    })
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_reviewing_1'", {
+      stdout = '{"body":"' .. json_string(core.state_marker(event.proposal_id, "reviewing", event.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_review_pr(event, opts("review-pr-durable-reviewing-hand-off"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus.proposal")
+    t.eq(count_calls("repos/owner/repo/issues/comments/IC_reviewing_1"), 1)
+    t.eq(count_calls("gh pr diff"), 1)
+  end,
+
   test_review_result_approve_marks_issue_merge_ready = function()
     local event = review_reached({
       angle_results = {

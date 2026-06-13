@@ -47,8 +47,31 @@ function pipeline(event)
     local state = core.current_entity_state(current_pr.comments, reviewing.proposal_id)
     local marker_order = core.compare_state_marker_order(state, "reviewing", reviewing.version)
     if marker_order < 0 then
-      core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
-      error("github-devloop: reviewing state marker not yet visible for PR review; retrying")
+      local verified_state = nil
+      local hand_off_reason = "missing"
+      if reviewing.reviewing_hand_off ~= nil then
+        verified_state, hand_off_reason = core.verified_hand_off_state(repo, reviewing.reviewing_hand_off, {
+          proposal_id = reviewing.proposal_id,
+          state = "reviewing",
+          marker_version = reviewing.version,
+          event_version = reviewing.version,
+        })
+      end
+      if verified_state ~= nil then
+        state = verified_state
+        marker_order = 0
+        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "apply(verified-own-reviewing-hand-off)", "reviewing marker comment verified by direct id lookup")
+      else
+        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
+        if reviewing.reviewing_hand_off ~= nil then
+          core.log_line("info", "review_pr", reviewing.proposal_id, "HANDOFF", {
+            "state=reviewing",
+            "outcome=verify-failed",
+            "reason=" .. tostring(hand_off_reason),
+          })
+        end
+        error("github-devloop: reviewing state marker not yet visible for PR review; retrying")
+      end
     end
     if marker_order > 0 or state.state ~= "reviewing" then
       core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale/diverged", "issue is not currently reviewing")

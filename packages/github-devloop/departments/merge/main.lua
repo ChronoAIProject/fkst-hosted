@@ -1,7 +1,6 @@
 local core = require("core")
 
 local M = {}
-
 M.spec = {
   consumes = { "devloop_merge_ready", "devloop_merge_queue_tick" },
   produces = {
@@ -14,9 +13,7 @@ M.spec = {
   fanout = { "devloop_merge_queue_tick" },
   stall_window = "2m",
 }
-
 local MAX_RUNTIME_ID_LEN = 180
-
 local function safe_segment(value)
   local safe = tostring(value or ""):gsub("[^%w._-]", "_")
   safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
@@ -25,7 +22,6 @@ local function safe_segment(value)
   end
   return safe
 end
-
 local function runtime_identity(repo, issue_number)
   local id = "merge-" .. safe_segment(repo) .. "-issue-" .. safe_segment(issue_number)
   if #id > MAX_RUNTIME_ID_LEN then
@@ -33,7 +29,6 @@ local function runtime_identity(repo, issue_number)
   end
   return id
 end
-
 local function temp_body_file(repo, issue_number)
   return "/tmp/fkst-github-devloop-" .. runtime_identity(repo, issue_number) .. ".md"
 end

@@ -39,6 +39,9 @@ local function comment_author_login(comment)
     if type(comment.author) == "table" and comment.author.login ~= nil then
       return tostring(comment.author.login)
     end
+    if type(comment.user) == "table" and comment.user.login ~= nil then
+      return tostring(comment.user.login)
+    end
   end
   return nil
 end
@@ -171,6 +174,12 @@ function M.gh_issue_comment_cmd(repo, issue_number, body_file)
     .. " --body-file " .. shell_single_quote(body_file)
 end
 
+function M.gh_issue_comment_create_cmd(repo, issue_number, body_file)
+  return "gh api --method POST "
+    .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments")
+    .. " --field body=@" .. shell_single_quote(body_file)
+end
+
 function M.gh_comment_edit_cmd(repo, comment_id_value, body_file)
   if comment_id_value == nil or tostring(comment_id_value) == "" then
     error("github-proxy: invalid comment id")
@@ -187,7 +196,7 @@ local function edit_existing_comment(M, repo, target, path, existing, replace_ma
 
   local ok, err = M.gh_exec_result(M.gh_comment_edit_cmd(repo, existing.id, path), 30, "gh comment edit")
   if ok then
-    return true, nil
+    return true, nil, existing
   end
 
   if not is_gh_not_found(err.result) then
@@ -204,13 +213,29 @@ local function edit_existing_comment(M, repo, target, path, existing, replace_ma
 
   local refreshed_ok, refreshed_err = M.gh_exec_result(M.gh_comment_edit_cmd(repo, refreshed.id, path), 30, "gh comment edit")
   if refreshed_ok then
-    return true, nil
+    return true, nil, refreshed
   end
   if is_gh_not_found(refreshed_err.result) then
     log.warn("github-proxy: refreshed gh comment edit target is stale: error_class=" .. stale_comment_target_error_class)
     return false, stale_comment_target_error_class
   end
   error(refreshed_err.message)
+end
+
+local function parse_written_comment(stdout)
+  local ok, decoded = pcall(json.decode, stdout or "{}")
+  if not ok or type(decoded) ~= "table" then
+    return nil
+  end
+  local id = comment_id(decoded)
+  if id == nil then
+    return nil
+  end
+  return {
+    id = id,
+    body = comment_body(decoded),
+    author_login = comment_author_login(decoded),
+  }
 end
 
 function M.write_comment_request(payload, target)
@@ -234,6 +259,7 @@ function M.write_comment_request(payload, target)
   local bot_login = M.assert_trusted_bot_configured()
 
   local runtime_id = comment_runtime_identity(repo, target.kind, target.number)
+  local written_comment = nil
   with_lock("github-proxy/" .. runtime_id, function()
     local comments = load_comments(M, target, repo)
     local replace_marker = payload.replace_marker
@@ -242,6 +268,7 @@ function M.write_comment_request(payload, target)
       existing = M.trusted_comment_with_fragment(comments, tostring(replace_marker), bot_login)
     elseif M.has_trusted_marker(comments, payload.dedup_key, bot_login) then
       log.info("github-proxy: comment marker already present")
+      written_comment = M.trusted_comment_with_fragment(comments, M.comment_marker(payload.dedup_key), bot_login)
       return
     end
     local claim_issue_number = target.kind == "issue" and target.number or payload.issue_number
@@ -253,8 +280,9 @@ function M.write_comment_request(payload, target)
     local body = tostring(payload.body) .. "\n\n" .. M.comment_marker(payload.dedup_key) .. "\n"
     local path = "/tmp/fkst-github-proxy-" .. runtime_id .. ".md"
     file.write(path, body)
-    local edited, edit_status = edit_existing_comment(M, repo, target, path, existing, tostring(replace_marker or ""), bot_login)
+    local edited, edit_status, edited_comment = edit_existing_comment(M, repo, target, path, existing, tostring(replace_marker or ""), bot_login)
     if edited then
+      written_comment = edited_comment
       return
     end
     if edit_status == stale_comment_target_error_class then
@@ -262,8 +290,14 @@ function M.write_comment_request(payload, target)
     elseif existing ~= nil then
       log.warn("github-proxy: replace marker comment missing id; creating a fresh comment")
     end
-    M.gh_exec(target.comment_cmd(repo, target.number, path), 30, target.comment_label)
+    local created = M.gh_exec(target.comment_create_cmd(repo, target.number, path), 30, target.comment_label)
+    local written = parse_written_comment(created.stdout)
+    if written == nil then
+      error("github-proxy: comment create did not return a valid comment id")
+    end
+    written_comment = written
   end)
+  return written_comment
 end
 
 end

@@ -344,6 +344,14 @@ function M.gh_commit_check_runs_cmd(repo, head_sha)
   return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/commits/" .. tostring(head_sha) .. "/check-runs")
 end
 
+function M.gh_issue_comment_get_cmd(repo, comment_id)
+  if not M.is_safe_comment_id(comment_id) then
+    error("github-devloop: invalid comment id")
+  end
+  return "gh api --method GET "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/comments/" .. tostring(comment_id))
+end
+
 function M.gh_pr_ready_cmd(repo, pr_number)
   return "gh pr ready " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)

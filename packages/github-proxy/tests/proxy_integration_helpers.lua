@@ -186,7 +186,18 @@ local function mock_non_branch_ref_head(head_sha)
 end
 
 local function mock_comment_write()
-  t.mock_command("gh issue comment", { stdout = "", exit_code = 0 })
+  t.mock_command("gh api --method POST 'repos/owner/x/issues/42/comments' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-issue-42.md'", {
+    stdout = '{"id":123456,"body":"created","user":{"login":"fkst-test-bot"}}\n',
+    exit_code = 0,
+  })
+  t.mock_command("gh api --method POST 'repos/owner/payload/issues/42/comments' --field body=@'/tmp/fkst-github-proxy-comment-owner_payload-issue-42.md'", {
+    stdout = '{"id":123456,"body":"created","user":{"login":"fkst-test-bot"}}\n',
+    exit_code = 0,
+  })
+  t.mock_command("gh issue comment '42' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-issue-comment.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
 end
 
 local function label_list_json(labels)
@@ -300,7 +311,38 @@ local function mock_pr_comment_view(comments, author)
 end
 
 local function mock_pr_comment_write()
-  t.mock_command("gh pr comment", { stdout = "", exit_code = 0 })
+  t.mock_command("gh api --method POST 'repos/owner/x/issues/7/comments' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-pr-7.md'", {
+    stdout = '{"id":123456,"body":"created","user":{"login":"fkst-test-bot"}}\n',
+    exit_code = 0,
+  })
+  t.mock_command("gh pr comment '7' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-comment-owner_x-pr-7.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr comment '7' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-intent-issue-create-decompose_github-devloop_issue_owner_x_42_v1_1_123.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr comment '7' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-created-issue-create-decompose_github-devloop_issue_owner_x_42_v1_1_123.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr comment '7' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr comment '9' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr comment '10' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr comment '11' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md'", {
+    stdout = "",
+    exit_code = 0,
+  })
 end
 
 local function calls_matching(needle)
