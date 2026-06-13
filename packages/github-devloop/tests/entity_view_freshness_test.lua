@@ -40,4 +40,28 @@ return {
     t.is_true(state.stdout:find('"After"', 1, true) ~= nil)
     t.eq(count_calls(command), 2)
   end,
+
+  test_marker_bearing_pr_origin_reader_bypasses_entity_view_cache = function()
+    local command = core.gh_pr_view_entity_cmd("owner/repo", 7)
+    t.mock_command(command, {
+      stdout = '{"headRefName":"branch","headRefOid":"abc123","baseRefName":"dev","state":"OPEN","comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local cached = core.fetch_pr_view("owner/repo", 7, "2026-06-03T01:02:03Z", {
+      consumer = "non-marker-reader",
+    })
+    t.eq(cached.exit_code, 0)
+    t.is_true(cached.stdout:find('"abc123"', 1, true) ~= nil)
+
+    t.mock_command(command, {
+      stdout = '{"headRefName":"branch","headRefOid":"def456","baseRefName":"dev","state":"OPEN","comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local origin = core.fetch_pr_view_origin("owner/repo", 7, "2026-06-03T01:02:03Z")
+    t.eq(origin.exit_code, 0)
+    t.is_true(origin.stdout:find('"def456"', 1, true) ~= nil)
+    t.eq(count_calls(command), 2)
+  end,
 }

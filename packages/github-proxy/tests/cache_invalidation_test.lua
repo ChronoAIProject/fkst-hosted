@@ -27,7 +27,7 @@ local function issue_comment_event()
   }
 end
 
-local function run_entity_view_probe(run_opts, consumer, marker_bearing)
+local function run_entity_view_probe(run_opts, consumer, marker_bearing, named_marker_reader)
   local result = t.run_department("tests/entity_view_probe_helpers.lua", {
     queue = "entity_view_probe",
     payload = {
@@ -37,6 +37,7 @@ local function run_entity_view_probe(run_opts, consumer, marker_bearing)
       updated_at = "2026-06-03T01:02:03Z",
       consumer = consumer,
       marker_bearing = marker_bearing,
+      named_marker_reader = named_marker_reader,
     },
   }, run_opts)
   t.eq(result.exit_code, 0)
@@ -135,5 +136,32 @@ return {
     t.is_true(marker_read.stdout:find('"After"', 1, true) ~= nil)
     t.eq(count_calls(core.gh_issue_view_entity_cmd("owner/x", 42)), 2)
     t.is_true(run_opts.env.FKST_RUNTIME_ROOT ~= nil)
+  end,
+
+  test_named_marker_issue_fetch_bypasses_proxy_entity_view_cache = function()
+    local run_opts = opts("proxy-named-marker-fresh")
+    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
+      stdout = '{"title":"Before","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
+      stdout = "2026-06-03T01:02:03Z\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    local first = run_entity_view_probe(run_opts, "non-marker-reader")
+    t.eq(first.exit_code, 0)
+    t.is_true(first.stdout:find('"Before"', 1, true) ~= nil)
+
+    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
+      stdout = '{"title":"After","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    local marker_read = run_entity_view_probe(run_opts, "state-reader", false, true)
+    t.eq(marker_read.exit_code, 0)
+    t.is_true(marker_read.stdout:find('"After"', 1, true) ~= nil)
+    t.eq(count_calls(core.gh_issue_view_entity_cmd("owner/x", 42)), 2)
   end,
 }

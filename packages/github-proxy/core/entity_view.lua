@@ -217,6 +217,20 @@ function M.fetch_pr_view(repo, pr_number, updated_at, opts)
   return fetch_entity_view(repo, "pr", pr_number, updated_at, opts)
 end
 
+function M.fetch_marker_issue_view(repo, issue_number, updated_at, opts)
+  local options = opts or {}
+  options.consumer = options.consumer or "marker-reader"
+  options.marker_bearing = true
+  return M.fetch_issue_view(repo, issue_number, updated_at, options)
+end
+
+function M.fetch_marker_pr_view(repo, pr_number, updated_at, opts)
+  local options = opts or {}
+  options.consumer = options.consumer or "marker-reader"
+  options.marker_bearing = true
+  return M.fetch_pr_view(repo, pr_number, updated_at, options)
+end
+
 end
 
 return S
