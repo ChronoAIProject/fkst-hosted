@@ -66,6 +66,8 @@ local deterministic_branch_for = h.deterministic_branch_for
 local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
 local mock_existing_empty_implement_worktree = h.mock_existing_empty_implement_worktree
 local mock_existing_empty_implement_worktree_reuse = h.mock_existing_empty_implement_worktree_reuse
+local mock_existing_dirty_implement_worktree_reuse = h.mock_existing_dirty_implement_worktree_reuse
+local mock_outside_runtime_implement_worktree_rebuild = h.mock_outside_runtime_implement_worktree_rebuild
 local mock_existing_implement_branch = h.mock_existing_implement_branch
 local mock_git_commit = h.mock_git_commit
 local mock_git_push = h.mock_git_push
@@ -371,6 +373,82 @@ return {
     t.eq(count_calls("git worktree list --porcelain"), 1)
     t.eq(count_calls("git worktree add"), 0)
     t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_implement_reused_worktree_is_reset_and_cleaned_before_merge = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:ready" })
+    local worktree = mock_existing_dirty_implement_worktree_reuse(nil, branch, "1")
+    mock_implement_codex(0, "Committed implementation directly.")
+    mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("rev-parse --verify refs/heads/", {
+      stdout = "def456\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-dirty-worktree-reuse"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
+    t.eq(count_calls("reset --hard"), 1)
+    t.eq(count_calls("clean -fd"), 1)
+    t.eq(count_calls("merge --no-edit 'abc123'"), 1)
+
+    local reset_before_merge = false
+    local reset_seen = false
+    for _, call in ipairs(t.command_calls()) do
+      if call.rendered:find("git -C '" .. worktree .. "' reset --hard", 1, true) ~= nil then
+        reset_seen = true
+      elseif call.rendered:find("git -C '" .. worktree .. "' merge --no-edit 'abc123'", 1, true) ~= nil then
+        reset_before_merge = reset_seen
+      end
+    end
+    t.eq(reset_before_merge, true)
+  end,
+
+  test_implement_ignores_existing_worktree_outside_current_runtime_root = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    local runtime = "/tmp/fkst-packages-test/github-devloop/runtime"
+    mock_issue_implement({ "fkst-dev:ready" })
+    mock_outside_runtime_implement_worktree_rebuild(runtime, branch)
+    mock_implement_codex(0, "Committed implementation directly.")
+    mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("rev-parse --verify refs/heads/", {
+      stdout = "def456\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-ignore-outside-runtime-worktree"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
+    t.eq(count_calls("git worktree add"), 1)
+    t.eq(count_calls("git worktree remove --force"), 1)
+    t.eq(count_calls("reset --hard"), 1)
+    t.eq(count_calls("clean -fd"), 1)
+
+    local codex_used_current_runtime = false
+    for _, call in ipairs(t.command_calls()) do
+      if call.rendered:find("codex exec", 1, true) ~= nil
+        and call.rendered:find(runtime .. "/worktrees/devloop-owner-repo-42-", 1, true) ~= nil then
+        codex_used_current_runtime = true
+      end
+    end
+    t.eq(codex_used_current_runtime, true)
   end,
 
   test_implement_marker_present_skips_idempotently = function()

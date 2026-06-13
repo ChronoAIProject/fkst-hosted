@@ -25,6 +25,19 @@ local function deterministic_branch_for(event)
   return core.implement_branch(repo, issue_number, event.dedup_key)
 end
 
+local function mock_implement_worktree_reconcile()
+  t.mock_command("reset --hard", {
+    stdout = "HEAD is now at abc123 implementation branch\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("clean -fd", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_fresh_implement_worktree(path)
   t.mock_command("git fetch 'origin' 'dev'", {
     stdout = "",
@@ -51,6 +64,7 @@ local function mock_fresh_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  mock_implement_worktree_reconcile()
   t.mock_command("merge --no-edit 'abc123'", {
     stdout = "Already up to date.\n",
     stderr = "",
@@ -94,6 +108,7 @@ local function mock_existing_empty_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  mock_implement_worktree_reconcile()
   t.mock_command("merge --no-edit 'abc123'", {
     stdout = "Already up to date.\n",
     stderr = "",
@@ -134,12 +149,74 @@ local function mock_existing_empty_implement_worktree_reuse(path, branch, ahead_
     stderr = "",
     exit_code = 0,
   })
+  mock_implement_worktree_reconcile()
   t.mock_command("merge --no-edit 'abc123'", {
     stdout = "Already up to date.\n",
     stderr = "",
     exit_code = 0,
   })
   return worktree
+end
+
+local function mock_existing_dirty_implement_worktree_reuse(path, branch, ahead_count)
+  return mock_existing_empty_implement_worktree_reuse(path, branch, ahead_count)
+end
+
+local function mock_outside_runtime_implement_worktree_rebuild(runtime_root, branch)
+  local runtime = runtime_root or "/tmp/fkst-packages-test/github-devloop/runtime"
+  local stale = "/tmp/fkst-packages-test/github-devloop/old-runtime/worktrees/devloop-owner-repo-42-01HY"
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-list --count", {
+    stdout = "1\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = runtime,
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree " .. stale .. "\nHEAD abc123\nbranch refs/heads/" .. tostring(branch) .. "\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("[ -d '" .. stale .. "' ]", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  mock_implement_worktree_reconcile()
+  t.mock_command("merge --no-edit 'abc123'", {
+    stdout = "Already up to date.\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  return runtime .. "/worktrees/devloop-owner-repo-42-01HY"
 end
 
 local function mock_existing_implement_branch(head)
@@ -474,6 +551,8 @@ return {
   mock_fresh_implement_worktree = mock_fresh_implement_worktree,
   mock_existing_empty_implement_worktree = mock_existing_empty_implement_worktree,
   mock_existing_empty_implement_worktree_reuse = mock_existing_empty_implement_worktree_reuse,
+  mock_existing_dirty_implement_worktree_reuse = mock_existing_dirty_implement_worktree_reuse,
+  mock_outside_runtime_implement_worktree_rebuild = mock_outside_runtime_implement_worktree_rebuild,
   mock_existing_implement_branch = mock_existing_implement_branch,
   mock_git_commit = mock_git_commit,
   mock_git_push = mock_git_push,
