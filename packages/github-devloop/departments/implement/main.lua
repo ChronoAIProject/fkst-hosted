@@ -526,7 +526,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   return true
 end
 
-function pipeline(event)
+local function process_ready_event(event)
   local ready = event.payload or {}
   if not core.is_supported_ready(ready) then
     core.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
@@ -644,7 +644,7 @@ function pipeline(event)
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
     end
-    local accepts_ready_hand_off = event.queue == "devloop_ready_session"
+    local accepts_ready_hand_off = core.event_queue_matches(event, "devloop_ready_session")
     local accepted_ready_hand_off = nil
     if transition == "pending" then
       if accepts_ready_hand_off and retry_failure == nil and ready.impl_retry_attempt == nil and core.is_ready_hand_off(ready.ready_hand_off, ready) then
@@ -707,6 +707,13 @@ function pipeline(event)
       raise_attempt_outcome(repo, issue_number, outcome)
     end
   end)
+end
+
+function pipeline(event)
+  core.dispatch_consumed_queue("implement", M.spec, event, {
+    devloop_ready = process_ready_event,
+    devloop_ready_session = process_ready_event,
+  })
 end
 
 pipeline = core.wrap_pipeline_failure("implement", pipeline)
