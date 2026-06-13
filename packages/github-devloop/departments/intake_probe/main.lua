@@ -11,6 +11,7 @@ M.spec = {
 
 local PROBE_LIMIT = 5
 local CURSOR_KEY = "github-devloop/intake-probe/created-cursor"
+local BACKSTOP_BOUND = "burst beyond 5 new issues per 60s probe falls back to the 5m intake_scan sweep"
 
 local function parse_cursor(value)
   local created_at, number = tostring(value or ""):match("^([^\t]+)\t(%d+)$")
@@ -70,6 +71,12 @@ end
 function pipeline(event)
   core.log_entry("intake_probe", event, "github-devloop/intake-probe", "tick")
   core.assert_trusted_bot_configured()
+
+  local gate = core.intake_probe_gate()
+  if not gate.enabled then
+    core.log_cas_decision("intake_probe", "github-devloop/intake-probe", { state = nil, version = nil }, "tick", "candidate", "skip-gated", gate.reason .. "; " .. BACKSTOP_BOUND)
+    return
+  end
 
   local repo = core.read_intake_repo()
   if repo == nil then

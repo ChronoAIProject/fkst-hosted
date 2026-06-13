@@ -16,6 +16,14 @@ local function mock_repo_env(repo)
   })
 end
 
+local function mock_probe_proof(value)
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTAKE_PROBE_PROOF"', {
+    stdout = value or "event-fast-path-insufficient",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function json_string(value)
   return h.json_string(value)
 end
@@ -89,8 +97,28 @@ local function seed_probe_cursor(value, run_opts)
 end
 
 return {
+  test_probe_is_gated_without_event_fast_path_insufficiency_proof = function()
+    h.mock_bot_env()
+    mock_probe_proof("")
+
+    local result = run_probe(opts("intake-probe-gated-without-proof"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_rendered_calls("repos/owner/repo/issues?state=open"), 0)
+  end,
+
+  test_probe_rejects_unknown_proof_value = function()
+    h.mock_bot_env()
+    mock_probe_proof("temporary-poll")
+
+    local result = run_probe(opts("intake-probe-invalid-proof"))
+    t.eq(result.exit_code, 1)
+    t.eq(count_rendered_calls("repos/owner/repo/issues?state=open"), 0)
+  end,
+
   test_probe_raises_recent_new_issue_candidate = function()
     h.mock_bot_env()
+    mock_probe_proof()
     mock_repo_env()
     mock_probe_issue_list({
       { number = 42, created_at = "2026-06-03T01:01:00Z", updated_at = "2026-06-03T01:02:03Z", labels = {} },
@@ -108,6 +136,7 @@ return {
 
   test_probe_skips_known_devloop_state_label_without_issue_view = function()
     h.mock_bot_env()
+    mock_probe_proof()
     mock_repo_env()
     mock_probe_issue_list({
       { number = 42, created_at = "2026-06-03T01:01:00Z", labels = { "fkst-dev:enabled" } },
@@ -123,6 +152,7 @@ return {
     local run_opts = opts("intake-probe-same-second-cursor")
     seed_probe_cursor("2026-06-03T01:01:00Z\t42", run_opts)
     h.mock_bot_env()
+    mock_probe_proof()
     mock_repo_env()
     mock_probe_issue_list({
       { number = 43, created_at = "2026-06-03T01:01:00Z", updated_at = "2026-06-03T01:02:04Z", labels = {} },
@@ -137,6 +167,7 @@ return {
 
   test_probe_full_window_rechecks_until_full_sweep_backstop = function()
     h.mock_bot_env()
+    mock_probe_proof()
     mock_repo_env()
     mock_probe_issue_list({
       { number = 50, created_at = "2026-06-03T01:05:00Z", labels = { "fkst-dev:enabled" } },
