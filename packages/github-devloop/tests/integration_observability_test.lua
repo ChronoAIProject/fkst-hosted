@@ -829,11 +829,11 @@ return {
     })
     mock_dashboard_issue_list('[[{"number":99,"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}]]\n')
     t.mock_command("gh api --method GET --include 'repos/owner/repo/issues/99'", {
-      stdout = 'HTTP/2.0 200 OK\netag: "dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}\n',
+      stdout = 'HTTP/2.0 200 OK\netag: W/"dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"old\\n<!-- fkst:dashboard:v1 version=\\"2026-06-01T00:00:00Z\\" hash=\\"old\\" generated_at=\\"2026-06-01T00:00:00Z\\" -->"}\n',
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
       stdout = '{"number":99}\n',
       stderr = "",
       exit_code = 0,
@@ -843,8 +843,9 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST"), 0)
-    t.eq(count_calls("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"'"), 1)
-    local input_path = command_input_path(first_call("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"'"))
+    t.eq(count_calls("If-Match"), 0)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/repo/issues/99' --input"), 1)
+    local input_path = command_input_path(first_call("gh api --method PATCH 'repos/owner/repo/issues/99' --input"))
     t.is_true(input_path ~= nil)
     t.is_true(input_path:find("/tmp/fkst-github-devloop-dashboard-owner-repo-", 1, true) == 1)
     t.is_true(input_path ~= "/tmp/fkst-github-devloop-dashboard-owner-repo.json")
@@ -907,7 +908,7 @@ return {
     t.eq(count_calls("gh api --method POST 'repos/owner/repo/issues'"), 1)
   end,
 
-  test_dashboard_write_skips_update_when_etag_precondition_fails = function()
+  test_dashboard_write_skips_update_when_patch_precondition_fails = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     mock_env("fkst-test-bot", "1")
     mock_all_issue_lists({ 42 })
@@ -921,17 +922,18 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
+    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
       stdout = "",
       stderr = "HTTP 412: Precondition Failed\n",
       exit_code = 1,
     })
 
-    local result = run_observability(opts("observability-dashboard-etag-precondition", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_observability(opts("observability-dashboard-patch-precondition", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --method POST"), 0)
-    t.eq(count_calls("gh api --method PATCH 'repos/owner/repo/issues/99' --header 'If-Match: \"dashboard-old-etag\"'"), 1)
+    t.eq(count_calls("If-Match"), 0)
+    t.eq(count_calls("gh api --method PATCH 'repos/owner/repo/issues/99' --input"), 1)
   end,
 
   test_dashboard_write_skips_stale_snapshot_when_current_version_is_newer = function()
