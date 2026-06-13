@@ -20,6 +20,11 @@
 #       Run read-only preflight checks for git/cargo/rustc, fkst-framework BIN,
 #       codex, gh auth, and relevant FKST_* host facts.
 #
+#   scripts/run.sh doctor github-devloop
+#       Run the read-only package-side saga doctor against the configured
+#       running GitHub repository. Exact engine queue/DLQ depths remain
+#       unavailable here and need fkst-framework doctor support.
+#
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
 #
@@ -511,6 +516,43 @@ cmd_run() {
   return "$rc"
 }
 
+cmd_doctor() {
+  if [ "$#" -eq 0 ]; then
+    "$BASH" "$ROOT/scripts/doctor.sh"
+    return $?
+  fi
+
+  local pkg="${1:-}"
+  shift
+  case "$pkg" in
+    github-devloop)
+      if [ "$#" -ne 0 ]; then
+        echo "usage: scripts/run.sh doctor github-devloop" >&2
+        exit 2
+      fi
+      resolve_bin
+      ensure_fresh_bin
+      local pkgdir="$PACKAGES_ROOT/github-devloop"
+      local lua="$pkgdir/departments/doctor/main.lua"
+      [ -f "$lua" ] || { echo "error: no saga doctor at $lua" >&2; exit 1; }
+      "$BIN" run "$lua" --project-root "$ROOT" --package-root "$pkgdir" --event '{"queue":"devloop_doctor_tick","payload":{}}' \
+        | grep -vE '^RAISED:'
+      ;;
+    --running|--system)
+      if [ "${1:-}" != "github-devloop" ]; then
+        echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+        exit 2
+      fi
+      shift
+      cmd_doctor github-devloop "$@"
+      ;;
+    *)
+      echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+      exit 2
+      ;;
+  esac
+}
+
 cmd_supervise() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
@@ -581,7 +623,7 @@ cmd_build() {
 main() {
   case "${1:-}" in
     check) shift; cmd_check "$@" ;;
-    doctor) shift; "$BASH" "$ROOT/scripts/doctor.sh" "$@" ;;
+    doctor) shift; cmd_doctor "$@" ;;
     test) shift
       # Quiet cmd_check's advisory warnings during a test run unless verbose;
       # surface its full output only when it hard-fails (non-zero). `run.sh check`
