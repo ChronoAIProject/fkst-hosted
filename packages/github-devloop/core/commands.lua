@@ -78,10 +78,6 @@ function M.gh_issue_list_wip_cmd(repo)
     .. " --json number"
 end
 
-function M.gh_issue_list_dependency_reconcile_cmd(repo)
-  return M.gh_issue_list_observe_cmd(repo, M._blocked_on_dependency_label)
-end
-
 function M.gh_dashboard_issue_list_cmd(repo, label)
   local selected_label = tostring(label or "")
   if selected_label == "" then
@@ -516,6 +512,19 @@ function M.git_worktree_merge_no_edit_cmd(worktree, sha)
     .. M._shell_single_quote(sha)
 end
 
+function M.git_worktree_reset_hard_cmd(worktree, branch)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid reset branch")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " reset --hard refs/heads/"
+    .. M._shell_single_quote(branch)
+end
+
+function M.git_worktree_clean_cmd(worktree)
+  return "git -C " .. M._shell_single_quote(worktree) .. " clean -fd"
+end
+
 function M.git_ahead_count_cmd(upstream, integration)
   if not M._is_git_ref_safe(upstream) then
     error("github-devloop: invalid upstream branch")
@@ -665,7 +674,37 @@ function M.path_is_directory_cmd(path)
   return "[ -d " .. M._shell_single_quote(value) .. " ]"
 end
 
+function M.find_worktrees_for_branch(stdout, branch)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  local wanted = "refs/heads/" .. tostring(branch)
+  local path = nil
+  local matches = {}
+  for line in (tostring(stdout or "") .. "\n"):gmatch("([^\n]*)\n") do
+    if line == "" then
+      path = nil
+    else
+      local current_path = line:match("^worktree%s+(.+)$")
+      if current_path ~= nil then
+        path = current_path
+      elseif line == "branch " .. wanted and path ~= nil and path ~= "" then
+        table.insert(matches, path)
+      end
+    end
+  end
+  return matches
+end
+
 function M.find_worktree_for_branch(stdout, branch)
+  local matches = M.find_worktrees_for_branch(stdout, branch)
+  if #matches > 0 then
+    return matches[1]
+  end
+  return nil
+end
+
+function M.find_worktree_for_branch_under_runtime(stdout, branch, runtime_root)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -678,7 +717,10 @@ function M.find_worktree_for_branch(stdout, branch)
       local current_path = line:match("^worktree%s+(.+)$")
       if current_path ~= nil then
         path = current_path
-      elseif line == "branch " .. wanted and path ~= nil and path ~= "" then
+      elseif line == "branch " .. wanted
+        and path ~= nil
+        and path ~= ""
+        and M.path_under_runtime_root(runtime_root, path) then
         return path
       end
     end

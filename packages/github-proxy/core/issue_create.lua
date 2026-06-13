@@ -322,6 +322,7 @@ function M.write_issue_create_request(payload)
       local intent_path = issue_create_intent_marker_body_file(payload.dedup_key)
       file.write(intent_path, M.issue_create_intent_marker(payload.dedup_key) .. "\n")
       M.gh_exec(M.gh_issue_create_parent_comment_cmd(parent, intent_path), 30, "gh parent issue-create intent comment")
+      M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
       local confirm = M.gh_exec(M.gh_issue_create_parent_view_cmd(parent), 30, "gh parent issue-create intent confirm")
       if not M.has_trusted_issue_create_intent_marker(M.parse_issue_comments(confirm.stdout), payload.dedup_key, bot_login) then
         error("github-proxy: issue-create intent marker not visible after write")
@@ -344,11 +345,15 @@ function M.write_issue_create_request(payload)
       local path = "/tmp/fkst-github-proxy-" .. issue_create_runtime_identity(payload.dedup_key) .. ".md"
       file.write(path, body)
       local created = M.gh_exec(M.gh_issue_create_cmd(repo, payload.title, path, payload.labels), 30, "gh issue create")
+      local issue_number = M.parse_created_issue_number(created.stdout)
+      if issue_number ~= nil then
+        M.invalidate_entity_after_write(repo, "issue", issue_number)
+      end
       if parent ~= nil then
-        local issue_number = M.parse_created_issue_number(created.stdout) or "unknown"
         local marker_path = issue_created_marker_body_file(payload.dedup_key)
-        file.write(marker_path, M.issue_created_marker(payload.dedup_key, issue_number) .. "\n")
+        file.write(marker_path, M.issue_created_marker(payload.dedup_key, issue_number or "unknown") .. "\n")
         M.gh_exec(M.gh_issue_create_parent_comment_cmd(parent, marker_path), 30, "gh parent issue-created comment")
+        M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
       end
     end)
     if not ran then

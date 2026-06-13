@@ -965,6 +965,9 @@ function M.build_reached_payload(proposal, decision, angle_results, framing)
       ref = proposal.source_ref.ref,
     },
   }
+  if proposal.effect_version ~= nil then
+    payload.effect_version = tostring(proposal.effect_version)
+  end
   if clean_gaps ~= nil then
     payload.blocking_gaps = clean_gaps
     payload.blocking_gap = clean_gaps[1]
@@ -980,7 +983,7 @@ function M.build_converge_payload(proposal, narrowed_question, angle_results)
     error("consensus: missing source_ref")
   end
 
-  return {
+  local payload = {
     schema = "consensus.consensus_converge.v1",
     proposal_id = proposal.proposal_id,
     round = tonumber(proposal.round) or 0,
@@ -992,6 +995,10 @@ function M.build_converge_payload(proposal, narrowed_question, angle_results)
       ref = proposal.source_ref.ref,
     },
   }
+  if proposal.effect_version ~= nil then
+    payload.effect_version = tostring(proposal.effect_version)
+  end
+  return payload
 end
 
 return M

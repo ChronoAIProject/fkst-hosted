@@ -257,6 +257,7 @@ local function write_merging_marker(repo, merge_ready, comments)
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr merging marker comment failed: " .. tostring(result.stderr))
   end
+  core.invalidate_entity_after_write(repo, "pr", merge_ready.pr_number)
 end
 
 local function build_merged_requests(repo, issue_number, merge_ready)
@@ -283,6 +284,7 @@ local function finalize_merged(repo, issue_number, merge_ready, current_state, r
     if close_result.exit_code ~= 0 then
       error("github-devloop: gh issue close failed: " .. tostring(close_result.stderr))
     end
+    core.invalidate_entity_after_write(repo, "issue", issue_number)
   end
 
   local comment_request, label_request = build_merged_requests(repo, issue_number, merge_ready)
@@ -932,7 +934,6 @@ local function process_merge_queue_tick(event)
     end
   end)
 end
-
 function pipeline(event)
   if event.queue == "devloop_merge_queue_tick" then
     process_merge_queue_tick(event)
@@ -954,7 +955,6 @@ function pipeline(event)
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
-
   local lock_key = core.merge_lane_lock_key(repo)
   if lock_key == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
@@ -967,7 +967,5 @@ function pipeline(event)
     process_merge_ready_locked(repo, issue_number, merge_ready, branches)
   end)
 end
-
 pipeline = core.wrap_pipeline_failure("merge", pipeline)
-
 return M

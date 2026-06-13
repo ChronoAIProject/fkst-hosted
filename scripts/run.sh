@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Generic dev runner for fkst packages.
 #
-#   scripts/run.sh test [package]
+#   scripts/run.sh test [-v|--verbose] [package]
 #       Run fkst-framework --self-test once, then conformance + test for flat
 #       packages. Composed packages skip single-package conformance and still
 #       run tests. Full test also runs composed graph conformance. This is the
 #       single CI and local test entrypoint. FKST_RUNTIME_ROOT and
 #       FKST_DURABLE_ROOT are overridden with fresh temp roots, and
 #       FKST_GITHUB_WRITE is cleared, so local runs predict CI.
+#       By default only failure-relevant lines are printed (the per-test
+#       --report-json drives the tally and G5 coverage independently of stdout,
+#       so filtering stdout is safe). Pass -v/--verbose or set FKST_TEST_VERBOSE=1
+#       to stream the full per-test department logs.
 #
 #   scripts/run.sh check
 #       Run hermetic repository checks only. Does not resolve or execute BIN.
@@ -15,6 +19,11 @@
 #   scripts/run.sh doctor
 #       Run read-only preflight checks for git/cargo/rustc, fkst-framework BIN,
 #       codex, gh auth, and relevant FKST_* host facts.
+#
+#   scripts/run.sh doctor github-devloop
+#       Run the read-only package-side saga doctor against the configured
+#       running GitHub repository. Exact engine queue/DLQ depths remain
+#       unavailable here and need fkst-framework doctor support.
 #
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
@@ -110,7 +119,9 @@ ensure_fresh_bin() {
   fi
 
   echo "ensuring fkst-framework is built from current source: $substrate" >&2
-  if ! cargo build --manifest-path "$substrate/Cargo.toml" -p fkst-framework 1>&2; then
+  local build_out
+  if ! build_out="$(cargo build --manifest-path "$substrate/Cargo.toml" -p fkst-framework 2>&1)"; then
+    printf '%s\n' "$build_out" >&2
     echo "error: fkst-framework freshness build failed; refusing to continue with a potentially stale BIN" >&2
     exit 1
   fi
@@ -237,9 +248,57 @@ LUA
   echo "OK: SDK primitive truncate_utf8 is available in BIN: $BIN"
 }
 
+# Run "$@"; unless verbose (cmd_test's flag), drop advisory `PASS` lines from its
+# combined output so only failures surface. Returns the command's own exit code
+# (via PIPESTATUS, not grep's). The `set +e`/`set -e` guard makes it safe in any
+# caller context: the inner grep matching nothing on an all-pass run must not
+# trip the script-wide `set -e`.
+run_quiet_pass() {
+  if [ -n "${verbose:-}${FKST_TEST_VERBOSE:-}" ]; then "$@"; return $?; fi
+  local rc
+  set +e
+  "$@" 2>&1 | grep -vE '^PASS '
+  rc=${PIPESTATUS[0]}
+  set -e
+  return "$rc"
+}
+
+# Run "$2..."; unless verbose, KEEP only stdout lines matching the regex in $1
+# (the inverse of run_quiet_pass — allowlist for the noisy engine test stream).
+# Returns the command's own exit code via PIPESTATUS, not grep's, so an all-pass
+# run (grep still matches the tally) and a failing run both report correctly.
+# Same `set +e`/`set -e` guard so a failing package neither aborts the run nor is
+# swallowed: the loop continues and the count stays accurate.
+run_quiet_keep() {
+  local keep="$1"; shift
+  if [ -n "${verbose:-}${FKST_TEST_VERBOSE:-}" ]; then "$@"; return $?; fi
+  local rc
+  set +e
+  "$@" 2>&1 | grep -E -- "$keep"
+  rc=${PIPESTATUS[0]}
+  set -e
+  return "$rc"
+}
+
 cmd_test() {
-  local target="${1:-}" ran=0 fail=0 pkg name
+  local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}"
   local report_dir report_file
+  # Lines worth surfacing when a package test fails: the engine's per-test FAIL
+  # line (anchored at column 0 so it does not catch mid-line tag=FAILURE in the
+  # info logs of tests that deliberately exercise error paths and still pass),
+  # the per-package tally, and panics. Everything else (PASS lines, LEVEL=info
+  # department logs, expected-error tracebacks) is suppressed unless verbose.
+  # For a real failure the FAIL line already carries the assertion/error reason;
+  # use -v for the full traceback.
+  local test_failure_filter='^FAIL |passed, [0-9]+ failed|panic'
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -v|--verbose) verbose=1 ;;
+      -*) echo "unknown test flag: $1" >&2; exit 2 ;;
+      *) target="$1" ;;
+    esac
+    shift
+  done
 
   trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}"' EXIT
   TEST_HERMETIC_RUNTIME_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-rt.XXXXXX")"
@@ -258,7 +317,7 @@ cmd_test() {
   fi
 
   echo "=== sdk-primitives ==="
-  if ! check_sdk_primitives; then
+  if ! run_quiet_pass check_sdk_primitives; then
     fail=$((fail + 1))
   fi
 
@@ -271,13 +330,18 @@ cmd_test() {
     if [ -f "$pkg/composed.deps" ]; then
       echo "skip single-package conformance for composed package: $name"
     else
-      if ! "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
+      if ! run_quiet_pass "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
         fail=$((fail + 1))
         continue
       fi
     fi
     report_file="$report_dir/$name.json"
-    if ! "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file"; then
+    # Default-quiet: keep only failure-relevant lines (the --report-json that
+    # drives the tally and G5 coverage is unaffected). run_quiet_keep is called
+    # from `if !` so the inner pipe never trips `set -e` on a failing package;
+    # the loop continues, the count is correct, and FAILED: still prints.
+    if ! run_quiet_keep "$test_failure_filter" \
+        "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file"; then
       fail=$((fail + 1))
     fi
   done
@@ -345,7 +409,7 @@ cmd_test_composed() {
     args+=(--package-root "$PACKAGES_ROOT/$name")
   done
   echo "=== composed conformance ==="
-  "$BIN" conformance --project-root "$ROOT" "${args[@]}"
+  run_quiet_pass "$BIN" conformance --project-root "$ROOT" "${args[@]}"
 }
 
 cmd_run() {
@@ -452,6 +516,43 @@ cmd_run() {
   return "$rc"
 }
 
+cmd_doctor() {
+  if [ "$#" -eq 0 ]; then
+    "$BASH" "$ROOT/scripts/doctor.sh"
+    return $?
+  fi
+
+  local pkg="${1:-}"
+  shift
+  case "$pkg" in
+    github-devloop)
+      if [ "$#" -ne 0 ]; then
+        echo "usage: scripts/run.sh doctor github-devloop" >&2
+        exit 2
+      fi
+      resolve_bin
+      ensure_fresh_bin
+      local pkgdir="$PACKAGES_ROOT/github-devloop"
+      local lua="$pkgdir/departments/doctor/main.lua"
+      [ -f "$lua" ] || { echo "error: no saga doctor at $lua" >&2; exit 1; }
+      "$BIN" run "$lua" --project-root "$ROOT" --package-root "$pkgdir" --event '{"queue":"devloop_doctor_tick","payload":{}}' \
+        | grep -vE '^RAISED:'
+      ;;
+    --running|--system)
+      if [ "${1:-}" != "github-devloop" ]; then
+        echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+        exit 2
+      fi
+      shift
+      cmd_doctor github-devloop "$@"
+      ;;
+    *)
+      echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+      exit 2
+      ;;
+  esac
+}
+
 cmd_supervise() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
@@ -522,8 +623,18 @@ cmd_build() {
 main() {
   case "${1:-}" in
     check) shift; cmd_check "$@" ;;
-    doctor) shift; "$BASH" "$ROOT/scripts/doctor.sh" "$@" ;;
-    test) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
+    doctor) shift; cmd_doctor "$@" ;;
+    test) shift
+      # Quiet cmd_check's advisory warnings during a test run unless verbose;
+      # surface its full output only when it hard-fails (non-zero). `run.sh check`
+      # and `test -v`/FKST_TEST_VERBOSE=1 still show every warning.
+      case " $* " in *" -v "*|*" --verbose "*) _tv=1 ;; *) _tv="${FKST_TEST_VERBOSE:-}" ;; esac
+      if [ -n "$_tv" ]; then
+        cmd_check
+      elif ! _chk_out="$(cmd_check 2>&1)"; then
+        printf '%s\n' "$_chk_out"; exit 1
+      fi
+      resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
     test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
     run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
     supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
