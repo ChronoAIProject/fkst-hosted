@@ -1,5 +1,5 @@
 local core = require("core")
-local runtime = require("departments.merge.runtime")
+local runtime_files = require("departments.merge.runtime_files")
 
 local M = {}
 
@@ -243,9 +243,7 @@ local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
   end
   return core.parse_pr_view_merge(pr_view.stdout)
 end
-local function is_merged_pr(pr)
-  return core.is_merged_pr(pr)
-end
+
 local function build_merging_body(merge_ready)
   return core.build_merging_comment_body(merge_ready)
 end
@@ -253,7 +251,7 @@ local function write_merging_marker(repo, merge_ready, comments)
   if core.merging_fact(comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) ~= nil then
     return
   end
-  local path = runtime.temp_body_file(repo, merge_ready.pr_number)
+  local path = runtime_files.temp_body_file(repo, merge_ready.pr_number)
   file.write(path, build_merging_body(merge_ready))
   local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, merge_ready.pr_number, path), timeout = 30 })
   if result.exit_code ~= 0 then
@@ -301,11 +299,8 @@ local function finalize_merged(repo, issue_number, merge_ready, current_state, r
 end
 
 local function log_batch_window(proposal_id, fields)
-  local facts = { "batch_window=true" }
-  for _, field in ipairs(fields or {}) do
-    table.insert(facts, field)
-  end
-  core.log_line("info", "merge", proposal_id or "merge", "BATCH_WINDOW", facts)
+  table.insert(fields, 1, "batch_window=true")
+  core.log_line("info", "merge", proposal_id or "merge", "BATCH_WINDOW", fields)
 end
 
 local function process_merge_ready_locked(repo, issue_number, merge_ready, branches, initial_pr, options)
@@ -396,7 +391,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   local write_enabled = (write_mode or core.write_mode()) == "real"
   local pr_ok, pr_reason = assert_open_same_repo_pr(merge_ready, current_pr, repo, origin.branch, merge_ready.reviewed_head_sha)
   if not pr_ok then
-    if is_merged_pr(current_pr)
+    if core.is_merged_pr(current_pr)
       and tostring(current_pr.head_ref_name or "") == tostring(origin.branch)
       and tostring(current_pr.head_sha or "") == tostring(merge_ready.reviewed_head_sha)
       and core.is_same_repo_pr_head(current_pr, repo) then

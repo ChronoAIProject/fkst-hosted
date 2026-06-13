@@ -1,0 +1,10 @@
+Implemented the smallest conflict fix for the named blocking gap: `mergeable-conflicting`.
+
+I aligned `packages/github-devloop/departments/merge/main.lua` with the target branch’s settled merge helper shape by switching from `departments.merge.runtime` to `departments.merge.runtime_files`, removing the duplicate `runtime.lua`, and keeping the local behavior self-contained. This follows the standard three-way merge practice: preserve both independent changes where compatible, without importing target-only APIs that are not available before the merge.
+
+Verification:
+- Temporary mergeability check against current `origin/integration`: clean.
+- `scripts/run.sh test`: passed, `OK: 5 package(s)`.
+- No unmerged paths or conflict markers found.
+
+I did not push or modify GitHub state.
