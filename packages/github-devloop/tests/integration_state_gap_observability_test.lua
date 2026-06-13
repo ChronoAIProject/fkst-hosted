@@ -69,14 +69,14 @@ local function mock_all_issue_lists(numbers)
   for _, number in ipairs(numbers or {}) do
     table.insert(rendered, string.format('{"number":%d,"state":"open"}', number))
   end
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'", {
-    stdout = "[[" .. table.concat(rendered, ",") .. "]]\n",
+  t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label, 1, true), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
     stderr = "",
     exit_code = 0,
   })
   for _, state in ipairs(core._state_order) do
-    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=" .. core.state_label(state):gsub(":", "%%3A") .. "&per_page=100'", {
-      stdout = "[[]]\n",
+    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core.state_label(state), 1, true), {
+      stdout = "[]\n",
       stderr = "",
       exit_code = 0,
     })
@@ -88,8 +88,8 @@ local function mock_pr_list(numbers)
   for _, number in ipairs(numbers or {}) do
     table.insert(rendered, string.format('{"number":%d,"state":"open"}', number))
   end
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'", {
-    stdout = "[[" .. table.concat(rendered, ",") .. "]]\n",
+  t.mock_command(core.gh_pr_list_observe_cmd("owner/repo", 1, true), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
     stderr = "",
     exit_code = 0,
   })
@@ -112,7 +112,7 @@ local function mock_pr_view(comments)
   })
 end
 
-local function gap_logs()
+local function gap_logs(event)
   local logs = {}
   local old_log = log
   log = {
@@ -131,9 +131,9 @@ local function gap_logs()
     local package_root = package.searchpath("tests.integration_state_gap_observability_test", package.path)
       :match("(.+)/tests/integration_state_gap_observability_test%.lua$")
     dofile(package_root .. "/departments/observability/main.lua")
-    pipeline({
+    pipeline(event or {
       queue = "devloop_observe_tick",
-      payload = { schema = "github-devloop.observe-tick.v1" },
+      payload = { schema = "github-devloop.observe-tick.v1", cursor = "alpha" },
     })
   end)
 
