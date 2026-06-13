@@ -81,7 +81,6 @@ end
 local function is_rollup_red_fix_reason(reason)
   return core.merge_gate_reason_class(reason) == "rollup-red"
 end
-
 local function fetch_pr_merge_product_sha(pr_number)
   local fetch_result = exec_sync({ cmd = core.git_fetch_pr_merge_ref_cmd("origin", pr_number), timeout = 60 })
   if fetch_result.exit_code ~= 0 then
@@ -261,15 +260,12 @@ local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
   end
   return core.parse_pr_view_merge(pr_view.stdout)
 end
-
 local function is_merged_pr(pr)
   return core.is_merged_pr(pr)
 end
-
 local function build_merging_body(merge_ready)
   return core.build_merging_comment_body(merge_ready)
 end
-
 local function write_merging_marker(repo, merge_ready, comments)
   if core.merging_fact(comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) ~= nil then
     return
