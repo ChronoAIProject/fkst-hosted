@@ -156,6 +156,14 @@ local function remote_bump_branch_pin(branch_head)
   return pin:lower()
 end
 
+local function remove_existing_branch_worktree(branch)
+  local list = run_cmd(M.git_worktree_list_cmd(), 30, "git substrate-ref worktree list")
+  local existing = M.find_worktree_for_branch(list.stdout, branch)
+  if existing ~= nil then
+    run_cmd(M.git_worktree_remove_cmd(existing), 60, "git stale substrate-ref branch worktree remove")
+  end
+end
+
 local function pin_delta_state(worktree)
   local diff = run_cmd("git -C " .. M._shell_single_quote(worktree) .. " diff --name-only HEAD", 30, "git diff name-only")
   local name = M._trim(diff.stdout)
@@ -179,6 +187,7 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
   end
   local runtime_root = read_runtime_root()
   local worktree = bump_worktree_path(runtime_root, repo, target_sha)
+  remove_existing_branch_worktree(bump_branch)
   run_cmd(M.git_worktree_remove_if_present_cmd(worktree), 60, "git stale substrate-ref worktree remove")
   local action = "updated"
   local added = false

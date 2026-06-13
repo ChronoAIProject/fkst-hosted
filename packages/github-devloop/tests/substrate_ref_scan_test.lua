@@ -147,6 +147,36 @@ local function mock_branch_pin_missing()
   })
 end
 
+local function mock_no_checked_out_bump_branch()
+  t.mock_command("git worktree list --porcelain", {
+    stdout = "worktree /repo\nHEAD " .. base_sha .. "\nbranch refs/heads/dev\n\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_checked_out_bump_branch()
+  t.mock_command("git worktree list --porcelain", {
+    stdout = table.concat({
+      "worktree /repo",
+      "HEAD " .. base_sha,
+      "branch refs/heads/dev",
+      "",
+      "worktree /tmp/fkst-packages-test/github-devloop/stale-substrate",
+      "HEAD " .. old_branch_sha,
+      "branch refs/heads/chore/substrate-ref-bump",
+      "",
+    }, "\n"),
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree remove --force '/tmp/fkst-packages-test/github-devloop/stale-substrate'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_worktree_commands(push_with_lease)
   t.mock_command("if [ -d '/tmp/fkst-packages-test/github-devloop/", {
     stdout = "",
@@ -251,6 +281,7 @@ return {
     mock_branch_missing()
     mock_base_head()
     mock_runtime_root("substrate-create")
+    mock_no_checked_out_bump_branch()
     mock_worktree_commands(false)
     mock_pr_create()
 
@@ -269,6 +300,7 @@ return {
     mock_branch_pin_missing()
     mock_base_head()
     mock_runtime_root("substrate-update")
+    mock_no_checked_out_bump_branch()
     mock_worktree_commands(true)
 
     local result = run_scan(opts("substrate-update", { FKST_GITHUB_WRITE = "1" }))
@@ -285,6 +317,7 @@ return {
     mock_branch_missing()
     mock_base_head()
     mock_runtime_root("substrate-recheck")
+    mock_no_checked_out_bump_branch()
     mock_worktree_commands(false)
 
     local result = run_scan(opts("substrate-recheck", { FKST_GITHUB_WRITE = "1" }))
@@ -308,5 +341,23 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("git worktree"), 0)
     t.eq(count_calls("git push"), 0)
+  end,
+
+  test_real_mode_removes_stale_checked_out_bump_branch_worktree_before_update = function()
+    mock_env("1")
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin_missing()
+    mock_base_head()
+    mock_runtime_root("substrate-stale-worktree")
+    mock_checked_out_bump_branch()
+    mock_worktree_commands(true)
+
+    local result = run_scan(opts("substrate-stale-worktree", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git worktree remove --force '/tmp/fkst-packages-test/github-devloop/stale-substrate'"), 1)
+    t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 1)
   end,
 }
