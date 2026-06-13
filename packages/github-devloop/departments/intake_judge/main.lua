@@ -5,6 +5,7 @@ local M = {}
 M.spec = {
   consumes = { "devloop_intake_candidate" },
   produces = {
+    "consensus.proposal",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_create_request",
     "github-proxy.github_issue_label_request",
@@ -25,6 +26,73 @@ end
 
 local function tracks_umbrella(action)
   return action == "track"
+end
+
+local function intake_hand_off(candidate, decision)
+  return {
+    kind = "own-intake-decision",
+    proposal_id = candidate.proposal_id,
+    decision = decision,
+    dedup_key = candidate.dedup_key,
+    source_ref = core.normalize_source_ref(candidate.source_ref),
+  }
+end
+
+local function build_direct_proposal(repo, issue_number, candidate, current, event_ts)
+  local issue = {
+    repo = repo,
+    number = issue_number,
+    title = current.title,
+    updated_at = current.updated_at,
+    source_ref = candidate.source_ref,
+    content_fetch = core.context_fetch_ref_from_bundle({
+      dept = "intake_judge",
+      repo = repo,
+      issue_number = issue_number,
+      proposal_id = candidate.proposal_id,
+      version = candidate.dedup_key,
+      tick = event_ts,
+    }),
+  }
+  local proposal = core.build_board_proposal(issue, event_ts)
+  proposal.dedup_key = candidate.dedup_key
+  proposal.intake_hand_off = intake_hand_off(candidate, "enable")
+  return core.validate_proposal(proposal) and proposal or nil
+end
+
+local function raise_enable_successor(dept, repo, issue_number, candidate, current, event_ts, options)
+  local opts = options or {}
+  local direct_proposal = build_direct_proposal(repo, issue_number, candidate, current, event_ts)
+  if direct_proposal == nil then
+    log.warn("github-devloop dept=" .. tostring(dept) .. " proposal_id=" .. tostring(candidate.proposal_id) .. " tag=SKIP reason=cannot-build-valid-direct-proposal")
+    return false
+  end
+  local issue_ref = {
+    repo = repo,
+    number = issue_number,
+    source_ref = candidate.source_ref,
+  }
+  local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
+  local thinking_comment_request = core.build_observe_comment_request(issue_ref, direct_proposal)
+  local thinking_label_request = core.build_thinking_label_request(issue_ref, direct_proposal)
+  if opts.log_apply then
+    local class_add, class_remove = core.intake_service_class_label_changes(candidate.service_class)
+    core.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "intake-enable", "thinking", "applied(" .. tostring(opts.reason or "direct") .. ")", "raising direct intake successor event")
+    core.log_apply(dept, candidate.proposal_id, "thinking", direct_proposal.dedup_key, {
+      add = { core._enabled_label, class_add[1], core._thinking_label },
+      remove = class_remove,
+    }, {
+      "github-proxy.github_issue_label_request",
+      "github-proxy.github_issue_comment_request",
+      "github-proxy.github_issue_label_request",
+      "consensus.proposal",
+    })
+  end
+  core.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  core.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_comment_request", thinking_comment_request)
+  core.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_label_request", thinking_label_request)
+  core.log_raise(dept, candidate.proposal_id, "consensus.proposal", direct_proposal)
+  return true
 end
 
 local function has_devloop_state_label(labels)
@@ -114,11 +182,26 @@ function pipeline(event)
         return
       end
     end
-    if core.is_opted_in(current.labels) then
+    local intake_fact = core.intake_decision_fact(current.comments, candidate.proposal_id)
+    local authoritative_state = core.current_state(current.comments, candidate.proposal_id)
+    local can_replay_enable_successor = intake_fact ~= nil
+      and intake_fact.decision == "enable"
+      and tostring(intake_fact.dedup_key or "") == tostring(candidate.dedup_key or "")
+      and authoritative_state.state == nil
+      and not has_pending_reintake
+    if core.is_opted_in(current.labels) and not can_replay_enable_successor then
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
       return
     end
-    if core.has_intake_decision_marker(current.comments, candidate.proposal_id) and not has_pending_reintake then
+    if intake_fact ~= nil and not has_pending_reintake then
+      if can_replay_enable_successor then
+        candidate.service_class = intake_fact.service_class
+        raise_enable_successor("intake_judge", repo, issue_number, candidate, current, event.ts, {
+          log_apply = true,
+          reason = "visible-intake-fact",
+        })
+        return
+      end
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-idempotent(intake marker already visible)", "trusted intake decision marker exists")
       return
     end
@@ -191,6 +274,11 @@ function pipeline(event)
     local apply_add = { class_add[1] }
     local apply_remove = class_remove
     if enables_pipeline(parsed.action) then
+      table.insert(raised, "consensus.proposal")
+      table.insert(raised, "github-proxy.github_issue_comment_request")
+      table.insert(raised, "github-proxy.github_issue_label_request")
+    end
+    if enables_pipeline(parsed.action) then
       table.insert(apply_add, 1, core._enabled_label)
     elseif tracks_umbrella(parsed.action) then
       table.insert(apply_add, 1, core._tracking_label)
@@ -221,8 +309,7 @@ function pipeline(event)
       end
     end
     if enables_pipeline(parsed.action) then
-      local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
-      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
+      raise_enable_successor("intake_judge", repo, issue_number, candidate, current, event.ts)
     elseif tracks_umbrella(parsed.action) then
       local label_request = core.build_intake_tracking_label_request(repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)

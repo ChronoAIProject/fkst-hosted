@@ -27,8 +27,21 @@ local function short_sha(value)
   return nil
 end
 
+local function epoch_seconds(value)
+  local n = tonumber(value)
+  if n == nil then
+    return nil
+  end
+  if n > 100000000000000 then
+    n = n / 1000000
+  elseif n > 100000000000 then
+    n = n / 1000
+  end
+  return math.floor(n)
+end
+
 local function format_started_at(started_at)
-  local n = tonumber(started_at)
+  local n = epoch_seconds(started_at)
   if n ~= nil then
     return os.date("!%Y-%m-%dT%H:%M:%SZ", n)
   end
@@ -40,8 +53,8 @@ local function format_started_at(started_at)
 end
 
 local function format_duration(started_at, finished_at)
-  local started = tonumber(started_at)
-  local finished = tonumber(finished_at) or now()
+  local started = epoch_seconds(started_at)
+  local finished = epoch_seconds(finished_at) or now()
   if started == nil or finished < started then
     return nil
   end
