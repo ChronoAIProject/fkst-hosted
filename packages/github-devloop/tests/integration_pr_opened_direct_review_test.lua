@@ -2,13 +2,31 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local opts = h.opts
-local mock_pr_origin = h.mock_pr_origin
 local find_raise = h.find_raise
 
 local function find_label_raise(raises, target_kind)
   return find_raise(raises, "github-proxy.github_issue_label_request", function(payload)
     return tostring(payload.target_kind or "issue") == tostring(target_kind or "issue")
   end)
+end
+
+local function mock_pr_view_origin(comments, head, head_sha, state, base_branch)
+  local rendered_comments = {}
+  for _, comment in ipairs(comments or {}) do
+    table.insert(rendered_comments, h.render_comment(comment))
+  end
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+    stdout = string.format(
+      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+      h.json_string(head or "devloop-owner-repo-42-01HY"),
+      h.json_string(head_sha or "def456"),
+      h.json_string(base_branch or "dev"),
+      h.json_string(state or "OPEN"),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function pr_opened_event(extra)
@@ -47,9 +65,8 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    mock_pr_origin({
+    mock_pr_view_origin({
       core.pr_origin_marker(event.proposal_id, "42", event.branch, event.impl_version, event.base_branch),
-      core.state_marker(event.proposal_id, "pr-open", event.impl_version),
     }, event.branch, event.head_sha)
 
     local result = t.run_department("departments/observe_pr/main.lua", {
@@ -70,5 +87,32 @@ return {
     t.eq(reviewing_raise.payload.pr_number, 7)
     t.eq(reviewing_raise.payload.version, event.impl_version)
     t.eq(reviewing_raise.payload.source_ref.ref, "owner/repo#pr/7")
+  end,
+
+  test_pr_opened_direct_event_refuses_mismatched_head = function()
+    local event = pr_opened_event({
+      head_sha = "abc123",
+    })
+    t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+      stdout = "dev",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_pr_view_origin({
+      core.pr_origin_marker(event.proposal_id, "42", event.branch, event.impl_version, event.base_branch),
+    }, event.branch, "def456")
+
+    local result = t.run_department("departments/observe_pr/main.lua", {
+      queue = "github-proxy.github_pr_opened",
+      payload = event,
+    }, opts("pr-opened-direct-reviewing-head-mismatch"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
   end,
 }

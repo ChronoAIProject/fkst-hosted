@@ -27,6 +27,7 @@ local function pr_context(event)
   local payload = event.payload or {}
   if core.is_supported_pr(payload) then
     return {
+      source = "poll",
       repo = payload.repo,
       number = payload.number,
       dedup_key = payload.dedup_key,
@@ -35,10 +36,17 @@ local function pr_context(event)
   end
   if core.is_supported_pr_opened(payload) then
     return {
+      source = "direct-opened",
       repo = payload.repo,
       number = payload.pr_number,
       dedup_key = payload.dedup_key,
       source_ref = payload.source_ref,
+      proposal_id = payload.proposal_id,
+      issue_number = payload.issue_number,
+      impl_version = payload.impl_version,
+      branch = payload.branch,
+      head_sha = payload.head_sha,
+      base_branch = payload.base_branch,
     }
   end
   return nil
@@ -248,6 +256,18 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   return true
 end
 
+local function direct_opened_matches_origin(pr, origin, current_pr)
+  if pr.source ~= "direct-opened" then
+    return false
+  end
+  return tostring(pr.proposal_id or "") == tostring(origin.proposal_id or "")
+    and tostring(pr.issue_number or "") == tostring(origin.issue_number or "")
+    and tostring(pr.impl_version or "") == tostring(origin.impl_version or "")
+    and tostring(pr.branch or "") == tostring(origin.branch or "")
+    and tostring(pr.head_sha or "") == tostring(current_pr.head_sha or "")
+    and tostring(pr.base_branch or "") == tostring(origin.base_branch or "")
+end
+
 function pipeline(event)
   local pr = pr_context(event)
   local raw = event.payload or {}
@@ -312,12 +332,26 @@ function pipeline(event)
       return
     end
 
+    local direct_opened = direct_opened_matches_origin(pr, origin, current_pr)
+    if pr.source == "direct-opened" and not direct_opened then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-stale(direct-opened-fact-mismatch)", "direct PR-opened event does not match canonical PR origin")
+      return
+    end
     local transition = core.versioned_transition_status(state, { "pr-open", "unmanaged" }, "reviewing", origin.impl_version)
     if has_issue_origin and transition == "pending" then
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", core.cas_outcome(state, transition, origin.impl_version), "reviewing PR marker not yet visible")
+      if direct_opened then
+        transition = "apply"
+      else
+        core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", core.cas_outcome(state, transition, origin.impl_version), "reviewing PR marker not yet visible")
+        return
+      end
     end
     if state.state == "pr-open" and tostring(state.version or "") ~= tostring(origin.impl_version or "") then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-stale(version-mismatch)", "PR-open marker version does not match PR origin")
+      return
+    end
+    if transition ~= "apply" and transition ~= "idempotent" then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", core.cas_outcome(state, transition, origin.impl_version), "current PR state cannot advance to reviewing")
       return
     end
     if tostring(current_pr.state or ""):lower() ~= "open" then
