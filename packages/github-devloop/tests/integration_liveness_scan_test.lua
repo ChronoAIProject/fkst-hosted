@@ -6,6 +6,7 @@ local issue = h.issue
 local reviewing = h.reviewing
 local mock_issue_state = h.mock_issue_state
 local run_observe = h.run_observe
+local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
@@ -164,6 +165,7 @@ return {
     mock_linked_pr_state({}, nil, nil, 2)
     local observed = run_observe(issue({
       dedup_key = raised.payload.dedup_key,
+      source = raised.payload.source,
       source_ref = raised.payload.source_ref,
     }), opts("liveness-scan-observe-pr-open"))
     t.eq(observed.exit_code, 0)
@@ -171,6 +173,7 @@ return {
     t.is_true(reviewing_raise ~= nil)
     t.eq(reviewing_raise.payload.proposal_id, ready_payload.proposal_id)
     t.eq(reviewing_raise.payload.pr_number, ready_payload.pr_number)
+    t.eq(reviewing_raise.payload.version, version .. "/review-loop/1")
   end,
 
   test_liveness_scan_skips_terminal_issue = function()
@@ -230,6 +233,25 @@ return {
     t.eq(raised.payload.number, 7)
     t.eq(raised.payload.source_ref.ref, "owner/repo#pr/7")
     t.is_true(tostring(raised.payload.dedup_key):find("liveness%-scan", 1) ~= nil)
+
+    mock_pr_state({
+      core.pr_origin_marker(event.proposal_id, 42, "devloop-owner-repo-42-01HY", event.version, "dev"),
+      core.state_marker(event.proposal_id, "reviewing", event.version),
+    }, "OPEN")
+    local observed = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = repo,
+      number = 7,
+      updated_at = raised.payload.updated_at,
+      dedup_key = raised.payload.dedup_key,
+      source = raised.payload.source,
+      source_ref = raised.payload.source_ref,
+    }, opts("liveness-scan-observe-pr-reviewing"))
+    t.eq(observed.exit_code, 0)
+    local reviewing_raise = find_raise(observed.raises, "devloop_reviewing")
+    t.is_true(reviewing_raise ~= nil)
+    t.eq(reviewing_raise.payload.version, event.version .. "/review-loop/1")
   end,
 
   test_liveness_scan_caps_before_fresh_entity_views = function()

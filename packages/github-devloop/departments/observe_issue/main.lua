@@ -51,6 +51,21 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     snapshot = snapshot,
     event_ts = event_ts,
   }
+  if issue.source == "liveness-scan"
+    and state.state == "pr-open"
+    and issue_state ~= nil
+    and issue_state.state == state.state
+    and tostring(issue_state.version or "") == tostring(state.version or "")
+    and core.liveness_timeout_due(row, state, now()) then
+    local timeout_state = {
+      state = state.state,
+      version = core.next_liveness_timeout_version(row, state),
+      proposal_id = state.proposal_id,
+      stage_rank = state.stage_rank,
+      marker_created_at = state.marker_created_at,
+    }
+    return core.replay_from_table("observe_issue", issue, timeout_state, row, facts)
+  end
   if observe_replay_states[state.state] and state.state == "thinking" then
     if issue_state ~= nil
       and issue_state.state == state.state
