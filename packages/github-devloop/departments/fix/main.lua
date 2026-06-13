@@ -202,6 +202,7 @@ local function raise_work_card(repo, fix, card)
   }, {
     proposal_id = fix.proposal_id,
     role = "fix",
+    run_id = core.work_card_run_id({ "fix", fix.dedup_key }),
     version = fix.version,
     round = core.version_fix_round(fix.version),
     started_at = card.started_at,

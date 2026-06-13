@@ -204,7 +204,7 @@ return {
     mock_pr_list({})
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
-      render_comment(core.work_card_marker(proposal_id), "fkst-test-bot", "2026-06-03T01:02:00Z"),
+      render_comment(core.work_card_marker(proposal_id, core.work_card_run_id({ "fixture", proposal_id })), "fkst-test-bot", "2026-06-03T01:02:00Z"),
       render_comment(core.state_marker(proposal_id, "pr-open", "v1"), "fkst-test-bot", "2026-06-03T01:20:00Z"),
     })
 
@@ -247,7 +247,7 @@ return {
     mock_pr_list({})
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
-      render_comment(core.work_card_marker(proposal_id), "fkst-test-bot", "2026-06-03T01:14:00Z"),
+      render_comment(core.work_card_marker(proposal_id, core.work_card_run_id({ "fixture", proposal_id })), "fkst-test-bot", "2026-06-03T01:14:00Z"),
       render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:35:00Z"),
     })
 
@@ -271,12 +271,12 @@ return {
     mock_pr_list({})
     mock_issue_view({
       render_comment(core.state_marker(proposal_42, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
-      render_comment(core.work_card_marker(proposal_42), "fkst-test-bot", "2026-06-03T01:20:00Z"),
+      render_comment(core.work_card_marker(proposal_42, core.work_card_run_id({ "fixture", proposal_42 })), "fkst-test-bot", "2026-06-03T01:20:00Z"),
       render_comment(core.state_marker(proposal_42, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:35:00Z"),
     })
     mock_issue_view({
       render_comment(core.state_marker(proposal_43, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:02:00Z"),
-      render_comment(core.work_card_marker(proposal_43), "fkst-test-bot", "2026-06-03T01:20:30Z"),
+      render_comment(core.work_card_marker(proposal_43, core.work_card_run_id({ "fixture", proposal_43 })), "fkst-test-bot", "2026-06-03T01:20:30Z"),
       render_comment(core.state_marker(proposal_43, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:36:00Z"),
     })
 
