@@ -449,6 +449,11 @@ return {
     t.eq(core.git_fetch_head_commit_cmd(), "git rev-parse --verify FETCH_HEAD^{commit}")
     t.eq(core.git_remote_branch_head_cmd("origin", "dev"), "git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}")
     t.is_true(core.git_worktree_add_new_branch_cmd(worktree_path, deterministic_branch, "abc123"):find("git worktree add -b", 1, true) ~= nil)
+    t.eq(
+      core.git_worktree_reset_hard_cmd(worktree_path, deterministic_branch),
+      "git -C '" .. worktree_path .. "' reset --hard refs/heads/'" .. deterministic_branch .. "'"
+    )
+    t.eq(core.git_worktree_clean_cmd(worktree_path), "git -C '" .. worktree_path .. "' clean -fd")
     t.eq(core.git_worktree_list_cmd(), "git worktree list --porcelain")
     t.is_true(core.git_worktree_add_remote_branch_cmd(worktree_path, "origin", deterministic_branch, true):find("git worktree add --force -B", 1, true) ~= nil)
     local list = "worktree /tmp/main\nHEAD abc123\nbranch refs/heads/dev\n\n"

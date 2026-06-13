@@ -493,7 +493,7 @@ function M.git_worktree_reset_hard_cmd(worktree, branch)
     error("github-devloop: invalid reset branch")
   end
   return "git -C " .. M._shell_single_quote(worktree)
-    .. " reset --hard "
+    .. " reset --hard refs/heads/"
     .. M._shell_single_quote(branch)
 end
 
