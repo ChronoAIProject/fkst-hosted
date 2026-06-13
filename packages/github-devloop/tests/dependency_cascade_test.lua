@@ -477,6 +477,11 @@ return {
   end,
 
   test_dependency_gate_cross_repo_and_failures_unresolvable = function()
+    t.mock_command(core.read_env_command("FKST_DEVLOOP_MANAGED_SIBLING_REPOS"), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
     mock_blocked_by(42, { { number = 41, repo = "other/repo" } })
     local cross_repo = core.dependency_gate(repo, 42)
     t.eq(cross_repo.ok, false)
