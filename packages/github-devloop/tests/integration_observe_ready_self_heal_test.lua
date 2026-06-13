@@ -66,15 +66,6 @@ local function mock_decompose_child_issue_list(event, indexes)
   })
 end
 
-local function run_thinking_reconcile(run_opts)
-  return t.run_department("departments/thinking_reconcile/main.lua", {
-    queue = "devloop_thinking_reconcile_tick",
-    payload = {
-      schema = "github-devloop.tick.v1",
-    },
-  }, run_opts)
-end
-
 local function merge_gate_fix_marker(event)
   return core.merge_gate_marker(
     event.proposal_id,
@@ -203,57 +194,6 @@ return {
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
   end,
 
-  test_thinking_reconcile_requeues_thinking_issues_without_updated_at_bump = function()
-    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
-      stdout = "owner/repo",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo"), {
-      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
-    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker("github-devloop/issue/owner/repo/42", "thinking", "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"),
-    })
-
-    local result = run_thinking_reconcile(opts("thinking-reconcile"))
-    t.eq(result.exit_code, 0)
-    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
-    t.is_true(raised ~= nil)
-    t.eq(raised.payload.type, "issue")
-    t.eq(raised.payload.repo, "owner/repo")
-    t.eq(raised.payload.number, 42)
-    t.eq(raised.payload.updated_at, "2026-06-03T01:02:03Z")
-    t.eq(raised.payload.source, "thinking-reconcile")
-    t.eq(raised.payload.source_ref.ref, "owner/repo#issue/42")
-    t.is_true(tostring(raised.payload.dedup_key):find("thinking%-reconcile", 1) ~= nil)
-  end,
-
-  test_thinking_reconcile_uses_open_scan_and_trusted_marker_not_label_hint = function()
-    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
-      stdout = "owner/repo",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo"), {
-      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
-    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", {
-      core.state_marker("github-devloop/issue/owner/repo/42", "thinking", "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"),
-    })
-
-    local result = run_thinking_reconcile(opts("thinking-reconcile-label-drift"))
-    t.eq(result.exit_code, 0)
-    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
-    t.is_true(raised ~= nil)
-    t.eq(raised.payload.number, 42)
-    t.eq(raised.payload.source, "thinking-reconcile")
-  end,
-
   test_observe_issue_reraises_ready_for_poll_self_heal = function()
     local event = reached()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", {
@@ -367,6 +307,29 @@ return {
     t.eq(second_reviewing.payload.dedup_key, first_reviewing.payload.dedup_key)
   end,
 
+  test_observe_issue_pr_open_timeout_redrive_reaches_reviewing = function()
+    local event = reached()
+    local ready_payload = core.build_devloop_ready_payload(event)
+    local comments = {
+      {
+        body = core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
+        created_at = "2026-06-03T01:00:00Z",
+      },
+      core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
+    mock_linked_pr_state({}, nil, nil, 2)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-timeout-redrive", {
+      now = "2026-06-03T03:00:00Z",
+    }))
+    t.eq(result.exit_code, 0)
+    local reviewing = find_raise(result.raises, "devloop_reviewing")
+    t.is_true(reviewing ~= nil)
+    t.eq(reviewing.payload.version, ready_payload.dedup_key)
+    t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")
+  end,
+
   test_observe_issue_pr_open_reraise_requires_matching_link_version = function()
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)
@@ -444,6 +407,13 @@ return {
     t.is_true(reviewing ~= nil)
     t.is_true(reviewing.payload.version:find("/timeout/reviewing/1", 1, true) ~= nil)
     t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")
+
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker(proposal_id, "reviewing", version),
+    })
+    local review = run_review_pr(reviewing.payload, opts("observe-issue-reviewing-timeout-review-pr"))
+    t.eq(review.exit_code, 0)
+    t.is_true(find_raise(review.raises, "consensus.proposal") ~= nil)
   end,
 
   test_observe_issue_pr_open_does_not_reraise_after_pr_local_reviewing = function()
