@@ -131,6 +131,22 @@ local function mock_branch_present()
   })
 end
 
+local function mock_branch_pin(sha)
+  t.mock_command("git show '" .. old_branch_sha .. ":.fkst/substrate-ref'", {
+    stdout = tostring(sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_branch_pin_missing()
+  t.mock_command("git show '" .. old_branch_sha .. ":.fkst/substrate-ref'", {
+    stdout = "",
+    stderr = "fatal: path '.fkst/substrate-ref' exists on disk, but not in '" .. old_branch_sha .. "'\n",
+    exit_code = 128,
+  })
+end
+
 local function mock_worktree_commands(push_with_lease)
   t.mock_command("if [ -d '/tmp/fkst-packages-test/github-devloop/", {
     stdout = "",
@@ -232,9 +248,9 @@ return {
     mock_env("1")
     mock_substrate_head(target_sha)
     mock_no_existing_pr()
+    mock_branch_missing()
     mock_base_head()
     mock_runtime_root("substrate-create")
-    mock_branch_missing()
     mock_worktree_commands(false)
     mock_pr_create()
 
@@ -249,9 +265,10 @@ return {
     mock_env("1")
     mock_substrate_head(target_sha)
     mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin_missing()
     mock_base_head()
     mock_runtime_root("substrate-update")
-    mock_branch_present()
     mock_worktree_commands(true)
 
     local result = run_scan(opts("substrate-update", { FKST_GITHUB_WRITE = "1" }))
@@ -259,5 +276,37 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 1)
+  end,
+
+  test_real_mode_rechecks_pr_under_lock_before_create = function()
+    mock_env("1")
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_missing()
+    mock_base_head()
+    mock_runtime_root("substrate-recheck")
+    mock_worktree_commands(false)
+
+    local result = run_scan(opts("substrate-recheck", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(core.gh_pr_list_head_cmd("owner/repo", "chore/substrate-ref-bump")), 1)
+    t.eq(count_calls("gh pr create"), 0)
+    t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
+  end,
+
+  test_real_mode_skips_push_when_bump_branch_already_targets_dev_head = function()
+    mock_env("1")
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin(target_sha)
+
+    local result = run_scan(opts("substrate-already-current", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr create"), 0)
+    t.eq(count_calls("git worktree"), 0)
+    t.eq(count_calls("git push"), 0)
   end,
 }

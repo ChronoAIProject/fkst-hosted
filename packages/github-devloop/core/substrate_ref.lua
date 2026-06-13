@@ -125,14 +125,6 @@ local function write_pr_body(repo, current_pin, target_sha)
   return path
 end
 
-local function ensure_clean_pin_delta(worktree)
-  local diff = run_cmd("git -C " .. M._shell_single_quote(worktree) .. " diff --name-only HEAD", 30, "git diff name-only")
-  local name = M._trim(diff.stdout)
-  if name ~= substrate_ref_path then
-    error("github-devloop: substrate-ref bump changed unexpected paths")
-  end
-end
-
 local function fetch_bump_branch_head()
   local fetch = exec_sync({ cmd = M.git_fetch_branch_cmd("origin", bump_branch), timeout = 60 })
   if fetch.exit_code ~= 0 then
@@ -146,30 +138,80 @@ local function fetch_bump_branch_head()
   return sha:lower()
 end
 
+local function remote_bump_branch_pin(branch_head)
+  if branch_head == nil then
+    return nil
+  end
+  local result = exec_sync({
+    cmd = "git show " .. M._shell_single_quote(tostring(branch_head) .. ":" .. substrate_ref_path),
+    timeout = 30,
+  })
+  if result.exit_code ~= 0 then
+    return nil
+  end
+  local pin = M._trim(result.stdout)
+  if not M._is_git_sha(pin) then
+    return nil
+  end
+  return pin:lower()
+end
+
+local function pin_delta_state(worktree)
+  local diff = run_cmd("git -C " .. M._shell_single_quote(worktree) .. " diff --name-only HEAD", 30, "git diff name-only")
+  local name = M._trim(diff.stdout)
+  if name == "" then
+    return "empty"
+  end
+  if name ~= substrate_ref_path then
+    error("github-devloop: substrate-ref bump changed unexpected paths")
+  end
+  return "pin-only"
+end
+
 local function create_or_update_branch(repo, base_branch, current_pin, target_sha)
+  local old_branch_head = fetch_bump_branch_head()
+  if remote_bump_branch_pin(old_branch_head) == target_sha then
+    return "already-current"
+  end
   local base_head = M.current_base_head(base_branch)
   if base_head == nil then
     error("github-devloop: unable to read base branch head for substrate-ref bump")
   end
   local runtime_root = read_runtime_root()
   local worktree = bump_worktree_path(runtime_root, repo, target_sha)
-  local old_branch_head = fetch_bump_branch_head()
   run_cmd(M.git_worktree_remove_if_present_cmd(worktree), 60, "git stale substrate-ref worktree remove")
-  run_cmd(M.git_worktree_add_reset_branch_cmd(worktree, bump_branch, base_head), 120, "git substrate-ref worktree add")
-  run_cmd(M.git_write_file_cmd(worktree, substrate_ref_path, target_sha .. "\n"), 30, "write substrate-ref pin")
-  ensure_clean_pin_delta(worktree)
-  run_cmd(M.git_add_all_cmd(worktree), 30, "git substrate-ref add")
-  run_cmd(M.git_commit_cmd(worktree, "chore: bump fkst-substrate pin"), 60, "git substrate-ref commit")
-  if old_branch_head == nil then
-    run_cmd(M.git_push_worktree_branch_update_cmd(worktree, bump_branch), 120, "git substrate-ref push")
-  else
-    run_cmd(
-      M.git_push_worktree_branch_update_with_lease_cmd(worktree, bump_branch, old_branch_head),
-      120,
-      "git substrate-ref push"
-    )
+  local action = "updated"
+  local added = false
+  local ok, err = pcall(function()
+    run_cmd(M.git_worktree_add_reset_branch_cmd(worktree, bump_branch, base_head), 120, "git substrate-ref worktree add")
+    added = true
+    run_cmd(M.git_write_file_cmd(worktree, substrate_ref_path, target_sha .. "\n"), 30, "write substrate-ref pin")
+    if pin_delta_state(worktree) == "empty" then
+      action = "base-current"
+      return
+    end
+    run_cmd(M.git_add_all_cmd(worktree), 30, "git substrate-ref add")
+    run_cmd(M.git_commit_cmd(worktree, "chore: bump fkst-substrate pin"), 60, "git substrate-ref commit")
+    if old_branch_head == nil then
+      run_cmd(M.git_push_worktree_branch_update_cmd(worktree, bump_branch), 120, "git substrate-ref push")
+    else
+      run_cmd(
+        M.git_push_worktree_branch_update_with_lease_cmd(worktree, bump_branch, old_branch_head),
+        120,
+        "git substrate-ref push"
+      )
+    end
+  end)
+  if added then
+    local remove = exec_sync({ cmd = M.git_worktree_remove_cmd(worktree), timeout = 60 })
+    if ok and remove.exit_code ~= 0 then
+      error("github-devloop: git substrate-ref worktree remove failed: " .. tostring(remove.stderr))
+    end
   end
-  run_cmd(M.git_worktree_remove_cmd(worktree), 60, "git substrate-ref worktree remove")
+  if not ok then
+    error(err)
+  end
+  return action
 end
 
 local function create_pr(repo, base_branch, current_pin, target_sha)
@@ -212,8 +254,8 @@ function M.substrate_ref_scan()
     return { status = "current", pin = current_pin, target = target_sha }
   end
 
-  local existing = existing_bump_pr(repo)
   if cfg.write_mode ~= "real" then
+    local existing = existing_bump_pr(repo)
     log_scan("bump-planned", {
       "mode=" .. cfg.write_mode,
       "repo=" .. repo,
@@ -231,9 +273,12 @@ function M.substrate_ref_scan()
     }
   end
 
+  local final_existing = nil
+  local branch_action = nil
   with_lock("github-devloop/substrate-ref/" .. M.safe_repo(repo), function()
-    create_or_update_branch(repo, cfg.upstream_branch, current_pin, target_sha)
-    if existing == nil then
+    final_existing = existing_bump_pr(repo)
+    branch_action = create_or_update_branch(repo, cfg.upstream_branch, current_pin, target_sha)
+    if final_existing == nil and branch_action ~= "base-current" then
       create_pr(repo, cfg.upstream_branch, current_pin, target_sha)
       log_scan("pr-created", {
         "mode=real",
@@ -242,23 +287,34 @@ function M.substrate_ref_scan()
         "to=" .. target_sha,
         "branch=" .. bump_branch,
       })
-    else
+    elseif final_existing ~= nil then
       log_scan("pr-updated", {
         "mode=real",
         "repo=" .. repo,
         "from=" .. current_pin,
         "to=" .. target_sha,
         "branch=" .. bump_branch,
-        "pr=" .. tostring(existing.number),
+        "pr=" .. tostring(final_existing.number),
+        "branch_action=" .. tostring(branch_action),
+      })
+    else
+      log_scan("base-current", {
+        "mode=real",
+        "repo=" .. repo,
+        "from=" .. current_pin,
+        "to=" .. target_sha,
       })
     end
   end)
 
+  if branch_action == "base-current" then
+    return { status = "current", pin = current_pin, target = target_sha }
+  end
   return {
-    status = existing == nil and "created" or "updated",
+    status = final_existing == nil and "created" or "updated",
     pin = current_pin,
     target = target_sha,
-    existing_pr = existing and existing.number or nil,
+    existing_pr = final_existing and final_existing.number or nil,
     branch = bump_branch,
   }
 end
