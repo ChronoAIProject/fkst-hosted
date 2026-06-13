@@ -20,6 +20,7 @@ return {
       ['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "", exit_code = 0 },
       ['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "", exit_code = 0 },
       ['printf %s "$FKST_DEVLOOP_TEST_COMMAND"'] = { stdout = "", exit_code = 0 },
+      ['printf %s "$FKST_DEVLOOP_INTAKE_PROBE_PROOF"'] = { stdout = "", exit_code = 0 },
       ['printf %s "$FKST_GITHUB_REPO"'] = { stdout = "owner/repo", exit_code = 0 },
       ['printf %s "$FKST_GITHUB_BOT_LOGIN"'] = { stdout = "fkst-test-bot", exit_code = 0 },
       ['printf %s "$FKST_GITHUB_WRITE"'] = { stdout = "", exit_code = 0 },
@@ -36,6 +37,7 @@ return {
     t.eq(config.integration_branch, "dev")
     t.eq(config.rollup_merge, "auto")
     t.eq(core.test_command(exec), "scripts/run.sh test")
+    t.eq(core.intake_probe_gate(exec).enabled, false)
 
     t.eq(core.env_present_command("GH_TOKEN"), 'if [ -n "${GH_TOKEN:-}" ]; then printf present; fi')
     responses[core.env_present_command("GH_TOKEN")] = { stdout = "present", exit_code = 0 }
@@ -50,6 +52,7 @@ return {
     responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "integration/dev", exit_code = 0 }
     responses['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "manual", exit_code = 0 }
     responses['printf %s "$FKST_DEVLOOP_TEST_COMMAND"'] = { stdout = "cargo build && cargo test", exit_code = 0 }
+    responses['printf %s "$FKST_DEVLOOP_INTAKE_PROBE_PROOF"'] = { stdout = "event-fast-path-insufficient", exit_code = 0 }
     responses['printf %s "$FKST_GITHUB_WRITE"'] = { stdout = "1", exit_code = 0 }
     config = core.devloop_config(exec)
     t.eq(config.write_mode, "real")
@@ -57,6 +60,7 @@ return {
     t.eq(config.integration_branch, "integration/dev")
     t.eq(config.rollup_merge, "manual")
     t.eq(core.test_command(exec), "cargo build && cargo test")
+    t.eq(core.intake_probe_gate(exec).enabled, true)
 
     responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "../bad", exit_code = 0 }
     t.raises(function()
@@ -66,6 +70,10 @@ return {
     responses['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "sometimes", exit_code = 0 }
     t.raises(function()
       core.devloop_config(exec)
+    end)
+    responses['printf %s "$FKST_DEVLOOP_INTAKE_PROBE_PROOF"'] = { stdout = "enabled", exit_code = 0 }
+    t.raises(function()
+      core.intake_probe_gate(exec)
     end)
   end,
   test_gh_exec_opts_uses_shared_rate_pool = function()
@@ -599,6 +607,14 @@ return {
       core.gh_issue_list_intake_cmd("owner/repo", 50),
       "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels,assignees"
     )
+    t.eq(
+      core.gh_issue_list_intake_probe_cmd("owner/repo", 5),
+      "gh api 'repos/owner/repo/issues?state=open&sort=created&direction=desc&per_page=5'"
+    )
+    t.eq(
+      core.gh_issue_list_intake_probe_cmd("owner/repo", 5, "2026-06-03T01:02:03Z"),
+      "gh api 'repos/owner/repo/issues?state=open&sort=created&direction=desc&per_page=5&since=2026-06-03T01%3A02%3A03Z'"
+    )
     t.eq(core.gh_issue_list_observe_cmd("owner/repo"), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'")
     t.eq(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'")
     t.eq(
@@ -608,6 +624,7 @@ return {
     local intake = core.parse_issue_list_intake('[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
     t.eq(intake[1].number, 42)
     t.eq(intake[1].body, "")
+    t.eq(intake[1].created_at, nil)
     t.eq(intake[1].updated_at, "2026-06-03T01:02:03Z")
     t.eq(intake[1].labels[1], "bug")
     local mixed = core.parse_issue_list_intake('[[{"number":1,"pull_request":{"url":"https://api.example.test/pulls/1"}}],[{"number":2,"title":"Issue","updated_at":"2026-06-03T01:02:04Z","labels":[]}]]', 1)

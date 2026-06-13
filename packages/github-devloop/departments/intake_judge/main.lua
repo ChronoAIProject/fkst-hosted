@@ -78,6 +78,9 @@ function pipeline(event)
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
       return
     end
+    if not core.claim_issue_for_management("intake_judge", repo, issue_number, current, candidate.proposal_id) then
+      return
+    end
     local reintake_command = core.operator_command_fact(current.comments, "reintake")
     local has_pending_reintake = reintake_command ~= nil and not core.has_operator_command_response(current.comments, reintake_command)
     if has_pending_reintake and not core.has_intake_decision_marker(current.comments, candidate.proposal_id) then
