@@ -24,6 +24,11 @@ local function pr_event(updated_at)
 end
 
 local function mock_base_fetch(base_head)
+  t.mock_command("git merge-base --is-ancestor", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git fetch 'origin' 'dev'", {
     stdout = "",
     stderr = "",
@@ -61,7 +66,9 @@ return {
 
     t.eq(result.exit_code, 0)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local merge_raise = find_raise(result.raises, "devloop_merge_ready")
+    local merge_raise = find_raise(result.raises, "devloop_merge_ready", function(payload)
+      return payload.reviewed_head_sha == new_head
+    end)
     t.is_true(comment_raise.payload.body:find("review%-carry%-over:v1") ~= nil)
     t.is_true(comment_raise.payload.body:find('approved_head_sha="' .. old_head .. '"', 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('new_head_sha="' .. new_head .. '"', 1, true) ~= nil)
@@ -70,7 +77,7 @@ return {
     t.is_true(comment_raise.payload.body:find('decision="approve"', 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('head_sha="' .. new_head .. '"', 1, true) ~= nil)
     t.eq(merge_raise.payload.reviewed_head_sha, new_head)
-    t.eq(merge_raise.payload.review_proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, new_head))
+    t.is_true(comment_raise.payload.body:find('review_proposal="' .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. '"', 1, true) ~= nil)
     t.is_true(merge_raise.payload.dedup_key ~= event.dedup_key)
     t.is_true(merge_raise.payload.dedup_key:find(new_head, 1, true) ~= nil)
     t.eq(count_calls("git merge-tree --write-tree"), 1)
@@ -149,7 +156,9 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
-    local merge_raise = find_raise(result.raises, "devloop_merge_ready")
+    local merge_raise = find_raise(result.raises, "devloop_merge_ready", function(payload)
+      return payload.reviewed_head_sha == new_head
+    end)
     t.eq(merge_raise.payload.reviewed_head_sha, new_head)
     t.eq(merge_raise.payload.review_proposal_id, new_review)
   end,

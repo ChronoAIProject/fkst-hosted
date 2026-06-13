@@ -442,6 +442,10 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       return
     end
     if pr_reason == "head-sha-mismatch" and state.state == "merge-ready" then
+      local carried = core.raise_review_carry_over("merge", repo, merge_ready.pr_number, merge_ready.proposal_id, merge_ready.version, state, current_pr, origin.base_branch)
+      if carried ~= nil then
+        return
+      end
       log_gate(merge_ready, "reviewing", "head-sha-mismatch")
       raise_reviewing_for_current_head(repo, issue_number, merge_ready, state, current_pr, "head-sha-mismatch")
       return
