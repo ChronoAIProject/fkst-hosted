@@ -14,7 +14,11 @@ local entity_types = {
 }
 
 local function replay_sort_key(entity)
-  return tostring(entity.updated_at or "") .. "/" .. string.format("%010d", tonumber(entity.number) or 0)
+  return tostring(entity.updated_at or "")
+    .. "/"
+    .. string.format("%010d", tonumber(entity.number) or 0)
+    .. "/"
+    .. tostring(entity.type or "")
 end
 
 local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates)
@@ -28,6 +32,7 @@ local function collect_changed(repo, entity_type, entities, fresh_changes, repla
         key = key,
         replay = cached_updated_at == nil,
       }
+      item.entity.type = entity_type
       if item.replay then
         table.insert(replay_candidates, item)
       else

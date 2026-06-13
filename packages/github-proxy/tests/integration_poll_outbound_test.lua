@@ -75,6 +75,10 @@ local function issue_list_from(items)
   return "[[" .. table.concat(items, ",") .. "]]\n"
 end
 
+local function pr_list_from(items)
+  return "[[" .. table.concat(items, ",") .. "]]\n"
+end
+
 local function numbers(raises)
   local result = {}
   for _, raised in ipairs(raises or {}) do
@@ -232,6 +236,63 @@ return {
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 1)
     t.eq(second.raises[1].payload.number, 44)
+  end,
+
+  test_inbound_poll_replay_budget_is_shared_across_issue_and_pr_lanes = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("shared-replay-budget", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+    })
+    local issues = issue_list_from({
+      issue_json(42, "2026-06-03T01:02:00Z"),
+      issue_json(44, "2026-06-03T01:04:00Z"),
+    })
+    local prs = pr_list_from({
+      pr_json(7, "2026-06-03T01:03:00Z"),
+      pr_json(8, "2026-06-03T01:05:00Z"),
+    })
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 2)
+    t.eq(first.raises[1].payload.type, "issue")
+    t.eq(first.raises[1].payload.number, 42)
+    t.eq(first.raises[2].payload.type, "pr")
+    t.eq(first.raises[2].payload.number, 7)
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 2)
+    t.eq(second.raises[1].payload.type, "issue")
+    t.eq(second.raises[1].payload.number, 44)
+    t.eq(second.raises[2].payload.type, "pr")
+    t.eq(second.raises[2].payload.number, 8)
+  end,
+
+  test_inbound_poll_defaults_cold_replay_budget_to_ten = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local items = {}
+    for number = 1, 11 do
+      table.insert(items, issue_json(number, string.format("2026-06-03T01:%02d:00Z", number)))
+    end
+
+    mock_repo_env()
+    mock_replay_budget_env("")
+    mock_issue_list(issue_list_from(items))
+    mock_pr_list("[]\n")
+    local result = t.run_department("departments/github_poll/main.lua", event, opts("default-replay-budget"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 10)
+    t.eq(result.raises[1].payload.number, 1)
+    t.eq(result.raises[10].payload.number, 10)
   end,
 
   test_inbound_poll_prioritizes_cached_fresh_changes_over_replay_budget = function()
