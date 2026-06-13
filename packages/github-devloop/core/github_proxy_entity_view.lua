@@ -40,6 +40,24 @@ local function entity_view_cache_key(repo, kind, number, updated_at)
     .. sanitize_cache_segment(updated_at, false)
 end
 
+local function entity_view_generation_key(repo, kind, number)
+  return "github-proxy/view-generation/"
+    .. sanitize_cache_segment(repo, true)
+    .. "/"
+    .. sanitize_cache_segment(kind, false)
+    .. "/"
+    .. sanitize_cache_segment(number, false)
+end
+
+local function entity_view_storage_cache_key(repo, kind, number, updated_at)
+  local base_key = entity_view_cache_key(repo, kind, number, updated_at)
+  local generation = cache_get(entity_view_generation_key(repo, kind, number))
+  if generation == nil or generation == "" then
+    return base_key
+  end
+  return base_key .. "-g-" .. sanitize_cache_segment(generation, false)
+end
+
 local function issue_view_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
@@ -126,11 +144,11 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   local freshness = tostring(updated_at or "")
   local options = opts or {}
   local consumer = tostring(options.consumer or "")
-  if options.fresh == true or freshness == "" then
+  if options.fresh == true or options.marker_bearing == true or freshness == "" then
     return M.gh_exec(cmd, 30)
   end
 
-  local key = entity_view_cache_key(repo, selected_kind, number, freshness)
+  local key = entity_view_storage_cache_key(repo, selected_kind, number, freshness)
   local cached = decode_cached_view(cache_get(key))
   if cached ~= nil and cached.producer ~= consumer then
     local current = M.gh_exec(entity_updated_at_cmd(repo, selected_kind, number), 30)
@@ -157,6 +175,28 @@ end
 
 function M.entity_view_cache_key(repo, kind, number, updated_at)
   return entity_view_cache_key(repo, kind, number, updated_at)
+end
+
+function M.entity_view_generation_key(repo, kind, number)
+  return entity_view_generation_key(repo, kind, number)
+end
+
+function M.entity_cache_key(repo, entity_type, number)
+  return "github-proxy/" .. tostring(entity_type) .. "/" .. tostring(repo) .. "/" .. tostring(number)
+end
+
+function M.invalidate_entity_after_write(repo, kind, number)
+  local selected_kind = tostring(kind or "")
+  if selected_kind ~= "issue" and selected_kind ~= "pr" then
+    error("github-devloop: invalid post-write invalidation kind")
+  end
+  local entity_key = M.entity_cache_key(repo, selected_kind, number)
+  local generation_key = entity_view_generation_key(repo, selected_kind, number)
+  with_lock(entity_key, function()
+    cache_set(entity_key, "")
+    local next_generation = (tonumber(cache_get(generation_key) or "0") or 0) + 1
+    cache_set(generation_key, tostring(next_generation))
+  end)
 end
 
 function M.gh_issue_view_entity_cmd(repo, issue_number)
@@ -190,12 +230,14 @@ end
 function M.fetch_issue_view_state(repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "observe_issue"
+  options.fresh = true
   return M.fetch_issue_view(repo, issue_number, updated_at, options)
 end
 
 function M.fetch_issue_view_open_pr(repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "open_pr"
+  options.fresh = true
   return M.fetch_issue_view(repo, issue_number, updated_at, options)
 end
 
@@ -219,6 +261,7 @@ end
 function M.fetch_pr_view_origin(repo, pr_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "observe_pr"
+  options.fresh = true
   return M.fetch_pr_view(repo, pr_number, updated_at, options)
 end
 
