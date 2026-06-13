@@ -117,7 +117,7 @@ function pipeline(event)
     return
   end
   if not core.is_supported_result(reached) then
-    core.log_entry("consensus_result", event, "unknown", reached.dedup_key)
+    core.log_entry("consensus_result", event, "unknown", core.payload_field(reached, "dedup_key"))
     core.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -186,5 +186,7 @@ function pipeline(event)
     raise_result_effects(repo, issue_number, reached, current, state, gate, core.cas_outcome(state, transition, reached.dedup_key))
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("consensus_result", pipeline)
 
 return M

@@ -20,7 +20,7 @@ M.spec = {
 function pipeline(event)
   local reached = event.payload or {}
   if not core.is_supported_review_result(reached) then
-    core.log_entry("review_result", event, "unknown", reached.dedup_key)
+    core.log_entry("review_result", event, "unknown", core.payload_field(reached, "dedup_key"))
     core.log_cas_decision("review_result", "unknown", { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -246,5 +246,7 @@ function pipeline(event)
     end
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("review_result", pipeline)
 
 return M

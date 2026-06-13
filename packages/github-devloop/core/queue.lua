@@ -12,7 +12,6 @@ local active_wip_states = {
 }
 
 local merge_queue_lane_states = {
-  fixing = true,
   ["merge-ready"] = true,
   merging = true,
 }
@@ -31,6 +30,37 @@ local function predecessor_identity(entry)
     .. "-" .. M.safe_version_segment(entry.proposal_id)
     .. "-" .. M.safe_version_segment(entry.version)
     .. "-" .. tostring(entry.head_sha)
+end
+
+local function parse_name_only_paths(stdout)
+  local paths = {}
+  local seen = {}
+  for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
+    local path = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if path ~= "" and not seen[path] then
+      table.insert(paths, path)
+      seen[path] = true
+    end
+  end
+  table.sort(paths)
+  return paths
+end
+
+local function path_set(paths)
+  local set = {}
+  for _, path in ipairs(paths or {}) do
+    set[path] = true
+  end
+  return set
+end
+
+local function intersecting_path(left, right)
+  for path in pairs(left or {}) do
+    if right[path] then
+      return path
+    end
+  end
+  return nil
 end
 
 local function current_any_entity_state(M, entity_comments)
@@ -102,8 +132,12 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
     pr_number = tonumber(pr_number),
     proposal_id = fact.proposal_id,
     version = fact.version,
+    review_proposal_id = fact.review_proposal_id,
+    review_dedup_key = fact.review_dedup_key,
     state = state.state,
+    head_branch = pr.head_ref_name,
     head_sha = fact.head_sha,
+    base_sha = pr.base_ref_oid,
     merge_ready_created_at = fact.comment_created_at or "",
   }
 end
@@ -183,6 +217,57 @@ function M.merge_queue_predecessor_set(entries)
   return table.concat(values, ".")
 end
 
+local function predecessor_set_entries(predecessor_set)
+  if predecessor_set == nil or predecessor_set == "" or predecessor_set == "none" then
+    return {}
+  end
+  local entries = {}
+  for entry in tostring(predecessor_set):gmatch("[^.]+") do
+    table.insert(entries, entry)
+  end
+  return entries
+end
+
+local function predecessor_head_sha(predecessor)
+  local head_sha = tostring(predecessor or ""):match("([0-9a-fA-F]+)$")
+  if head_sha == nil or not M._is_git_sha(head_sha) then
+    return nil
+  end
+  return head_sha
+end
+
+function M.merge_queue_predecessor_set_matches_current_base(recorded_set, current_set, base_branch)
+  local recorded = predecessor_set_entries(recorded_set)
+  local current = predecessor_set_entries(current_set)
+  if #current > #recorded then
+    return false, "predecessor-set-mismatch"
+  end
+  local offset = #recorded - #current
+  for index, entry in ipairs(current) do
+    if entry ~= recorded[offset + index] then
+      return false, "predecessor-set-mismatch"
+    end
+  end
+  if offset == 0 then
+    return true, "predecessor-set-current"
+  end
+  local base_head, base_reason = M.current_base_head(base_branch)
+  if base_head == nil then
+    return false, base_reason
+  end
+  for index = 1, offset do
+    local head_sha = predecessor_head_sha(recorded[index])
+    if head_sha == nil then
+      return false, "predecessor-set-mismatch"
+    end
+    local result = exec_sync({ cmd = M.git_is_ancestor_cmd(head_sha, base_head), timeout = 30 })
+    if result.exit_code ~= 0 then
+      return false, "predecessor-not-landed"
+    end
+  end
+  return true, "predecessor-set-landed-prefix"
+end
+
 function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)
   local head = M.merge_queue_head(repo, base_branch, {
     pr_number = merge_ready.pr_number,
@@ -198,6 +283,48 @@ function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)
     return false, "merge-queue-head-pr-" .. tostring(head.pr_number or "unknown")
   end
   return true, "merge-queue-head"
+end
+
+function M.merge_ready_payload_from_queue_entry(entry, source_ref)
+  if type(entry) ~= "table" then
+    return nil
+  end
+  return M.build_devloop_merge_ready_payload(
+    entry.proposal_id,
+    entry.pr_number,
+    entry.version,
+    {
+      review_proposal_id = entry.review_proposal_id,
+      review_dedup_key = entry.review_dedup_key,
+      reviewed_head_sha = entry.head_sha,
+    },
+    source_ref
+  )
+end
+
+function M.merge_queue_changed_files(repo, entry)
+  local result = M.gh_exec({ cmd = M.gh_pr_diff_name_only_cmd(repo, entry.pr_number), timeout = 30 })
+  if result.exit_code ~= 0 then
+    return nil, "diff-name-only-failed: " .. tostring(result.stderr)
+  end
+  local paths = parse_name_only_paths(result.stdout)
+  return {
+    pr_number = entry.pr_number,
+    proposal_id = entry.proposal_id,
+    version = entry.version,
+    base_sha = entry.base_sha,
+    head_sha = entry.head_sha,
+    paths = paths,
+    set = path_set(paths),
+  }, "changed-files-ok"
+end
+
+function M.merge_queue_files_disjoint(left, right)
+  local path = intersecting_path(left and left.set, right and right.set)
+  if path ~= nil then
+    return false, path
+  end
+  return true, "disjoint"
 end
 
 function M.wip_capacity_allows_start(repo, current_issue_number)

@@ -13,7 +13,7 @@ local entity_types = {
   { type = "pr", cmd = core.gh_pr_list_cmd },
 }
 
-function pipeline(_event)
+function pipeline(event)
   local repo = core.read_env("FKST_GITHUB_REPO")
   if repo == nil then
     log.warn("github-proxy: FKST_GITHUB_REPO missing; skipping poll")
@@ -23,10 +23,14 @@ function pipeline(_event)
   for _, entity_type in ipairs(entity_types) do
     local ok, result_or_err = core.gh_exec_result(entity_type.cmd(repo), 30, "gh " .. entity_type.type .. " list")
     if not ok then
+      core.log_error_fact("warn", "github_poll", "FAILURE", result_or_err.class, event and event.queue, result_or_err.message, {
+        source_ref = event and event.source_ref,
+        attempt = event and event.attempt,
+        terminal = false,
+      })
       if core.is_gh_rate_limit_error(result_or_err) then
         error(result_or_err.message)
       end
-      log.warn(result_or_err.message)
     else
       local entities = core.parse_entity_list(result_or_err.stdout, entity_type.type)
       for _, entity in ipairs(entities) do
@@ -61,5 +65,7 @@ function pipeline(_event)
     end
   end
 end
+
+pipeline = core.wrap_pipeline_failure("github_poll", pipeline)
 
 return M

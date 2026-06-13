@@ -1,7 +1,5 @@
 local S = {}
-
 function S.install(M)
-
 local function transition_row(state_name)
   for _, row in ipairs(M.restart_transition_table()) do
     if row.from_state == state_name then
@@ -14,7 +12,6 @@ end
 function M.restart_transition_row(state_name)
   return transition_row(state_name)
 end
-
 local marker_aliases = {
   ["pr-link"] = { pr = "pr_number" },
   ["review-result"] = { gap = "blocking_gap" },
@@ -23,7 +20,6 @@ local marker_aliases = {
   merging = { head_sha = "head_sha" },
   ["review-converge-round"] = { proposal = "proposal_id", dedup = "dedup_key", round = "n" },
 }
-
 local function marker_source(facts, family)
   if family == "state" then
     return facts.state
@@ -45,7 +41,6 @@ local function marker_source(facts, family)
   end
   return facts[family]
 end
-
 local function marker_value(facts, family, attr)
   local source = marker_source(facts, family)
   if source == nil then
@@ -64,7 +59,6 @@ local function marker_value(facts, family, attr)
   local key = aliases[attr] or attr
   return source[key]
 end
-
 local function resolve_payload_fields(row, state, facts)
   local resolved = {}
   local context = facts or {}
@@ -91,7 +85,6 @@ end
 function M.resolve_replay_payload_fields(row, state, facts)
   return resolve_payload_fields(row, state, facts or {})
 end
-
 local function find_linked_pr(snapshot, pr_number)
   for _, item in ipairs(snapshot and snapshot.prs or {}) do
     if tostring(item.number or "") == tostring(pr_number or "") then
@@ -188,6 +181,9 @@ local function require_marker_fact(facts, family)
   if family == "implementing" then
     return M.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
+  if family == "implement-attempt" then
+    return M.latest_implement_attempt_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
   if family == "impl-failure" then
     return M.impl_failure_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
@@ -234,6 +230,9 @@ local function gather_fetch_before_compare_fact(facts, entity, family)
     end
     facts.decompose_children = M.parse_decompose_child_issue_list(child_list.stdout)
     return facts.decompose_children
+  end
+  if family == "branch-head" then
+    return true
   end
   error("github-devloop: unsupported replay fetch-before-compare fact family: " .. tostring(family))
 end
@@ -318,7 +317,8 @@ local function raise_effects(dept, proposal_id, apply_state, version, label_chan
 end
 
 local function build_thinking_replay_proposal(issue, proposal_id, state, current, event_ts)
-  local state_base_version = M.version_loop_round(state.version) > 0 and M.converge_base_version(state.version) or nil
+  local stable_version = M.strip_transition_version_suffixes(state.version)
+  local state_base_version = M.version_loop_round(stable_version) > 0 and M.converge_base_version(stable_version) or nil
   local latest = M.latest_complete_converge_round(current.comments, proposal_id, state_base_version, issue.source_ref)
   if latest ~= nil then
     local base_version = M.proposal_dedup_key(proposal_id, issue.updated_at)
@@ -343,15 +343,13 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
     return M.validate_proposal(proposal) and proposal or nil
   end
 
-  if M.version_loop_round(state.version) ~= 0 then
-    return nil
-  end
-
   local replay_issue = {}
   for key, value in pairs(issue) do
     replay_issue[key] = value
   end
-  local replay_dedup = M.proposal_dedup_key(proposal_id, issue.updated_at) .. "/replay"
+  local replay_dedup = M.proposal_dedup_key(proposal_id, issue.updated_at)
+    .. "/replay"
+    .. tostring(state.version or ""):sub(#stable_version + 1)
   replay_issue.content_fetch = M.context_fetch_ref_from_bundle({
     dept = "observe_issue",
     repo = issue.repo,
@@ -488,15 +486,7 @@ local function replay_ready(dept, issue, state, row, facts)
       M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
     end
     if dependency_hold == nil then
-      M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_hold_comment_request(
-        issue.repo,
-        issue.number,
-        proposal_id,
-        state.version,
-        gate,
-        marker,
-        issue.source_ref
-      ))
+      M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_hold_comment_request(issue.repo, issue.number, proposal_id, state.version, gate, marker, issue.source_ref))
       M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
         issue.repo,
         issue.number,
@@ -522,13 +512,7 @@ local function replay_ready(dept, issue, state, row, facts)
   local raised = { "devloop_ready" }
   local command_comment_request = nil
   if command ~= nil then
-    command_comment_request = M.build_operator_issue_reready_comment_request(
-      issue.repo,
-      issue.number,
-      command,
-      "ready",
-      issue.source_ref
-    )
+    command_comment_request = M.build_operator_issue_reready_comment_request(issue.repo, issue.number, command, "ready", issue.source_ref)
     table.insert(raised, "github-proxy.github_issue_comment_request")
   end
   M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "applied(replay)", "dependency gate is satisfied")
@@ -538,6 +522,33 @@ local function replay_ready(dept, issue, state, row, facts)
   end
   M.log_raise(dept, proposal_id, "devloop_ready", ready_payload)
   return true
+end
+
+local function replay_implementing(dept, issue, state, row, facts)
+  local proposal_id = facts.proposal_id
+  local attempt = facts["implement-attempt"]
+  local started_at = attempt and attempt.started_at
+  if attempt == nil then
+    if facts.implementing == nil then
+      return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-attempt-marker)", "implement attempt marker is not visible")
+    end
+    local marker_updated_at = M.version_updated_at(state.version)
+    if marker_updated_at ~= "" then started_at = M.iso_timestamp_epoch_seconds(marker_updated_at) end
+  end
+  local started = tonumber(started_at)
+  local age = started ~= nil and (now() - started) or 7200
+  if age < 7200 then
+    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(attempt-live)", "implement attempt is still inside the liveness budget")
+  end
+  local payload = M.build_devloop_ready_payload({
+    proposal_id = proposal_id,
+    dedup_key = state.version,
+    source_ref = issue.source_ref,
+  })
+  M.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(liveness-expired)", "implement attempt exceeded liveness budget")
+  return raise_effects(dept, proposal_id, "implementing", state.version, { add = {}, remove = {} }, {
+    { queue = "devloop_ready", payload = payload },
+  })
 end
 
 local function replay_impl_failed(dept, issue, state, row, facts)
@@ -958,6 +969,7 @@ end
 local replayers = {
   thinking = replay_thinking,
   ready = replay_ready,
+  implementing = replay_implementing,
   ["impl-failed"] = replay_impl_failed,
   ["pr-open"] = replay_pr_open,
   reviewing = replay_reviewing,
@@ -978,13 +990,10 @@ function M.replay_from_table(dept, entity, state, table_row, facts)
     return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(state)", "current state does not match restart transition table row")
   end
   local replay = replayers[row.from_state]
-  if replay == nil then
-    return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(replayer)", "restart transition table row is not replayable by this department")
-  end
+  if replay == nil then return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(replayer)", "restart transition table row is not replayable by this department") end
   local replay_facts = gather_required_facts(row, entity, state, facts or {})
   return replay(dept, entity, state, row, replay_facts)
 end
-
 end
 
 return S

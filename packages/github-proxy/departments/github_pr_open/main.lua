@@ -106,6 +106,9 @@ local function guard_pr_open_write(repo, payload, bot_login)
   )
 
   local issue = core.parse_issue_state(view.stdout)
+  if not core.verify_issue_claim_in_issue(issue, payload, repo, payload.issue_number, "github_pr_open") then
+    return nil
+  end
   local state = core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
   local has_pr_open_marker = core.has_devloop_pr_open_marker(issue.comments, payload.proposal_id, payload.impl_version, bot_login)
   if has_pr_open_marker then
@@ -358,5 +361,7 @@ function pipeline(event)
     raise_pr_entity_changed(repo, pr, payload)
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("github_pr_open", pipeline)
 
 return M

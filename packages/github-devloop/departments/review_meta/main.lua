@@ -48,7 +48,7 @@ end
 function pipeline(event)
   local review_meta = event.payload or {}
   if not core.is_supported_review_meta(review_meta) then
-    core.log_entry("review_meta", event, "unknown", review_meta.dedup_key)
+    core.log_entry("review_meta", event, "unknown", core.payload_field(review_meta, "dedup_key"))
     core.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -132,7 +132,11 @@ function pipeline(event)
     ))
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr)
+      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr, {
+        queue = event.queue,
+        source_ref = review_meta.source_ref,
+        terminal = false,
+      })
       raise_work_card(repo, review_meta, {
         started_at = codex_started_at,
         finished_at = now(),
@@ -142,7 +146,11 @@ function pipeline(event)
     end
     local parsed = core.parse_review_meta_action(result.stdout)
     if parsed == nil then
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "parse-failed")
+      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "parse-failed", {
+        queue = event.queue,
+        source_ref = review_meta.source_ref,
+        terminal = false,
+      })
       parsed = {
         action = "block",
         reason = "Review-meta codex output was unparseable.",
@@ -233,5 +241,7 @@ function pipeline(event)
     end
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("review_meta", pipeline)
 
 return M

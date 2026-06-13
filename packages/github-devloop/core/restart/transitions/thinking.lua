@@ -14,7 +14,7 @@ return function(M, h)
     on_timeout = timeout("consensus.proposal"),
     payload_builder = M.build_proposal,
     dedup_shape = "proposal:<proposal_id>/<updated_at> or consensus:<base_version>/loop/<n>",
-    required_facts = { fact("state", "marker-read"), fact("converge-round", "marker-read") },
+    required_facts = { fact("state", "marker-read") },
     payload_fields = {
       proposal_id = "marker:state.proposal",
       dedup_key = "marker:state.version",

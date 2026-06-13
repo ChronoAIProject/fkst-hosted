@@ -210,7 +210,7 @@ end
 function pipeline(event)
   local decompose = event.payload or {}
   if not core.is_supported_decompose(decompose) then
-    core.log_entry("decompose", event, "unknown", decompose.dedup_key)
+    core.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
     core.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -285,5 +285,7 @@ function pipeline(event)
     end
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("decompose", pipeline)
 
 return M

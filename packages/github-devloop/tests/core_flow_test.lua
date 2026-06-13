@@ -477,6 +477,11 @@ return {
     }, ready.proposal_id, ready.dedup_key))
     t.eq(core.is_safe_branch("devloop-owner-repo-42-01HY"), true)
     t.eq(core.is_safe_branch("../bad"), false)
+    local attempt_marker = core.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 2, "123")
+    local attempt = core.latest_implement_attempt_fact({ attempt_marker }, ready.proposal_id, ready.dedup_key)
+    t.eq(attempt.attempt, 2)
+    t.eq(attempt.started_at, "123")
+    t.eq(core.implement_attempt_count({ attempt_marker }, ready.proposal_id, ready.dedup_key), 2)
 
     local failed = core.impl_failure_marker(ready.proposal_id, ready.dedup_key, "codex-failed")
     t.eq(core.has_impl_failure_marker({ failed }, ready.proposal_id, ready.dedup_key), true)
@@ -507,6 +512,9 @@ return {
     t.is_true(comment.body:find("Worktree: /tmp/devloop-owner-repo-42", 1, true) ~= nil)
     t.is_true(comment.body:find("Branch: devloop-owner-repo-42-01HY", 1, true) ~= nil)
     t.is_true(comment.body:find(branch_marker, 1, true) ~= nil)
+    local attempt_comment = core.build_implement_attempt_comment_request("owner/repo", "42", ready, 2, "123")
+    t.is_true(attempt_comment.body:find("github-devloop implementation attempt started", 1, true) ~= nil)
+    t.eq(core.implement_attempt_count({ attempt_comment.body }, ready.proposal_id, ready.dedup_key), 2)
 
     local failed_label = core.build_impl_failed_label_request("owner/repo", "42", ready, "no-changes")
     t.eq(failed_label.add_labels[1], "fkst-dev:impl-failed")

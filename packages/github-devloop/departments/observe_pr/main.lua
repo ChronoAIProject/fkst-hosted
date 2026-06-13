@@ -234,7 +234,7 @@ function pipeline(event)
   local pr = pr_context(event)
   local raw = event.payload or {}
   if pr == nil then
-    core.log_entry("observe_pr", event, "unknown", raw.dedup_key)
+    core.log_entry("observe_pr", event, "unknown", core.payload_field(raw, "dedup_key"))
     core.log_cas_decision("observe_pr", "unknown", { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "unsupported event payload")
     return
   end
@@ -319,5 +319,7 @@ function pipeline(event)
     maybe_label_hint(origin, { state = "reviewing", version = origin.impl_version }, core.issue_source_ref(origin.repo, origin.issue_number))
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("observe_pr", pipeline)
 
 return M
