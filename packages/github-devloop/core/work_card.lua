@@ -32,7 +32,9 @@ local function epoch_seconds(value)
   if n == nil then
     return nil
   end
-  if n > 100000000000 then
+  if n > 100000000000000 then
+    n = n / 1000000
+  elseif n > 100000000000 then
     n = n / 1000
   end
   return math.floor(n)
