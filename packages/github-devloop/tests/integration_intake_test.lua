@@ -6,8 +6,28 @@ local find_raise = h.find_raise
 local count_calls = h.count_calls
 
 local function mock_repo_env(repo)
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
     stdout = repo or "owner/repo",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
+    stdout = "",
     stderr = "",
     exit_code = 0,
   })
@@ -79,10 +99,27 @@ local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
     table.insert(rendered, string.format(
-      '{"number":%d,"title":"%s","body":"%s","updatedAt":"%s","labels":[%s],"assignees":[%s]}',
+      '{"number":%d,"title":"%s","body":"%s","createdAt":"%s","updatedAt":"%s","labels":[%s],"assignees":[%s]}',
       issue.number,
       json_string(issue.title or "Issue"),
       json_string(issue.body or ""),
+      json_string(issue.created_at or "2026-06-03T01:00:00Z"),
+      json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
+      labels_json(issue.labels or {}),
+      issue.assignees_json or '{"login":"fkst-test-bot"}'
+    ))
+  end
+  return "[" .. table.concat(rendered, ",") .. "]"
+end
+
+local function issue_probe_json(issues)
+  local rendered = {}
+  for _, issue in ipairs(issues or {}) do
+    table.insert(rendered, string.format(
+      '{"number":%d,"title":"%s","created_at":"%s","updated_at":"%s","labels":[%s],"assignees":[%s]}',
+      issue.number,
+      json_string(issue.title or "Issue"),
+      json_string(issue.created_at or "2026-06-03T01:00:00Z"),
       json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
       labels_json(issue.labels or {}),
       issue.assignees_json or '{"login":"fkst-test-bot"}'
@@ -94,6 +131,14 @@ end
 local function mock_issue_list(issues)
   t.mock_command(core.gh_issue_list_intake_cmd("owner/repo", 100), {
     stdout = issue_list_json(issues) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_probe_issue_list(issues)
+  t.mock_command(core.gh_issue_list_intake_probe_cmd("owner/repo", 5), {
+    stdout = issue_probe_json(issues) .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -276,6 +321,13 @@ local function run_scan(run_opts)
   }, run_opts)
 end
 
+local function run_probe(run_opts)
+  return t.run_department("departments/intake_probe/main.lua", {
+    queue = "devloop_intake_probe_tick",
+    payload = { schema = "github-devloop.intake-probe-tick.v1" },
+  }, run_opts)
+end
+
 local function run_judge(payload, run_opts)
   return t.run_department("departments/intake_judge/main.lua", {
     queue = "devloop_intake_candidate",
@@ -284,6 +336,75 @@ local function run_judge(payload, run_opts)
 end
 
 return {
+  test_probe_raises_recent_new_issue_candidate = function()
+    mock_bot_env()
+    mock_repo_env()
+    mock_probe_issue_list({
+      { number = 42, created_at = "2026-06-03T01:01:00Z", updated_at = "2026-06-03T01:02:03Z", labels = {} },
+    })
+    mock_intake_scan_view({}, {}, "OPEN")
+
+    local result = run_probe(opts("intake-probe-new-issue"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "devloop_intake_candidate")
+    t.eq(result.raises[1].payload.issue_number, "42")
+    t.eq(result.raises[1].payload.dedup_key, core.intake_dedup_key("github-devloop/issue/owner/repo/42", "2026-06-03T01:02:03Z"))
+    t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
+  end,
+
+  test_probe_skips_existing_intake_decision_marker = function()
+    mock_bot_env()
+    mock_repo_env()
+    mock_probe_issue_list({
+      { number = 42, created_at = "2026-06-03T01:01:00Z", labels = {} },
+    })
+    mock_intake_scan_view({}, {
+      core.intake_decision_marker("github-devloop/issue/owner/repo/42", "decline", "intake/github-devloop/issue/owner/repo/42/v1"),
+    }, "OPEN")
+
+    local result = run_probe(opts("intake-probe-existing-marker"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+  end,
+
+  test_probe_full_window_does_not_advance_cursor = function()
+    mock_bot_env()
+    mock_repo_env()
+    mock_probe_issue_list({
+      { number = 50, created_at = "2026-06-03T01:05:00Z", labels = { "fkst-dev:enabled" } },
+      { number = 49, created_at = "2026-06-03T01:04:00Z", labels = { "fkst-dev:enabled" } },
+      { number = 48, created_at = "2026-06-03T01:03:00Z", labels = { "fkst-dev:enabled" } },
+      { number = 47, created_at = "2026-06-03T01:02:00Z", labels = { "fkst-dev:enabled" } },
+      { number = 46, created_at = "2026-06-03T01:01:00Z", labels = { "fkst-dev:enabled" } },
+    })
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
+
+    local result = run_probe(opts("intake-probe-full-window"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+
+    mock_repo_env()
+    mock_probe_issue_list({
+      { number = 50, created_at = "2026-06-03T01:05:00Z", labels = { "fkst-dev:enabled" } },
+    })
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
+    local second = run_probe(opts("intake-probe-full-window"))
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 0)
+    local view_calls = 0
+    for _, call in ipairs(t.command_calls()) do
+      if call.rendered:find("--json labels,comments,state,assignees", 1, true) ~= nil then
+        view_calls = view_calls + 1
+      end
+    end
+    t.eq(view_calls, 6)
+  end,
+
   test_scan_filters_enabled_closed_and_trusted_marker = function()
     mock_bot_env()
     mock_repo_env()

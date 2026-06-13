@@ -579,6 +579,10 @@ return {
       core.gh_issue_list_intake_cmd("owner/repo", 50),
       "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels,assignees"
     )
+    t.eq(
+      core.gh_issue_list_intake_probe_cmd("owner/repo", 5),
+      "gh api 'repos/owner/repo/issues?state=open&sort=created&direction=desc&per_page=5'"
+    )
     t.eq(core.gh_issue_list_observe_cmd("owner/repo"), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'")
     t.eq(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'")
     t.eq(
@@ -588,6 +592,7 @@ return {
     local intake = core.parse_issue_list_intake('[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
     t.eq(intake[1].number, 42)
     t.eq(intake[1].body, "")
+    t.eq(intake[1].created_at, nil)
     t.eq(intake[1].updated_at, "2026-06-03T01:02:03Z")
     t.eq(intake[1].labels[1], "bug")
     local mixed = core.parse_issue_list_intake('[[{"number":1,"pull_request":{"url":"https://api.example.test/pulls/1"}}],[{"number":2,"title":"Issue","updated_at":"2026-06-03T01:02:04Z","labels":[]}]]', 1)
