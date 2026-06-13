@@ -21,6 +21,21 @@ local function replay_sort_key(entity)
     .. tostring(entity.type or "")
 end
 
+local function has_devloop_label(labels)
+  for _, label in ipairs(labels or {}) do
+    if tostring(label):match("^fkst%-dev:") ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function is_intake_candidate_snapshot(entity_type, entity)
+  return entity_type == "issue"
+    and tostring(entity.state or ""):upper() == "OPEN"
+    and not has_devloop_label(entity.labels)
+end
+
 local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates)
   for _, entity in ipairs(entities) do
     local key = core.entity_cache_key(repo, entity_type, entity.number)
@@ -33,7 +48,7 @@ local function collect_changed(repo, entity_type, entities, fresh_changes, repla
         replay = cached_updated_at == nil,
       }
       item.entity.type = entity_type
-      if item.replay then
+      if item.replay and not is_intake_candidate_snapshot(entity_type, entity) then
         table.insert(replay_candidates, item)
       else
         table.insert(fresh_changes, item)

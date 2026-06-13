@@ -64,10 +64,7 @@ end
 local function issue_json(number, updated_at)
   return string.format(
     '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","labels":[{"name":"fkst-dev:enabled"}]}',
-    number,
-    number,
-    number,
-    updated_at
+    number, number, number, updated_at
   )
 end
 
@@ -363,6 +360,18 @@ return {
     t.eq(changed.exit_code, 0)
     t.eq(#changed.raises, 2)
     t.eq(numbers(changed.raises), "42,43")
+  end,
+
+  test_inbound_poll_prioritizes_cold_intake_candidates_over_replay_budget = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("cold-intake-before-replay", { FKST_DEVLOOP_REPLAY_BUDGET = "1" })
+    mock_repo_env() mock_replay_budget_env("1")
+    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}]}'
+    mock_issue_list(issue_list_from({ issue_json(42, "2026-06-03T01:02:00Z"), issue_json(43, "2026-06-03T01:03:00Z"), intake }))
+    mock_pr_list("[]\n")
+    local result = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(result.exit_code, 0) t.eq(#result.raises, 2)
+    t.eq(numbers(result.raises), "50,42")
   end,
 
   test_inbound_poll_rejects_invalid_replay_budget = function()
