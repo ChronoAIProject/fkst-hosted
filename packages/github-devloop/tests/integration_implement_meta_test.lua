@@ -68,6 +68,7 @@ local mock_existing_empty_implement_worktree = h.mock_existing_empty_implement_w
 local mock_existing_empty_implement_worktree_reuse = h.mock_existing_empty_implement_worktree_reuse
 local mock_existing_dirty_implement_worktree_reuse = h.mock_existing_dirty_implement_worktree_reuse
 local mock_outside_runtime_implement_worktree_rebuild = h.mock_outside_runtime_implement_worktree_rebuild
+local mock_multiple_outside_runtime_implement_worktrees_rebuild = h.mock_multiple_outside_runtime_implement_worktrees_rebuild
 local mock_existing_implement_branch = h.mock_existing_implement_branch
 local mock_git_commit = h.mock_git_commit
 local mock_git_push = h.mock_git_push
@@ -449,6 +450,34 @@ return {
       end
     end
     t.eq(codex_used_current_runtime, true)
+  end,
+
+  test_implement_removes_all_existing_worktrees_outside_current_runtime_root = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:ready" })
+    mock_multiple_outside_runtime_implement_worktrees_rebuild("/tmp/fkst-packages-test/github-devloop/runtime", branch)
+    mock_implement_codex(0, "Committed implementation directly.")
+    mock_git_status("")
+    t.mock_command("rev-list --count", {
+      stdout = "1\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("rev-parse --verify refs/heads/", {
+      stdout = "def456\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-remove-all-outside-runtime-worktrees"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
+    t.eq(count_calls("git worktree remove --force"), 2)
+    t.eq(count_calls("git worktree add"), 1)
+    t.eq(count_calls("reset --hard"), 1)
+    t.eq(count_calls("clean -fd"), 1)
   end,
 
   test_implement_marker_present_skips_idempotently = function()

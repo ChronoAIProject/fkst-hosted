@@ -612,12 +612,13 @@ function M.path_is_directory_cmd(path)
   return "[ -d " .. M._shell_single_quote(value) .. " ]"
 end
 
-function M.find_worktree_for_branch(stdout, branch)
+function M.find_worktrees_for_branch(stdout, branch)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
   local wanted = "refs/heads/" .. tostring(branch)
   local path = nil
+  local matches = {}
   for line in (tostring(stdout or "") .. "\n"):gmatch("([^\n]*)\n") do
     if line == "" then
       path = nil
@@ -626,9 +627,17 @@ function M.find_worktree_for_branch(stdout, branch)
       if current_path ~= nil then
         path = current_path
       elseif line == "branch " .. wanted and path ~= nil and path ~= "" then
-        return path
+        table.insert(matches, path)
       end
     end
+  end
+  return matches
+end
+
+function M.find_worktree_for_branch(stdout, branch)
+  local matches = M.find_worktrees_for_branch(stdout, branch)
+  if #matches > 0 then
+    return matches[1]
   end
   return nil
 end

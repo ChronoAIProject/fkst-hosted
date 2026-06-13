@@ -454,10 +454,20 @@ return {
     local list = "worktree /tmp/main\nHEAD abc123\nbranch refs/heads/dev\n\n"
       .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
     t.eq(core.find_worktree_for_branch(list, deterministic_branch), worktree_path)
+    local branch_worktrees = core.find_worktrees_for_branch(list, deterministic_branch)
+    t.eq(#branch_worktrees, 1)
+    t.eq(branch_worktrees[1], worktree_path)
     t.is_nil(core.find_worktree_for_branch(list, deterministic_branch .. "-other"))
     local stale_worktree_path = "/tmp/fkst-rt-old/worktrees/devloop-owner-repo-42-01HY"
+    local stale_worktree_path_two = "/tmp/fkst-rt-old-two/worktrees/devloop-owner-repo-42-01HY"
     local current_root_list = "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+      .. "worktree " .. stale_worktree_path_two .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
       .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
+    local all_branch_worktrees = core.find_worktrees_for_branch(current_root_list, deterministic_branch)
+    t.eq(#all_branch_worktrees, 3)
+    t.eq(all_branch_worktrees[1], stale_worktree_path)
+    t.eq(all_branch_worktrees[2], stale_worktree_path_two)
+    t.eq(all_branch_worktrees[3], worktree_path)
     t.eq(core.find_worktree_for_branch_under_runtime(current_root_list, deterministic_branch, "/tmp/fkst-rt"), worktree_path)
     t.is_nil(core.find_worktree_for_branch_under_runtime(
       "worktree " .. stale_worktree_path .. "\nHEAD abc123\nbranch refs/heads/" .. deterministic_branch .. "\n\n",

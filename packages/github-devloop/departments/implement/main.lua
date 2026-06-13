@@ -257,6 +257,16 @@ local function prepare_worktree(repo, issue_number, ready, branch, base_head)
       error("github-devloop: git worktree list failed: " .. tostring(list_result.stderr))
     end
     local existing_worktree = core.find_worktree_for_branch_under_runtime(list_result.stdout, branch, runtime_result.stdout)
+    for _, stale_worktree in ipairs(core.find_worktrees_for_branch(list_result.stdout, branch)) do
+      if not core.path_under_runtime_root(runtime_result.stdout, stale_worktree) then
+        core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+          "branch=" .. tostring(branch),
+          "worktree=" .. tostring(stale_worktree),
+          "reason=removing non-current-runtime deterministic worktree",
+        })
+        remove_stale_worktree(stale_worktree)
+      end
+    end
     if existing_worktree ~= nil then
       worktree = existing_worktree
       core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
@@ -265,15 +275,6 @@ local function prepare_worktree(repo, issue_number, ready, branch, base_head)
         "reason=reusing current-runtime deterministic worktree",
       })
     else
-      local stale_worktree = core.find_worktree_for_branch(list_result.stdout, branch)
-      if stale_worktree ~= nil then
-        core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
-          "branch=" .. tostring(branch),
-          "worktree=" .. tostring(stale_worktree),
-          "reason=removing non-current-runtime deterministic worktree",
-        })
-        remove_stale_worktree(stale_worktree)
-      end
       local worktree_result = exec_sync({ cmd = core.git_worktree_add_existing_branch_cmd(worktree, branch), timeout = 60 })
       if worktree_result.exit_code ~= 0 then
         error("github-devloop: git worktree add failed: " .. tostring(worktree_result.stderr))
