@@ -24,6 +24,20 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --json number,title,body,updatedAt,labels,assignees"
 end
 
+function M.gh_issue_list_intake_probe_cmd(repo, limit, since)
+  local bounded_limit = tonumber(limit or 5)
+  if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 10 then
+    error("github-devloop: invalid intake probe issue list limit")
+  end
+  local query = "repos/" .. tostring(repo)
+    .. "/issues?state=open&sort=created&direction=desc&per_page=" .. tostring(math.floor(bounded_limit))
+  if since ~= nil and tostring(since) ~= "" then
+    query = query .. "&since=" .. url_encode(since)
+  end
+  return "gh api "
+    .. M._shell_single_quote(query)
+end
+
 function M.gh_issue_list_decompose_children_cmd(repo, proposal_id)
   return "gh issue list"
     .. " --repo " .. M._shell_single_quote(repo)
