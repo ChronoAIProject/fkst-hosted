@@ -85,6 +85,11 @@ local function assert_direct_enable_chain(raises, payload)
   t.eq(proposal.proposal_id, payload.proposal_id)
   t.eq(proposal.dedup_key, payload.dedup_key)
   t.eq(proposal.source_ref.ref, payload.source_ref.ref)
+  t.eq(proposal.intake_hand_off.kind, "own-intake-decision")
+  t.eq(proposal.intake_hand_off.proposal_id, payload.proposal_id)
+  t.eq(proposal.intake_hand_off.decision, "enable")
+  t.eq(proposal.intake_hand_off.dedup_key, payload.dedup_key)
+  t.eq(proposal.intake_hand_off.source_ref.ref, payload.source_ref.ref)
   t.is_true(tostring(proposal.content_fetch or ""):find("^runtime%-cache:") ~= nil)
 
   local thinking_comment = find_comment_body(raises, 'state="thinking"')
@@ -797,10 +802,42 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "enable", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
     })
 
     local result = run_judge(payload, opts("intake-idempotent"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_judge_replays_enable_successor_after_visible_intake_marker = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:enabled" }, {
+      core.intake_decision_marker(payload.proposal_id, "enable", payload.dedup_key, "expedite"),
+    })
+    h.mock_context_bundle()
+
+    local result = run_judge(payload, opts("intake-enable-successor-replay"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    t.eq(count_calls("codex exec"), 0)
+    assert_direct_enable_chain(result.raises, payload)
+    local enabled_label = find_label_add(result.raises, "fkst-dev:enabled")
+    t.eq(enabled_label.add_labels[1], "fkst-dev:enabled")
+    t.eq(enabled_label.add_labels[2], "fkst-class:expedite")
+  end,
+
+  test_judge_visible_intake_marker_does_not_replay_after_thinking_marker = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:thinking" }, {
+      core.intake_decision_marker(payload.proposal_id, "enable", payload.dedup_key, "expedite"),
+      core.state_marker(payload.proposal_id, "thinking", payload.dedup_key),
+    })
+
+    local result = run_judge(payload, opts("intake-enable-successor-idempotent"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
