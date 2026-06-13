@@ -69,25 +69,33 @@ function M.observability_run_cmd(cmd, limits, deadline, error_class, exec)
   return result
 end
 
+local function bounded_page_cap(limit)
+  return positive_integer(limit, default_observability_list_page_cap, 1, 10)
+end
+
 function M.observability_rotation_seed(event)
+  if event and event.ts ~= nil then
+    return tostring(event.ts)
+  end
   local payload = event and event.payload
   if type(payload) == "table" then
-    for _, key in ipairs({ "tick", "cursor", "round", "generated_at", "ts" }) do
+    for _, key in ipairs({ "tick", "generated_at", "ts" }) do
       if payload[key] ~= nil then
         return tostring(payload[key])
       end
     end
   end
-  if event and event.ts ~= nil then
-    return tostring(event.ts)
-  end
-  return tostring(now())
+  return tostring(math.floor(now() / 60))
 end
 
 function M.observability_rotation_offset(count, seed)
   local n = tonumber(count)
   if n == nil or n <= 0 then
     return 0
+  end
+  local numeric_seed = tonumber(seed)
+  if numeric_seed ~= nil and numeric_seed == math.floor(numeric_seed) then
+    return numeric_seed % n
   end
   local hash = M._decimal_checksum(tostring(seed or ""))
   return tonumber(hash) % n
@@ -115,6 +123,13 @@ end
 function M.observability_batch(items, seed, cap)
   local source = items or {}
   local bounded_cap = positive_integer(cap, default_observability_entity_cap, 1, 1000)
+  if #source <= bounded_cap then
+    local all_items = {}
+    for _, item in ipairs(source) do
+      table.insert(all_items, item)
+    end
+    return all_items, 0
+  end
   local rotated = M.observability_rotate(source, seed)
   local selected = {}
   for i, item in ipairs(rotated) do
@@ -124,6 +139,24 @@ function M.observability_batch(items, seed, cap)
     table.insert(selected, item)
   end
   return selected, math.max(0, #source - #selected)
+end
+
+function M.observability_page_window(total_pages, seed, cap)
+  local total = tonumber(total_pages)
+  if total == nil or total ~= math.floor(total) or total < 1 then
+    total = 1
+  end
+  local bounded_cap = bounded_page_cap(cap)
+  if bounded_cap > total then
+    bounded_cap = total
+  end
+  local offset = M.observability_rotation_offset(total, seed)
+  local pages = {}
+  for i = 1, bounded_cap do
+    table.insert(pages, ((offset + i - 1) % total) + 1)
+  end
+  table.sort(pages)
+  return pages, math.max(0, total - #pages)
 end
 
 function M.observability_entity_candidates(issue_numbers, pr_numbers, seed, cap)
@@ -164,46 +197,115 @@ function M.observability_sorted_numbers(items)
   return numbers
 end
 
-function M.observability_list_issue_candidates(repo, labels, limits, deadline)
-  local items = {}
-  for _, label in ipairs(labels or {}) do
-    for page = 1, limits.list_page_cap do
-      local issue_list = M.observability_run_cmd(
-        M.gh_issue_list_observe_cmd(repo, label, page),
-        limits,
-        deadline,
-        "gh observability issue list"
-      )
-      local parsed = M.parse_issue_list_observe(issue_list.stdout)
-      for _, issue in ipairs(parsed) do
-        table.insert(items, issue)
-      end
-      if #parsed < 100 then
-        break
-      end
+function M.observability_total_pages_from_headers(stdout, item_count)
+  local body = tostring(stdout or "")
+  local header_end = body:find("\r\n\r\n", 1, true) or body:find("\n\n", 1, true)
+  if header_end == nil then
+    if tonumber(item_count) == 100 then
+      return 2
+    end
+    return 1
+  end
+  local headers = body:sub(1, header_end - 1)
+  local link = headers:match("[Ll][Ii][Nn][Kk]:%s*([^\r\n]+)")
+  local last = link and link:match('[%?&]page=(%d+)>;%s*rel="last"')
+  if last ~= nil then
+    local n = tonumber(last)
+    if n ~= nil and n >= 1 and n == math.floor(n) then
+      return n
     end
   end
-  return items
+  local next_page = link and link:match('[%?&]page=(%d+)>;%s*rel="next"')
+  if next_page ~= nil then
+    local n = tonumber(next_page)
+    if n ~= nil and n >= 2 and n == math.floor(n) then
+      return n
+    end
+  end
+  if tonumber(item_count) == 100 then
+    return 2
+  end
+  return 1
 end
 
-function M.observability_list_pr_candidates(repo, limits, deadline)
+local function response_body(stdout)
+  local text = tostring(stdout or "")
+  local marker = text:find("\r\n\r\n", 1, true)
+  if marker ~= nil then
+    return text:sub(marker + 4)
+  end
+  marker = text:find("\n\n", 1, true)
+  if marker ~= nil then
+    return text:sub(marker + 2)
+  end
+  return text
+end
+
+local function list_rotating_pages(first_cmd, page_cmd, parse, limits, deadline, seed, error_class, exec)
+  local first = M.observability_run_cmd(first_cmd, limits, deadline, error_class, exec)
+  local first_parsed = parse(response_body(first.stdout))
+  local total_pages = M.observability_total_pages_from_headers(first.stdout, #first_parsed)
+  local pages, deferred_pages = M.observability_page_window(total_pages, seed, limits.list_page_cap)
   local items = {}
-  for page = 1, limits.list_page_cap do
-    local pr_list = M.observability_run_cmd(
-      M.gh_pr_list_observe_cmd(repo, page),
-      limits,
-      deadline,
-      "gh observability PR list"
-    )
-    local parsed = M.parse_pr_list_observe(pr_list.stdout)
-    for _, pr in ipairs(parsed) do
-      table.insert(items, pr)
+  local used_first = false
+  for _, page in ipairs(pages) do
+    local parsed = nil
+    if page == 1 then
+      parsed = first_parsed
+      used_first = true
+    else
+      local listed = M.observability_run_cmd(page_cmd(page), limits, deadline, error_class, exec)
+      parsed = parse(listed.stdout)
     end
-    if #parsed < 100 then
-      break
+    for _, item in ipairs(parsed or {}) do
+      table.insert(items, item)
     end
   end
-  return items
+  if not used_first and total_pages == 1 then
+    for _, item in ipairs(first_parsed) do
+      table.insert(items, item)
+    end
+  end
+  return items, deferred_pages
+end
+
+function M.observability_list_issue_candidates(repo, labels, limits, deadline, seed, exec)
+  local items = {}
+  local deferred_pages = 0
+  for _, label in ipairs(labels or {}) do
+    local listed, deferred = list_rotating_pages(
+      M.gh_issue_list_observe_cmd(repo, label, 1, true),
+      function(page)
+        return M.gh_issue_list_observe_cmd(repo, label, page)
+      end,
+      M.parse_issue_list_observe,
+      limits,
+      deadline,
+      tostring(seed or "") .. "/issue/" .. tostring(label or ""),
+      "gh observability issue list",
+      exec
+    )
+    deferred_pages = deferred_pages + deferred
+    for _, issue in ipairs(listed) do
+      table.insert(items, issue)
+    end
+  end
+  return items, deferred_pages
+end
+
+function M.observability_list_pr_candidates(repo, limits, deadline, seed, exec)
+  return list_rotating_pages(
+    M.gh_pr_list_observe_cmd(repo, 1, true),
+    function(page)
+      return M.gh_pr_list_observe_cmd(repo, page)
+    end,
+    M.parse_pr_list_observe,
+    limits,
+    deadline,
+    tostring(seed or "") .. "/pr",
+    "gh observability PR list",
+    exec
+  )
 end
 
 function M.observability_deferred_log_line(fields)

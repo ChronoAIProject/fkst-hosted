@@ -69,13 +69,13 @@ local function mock_all_issue_lists(numbers)
   for _, number in ipairs(numbers or {}) do
     table.insert(rendered, string.format('{"number":%d,"state":"open"}', number))
   end
-  t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label, 1), {
+  t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label, 1, true), {
     stdout = "[" .. table.concat(rendered, ",") .. "]\n",
     stderr = "",
     exit_code = 0,
   })
   for _, state in ipairs(core._state_order) do
-    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core.state_label(state), 1), {
+    t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core.state_label(state), 1, true), {
       stdout = "[]\n",
       stderr = "",
       exit_code = 0,
@@ -88,7 +88,7 @@ local function mock_pr_list(numbers)
   for _, number in ipairs(numbers or {}) do
     table.insert(rendered, string.format('{"number":%d,"state":"open"}', number))
   end
-  t.mock_command(core.gh_pr_list_observe_cmd("owner/repo", 1), {
+  t.mock_command(core.gh_pr_list_observe_cmd("owner/repo", 1, true), {
     stdout = "[" .. table.concat(rendered, ",") .. "]\n",
     stderr = "",
     exit_code = 0,

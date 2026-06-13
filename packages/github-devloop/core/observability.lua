@@ -909,15 +909,17 @@ function M.observe_devloop_entities(event)
   for _, state in ipairs(M._state_order) do
     table.insert(labels, M.state_label(state))
   end
-  local issue_numbers = M.observability_sorted_numbers(M.observability_list_issue_candidates(repo, labels, limits, deadline))
-  local pr_numbers = M.observability_sorted_numbers(M.observability_list_pr_candidates(repo, limits, deadline))
   local rotation_seed = M.observability_rotation_seed(event)
+  local issue_items, deferred_issue_pages = M.observability_list_issue_candidates(repo, labels, limits, deadline, rotation_seed)
+  local pr_items, deferred_pr_pages = M.observability_list_pr_candidates(repo, limits, deadline, rotation_seed)
+  local issue_numbers = M.observability_sorted_numbers(issue_items)
+  local pr_numbers = M.observability_sorted_numbers(pr_items)
   local candidates, deferred_candidates = M.observability_entity_candidates(issue_numbers, pr_numbers, rotation_seed, limits.entity_cap)
   local entities = {}
   local seen_prs = {}
 
   local processed_issues, processed_prs, remaining_budget = observe_candidates(repo, candidates, entities, seen_prs, limits, deadline)
-  if deferred_candidates > 0 or remaining_budget == 0 or not M.observability_has_budget(deadline) then
+  if deferred_issue_pages > 0 or deferred_pr_pages > 0 or deferred_candidates > 0 or remaining_budget == 0 or not M.observability_has_budget(deadline) then
     log.warn(M.observability_deferred_log_line({
       reason = M.observability_has_budget(deadline) and "batch-cap" or "deadline",
       listed_issues = #issue_numbers,

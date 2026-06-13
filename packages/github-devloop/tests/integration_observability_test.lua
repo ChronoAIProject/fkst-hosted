@@ -25,7 +25,7 @@ local function run_observability(run_opts)
 end
 
 local function mock_env(bot_login, write_mode)
-  for _ = 1, 8 do
+  for _ = 1, 16 do
     t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
       stdout = bot_login == nil and "fkst-test-bot" or bot_login,
       stderr = "",
@@ -37,7 +37,7 @@ local function mock_env(bot_login, write_mode)
     stderr = "",
     exit_code = 0,
   })
-  for _ = 1, 8 do
+  for _ = 1, 16 do
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
       stdout = write_mode or "",
       stderr = "",
@@ -61,8 +61,16 @@ local function observe_issue_list_command(label, page)
   return core.gh_issue_list_observe_cmd("owner/repo", label, page or 1)
 end
 
+local function observe_issue_list_first_command(label)
+  return core.gh_issue_list_observe_cmd("owner/repo", label, 1, true)
+end
+
 local function observe_pr_list_command(page)
   return core.gh_pr_list_observe_cmd("owner/repo", page or 1)
+end
+
+local function observe_pr_list_first_command()
+  return core.gh_pr_list_observe_cmd("owner/repo", 1, true)
 end
 
 local function render_comment(body, author, created_at)
@@ -82,7 +90,7 @@ local function mock_all_issue_lists(items)
     table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
   end
   local stdout = "[" .. table.concat(rendered, ",") .. "]\n"
-  t.mock_command(observe_issue_list_command(core._enabled_label), {
+  t.mock_command(observe_issue_list_first_command(core._enabled_label), {
     stdout = stdout,
     stderr = "",
     exit_code = 0,
@@ -95,7 +103,7 @@ local function mock_all_issue_lists(items)
     })
   end
   for _, state in ipairs(core._state_order) do
-    t.mock_command(observe_issue_list_command(core.state_label(state)), {
+    t.mock_command(observe_issue_list_first_command(core.state_label(state)), {
       stdout = "[]\n",
       stderr = "",
       exit_code = 0,
@@ -110,7 +118,7 @@ local function mock_pr_list(items)
     local state = type(item) == "table" and item.state or "open"
     table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
   end
-  t.mock_command(observe_pr_list_command(), {
+  t.mock_command(observe_pr_list_first_command(), {
     stdout = "[" .. table.concat(rendered, ",") .. "]\n",
     stderr = "",
     exit_code = 0,
@@ -406,7 +414,7 @@ return {
     t.is_true(summary:find("ready=1", 1, true) ~= nil)
     t.eq(count_calls("gh issue view"), 1)
     t.eq(count_calls("gh pr view"), 0)
-    t.is_true(has_call(observe_issue_list_command(core._enabled_label)))
+    t.is_true(has_call(observe_issue_list_first_command(core._enabled_label)))
   end,
 
   test_pr_phase_comment_stream_wins_over_stale_issue_pr_open = function()
@@ -706,8 +714,8 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.is_true(has_call(observe_issue_list_command(core._enabled_label)))
-    t.is_true(has_call(observe_pr_list_command()))
+    t.is_true(has_call(observe_issue_list_first_command(core._enabled_label)))
+    t.is_true(has_call(observe_pr_list_first_command()))
     t.eq(count_calls("gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'"), 0)
     t.eq(count_calls("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'"), 0)
   end,
