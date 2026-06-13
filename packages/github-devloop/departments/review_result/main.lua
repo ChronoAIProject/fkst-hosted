@@ -178,6 +178,7 @@ function pipeline(event)
     }, {
       proposal_id = origin.proposal_id,
       role = "review",
+      run_id = core.work_card_run_id({ "review", reached.proposal_id, reached.dedup_key }),
       version = issue_version,
       round = core.version_fix_round(issue_version),
       started_at = event.ts or now(),

@@ -104,7 +104,8 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
   if not merge_queue_lane_states[state.state] then
     return nil
   end
-  local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number)
+  local current_head_sha = tostring(pr.head_sha or "")
+  local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number, current_head_sha)
   if fact == nil then
     for _, comment in ipairs(M._trusted_marker_comments(pr.comments)) do
       for marker in M._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
@@ -114,7 +115,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
           local merge_ready_version = merge_ready_version_for_lane_state(M, candidate_state)
           if merge_queue_lane_states[candidate_state.state]
             and tostring(merge_ready_version or "") == tostring(marker:match('version="([^"]*)"') or "") then
-            fact = M.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number)
+            fact = M.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number, current_head_sha)
             state = candidate_state
             break
           end
@@ -283,6 +284,39 @@ function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)
     return false, "merge-queue-head-pr-" .. tostring(head.pr_number or "unknown")
   end
   return true, "merge-queue-head"
+end
+
+function M.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry)
+  if type(next_entry) ~= "table" then
+    error("github-devloop: invalid merge queue next entry")
+  end
+  return M._dedup_key({
+    "merge-queue",
+    "requeue",
+    M.safe_repo(repo),
+    "merged-pr",
+    M.safe_issue(merged_pr_number),
+    "next-pr",
+    M.safe_issue(next_entry.pr_number),
+    M.safe_head_segment(next_entry.head_sha),
+  })
+end
+
+function M.merge_queue_tick_payload(repo, merged_pr_number, next_entry)
+  if type(next_entry) ~= "table" then
+    return nil
+  end
+  return {
+    schema = "github-devloop.merge-queue-tick.v1",
+    dedup_key = M.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry),
+    source_ref = M.pr_source_ref(repo, next_entry.pr_number),
+    cause = {
+      kind = "merge-progress",
+      merged_pr_number = tonumber(merged_pr_number),
+      next_pr_number = tonumber(next_entry.pr_number),
+      next_head_sha = tostring(next_entry.head_sha or ""),
+    },
+  }
 end
 
 function M.merge_ready_payload_from_queue_entry(entry, source_ref)

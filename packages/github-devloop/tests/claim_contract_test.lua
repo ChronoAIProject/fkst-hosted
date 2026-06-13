@@ -2,13 +2,13 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 
-local function mock_bot(login, write_mode)
+local function mock_bot(login, write_mode, write_reads)
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
     stdout = login or "fkst-test-bot",
     stderr = "",
     exit_code = 0,
   })
-  for _ = 1, 6 do
+  for _ = 1, write_reads or 2 do
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
       stdout = write_mode or "",
       stderr = "",
@@ -166,7 +166,7 @@ return {
   end,
 
   test_timeout_release_can_be_followed_by_reclaim = function()
-    mock_bot("fkst-test-bot", "1")
+    mock_bot("fkst-test-bot", "1", 4)
     t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
       stdout = assignees_json({ "fkst-test-bot" }),
       stderr = "",

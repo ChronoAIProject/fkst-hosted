@@ -6,8 +6,28 @@ local find_raise = h.find_raise
 local count_calls = h.count_calls
 
 local function mock_repo_env(repo)
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
     stdout = repo or "owner/repo",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
+    stdout = "",
     stderr = "",
     exit_code = 0,
   })
@@ -21,10 +41,6 @@ local function json_string(value)
   return h.json_string(value)
 end
 
-local function render_comment(comment)
-  return h.render_comment(comment)
-end
-
 local function labels_json(labels)
   local rendered = {}
   for _, label in ipairs(labels or {}) do
@@ -36,7 +52,7 @@ end
 local function comments_json(comments)
   local rendered = {}
   for _, comment in ipairs(comments or {}) do
-    table.insert(rendered, render_comment(comment))
+    table.insert(rendered, h.render_comment(comment))
   end
   return table.concat(rendered, ",")
 end
@@ -66,6 +82,52 @@ local function find_comment_body(raises, needle)
   return nil
 end
 
+local function find_label_add(raises, label)
+  for _, raised in ipairs(raises or {}) do
+    if raised.queue == "github-proxy.github_issue_label_request" then
+      for _, value in ipairs((raised.payload or {}).add_labels or {}) do
+        if tostring(value) == tostring(label) then
+          return raised.payload
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function default_intake_current(extra)
+  local fields = extra or {}
+  return { title = fields.title or "Add retry backoff to failed widget sync", body = fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries." }
+end
+
+local function expected_decision_key(payload, extra, reintake_command)
+  return core.intake_decision_dedup_key(payload.proposal_id, default_intake_current(extra), reintake_command)
+end
+
+local function expected_scan_effect_key(proposal_id, issue, command)
+  return core.intake_decision_dedup_key(proposal_id, { title = issue and issue.title or "Issue", body = issue and issue.body or "" }, command)
+end
+local function assert_direct_enable_chain(raises, payload, extra, reintake_command)
+  local expected_dedup = expected_decision_key(payload, extra, reintake_command)
+  local proposal = find_raise(raises, "consensus.proposal").payload
+  t.eq(proposal.schema, "consensus.proposal.v1")
+  t.eq(proposal.proposal_id, payload.proposal_id)
+  t.eq(proposal.dedup_key, expected_dedup)
+  t.eq(proposal.effect_version, expected_dedup)
+  t.eq(proposal.source_ref.ref, payload.source_ref.ref)
+  t.eq(proposal.intake_hand_off.kind, "own-intake-decision")
+  t.eq(proposal.intake_hand_off.proposal_id, payload.proposal_id)
+  t.eq(proposal.intake_hand_off.decision, "enable")
+  t.eq(proposal.intake_hand_off.dedup_key, expected_dedup)
+  t.eq(proposal.intake_hand_off.source_ref.ref, payload.source_ref.ref)
+  t.is_true(tostring(proposal.content_fetch or ""):find("^runtime%-cache:") ~= nil)
+
+  local thinking_comment = find_comment_body(raises, 'state="thinking"')
+  local thinking_label = find_label_add(raises, "fkst-dev:thinking")
+  t.is_true(thinking_comment ~= nil)
+  t.is_true(thinking_comment.body:find(core.state_marker(payload.proposal_id, "thinking", expected_dedup), 1, true) ~= nil)
+  t.is_true(thinking_label ~= nil)
+end
 local function has_value(values, expected)
   for _, value in ipairs(values or {}) do
     if tostring(value) == tostring(expected) then
@@ -79,10 +141,11 @@ local function issue_list_json(issues)
   local rendered = {}
   for _, issue in ipairs(issues or {}) do
     table.insert(rendered, string.format(
-      '{"number":%d,"title":"%s","body":"%s","updatedAt":"%s","labels":[%s],"assignees":[%s]}',
+      '{"number":%d,"title":"%s","body":"%s","createdAt":"%s","updatedAt":"%s","labels":[%s],"assignees":[%s]}',
       issue.number,
       json_string(issue.title or "Issue"),
       json_string(issue.body or ""),
+      json_string(issue.created_at or "2026-06-03T01:00:00Z"),
       json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
       labels_json(issue.labels or {}),
       issue.assignees_json or '{"login":"fkst-test-bot"}'
@@ -114,19 +177,20 @@ end
 
 local function mock_intake_judge_view(labels, comments, extra)
   local fields = extra or {}
-  t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
-    stdout = string.format(
-      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
-      json_string(fields.title or "Add retry backoff to failed widget sync"),
-      json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
-      json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
-      json_string(fields.state or "OPEN"),
-      labels_json(labels or {}),
-      comments_json(comments or {})
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  local assignees_json = fields.assignees_json or '{"login":"fkst-test-bot"}'
+  local assignee_stdout = string.format(
+    '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
+    json_string(fields.title or "Add retry backoff to failed widget sync"),
+    json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
+    json_string(fields.updated_at or "2026-06-03T01:02:03Z"), json_string(fields.state or "OPEN"),
+    labels_json(labels or {}), comments_json(comments or {}), assignees_json)
+  for _ = 1, 2 do
+    t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
+      stdout = assignee_stdout,
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   t.mock_command("--json title,body,updatedAt,labels,comments,state", {
     stdout = string.format(
       '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
@@ -143,11 +207,13 @@ local function mock_intake_judge_view(labels, comments, extra)
 end
 
 local function mock_intake_codex_with_closed_issues(stdout, closed_issues, exit_code, stderr)
-  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
-    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
-    stderr = "",
-    exit_code = 0,
-  })
+  for _ = 1, 3 do
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+      stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   for _ = 1, 2 do
     t.mock_command("test -d", { stdout = "", stderr = "", exit_code = 1 })
   end
@@ -185,7 +251,9 @@ local function mock_intake_codex_with_closed_issues(stdout, closed_issues, exit_
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("test -r", { stdout = "", stderr = "", exit_code = 0 })
+  for _ = 1, 3 do
+    t.mock_command("test -r", { stdout = "", stderr = "", exit_code = 0 })
+  end
   for _ = 1, 8 do
     t.mock_command("wc -c < ", {
       stdout = "1\n",
@@ -193,11 +261,6 @@ local function mock_intake_codex_with_closed_issues(stdout, closed_issues, exit_
       exit_code = 0,
     })
   end
-  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
-    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
-    stderr = "",
-    exit_code = 0,
-  })
   t.mock_command("mkdir -p", {
     stdout = "",
     stderr = "",
@@ -264,9 +327,11 @@ local function candidate(extra)
 end
 
 local function reintake_candidate(command)
-  return candidate({
-    dedup_key = core.build_devloop_intake_candidate_payload("owner/repo", 42, command.created_at).dedup_key,
-  })
+  local payload = candidate()
+  payload.effect_id = expected_decision_key(payload, nil, command)
+  payload.dedup_key = core.intake_candidate_delivery_dedup_key(payload.proposal_id, payload.effect_id, payload.effect_id)
+  payload.reintake_command_created_at = command.created_at
+  return payload
 end
 
 local function run_scan(run_opts)
@@ -326,8 +391,11 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "devloop_intake_candidate")
     t.eq(result.raises[1].payload.issue_number, "42")
-    t.eq(result.raises[1].payload.dedup_key, core.intake_dedup_key(proposal_id, command.created_at))
+    local expected_effect = expected_scan_effect_key(proposal_id, nil, command)
+    t.eq(result.raises[1].payload.effect_id, expected_effect)
+    t.eq(result.raises[1].payload.reintake_command_created_at, command.created_at)
     t.is_true(result.raises[1].payload.dedup_key ~= core.intake_dedup_key(proposal_id, "2026-06-03T01:02:03Z"))
+    t.is_true(result.raises[1].payload.dedup_key:find("intake%-candidate/github%-devloop/issue/owner/repo/42", 1, false) ~= nil)
   end,
 
   test_scan_reintake_without_prior_intake_marker_refuses = function()
@@ -406,9 +474,9 @@ return {
 
     local result = run_judge(payload, opts("intake-positive"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(#result.raises, 5)
+    local comment = find_comment_body(result.raises, 'decision="enable"')
+    local label = find_label_add(result.raises, "fkst-dev:enabled")
     t.is_true(comment.body:find('fkst:github-devloop:intake-decision:v1', 1, true) ~= nil)
     t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
     t.is_true(comment.body:find('class="expedite"', 1, true) ~= nil)
@@ -416,7 +484,21 @@ return {
     t.eq(label.add_labels[2], "fkst-class:expedite")
     t.is_true(has_value(label.remove_labels, "fkst-class:standard"))
     t.is_true(has_value(label.remove_labels, "fkst-class:background"))
+    assert_direct_enable_chain(result.raises, payload)
     assert_intake_judgment_call()
+  end,
+
+  test_judge_skips_issue_claimed_by_other_login = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      assignees_json = '{"login":"other-bot"}',
+    })
+
+    local result = run_judge(payload, opts("intake-claimed-by-other"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
   end,
 
   test_judge_standard_class_is_default_and_replaces_other_class_labels = function()
@@ -427,8 +509,8 @@ return {
 
     local result = run_judge(payload, opts("intake-standard-default"))
     t.eq(result.exit_code, 0)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    local comment = find_comment_body(result.raises, 'decision="enable"')
+    local label = find_label_add(result.raises, "fkst-dev:enabled")
     t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
     t.eq(label.add_labels[2], "fkst-class:standard")
@@ -497,9 +579,9 @@ return {
 
     local result = run_judge(payload, opts("intake-invalid-class-standard"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(#result.raises, 5)
+    local comment = find_comment_body(result.raises, 'decision="enable"')
+    local label = find_label_add(result.raises, "fkst-dev:enabled")
     t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
     t.eq(label.add_labels[2], "fkst-class:standard")
@@ -656,12 +738,16 @@ return {
 
     local result = run_judge(payload, opts("intake-escalate-class-no-stable-key"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
-    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(#result.raises, 5)
+    local comment = find_comment_body(result.raises, 'decision="enable"')
+    local label = find_label_add(result.raises, "fkst-dev:enabled")
     t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
     t.is_true(comment.body:find("No stable recurring-class identity was found", 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
+    assert_direct_enable_chain(result.raises, payload, {
+      title = "Repair widget sync timeout residual",
+      body = "Another instance after #80 and #81, but the siblings have no stable recurrence label.",
+    })
     t.is_nil(find_comment_body(result.raises, "intake class follow-up: folded"))
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
@@ -677,9 +763,13 @@ return {
 
     local result = run_judge(payload, opts("intake-class-carrier-enable"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+    t.eq(#result.raises, 5)
+    t.is_true(find_comment_body(result.raises, 'decision="enable"').body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_label_add(result.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
+    assert_direct_enable_chain(result.raises, payload, {
+      title = "Recurrence-aware widget sync policy",
+      body = "This issue cites #80 and #81 and proposes the class-level retry policy.",
+    })
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 
@@ -711,7 +801,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:tracking" }, {
-      core.intake_decision_marker(payload.proposal_id, "track", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "track", expected_decision_key(payload)),
     })
 
     local result = run_judge(payload, opts("intake-track-idempotent"))
@@ -731,9 +821,13 @@ return {
     mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Implementation request; downstream consensus can narrow scope.")
     local ambiguous = run_judge(payload, opts("intake-enable-ambiguous"))
     t.eq(ambiguous.exit_code, 0)
-    t.eq(#ambiguous.raises, 2)
-    t.is_true(find_raise(ambiguous.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
-    t.eq(find_raise(ambiguous.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+    t.eq(#ambiguous.raises, 5)
+    t.is_true(find_comment_body(ambiguous.raises, 'decision="enable"').body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_label_add(ambiguous.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
+    assert_direct_enable_chain(ambiguous.raises, payload, {
+      title = "Make sync less flaky",
+      body = "The sync behavior is ambiguous and needs investigation to find the right code change.",
+    })
 
     mock_bot_env()
     mock_intake_judge_view({}, {}, {
@@ -744,9 +838,9 @@ return {
     mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Cross-repository uncertainty is not a human gate.")
     local cross_repo = run_judge(candidate({ updated_at = "2026-06-03T01:03:03Z" }), opts("intake-enable-cross-repo"))
     t.eq(cross_repo.exit_code, 0)
-    t.eq(#cross_repo.raises, 2)
-    t.is_true(find_raise(cross_repo.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
-    t.eq(find_raise(cross_repo.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+    t.eq(#cross_repo.raises, 5)
+    t.is_true(find_comment_body(cross_repo.raises, 'decision="enable"').body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_label_add(cross_repo.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
 
     mock_bot_env()
     mock_intake_judge_view({}, {}, {
@@ -757,19 +851,65 @@ return {
     mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Insufficient detail should converge downstream.")
     local insufficient = run_judge(candidate({ updated_at = "2026-06-03T01:04:03Z" }), opts("intake-enable-insufficient"))
     t.eq(insufficient.exit_code, 0)
-    t.eq(#insufficient.raises, 2)
-    t.is_true(find_raise(insufficient.raises, "github-proxy.github_issue_comment_request").payload.body:find('decision="enable"', 1, true) ~= nil)
-    t.eq(find_raise(insufficient.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+    t.eq(#insufficient.raises, 5)
+    t.is_true(find_comment_body(insufficient.raises, 'decision="enable"').body:find('decision="enable"', 1, true) ~= nil)
+    t.eq(find_label_add(insufficient.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
   end,
 
   test_judge_idempotent_skips_trusted_marker = function()
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "enable", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload)),
     })
 
     local result = run_judge(payload, opts("intake-idempotent"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_judge_decides_seen_candidate_delivery_when_no_completion_marker = function()
+    local payload = candidate({
+      dedup_key = core.intake_candidate_delivery_dedup_key("github-devloop/issue/owner/repo/42", expected_decision_key(candidate()), "seen-before"),
+    })
+    mock_bot_env()
+    mock_intake_judge_view({}, {})
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ expedite\n⟦FKST:REASON⟧ Clear bounded implementation task.")
+
+    local result = run_judge(payload, opts("intake-seen-candidate-no-marker"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    assert_direct_enable_chain(result.raises, payload)
+  end,
+
+  test_judge_replays_enable_successor_after_visible_intake_marker = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:enabled" }, {
+      core.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
+    })
+    h.mock_context_bundle()
+
+    local result = run_judge(payload, opts("intake-enable-successor-replay"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    t.eq(count_calls("codex exec"), 0)
+    assert_direct_enable_chain(result.raises, payload)
+    local enabled_label = find_label_add(result.raises, "fkst-dev:enabled")
+    t.eq(enabled_label.add_labels[1], "fkst-dev:enabled")
+    t.eq(enabled_label.add_labels[2], "fkst-class:expedite")
+  end,
+
+  test_judge_visible_intake_marker_does_not_replay_after_thinking_marker = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:thinking" }, {
+      core.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
+      core.state_marker(payload.proposal_id, "thinking", expected_decision_key(payload)),
+    })
+
+    local result = run_judge(payload, opts("intake-enable-successor-idempotent"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
@@ -780,20 +920,21 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", expected_decision_key(payload, nil, command)),
       command,
     })
     mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Class-level carrier; reintake enables after calibration.")
 
     local result = run_judge(payload, opts("intake-reintake"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 6)
     local command_comment = find_comment_body(result.raises, "operator command accepted: reintake")
     local intake_comment = find_comment_body(result.raises, 'decision="enable"')
     t.is_true(command_comment ~= nil)
     t.is_true(intake_comment ~= nil)
     t.is_true(command_comment.body:find('command="reintake"', 1, true) ~= nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:enabled")
+    t.eq(find_label_add(result.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
+    assert_direct_enable_chain(result.raises, payload, nil, command)
     t.eq(count_calls("codex exec"), 1)
   end,
 
@@ -802,7 +943,7 @@ return {
     local command = trusted_reintake_command("IC_reintake_stale")
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload)),
       command,
     })
 
@@ -817,7 +958,7 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:thinking" }, {
-      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload, nil, command)),
       command,
     })
 

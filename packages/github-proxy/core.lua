@@ -16,6 +16,7 @@ local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_WRITE = true,
+  FKST_DEVLOOP_REPLAY_BUDGET = true,
 }
 local trusted_bot_login = nil
 local max_branch_len = 160
@@ -107,6 +108,22 @@ function M.read_env(name, exec)
     return nil
   end
   return out.stdout
+end
+
+function M.devloop_replay_budget(exec)
+  local ok, value = pcall(M.read_env, "FKST_DEVLOOP_REPLAY_BUDGET", exec)
+  if not ok then
+    return 10
+  end
+  if value == nil then
+    return 10
+  end
+  value = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
+  local parsed = tonumber(value)
+  if parsed == nil or parsed ~= math.floor(parsed) or parsed < 1 or parsed > 100 then
+    error("github-proxy: invalid FKST_DEVLOOP_REPLAY_BUDGET")
+  end
+  return parsed
 end
 
 function M.log_line(level, dept, tag, fields)
@@ -239,6 +256,18 @@ end
 
 function M.issue_label_lock_key(repo, issue_number)
   local id = sanitize_runtime_segment(repo) .. "/issue/" .. sanitize_runtime_segment(issue_number)
+  if #id > 180 then
+    id = id:sub(1, 180)
+  end
+  return "github-proxy/label-lock/" .. id
+end
+
+function M.entity_label_lock_key(repo, target_kind, number)
+  local kind = tostring(target_kind or "issue")
+  if kind ~= "issue" and kind ~= "pr" then
+    kind = "issue"
+  end
+  local id = sanitize_runtime_segment(repo) .. "/" .. kind .. "/" .. sanitize_runtime_segment(number)
   if #id > 180 then
     id = id:sub(1, 180)
   end
@@ -718,6 +747,18 @@ function M.gh_issue_view_labels_cmd(repo, issue_number)
     .. " --json labels"
 end
 
+function M.gh_pr_view_labels_cmd(repo, pr_number)
+  return "gh pr view " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json labels"
+end
+
+function M.gh_pr_view_label_guard_cmd(repo, pr_number)
+  return "gh pr view " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+    .. " --json labels,comments"
+end
+
 function M.gh_label_list_cmd(repo)
   return "gh label list --repo " .. shell_single_quote(repo) .. " --limit 1000 --json name"
 end
@@ -758,6 +799,15 @@ function M.parse_issue_labels(gh_json_stdout)
     end
   end
   return labels
+end
+
+function M.parse_entity_label_view(gh_json_stdout)
+  local decoded = json.decode(gh_json_stdout or "{}")
+  return {
+    labels = M.parse_issue_labels(gh_json_stdout),
+    comments = M.parse_issue_comments(gh_json_stdout),
+    raw = decoded,
+  }
 end
 
 function M.parse_repo_labels(gh_json_stdout)
@@ -828,7 +878,19 @@ function M.gh_issue_edit_labels_cmd(repo, issue_number, add_labels, remove_label
   return cmd
 end
 
-function M.apply_issue_labels(repo, issue_number, add_labels, remove_labels)
+function M.gh_pr_edit_labels_cmd(repo, pr_number, add_labels, remove_labels)
+  local cmd = "gh pr edit " .. shell_single_quote(pr_number)
+    .. " --repo " .. shell_single_quote(repo)
+  for _, label in ipairs(add_labels or {}) do
+    cmd = cmd .. " --add-label " .. shell_single_quote(label)
+  end
+  for _, label in ipairs(remove_labels or {}) do
+    cmd = cmd .. " --remove-label " .. shell_single_quote(label)
+  end
+  return cmd
+end
+
+function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_labels)
   local add = normalized_unique_labels(add_labels)
   local remove = normalized_unique_labels(remove_labels)
   if #add == 0 and #remove == 0 then
@@ -855,12 +917,30 @@ function M.apply_issue_labels(repo, issue_number, add_labels, remove_labels)
     return false
   end
 
+  local kind = tostring(target_kind or "issue")
+  local edit_cmd = nil
+  local edit_context = nil
+  if kind == "issue" then
+    edit_cmd = M.gh_issue_edit_labels_cmd(repo, number, add, safe_remove)
+    edit_context = "gh issue edit"
+  elseif kind == "pr" then
+    edit_cmd = M.gh_pr_edit_labels_cmd(repo, number, add, safe_remove)
+    edit_context = "gh pr edit"
+  else
+    error("github-proxy: invalid label target kind")
+  end
+
   M.gh_exec(
-    M.gh_issue_edit_labels_cmd(repo, issue_number, add, safe_remove),
+    edit_cmd,
     30,
-    "gh issue edit"
+    edit_context
   )
+  M.invalidate_entity_after_write(repo, "issue", issue_number)
   return true
+end
+
+function M.apply_issue_labels(repo, issue_number, add_labels, remove_labels)
+  return M.apply_entity_labels(repo, "issue", issue_number, add_labels, remove_labels)
 end
 
 return M

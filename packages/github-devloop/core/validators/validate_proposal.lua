@@ -1,4 +1,18 @@
 return function(M)
+function M.is_intake_hand_off(hand_off, proposal)
+  if type(hand_off) ~= "table" or type(proposal) ~= "table" then
+    return false
+  end
+  return hand_off.kind == "own-intake-decision"
+    and hand_off.proposal_id == proposal.proposal_id
+    and hand_off.decision == "enable"
+    and hand_off.dedup_key == proposal.dedup_key
+    and M._has_bounded_source_ref(hand_off.source_ref)
+    and type(proposal.source_ref) == "table"
+    and tostring(hand_off.source_ref.kind or "") == tostring(proposal.source_ref.kind or "")
+    and tostring(hand_off.source_ref.ref or "") == tostring(proposal.source_ref.ref or "")
+end
+
 function M.validate_proposal(proposal)
   if type(proposal) ~= "table" then
     return false
@@ -29,6 +43,12 @@ function M.validate_proposal(proposal)
   if proposal.content_fetch ~= nil and not M._is_bounded_string(proposal.content_fetch, 4000) then
     return false
   end
-  return M._has_bounded_source_ref(proposal.source_ref)
+  if not M._has_bounded_source_ref(proposal.source_ref) then
+    return false
+  end
+  if proposal.effect_version ~= nil and not M._is_bounded_string(proposal.effect_version, M._max_dedup_len) then
+    return false
+  end
+  return proposal.intake_hand_off == nil or M.is_intake_hand_off(proposal.intake_hand_off, proposal)
 end
 end

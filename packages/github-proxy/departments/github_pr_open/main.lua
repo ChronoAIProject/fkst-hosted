@@ -301,6 +301,7 @@ function pipeline(event)
         error("github-proxy: gh pr create/list did not return a valid PR number")
       end
       verify_pr_remote_head(repo, pr.number, payload.head_sha, payload.base_branch)
+      core.invalidate_entity_after_write(repo, "pr", pr.number)
     else
       verify_pr_remote_head(repo, pr.number, payload.head_sha, payload.base_branch)
       log.info("github-proxy: PR for head branch already exists; reusing #" .. tostring(pr.number))
@@ -327,6 +328,7 @@ function pipeline(event)
         30,
         "gh issue comment after PR open"
       )
+      core.invalidate_entity_after_write(repo, "issue", payload.issue_number)
     end
 
     local pr_view = core.gh_exec(
@@ -343,6 +345,7 @@ function pipeline(event)
         30,
         "gh pr comment"
       )
+      core.invalidate_entity_after_write(repo, "pr", pr.number)
     end
 
     local add_labels = normalize_labels(payload.issue_label_add)

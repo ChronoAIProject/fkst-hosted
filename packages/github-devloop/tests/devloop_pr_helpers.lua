@@ -124,7 +124,7 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch, time
   for _ = 1, times or 1 do
     t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
       stdout = string.format(
-        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","labels":[],"comments":[%s]}\n',
         json_string(head or "devloop-owner-repo-42-01HY"),
         json_string(head_sha or "def456"),
         json_string(base_branch or "dev"),
@@ -329,8 +329,7 @@ local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_rep
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
-    stdout = string.format(
+  local stdout = string.format(
       '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
@@ -338,7 +337,9 @@ local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_rep
       table.concat(rendered_comments, ","),
       json_string(head_repo or "owner/repo"),
       cross
-    ),
+    )
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
+    stdout = stdout,
     stderr = "",
     exit_code = 0,
   })

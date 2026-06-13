@@ -27,8 +27,21 @@ local function short_sha(value)
   return nil
 end
 
+local function epoch_seconds(value)
+  local n = tonumber(value)
+  if n == nil then
+    return nil
+  end
+  if n > 100000000000000 then
+    n = n / 1000000
+  elseif n > 100000000000 then
+    n = n / 1000
+  end
+  return math.floor(n)
+end
+
 local function format_started_at(started_at)
-  local n = tonumber(started_at)
+  local n = epoch_seconds(started_at)
   if n ~= nil then
     return os.date("!%Y-%m-%dT%H:%M:%SZ", n)
   end
@@ -40,8 +53,8 @@ local function format_started_at(started_at)
 end
 
 local function format_duration(started_at, finished_at)
-  local started = tonumber(started_at)
-  local finished = tonumber(finished_at) or now()
+  local started = epoch_seconds(started_at)
+  local finished = epoch_seconds(finished_at) or now()
   if started == nil or finished < started then
     return nil
   end
@@ -63,8 +76,20 @@ local function role_label(role)
   return M.comment_string(key)
 end
 
-function M.work_card_marker(proposal_id)
-  return '<!-- fkst:github-devloop:work-card:v1 proposal="' .. tostring(proposal_id) .. '" -->'
+function M.work_card_run_id(parts)
+  if type(parts) ~= "table" then
+    error("github-devloop: invalid work card run id")
+  end
+  return M._dedup_key(parts)
+end
+
+function M.work_card_marker(proposal_id, run_id)
+  if run_id == nil or tostring(run_id) == "" then
+    error("github-devloop: invalid work card run id")
+  end
+  return '<!-- fkst:github-devloop:work-card:v1 proposal="' .. tostring(proposal_id)
+    .. '" run_id="' .. tostring(run_id)
+    .. '" -->'
 end
 
 function M.implement_attempt_marker(proposal_id, dedup_key, attempt, started_at)
@@ -117,6 +142,10 @@ function M.build_work_card_comment_request(target, card)
   if type(target) ~= "table" or card == nil or not is_supported_role(card.role) then
     error("github-devloop: invalid work card request")
   end
+  if card.run_id == nil or tostring(card.run_id) == "" then
+    error("github-devloop: missing work card run id")
+  end
+  local run_id = tostring(card.run_id)
   local started_at = format_started_at(card.started_at)
   local lines = {}
   local round = tonumber(card.round)
@@ -143,7 +172,7 @@ function M.build_work_card_comment_request(target, card)
     table.insert(lines, M.comment_string("work_card_duration_label") .. duration)
   end
   table.insert(lines, "")
-  table.insert(lines, M.work_card_marker(card.proposal_id))
+  table.insert(lines, M.work_card_marker(card.proposal_id, run_id))
 
   local source_ref = card.source_ref
   if source_ref == nil then
@@ -151,15 +180,12 @@ function M.build_work_card_comment_request(target, card)
       and M.pr_source_ref(target.repo, target.number)
       or M.issue_source_ref(target.repo, target.number)
   end
-  local version = card.version or card.dedup_key or started_at
   return M.build_entity_comment_request(target, table.concat(lines, "\n"), M._dedup_key({
     "work-card",
     tostring(card.proposal_id),
-    tostring(card.role),
-    tostring(version),
-    tostring(outcome or "running"),
+    run_id,
   }), source_ref, {
-    replace_marker = M.work_card_marker(card.proposal_id),
+    replace_marker = M.work_card_marker(card.proposal_id, run_id),
   })
 end
 

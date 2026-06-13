@@ -30,6 +30,7 @@ The memory files carry detail and incident history. This skill is the decision t
 ## Non-negotiable guardrails (read before any intervention)
 
 - **UNATTENDED MODE — never pop up a question.** This runs unattended. Do NOT use AskUserQuestion; never block on a user prompt. When you are unsure or facing a judgment call (including a risky op below), run `sshx` to think it through and decide — independent worker perspectives are the gate, not a human prompt. Never act rashly, and never stall waiting for a human.
+- **NEVER mutate program state by hand** (user constitution, 2026-06-11): no hand-written state/converge/review-result markers, no touching runtime/durable contents. State is produced ONLY by the program. Fix the PROGRAM first (self-drive preferred; sshx out-of-band only for bootstrap breakage of the program itself), THEN steer through GitHub-surface interfaces: issues, comments (incl. command comments once #278 lands), pushed commits (head-nudge), closing your own issues. The PR#223 hand-crafted re-entry marker is the named anti-example.
 - A hotfix fixes ONLY the one defect. Do NOT unilaterally change architecture, switch branch topology, delete/modify remote branches, or bypass the integration buffer + rollup gate.
 - Destructive/irreversible remote ops - close PR, delete branch, force-push, change default branch - are high-risk: do NOT act rashly, and (unattended) do NOT pop up. Vet via `sshx` (multi-angle), check in-flight PR dependencies + branch ancestry FIRST, and proceed only if sshx confirms it is both safe AND necessary. Deleting a base branch auto-closes its open PRs.
 - Engine (Rust) changes belong in the sibling `fkst-substrate` repo, never here. A package fix must work package-side; an engine need is a separate substrate PR.
@@ -41,12 +42,15 @@ The memory files carry detail and incident history. This skill is the decision t
 
 1. Run `github-devloop` supervise with real write posture, from a worktree checked out to the merged `dev`. It is a long-running foreground process — run it detached (background it and redirect output to a log) so the loop survives across turns.
 
-   Fresh runtime+durable roots mean a clean restart. `<gh-login>` is the `gh auth` user, which is the trusted bot marker author.
+   `FKST_RUNTIME_ROOT` is clearable scratch — a fresh one each run is fine. `FKST_DURABLE_ROOT` is the redb **persistent** delivery store and is **NOT scratch** (per `CLAUDE.md`): **reuse a STABLE durable root across restarts** so in-flight persisted events resume. A *fresh* durable root throws the whole durable queue away and **strands mid-state issues** whose advancing event was sitting in the abandoned store (e.g. an issue stuck at `ready`/`implementing` that never re-triggers implement — observed: #62/#78). Use a fresh durable root ONLY for a deliberate clean-slate wipe, never for a normal restart-to-deploy. `<gh-login>` is the `gh auth` user, which is the trusted bot marker author.
+
+   **EXPORT `BIN` in the supervise environment** (not only `--framework-bin`). The spawned implement/fix codex runs `scripts/run.sh test` in its worktree to verify its own work passes CI before finishing; that resolution needs the engine BIN, which it inherits from the supervise process env (the codex worktree has no `.env` — it is gitignored). Launching bare (`"$BIN" supervise …` without `BIN=…` in the env) leaves the codex unable to run the suite, so the autonomous fix loop cannot close CI failures and every PR with a red check churns to `blocked`. `scripts/run.sh supervise` exports it for you; a direct launch must set `BIN=<engine-bin>` in the env list.
 
    ```sh
+   BIN=<engine-bin> \
    FKST_GITHUB_REPO=<owner/repo> FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN=<gh-login> \
    FKST_DEVLOOP_UPSTREAM_BRANCH=dev FKST_DEVLOOP_INTEGRATION_BRANCH=integration FKST_DEVLOOP_ROLLUP_MERGE=auto \
-   FKST_RUNTIME_ROOT=<fresh> FKST_DURABLE_ROOT=<fresh> \
+   FKST_RUNTIME_ROOT=<fresh-scratch> FKST_DURABLE_ROOT=<STABLE, reused across restarts> \
    "$BIN" supervise --project-root <worktree> \
      --package-root <worktree>/packages/github-devloop --package-root <worktree>/packages/github-proxy --package-root <worktree>/packages/consensus \
      --framework-bin "$BIN"
@@ -58,7 +62,12 @@ The memory files carry detail and incident history. This skill is the decision t
 
 ## What to observe
 
-Per monitoring pass, check:
+**Every activation, FIRST sweep the full board — do not skip to logs.** Enumerate every open issue and every open PR, and for each map its current state marker / label / last transition. The goal is to catch, per item, two failure shapes the log alone hides:
+
+- **Stuck**: an item whose state has not advanced across passes (e.g. parked at `ready`/`reviewing`/`fixing`/`thinking` with no new marker), or an issue sitting with no state at all (intake never decided, or `decline`-dead-ended).
+- **Misbehaving**: an item that transitioned WRONG vs the expected state machine — a sound issue `decline`d or `blocked`, a review reject that should have been a converge, a PR that re-opened/churned, a redundant autonomous PR duplicating an out-of-band fix, a `+0/-0` rollup.
+
+Only after the board sweep, check the running process:
 
 - Supervise alive + 0 panic.
 - State transitions advancing: consensus, review, implement, and merge activity; not only `github_poll`.
@@ -67,7 +76,7 @@ Per monitoring pass, check:
 - Reviews not stuck in `reviewing` across runs with no transition. That is a mid-loop stall.
 - GraphQL quota healthy.
 
-A stall means consensus/review activity stops while only polling continues.
+A stall means consensus/review activity stops while only polling continues. A board item stuck or mis-transitioned with the pipeline otherwise flowing is ALSO a defect — diagnose it (often impoverished codex context: truncated input, no code access, or a terminal-reject gate that should converge), file a consensus-rnd-informed issue, and drive it.
 
 ## Stall decision tree
 
@@ -91,7 +100,8 @@ Use this path for both branch 3 and branch 4 in the Stall decision tree.
   Run workers in the background. Each worker emits `===CONCLUSION===`.
 
 - Land it: PR direct to `dev`. This is the out-of-band exception: the broken pipeline cannot carry its own fix. Watch CI; squash-merge when green.
-- Restart supervise: stop the old one, update the worktree to the merged `dev`, relaunch with fresh roots so the fixed code loads.
+- **Post the review record ON the PR** (before or right after merge): a comment with each reviewer's verdict, blocking findings, fix-pass history, and suite evidence. The audit trail lives on GitHub, not in local `/tmp` logs — same marker-as-fact transparency the autonomous pipeline gives its own PRs (user feedback, PR#226).
+- Restart supervise: stop the old one, update the worktree to the merged `dev`, relaunch with a fresh runtime scratch root but the **SAME stable durable root**, so the fixed code loads while the durable queue's in-flight events resume. Do NOT fresh the durable root on a normal restart — that strands mid-state issues (see the runtime/durable root note in the operating loop). Re-derive from GitHub markers also self-heals mid-state issues, but only for states that have a self-heal branch in `observe_issue`.
 
 ## Nudge after fix & close
 

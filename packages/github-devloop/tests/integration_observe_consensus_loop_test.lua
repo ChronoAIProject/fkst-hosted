@@ -29,7 +29,6 @@ local run_review_pr = h.run_review_pr
 local run_review_result = h.run_review_result
 local run_fix = h.run_fix
 local set_pr_phase_comments = h.set_pr_phase_comments
-local run_review_loop = h.run_review_loop
 local run_review_meta = h.run_review_meta
 local run_merge = h.run_merge
 local json_string = h.json_string
@@ -642,6 +641,29 @@ return {
     t.is_true(find_raise(result.raises, "devloop_ready") ~= nil)
   end,
 
+  test_consensus_result_uses_effect_version_for_ready_state_marker = function()
+    local current = reached({
+      dedup_key = "consensus:github-devloop/issue/owner/repo/42/intake/1234567890",
+      effect_version = "intake/github-devloop/issue/owner/repo/42/2026-06-03T02-02-03Z",
+    })
+    mock_issue_result({ "fkst-dev:thinking" }, {
+      core.state_marker(current.proposal_id, "thinking", current.effect_version),
+    })
+
+    local result = run_result(current, opts("result-effect-version-cas"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment_raise.payload.body:find(core.state_marker(current.proposal_id, "ready", current.effect_version, "result-marker,ready-label,devloop-ready"), 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(core.result_marker(current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.eq(ready_raise.payload.dedup_key, core.build_devloop_ready_payload({
+      proposal_id = current.proposal_id,
+      dedup_key = current.effect_version,
+      source_ref = current.source_ref,
+    }).dedup_key)
+  end,
+
   test_consensus_result_old_version_skips_when_newer_ready_marker_exists = function()
     local old = reached({
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
@@ -792,50 +814,6 @@ return {
     local reconcile_raise = find_raise(result.raises, "devloop_reconcile").payload
     t.eq(reconcile_raise.round, cap)
     t.eq(reconcile_raise.dedup_key, "reconcile:" .. base_version .. "/loop/" .. tostring(cap))
-  end,
-
-  test_review_loop_round_cap_records_round_and_raises_review_reconcile_even_when_question_varies = function()
-    local cap = core.max_converge_rounds()
-    local event = review_unresolved({
-      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/" .. tostring(cap),
-      round = cap,
-      narrowed_question = "Review question " .. tostring(cap),
-      angle_digests = {
-        { angle = "minimal", verdict = "abstain", digest = "review-digest-" .. tostring(cap) },
-      },
-    })
-    local impl_version = reviewing().version
-    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
-    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
-    local sr_digest = core.source_ref_digest(event.source_ref)
-    local function varying_digest(round)
-      return {
-        { angle = "minimal", verdict = "abstain", digest = "review-digest-" .. tostring(round) },
-      }
-    end
-    mock_bot_env()
-    mock_pr_origin({
-      origin_marker,
-      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
-      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 2, "base", "Review question " .. tostring(cap - 2), varying_digest(cap - 2)),
-      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 1, "loop", "Review question " .. tostring(cap - 1), varying_digest(cap - 1)),
-    }, "devloop-owner-repo-42-01HY", "def456")
-
-    local result = run_review_loop(event, opts("review-loop-round-cap"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
-    t.is_true(result.raises[1].payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
-    t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
-    t.eq(result.raises[2].queue, "devloop_review_reconcile")
-    local reconcile_raise = find_raise(result.raises, "devloop_review_reconcile").payload
-    t.eq(reconcile_raise.schema, "github-devloop.review-reconcile.v1")
-    t.eq(reconcile_raise.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(reconcile_raise.review_proposal_id, event.proposal_id)
-    t.eq(reconcile_raise.issue_version, review_version)
-    t.eq(reconcile_raise.head_sha, "def456")
-    t.eq(reconcile_raise.round, cap)
-    t.eq(reconcile_raise.dedup_key, "review-reconcile:" .. review_version .. "/review-loop/" .. tostring(cap))
   end,
 
   test_loop_duplicate_converge_round_marker_skips = function()

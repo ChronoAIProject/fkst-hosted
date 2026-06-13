@@ -24,6 +24,20 @@ function M.gh_issue_list_intake_cmd(repo, limit)
     .. " --json number,title,body,updatedAt,labels,assignees"
 end
 
+function M.gh_issue_list_intake_probe_cmd(repo, limit, since)
+  local bounded_limit = tonumber(limit or 5)
+  if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 10 then
+    error("github-devloop: invalid intake probe issue list limit")
+  end
+  local query = "repos/" .. tostring(repo)
+    .. "/issues?state=open&sort=created&direction=desc&per_page=" .. tostring(math.floor(bounded_limit))
+  if since ~= nil and tostring(since) ~= "" then
+    query = query .. "&since=" .. url_encode(since)
+  end
+  return "gh api "
+    .. M._shell_single_quote(query)
+end
+
 function M.gh_issue_list_decompose_children_cmd(repo, proposal_id)
   return "gh issue list"
     .. " --repo " .. M._shell_single_quote(repo)
@@ -45,14 +59,33 @@ function M.gh_issue_list_recent_closed_cmd(repo, limit)
     .. " --json number,title,closedAt,labels"
 end
 
-function M.gh_issue_list_observe_cmd(repo, label)
+local function bounded_page_number(page)
+  if page == nil then
+    return nil
+  end
+  local n = tonumber(page)
+  if n == nil or n ~= math.floor(n) or n < 1 then
+    error("github-devloop: invalid list page number")
+  end
+  return n
+end
+
+function M.gh_issue_list_observe_cmd(repo, label, page, include_headers)
+  local selected_page = bounded_page_number(page)
+  local include = include_headers and "--include " or ""
+  local paginate = "--paginate --slurp "
+  local page_query = ""
+  if selected_page ~= nil then
+    paginate = ""
+    page_query = "&page=" .. tostring(selected_page)
+  end
   if label == nil or tostring(label) == "" then
-    return "gh api --paginate --slurp "
-      .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
+    return "gh api " .. include .. paginate
+      .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100" .. page_query)
   end
   local selected_label = label
-  return "gh api --paginate --slurp "
-    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100")
+  return "gh api " .. include .. paginate
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100" .. page_query)
 end
 
 function M.gh_issue_list_wip_cmd(repo)
@@ -62,10 +95,6 @@ function M.gh_issue_list_wip_cmd(repo)
     .. " --label " .. M._shell_single_quote(M._enabled_label)
     .. " --limit 100"
     .. " --json number"
-end
-
-function M.gh_issue_list_dependency_reconcile_cmd(repo)
-  return M.gh_issue_list_observe_cmd(repo, M._blocked_on_dependency_label)
 end
 
 function M.gh_dashboard_issue_list_cmd(repo, label)
@@ -171,9 +200,17 @@ function M.gh_dashboard_issue_update_cmd(repo, issue_number, input_file, etag)
     .. " --input " .. M._shell_single_quote(input_file)
 end
 
-function M.gh_pr_list_observe_cmd(repo)
-  return "gh api --paginate --slurp "
-    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
+function M.gh_pr_list_observe_cmd(repo, page, include_headers)
+  local selected_page = bounded_page_number(page)
+  local include = include_headers and "--include " or ""
+  local paginate = "--paginate --slurp "
+  local page_query = ""
+  if selected_page ~= nil then
+    paginate = ""
+    page_query = "&page=" .. tostring(selected_page)
+  end
+  return "gh api " .. include .. paginate
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100" .. page_query)
 end
 
 function M.gh_pr_list_freshness_cmd(repo)
@@ -313,6 +350,18 @@ function M.gh_pr_list_head_base_cmd(repo, head, base)
       .. "&per_page=100") -- gh api --paginate
 end
 
+function M.gh_pr_list_head_cmd(repo, head)
+  if not M._is_git_ref_safe(head) then
+    error("github-devloop: invalid PR head branch")
+  end
+  local owner = repo_owner(repo)
+  local head_filter = owner ~= nil and (owner .. ":" .. tostring(head)) or tostring(head)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo)
+      .. "/pulls?state=open&head=" .. url_encode(head_filter)
+      .. "&per_page=100")
+end
+
 function M.gh_pr_create_cmd(repo, head, base, title, body_file)
   if not M._is_git_ref_safe(head) then
     error("github-devloop: invalid PR head branch")
@@ -444,6 +493,18 @@ function M.git_fetch_branch_cmd(remote, branch)
   return "git fetch " .. M._shell_single_quote(remote) .. " " .. M._shell_single_quote(branch)
 end
 
+function M.git_ls_remote_branch_cmd(remote, branch)
+  local selected_remote = tostring(remote or "")
+  if selected_remote == "" or selected_remote:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid remote branch")
+  end
+  return "git ls-remote " .. M._shell_single_quote(selected_remote)
+    .. " " .. M._shell_single_quote("refs/heads/" .. tostring(branch))
+end
+
 function M.git_fetch_pr_merge_ref_cmd(remote, pr_number)
   if not M._is_git_ref_safe(remote) then
     error("github-devloop: invalid git remote")
@@ -489,6 +550,19 @@ function M.git_worktree_merge_no_edit_cmd(worktree, sha)
     .. M._shell_single_quote(sha)
 end
 
+function M.git_worktree_reset_hard_cmd(worktree, branch)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid reset branch")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " reset --hard refs/heads/"
+    .. M._shell_single_quote(branch)
+end
+
+function M.git_worktree_clean_cmd(worktree)
+  return "git -C " .. M._shell_single_quote(worktree) .. " clean -fd"
+end
+
 function M.git_ahead_count_cmd(upstream, integration)
   if not M._is_git_ref_safe(upstream) then
     error("github-devloop: invalid upstream branch")
@@ -532,6 +606,23 @@ function M.git_push_branch_cmd(branch)
   return "git push origin " .. M._shell_single_quote(branch)
 end
 
+function M.git_switch_branch_cmd(worktree, branch)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " switch " .. M._shell_single_quote(branch)
+end
+
+function M.git_write_file_cmd(worktree, relative_path, contents)
+  local path = tostring(relative_path or "")
+  if path == "" or path:find("[\r\n]") ~= nil or path:sub(1, 1) == "/" or path:find("%.%.", 1, true) ~= nil then
+    error("github-devloop: invalid write path")
+  end
+  return "printf %s " .. M._shell_single_quote(tostring(contents or ""))
+    .. " > " .. M._shell_single_quote(tostring(worktree):gsub("/+$", "") .. "/" .. path)
+end
+
 function M.read_runtime_root_cmd()
   return 'printf %s "$FKST_RUNTIME_ROOT"'
 end
@@ -544,6 +635,14 @@ function M.mkdir_p_cmd(path)
   return "mkdir -p " .. M._shell_single_quote(value) .. " && chmod 0555 " .. M._shell_single_quote(value)
 end
 
+function M.git_worktree_remove_if_present_cmd(worktree)
+  local value = tostring(worktree or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid worktree path")
+  end
+  return "if [ -d " .. M._shell_single_quote(value) .. " ]; then git worktree remove --force " .. M._shell_single_quote(value) .. "; fi"
+end
+
 function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
@@ -553,6 +652,19 @@ function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
   end
   return "mkdir -p " .. M._shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
     .. " && git worktree add -b " .. M._shell_single_quote(branch)
+    .. " " .. M._shell_single_quote(worktree)
+    .. " " .. M._shell_single_quote(base)
+end
+
+function M.git_worktree_add_reset_branch_cmd(worktree, branch, base)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  if not M._is_git_sha(base) then
+    error("github-devloop: invalid base head")
+  end
+  return "mkdir -p " .. M._shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
+    .. " && git worktree add -B " .. M._shell_single_quote(branch)
     .. " " .. M._shell_single_quote(worktree)
     .. " " .. M._shell_single_quote(base)
 end
@@ -600,7 +712,37 @@ function M.path_is_directory_cmd(path)
   return "[ -d " .. M._shell_single_quote(value) .. " ]"
 end
 
+function M.find_worktrees_for_branch(stdout, branch)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  local wanted = "refs/heads/" .. tostring(branch)
+  local path = nil
+  local matches = {}
+  for line in (tostring(stdout or "") .. "\n"):gmatch("([^\n]*)\n") do
+    if line == "" then
+      path = nil
+    else
+      local current_path = line:match("^worktree%s+(.+)$")
+      if current_path ~= nil then
+        path = current_path
+      elseif line == "branch " .. wanted and path ~= nil and path ~= "" then
+        table.insert(matches, path)
+      end
+    end
+  end
+  return matches
+end
+
 function M.find_worktree_for_branch(stdout, branch)
+  local matches = M.find_worktrees_for_branch(stdout, branch)
+  if #matches > 0 then
+    return matches[1]
+  end
+  return nil
+end
+
+function M.find_worktree_for_branch_under_runtime(stdout, branch, runtime_root)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -613,7 +755,10 @@ function M.find_worktree_for_branch(stdout, branch)
       local current_path = line:match("^worktree%s+(.+)$")
       if current_path ~= nil then
         path = current_path
-      elseif line == "branch " .. wanted and path ~= nil and path ~= "" then
+      elseif line == "branch " .. wanted
+        and path ~= nil
+        and path ~= ""
+        and M.path_under_runtime_root(runtime_root, path) then
         return path
       end
     end

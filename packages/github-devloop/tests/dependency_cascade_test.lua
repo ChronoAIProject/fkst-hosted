@@ -63,7 +63,8 @@ end
 
 local function blocked_by_json(nodes)
   local rendered = {}
-  for _, node in ipairs(nodes or {}) do
+  local input = nodes or {}
+  for _, node in ipairs(input) do
     local state_reason = node.state_reason or node.stateReason or ""
     table.insert(rendered, string.format(
       '{"number":%s,"state":"%s","stateReason":"%s","repository":{"nameWithOwner":"%s"}}',
@@ -73,7 +74,11 @@ local function blocked_by_json(nodes)
       json_string(node.repo or repo)
     ))
   end
-  return '{"data":{"repository":{"issue":{"blockedBy":{"nodes":[' .. table.concat(rendered, ",") .. ']}}}}}\n'
+  return '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":'
+    .. tostring(#input)
+    .. ',"pageInfo":{"hasNextPage":false},"nodes":['
+    .. table.concat(rendered, ",")
+    .. ']}}}}}\n'
 end
 
 local function mock_blocked_by(issue_number, nodes)
@@ -212,6 +217,48 @@ local function mock_implement_issue(labels, comments)
   })
 end
 
+local function mock_repo()
+  t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+    stdout = repo,
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_liveness_issue_list(items)
+  local rendered = {}
+  for _, item in ipairs(items or {}) do
+    table.insert(rendered, string.format(
+      '{"number":%d,"state":"%s","updated_at":"%s"}',
+      tonumber(item.number),
+      json_string(item.state or "open"),
+      json_string(item.updated_at or "")
+    ))
+  end
+  t.mock_command(core.gh_issue_list_observe_cmd(repo), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_liveness_pr_list(items)
+  local rendered = {}
+  for _, item in ipairs(items or {}) do
+    table.insert(rendered, string.format(
+      '{"number":%d,"state":"%s","updated_at":"%s"}',
+      tonumber(item.number),
+      json_string(item.state or "open"),
+      json_string(item.updated_at or "")
+    ))
+  end
+  t.mock_command(core.gh_pr_list_observe_cmd(repo), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function reached()
   return {
     schema = "consensus.consensus_reached.v1",
@@ -237,19 +284,19 @@ local function run_observe()
   }, h.opts("dependency-observe"))
 end
 
+local function run_liveness_scan()
+  return t.run_department("departments/liveness_scan/main.lua", {
+    queue = "devloop_liveness_tick",
+    payload = { schema = "github-devloop.tick.v1" },
+    ts = "2026-06-03T01:32:03Z",
+  }, h.opts("dependency-liveness-scan"))
+end
+
 local function run_implement()
   return t.run_department("departments/implement/main.lua", {
     queue = "devloop_ready",
     payload = h.ready(),
   }, h.opts("dependency-implement"))
-end
-
-local function run_dependency_reconcile()
-  return t.run_department("departments/dependency_reconcile/main.lua", {
-    queue = "devloop_dependency_reconcile_tick",
-    payload = { schema = "github-devloop.v1" },
-    ts = "2026-06-03T01:32:03Z",
-  }, h.opts("dependency-reconcile"))
 end
 
 local function find_raise(raises, queue, predicate)
@@ -477,6 +524,11 @@ return {
   end,
 
   test_dependency_gate_cross_repo_and_failures_unresolvable = function()
+    t.mock_command(core.read_env_command("FKST_DEVLOOP_MANAGED_SIBLING_REPOS"), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
     mock_blocked_by(42, { { number = 41, repo = "other/repo" } })
     local cross_repo = core.dependency_gate(repo, 42)
     t.eq(cross_repo.ok, false)
@@ -558,6 +610,46 @@ return {
     t.is_true(clear ~= nil)
   end,
 
+  test_liveness_scan_reinjected_dependency_hold_uses_observe_gate = function()
+    mock_repo()
+    mock_liveness_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
+    mock_liveness_pr_list({})
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 53 }),
+      }
+    )
+    local scanned = run_liveness_scan()
+    t.eq(scanned.exit_code, 0)
+    local changed = find_raise(scanned.raises, "github-proxy.github_entity_changed")
+    t.is_true(changed ~= nil)
+
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 53 }),
+      }
+    )
+    mock_blocked_by(42, { { number = 53 } })
+    mock_blocked_by(53, {})
+    mock_blocker_issue(53, "merged")
+    local observed = t.run_department("departments/observe_issue/main.lua", {
+      queue = "github-proxy.github_entity_changed",
+      payload = h.issue({
+        dedup_key = changed.payload.dedup_key,
+        source_ref = changed.payload.source_ref,
+      }),
+    }, h.opts("dependency-liveness-observe"))
+    t.eq(observed.exit_code, 0)
+    t.is_true(has_queue(observed.raises, "devloop_ready"))
+    t.is_true(has_marker(observed.raises, "fkst:github-devloop:dependency-release:v1"))
+  end,
+
   test_consensus_result_releases_not_planned_blocker_with_void_audit = function()
     mock_result_issue()
     mock_blocked_by(42, { { number = 56, state = "CLOSED", state_reason = "NOT_PLANNED" } })
@@ -588,59 +680,6 @@ return {
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
     end)
     t.is_true(clear ~= nil)
-  end,
-
-  test_dependency_reconcile_requeues_dependency_held_issues_without_updated_at_bump = function()
-    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
-      stdout = repo,
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
-      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
-    mock_observe_issue(
-      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
-      {
-        core.state_marker(proposal_id, "ready", version),
-        core.dependency_wait_marker(proposal_id, version, { 7 }),
-      }
-    )
-    local result = run_dependency_reconcile()
-    t.eq(result.exit_code, 0)
-    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
-    t.is_true(raised ~= nil)
-    t.eq(raised.payload.type, "issue")
-    t.eq(raised.payload.repo, repo)
-    t.eq(raised.payload.number, 42)
-    t.eq(raised.payload.updated_at, "2026-06-03T01:02:03Z")
-    t.eq(raised.payload.source, "dependency-reconcile")
-    t.eq(raised.payload.source_ref.ref, "owner/repo#issue/42")
-    t.is_true(tostring(raised.payload.dedup_key):find("dependency%-reconcile", 1) ~= nil)
-  end,
-
-  test_dependency_reconcile_skips_label_without_trusted_hold_marker = function()
-    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
-      stdout = repo,
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(core.gh_issue_list_dependency_reconcile_cmd(repo), {
-      stdout = '[{"number":42,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
-    mock_observe_issue(
-      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
-      {
-        core.state_marker(proposal_id, "ready", version),
-      }
-    )
-    local result = run_dependency_reconcile()
-    t.eq(result.exit_code, 0)
-    t.eq(has_queue(result.raises, "github-proxy.github_entity_changed"), false)
   end,
 
   test_consensus_result_holds_completed_blocker_without_waiver = function()

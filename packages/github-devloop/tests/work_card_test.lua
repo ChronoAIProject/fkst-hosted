@@ -9,6 +9,10 @@ local function source_ref()
   }
 end
 
+local function run_id()
+  return core.work_card_run_id({ "fix", "v1/fix/2" })
+end
+
 return {
   test_work_card_comment_request_is_replaceable_view = function()
     local request = core.build_work_card_comment_request({
@@ -18,6 +22,7 @@ return {
     }, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       role = "fix",
+      run_id = run_id(),
       version = "v1/fix/2",
       round = 2,
       started_at = 1,
@@ -33,8 +38,87 @@ return {
     t.is_true(request.body:find("Working: fix", 1, true) ~= nil)
     t.is_true(request.body:find("Duration: 1m 30s", 1, true) ~= nil)
     t.is_true(request.body:find("fkst:github-devloop:work-card:v1", 1, true) ~= nil)
+    t.is_true(request.body:find('run_id="' .. run_id() .. '"', 1, true) ~= nil)
     t.eq(request.body:find("fkst:github-devloop:state:v1", 1, true), nil)
-    t.eq(request.replace_marker, core.work_card_marker("github-devloop/issue/owner/repo/42"))
+    t.eq(request.replace_marker, core.work_card_marker("github-devloop/issue/owner/repo/42", run_id()))
+    t.eq(request.dedup_key, core._dedup_key({
+      "work-card",
+      "github-devloop/issue/owner/repo/42",
+      run_id(),
+    }))
+  end,
+
+  test_work_card_dedup_key_ignores_mutable_outcome = function()
+    local target = {
+      kind = "pr",
+      repo = "owner/repo",
+      number = 7,
+    }
+    local first = core.build_work_card_comment_request(target, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      role = "fix",
+      run_id = run_id(),
+      started_at = 1,
+      outcome = "running",
+      source_ref = source_ref(),
+    })
+    local final = core.build_work_card_comment_request(target, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      role = "fix",
+      run_id = run_id(),
+      started_at = 1,
+      finished_at = 91,
+      outcome = "completed: pushed for re-review",
+      source_ref = source_ref(),
+    })
+
+    t.eq(final.dedup_key, first.dedup_key)
+    t.eq(final.replace_marker, first.replace_marker)
+  end,
+
+  test_work_card_formats_epoch_milliseconds_as_sane_iso_8601 = function()
+    local request = core.build_work_card_comment_request({
+      kind = "pr",
+      repo = "owner/repo",
+      number = 7,
+    }, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      role = "review",
+      run_id = core.work_card_run_id({ "review", "v1/review/3" }),
+      version = "v1/review/3",
+      round = 3,
+      started_at = 1781296278000,
+      finished_at = 1781296368000,
+      outcome = "decision: approve",
+      source_ref = source_ref(),
+    })
+
+    t.is_true(request.body:find("Started: 2026%-06%-12T20:31:18Z") ~= nil)
+    t.eq(request.body:find("58417", 1, true), nil)
+    t.is_true(request.body:find("Duration: 1m 30s", 1, true) ~= nil)
+  end,
+
+  test_work_card_formats_epoch_microseconds_as_sane_iso_8601 = function()
+    local request = core.build_work_card_comment_request({
+      kind = "pr",
+      repo = "owner/repo",
+      number = 7,
+    }, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      role = "review",
+      run_id = core.work_card_run_id({ "review", "v1/review/3" }),
+      version = "v1/review/3",
+      round = 3,
+      started_at = 1781296278000000,
+      finished_at = 1781296368000000,
+      outcome = "decision: approve",
+      source_ref = source_ref(),
+    })
+
+    t.is_true(request.body:find("Started: 2026%-06%-12T20:31:18Z") ~= nil)
+    t.is_true(request.body:find("Started: 20%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ") ~= nil)
+    t.eq(request.body:find("58417", 1, true), nil)
+    t.is_true(request.body:find("Duration: 1m 30s", 1, true) ~= nil)
   end,
 
   test_review_pr_raises_work_card_with_review_proposal = function()
@@ -64,7 +148,8 @@ return {
       return tostring(payload.body or ""):find("fkst:github-devloop:work-card:v1", 1, true) ~= nil
     end)
     t.is_true(card ~= nil)
-    t.eq(card.payload.replace_marker, core.work_card_marker("github-devloop/issue/owner/repo/42"))
+    t.is_true(tostring(card.payload.replace_marker or ""):find("fkst:github-devloop:work-card:v1", 1, true) ~= nil)
+    t.is_true(tostring(card.payload.replace_marker or ""):find('run_id="review/', 1, true) ~= nil)
     t.is_true(h.find_raise(result.raises, "consensus.proposal") ~= nil)
   end,
 }
