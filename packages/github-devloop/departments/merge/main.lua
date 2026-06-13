@@ -121,6 +121,29 @@ local function gate_baseline_sha_for_reason(proposal_id, pr_number, pr, reason)
   return gate_baseline_sha_from_pr(pr)
 end
 
+local function pr_head_contains_current_base(pr, branches)
+  local base_head, base_reason = core.current_base_head(branches.integration)
+  if base_head == nil then
+    return false, base_reason
+  end
+  local head_sha = tostring(pr and pr.head_sha or "")
+  if not core.is_safe_head_sha(head_sha) then
+    return false, "unsafe-pr-head"
+  end
+  local result = exec_sync({ cmd = core.git_is_ancestor_cmd(base_head, head_sha), timeout = 30 })
+  if result.exit_code == 0 then
+    return true, "current-base-contained"
+  end
+  return false, "current-base-not-contained"
+end
+
+local function should_wait_for_stale_mergeability(pr, branches, mergeable_reason)
+  if not core.is_not_mergeable_reason(mergeable_reason) then
+    return false, "not-stale-mergeability"
+  end
+  return pr_head_contains_current_base(pr, branches)
+end
+
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
   local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
   local fix_version = core.fix_version_from_review_version(current_state.version)
@@ -559,6 +582,11 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       end
       local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
       if not mergeable and core.is_not_mergeable_reason(mergeable_reason) then
+        local stale_mergeability, stale_reason = should_wait_for_stale_mergeability(current_pr, branches, mergeable_reason)
+        if stale_mergeability then
+          log_gate(merge_ready, "dry-run", stale_reason)
+          error("github-devloop: merge wait on stale " .. tostring(mergeable_reason) .. "; retrying")
+        end
         if not write_enabled then
           log_gate(merge_ready, "dry-run", "speculative fix requires FKST_GITHUB_WRITE=1")
           return
@@ -611,6 +639,11 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     if not core.is_not_mergeable_reason(mergeable_reason) then
       log_gate(merge_ready, "dry-run", mergeable_reason)
       error("github-devloop: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
+    end
+    local stale_mergeability, stale_reason = should_wait_for_stale_mergeability(current_pr, branches, mergeable_reason)
+    if stale_mergeability then
+      log_gate(merge_ready, "dry-run", stale_reason)
+      error("github-devloop: merge wait on stale " .. tostring(mergeable_reason) .. "; retrying")
     end
     log_gate(merge_ready, "fixing", mergeable_reason)
     raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason, queue_position)
@@ -724,6 +757,11 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
   if not merge_ok and core.is_not_mergeable_reason(merge_reason) then
+    local stale_mergeability, stale_reason = should_wait_for_stale_mergeability(merge_rechecked_pr, branches, merge_reason)
+    if stale_mergeability then
+      log_gate(merge_ready, "dry-run", stale_reason)
+      error("github-devloop: merge wait on write-time stale " .. tostring(merge_reason) .. "; retrying")
+    end
     log_gate(merge_ready, "fixing", merge_reason)
     raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason, queue_position)
     return

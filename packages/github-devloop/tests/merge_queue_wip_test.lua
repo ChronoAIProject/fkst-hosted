@@ -545,6 +545,36 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
   end,
 
+  test_merge_conflicting_but_current_base_contained_waits_without_fixing = function()
+    local current_head = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    local base_event = merge_ready()
+    local current_review = core.pr_review_proposal_id("owner/repo", base_event.pr_number, base_event.version, current_head)
+    local current = merge_ready({
+      review_proposal_id = current_review,
+      review_dedup_key = "consensus:" .. current_review .. "/review",
+      reviewed_head_sha = current_head,
+    })
+    local origin_marker = core.pr_origin_marker(current.proposal_id, "42", "devloop-owner-repo-42-01HY", current.version, "dev")
+    local base_head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(current))
+    mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", current.reviewed_head_sha, "OPEN", "owner/repo", false, "MERGEABLE", "DIRTY")
+    mock_current_base_head(base_head)
+    t.mock_command("git merge-base --is-ancestor '" .. base_head .. "' '" .. current.reviewed_head_sha .. "'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_merge(current, opts("merge-conflicting-base-contained", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+  end,
+
   test_merge_batch_window_merges_disjoint_pair_in_one_pass = function()
     local first = event_for_pr(7, 42, "2026-06-03T00-00-00Z", "def456")
     local second = event_for_pr(8, 43, "2026-06-03T00-01-00Z", "fed789")
