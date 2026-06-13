@@ -159,19 +159,8 @@ local function split_included_headers(stdout)
   return head, body
 end
 
-local function header_value(headers, name)
-  local target = tostring(name or ""):lower()
-  for line in tostring(headers or ""):gmatch("[^\r\n]+") do
-    local key, value = line:match("^%s*([^:]+):%s*(.-)%s*$")
-    if key ~= nil and key:lower() == target then
-      return value
-    end
-  end
-  return nil
-end
-
 local function parse_dashboard_issue_get(stdout)
-  local headers, body = split_included_headers(stdout)
+  local _, body = split_included_headers(stdout)
   local decoded = json.decode(body or "{}")
   if type(decoded) ~= "table" then
     decoded = {}
@@ -190,7 +179,6 @@ local function parse_dashboard_issue_get(stdout)
     author_login = author_login,
     body = tostring(decoded.body or ""),
     updated_at = decoded.updated_at or decoded.updatedAt,
-    etag = header_value(headers, "etag"),
   }
 end
 
@@ -858,24 +846,15 @@ function M.publish_observability_dashboard(repo, dashboard, limits, deadline)
       .. " hash=" .. tostring(dashboard.hash))
     return "stale"
   end
-  if refreshed.etag == nil or tostring(refreshed.etag) == "" then
-    log.info("github-devloop dept=observability tag=DASHBOARD_CAS_MISMATCH issue=" .. tostring(current.number)
-      .. " expected_version=" .. tostring(current_version or "")
-      .. " actual_version=" .. tostring(refreshed_version or "")
-      .. " reason=missing-etag"
-      .. " hash=" .. tostring(dashboard.hash))
-    return "cas-mismatch"
-  end
-
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-  local updated = M.observability_exec(M.gh_dashboard_issue_update_cmd(repo, current.number, path, refreshed.etag), limits, deadline, "gh dashboard issue update")
+  local updated = M.observability_exec(M.gh_dashboard_issue_update_cmd(repo, current.number, path), limits, deadline, "gh dashboard issue update")
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")
     if stderr:find("412", 1, true) ~= nil or stderr:find("Precondition Failed", 1, true) ~= nil then
       log.info("github-devloop dept=observability tag=DASHBOARD_CAS_MISMATCH issue=" .. tostring(current.number)
         .. " expected_version=" .. tostring(refreshed_version or "")
         .. " actual_version=unknown"
-        .. " reason=etag-precondition"
+        .. " reason=patch-precondition"
         .. " hash=" .. tostring(dashboard.hash))
       return "cas-mismatch"
     end
