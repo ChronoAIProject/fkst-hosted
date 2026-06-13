@@ -4,6 +4,12 @@ local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
 
+local function find_label_raise(raises, target_kind)
+  return find_raise(raises, "github-proxy.github_issue_label_request", function(payload)
+    return tostring(payload.target_kind or "issue") == tostring(target_kind or "issue")
+  end)
+end
+
 local function mock_pr_view_origin(comments, head, head_sha, state, base_branch)
   local rendered_comments = {}
   for _, comment in ipairs(comments or {}) do
@@ -69,10 +75,14 @@ return {
     }, opts("pr-opened-direct-reviewing"))
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 4)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    local pr_label_raise = find_label_raise(result.raises, "pr")
     local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
     t.eq(comment_raise.payload.pr_number, 7)
+    t.eq(pr_label_raise.payload.target_number, 7)
+    t.eq(pr_label_raise.payload.expected_state, "reviewing")
+    t.eq(pr_label_raise.payload.expected_version, event.impl_version)
     t.eq(reviewing_raise.payload.proposal_id, event.proposal_id)
     t.eq(reviewing_raise.payload.pr_number, 7)
     t.eq(reviewing_raise.payload.version, event.impl_version)

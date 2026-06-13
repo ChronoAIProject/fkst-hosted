@@ -27,7 +27,11 @@ return function(M, h)
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "devloop_reviewing" }, "review payload is complete when current PR head is fetched and no head-bound review result exists"),
+    effects = effect(
+      { "devloop_reviewing", "pr-state-label" },
+      "reviewing replay is complete when current PR head is fetched, no head-bound review result exists, and the PR-local state label projection is requested",
+      "build_reconcile_pr_state_label_request"
+    ),
     marker_facts = "state:v1 reviewing plus PR head facts",
     kickoff = "devloop_reviewing",
     replay = "PR observe re-derives review kickoff from current PR head and issue version.",

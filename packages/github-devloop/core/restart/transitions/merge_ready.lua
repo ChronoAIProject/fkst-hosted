@@ -34,8 +34,8 @@ return function(M, h)
     },
     version_identity = "strip_transition_version_suffixes(merge-ready.version)",
     effects = effect(
-      { "review-carry-over-marker", "devloop_merge_ready" },
-      "merge-ready replay is complete when head-bound approval and fetched PR head match, or when review_carry_over_marker proves the carried approval marker was written",
+      { "review-carry-over-marker", "devloop_merge_ready", "pr-state-label" },
+      "merge-ready replay is complete when head-bound approval and fetched PR head match, or when review_carry_over_marker proves the carried approval marker was written; the PR-local state label projection is requested when the PR label is stale",
       "review_carry_over_marker"
     ),
     marker_facts = "state:v1 merge-ready plus merge-ready:v1",
