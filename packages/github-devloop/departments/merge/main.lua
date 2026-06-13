@@ -10,6 +10,8 @@ M.spec = {
     "github-proxy.github_pr_comment_request",
     "devloop_reviewing",
     "devloop_fixing",
+    "devloop_fix_reconcile",
+    "devloop_decompose",
     "devloop_merge_queue_tick",
   },
   fanout = { "devloop_merge_queue_tick" },
@@ -123,8 +125,27 @@ local function should_wait_for_stale_mergeability(pr, branches, mergeable_reason
   return pr_head_contains_current_base(pr, branches)
 end
 
+local function raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
+  local fix_reconcile = core.build_devloop_fix_reconcile_payload({
+    proposal_id = merge_ready.proposal_id,
+    review_proposal_id = merge_ready.review_proposal_id,
+    review_dedup_key = merge_ready.review_dedup_key,
+    reviewed_head_sha = merge_ready.reviewed_head_sha,
+    pr_number = merge_ready.pr_number,
+    source_ref = source_ref,
+  }, current_state.version)
+  local decompose = core.build_devloop_decompose_payload(fix_reconcile)
+  core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "blocked", "applied(fix-loop-max-rounds)", reason)
+  core.log_raise("merge", merge_ready.proposal_id, "devloop_fix_reconcile", fix_reconcile)
+  core.log_raise("merge", merge_ready.proposal_id, "devloop_decompose", decompose)
+end
+
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
   local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
+  if core.version_fix_round(current_state.version) >= core.max_fix_rounds() then
+    raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
+    return
+  end
   local fix_version = core.fix_version_from_review_version(current_state.version)
   local gate_baseline_sha = gate_baseline_sha_for_reason(merge_ready.proposal_id, merge_ready.pr_number, current_pr, reason)
   local predecessor_set = nil
