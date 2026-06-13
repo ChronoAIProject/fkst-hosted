@@ -462,6 +462,7 @@ local function state_marker_comment_verified(M, repo, hand_off)
     body = decoded.body,
     author = decoded.author,
     author_login = decoded.author_login,
+    user = decoded.user,
     created_at = decoded.createdAt or decoded.created_at,
   }
   if not M._is_trusted_comment(comment) then

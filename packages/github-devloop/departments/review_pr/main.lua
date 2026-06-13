@@ -78,7 +78,7 @@ function pipeline(event)
       return
     end
 
-    if tostring(state.version or "") ~= tostring(reviewing.version) then
+    if core.strip_transition_version_suffixes(state.version) ~= core.strip_transition_version_suffixes(reviewing.version) then
       core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
       return
     end

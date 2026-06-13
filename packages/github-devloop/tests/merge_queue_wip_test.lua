@@ -384,6 +384,9 @@ return {
     })
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
     mock_issue_close()
+    mock_diff_name_only(7, { "packages/a.lua" })
+    mock_current_base_head("abc124")
+    mock_queue_list({})
 
     local polled = run_merge_queue_tick(opts("merge-queue-poll-drives-head", {
       FKST_GITHUB_WRITE = "1",

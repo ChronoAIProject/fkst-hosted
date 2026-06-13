@@ -576,7 +576,7 @@ end
 local function replay_pr_open(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local link = facts.link
-  if link == nil or tostring(state.version or "") ~= tostring(link.impl_version or "") then
+  if link == nil or M.strip_transition_version_suffixes(state.version) ~= M.strip_transition_version_suffixes(link.impl_version) then
     return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(pr-link)", "pr-open replay requires a same-version pr-link marker")
   end
   for _, item in ipairs(facts.snapshot.prs or {}) do
