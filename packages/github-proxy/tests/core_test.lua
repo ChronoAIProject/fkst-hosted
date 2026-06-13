@@ -5,6 +5,7 @@ return {
   test_env_command_whitelist = function()
 	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
 	    t.eq(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), 'printf %s "$FKST_GITHUB_BOT_LOGIN"')
+	    t.eq(core.read_env_command("FKST_DEVLOOP_REPLAY_BUDGET"), 'printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"')
 	    t.raises(function()
 	      core.read_env_command("HOME")
 	    end)
@@ -15,6 +16,39 @@ return {
       return { stdout = "", stderr = "", exit_code = 0 }
     end)
     t.is_nil(value)
+  end,
+
+  test_devloop_replay_budget_defaults_to_ten = function()
+    local value = core.devloop_replay_budget(function(_cmd)
+      return { stdout = "", stderr = "", exit_code = 0 }
+    end)
+    t.eq(value, 10)
+  end,
+
+  test_devloop_replay_budget_parses_bounded_positive_integer = function()
+    local value = core.devloop_replay_budget(function(cmd)
+      t.eq(cmd, 'printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"')
+      return { stdout = " 7 ", stderr = "", exit_code = 0 }
+    end)
+    t.eq(value, 7)
+  end,
+
+  test_devloop_replay_budget_rejects_invalid_values = function()
+    t.raises(function()
+      core.devloop_replay_budget(function(_cmd)
+        return { stdout = "0", stderr = "", exit_code = 0 }
+      end)
+    end)
+    t.raises(function()
+      core.devloop_replay_budget(function(_cmd)
+        return { stdout = "101", stderr = "", exit_code = 0 }
+      end)
+    end)
+    t.raises(function()
+      core.devloop_replay_budget(function(_cmd)
+        return { stdout = "1.5", stderr = "", exit_code = 0 }
+      end)
+    end)
   end,
 
   test_entity_cache_key = function()
