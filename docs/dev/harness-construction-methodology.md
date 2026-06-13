@@ -76,7 +76,7 @@ A *harness* is the pairing of (1) a CLOSED governing theory for a class of probl
 
    - The substrate completeness predicate: a change is complete only when it has evidence for any trusted-base expansion, keeps tier boundaries, records facts in git/filesystem/fcntl, has classifiable failures, and has applicable tests or conformance in `fkst-substrate/CLAUDE.md:153`.
    - The package judgment pipeline doctrine: gates are codex judgment pipelines plus event flow, not per-event human labels, in `fkst-packages/CLAUDE.md:68`.
-   - The consensus/review flow for `github-devloop`, where issue design, implementation, PR review, fix, and merge each move through marker-backed state and fail-closed gates in `fkst-packages/CLAUDE.md:11` and `docs/devloop-design.md:110` through `docs/devloop-design.md:121`.
+   - The consensus/review flow for `github-devloop`, where issue design, implementation, PR review, fix, and merge each move through marker-backed state and fail-closed gates in `fkst-packages/CLAUDE.md:11` and `docs/dev/devloop-design.md:110` through `docs/dev/devloop-design.md:121`.
 
 8. **HONEST GAP (Gödel humility)** -- the system can FORCE declared invariants but cannot PROVE it has discovered all relevant ones.
 
@@ -88,7 +88,7 @@ A *harness* is the pairing of (1) a CLOSED governing theory for a class of probl
 | --- | --- |
 | R&D / design | `FRAME`, `CLOSE`, and `BOUND` happen in the proposal. Today the gate is harness-first consensus/review meta-judgment, which challenges prose-only plans and unframed novelty at the doctrine level. The exact `META-GATE` predicate (reject `enforcing_gate=none`, require named deviations) is the PRESCRIBED hardening of that gate (Section 4), not yet a built field gate. Anchors: `fkst-packages/CLAUDE.md:54`, `fkst-packages/CLAUDE.md:56`, `fkst-packages/CLAUDE.md:68`. |
 | Test | The gate is executable contract tests (`*_test.lua`) plus conformance. Behavioral invariants land here. `G5` -- every `*_test.lua` yields at least one engine-enumerated PASS -- is the meta-check that the test gate itself is real. Anchors: `fkst-packages/CLAUDE.md:73`, `scripts/run.sh:142` through `scripts/run.sh:194`, and `fkst-substrate/SPEC.md:82`. |
-| Deploy | The gate is CI green plus branch protection / required status checks server-side. Irreversible actions such as merge require the strongest real gates: trusted marker, independent review approval, head-bound proof, CI/mergeability, and server-side branch protection. Anchors: `.github/workflows/ci.yml:62` through `.github/workflows/ci.yml:71`, `fkst-packages/CLAUDE.md:32`, and `docs/devloop-design.md:121`. |
+| Deploy | The gate is CI green plus branch protection / required status checks server-side. Irreversible actions such as merge require the strongest real gates: trusted marker, independent review approval, head-bound proof, CI/mergeability, and server-side branch protection. Anchors: `.github/workflows/ci.yml:62` through `.github/workflows/ci.yml:71`, `fkst-packages/CLAUDE.md:32`, and `docs/dev/devloop-design.md:121`. |
 
 It is the SAME eight-stage loop each time; what shifts per phase is chiefly the gate layer selected at stage 4 -- and with it the authority surface: proposal/review meta-judgment at R&D, executable tests + conformance at test time, CI + server-side branch protection at deploy.
 
@@ -108,7 +108,7 @@ It is the SAME eight-stage loop each time; what shifts per phase is chiefly the 
 
 4. **Deploy gate**
 
-   The concrete mechanisms are CI workflow, branch protection, required status checks, and merge-time head binding. CI builds the engine and runs `scripts/run.sh test` in `.github/workflows/ci.yml:62` through `.github/workflows/ci.yml:71`. Package doctrine requires CI green for PR merge in `fkst-packages/CLAUDE.md:84`. `github-devloop` merge requires trusted `review-result:v1 approve`, trusted head-bound `merge-ready:v1`, same head, CI/mergeability, `--match-head-commit`, and server-side branch protection in `fkst-packages/CLAUDE.md:11`, `fkst-packages/CLAUDE.md:32`, and `docs/devloop-design.md:121`.
+   The concrete mechanisms are CI workflow, branch protection, required status checks, and merge-time head binding. CI builds the engine and runs `scripts/run.sh test` in `.github/workflows/ci.yml:62` through `.github/workflows/ci.yml:71`. Package doctrine requires CI green for PR merge in `fkst-packages/CLAUDE.md:84`. `github-devloop` merge requires trusted `review-result:v1 approve`, trusted head-bound `merge-ready:v1`, same head, CI/mergeability, `--match-head-commit`, and server-side branch protection in `fkst-packages/CLAUDE.md:11`, `fkst-packages/CLAUDE.md:32`, and `docs/dev/devloop-design.md:121`.
 
 ## 4. The meta-gate, made executable
 
