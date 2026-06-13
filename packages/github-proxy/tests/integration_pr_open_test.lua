@@ -18,6 +18,7 @@ local mock_comment_view_failure = h.mock_comment_view_failure
 local mock_label_view = h.mock_label_view
 local mock_pr_open_guard = h.mock_pr_open_guard
 local mock_branch_head = h.mock_branch_head
+local mock_branch_head_descends = h.mock_branch_head_descends
 local mock_non_branch_ref_head = h.mock_non_branch_ref_head
 local mock_comment_write = h.mock_comment_write
 local mock_label_write = h.mock_label_write
@@ -49,7 +50,12 @@ return {
   test_pr_open_request_pushes_creates_comments_and_labels = function()
     mock_write_env("1")
     mock_bot_env()
-    mock_pr_open_guard(nil, pr_open_guard_comments())
+    local event = pr_open_event()
+    event.payload.claim = {
+      owner = "fkst-test-bot",
+      source_ref = event.payload.source_ref,
+    }
+    mock_pr_open_guard(nil, pr_open_guard_comments(), { "fkst-test-bot" })
     mock_branch_head("abc123")
     mock_pr_head_list("[]\n")
     mock_git_push()
@@ -62,7 +68,7 @@ return {
     mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_label_write()
 
-    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-write", {
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-write", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
@@ -71,6 +77,24 @@ return {
     t.eq(count_calls("gh issue comment"), 1)
     t.eq(count_calls("gh pr comment"), 1)
     t.eq(count_calls("gh issue edit"), 1)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "github_entity_changed")
+    t.eq(result.raises[1].payload.type, "pr")
+    t.eq(result.raises[1].payload.repo, "owner/x")
+    t.eq(result.raises[1].payload.number, 7)
+    t.eq(result.raises[1].payload.source, "github_pr_open")
+    t.eq(result.raises[1].payload.source_ref.ref, "owner/x#pr/7")
+    t.eq(result.raises[2].queue, "github_pr_opened")
+    t.eq(result.raises[2].payload.schema, "github-proxy.pr-opened.v1")
+    t.eq(result.raises[2].payload.repo, "owner/x")
+    t.eq(result.raises[2].payload.issue_number, 42)
+    t.eq(result.raises[2].payload.proposal_id, "github-devloop/issue/owner/x/42")
+    t.eq(result.raises[2].payload.impl_version, "v1")
+    t.eq(result.raises[2].payload.pr_number, 7)
+    t.eq(result.raises[2].payload.branch, "devloop-owner-x-42-01HY")
+    t.eq(result.raises[2].payload.head_sha, "abc123")
+    t.eq(result.raises[2].payload.base_branch, "dev")
+    t.eq(result.raises[2].payload.source_ref.ref, "owner/x#pr/7")
     t.eq(count_calls("--json labels,comments"), 2)
     local create = calls_matching("gh pr create")[1]
     t.eq(create.rendered:find("--json", 1, true), nil)
@@ -83,6 +107,26 @@ return {
 
     local pr_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md")
     t.is_true(pr_written:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
+  end,
+
+  test_pr_open_request_skips_when_issue_claim_is_lost = function()
+    mock_write_env("1")
+    mock_bot_env()
+    local event = pr_open_event()
+    event.payload.claim = {
+      owner = "fkst-test-bot",
+      source_ref = event.payload.source_ref,
+    }
+    mock_pr_open_guard(nil, pr_open_guard_comments(), { "other-bot" })
+
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-claim-lost", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git push -u origin"), 0)
+    t.eq(count_calls("gh pr create"), 0)
+    t.eq(count_calls("gh issue comment"), 0)
+    t.eq(count_calls("gh pr comment"), 0)
   end,
 
   test_pr_open_request_read_after_write_lag_skips_tail_label_update = function()
@@ -162,6 +206,46 @@ return {
     t.is_true(edit.rendered:find("--remove-label 'fkst-dev:implementing'", 1, true) ~= nil)
   end,
 
+  test_pr_open_write_guard_bypasses_warm_entity_view_cache = function()
+    local run_opts = opts("pr-open-write-guard-fresh", {
+      FKST_GITHUB_WRITE = "1",
+    })
+    mock_write_env("1")
+    mock_bot_env()
+    t.mock_command("--json title,body,comments,labels,state", {
+      stdout = '{"title":"Cached","body":"","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
+      stdout = "2026-06-03T01:02:03Z\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    local cached = core.fetch_issue_view("owner/x", 42, "2026-06-03T01:02:03Z")
+    t.eq(cached.exit_code, 0)
+
+    local guard_calls_before = count_calls("--json labels,comments")
+    local pr_create_calls_before = count_calls("gh pr create")
+    mock_pr_open_guard(nil, pr_open_guard_comments())
+    mock_branch_head("abc123")
+    mock_pr_head_list("[]\n")
+    mock_git_push()
+    mock_pr_create(7)
+    mock_pr_head_state("abc123", "OPEN")
+    mock_comment_view("existing issue comment")
+    mock_comment_write()
+    mock_pr_comment_view("existing pr comment")
+    mock_pr_comment_write()
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
+    mock_label_write()
+
+    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("--json labels,comments") - guard_calls_before, 2)
+    t.eq(count_calls("gh pr create") - pr_create_calls_before, 1)
+  end,
+
   test_pr_open_request_pushes_without_intent_label = function()
     mock_write_env("1")
     mock_bot_env()
@@ -188,17 +272,67 @@ return {
     t.eq(count_calls("gh issue edit"), 1)
   end,
 
-  test_pr_open_request_skips_when_branch_moved_past_recorded_head = function()
+  test_pr_open_request_allows_current_descendant_head = function()
+    local event = pr_open_event()
+    event.payload.head_sha = "def456"
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_open_guard(nil, pr_open_guard_comments())
+    mock_branch_head("def456")
+    mock_branch_head_descends(true)
+    mock_pr_head_list("[]\n")
+    mock_git_push()
+    mock_pr_create(7)
+    mock_pr_head_state("def456", "OPEN")
+    mock_comment_view("existing issue comment")
+    mock_comment_write()
+    mock_pr_comment_view("existing pr comment")
+    mock_pr_comment_write()
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
+    mock_label_write()
+
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-descendant-head", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git show-ref --verify refs/heads"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 1)
+    t.eq(count_calls("git push -u origin"), 1)
+    t.eq(count_calls("gh pr create"), 1)
+    t.eq(result.raises[2].payload.head_sha, "def456")
+  end,
+
+  test_pr_open_request_skips_when_branch_head_is_not_descendant = function()
+    local event = pr_open_event()
+    event.payload.head_sha = "def456"
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_open_guard(nil, pr_open_guard_comments())
+    mock_branch_head("def456")
+    mock_branch_head_descends(false)
+
+    local result = t.run_department("departments/github_pr_open/main.lua", event, opts("pr-open-branch-not-descendant", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git show-ref --verify refs/heads"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 1)
+    t.eq(count_calls("git push -u origin"), 0)
+    t.eq(count_calls("gh pr create"), 0)
+  end,
+
+  test_pr_open_request_skips_when_payload_head_does_not_match_current_branch = function()
     mock_write_env("1")
     mock_bot_env()
     mock_pr_open_guard(nil, pr_open_guard_comments())
     mock_branch_head("def456")
 
-    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-branch-moved", {
+    local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-payload-head-stale", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("git show-ref --verify refs/heads"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 0)
     t.eq(count_calls("git push -u origin"), 0)
     t.eq(count_calls("gh pr create"), 0)
   end,
@@ -272,8 +406,14 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr list"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&head=owner%3A"), 2)
     t.eq(count_calls("gh pr create"), 1)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "github_entity_changed")
+    t.eq(result.raises[1].payload.type, "pr")
+    t.eq(result.raises[1].payload.number, 11)
+    t.eq(result.raises[2].queue, "github_pr_opened")
+    t.eq(result.raises[2].payload.pr_number, 11)
     local issue_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-issue-comment.md")
     t.is_true(issue_written:find("github-devloop PR opened: #11", 1, true) ~= nil)
   end,
@@ -363,6 +503,12 @@ return {
     t.eq(count_calls("git push -u origin"), 0)
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("gh issue comment"), 1)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "github_entity_changed")
+    t.eq(result.raises[1].payload.type, "pr")
+    t.eq(result.raises[1].payload.number, 9)
+    t.eq(result.raises[2].queue, "github_pr_opened")
+    t.eq(result.raises[2].payload.pr_number, 9)
     local issue_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-issue-comment.md")
     t.is_true(issue_written:find("github-devloop PR opened: #9", 1, true) ~= nil)
   end,
@@ -453,6 +599,12 @@ return {
     t.eq(count_calls("gh pr comment"), 1)
     t.eq(count_calls("gh issue edit"), 1)
     t.eq(count_calls("--json labels,comments"), 2)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "github_entity_changed")
+    t.eq(result.raises[1].payload.type, "pr")
+    t.eq(result.raises[1].payload.number, 9)
+    t.eq(result.raises[2].queue, "github_pr_opened")
+    t.eq(result.raises[2].payload.pr_number, 9)
 
     local pr_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md")
     t.is_true(pr_written:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)

@@ -66,12 +66,16 @@ local function mock_pr_list(pr)
   local stdout = "[]\n"
   if pr ~= nil then
     stdout = string.format(
-      '[{"number":%d,"headRefOid":"%s","headRefName":"integration/dev","baseRefName":"dev","state":"OPEN"}]\n',
+      '[[{"number":%d,"head":{"sha":"%s","ref":"integration/dev"},"base":{"ref":"dev"},"state":"open"}]]\n',
       pr.number or 9,
       h.json_string(pr.head_sha or "def456")
     )
   end
-  t.mock_command("gh pr list", { stdout = stdout, stderr = "", exit_code = 0 })
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&base=dev&per_page=100'", {
+    stdout = stdout,
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_integration_head(head)
@@ -115,7 +119,7 @@ return {
     local result = run_scan()
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(h.count_calls("gh pr list"), 0)
+    t.eq(h.count_calls("gh api --paginate --slurp 'repos/owner/repo/pulls"), 0)
   end,
 
   test_rollup_scan_ahead_no_open_pr_real_creates_with_head_and_base = function()
@@ -227,7 +231,7 @@ return {
     local result = run_scan(opts("rollup-empty-diff", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(h.count_calls("gh pr list"), 0)
+    t.eq(h.count_calls("gh api --paginate --slurp 'repos/owner/repo/pulls"), 0)
     t.eq(h.count_calls("gh pr create"), 0)
   end,
 

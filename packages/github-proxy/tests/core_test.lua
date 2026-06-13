@@ -5,6 +5,7 @@ return {
   test_env_command_whitelist = function()
 	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
 	    t.eq(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), 'printf %s "$FKST_GITHUB_BOT_LOGIN"')
+	    t.eq(core.read_env_command("FKST_DEVLOOP_REPLAY_BUDGET"), 'printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"')
 	    t.raises(function()
 	      core.read_env_command("HOME")
 	    end)
@@ -17,9 +18,55 @@ return {
     t.is_nil(value)
   end,
 
+  test_devloop_replay_budget_defaults_to_ten = function()
+    local value = core.devloop_replay_budget(function(_cmd)
+      return { stdout = "", stderr = "", exit_code = 0 }
+    end)
+    t.eq(value, 10)
+  end,
+
+  test_devloop_replay_budget_parses_bounded_positive_integer = function()
+    local value = core.devloop_replay_budget(function(cmd)
+      t.eq(cmd, 'printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"')
+      return { stdout = " 7 ", stderr = "", exit_code = 0 }
+    end)
+    t.eq(value, 7)
+  end,
+
+  test_devloop_replay_budget_rejects_invalid_values = function()
+    t.raises(function()
+      core.devloop_replay_budget(function(_cmd)
+        return { stdout = "0", stderr = "", exit_code = 0 }
+      end)
+    end)
+    t.raises(function()
+      core.devloop_replay_budget(function(_cmd)
+        return { stdout = "101", stderr = "", exit_code = 0 }
+      end)
+    end)
+    t.raises(function()
+      core.devloop_replay_budget(function(_cmd)
+        return { stdout = "1.5", stderr = "", exit_code = 0 }
+      end)
+    end)
+  end,
+
   test_entity_cache_key = function()
     local key = core.entity_cache_key("owner/repo", "issue", 12)
     t.eq(key, "github-proxy/issue/owner/repo/12")
+  end,
+
+  test_entity_view_cache_key = function()
+    local key = core.entity_view_cache_key("owner/repo", "issue", 12, "2026-06-03T01:02:03Z")
+    t.eq(key, "github-proxy/view/owner/repo/issue/12/2026-06-03T01-02-03Z")
+    t.eq(
+      core.gh_issue_view_entity_cmd("owner/repo", 12),
+      "gh issue view '12' --repo 'owner/repo' --json title,body,comments,labels,state,updatedAt"
+    )
+    t.eq(
+      core.gh_pr_view_entity_cmd("owner/repo", 7),
+      "gh pr view '7' --repo 'owner/repo' --json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+    )
   end,
 
   test_entity_dedup_key = function()
@@ -147,7 +194,7 @@ return {
   end,
 
   test_parse_entity_list = function()
-    local entities = core.parse_entity_list('[{"number":7,"title":"Fix \\"x\\"","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]')
+    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix \\"x\\"","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]]')
     t.eq(#entities, 1)
     t.eq(entities[1].number, 7)
     t.eq(entities[1].title, 'Fix "x"')
@@ -159,7 +206,7 @@ return {
   end,
 
   test_parse_entity_list_accepts_string_labels = function()
-    local entities = core.parse_entity_list('[{"number":7,"title":"Fix","url":"https://example.test/7","updatedAt":"2026-06-03T00:00:00Z","state":"OPEN","labels":["one","two"]}]')
+    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","labels":["one","two"]}]]')
     t.eq(#entities[1].labels, 2)
     t.eq(entities[1].labels[1], "one")
     t.eq(entities[1].labels[2], "two")
@@ -170,6 +217,17 @@ return {
     t.eq(#entities, 0)
   end,
 
+  test_parse_entity_list_empty_slurped_page = function()
+    local entities = core.parse_entity_list("[[]]")
+    t.eq(#entities, 0)
+  end,
+
+  test_parse_entity_list_skips_malformed_rest_items = function()
+    local entities = core.parse_entity_list('[[{},{"number":7,"title":"Fix","html_url":"https://example.test/7"}]]')
+    t.eq(#entities, 1)
+    t.eq(entities[1].number, 7)
+  end,
+
   test_parse_entity_list_accepts_updated_at = function()
     local entities = core.parse_entity_list('[{"number":8,"title":"Snake case","url":"https://example.test/8","updated_at":"2026-06-03T04:05:06Z","state":"OPEN"}]')
     t.eq(#entities, 1)
@@ -177,14 +235,31 @@ return {
     t.eq(core.parse_issue_list("[]")[1], nil)
   end,
 
+  test_parse_issue_list_skips_rest_pull_request_shadows = function()
+    local entities = core.parse_issue_list('[[{"number":8,"title":"Issue","html_url":"https://example.test/issues/8","updated_at":"2026-06-03T04:05:06Z","state":"open"},{"number":9,"title":"PR","html_url":"https://example.test/pull/9","updated_at":"2026-06-03T04:05:07Z","state":"open","pull_request":{"url":"https://api.example.test/pulls/9"}}]]')
+    t.eq(#entities, 1)
+    t.eq(entities[1].number, 8)
+  end,
+
   test_gh_exec_returns_success_result = function()
     local result = core.gh_exec("gh issue list", 30, "gh issue list", function(spec)
       t.eq(spec.cmd, "gh issue list")
       t.eq(spec.timeout, 30)
+      t.eq(spec.rate_pool.name, "gh")
+      t.eq(spec.rate_pool.burst, nil)
+      t.eq(spec.rate_pool.refill_per_hour, nil)
       return { stdout = "[]\n", stderr = "", exit_code = 0 }
     end)
 
     t.eq(result.stdout, "[]\n")
+  end,
+
+  test_gh_exec_opts_preserves_options = function()
+    local spec = core.gh_exec_opts({ cmd = "gh pr list", timeout = 60, cwd = "/tmp" })
+    t.eq(spec.cmd, "gh pr list")
+    t.eq(spec.timeout, 60)
+    t.eq(spec.cwd, "/tmp")
+    t.eq(spec.rate_pool.name, "gh")
   end,
 
   test_gh_error_classifies_rate_limit_and_abuse = function()
@@ -210,6 +285,98 @@ return {
     t.eq(err.class, "gh-command-failed")
     t.eq(err.retryable, false)
     t.is_true(err.message:find("gh-command-failed", 1, true) ~= nil)
+  end,
+
+  test_error_fact_fields_include_available_delivery_context = function()
+    local fields = core.error_fact_fields(
+      "gh-command-failed",
+      "github_issue_comment_request",
+      "github_comment",
+      "github-proxy: gh issue comment failed: gh-command-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a",
+      {
+        source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+        attempt = 2,
+        terminal = false,
+      }
+    )
+
+    t.eq(fields[1], "error_class=gh-command-failed")
+    t.eq(fields[2], "fingerprint=" .. core.error_fingerprint(
+      "gh-command-failed",
+      "github_issue_comment_request",
+      "github_comment",
+      "github-proxy: gh issue comment failed: gh-command-failed: bad sha fedcba0987654321 at 2026-07-11T09:08:07Z /tmp/fkst-b"
+    ))
+    t.eq(fields[3], "source_ref=external:owner/repo#issue/42")
+    t.eq(fields[4], "attempt=2")
+    t.eq(fields[5], "terminal=false")
+  end,
+
+  test_error_fact_fields_omit_unavailable_delivery_context = function()
+    local fields = core.error_fact_fields("caught-failure", "github_poll_tick", "github_poll", "poll failed", {})
+
+    t.eq(#fields, 2)
+    t.eq(fields[1], "error_class=caught-failure")
+    t.is_true(fields[2]:find("^fingerprint=fp%-") ~= nil)
+  end,
+
+  test_log_error_fact_emits_structured_failure_line = function()
+    local captured = {}
+    local old_log = log
+    log = {
+      warn = function(message)
+        table.insert(captured, tostring(message))
+      end,
+    }
+
+    core.log_error_fact("warn", "github_poll", "FAILURE", "gh-command-failed", "github_poll_tick", "gh failed", {
+      source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+      terminal = false,
+    })
+    log = old_log
+
+    t.eq(#captured, 1)
+    t.is_true(captured[1]:find("github-proxy dept=github_poll tag=FAILURE", 1, true) ~= nil)
+    t.is_true(captured[1]:find("error_class=gh-command-failed", 1, true) ~= nil)
+    t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(captured[1]:find("terminal=false", 1, true) ~= nil)
+  end,
+
+  test_wrapped_pipeline_failure_logs_delivery_error_fact_and_rethrows = function()
+    local captured = {}
+    local old_log = log
+    log = {
+      error = function(message)
+        table.insert(captured, tostring(message))
+      end,
+    }
+
+    local wrapped = core.wrap_pipeline_failure("github_pr_open", function(_event)
+      error("github-proxy: gh-pr-create-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a")
+    end)
+    local ok, err = pcall(function()
+      wrapped({
+        queue = "github_pr_open_request",
+        attempt = 5,
+        terminal = false,
+        payload = {
+          source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+        },
+      })
+    end)
+
+    log = old_log
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh-pr-create-failed", 1, true) ~= nil)
+    t.eq(#captured, 1)
+    t.is_true(captured[1]:find("github-proxy dept=github_pr_open tag=FAILURE", 1, true) ~= nil)
+    t.is_true(captured[1]:find("error_class=gh-pr-create-failed", 1, true) ~= nil)
+    t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
+    t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(captured[1]:find("attempt=5", 1, true) ~= nil)
+    t.is_nil(captured[1]:find("terminal=", 1, true))
+    t.is_true(captured[1]:find("queue=github_pr_open_request", 1, true) ~= nil)
   end,
 
   test_gh_exec_fails_closed_for_non_rate_limit_failure = function()
@@ -240,19 +407,19 @@ return {
   test_gh_commands_are_quoted = function()
     t.eq(
       core.gh_issue_list_cmd("owner/repo"),
-      "gh issue list --repo 'owner/repo' --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
+      "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'"
     )
     t.eq(
       core.gh_pr_list_cmd("owner/repo"),
-      "gh pr list --repo 'owner/repo' --state open --limit 1000 --json number,title,updatedAt,url,state,labels"
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'"
     )
     t.eq(
       core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY"),
-      "gh pr list --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --state open --json number,url,headRefName,baseRefName,state"
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Adevloop-owner-repo-42-01HY&per_page=100'"
     )
     t.eq(
       core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY", "dev"),
-      "gh pr list --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --base 'dev' --state open --json number,url,headRefName,baseRefName,state"
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Adevloop-owner-repo-42-01HY&per_page=100&base=dev'"
     )
     t.eq(
       core.git_push_branch_cmd("devloop-owner-repo-42-01HY"),
@@ -281,6 +448,10 @@ return {
     local listed = core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","baseRefName":"dev","state":"OPEN"}]', "devloop-owner-repo-42-01HY")
     t.eq(listed.number, 7)
     t.eq(listed.base_ref_name, "dev")
+    local rest_listed = core.parse_pr_list_for_head('[[{"number":8,"html_url":"https://example.test/8","head":{"ref":"devloop-owner-repo-42-01HY"},"base":{"ref":"dev"},"state":"open"}]]', "devloop-owner-repo-42-01HY")
+    t.eq(rest_listed.number, 8)
+    t.eq(rest_listed.url, "https://example.test/8")
+    t.eq(rest_listed.base_ref_name, "dev")
     t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","state":"CLOSED"}]', "devloop-owner-repo-42-01HY"), nil)
     t.eq(
       core.gh_pr_view_head_oid_cmd("owner/repo", 7),
@@ -314,6 +485,7 @@ return {
     )
     local expected_label_colors = {
       ["fkst-dev:enabled"] = "1D76DB",
+      ["fkst-dev:tracking"] = "C5DEF5",
       ["fkst-dev:thinking"] = "8250DF",
       ["fkst-dev:ready"] = "0E8A16",
       ["fkst-dev:implementing"] = "FBCA04",

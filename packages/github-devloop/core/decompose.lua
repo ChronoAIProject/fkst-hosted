@@ -11,7 +11,7 @@ local function bounded_text(value, limit, fallback)
     text = fallback or "(empty)"
   end
   if #text > limit then
-    text = text:sub(1, limit)
+    text = M.truncate_utf8(text, limit)
   end
   return text
 end
@@ -50,23 +50,50 @@ function M.is_supported_decompose(payload)
     return false
   end
   local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local has_review_binding = payload.review_proposal_id ~= nil
+    or payload.review_dedup_key ~= nil
+    or payload.head_sha ~= nil
+  local valid_review_binding = not has_review_binding
+    or (M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
+      and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
+      and M._is_git_sha(payload.head_sha))
+  local forward_dedup = M._dedup_key({
+    "decompose",
+    tostring(payload.proposal_id),
+    tostring(payload.version),
+  })
+  local replay_dedup = M._dedup_key({
+    "decompose",
+    "replay",
+    tostring(payload.proposal_id),
+    tostring(payload.version),
+    tostring(payload.pr_number),
+    tostring(payload.expected_child_count or "unknown"),
+    tostring(payload.completed_child_count or "unknown"),
+  })
+  local has_replay_counts = payload.expected_child_count ~= nil or payload.completed_child_count ~= nil
+  local valid_replay_counts = not has_replay_counts
+    or (tonumber(payload.expected_child_count) ~= nil
+      and tonumber(payload.completed_child_count) ~= nil
+      and tonumber(payload.expected_child_count) >= 1
+      and tonumber(payload.expected_child_count) <= max_decompose_issues
+      and tonumber(payload.completed_child_count) >= 0
+      and tonumber(payload.completed_child_count) < tonumber(payload.expected_child_count)
+      and tonumber(payload.expected_child_count) % 1 == 0
+      and tonumber(payload.completed_child_count) % 1 == 0)
   return payload.schema == "github-devloop.decompose.v1"
     and repo ~= nil
     and issue_number ~= nil
     and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
     and M._is_positive_pr_number(payload.pr_number)
     and M._is_bounded_string(payload.version, M._max_dedup_len)
-    and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
-    and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
-    and M._is_git_sha(payload.head_sha)
+    and valid_review_binding
     and tonumber(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.version)
     and M._is_path_safe_key(payload.dedup_key, M._max_dedup_len)
-    and tostring(payload.dedup_key) == M._dedup_key({
-      "decompose",
-      tostring(payload.proposal_id),
-      tostring(payload.version),
-    })
+    and valid_replay_counts
+    and ((not has_replay_counts and tostring(payload.dedup_key) == forward_dedup)
+      or (has_replay_counts and tostring(payload.dedup_key) == replay_dedup))
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
@@ -100,6 +127,152 @@ function M.has_decomposed_marker(comments, proposal_id, version, pr_number)
     end
   end
   return false
+end
+
+function M.decomposed_fact(comments, proposal_id, version, pr_number)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:decomposed:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if marker:match('proposal="([^"]+)"') == tostring(proposal_id) then
+        local marker_version = marker:match('version="([^"]*)"')
+        local marker_pr_number = marker:match('pr="([^"]+)"')
+        local count = tonumber(marker:match('count="([^"]+)"'))
+        if (version == nil or marker_version == tostring(version))
+          and (pr_number == nil or tostring(marker_pr_number) == tostring(pr_number))
+          and M._is_positive_pr_number(marker_pr_number)
+          and count ~= nil
+          and count >= 1
+          and count <= max_decompose_issues
+          and count % 1 == 0 then
+          return {
+            proposal_id = tostring(proposal_id),
+            version = marker_version,
+            pr_number = tonumber(marker_pr_number),
+            count = count,
+            comment_created_at = M._comment_created_at(comment),
+          }
+        end
+      end
+    end
+  end
+  return nil
+end
+
+function M.parse_decompose_child_issue_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local issues = {}
+  if type(decoded) ~= "table" then
+    return issues
+  end
+  for _, issue in ipairs(decoded) do
+    if type(issue) == "table" then
+      local author_login = issue.author_login
+      if author_login == nil and type(issue.author) == "table" then
+        author_login = issue.author.login
+      end
+      table.insert(issues, {
+        number = issue.number,
+        title = issue.title,
+        state = issue.state,
+        body = tostring(issue.body or ""),
+        author_login = author_login,
+        url = issue.url,
+      })
+    end
+  end
+  return issues
+end
+
+function M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
+  local completed = {}
+  local child_pattern = "<!%-%- fkst:github%-devloop:decompose%-child:v1.-%-%->"
+  for _, issue in ipairs(issues or {}) do
+    local body = tostring(type(issue) == "table" and issue.body or "")
+    local trusted_child = type(issue) == "table"
+      and M.comment_author_login(issue) == M.trusted_bot_login()
+      and tostring(issue.state or ""):upper() == "OPEN"
+    if trusted_child then
+      for marker in body:gmatch(child_pattern) do
+        if marker:match('parent="([^"]+)"') == tostring(proposal_id)
+          and marker:match('version="([^"]*)"') == tostring(version)
+          and tostring(marker:match('pr="([^"]+)"')) == tostring(pr_number) then
+          local index = tonumber(marker:match('index="([^"]+)"'))
+          if index ~= nil and index >= 1 and index <= max_decompose_issues and index % 1 == 0 then
+            completed[index] = true
+          end
+        end
+      end
+    end
+  end
+  return completed
+end
+
+function M.decompose_child_fact_indexes(comments, issues, proposal_id, version, pr_number, dedup_by_index)
+  local completed = M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
+  local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+    for marker in M._comment_body(comment):gmatch(created_pattern) do
+      local dedup = marker:match('dedup="([^"]+)"')
+      for index = 1, max_decompose_issues do
+        if type(dedup_by_index) == "table"
+          and dedup_by_index[index] ~= nil
+          and tostring(dedup) == tostring(dedup_by_index[index])
+          and not completed[index] then
+          completed[index] = true
+        end
+      end
+    end
+  end
+  return completed
+end
+
+local function decompose_child_count(completed)
+  local count = 0
+  for _, present in pairs(completed or {}) do
+    if present then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+function M.decompose_children_complete(comments, issues, proposal_id, version, pr_number, expected_count)
+  local count = tonumber(expected_count)
+  if count == nil or count < 1 or count > max_decompose_issues or count % 1 ~= 0 then
+    return true, 0
+  end
+  local completed = M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
+  local completed_count = decompose_child_count(completed)
+  return completed_count >= count, completed_count
+end
+
+function M.build_decompose_replay_payload(fact, comments, source_ref, completed_count)
+  local feedback = M.fixing_replay_feedback_fact(comments, fact.proposal_id, fact.version)
+  local payload = M.build_devloop_decompose_payload({
+    proposal_id = fact.proposal_id,
+    pr_number = fact.pr_number,
+    issue_version = fact.version,
+    review_proposal_id = feedback and feedback.review_proposal_id or nil,
+    review_dedup_key = feedback and feedback.review_dedup_key or nil,
+    head_sha = feedback and feedback.reviewed_head_sha or nil,
+    round = M.version_fix_round(fact.version),
+    source_ref = source_ref,
+  })
+  payload.expected_child_count = fact.count
+  payload.completed_child_count = tonumber(completed_count) or 0
+  payload.dedup_key = M._dedup_key({
+    "decompose",
+    "replay",
+    tostring(fact.proposal_id),
+    tostring(fact.version),
+    tostring(fact.pr_number),
+    tostring(payload.expected_child_count),
+    tostring(payload.completed_child_count),
+  })
+  return payload
 end
 
 function M.decompose_child_marker(proposal_id, version, pr_number, index)
@@ -170,7 +343,7 @@ function M.fallback_decompose_plan(decompose)
 end
 
 function M.decomposed_comment_body(decompose, count)
-  return "github-devloop decomposed blocked PR into " .. tostring(count) .. " follow-up issue(s)"
+  return M.comment_string("decomposed_prefix") .. tostring(count) .. M.comment_string("decomposed_suffix")
     .. "\n\n" .. M.decomposed_marker(decompose.proposal_id, decompose.version, decompose.pr_number, count)
 end
 
@@ -187,7 +360,7 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     .. "\n\n" .. M.decompose_lineage_marker(decompose.proposal_id, M.decompose_lineage_depth(decompose.current_issue_body) + 1)
     .. "\n\n" .. M.decompose_child_marker(decompose.proposal_id, decompose.version, decompose.pr_number, index)
   if #body > M._max_body_len then
-    body = body:sub(1, M._max_body_len)
+    body = M.truncate_utf8(body, M._max_body_len)
   end
   local fingerprint = issue_fingerprint(decompose, index)
   return {

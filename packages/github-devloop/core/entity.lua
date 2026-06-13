@@ -22,7 +22,7 @@ function M.issue_source_ref(repo, issue_number)
   }
 end
 
-function M.build_entity_comment_request(target, body, dedup_key, source_ref)
+function M.build_entity_comment_request(target, body, dedup_key, source_ref, opts)
   if type(target) ~= "table" then
     error("github-devloop: invalid entity comment target")
   end
@@ -33,8 +33,12 @@ function M.build_entity_comment_request(target, body, dedup_key, source_ref)
     dedup_key = dedup_key,
     source_ref = M.normalize_source_ref(source_ref),
   }
+  if type(opts) == "table" and opts.replace_marker ~= nil then
+    request.replace_marker = tostring(opts.replace_marker)
+  end
   if target.kind == "issue" then
     request.issue_number = target.number
+    M.attach_issue_claim(request, request.source_ref)
   elseif target.kind == "pr" then
     request.pr_number = target.number
   else
@@ -51,6 +55,12 @@ local function copy_comments(target, comments)
   for _, comment in ipairs(comments or {}) do
     table.insert(target, comment)
   end
+end
+
+local function command_indicates_not_found(result)
+  local stderr = tostring(result and result.stderr or ""):lower()
+  return stderr:find("404", 1, true) ~= nil
+    or stderr:find("not found", 1, true) ~= nil
 end
 
 local function linked_pr_numbers(issue_comments, proposal_id)
@@ -87,24 +97,33 @@ function M.linked_entity_snapshot(repo, proposal_id, issue_comments)
   local snapshot = {
     comments = {},
     prs = {},
+    absent_prs = {},
   }
   copy_comments(snapshot.comments, issue_comments)
   for _, pr_number in ipairs(linked_pr_numbers(issue_comments, proposal_id)) do
-    local pr_view = exec_sync({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
+    local pr_view = M.gh_exec({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
-      error("github-devloop: linked PR state view failed: " .. tostring(pr_view.stderr))
+      if command_indicates_not_found(pr_view) then
+        snapshot.absent_prs[tostring(pr_number)] = true
+      else
+        error("github-devloop: linked PR state view failed: " .. tostring(pr_view.stderr))
+      end
+    else
+      local current_pr = M.parse_pr_view_origin(pr_view.stdout)
+      if type(current_pr.comments) ~= "table" or tostring(current_pr.state or "") == "" then
+        error("github-devloop: linked PR state view malformed")
+      end
+      table.insert(snapshot.prs, {
+        number = pr_number,
+        current = current_pr,
+      })
+      copy_comments(snapshot.comments, current_pr.comments)
     end
-    local current_pr = M.parse_pr_view_origin(pr_view.stdout)
-    if type(current_pr.comments) ~= "table" or tostring(current_pr.state or "") == "" then
-      error("github-devloop: linked PR state view malformed")
-    end
-    table.insert(snapshot.prs, {
-      number = pr_number,
-      current = current_pr,
-    })
-    copy_comments(snapshot.comments, current_pr.comments)
   end
   snapshot.state = M.current_entity_state(snapshot.comments, proposal_id)
+  snapshot.fetch_before_compare = {
+    ["pr-head"] = true,
+  }
   return snapshot
 end
 
@@ -129,6 +148,10 @@ end
 
 function M.pr_transition_lock_key(repo, pr_number)
   return "github-devloop/transition/" .. M.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
+end
+
+function M.merge_lane_lock_key(repo)
+  return "github-devloop/merge-lane/" .. M.sanitize_key(repo, false)
 end
 
 function M.parse_entity_proposal_id(proposal_id)

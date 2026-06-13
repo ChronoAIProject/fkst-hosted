@@ -70,7 +70,7 @@ local function pr_native_comments(event, include_review_result)
   return comments
 end
 
-local function mock_pr_origin(comments, head, head_sha, state, base_branch)
+local function mock_pr_origin(comments, head, head_sha, state, base_branch, times)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   local has_state_marker = false
@@ -121,21 +121,23 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch)
   for _, comment in ipairs(input_comments or {}) do
     table.insert(rendered_comments, render_comment(comment))
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
-      json_string(head or "devloop-owner-repo-42-01HY"),
-      json_string(head_sha or "def456"),
-      json_string(base_branch or "dev"),
-      json_string(state or "OPEN"),
-      table.concat(rendered_comments, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  for _ = 1, times or 1 do
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+      stdout = string.format(
+        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","labels":[],"comments":[%s]}\n',
+        json_string(head or "devloop-owner-repo-42-01HY"),
+        json_string(head_sha or "def456"),
+        json_string(base_branch or "dev"),
+        json_string(state or "OPEN"),
+        table.concat(rendered_comments, ",")
+      ),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
-local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, is_draft)
+local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, is_draft, base_sha)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   if input_comments == nil or #input_comments == 0 then
@@ -172,11 +174,12 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}]}\n',
+      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"%s","detailsUrl":"https://example.invalid/checks/ci","name":"ci","startedAt":"2026-06-03T02:03:04Z","status":"%s","workflowName":"ci"}]}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
+      json_string(base_sha or "abc123"),
       json_string(state or "OPEN"),
       is_draft == true and "true" or "false",
       json_string(merged_at or ""),
@@ -185,8 +188,8 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
       cross,
       json_string(mergeable or "MERGEABLE"),
       json_string(merge_state or "CLEAN"),
-      json_string(rollup_state or "COMPLETED"),
-      json_string(rollup_conclusion or "SUCCESS")
+      json_string(rollup_conclusion or "SUCCESS"),
+      json_string(rollup_state or "COMPLETED")
     ),
     stderr = "",
     exit_code = 0,
@@ -196,7 +199,7 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
   end
 end
 
-local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, merged_at, is_draft)
+local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, merged_at, is_draft, base_sha)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   if input_comments == nil or #input_comments == 0 then
@@ -233,11 +236,12 @@ local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
+      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
+      json_string(base_sha or "abc123"),
       json_string(state or "OPEN"),
       is_draft == true and "true" or "false",
       json_string(merged_at or ""),
@@ -325,8 +329,7 @@ local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_rep
   if cross_repo == true then
     cross = "true"
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
-    stdout = string.format(
+  local stdout = string.format(
       '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s}\n',
       json_string(head or "devloop-owner-repo-42-01HY"),
       json_string(head_sha or "def456"),
@@ -334,7 +337,9 @@ local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_rep
       table.concat(rendered_comments, ","),
       json_string(head_repo or "owner/repo"),
       cross
-    ),
+    )
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
+    stdout = stdout,
     stderr = "",
     exit_code = 0,
   })
@@ -444,11 +449,32 @@ local function mock_branch_exists(branch, head)
   })
 end
 
-local function mock_meta_codex(action, reason, exit_code)
+local function mock_branch_head_descends(descends)
+  t.mock_command("merge-base --is-ancestor", {
+    stdout = "",
+    stderr = "",
+    exit_code = descends == false and 1 or 0,
+  })
+end
+
+local function mock_meta_codex(action, reason, exit_code, blocking_gap)
   local stdout = ""
   if action ~= nil then
     stdout = action_label .. " " .. tostring(action) .. "\n" .. reason_label .. " " .. tostring(reason or "Reason.")
+    if action == "fix" then
+      stdout = stdout .. "\nBlocking gap: " .. tostring(blocking_gap or "missing retry guard")
+    end
   end
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("codex exec", {
     stdout = stdout,
     stderr = "",
@@ -480,6 +506,7 @@ return {
   mock_pr_head = mock_pr_head,
   mock_pr_diff = mock_pr_diff,
   mock_branch_exists = mock_branch_exists,
+  mock_branch_head_descends = mock_branch_head_descends,
   mock_meta_codex = mock_meta_codex,
   reset_pr_helper_state = reset_pr_helper_state,
 }

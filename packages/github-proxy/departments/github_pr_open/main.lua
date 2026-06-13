@@ -4,6 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "github_pr_open_request" },
+  produces = { "github_entity_changed", "github_pr_opened" },
   stall_window = "2m",
 }
 
@@ -105,6 +106,9 @@ local function guard_pr_open_write(repo, payload, bot_login)
   )
 
   local issue = core.parse_issue_state(view.stdout)
+  if not core.verify_issue_claim_in_issue(issue, payload, repo, payload.issue_number, "github_pr_open") then
+    return nil
+  end
   local state = core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
   local has_pr_open_marker = core.has_devloop_pr_open_marker(issue.comments, payload.proposal_id, payload.impl_version, bot_login)
   if has_pr_open_marker then
@@ -126,7 +130,6 @@ local function guard_pr_open_write(repo, payload, bot_login)
     return nil
   end
   if tostring(fact.branch) ~= tostring(payload.branch)
-    or tostring(fact.head_sha) ~= tostring(payload.head_sha)
     or tostring(fact.base_branch) ~= tostring(payload.base_branch) then
     log.warn("github-proxy: PR open skipped because request does not match implementing fact marker")
     return nil
@@ -141,9 +144,16 @@ local function guard_pr_open_write(repo, payload, bot_login)
     log.warn("github-proxy: PR open skipped because branch ref output is invalid")
     return nil
   end
-  if current_head ~= fact.head_sha then
-    log.warn("github-proxy: PR open skipped because branch head moved past implementing fact")
+  if current_head ~= tostring(payload.head_sha):lower() then
+    log.warn("github-proxy: PR open skipped because request head does not match current branch head")
     return nil
+  end
+  if current_head ~= tostring(fact.head_sha):lower() then
+    local ancestry = exec_sync({ cmd = core.git_is_ancestor_cmd(fact.head_sha, current_head), timeout = 30 })
+    if ancestry.exit_code ~= 0 then
+      log.warn("github-proxy: PR open skipped because branch head is not descended from implementing fact")
+      return nil
+    end
   end
 
   return {
@@ -162,6 +172,49 @@ local function can_apply_pr_open_labels(state, impl_version)
     return false
   end
   return state.state == "implementing" or state.state == "pr-open"
+end
+
+local function raise_pr_entity_changed(repo, pr, payload)
+  local updated_at = tostring(payload.dedup_key or "") .. "/pr/" .. tostring(pr.number)
+  local entity_payload = {
+    schema = "github-proxy.v1",
+    type = "pr",
+    repo = repo,
+    number = pr.number,
+    title = tostring(payload.title or "PR #" .. tostring(pr.number)),
+    url = pr.url,
+    state = pr.state or "OPEN",
+    updated_at = updated_at,
+    dedup_key = core.entity_dedup_key(repo, "pr", pr.number, updated_at),
+    source = "github_pr_open",
+    source_ref = core.entity_source_ref(repo, "pr", pr.number),
+  }
+  raise("github_entity_changed", {
+    schema = entity_payload.schema,
+    type = entity_payload.type,
+    repo = entity_payload.repo,
+    number = entity_payload.number,
+    title = entity_payload.title,
+    url = entity_payload.url,
+    state = entity_payload.state,
+    updated_at = entity_payload.updated_at,
+    dedup_key = entity_payload.dedup_key,
+    source = entity_payload.source,
+    source_ref = entity_payload.source_ref,
+  })
+  raise("github_pr_opened", {
+    schema = "github-proxy.pr-opened.v1",
+    repo = repo,
+    issue_number = payload.issue_number,
+    proposal_id = payload.proposal_id,
+    impl_version = payload.impl_version,
+    pr_number = pr.number,
+    branch = payload.branch,
+    head_sha = payload.head_sha,
+    base_branch = payload.base_branch,
+    dedup_key = tostring(payload.dedup_key or "") .. "/opened/" .. tostring(pr.number),
+    source_ref = entity_payload.source_ref,
+  })
 end
 
 local function current_issue_state_for_label_edit(repo, payload, bot_login)
@@ -248,6 +301,7 @@ function pipeline(event)
         error("github-proxy: gh pr create/list did not return a valid PR number")
       end
       verify_pr_remote_head(repo, pr.number, payload.head_sha, payload.base_branch)
+      core.invalidate_entity_after_write(repo, "pr", pr.number)
     else
       verify_pr_remote_head(repo, pr.number, payload.head_sha, payload.base_branch)
       log.info("github-proxy: PR for head branch already exists; reusing #" .. tostring(pr.number))
@@ -274,6 +328,7 @@ function pipeline(event)
         30,
         "gh issue comment after PR open"
       )
+      core.invalidate_entity_after_write(repo, "issue", payload.issue_number)
     end
 
     local pr_view = core.gh_exec(
@@ -290,6 +345,7 @@ function pipeline(event)
         30,
         "gh pr comment"
       )
+      core.invalidate_entity_after_write(repo, "pr", pr.number)
     end
 
     local add_labels = normalize_labels(payload.issue_label_add)
@@ -304,7 +360,11 @@ function pipeline(event)
         core.apply_issue_labels(repo, payload.issue_number, add_labels, remove_labels)
       end)
     end
+
+    raise_pr_entity_changed(repo, pr, payload)
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("github_pr_open", pipeline)
 
 return M

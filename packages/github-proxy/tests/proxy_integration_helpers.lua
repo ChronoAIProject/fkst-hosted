@@ -7,17 +7,17 @@ end
 
 local function issue_list_json(updated_at, state)
   return string.format(
-    '[{"number":42,"title":"Bridge issue","url":"https://github.example/owner/x/issues/42","updatedAt":"%s","state":"%s","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]\n',
+    '[[{"number":42,"title":"Bridge issue","html_url":"https://github.example/owner/x/issues/42","updated_at":"%s","state":"%s","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]]\n',
     updated_at or "2026-06-03T01:02:03Z",
-    state or "OPEN"
+    state or "open"
   )
 end
 
 local function pr_list_json(updated_at, state)
   return string.format(
-    '[{"number":7,"title":"Bridge PR","url":"https://github.example/owner/x/pull/7","updatedAt":"%s","state":"%s","labels":[{"name":"review"}]}]\n',
+    '[[{"number":7,"title":"Bridge PR","html_url":"https://github.example/owner/x/pull/7","updated_at":"%s","state":"%s","labels":[{"name":"review"}]}]]\n',
     updated_at or "2026-06-03T02:03:04Z",
-    state or "OPEN"
+    state or "open"
   )
 end
 
@@ -46,6 +46,10 @@ local function mock_repo_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = value or "owner/x" })
 end
 
+local function mock_replay_budget_env(value)
+  t.mock_command('printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"', { stdout = value or "" })
+end
+
 local function mock_write_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = value or "" })
 end
@@ -55,7 +59,7 @@ local function mock_bot_env(value)
 end
 
 local function mock_issue_list(stdout, exit_code, stderr)
-  t.mock_command("gh issue list", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'", {
     stdout = stdout or issue_list_json(),
     stderr = stderr or "",
     exit_code = exit_code or 0,
@@ -63,7 +67,7 @@ local function mock_issue_list(stdout, exit_code, stderr)
 end
 
 local function mock_pr_list(stdout, exit_code, stderr)
-  t.mock_command("gh pr list", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'", {
     stdout = stdout or pr_list_json(),
     stderr = stderr or "",
     exit_code = exit_code or 0,
@@ -83,8 +87,16 @@ local function json_string(value)
     :gsub("\n", "\\n")
 end
 
-local function comment_json(body, author)
-  return string.format('{"body":"%s","author":{"login":"%s"}}', json_string(body), json_string(author or "fkst-test-bot"))
+local function comment_json(body, author, id, database_id)
+  local id_field = ""
+  if id ~= nil then
+    id_field = '"id":"' .. json_string(id) .. '",'
+  end
+  local database_id_field = ""
+  if database_id ~= nil then
+    database_id_field = '"databaseId":' .. tostring(database_id) .. ","
+  end
+  return string.format('{%s%s"body":"%s","author":{"login":"%s"}}', id_field, database_id_field, json_string(body), json_string(author or "fkst-test-bot"))
 end
 
 local function mock_comment_view(comments, author)
@@ -92,7 +104,7 @@ local function mock_comment_view(comments, author)
   if type(comments) == "table" then
     local parts = {}
     for _, comment in ipairs(comments) do
-      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author))
+      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author, comment.id, comment.databaseId or comment.database_id))
     end
     rendered_comments = table.concat(parts, ",")
   else
@@ -121,9 +133,9 @@ local function mock_label_view(labels)
   })
 end
 
-local function mock_pr_open_guard(labels, comments)
+local function mock_pr_label_guard(labels, comments)
   local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
+  for _, label in ipairs(labels or {}) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
   local rendered_comments = {}
@@ -141,11 +153,47 @@ local function mock_pr_open_guard(labels, comments)
   })
 end
 
+local function assignees_json(assignees)
+  local rendered = {}
+  for _, assignee in ipairs(assignees or { "fkst-test-bot" }) do
+    table.insert(rendered, string.format('{"login":"%s"}', json_string(assignee)))
+  end
+  return table.concat(rendered, ",")
+end
+
+local function mock_pr_open_guard(labels, comments, assignees)
+  local rendered_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
+  local rendered_comments = {}
+  for _, comment in ipairs(comments or {}) do
+    if type(comment) == "table" then
+      table.insert(rendered_comments, comment_json(comment.body, comment.author_login or comment.author))
+    else
+      table.insert(rendered_comments, comment_json(comment, "fkst-test-bot"))
+    end
+  end
+  t.mock_command("--json labels,comments,assignees", {
+    stdout = '{"labels":[' .. table.concat(rendered_labels, ",") .. '],"comments":[' .. table.concat(rendered_comments, ",") .. '],"assignees":[' .. assignees_json(assignees) .. "]}\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_branch_head(head_sha)
   t.mock_command("git show-ref --verify refs/heads", {
     stdout = tostring(head_sha or "abc123") .. " refs/heads/devloop-owner-x-42-01HY\n",
     stderr = "",
     exit_code = 0,
+  })
+end
+
+local function mock_branch_head_descends(descends)
+  t.mock_command("merge-base --is-ancestor", {
+    stdout = "",
+    stderr = "",
+    exit_code = descends == false and 1 or 0,
   })
 end
 
@@ -205,7 +253,7 @@ local function mock_label_write(labels)
 end
 
 local function mock_pr_head_list(stdout)
-  t.mock_command("gh pr list", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&head=owner%3A", {
     stdout = stdout or "[]\n",
     stderr = "",
     exit_code = 0,
@@ -260,7 +308,7 @@ local function mock_pr_comment_view(comments, author)
   if type(comments) == "table" then
     local parts = {}
     for _, comment in ipairs(comments) do
-      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author))
+      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author, comment.id, comment.databaseId or comment.database_id))
     end
     rendered_comments = table.concat(parts, ",")
   else
@@ -324,6 +372,52 @@ local function capture_comment_department_logs(department_path, event, write_env
   end)
 
   core.write_comment_request = old_write_comment_request
+  log = old_log
+  if not ok then
+    error(err)
+  end
+
+  return captured, write_requests
+end
+
+local function capture_label_department_logs(department_path, event, write_env, apply_result)
+  mock_write_env(write_env)
+
+  local captured = {}
+  local old_log = log
+  local old_apply_issue_labels = core.apply_issue_labels
+  local old_with_lock = with_lock
+  local write_requests = 0
+
+  log = {
+    info = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    warn = function(message)
+      table.insert(captured, tostring(message))
+    end,
+    error = function(message)
+      table.insert(captured, tostring(message))
+    end,
+  }
+  core.apply_issue_labels = function(_repo, _issue_number, _add_labels, _remove_labels)
+    write_requests = write_requests + 1
+    if apply_result == false then
+      return false
+    end
+    return true
+  end
+  with_lock = function(_key, fn)
+    return fn()
+  end
+
+  local ok, err = pcall(function()
+    dofile(package_root() .. "/" .. department_path)
+    pipeline(event)
+  end)
+
+  core.apply_issue_labels = old_apply_issue_labels
+  with_lock = old_with_lock
   log = old_log
   if not ok then
     error(err)
@@ -399,6 +493,7 @@ return {
   runtime_root = runtime_root,
   opts = opts,
   mock_repo_env = mock_repo_env,
+  mock_replay_budget_env = mock_replay_budget_env,
   mock_write_env = mock_write_env,
   mock_bot_env = mock_bot_env,
   mock_issue_list = mock_issue_list,
@@ -409,8 +504,10 @@ return {
   mock_comment_view = mock_comment_view,
   mock_comment_view_failure = mock_comment_view_failure,
   mock_label_view = mock_label_view,
+  mock_pr_label_guard = mock_pr_label_guard,
   mock_pr_open_guard = mock_pr_open_guard,
   mock_branch_head = mock_branch_head,
+  mock_branch_head_descends = mock_branch_head_descends,
   mock_non_branch_ref_head = mock_non_branch_ref_head,
   mock_comment_write = mock_comment_write,
   mock_repo_label_list = mock_repo_label_list,
@@ -426,6 +523,7 @@ return {
   calls_matching = calls_matching,
   count_calls = count_calls,
   capture_comment_department_logs = capture_comment_department_logs,
+  capture_label_department_logs = capture_label_department_logs,
   long_dedup = long_dedup,
   pr_open_event = pr_open_event,
   pr_open_guard_comments = pr_open_guard_comments,

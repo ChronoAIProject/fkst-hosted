@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 import sys
+import base64
+import binascii
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,8 +51,41 @@ GRAPHQL_FIRST_CONNECTION_RE = re.compile(
     re.DOTALL,
 )
 LONG_STRING_CHAR_RE = re.compile(r"\bstring\s*\.\s*char\s*\((?P<args>[^)]*)\)", re.DOTALL)
-NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*\d+\s*(?=,|\Z)")
+NUMERIC_ARG_RE = re.compile(r"(?:^|,)\s*(?:0x[0-9A-Fa-f]+|\d+)\s*(?=,|\Z)")
 HIDDEN_TEXT_STRING_CHAR_ARG_MIN = 6
+ERROR_CALL_STRING_RE = re.compile(r"\berror\s*\(\s*(?P<quote>['\"])(?P<message>[^'\"]*)(?P=quote)")
+ERROR_CLASS_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9-]*: [a-z0-9][a-z0-9-]*:")
+HELPER_STRING_ARG_RE = re.compile(
+    r"\b(?P<func>(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?[A-Za-z_][A-Za-z0-9_]*)"
+    r"\s*\(\s*(?P<quote>[\"'])"
+)
+GH_RATE_POOL_FUNCTION_RE = re.compile(
+    r"\bfunction\b[^\n]*\bgh_rate_pool\b|\bgh_rate_pool\b\s*=\s*function\b"
+)
+GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
+PERSISTENCE_CLASS_RE = re.compile(
+    r"\bfunction\s+M\s*\.\s*persistence_class\s*\([^)]*\)\s*"
+    r"return\s*(?P<quote>[\"'])(?P<class>[A-Za-z0-9_]+)(?P=quote)",
+    re.DOTALL,
+)
+ALLOWED_PERSISTENCE_CLASSES = {
+    "saga",
+    "stateless_adapter",
+    "judgment_pipeline",
+    "composed_judgment_pipeline",
+}
+SAGA_RECOVERY_TOKENS = (
+    "fkst:github-devloop:state:v1",
+    "current_entity_state",
+    "restart_completeness",
+    "transition_status",
+    "versioned_transition_status",
+    "cyclic_transition_status",
+)
+HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
+BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
+BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
+ENCODED_LITERAL_MIN_BYTES = 6
 
 
 @dataclass(frozen=True)
@@ -64,11 +99,20 @@ def repo_root() -> Path:
 
 
 def rel(root: Path, path: Path) -> str:
+    packages_view = packages_root(root)
+    try:
+        return "packages/" + path.relative_to(packages_view).as_posix()
+    except ValueError:
+        pass
     return path.relative_to(root).as_posix()
 
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def packages_root(root: Path) -> Path:
+    return root / ".fkst" / "packages"
 
 
 def line_count(path: Path) -> int:
@@ -309,6 +353,18 @@ def unguarded_graphql_first_connection_lines(text: str) -> list[int]:
     return lines
 
 
+def unguarded_rest_per_page_lines(text: str) -> list[int]:
+    lines: list[int] = []
+    source_lines = text.splitlines()
+    for index, line in enumerate(source_lines):
+        if "per_page=100" not in line:
+            continue
+        window = "\n".join(source_lines[max(0, index - 3) : index + 2])
+        if "gh api" not in window or "--paginate" not in window:
+            lines.append(index + 1)
+    return lines
+
+
 def hidden_text_string_char_lines(text: str) -> list[int]:
     stripped = strip_lua_comments_and_strings(text)
     lines: list[int] = []
@@ -319,9 +375,100 @@ def hidden_text_string_char_lines(text: str) -> list[int]:
     return lines
 
 
+def unclassified_error_call_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = []
+    for match in ERROR_CALL_STRING_RE.finditer(text):
+        if not is_unmasked_range(text, stripped, match.start(), match.start("quote")):
+            continue
+        message = match.group("message")
+        if not ERROR_CLASS_PREFIX_RE.match(message):
+            lines.append(text.count("\n", 0, match.start()) + 1)
+    return lines
+
+
+def helper_name(value: str) -> str:
+    return re.sub(r"\s+", "", value).lower()
+
+
+def looks_like_decode_helper(func: str) -> bool:
+    normalized = helper_name(func)
+    base_name = normalized.rsplit(".", 1)[-1]
+    if base_name in {"h", "b", "u", "hex", "base64", "b64", "bytes", "byte"}:
+        return True
+    helper_tokens = (
+        "decode",
+        "fromhex",
+        "from_hex",
+        "unhex",
+        "unescape",
+    )
+    return any(token in normalized for token in helper_tokens)
+
+
+def byte_escape_count(content: str) -> int:
+    return len(BYTE_ESCAPE_RE.findall(content))
+
+
+def is_printable_utf8(data: bytes) -> bool:
+    if len(data) < ENCODED_LITERAL_MIN_BYTES:
+        return False
+    try:
+        decoded = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not decoded:
+        return False
+    printable = sum(1 for char in decoded if char.isprintable() or char in "\n\r\t")
+    return printable / len(decoded) >= 0.8
+
+
+def encoded_literal_kind(content: str) -> str | None:
+    if (
+        len(content) >= ENCODED_LITERAL_MIN_BYTES * 2
+        and len(content) % 2 == 0
+        and HEX_LITERAL_RE.fullmatch(content) is not None
+    ):
+        return "hex"
+
+    if byte_escape_count(content) >= ENCODED_LITERAL_MIN_BYTES:
+        return "byte-escape"
+
+    if (
+        len(content) >= ENCODED_LITERAL_MIN_BYTES * 2
+        and len(content) % 4 == 0
+        and BASE64_LITERAL_RE.fullmatch(content) is not None
+    ):
+        try:
+            decoded = base64.b64decode(content, validate=True)
+        except (binascii.Error, ValueError):
+            decoded = b""
+        if is_printable_utf8(decoded):
+            return "base64"
+
+    return None
+
+
+def hidden_text_encoded_literal_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = hidden_text_string_char_lines(text)
+    for match in HELPER_STRING_ARG_RE.finditer(text):
+        quote_start = match.start("quote")
+        if not is_unmasked_range(text, stripped, match.start(), quote_start):
+            continue
+        string_end = end_of_quoted_string(text, quote_start)
+        if string_end > len(text) or text[string_end - 1] != match.group("quote"):
+            continue
+        if not looks_like_decode_helper(match.group("func")):
+            continue
+        content = text[quote_start + 1 : string_end - 1]
+        if encoded_literal_kind(content) is not None:
+            lines.append(text.count("\n", 0, match.start()) + 1)
+    return sorted(set(lines))
+
+
 def check_line_limit(root: Path, violations: list[str]) -> None:
-    for scan_root_name in ("packages", "scripts"):
-        scan_root = root / scan_root_name
+    for scan_root in (packages_root(root), root / "scripts"):
         if not scan_root.exists():
             continue
         for path in sorted(scan_root.rglob("*")):
@@ -337,7 +484,7 @@ def check_line_limit(root: Path, violations: list[str]) -> None:
 
 
 def package_dirs(root: Path) -> list[Path]:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return []
     return [path for path in sorted(packages.iterdir()) if path.is_dir()]
@@ -582,7 +729,7 @@ def check_helper_reachability(root: Path, violations: list[str]) -> None:
 
 
 def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
-    packages = root / "packages"
+    packages = packages_root(root)
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
@@ -596,19 +743,121 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
             )
 
 
-def check_hidden_text_string_char(root: Path, warnings: list[str]) -> None:
+def check_rest_pagination_guards(root: Path, warnings: list[str]) -> None:
+    packages = packages_root(root)
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file():
+            continue
+        for line in unguarded_rest_per_page_lines(read_text(path)):
+            add(
+                warnings,
+                "G5",
+                f"{rel(root, path)}:{line} REST per_page=100 read lacks gh api --paginate; possible fail-open truncation",
+            )
+
+
+def check_hidden_text_encoded_literals(root: Path, violations: list[str]) -> None:
+    packages = packages_root(root)
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file() or "tests" in path.relative_to(packages).parts:
+            continue
+        for line in hidden_text_encoded_literal_lines(read_text(path)):
+            add(
+                violations,
+                "G6",
+                f"{rel(root, path)}:{line} hidden text uses an encoded literal decode helper; use a plain source literal instead",
+            )
+
+
+def gh_rate_pool_sizing_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    lines: list[int] = []
+    in_gh_rate_pool = False
+    for index, line in enumerate(stripped.splitlines(), start=1):
+        if not in_gh_rate_pool and GH_RATE_POOL_FUNCTION_RE.search(line):
+            in_gh_rate_pool = True
+
+        if in_gh_rate_pool and GH_RATE_POOL_SIZING_FIELD_RE.search(line):
+            lines.append(index)
+
+        if in_gh_rate_pool and re.match(r"^\s*end\s*[,;]?\s*$", line):
+            in_gh_rate_pool = False
+    return lines
+
+
+def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
+    packages = packages_root(root)
+    if not packages.exists():
+        return
+    for path in sorted(packages.rglob("*.lua")):
+        if not path.is_file() or "tests" in path.relative_to(packages).parts:
+            continue
+        for line in gh_rate_pool_sizing_lines(read_text(path)):
+            add(
+                violations,
+                "G7",
+                f"{rel(root, path)}:{line} gh rate pool sizing belongs to FKST_RATE_POOL_GH host posture; package code may declare only the pool name",
+            )
+
+
+def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
     packages = root / "packages"
     if not packages.exists():
         return
     for path in sorted(packages.rglob("*.lua")):
         if not path.is_file() or "tests" in path.relative_to(packages).parts:
             continue
-        for line in hidden_text_string_char_lines(read_text(path)):
+        for line in unclassified_error_call_lines(read_text(path)):
             add(
                 warnings,
-                "G6",
-                f"{rel(root, path)}:{line} string.char call uses a long numeric byte sequence; use a plain English literal instead",
+                "G7",
+                f"{rel(root, path)}:{line} production error(...) string lacks a greppable class prefix",
             )
+
+
+def package_persistence_class(core_path: Path) -> str | None:
+    match = PERSISTENCE_CLASS_RE.search(read_text(core_path))
+    if match is None:
+        return None
+    return match.group("class")
+
+
+def check_persistence_classes(root: Path, violations: list[str]) -> None:
+    for pkg in package_dirs(root):
+        core_path = pkg / "core.lua"
+        if not core_path.exists():
+            continue
+        declared = package_persistence_class(core_path)
+        if declared is None:
+            add(
+                violations,
+                "G8",
+                f"{rel(root, core_path)} must declare M.persistence_class()",
+            )
+            continue
+        if declared not in ALLOWED_PERSISTENCE_CLASSES:
+            add(
+                violations,
+                "G8",
+                f"{rel(root, core_path)} declares unsupported persistence class: {declared}",
+            )
+        if declared == "saga":
+            continue
+        for path in sorted(pkg.rglob("*.lua")):
+            if not path.is_file() or "tests" in path.relative_to(pkg).parts:
+                continue
+            text = read_text(path)
+            for token in SAGA_RECOVERY_TOKENS:
+                if token in text:
+                    add(
+                        violations,
+                        "G8",
+                        f"{rel(root, path)} uses saga recovery token {token!r} but {pkg.name} is {declared}",
+                    )
 
 
 def main() -> int:
@@ -620,7 +869,11 @@ def main() -> int:
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)
-    check_hidden_text_string_char(root, warnings)
+    check_rest_pagination_guards(root, warnings)
+    check_hidden_text_encoded_literals(root, violations)
+    check_gh_rate_pool_sizing(root, violations)
+    check_error_class_prefixes(root, warnings)
+    check_persistence_classes(root, violations)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

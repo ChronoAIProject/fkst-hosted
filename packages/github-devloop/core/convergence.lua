@@ -24,6 +24,63 @@ local function safe_attr(value, limit)
   return text
 end
 
+local function decode_attr(value)
+  if type(value) ~= "string" or value == "" then
+    return nil
+  end
+  if value:find("%c") ~= nil or value:find("[<>]") ~= nil or value:find('"', 1, true) ~= nil then
+    return nil
+  end
+  return value
+end
+
+local sorted_angle_items
+
+local function encode_component(value)
+  return tostring(value or "")
+    :gsub("%%", "%%25")
+    :gsub("|", "%%7C")
+    :gsub(";", "%%3B")
+end
+
+local function decode_component(value)
+  return tostring(value or "")
+    :gsub("%%3[Bb]", ";")
+    :gsub("%%7[Cc]", "|")
+    :gsub("%%25", "%%")
+end
+
+local function encode_angle_replay(angle_digests)
+  local parts = {}
+  for _, item in ipairs(sorted_angle_items(angle_digests)) do
+    table.insert(parts, encode_component(item.angle) .. "|" .. encode_component(item.verdict) .. "|" .. encode_component(item.digest))
+  end
+  return safe_attr(table.concat(parts, ";"), 1000)
+end
+
+local function decode_angle_replay(value)
+  local text = decode_attr(value)
+  if text == nil then
+    return nil
+  end
+  local items = {}
+  for part in text:gmatch("[^;]+") do
+    local angle, verdict, item_digest = part:match("^([^|]+)|([^|]+)|(.*)$")
+    if angle == nil or verdict == nil or item_digest == nil then
+      return nil
+    end
+    table.insert(items, {
+      angle = decode_component(angle),
+      verdict = decode_component(verdict),
+      digest = decode_component(item_digest),
+    })
+  end
+  if #items == 0 then
+    return nil
+  end
+  return items
+end
+
 local function valid_round(value)
   local n = tonumber(value)
   if n == nil or n < 0 or n ~= math.floor(n) or n > max_round then
@@ -32,7 +89,7 @@ local function valid_round(value)
   return n
 end
 
-local function sorted_angle_items(angle_digests)
+function sorted_angle_items(angle_digests)
   local items = {}
   if type(angle_digests) ~= "table" then
     return items
@@ -80,6 +137,9 @@ local function converge_record_map(M, comments, kind, matches)
       local question = attr(marker, "question")
       local verdicts = attr(marker, "verdicts")
       local dedup = attr(marker, "dedup")
+      local narrowed_question = decode_attr(attr(marker, "narrowed_question"))
+      local angle_digests = decode_angle_replay(attr(marker, "angle_digests"))
+      local version = attr(marker, "version")
       if round ~= nil
         and matches(marker)
         and is_digest(question)
@@ -90,6 +150,9 @@ local function converge_record_map(M, comments, kind, matches)
           question = question,
           verdicts = verdicts,
           dedup = dedup,
+          version = version,
+          narrowed_question = narrowed_question,
+          angle_digests = angle_digests,
         }
       end
     end
@@ -214,12 +277,31 @@ function M.build_devloop_fix_reconcile_payload(reject_ctx, issue_version)
   }
 end
 
+function M.build_devloop_timeout_reconcile_payload(row, state, proposal_id, source_ref, attempt)
+  return {
+    schema = "github-devloop.timeout-reconcile.v1",
+    proposal_id = proposal_id,
+    state = row.from_state,
+    issue_version = state.version,
+    round = attempt,
+    dedup_key = "timeout-reconcile:" .. tostring(state.version) .. "/timeout-reconcile/" .. tostring(row.from_state) .. "/" .. tostring(attempt),
+    source_ref = {
+      kind = source_ref.kind,
+      ref = source_ref.ref,
+    },
+  }
+end
+
 function M.review_reconcile_state_version(issue_version, round)
   return tostring(issue_version) .. "/review-loop/" .. tostring(round)
 end
 
 function M.fix_reconcile_state_version(issue_version)
   return tostring(issue_version)
+end
+
+function M.timeout_reconcile_state_version(issue_version, state_name, round)
+  return tostring(issue_version) .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(round)
 end
 
 function M.is_supported_review_reconcile(payload)
@@ -261,6 +343,25 @@ function M.is_supported_fix_reconcile(payload)
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
+function M.is_supported_timeout_reconcile(payload)
+  if type(payload) ~= "table" then
+    return false
+  end
+  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local row = M.restart_transition_row(payload.state)
+  return payload.schema == "github-devloop.timeout-reconcile.v1"
+    and repo ~= nil
+    and issue_number ~= nil
+    and row ~= nil
+    and row.terminal == false
+    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and valid_round(payload.round) ~= nil
+    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and tostring(payload.dedup_key) == "timeout-reconcile:" .. tostring(payload.issue_version) .. "/timeout-reconcile/" .. tostring(payload.state) .. "/" .. tostring(payload.round)
+    and M._has_bounded_source_ref(payload.source_ref)
+end
+
 function M.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
   local n = valid_round(round)
   if n == nil then
@@ -274,6 +375,8 @@ function M.converge_round_marker(proposal_id, base_version, source_ref_digest, r
     .. '" question="' .. M.converge_question_digest(narrowed_question)
     .. '" verdicts="' .. M.converge_verdicts_digest(angle_digests)
     .. '" angles="' .. M.converge_angles_digest(angle_digests)
+    .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
+    .. '" angle_digests="' .. encode_angle_replay(angle_digests)
     .. '" -->'
 end
 
@@ -329,6 +432,23 @@ function M.fix_reconcile_marker(proposal_id, issue_version, action)
     .. '" -->'
 end
 
+function M.timeout_reconcile_marker(proposal_id, issue_version, state_name, round, action)
+  local n = valid_round(round)
+  if n == nil then
+    error("github-devloop: invalid timeout reconcile round")
+  end
+  if action ~= "drop" then
+    error("github-devloop: invalid timeout reconcile action")
+  end
+  return '<!-- fkst:github-devloop:timeout-reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
+    .. '" version="' .. safe_attr(M.timeout_reconcile_state_version(issue_version, state_name, n), M._max_dedup_len)
+    .. '" state="' .. safe_attr(state_name, max_attr_len)
+    .. '" round="' .. tostring(n)
+    .. '" action="' .. safe_attr(action, max_attr_len)
+    .. '" dedup="' .. safe_attr("timeout-reconcile:" .. tostring(issue_version) .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(n), M._max_dedup_len)
+    .. '" -->'
+end
+
 function M.review_converge_round_marker(review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
   local n = valid_round(round)
   if n == nil then
@@ -344,6 +464,8 @@ function M.review_converge_round_marker(review_proposal_id, issue_proposal_id, i
     .. '" question="' .. M.converge_question_digest(narrowed_question)
     .. '" verdicts="' .. M.converge_verdicts_digest(angle_digests)
     .. '" angles="' .. M.converge_angles_digest(angle_digests)
+    .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
+    .. '" angle_digests="' .. encode_angle_replay(angle_digests)
     .. '" -->'
 end
 
@@ -351,6 +473,14 @@ function M.converge_round_facts(comments, proposal_id, base_version, source_ref_
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(proposal_id)
       and attr(marker, "version") == tostring(base_version)
+      and attr(marker, "source_ref") == tostring(source_ref_digest)
+  end
+  return converge_record_map(M, comments, "converge%-round", matches)
+end
+
+function M.converge_round_facts_for_source(comments, proposal_id, source_ref_digest)
+  local matches = function(marker)
+    return attr(marker, "proposal") == tostring(proposal_id)
       and attr(marker, "source_ref") == tostring(source_ref_digest)
   end
   return converge_record_map(M, comments, "converge%-round", matches)
@@ -442,6 +572,26 @@ function M.has_fix_reconcile_marker(comments, proposal_id, issue_version)
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == tostring(issue_version)
+        and valid_round(attr(marker, "round")) == n then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function M.has_timeout_reconcile_marker(comments, proposal_id, issue_version, state_name, round)
+  local n = valid_round(round)
+  if n == nil or type(comments) ~= "table" then
+    return false
+  end
+  local version = M.timeout_reconcile_state_version(issue_version, state_name, n)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      if attr(marker, "proposal") == tostring(proposal_id)
+        and attr(marker, "version") == version
+        and attr(marker, "state") == tostring(state_name)
         and valid_round(attr(marker, "round")) == n then
         return true
       end

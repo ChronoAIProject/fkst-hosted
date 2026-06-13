@@ -30,7 +30,7 @@ jobs:
           set -euo pipefail
           ref="${{ github.event.inputs.substrate_ref }}"
           if [ -z "$ref" ]; then
-            ref="$(sed -n '1{s/[[:space:]]//g;p;q}' .fkst-substrate-ref 2>/dev/null || true)"
+            ref="$(sed -n '1{s/[[:space:]]//g;p;q}' .fkst/substrate-ref 2>/dev/null || true)"
           fi
           if [ -z "$ref" ]; then
             ref="dev"
@@ -39,7 +39,7 @@ jobs:
           echo "fkst-substrate ref: $ref"
 
       # fkst-framework is built from the sibling engine source repo. A downstream
-      # package repo should set .fkst-substrate-ref to a tag or SHA for a
+      # package repo should set .fkst/substrate-ref to a tag or SHA for a
       # reproducible engine source pin; this is not semver or binary distribution.
       - name: Checkout fkst-substrate
         uses: actions/checkout@v4

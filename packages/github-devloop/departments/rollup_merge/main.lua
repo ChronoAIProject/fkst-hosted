@@ -10,8 +10,8 @@ M.spec = {
 
 local function log_skip(payload, reason)
   core.log_line("info", "rollup_merge", "rollup", "GATE", {
-    "repo=" .. tostring(payload.repo),
-    "pr=" .. tostring(payload.pr_number),
+    "repo=" .. tostring(core.payload_field(payload, "repo")),
+    "pr=" .. tostring(core.payload_field(payload, "pr_number")),
     "outcome=skip",
     "reason=" .. tostring(reason),
   })
@@ -20,7 +20,7 @@ end
 function pipeline(event)
   local payload = event.payload or {}
   if not core.is_supported_rollup_ready(payload) then
-    core.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
+    core.log_entry("rollup_merge", event, "rollup", core.payload_field(payload, "dedup_key"))
     log_skip(payload, "unsupported-payload")
     return
   end
@@ -32,7 +32,7 @@ function pipeline(event)
       return
     end
 
-    local viewed = exec_sync({ cmd = core.gh_pr_view_merge_cmd(payload.repo, payload.pr_number), timeout = 30 })
+    local viewed = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(payload.repo, payload.pr_number), timeout = 30 })
     if viewed.exit_code ~= 0 then
       error("github-devloop: gh rollup PR view failed: " .. tostring(viewed.stderr))
     end
@@ -48,7 +48,11 @@ function pipeline(event)
       log_skip(payload, identity_reason)
       return
     end
-    local gate_ok, gate_reason = core.evaluate_ci_merge_gate(pr)
+    local gate_ok, gate_reason = core.evaluate_ci_merge_gate(pr, {
+      repo = payload.repo,
+      dept = "rollup_merge",
+      proposal_id = "rollup",
+    })
     if not gate_ok then
       log_skip(payload, gate_reason)
       return
@@ -60,6 +64,8 @@ function pipeline(event)
       head_sha = payload.head_sha,
       head_branch = payload.integration_branch,
       base_branch = payload.upstream_branch,
+      dept = "rollup_merge",
+      proposal_id = "rollup",
     })
     if not merged then
       log_skip(payload, reason)
@@ -68,5 +74,7 @@ function pipeline(event)
     core.log_apply("rollup_merge", "rollup", "rollup-merged", payload.head_sha, {}, {})
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("rollup_merge", pipeline)
 
 return M

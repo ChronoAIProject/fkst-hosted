@@ -75,6 +75,7 @@ local mock_git_push = h.mock_git_push
 local mock_existing_devloop_worktree = h.mock_existing_devloop_worktree
 local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
+local mock_existing_fix_worktree = h.mock_existing_fix_worktree
 local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local mock_issue_view_failure = h.mock_issue_view_failure
@@ -94,6 +95,7 @@ return {
         proposal_id = event.review_proposal_id,
         decision = "reject",
         body = "Reject because parser must fail closed.",
+        blocking_gap = "missing regression guard",
         dedup_key = event.review_dedup_key,
         source_ref = { kind = "external", ref = "owner/repo#pr/7" },
       },
@@ -108,11 +110,7 @@ return {
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD def456\nbranch refs/heads/" .. branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(branch, "def456")
     mock_implement_codex(0, "fixed review feedback")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
@@ -158,8 +156,7 @@ return {
     local proposal = find_raise(review_result.raises, "consensus.proposal").payload
     t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, expected_version, "feedface"))
     t.is_nil(proposal.body:find("+fixed again", 1, true))
-    t.is_true(proposal.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
-    t.is_true(proposal.content_fetch:find("Confirm headRefOid equals reviewed head feedface", 1, true) ~= nil)
+    t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
 	  end,
 
   test_fix_marker_lag_retries_then_visible_marker_runs = function()
@@ -170,7 +167,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
 
@@ -193,11 +190,7 @@ return {
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD def456\nbranch refs/heads/" .. branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(branch, "def456")
     mock_implement_codex(0, "fixed after marker became visible")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
@@ -227,7 +220,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
 
@@ -253,7 +246,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
     mock_bot_env()
@@ -276,7 +269,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
     mock_bot_env()
@@ -302,7 +295,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
@@ -326,11 +319,7 @@ return {
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD def456\nbranch refs/heads/" .. branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(branch, "def456")
     mock_implement_codex(0, "fixed review feedback")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
@@ -374,6 +363,7 @@ return {
         proposal_id = second_event.review_proposal_id,
         decision = "reject",
         body = "Reject second round.",
+        blocking_gap = "missing regression guard",
         dedup_key = second_event.review_dedup_key,
         source_ref = { kind = "external", ref = "owner/repo#pr/7" },
       },
@@ -388,11 +378,7 @@ return {
     }, first_branch, first_event.version)
     mock_pr_fix({ origin_marker }, first_branch, "feedface")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD feedface\nbranch refs/heads/" .. first_branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(first_branch, "feedface")
     mock_implement_codex(0, "fixed second-round review feedback")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("baddad", first_branch)
@@ -422,7 +408,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
@@ -459,7 +445,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
@@ -495,7 +481,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
     mock_bot_env()
@@ -507,11 +493,7 @@ return {
     mock_write_env("1")
     mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD def456\nbranch refs/heads/" .. branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(branch, "def456")
     mock_implement_codex(0, "No viable fix.")
     mock_git_status("")
     t.mock_command("rev-list --count", {
@@ -519,6 +501,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
 
     local result = run_fix(event, opts("fix-no-changes-review-meta", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -526,7 +509,8 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:review-meta")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("github-devloop fix escalated to review-meta: no-fix", 1, true) ~= nil)
-    t.eq(comment_body:find("fkst:github-devloop:review-meta:v1", 1, true), nil)
+    t.is_true(comment_body:find("fkst:github-devloop:review-meta:v1", 1, true) ~= nil)
+    t.is_true(comment_body:find('dedup="' .. event.review_dedup_key .. '"', 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_review_meta").payload.schema, "github-devloop.review-meta.v1")
   end,
 
@@ -538,7 +522,7 @@ return {
       "42",
       event.proposal_id,
       event.version,
-      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
+      { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
@@ -550,11 +534,7 @@ return {
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD feedface\nbranch refs/heads/" .. branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(branch, "feedface")
     mock_implement_codex(0, "Fix commit already exists.")
     mock_git_status("")
     t.mock_command("rev-list --count", {
@@ -587,6 +567,36 @@ return {
     t.eq(count_calls("git push origin"), 1)
   end,
 
+  test_fix_reviewing_clears_stale_fix_summary_when_codex_summary_is_empty = function()
+    local event = fixing({ fix_summary = "stale summary from a prior round" })
+    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local review = { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } }
+    local reject_comment = core.build_review_result_comment_request("owner/repo", "42", event.proposal_id, event.version, review, event.source_ref).body
+    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    mock_bot_env()
+    mock_write_env("1")
+    local comments = { core.state_marker(event.proposal_id, "fixing", event.version), reject_comment }
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, comments, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, "def456")
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
+    mock_existing_fix_worktree(branch, "feedface")
+    mock_implement_codex(0, "")
+    mock_git_status("")
+    t.mock_command("rev-list --count", { stdout = "1\n", stderr = "", exit_code = 0 })
+    t.mock_command("rev-parse --verify refs/heads/", { stdout = "feedface\n", stderr = "", exit_code = 0 })
+    mock_write_env("1")
+    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, comments, branch, event.version)
+    mock_pr_fix({ origin_marker }, branch, "def456")
+    mock_git_push(branch)
+    mock_pr_fix({ origin_marker }, branch, "feedface")
+
+    local result = run_fix(event, opts("fix-summary-cleared", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.eq(body:find("stale summary from a prior round", 1, true), nil)
+    t.eq(body:find("Fix-round summary:", 1, true), nil)
+  end,
+
   test_review_loop_unresolved_under_budget_reraises_review_proposal = function()
     local event = review_unresolved()
     local impl_version = reviewing().version
@@ -603,7 +613,6 @@ return {
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.is_true(result.raises[1].payload.dedup_key:find("/loop/1", 1, true) ~= nil)
     t.is_nil(result.raises[1].payload.body:find("+return true", 1, true))
-    t.is_true(result.raises[1].payload.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,
@@ -634,7 +643,6 @@ return {
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.eq(result.raises[1].payload.proposal_id, proposal_id)
-    t.is_true(result.raises[1].payload.content_fetch:find("gh pr diff '7' --repo 'owner/repo'", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find('round="0"', 1, true) ~= nil)
   end,
@@ -882,11 +890,7 @@ return {
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
     })
-    t.mock_command("codex exec", {
-      stdout = "unparseable review-meta answer",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_meta_codex(nil)
 
     local result = run_review_meta(event, opts("review-meta-parse-failure"))
     t.eq(result.exit_code, 0)
@@ -907,6 +911,7 @@ return {
     t.eq(#fix_result.raises, 3)
     t.eq(find_raise(fix_result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     t.eq(find_raise(fix_result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
+    t.eq(find_raise(fix_result.raises, "devloop_fixing").payload.blocking_gap, "missing retry guard")
 
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
@@ -959,6 +964,7 @@ return {
     t.eq(current.version, meta_exit_version)
     local fix_event = find_raise(meta_result.raises, "devloop_fixing").payload
     t.eq(fix_event.version, meta_exit_version)
+    t.eq(fix_event.blocking_gap, "missing retry guard")
 
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local recomputed_branch = core.implement_branch("owner/repo", "42", meta_exit_version)
@@ -971,11 +977,7 @@ return {
     }, branch, event.version)
     mock_pr_fix({ origin_marker }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
-    t.mock_command("git worktree list --porcelain", {
-      stdout = "worktree /tmp/fix-worktree\nHEAD def456\nbranch refs/heads/" .. branch .. "\n\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_fix_worktree(branch, "def456")
     mock_implement_codex(0, "fixed review-meta feedback")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)

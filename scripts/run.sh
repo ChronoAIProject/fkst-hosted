@@ -1,14 +1,29 @@
 #!/usr/bin/env bash
 # Generic dev runner for fkst packages.
 #
-#   scripts/run.sh test [package]
+#   scripts/run.sh test [-v|--verbose] [package]
 #       Run fkst-framework --self-test once, then conformance + test for flat
 #       packages. Composed packages skip single-package conformance and still
 #       run tests. Full test also runs composed graph conformance. This is the
-#       single CI and local test entrypoint.
+#       single CI and local test entrypoint. FKST_RUNTIME_ROOT and
+#       FKST_DURABLE_ROOT are overridden with fresh temp roots, and
+#       FKST_GITHUB_WRITE is cleared, so local runs predict CI.
+#       By default only failure-relevant lines are printed (the per-test
+#       --report-json drives the tally and G5 coverage independently of stdout,
+#       so filtering stdout is safe). Pass -v/--verbose or set FKST_TEST_VERBOSE=1
+#       to stream the full per-test department logs.
 #
 #   scripts/run.sh check
 #       Run hermetic repository checks only. Does not resolve or execute BIN.
+#
+#   scripts/run.sh doctor
+#       Run read-only preflight checks for git/cargo/rustc, fkst-framework BIN,
+#       codex, gh auth, and relevant FKST_* host facts.
+#
+#   scripts/run.sh doctor github-devloop
+#       Run the read-only package-side saga doctor against the configured
+#       running GitHub repository. Exact engine queue/DLQ depths remain
+#       unavailable here and need fkst-framework doctor support.
 #
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
@@ -21,52 +36,45 @@
 #       env, e.g.:
 #         PACKAGE_CONFIG=value scripts/run.sh run example-package example_department
 #       Reuses $FKST_RUNTIME_ROOT if already set (run twice with the same one to
-#       observe dedup), else uses a fresh temp dir. Never sets FKST_GITHUB_WRITE,
-#       so a read-only inbound dogfood stays read-only.
+#       observe dedup), else uses .fkst/runtime. Never sets FKST_GITHUB_WRITE, so
+#       a read-only inbound dogfood stays read-only.
 #
 #   scripts/run.sh supervise <package>
 #       Start the real fkst-framework supervise event loop for one package.
-#       Uses fresh temporary FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT directories
-#       and runs in the foreground until Ctrl-C. FKST_PROJECT_ROOT can override
-#       the default project root of packages/<package>.
+#       Uses .fkst/runtime and .fkst/durable by default and requires
+#       FKST_RATE_POOL_ROOT from the host so named external-command
+#       rate pools are shared across supervise instances. Runs in the foreground
+#       until Ctrl-C. FKST_PROJECT_ROOT can override the default project root of
+#       .fkst/packages/<package>.
 #
 #   scripts/run.sh build
 #       Local-only helper: update the fkst-substrate dev checkout and build
 #       fkst-framework. test/run/supervise ensure a traceable local BIN is built
 #       from the current fkst-substrate working tree before running.
 #
-# fkst-framework binary resolution (priority): $BIN > repo .env `BIN=` > PATH >
-# sibling ../fkst-substrate/target/debug/fkst-framework.
+# fkst-framework binary resolution (priority): $BIN > repo .fkst/env `BIN=` > PATH >
+# sibling ../fkst-substrate/target/debug/fkst-framework > pinned source cache
+# clone/build fallback.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FKST_DIR="$ROOT/.fkst"
+PACKAGES_ROOT="$FKST_DIR/packages"
+DEFAULT_RUNTIME_ROOT="$FKST_DIR/runtime"
+DEFAULT_DURABLE_ROOT="$FKST_DIR/durable"
+
+# shellcheck source=scripts/bin_bootstrap.sh
+. "$ROOT/scripts/bin_bootstrap.sh"
 
 resolve_bin() {
-  if [ -z "${BIN:-}" ] && [ -f "$ROOT/.env" ]; then
-    # `|| true`: no BIN= line is fine under set -o pipefail. Strip optional
-    # surrounding quotes and a trailing ` # comment`.
-    BIN="$(grep -E '^BIN=' "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-    BIN="${BIN%%[[:space:]]#*}"
-    BIN="${BIN%\"}"; BIN="${BIN#\"}"; BIN="${BIN%\'}"; BIN="${BIN#\'}"
-  fi
-  if [ -z "${BIN:-}" ]; then
-    if command -v fkst-framework >/dev/null 2>&1; then
-      BIN="$(command -v fkst-framework)"
-    elif [ -x "$ROOT/../fkst-substrate/target/debug/fkst-framework" ]; then
-      BIN="$ROOT/../fkst-substrate/target/debug/fkst-framework"
-    fi
-  fi
-  if [ -z "${BIN:-}" ] || [ ! -x "$BIN" ]; then
+  if ! resolve_bin_contract "$ROOT" "bootstrap"; then
+    echo "error: $RESOLVE_BIN_ERROR" >&2
     if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
-      echo "error: fkst-framework binary is not executable in CI: ${BIN:-<unset>}" >&2
       echo "  CI must build fkst-substrate and inject BIN; scripts/run.sh will not build in CI." >&2
-      exit 1
     fi
-    echo "error: fkst-framework binary not found (\$BIN, .env, PATH, ../fkst-substrate)." >&2
-    echo "  fix: cp env.example .env (set BIN=), or build the engine:" >&2
-    echo "       scripts/run.sh build" >&2
     exit 1
   fi
+  BIN="$RESOLVED_BIN"
   export BIN
 }
 
@@ -111,19 +119,26 @@ ensure_fresh_bin() {
   fi
 
   echo "ensuring fkst-framework is built from current source: $substrate" >&2
-  if ! cargo build --manifest-path "$substrate/Cargo.toml" -p fkst-framework 1>&2; then
+  local build_out
+  if ! build_out="$(cargo build --manifest-path "$substrate/Cargo.toml" -p fkst-framework 2>&1)"; then
+    printf '%s\n' "$build_out" >&2
     echo "error: fkst-framework freshness build failed; refusing to continue with a potentially stale BIN" >&2
     exit 1
   fi
 }
 
 usage() {
-  sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 cmd_check() {
-  python3 "$ROOT/scripts/check_repo.py"
-  python3 "$ROOT/scripts/check_repo_test.py"
+  local fail=0
+  python3 -B "$ROOT/scripts/check_repo.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
+  python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
+  python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
+  python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
+  return "$fail"
 }
 
 check_test_file_coverage() {
@@ -134,7 +149,9 @@ check_test_file_coverage() {
 
   (
     cd "$ROOT"
-    find packages \( -path '*/tests/*_test.lua' -o -path '*/departments/*/*_test.lua' \) -type f -print | LC_ALL=C sort -u
+    find -H "$PACKAGES_ROOT" \( -path '*/tests/*_test.lua' -o -path '*/departments/*/*_test.lua' \) -type f -print \
+      | while IFS= read -r path; do printf 'packages/%s\n' "${path#"$PACKAGES_ROOT"/}"; done \
+      | LC_ALL=C sort -u
   ) > "$expected"
 
   python3 - "$report_dir" <<'PY' | LC_ALL=C sort -u > "$actual"
@@ -178,25 +195,135 @@ PY
   echo "OK: G5 every *_test.lua produced an engine report-json pass"
 }
 
+check_sdk_primitives() {
+  local probe_dir report_file
+  probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-sdk-probe.XXXXXX")"
+  mkdir -p "$probe_dir/tests"
+  printf 'return {}\n' > "$probe_dir/core.lua"
+  cat > "$probe_dir/tests/sdk_primitives_test.lua" <<'LUA'
+local t = fkst.test
+
+local function cjk_char()
+  return string.char(0xe6, 0xb5, 0x8b)
+end
+
+local function emoji_char()
+  return string.char(0xf0, 0x9f, 0x98, 0x80)
+end
+
+local function assert_valid_utf8(value)
+  local ok, len = pcall(utf8.len, tostring(value or ""))
+  t.is_true(ok and len ~= nil)
+end
+
+return {
+  test_truncate_utf8_sdk_primitive_is_deployed = function()
+    t.eq(type(truncate_utf8), "function")
+    local cjk = cjk_char()
+    local emoji = emoji_char()
+    local mixed = "ab" .. cjk .. "cd"
+
+    t.eq(truncate_utf8(mixed, 2), "ab")
+    t.eq(truncate_utf8(mixed, 3), "ab")
+    t.eq(truncate_utf8(mixed, 4), "ab")
+    t.eq(truncate_utf8(mixed, 5), "ab" .. cjk)
+    t.eq(truncate_utf8(mixed, 6), "ab" .. cjk .. "c")
+    t.eq(truncate_utf8("", 3), "")
+    t.eq(truncate_utf8(cjk, 2), "")
+    t.eq(truncate_utf8(emoji .. "x", 3), "")
+    t.eq(truncate_utf8("ab" .. emoji .. "x", 6), "ab" .. emoji)
+    assert_valid_utf8(truncate_utf8(mixed, 1))
+    assert_valid_utf8(truncate_utf8(mixed, 7))
+    assert_valid_utf8(truncate_utf8("ab" .. emoji .. "x", 5))
+    assert_valid_utf8(truncate_utf8("ab" .. emoji .. "x", 6))
+  end,
+}
+LUA
+
+  report_file="$probe_dir/report.json"
+  if ! "$BIN" test --project-root "$probe_dir" --package-root "$probe_dir" --report-json "$report_file"; then
+    rm -rf "$probe_dir"
+    echo "error: required SDK primitive is unavailable or invalid: truncate_utf8(s, max_bytes)" >&2
+    return 1
+  fi
+  rm -rf "$probe_dir"
+  echo "OK: SDK primitive truncate_utf8 is available in BIN: $BIN"
+}
+
+# Run "$@"; unless verbose (cmd_test's flag), drop advisory `PASS` lines from its
+# combined output so only failures surface. Returns the command's own exit code
+# (via PIPESTATUS, not grep's). The `set +e`/`set -e` guard makes it safe in any
+# caller context: the inner grep matching nothing on an all-pass run must not
+# trip the script-wide `set -e`.
+run_quiet_pass() {
+  if [ -n "${verbose:-}${FKST_TEST_VERBOSE:-}" ]; then "$@"; return $?; fi
+  local rc
+  set +e
+  "$@" 2>&1 | grep -vE '^PASS '
+  rc=${PIPESTATUS[0]}
+  set -e
+  return "$rc"
+}
+
+# Run "$2..."; unless verbose, KEEP only stdout lines matching the regex in $1
+# (the inverse of run_quiet_pass — allowlist for the noisy engine test stream).
+# Returns the command's own exit code via PIPESTATUS, not grep's, so an all-pass
+# run (grep still matches the tally) and a failing run both report correctly.
+# Same `set +e`/`set -e` guard so a failing package neither aborts the run nor is
+# swallowed: the loop continues and the count stays accurate.
+run_quiet_keep() {
+  local keep="$1"; shift
+  if [ -n "${verbose:-}${FKST_TEST_VERBOSE:-}" ]; then "$@"; return $?; fi
+  local rc
+  set +e
+  "$@" 2>&1 | grep -E -- "$keep"
+  rc=${PIPESTATUS[0]}
+  set -e
+  return "$rc"
+}
+
 cmd_test() {
-  local target="${1:-}" ran=0 fail=0 pkg name
-  local self_rt report_dir report_file
+  local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}"
+  local report_dir report_file
+  # Lines worth surfacing when a package test fails: the engine's per-test FAIL
+  # line (anchored at column 0 so it does not catch mid-line tag=FAILURE in the
+  # info logs of tests that deliberately exercise error paths and still pass),
+  # the per-package tally, and panics. Everything else (PASS lines, LEVEL=info
+  # department logs, expected-error tracebacks) is suppressed unless verbose.
+  # For a real failure the FAIL line already carries the assertion/error reason;
+  # use -v for the full traceback.
+  local test_failure_filter='^FAIL |passed, [0-9]+ failed|panic'
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -v|--verbose) verbose=1 ;;
+      -*) echo "unknown test flag: $1" >&2; exit 2 ;;
+      *) target="$1" ;;
+    esac
+    shift
+  done
+
+  trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}"' EXIT
+  TEST_HERMETIC_RUNTIME_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-rt.XXXXXX")"
+  TEST_HERMETIC_DURABLE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-durable.XXXXXX")"
+  export FKST_RUNTIME_ROOT="$TEST_HERMETIC_RUNTIME_ROOT"
+  export FKST_DURABLE_ROOT="$TEST_HERMETIC_DURABLE_ROOT"
+  unset FKST_GITHUB_WRITE
+  unset FKST_SUPERVISOR_PID
+  echo "test hermetic: FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT (ambient overridden)"
 
   report_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-reports.XXXXXX")"
 
   echo "=== self-test ==="
-  if [ -n "${FKST_RUNTIME_ROOT:-}" ]; then
-    if ! "$BIN" --self-test; then
-      fail=$((fail + 1))
-    fi
-  else
-    self_rt="$(mktemp -d "${TMPDIR:-/tmp}/fkst-self-test.XXXXXX")"
-    if ! FKST_RUNTIME_ROOT="$self_rt" "$BIN" --self-test; then
-      fail=$((fail + 1))
-    fi
+  if ! "$BIN" --self-test; then
+    fail=$((fail + 1))
   fi
 
-  for pkg in "$ROOT"/packages/*/; do
+  echo "=== sdk-primitives ==="
+  if ! run_quiet_pass check_sdk_primitives; then
+    fail=$((fail + 1))
+  fi
+
+  for pkg in "$PACKAGES_ROOT"/*/; do
     [ -d "$pkg" ] || continue
     name="$(basename "$pkg")"
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
@@ -205,13 +332,18 @@ cmd_test() {
     if [ -f "$pkg/composed.deps" ]; then
       echo "skip single-package conformance for composed package: $name"
     else
-      if ! "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
+      if ! run_quiet_pass "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
         fail=$((fail + 1))
         continue
       fi
     fi
     report_file="$report_dir/$name.json"
-    if ! "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file"; then
+    # Default-quiet: keep only failure-relevant lines (the --report-json that
+    # drives the tally and G5 coverage is unaffected). run_quiet_keep is called
+    # from `if !` so the inner pipe never trips `set -e` on a failing package;
+    # the loop continues, the count is correct, and FAILED: still prints.
+    if ! run_quiet_keep "$test_failure_filter" \
+        "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file"; then
       fail=$((fail + 1))
     fi
   done
@@ -243,7 +375,7 @@ cmd_test() {
 
 collect_composed_package() {
   local name="$1" pkg dep
-  pkg="$ROOT/packages/$name"
+  pkg="$PACKAGES_ROOT/$name"
   [ -d "$pkg" ] || { echo "error: composed package dependency not found: $name" >&2; return 1; }
   case " ${COMPOSED_SEEN[*]-} " in
     *" $name "*) return 0 ;;
@@ -263,7 +395,7 @@ collect_composed_package() {
 cmd_test_composed() {
   local pkg name args
   COMPOSED_SEEN=()
-  for pkg in "$ROOT"/packages/*/; do
+  for pkg in "$PACKAGES_ROOT"/*/; do
     [ -d "$pkg" ] || continue
     [ -f "$pkg/composed.deps" ] || continue
     name="$(basename "$pkg")"
@@ -276,10 +408,10 @@ cmd_test_composed() {
 
   args=()
   for name in "${COMPOSED_SEEN[@]}"; do
-    args+=(--package-root "$ROOT/packages/$name")
+    args+=(--package-root "$PACKAGES_ROOT/$name")
   done
   echo "=== composed conformance ==="
-  "$BIN" conformance --project-root "$ROOT" "${args[@]}"
+  run_quiet_pass "$BIN" conformance --project-root "$ROOT" "${args[@]}"
 }
 
 cmd_run() {
@@ -345,7 +477,7 @@ cmd_run() {
     event="$inline_event"
   fi
 
-  local pkgdir="$ROOT/packages/$pkg" lua
+  local pkgdir="$PACKAGES_ROOT/$pkg" lua
   lua="$pkgdir/departments/$dept/main.lua"
   [ -f "$lua" ] || { echo "error: no department at $lua" >&2; exit 1; }
 
@@ -353,7 +485,8 @@ cmd_run() {
   if [ -n "${FKST_RUNTIME_ROOT:-}" ]; then
     rt="$FKST_RUNTIME_ROOT"
   else
-    rt="$(mktemp -d "${TMPDIR:-/tmp}/fkst-run.XXXXXX")"; fresh=1
+    rt="$DEFAULT_RUNTIME_ROOT"; fresh=1
+    mkdir -p "$rt"
   fi
   export FKST_RUNTIME_ROOT="$rt"
 
@@ -385,18 +518,68 @@ cmd_run() {
   return "$rc"
 }
 
+cmd_doctor() {
+  if [ "$#" -eq 0 ]; then
+    "$BASH" "$ROOT/scripts/doctor.sh"
+    return $?
+  fi
+
+  local pkg="${1:-}"
+  shift
+  case "$pkg" in
+    github-devloop)
+      if [ "$#" -ne 0 ]; then
+        echo "usage: scripts/run.sh doctor github-devloop" >&2
+        exit 2
+      fi
+      resolve_bin
+      ensure_fresh_bin
+      local pkgdir="$PACKAGES_ROOT/github-devloop"
+      local lua="$pkgdir/departments/doctor/main.lua"
+      [ -f "$lua" ] || { echo "error: no saga doctor at $lua" >&2; exit 1; }
+      "$BIN" run "$lua" --project-root "$ROOT" --package-root "$pkgdir" --event '{"queue":"devloop_doctor_tick","payload":{}}' \
+        | grep -vE '^RAISED:'
+      ;;
+    --running|--system)
+      if [ "${1:-}" != "github-devloop" ]; then
+        echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+        exit 2
+      fi
+      shift
+      cmd_doctor github-devloop "$@"
+      ;;
+    *)
+      echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+      exit 2
+      ;;
+  esac
+}
+
 cmd_supervise() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
     echo "usage: scripts/run.sh supervise <package>" >&2; exit 1
   fi
-  local pkgdir="$ROOT/packages/$pkg"
+  if [ -z "${FKST_RATE_POOL_ROOT:-}" ]; then
+    echo "error: FKST_RATE_POOL_ROOT is required for supervise so gh rate pools share one host-stable budget" >&2
+    echo "  set FKST_RATE_POOL_ROOT to the same host-stable directory for every supervise instance that spends the GitHub quota" >&2
+    exit 1
+  fi
+  case "$FKST_RATE_POOL_ROOT" in
+    /*) ;;
+    *)
+      echo "error: FKST_RATE_POOL_ROOT must be an absolute host-stable directory path" >&2
+      exit 1
+      ;;
+  esac
+  local pkgdir="$PACKAGES_ROOT/$pkg"
   [ -d "$pkgdir" ] || { echo "error: no package at $pkgdir" >&2; exit 1; }
 
   local project_root rt durable
   project_root="${FKST_PROJECT_ROOT:-$pkgdir}"
-  rt="$(mktemp -d "${TMPDIR:-/tmp}/fkst-supervise-rt.XXXXXX")"
-  durable="$(mktemp -d "${TMPDIR:-/tmp}/fkst-supervise-durable.XXXXXX")"
+  rt="${FKST_RUNTIME_ROOT:-$DEFAULT_RUNTIME_ROOT}"
+  durable="${FKST_DURABLE_ROOT:-$DEFAULT_DURABLE_ROOT}"
+  mkdir -p "$rt" "$durable"
   if [ "$rt" = "$durable" ]; then
     echo "error: FKST_RUNTIME_ROOT and FKST_DURABLE_ROOT resolved to the same directory" >&2
     exit 1
@@ -407,6 +590,7 @@ cmd_supervise() {
   echo "BIN=$BIN"
   echo "FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT"
   echo "FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT"
+  echo "FKST_RATE_POOL_ROOT=$FKST_RATE_POOL_ROOT"
   echo "This starts the real supervise event loop in the foreground. Press Ctrl-C to stop."
   echo "exec: \"$BIN\" supervise --project-root \"$project_root\" --package-root \"$pkgdir\" --framework-bin \"$BIN\""
   exec "$BIN" supervise --project-root "$project_root" --package-root "$pkgdir" --framework-bin "$BIN"
@@ -438,13 +622,30 @@ cmd_build() {
   echo "OK: built $substrate/target/debug/fkst-framework"
 }
 
-case "${1:-}" in
-  check) shift; cmd_check "$@" ;;
-  test) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
-  test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
-  run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
-  supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
-  build) shift; cmd_build "$@" ;;
-  -h|--help|help|"") usage ;;
-  *) echo "unknown subcommand: $1" >&2; usage; exit 1 ;;
-esac
+main() {
+  case "${1:-}" in
+    check) shift; cmd_check "$@" ;;
+    doctor) shift; cmd_doctor "$@" ;;
+    test) shift
+      # Quiet cmd_check's advisory warnings during a test run unless verbose;
+      # surface its full output only when it hard-fails (non-zero). `run.sh check`
+      # and `test -v`/FKST_TEST_VERBOSE=1 still show every warning.
+      case " $* " in *" -v "*|*" --verbose "*) _tv=1 ;; *) _tv="${FKST_TEST_VERBOSE:-}" ;; esac
+      if [ -n "$_tv" ]; then
+        cmd_check
+      elif ! _chk_out="$(cmd_check 2>&1)"; then
+        printf '%s\n' "$_chk_out"; exit 1
+      fi
+      resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
+    test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
+    run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
+    supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;
+    build) shift; cmd_build "$@" ;;
+    -h|--help|help|"") usage ;;
+    *) echo "unknown subcommand: $1" >&2; usage; exit 1 ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

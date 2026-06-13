@@ -18,21 +18,132 @@ local function branch_worktree(repo, issue_number, version, branch)
   if runtime_result.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
-  local worktree = core.implement_worktree_path(runtime_result.stdout, repo, issue_number, version)
+  local runtime_root = runtime_result.stdout
+  local worktree = core.implement_worktree_path(runtime_root, repo, issue_number, version)
   local list_result = exec_sync({ cmd = core.git_worktree_list_cmd(), timeout = 30 })
   if list_result.exit_code ~= 0 then
     error("github-devloop: git worktree list failed: " .. tostring(list_result.stderr))
   end
   local existing = core.find_worktree_for_branch(list_result.stdout, branch)
   if existing ~= nil then
-    return existing
+    local dir_result = exec_sync({ cmd = core.path_is_directory_cmd(existing), timeout = 30 })
+    if dir_result.exit_code ~= 0 and dir_result.exit_code ~= 1 then
+      error("github-devloop: git worktree path check failed: " .. tostring(dir_result.stderr))
+    end
+    if dir_result.exit_code == 0 and core.path_under_runtime_root(runtime_root, existing) then
+      return existing
+    end
+    if dir_result.exit_code == 1 then
+      local prune_result = exec_sync({ cmd = core.git_worktree_prune_cmd(), timeout = 60 })
+      if prune_result.exit_code ~= 0 then
+        error("github-devloop: git worktree prune failed: " .. tostring(prune_result.stderr))
+      end
+    else
+      local remove_result = exec_sync({ cmd = core.git_worktree_remove_cmd(existing), timeout = 60 })
+      if remove_result.exit_code ~= 0 then
+        error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
+      end
+    end
   end
 
-  local add_result = exec_sync({ cmd = core.git_worktree_add_existing_branch_cmd(worktree, branch), timeout = 60 })
+  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", branch), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR head branch fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local add_cmd = core.git_worktree_add_remote_branch_cmd(worktree, "origin", branch, false)
+  if existing ~= nil then
+    add_cmd = core.git_worktree_add_remote_branch_cmd(worktree, "origin", branch, true)
+  end
+  local add_result = exec_sync({ cmd = add_cmd, timeout = 60 })
   if add_result.exit_code ~= 0 then
     error("github-devloop: git worktree add failed: " .. tostring(add_result.stderr))
   end
   return worktree
+end
+
+local function fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+  if expected_baseline_sha == nil then
+    return nil
+  end
+  local fetch_result = exec_sync({ cmd = core.git_fetch_pr_merge_ref_cmd("origin", pr_number), timeout = 60 })
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local head_result = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    error("github-devloop: git PR merge ref head failed: " .. tostring(head_result.stderr))
+  end
+  local merge_product_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if merge_product_sha ~= expected_baseline_sha then
+    error("github-devloop: PR merge ref head does not match merge-gate baseline")
+  end
+  return merge_product_sha
+end
+
+local function merge_integration_for_fix(worktree, pr_number, integration_branch, expected_baseline_sha, merge_gate_reason)
+  if core.merge_gate_reason_requires_pr_merge_product(merge_gate_reason) then
+    fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
+  end
+  local base_head = expected_baseline_sha
+  if base_head == nil then
+    local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", integration_branch), timeout = 60 })
+    if fetch_result.exit_code ~= 0 then
+      error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
+    end
+    local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", integration_branch), timeout = 30 })
+    if base_result.exit_code ~= 0 then
+      error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
+    end
+    base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
+  end
+  if not core.is_safe_head_sha(base_head) then
+    error("github-devloop: unsafe integration head")
+  end
+  local result = {
+    target_branch = integration_branch,
+    target_sha = base_head,
+    conflicted = false,
+    unmerged_paths = "",
+  }
+  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
+  if merge_result.exit_code ~= 0 then
+    local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+    if unmerged_result.exit_code ~= 0 then
+      error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    end
+    if tostring(unmerged_result.stdout or "") == "" then
+      error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+    end
+    result.conflicted = true
+    result.unmerged_paths = tostring(unmerged_result.stdout or "")
+    core.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
+      "integration_branch=" .. tostring(integration_branch),
+      "integration_sha=" .. tostring(base_head),
+      "reason=integration merge requires codex conflict resolution",
+    })
+  end
+  return result
+end
+
+local function assert_no_unmerged_paths(worktree)
+  local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+  if unmerged_result.exit_code ~= 0 then
+    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+  end
+  if tostring(unmerged_result.stdout or "") ~= "" then
+    error("github-devloop: fix left target merge conflicts unresolved")
+  end
+end
+
+local function assert_no_conflict_markers(worktree)
+  local markers_result = exec_sync({ cmd = core.git_conflict_markers_cmd(worktree), timeout = 30 })
+  if markers_result.exit_code == 1 then
+    return
+  end
+  if markers_result.exit_code == 0 then
+    error("github-devloop: fix left conflict markers unresolved")
+  end
+  error("github-devloop: git conflict marker check failed: " .. tostring(markers_result.stderr))
 end
 
 local function raise_review_meta(repo, issue_number, fix, reason, detail)
@@ -61,26 +172,47 @@ local function raise_review_meta(repo, issue_number, fix, reason, detail)
   })
 end
 
-local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason)
-  local new_version = core.next_fix_version(fix.version)
-  core.log_cas_decision("fix", fix.proposal_id, { state = "fixing", version = fix.version }, "fixing", "reviewing", "applied", reason)
-  local comment_request = core.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
-  local label_request = core.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
-  local add_labels, remove_labels = core.state_label_changes("reviewing")
-  local reviewing_payload = core.build_devloop_reviewing_payload({
-    proposal_id = fix.proposal_id,
-    impl_version = new_version,
-  }, fix.pr_number, fix.source_ref)
-  core.log_apply("fix", fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_reviewing",
-  })
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  if issue_number ~= nil then
-    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+local function bounded_fix_summary(value)
+  local text = tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if #text > 600 then
+    text = text:sub(1, 600)
   end
-  core.log_raise("fix", fix.proposal_id, "devloop_reviewing", reviewing_payload)
+  return text
+end
+
+local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
+  core.raise_fix_reviewing({
+    dept = "fix",
+    repo = repo,
+    issue_number = issue_number,
+    fix = fix,
+    old_head_sha = old_head_sha,
+    new_head_sha = new_head_sha,
+    reason = reason,
+    fix_summary = bounded_fix_summary(summary),
+    clear_fix_summary = true,
+  })
+end
+
+local function raise_work_card(repo, fix, card)
+  local request = core.build_work_card_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = fix.pr_number,
+  }, {
+    proposal_id = fix.proposal_id,
+    role = "fix",
+    run_id = core.work_card_run_id({ "fix", fix.dedup_key }),
+    version = fix.version,
+    round = core.version_fix_round(fix.version),
+    started_at = card.started_at,
+    finished_at = card.finished_at,
+    outcome = card.outcome,
+    gate_baseline_sha = fix.gate_baseline_sha,
+    last_stage = fix.blocking_gap or fix.gate_failure_excerpt,
+    source_ref = fix.source_ref,
+  })
+  core.log_work_card("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", request)
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)
@@ -121,10 +253,208 @@ local function branch_head_if_ahead(base_head_sha, branch)
   return branch_head_sha
 end
 
+local function run_fix_attempt(plan)
+  local worktree = branch_worktree(plan.repo, plan.issue_number, plan.fix.version, plan.branch)
+  local merge_context = merge_integration_for_fix(
+    worktree,
+    plan.fix.pr_number,
+    plan.branches.integration,
+    plan.merge_gate_fact and plan.merge_gate_fact.gate_baseline_sha or nil,
+    plan.merge_gate_fact and plan.merge_gate_fact.reason or nil
+  )
+  if merge_context.conflicted then
+    core.log_conflict_files("fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
+  end
+  local codex_started_at = now()
+  raise_work_card(plan.repo, plan.fix, {
+    started_at = codex_started_at,
+  })
+  core.log_codex_start("fix", plan.fix.proposal_id, "fix")
+  local content_fetch = core.context_fetch_from_bundle({
+    dept = "fix",
+    repo = plan.repo,
+    issue_number = plan.issue_number,
+    pr_number = plan.fix.pr_number,
+    proposal_id = plan.fix.proposal_id,
+    version = plan.fix.dedup_key,
+    tick = plan.event_ts,
+  })
+  local result = spawn_codex_sync({
+    prompt = core.build_fix_prompt(plan.fix, plan.current_issue, plan.feedback_reason, plan.fix.framing, content_fetch, merge_context),
+    worktree = worktree,
+  })
+  if type(result) ~= "table" or result.exit_code ~= 0 then
+    local stderr = type(result) == "table" and result.stderr or "nil result"
+    core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, nil, stderr, {
+      queue = plan.event_queue,
+      source_ref = plan.fix.source_ref,
+      terminal = false,
+    })
+    return {
+      kind = "review-meta",
+      reason = "codex-failed",
+      detail = stderr,
+      outcome = "failed: codex-failed",
+      started_at = codex_started_at,
+      finished_at = now(),
+    }
+  end
+  core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=completed", nil)
+  assert_no_unmerged_paths(worktree)
+  assert_no_conflict_markers(worktree)
+
+  local status = exec_sync({ cmd = core.git_status_cmd(worktree), timeout = 30 })
+  if status.exit_code ~= 0 then
+    error("github-devloop: git status failed: " .. tostring(status.stderr))
+  end
+  if tostring(status.stdout or "") == "" then
+    local existing_head_sha = branch_head_if_ahead(plan.fix.reviewed_head_sha, plan.branch)
+    if existing_head_sha ~= nil then
+      core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
+      return {
+        kind = "reviewing",
+        old_head_sha = plan.fix.reviewed_head_sha,
+        new_head_sha = existing_head_sha,
+        reason = "existing fix commit pushed and PR head verified",
+        summary = result.stdout or result.stderr,
+        outcome = "completed: existing head pushed",
+        started_at = codex_started_at,
+        finished_at = now(),
+      }
+    end
+    core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, nil, "no-changes", {
+      queue = plan.event_queue,
+      source_ref = plan.fix.source_ref,
+      terminal = false,
+    })
+    return {
+      kind = "review-meta",
+      reason = "no-fix",
+      detail = result.stdout or result.stderr,
+      outcome = "escalated: no-fix",
+      started_at = codex_started_at,
+      finished_at = now(),
+    }
+  end
+
+  local add_result = exec_sync({ cmd = core.git_add_all_cmd(worktree), timeout = 30 })
+  if add_result.exit_code ~= 0 then
+    error("github-devloop: git add failed: " .. tostring(add_result.stderr))
+  end
+  local commit_result = exec_sync({
+    cmd = core.git_commit_cmd(worktree, core.fix_commit_subject(
+      plan.issue_number,
+      core.commit_issue_subject_snapshot(plan.repo, plan.issue_number)
+    )),
+    timeout = 60,
+  })
+  if commit_result.exit_code ~= 0 then
+    error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))
+  end
+  local branch_result = exec_sync({ cmd = core.git_current_branch_cmd(worktree), timeout = 30 })
+  if branch_result.exit_code ~= 0 then
+    error("github-devloop: git branch fact failed: " .. tostring(branch_result.stderr))
+  end
+  if tostring(branch_result.stdout or ""):gsub("%s+$", "") ~= plan.branch then
+    error("github-devloop: PR origin fix branch mismatch")
+  end
+  local head_result = exec_sync({ cmd = core.git_head_sha_cmd(worktree), timeout = 30 })
+  if head_result.exit_code ~= 0 then
+    error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
+  end
+  local new_head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+  if not core.is_safe_head_sha(new_head_sha) then
+    error("github-devloop: unsafe fix head_sha")
+  end
+  if new_head_sha == plan.fix.reviewed_head_sha then
+    return {
+      kind = "review-meta",
+      reason = "no-new-head",
+      detail = result.stdout or result.stderr,
+      outcome = "escalated: no-new-head",
+      started_at = codex_started_at,
+      finished_at = now(),
+    }
+  end
+  return {
+    kind = "reviewing",
+    old_head_sha = plan.fix.reviewed_head_sha,
+    new_head_sha = new_head_sha,
+    reason = "fix pushed and PR head verified",
+    summary = result.stdout or result.stderr,
+    outcome = "completed: pushed for re-review",
+    started_at = codex_started_at,
+    finished_at = now(),
+  }
+end
+
+local function recheck_fix_write_gate(repo, fix, branch)
+  local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+  if pr_recheck.exit_code ~= 0 then
+    error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
+  end
+  local rechecked_pr = core.parse_pr_view_fix(pr_recheck.stdout)
+  local rechecked_state = core.current_entity_state(rechecked_pr.comments, fix.proposal_id)
+  if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
+    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", "write-time issue state changed")
+    return nil
+  end
+  if tostring(rechecked_pr.state or ""):lower() ~= "open"
+    or tostring(rechecked_pr.head_ref_name or "") ~= branch
+    or tostring(rechecked_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
+    or not core.is_same_repo_pr_head(rechecked_pr, repo) then
+    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "fail-closed(write-gate)", "write-time PR fact changed or head repository missing")
+    error("github-devloop: write-time PR fact changed or head repository missing")
+  end
+  return rechecked_pr
+end
+
+local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
+  if outcome == nil then
+    return
+  end
+  recheck_fix_write_gate(repo, fix, branch)
+  if outcome.kind == "review-meta" then
+    raise_work_card(repo, fix, {
+      started_at = outcome.started_at,
+      finished_at = outcome.finished_at,
+      outcome = outcome.outcome,
+    })
+    raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)
+    return
+  end
+  if outcome.kind ~= "reviewing" then
+    error("github-devloop: unknown fix outcome")
+  end
+
+  local push = exec_sync({ cmd = core.git_push_branch_cmd(branch), timeout = 120 })
+  if push.exit_code ~= 0 then
+    error("github-devloop: git push failed: " .. tostring(push.stderr))
+  end
+  local pushed_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+  if pushed_view.exit_code ~= 0 then
+    error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
+  end
+  local pushed_pr = core.parse_pr_view_fix(pushed_view.stdout)
+  if tostring(pushed_pr.state or ""):lower() ~= "open"
+    or tostring(pushed_pr.head_ref_name or "") ~= branch
+    or tostring(pushed_pr.head_sha or "") ~= outcome.new_head_sha
+    or not core.is_same_repo_pr_head(pushed_pr, repo) then
+    error("github-devloop: pushed PR head verification failed")
+  end
+
+  raise_work_card(repo, fix, {
+    started_at = outcome.started_at,
+    finished_at = outcome.finished_at,
+    outcome = outcome.outcome,
+  })
+  raise_reviewing(repo, issue_number, fix, outcome.old_head_sha, outcome.new_head_sha, outcome.reason, outcome.summary)
+end
+
 function pipeline(event)
   local fix = event.payload or {}
   if not core.is_supported_fixing(fix) then
-    core.log_entry("fix", event, "unknown", fix.dedup_key)
+    core.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
     core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -144,11 +474,12 @@ function pipeline(event)
     return
   end
 
+  local attempt_plan = nil
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local pr_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
+    local pr_view = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
@@ -184,7 +515,16 @@ function pipeline(event)
     end
     local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
-      merge_gate_fact = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
+      local merge_gate_candidate = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
+      merge_gate_fact = core.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
+        review_proposal_id = fix.review_proposal_id,
+        review_dedup_key = fix.review_dedup_key,
+        gate_baseline_sha = fix.gate_baseline_sha,
+        match_gate_baseline_sha = true,
+      })
+      if merge_gate_fact == nil then
+        merge_gate_fact = merge_gate_candidate
+      end
     end
     if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
@@ -210,6 +550,10 @@ function pipeline(event)
         or merge_gate_fact.review_dedup_key ~= fix.review_dedup_key
         or merge_gate_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
         core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
+        return
+      end
+      if merge_gate_fact.gate_baseline_sha ~= fix.gate_baseline_sha then
+        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-baseline-mismatch)", "fix event does not match canonical merge-gate baseline")
         return
       end
       feedback_reason = merge_gate_fact.review_reason
@@ -265,140 +609,35 @@ function pipeline(event)
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = exec_sync({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
+      local issue_view = core.gh_exec({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue fix view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = core.parse_issue_view_fix(issue_view.stdout)
     end
 
-    local worktree = branch_worktree(repo, issue_number, fix.version, branch)
-    core.log_codex_start("fix", fix.proposal_id, "fix")
-    local result = spawn_codex_sync({
-      prompt = core.build_fix_prompt(fix, current_issue, feedback_reason, fix.framing),
-      worktree = worktree,
-    })
-    if type(result) ~= "table" or result.exit_code ~= 0 then
-      local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, stderr)
-      error("github-devloop: fix codex failed: " .. tostring(stderr))
-    end
-    core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=completed", nil)
-
-    local status = exec_sync({ cmd = core.git_status_cmd(worktree), timeout = 30 })
-    if status.exit_code ~= 0 then
-      error("github-devloop: git status failed: " .. tostring(status.stderr))
-    end
-    if tostring(status.stdout or "") == "" then
-      local existing_head_sha = branch_head_if_ahead(fix.reviewed_head_sha, branch)
-      if existing_head_sha ~= nil then
-        core.log_codex_result("fix", fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
-        local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
-        if pr_recheck.exit_code ~= 0 then
-          error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
-        end
-        local rechecked_pr = core.parse_pr_view_fix(pr_recheck.stdout)
-        local rechecked_state = core.current_entity_state(rechecked_pr.comments, fix.proposal_id)
-        if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-          core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
-          return
-        end
-        if tostring(rechecked_pr.state or ""):lower() ~= "open"
-          or tostring(rechecked_pr.head_ref_name or "") ~= branch
-          or tostring(rechecked_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
-          or not core.is_same_repo_pr_head(rechecked_pr, repo) then
-          core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "fail-closed(write-gate)", "write-time PR fact changed or head repository missing")
-          error("github-devloop: write-time PR fact changed or head repository missing")
-        end
-
-        local push = exec_sync({ cmd = core.git_push_branch_cmd(branch), timeout = 120 })
-        if push.exit_code ~= 0 then
-          error("github-devloop: git push failed: " .. tostring(push.stderr))
-        end
-        local pushed_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
-        if pushed_view.exit_code ~= 0 then
-          error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
-        end
-        local pushed_pr = core.parse_pr_view_fix(pushed_view.stdout)
-        if tostring(pushed_pr.state or ""):lower() ~= "open"
-          or tostring(pushed_pr.head_ref_name or "") ~= branch
-          or tostring(pushed_pr.head_sha or "") ~= existing_head_sha
-          or not core.is_same_repo_pr_head(pushed_pr, repo) then
-          error("github-devloop: pushed PR head verification failed")
-        end
-
-        raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, existing_head_sha, "existing fix commit pushed and PR head verified")
-        return
-      end
-      core.log_codex_result("fix", fix.proposal_id, "fix", result, nil, "no-changes")
-      raise_review_meta(repo, issue_number, fix, "no-fix", result.stdout or result.stderr)
-      return
-    end
-
-    local add_result = exec_sync({ cmd = core.git_add_all_cmd(worktree), timeout = 30 })
-    if add_result.exit_code ~= 0 then
-      error("github-devloop: git add failed: " .. tostring(add_result.stderr))
-    end
-    local commit_result = exec_sync({ cmd = core.git_commit_cmd(worktree, "Fix github-devloop review feedback"), timeout = 60 })
-    if commit_result.exit_code ~= 0 then
-      error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))
-    end
-    local branch_result = exec_sync({ cmd = core.git_current_branch_cmd(worktree), timeout = 30 })
-    if branch_result.exit_code ~= 0 then
-      error("github-devloop: git branch fact failed: " .. tostring(branch_result.stderr))
-    end
-    if tostring(branch_result.stdout or ""):gsub("%s+$", "") ~= branch then
-      error("github-devloop: PR origin fix branch mismatch")
-    end
-    local head_result = exec_sync({ cmd = core.git_head_sha_cmd(worktree), timeout = 30 })
-    if head_result.exit_code ~= 0 then
-      error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
-    end
-    local new_head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-    if not core.is_safe_head_sha(new_head_sha) then
-      error("github-devloop: unsafe fix head_sha")
-    end
-    if new_head_sha == fix.reviewed_head_sha then
-      raise_review_meta(repo, issue_number, fix, "no-new-head", result.stdout or result.stderr)
-      return
-    end
-
-    local pr_recheck = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
-    if pr_recheck.exit_code ~= 0 then
-      error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
-    end
-    local rechecked_pr = core.parse_pr_view_fix(pr_recheck.stdout)
-    local rechecked_state = core.current_entity_state(rechecked_pr.comments, fix.proposal_id)
-    if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-      core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", "write-time issue state changed")
-      return
-    end
-    if tostring(rechecked_pr.state or ""):lower() ~= "open"
-      or tostring(rechecked_pr.head_ref_name or "") ~= branch
-      or tostring(rechecked_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
-      or not core.is_same_repo_pr_head(rechecked_pr, repo) then
-      core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "fail-closed(write-gate)", "write-time PR fact changed or head repository missing")
-      error("github-devloop: write-time PR fact changed or head repository missing")
-    end
-
-    local push = exec_sync({ cmd = core.git_push_branch_cmd(branch), timeout = 120 })
-    if push.exit_code ~= 0 then
-      error("github-devloop: git push failed: " .. tostring(push.stderr))
-    end
-    local pushed_view = exec_sync({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
-    if pushed_view.exit_code ~= 0 then
-      error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
-    end
-    local pushed_pr = core.parse_pr_view_fix(pushed_view.stdout)
-    if tostring(pushed_pr.state or ""):lower() ~= "open"
-      or tostring(pushed_pr.head_ref_name or "") ~= branch
-      or tostring(pushed_pr.head_sha or "") ~= new_head_sha
-      or not core.is_same_repo_pr_head(pushed_pr, repo) then
-      error("github-devloop: pushed PR head verification failed")
-    end
-
-    raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, new_head_sha, "fix pushed and PR head verified")
+    attempt_plan = {
+      repo = repo,
+      issue_number = issue_number,
+      fix = fix,
+      branches = branches,
+      branch = branch,
+      current_issue = current_issue,
+      feedback_reason = feedback_reason,
+      merge_gate_fact = merge_gate_fact,
+      event_ts = event.ts,
+      event_queue = event.queue,
+    }
+  end)
+  if attempt_plan == nil then
+    return
+  end
+  local outcome = run_fix_attempt(attempt_plan)
+  with_lock(lock_key, function()
+    apply_fix_outcome(repo, issue_number, fix, attempt_plan.branch, outcome)
   end)
 end
+
+pipeline = core.wrap_pipeline_failure("fix", pipeline)
 
 return M

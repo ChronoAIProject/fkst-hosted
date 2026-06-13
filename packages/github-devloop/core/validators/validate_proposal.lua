@@ -1,0 +1,54 @@
+return function(M)
+function M.is_intake_hand_off(hand_off, proposal)
+  if type(hand_off) ~= "table" or type(proposal) ~= "table" then
+    return false
+  end
+  return hand_off.kind == "own-intake-decision"
+    and hand_off.proposal_id == proposal.proposal_id
+    and hand_off.decision == "enable"
+    and hand_off.dedup_key == proposal.dedup_key
+    and M._has_bounded_source_ref(hand_off.source_ref)
+    and type(proposal.source_ref) == "table"
+    and tostring(hand_off.source_ref.kind or "") == tostring(proposal.source_ref.kind or "")
+    and tostring(hand_off.source_ref.ref or "") == tostring(proposal.source_ref.ref or "")
+end
+
+function M.validate_proposal(proposal)
+  if type(proposal) ~= "table" then
+    return false
+  end
+  if proposal.schema ~= "consensus.proposal.v1" then
+    return false
+  end
+  local repo, issue_number = M.parse_proposal_id(proposal.proposal_id)
+  if repo == nil or issue_number == nil then
+    local review_repo, pr_number = M.parse_pr_review_proposal_id(proposal.proposal_id)
+    if review_repo == nil or pr_number == nil then
+      return false
+    end
+    if not M._is_path_safe_key(proposal.proposal_id, M._max_key_len) or not M._is_path_safe_key(proposal.dedup_key, M._max_dedup_len) then
+      return false
+    end
+  else
+    if not M.is_safe_proposal_ref(proposal.proposal_id, proposal.dedup_key) then
+      return false
+    end
+  end
+  if not M._is_bounded_string(proposal.title, M._max_title_len) then
+    return false
+  end
+  if not M._is_bounded_string(proposal.body, M._max_body_len) then
+    return false
+  end
+  if proposal.content_fetch ~= nil and not M._is_bounded_string(proposal.content_fetch, 4000) then
+    return false
+  end
+  if not M._has_bounded_source_ref(proposal.source_ref) then
+    return false
+  end
+  if proposal.effect_version ~= nil and not M._is_bounded_string(proposal.effect_version, M._max_dedup_len) then
+    return false
+  end
+  return proposal.intake_hand_off == nil or M.is_intake_hand_off(proposal.intake_hand_off, proposal)
+end
+end
