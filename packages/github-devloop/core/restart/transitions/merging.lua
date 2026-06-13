@@ -32,7 +32,11 @@ return function(M, h)
       source_ref = "source_ref:pr",
     },
     version_identity = "strip_transition_version_suffixes(merge-ready.version)",
-    effects = effect({ "devloop_merge_ready" }, "merging retry is complete when merge-ready and merging markers bind the same fetched PR head"),
+    effects = effect(
+      { "devloop_merge_ready", "pr-state-label" },
+      "merging retry is complete when merge-ready and merging markers bind the same fetched PR head and the PR-local state label projection is requested",
+      "build_reconcile_pr_state_label_request"
+    ),
     marker_facts = "state:v1 merging plus merging:v1",
     kickoff = "devloop_merge_ready",
     replay = "Merge retry re-derives completion or repair from PR mergeability and head facts.",
