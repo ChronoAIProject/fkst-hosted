@@ -183,7 +183,7 @@ return {
     t.eq(count_calls("rev-parse --verify"), 0)
   end,
 
-  test_issue_entity_view_is_shared_across_event_driven_departments = function()
+  test_marker_bearing_issue_view_is_fresh_across_event_driven_departments = function()
     full_issue_view({ "fkst-dev:ready" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "ready", "ready/version"),
     })
@@ -191,12 +191,14 @@ return {
     local event = issue({ labels = { "fkst-dev:ready" }, updated_at = "2026-06-03T01:02:03Z" })
 
     local observed = run_observe(event, run_opts)
-    issue_updated_at("2026-06-03T01:02:03Z")
+    full_issue_view({ "fkst-dev:ready" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "ready", "ready/version"),
+    })
     local opened = run_open_pr(event, run_opts)
 
     t.eq(observed.exit_code, 0)
     t.eq(opened.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 1)
+    t.eq(count_calls("gh issue view"), 2)
   end,
 
   test_cross_consumer_delayed_retry_refetches_current_issue_truth = function()

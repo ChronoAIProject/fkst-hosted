@@ -98,6 +98,7 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
   if assigned.exit_code ~= 0 then
     error("github-devloop: gh issue edit assign failed: " .. tostring(assigned.stderr))
   end
+  M.invalidate_entity_after_write(repo, "issue", issue_number)
   if M.verify_issue_claim(repo, issue_number, owner) then
     log_claim(dept, proposal_id, "claim-won", "assignee claim verified after assign")
     return true
@@ -107,6 +108,7 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
   if unassigned.exit_code ~= 0 then
     error("github-devloop: gh issue edit unassign failed: " .. tostring(unassigned.stderr))
   end
+  M.invalidate_entity_after_write(repo, "issue", issue_number)
   log_claim(dept, proposal_id, "claim-lost", "assignee claim lost after assign verification")
   return false
 end
@@ -165,6 +167,7 @@ function M.maybe_release_stale_self_claim(dept, repo, issue_number, current, pro
   if unassigned.exit_code ~= 0 then
     error("github-devloop: gh issue edit unassign failed: " .. tostring(unassigned.stderr))
   end
+  M.invalidate_entity_after_write(repo, "issue", issue_number)
   log_claim(dept, proposal_id, "timeout-release", "stale self claim released after fresh self-only verification")
   return true
 end

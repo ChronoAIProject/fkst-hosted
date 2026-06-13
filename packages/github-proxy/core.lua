@@ -877,6 +877,7 @@ function M.apply_issue_labels(repo, issue_number, add_labels, remove_labels)
     30,
     "gh issue edit"
   )
+  M.invalidate_entity_after_write(repo, "issue", issue_number)
   return true
 end
 

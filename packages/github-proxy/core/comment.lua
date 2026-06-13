@@ -255,6 +255,7 @@ function M.write_comment_request(payload, target)
     file.write(path, body)
     local edited, edit_status = edit_existing_comment(M, repo, target, path, existing, tostring(replace_marker or ""), bot_login)
     if edited then
+      M.invalidate_entity_after_write(repo, target.kind, target.number)
       return
     end
     if edit_status == stale_comment_target_error_class then
@@ -263,6 +264,7 @@ function M.write_comment_request(payload, target)
       log.warn("github-proxy: replace marker comment missing id; creating a fresh comment")
     end
     M.gh_exec(target.comment_cmd(repo, target.number, path), 30, target.comment_label)
+    M.invalidate_entity_after_write(repo, target.kind, target.number)
   end)
 end
 
