@@ -78,10 +78,6 @@ function M.gh_issue_list_wip_cmd(repo)
     .. " --json number"
 end
 
-function M.gh_issue_list_dependency_reconcile_cmd(repo)
-  return M.gh_issue_list_observe_cmd(repo, M._blocked_on_dependency_label)
-end
-
 function M.gh_dashboard_issue_list_cmd(repo, label)
   local selected_label = tostring(label or "")
   if selected_label == "" then
