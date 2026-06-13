@@ -127,6 +127,6 @@ prior art:Erlang/OTP「let it crash」(不防御式 catch,交给懂恢复策略�
 - **集成分支拓扑是 github-devloop 的运行姿态，不是可随手改的临时设置**：autonomous 改动先进**集成分支**（`FKST_DEVLOOP_INTEGRATION_BRANCH`）缓冲、再经 rollup PR 受控回 `dev`；`dev` 受保护，autonomous 改动**不直接合进 dev**。运行中**不得擅自切 topology（如 integration→单分支 dev）、不得擅自删/改远程分支**——这些是用户的架构决策，不是助手能定的。删任何远程分支前必须先查谁依赖它（in-flight PR 的 base、tracking 分支）；GitHub 删 base 分支会自动关闭其全部 open PR。
 - **hotfix 就只修那个 bug，不顺手改架构/换运行方式/做破坏性操作**。dogfood/运行中遇到**设计层问题**（如 sync↔rollup ping-pong）按「遇问题提 issue」处理 + 停下确认，**绝不擅自换方案绕过**（尤其不能用"切到 dev 直合"绕过用户刻意设的缓冲/门控）。不可逆/破坏性远程操作（删分支、关 PR、force push、改默认分支）一律先确认，即使 `/goal` 等机制在催"继续"。
 - **引擎 Rust 改动属 fkst-substrate 仓**，不在本仓做；本仓只写/改 Lua package + 测试 + 包文档。引擎需要的新能力（新 SDK 原语等）先在 fkst-substrate 提 PR。
-- 跨文档定位：engine↔package 契约以 fkst-substrate 的 `docs/package-repo-contract.md` 为权威总览，引擎实现细节以其 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md` 为准；本仓 `README.md` 说明包约定与命令，`docs/new-package-repo-bootstrap.md` 是新建 package-repo 的清单。
+- 跨文档定位：engine↔package 契约以 fkst-substrate 的 `docs/package-repo-contract.md` 为权威总览，引擎实现细节以其 `SPEC.md` / `CLAUDE.md` / `docs/architecture.md` 为准；本仓 `README.md` 说明包约定与命令，`docs/user/new-package-repo-bootstrap.md` 是新建 package-repo 的清单。
 
 ⟦AI:FKST⟧

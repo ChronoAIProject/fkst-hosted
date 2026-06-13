@@ -56,7 +56,7 @@ proposal(round R, [narrowed_question])
 
 - **Phase 1 — consensus 引擎**：`decide` 加 meta-judge（角度→judge→reached|converge）；`consensus_unresolved`→`consensus_converge`（带 narrowed_question + bounded digest）；`proposal` schema 加 round/convergence_question/prior_digests；consensus 单测 + conformance。下游暂兼容（github-devloop 先把 `consensus_converge` 当旧 unresolved 触发既有 loop，行为不变）以便分期。
 - **Phase 2 — github-devloop 收敛 wiring**：`review_loop`/`loop` 消费 `consensus_converge` → 带 narrowed_question 重发；converge-round marker；true-stall → reconcile；新增 reconciler dept；**删 `meta` split + 盲 budget 重跑**。
-- **Phase 3 — 清理**：删死码/旧形态/#31/#35 痕迹；更新 `docs/devloop-design.md` 与相关 memory。
+- **Phase 3 — 清理**：删死码/旧形态/#31/#35 痕迹；更新 `docs/dev/devloop-design.md` 与相关 memory。
 
 ## 风险 / 约束（sshx 三角度指出）
 
