@@ -438,9 +438,8 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
-  test_implement_accepts_own_ready_hand_off_before_marker_visibility = function()
+  test_implement_rejects_unverified_ready_hand_off_before_marker_visibility = function()
     local event = ready()
-    local branch = deterministic_branch_for(event)
     event.ready_hand_off = {
       kind = "own-state-marker",
       proposal_id = event.proposal_id,
@@ -451,18 +450,13 @@ return {
       effects = "result-marker,ready-label,devloop-ready",
     }
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
-    mock_fresh_implement_worktree("/tmp/fkst-packages-test/github-devloop/runtime")
-    mock_implement_codex(0, "implemented")
-    mock_git_status(" M packages/github-devloop/core.lua\n")
-    mock_git_commit("def456", branch)
 
-    local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"), "devloop_ready_session")
+    local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
-    t.is_true(find_comment_with(result.raises, "fkst:github-devloop:implement-attempt:v1") ~= nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    assert_open_pr_kickoff(result.raises, event, branch, "def456")
-    t.eq(count_calls("codex exec"), 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git -C"), 0)
   end,
 
   test_implement_replay_with_ready_hand_off_requires_visible_marker = function()
@@ -475,8 +469,14 @@ return {
       event_version = event.dedup_key,
       stage_rank = core.stage_rank("ready"),
       effects = "result-marker,ready-label,devloop-ready",
+      comment_id = "IC_ready_missing",
     }
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_ready_missing'", {
+      stdout = "",
+      stderr = "not found",
+      exit_code = 1,
+    })
 
     local result = run_implement(event, opts("implement-replay-hand-off-marker-pending"))
     t.eq(result.exit_code, 1)

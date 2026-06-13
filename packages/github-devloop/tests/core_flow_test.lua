@@ -421,7 +421,8 @@ return {
       include_ready_hand_off = true,
       impl_retry_attempt = 2,
     }))
-    t.eq(core.is_supported_ready(ready_with_hand_off), false)
+    t.is_nil(ready_with_hand_off.ready_hand_off)
+    t.eq(core.is_supported_ready(ready_with_hand_off), true)
 
     t.eq(core.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
     local deterministic_branch = core.implement_branch("owner/repo", "42", ready.dedup_key)

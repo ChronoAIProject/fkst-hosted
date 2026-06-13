@@ -386,7 +386,7 @@ function M.build_devloop_ready_payload(source)
     dedup_key = ready_version,
     source_ref = M.normalize_source_ref(source.source_ref),
   }
-  if source.include_ready_hand_off == true then
+  if source.include_ready_hand_off == true and source.ready_comment_id ~= nil then
     payload.ready_hand_off = {
       kind = "own-state-marker",
       proposal_id = source.proposal_id,
@@ -423,7 +423,7 @@ function M.is_ready_hand_off(hand_off, ready)
     and M._is_bounded_string(hand_off.marker_version, M._max_dedup_len)
     and hand_off.stage_rank == M.stage_rank("ready")
     and hand_off.effects == "result-marker,ready-label,devloop-ready"
-    and (hand_off.comment_id == nil or M.is_safe_comment_id(hand_off.comment_id))
+    and M.is_safe_comment_id(hand_off.comment_id)
 end
 
 function M.is_safe_comment_id(value)

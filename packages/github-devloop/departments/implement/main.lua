@@ -6,8 +6,7 @@ local MAX_IMPLEMENT_ATTEMPTS = 2
 local implemented_branch_head
 
 M.spec = {
-  consumes = { "devloop_ready", "devloop_ready_session" },
-  ephemeral = { "devloop_ready_session" },
+  consumes = { "devloop_ready" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
@@ -503,13 +502,6 @@ function pipeline(event)
       if retry_failure == nil and ready.impl_retry_attempt == nil and verified_state ~= nil then
         state = verified_state
         core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "apply(verified-own-ready-hand-off)", "ready marker comment verified by direct id lookup")
-      elseif event.queue == "devloop_ready_session" and retry_failure == nil and ready.impl_retry_attempt == nil and core.is_ready_hand_off(ready.ready_hand_off, ready) then
-        state = {
-          state = "ready",
-          version = ready.dedup_key,
-          stage_rank = core.stage_rank("ready"),
-        }
-        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "apply(own-ready-hand-off)", "ready marker was written by the same in-band generation")
       else
         core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
         if ready.ready_hand_off ~= nil then
