@@ -117,6 +117,8 @@ function M.build_label_request(repo, issue_number, add_labels, remove_labels, de
   return M.attach_issue_claim({
     schema = "github-proxy.label.v1",
     repo = repo,
+    target_kind = "issue",
+    target_number = issue_number,
     issue_number = issue_number,
     add_labels = add_labels or {},
     remove_labels = remove_labels or {},

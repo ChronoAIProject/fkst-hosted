@@ -167,23 +167,8 @@ local function raise_reviewing_for_current_head(repo, issue_number, merge_ready,
     return
   end
   local current_head_sha = tostring(current_pr.head_sha or "")
-  local comment_request = core.build_merge_head_reviewing_comment_request(
-    repo,
-    issue_number,
-    merge_ready,
-    merge_ready.reviewed_head_sha,
-    current_head_sha,
-    review_version,
-    source_ref
-  )
-  local label_request = issue_number ~= nil and core.build_merge_head_reviewing_label_request(
-    repo,
-    issue_number,
-    merge_ready,
-    current_head_sha,
-    review_version,
-    core.issue_source_ref(repo, issue_number)
-  ) or nil
+  local comment_request = core.build_merge_head_reviewing_comment_request(repo, issue_number, merge_ready, merge_ready.reviewed_head_sha, current_head_sha, review_version, source_ref)
+  local label_request = issue_number ~= nil and core.build_merge_head_reviewing_label_request(repo, issue_number, merge_ready, current_head_sha, review_version, core.issue_source_ref(repo, issue_number)) or nil
   local reviewing_payload = core.build_devloop_reviewing_payload({
     proposal_id = merge_ready.proposal_id,
     impl_version = review_version,
