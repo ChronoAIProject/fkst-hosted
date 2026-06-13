@@ -96,6 +96,7 @@ function M.parse_issue_list_intake(stdout, limit)
         number = number,
         title = tostring(issue.title or ""),
         body = tostring(issue.body or ""),
+        created_at = issue.createdAt or issue.created_at,
         updated_at = issue.updatedAt or issue.updated_at,
         labels = label_names(issue.labels),
         assignees = M.assignee_logins(issue.assignees),
