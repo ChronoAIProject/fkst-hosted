@@ -1,6 +1,19 @@
 local S = {}
 
 function S.install(M)
+local function redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, outcome, reason)
+  local ready_version = M.orphaned_pr_ready_version(state)
+  local ready_payload = M.build_devloop_ready_payload({
+    proposal_id = proposal_id,
+    dedup_key = ready_version,
+    source_ref = issue.source_ref,
+  })
+  M.log_cas_decision(dept, proposal_id, state, "pr-open", "ready", outcome, reason)
+  return tools.raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
+    { queue = "devloop_ready", payload = ready_payload },
+  })
+end
+
 local function replay_pr_open(dept, issue, state, row, facts, tools)
   local proposal_id = facts.proposal_id
   local link = facts.link
@@ -11,16 +24,7 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
     if tostring(item.number or "") == tostring(link.pr_number or "") then
       local pr = item.current or {}
       if tostring(pr.state or ""):lower() ~= "open" then
-        local ready_version = M.orphaned_pr_ready_version(state)
-        local ready_payload = M.build_devloop_ready_payload({
-          proposal_id = proposal_id,
-          dedup_key = ready_version,
-          source_ref = issue.source_ref,
-        })
-        M.log_cas_decision(dept, proposal_id, state, "pr-open", "ready", "applied(orphaned-pr-closed)", "linked PR is closed; re-driving implementation to replace it")
-        return tools.raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
-          { queue = "devloop_ready", payload = ready_payload },
-        })
+        return redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, "applied(orphaned-pr-closed)", "linked PR is closed; re-driving implementation to replace it")
       end
       if tostring(pr.head_ref_name or "") ~= tostring(link.branch or "") then
         return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "linked PR head branch does not match pr-link marker")
@@ -61,6 +65,9 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
         { queue = "devloop_reviewing", payload = reviewing_payload },
       })
     end
+  end
+  if facts.snapshot.absent_prs ~= nil and facts.snapshot.absent_prs[tostring(link.pr_number or "")] == true then
+    return redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, "applied(orphaned-pr-absent)", "linked PR is absent; re-driving implementation to replace it")
   end
   return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(pr-link)", "linked PR fact is not visible")
 end

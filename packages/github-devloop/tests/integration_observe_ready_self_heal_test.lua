@@ -363,6 +363,45 @@ return {
     t.eq(ready.payload.source_ref.ref, "owner/repo#issue/42")
   end,
 
+  test_observe_issue_pr_open_absent_link_redrives_ready_for_replacement_pr = function()
+    local event = reached()
+    local ready_payload = core.build_devloop_ready_payload(event)
+    local comments = {
+      {
+        body = core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
+        created_at = "2026-06-03T01:00:00Z",
+      },
+      core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
+    mock_linked_pr_state({}, "OPEN", 1)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" }, source = "liveness-scan" }), opts("observe-issue-pr-open-absent-link-redrive", {
+      now = "2026-06-03T03:00:00Z",
+    }))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
+    for _ = 1, 2 do
+      t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+        stdout = "",
+        stderr = "HTTP 404: Not Found\n",
+        exit_code = 1,
+      })
+    end
+
+    local absent = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" }, source = "liveness-scan" }), opts("observe-issue-pr-open-absent-link-known-missing", {
+      now = "2026-06-03T03:00:00Z",
+    }))
+    t.eq(absent.exit_code, 0)
+    t.eq(find_raise(absent.raises, "devloop_reviewing"), nil)
+    local ready = find_raise(absent.raises, "devloop_ready")
+    t.is_true(ready ~= nil)
+    t.eq(ready.payload.dedup_key, "ready/" .. ready_payload.dedup_key .. "/reimplement/1")
+    t.eq(ready.payload.source_ref.ref, "owner/repo#issue/42")
+  end,
+
   test_observe_issue_pr_open_reraise_requires_matching_link_version = function()
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)
