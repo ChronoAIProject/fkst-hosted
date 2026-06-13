@@ -510,6 +510,12 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     end
     payload.gate_baseline_sha = tostring(review_fact.gate_baseline_sha)
   end
+  if review_fact.predecessor_set ~= nil then
+    if not M._is_path_safe_key(review_fact.predecessor_set, M._max_dedup_len) then
+      error("github-devloop: invalid predecessor set")
+    end
+    payload.predecessor_set = tostring(review_fact.predecessor_set)
+  end
   local gate_failure_excerpt = bounded_control_text(M, review_fact.gate_failure_excerpt, M._max_rollup_failure_summary_len)
   if gate_failure_excerpt ~= nil then
     payload.gate_failure_excerpt = gate_failure_excerpt
@@ -534,6 +540,7 @@ function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     reviewed_head_sha = feedback.reviewed_head_sha,
     blocking_gap = feedback.blocking_gap,
     gate_baseline_sha = feedback.gate_baseline_sha,
+    predecessor_set = feedback.predecessor_set,
     gate_failure_excerpt = feedback.review_reason,
   }, source_ref)
   payload.dedup_key = M._dedup_key({
@@ -544,6 +551,7 @@ function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     tostring(pr_number),
     tostring(feedback.review_dedup_key),
     replay_fact_sha(feedback.gate_baseline_sha, "nobase"),
+    tostring(feedback.predecessor_set or "nopred"),
     replay_fact_sha(feedback.reviewed_head_sha, "nohead"),
   })
   return payload

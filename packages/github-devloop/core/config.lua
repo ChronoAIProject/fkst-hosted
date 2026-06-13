@@ -10,6 +10,7 @@ local allowed_env = {
   FKST_DEVLOOP_MAX_INFLIGHT = true,
   FKST_DEVLOOP_MANAGED_SIBLING_REPOS = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
+  FKST_DEVLOOP_RELEASE_NOTES_FALLBACK = true,
   FKST_DEVLOOP_CONFLICT_LOG_CMD = true,
   FKST_DEVLOOP_INTAKE_PROBE_PROOF = true,
   FKST_DEVLOOP_TEST_COMMAND = true,
@@ -193,6 +194,7 @@ function M.devloop_config(exec)
     upstream_branch = branches.upstream,
     integration_branch = branches.integration,
     rollup_merge = rollup_merge,
+    allow_release_notes_fallback = M.read_env("FKST_DEVLOOP_RELEASE_NOTES_FALLBACK", exec) == "1",
   }
 end
 end

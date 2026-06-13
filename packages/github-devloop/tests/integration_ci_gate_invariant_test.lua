@@ -40,6 +40,72 @@ return {
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
   end,
 
+  test_review_pr_review_loop_suffix_proceeds_against_base_reviewing_marker = function()
+    local base_version = reviewing().version
+    local event = reviewing({
+      version = base_version .. "/review-loop/3",
+    })
+    mock_bot_env()
+    mock_pr_origin({
+      origin_marker(event, base_version),
+      core.state_marker(event.proposal_id, "reviewing", base_version),
+    })
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker(event.proposal_id, "reviewing", base_version),
+    })
+
+    local result = run_review_pr(event, opts("review-pr-review-loop-suffix-proceeds"))
+
+    t.eq(result.exit_code, 0)
+    local proposal = find_raise(result.raises, "consensus.proposal")
+    t.eq(proposal.payload.schema, "consensus.proposal.v1")
+    t.eq(proposal.payload.proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
+  end,
+
+  test_review_pr_skips_after_canonical_state_advances = function()
+    local event = reviewing()
+    mock_bot_env()
+    mock_pr_origin({
+      origin_marker(event),
+      core.state_marker(event.proposal_id, "merge-ready", event.version),
+    })
+
+    local result = run_review_pr(event, opts("review-pr-advanced-canonical-state-stale"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json title,labels,comments"), 0)
+  end,
+
+  test_review_pr_retries_when_canonical_state_is_before_reviewing = function()
+    local event = reviewing()
+    mock_bot_env()
+    mock_pr_origin({
+      origin_marker(event),
+      core.state_marker(event.proposal_id, "pr-open", event.version),
+    })
+
+    local result = run_review_pr(event, opts("review-pr-pr-open-canonical-state-pending"))
+
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json title,labels,comments"), 0)
+  end,
+
+  test_review_pr_retries_when_canonical_state_marker_is_absent = function()
+    local event = reviewing()
+    mock_bot_env()
+    mock_pr_origin({
+      origin_marker(event),
+    })
+
+    local result = run_review_pr(event, opts("review-pr-absent-canonical-state-pending"))
+
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json title,labels,comments"), 0)
+  end,
+
   test_merge_remains_the_ci_status_gate = function()
     local event = merge_ready()
     mock_bot_env()
