@@ -658,13 +658,9 @@ function pipeline(event)
       branches = branches,
       branch = branch,
       base_head = prepare_base(branches),
-        attempt = ready.impl_retry_attempt or 1,
-        expected_from_states = expected_states,
-        accepts_ready_hand_off = accepts_ready_hand_off
-          and retry_failure == nil
-          and ready.impl_retry_attempt == nil
-          and core.is_ready_hand_off(ready.ready_hand_off, ready),
-      }
+      attempt = ready.impl_retry_attempt or 1,
+      expected_from_states = expected_states,
+    }
   end)
   if attempt_plan == nil then
     return
@@ -683,8 +679,7 @@ function pipeline(event)
     event.queue
   )
   with_lock(lock_key, function()
-    if attempt_plan.accepts_ready_hand_off
-      or recheck_implementation_write_gate(repo, issue_number, attempt_plan.marker_ready, attempt_plan.expected_from_states) then
+    if recheck_implementation_write_gate(repo, issue_number, attempt_plan.marker_ready, attempt_plan.expected_from_states) then
       raise_attempt_outcome(repo, issue_number, outcome)
     end
   end)

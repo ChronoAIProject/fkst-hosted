@@ -50,13 +50,13 @@ local function build_direct_proposal(repo, issue_number, candidate, current, eve
       repo = repo,
       issue_number = issue_number,
       proposal_id = candidate.proposal_id,
-      version = candidate.dedup_key,
+      version = decision_dedup_key,
       tick = event_ts,
     }),
   }
   local proposal = core.build_board_proposal(issue, event_ts)
   proposal.dedup_key = decision_dedup_key or candidate.dedup_key
-  proposal.effect_version = candidate.dedup_key
+  proposal.effect_version = decision_dedup_key or candidate.dedup_key
   proposal.intake_hand_off = intake_hand_off(candidate, "enable", proposal.dedup_key)
   return core.validate_proposal(proposal) and proposal or nil
 end
@@ -169,8 +169,8 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     return nil
   end
   if has_pending_reintake then
-    local expected = core.build_devloop_intake_candidate_payload(repo, issue_number, reintake_command.created_at)
-    if tostring(candidate.dedup_key or "") ~= tostring(expected.dedup_key or "") then
+    local expected = tostring(reintake_command.created_at or "")
+    if tostring(candidate.reintake_command_created_at or "") ~= expected then
       core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command timestamp")
       return nil
     end
@@ -248,7 +248,7 @@ function pipeline(event)
     repo = repo,
     issue_number = issue_number,
     proposal_id = candidate.proposal_id,
-    version = candidate.dedup_key,
+    version = gate.decision_dedup_key,
     tick = event.ts,
   })
   local result = spawn_codex_sync(core.judgment_codex_opts(

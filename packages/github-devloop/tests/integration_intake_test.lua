@@ -41,10 +41,6 @@ local function json_string(value)
   return h.json_string(value)
 end
 
-local function render_comment(comment)
-  return h.render_comment(comment)
-end
-
 local function labels_json(labels)
   local rendered = {}
   for _, label in ipairs(labels or {}) do
@@ -56,7 +52,7 @@ end
 local function comments_json(comments)
   local rendered = {}
   for _, comment in ipairs(comments or {}) do
-    table.insert(rendered, render_comment(comment))
+    table.insert(rendered, h.render_comment(comment))
   end
   return table.concat(rendered, ",")
 end
@@ -101,23 +97,23 @@ end
 
 local function default_intake_current(extra)
   local fields = extra or {}
-  return {
-    title = fields.title or "Add retry backoff to failed widget sync",
-    body = fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries.",
-  }
+  return { title = fields.title or "Add retry backoff to failed widget sync", body = fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries." }
 end
 
 local function expected_decision_key(payload, extra, reintake_command)
   return core.intake_decision_dedup_key(payload.proposal_id, default_intake_current(extra), reintake_command)
 end
 
+local function expected_scan_effect_key(proposal_id, issue, command)
+  return core.intake_decision_dedup_key(proposal_id, { title = issue and issue.title or "Issue", body = issue and issue.body or "" }, command)
+end
 local function assert_direct_enable_chain(raises, payload, extra, reintake_command)
   local expected_dedup = expected_decision_key(payload, extra, reintake_command)
   local proposal = find_raise(raises, "consensus.proposal").payload
   t.eq(proposal.schema, "consensus.proposal.v1")
   t.eq(proposal.proposal_id, payload.proposal_id)
   t.eq(proposal.dedup_key, expected_dedup)
-  t.eq(proposal.effect_version, payload.dedup_key)
+  t.eq(proposal.effect_version, expected_dedup)
   t.eq(proposal.source_ref.ref, payload.source_ref.ref)
   t.eq(proposal.intake_hand_off.kind, "own-intake-decision")
   t.eq(proposal.intake_hand_off.proposal_id, payload.proposal_id)
@@ -129,10 +125,9 @@ local function assert_direct_enable_chain(raises, payload, extra, reintake_comma
   local thinking_comment = find_comment_body(raises, 'state="thinking"')
   local thinking_label = find_label_add(raises, "fkst-dev:thinking")
   t.is_true(thinking_comment ~= nil)
-  t.is_true(thinking_comment.body:find(core.state_marker(payload.proposal_id, "thinking", payload.dedup_key), 1, true) ~= nil)
+  t.is_true(thinking_comment.body:find(core.state_marker(payload.proposal_id, "thinking", expected_dedup), 1, true) ~= nil)
   t.is_true(thinking_label ~= nil)
 end
-
 local function has_value(values, expected)
   for _, value in ipairs(values or {}) do
     if tostring(value) == tostring(expected) then
@@ -184,25 +179,18 @@ local function mock_intake_judge_view(labels, comments, extra)
   local fields = extra or {}
   local assignees_json = fields.assignees_json or '{"login":"fkst-test-bot"}'
   local assignee_stdout = string.format(
-      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
-      json_string(fields.title or "Add retry backoff to failed widget sync"),
-      json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
-      json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
-      json_string(fields.state or "OPEN"),
-      labels_json(labels or {}),
-      comments_json(comments or {}),
-      assignees_json
-    )
-  t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
-    stdout = assignee_stdout,
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
-    stdout = assignee_stdout,
-    stderr = "",
-    exit_code = 0,
-  })
+    '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
+    json_string(fields.title or "Add retry backoff to failed widget sync"),
+    json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
+    json_string(fields.updated_at or "2026-06-03T01:02:03Z"), json_string(fields.state or "OPEN"),
+    labels_json(labels or {}), comments_json(comments or {}), assignees_json)
+  for _ = 1, 2 do
+    t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
+      stdout = assignee_stdout,
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   t.mock_command("--json title,body,updatedAt,labels,comments,state", {
     stdout = string.format(
       '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
@@ -339,9 +327,11 @@ local function candidate(extra)
 end
 
 local function reintake_candidate(command)
-  return candidate({
-    dedup_key = core.build_devloop_intake_candidate_payload("owner/repo", 42, command.created_at).dedup_key,
-  })
+  local payload = candidate()
+  payload.effect_id = expected_decision_key(payload, nil, command)
+  payload.dedup_key = core.intake_candidate_delivery_dedup_key(payload.proposal_id, payload.effect_id, payload.effect_id)
+  payload.reintake_command_created_at = command.created_at
+  return payload
 end
 
 local function run_scan(run_opts)
@@ -401,8 +391,11 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "devloop_intake_candidate")
     t.eq(result.raises[1].payload.issue_number, "42")
-    t.eq(result.raises[1].payload.dedup_key, core.intake_dedup_key(proposal_id, command.created_at))
+    local expected_effect = expected_scan_effect_key(proposal_id, nil, command)
+    t.eq(result.raises[1].payload.effect_id, expected_effect)
+    t.eq(result.raises[1].payload.reintake_command_created_at, command.created_at)
     t.is_true(result.raises[1].payload.dedup_key ~= core.intake_dedup_key(proposal_id, "2026-06-03T01:02:03Z"))
+    t.is_true(result.raises[1].payload.dedup_key:find("intake%-candidate/github%-devloop/issue/owner/repo/42", 1, false) ~= nil)
   end,
 
   test_scan_reintake_without_prior_intake_marker_refuses = function()
@@ -876,6 +869,20 @@ return {
     t.eq(count_calls("codex exec"), 0)
   end,
 
+  test_judge_decides_seen_candidate_delivery_when_no_completion_marker = function()
+    local payload = candidate({
+      dedup_key = core.intake_candidate_delivery_dedup_key("github-devloop/issue/owner/repo/42", expected_decision_key(candidate()), "seen-before"),
+    })
+    mock_bot_env()
+    mock_intake_judge_view({}, {})
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ expedite\n⟦FKST:REASON⟧ Clear bounded implementation task.")
+
+    local result = run_judge(payload, opts("intake-seen-candidate-no-marker"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    assert_direct_enable_chain(result.raises, payload)
+  end,
+
   test_judge_replays_enable_successor_after_visible_intake_marker = function()
     local payload = candidate()
     mock_bot_env()
@@ -899,7 +906,7 @@ return {
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:thinking" }, {
       core.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
-      core.state_marker(payload.proposal_id, "thinking", payload.dedup_key),
+      core.state_marker(payload.proposal_id, "thinking", expected_decision_key(payload)),
     })
 
     local result = run_judge(payload, opts("intake-enable-successor-idempotent"))
@@ -913,7 +920,7 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", expected_decision_key(payload, nil, command)),
       command,
     })
     mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Class-level carrier; reintake enables after calibration.")
@@ -936,7 +943,7 @@ return {
     local command = trusted_reintake_command("IC_reintake_stale")
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload)),
       command,
     })
 
@@ -951,7 +958,7 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:thinking" }, {
-      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload, nil, command)),
       command,
     })
 

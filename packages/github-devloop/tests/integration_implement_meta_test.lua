@@ -562,13 +562,11 @@ return {
     mock_implement_codex(0, "implemented")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("def456", branch)
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
 
     local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"), "devloop_ready_session")
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
-    t.is_true(find_comment_with(result.raises, "fkst:github-devloop:implement-attempt:v1") ~= nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    assert_open_pr_kickoff(result.raises, event, branch, "def456")
+    t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 1)
   end,
 

@@ -129,7 +129,11 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "devloop_intake_candidate")
     t.eq(result.raises[1].payload.issue_number, "42")
-    t.eq(result.raises[1].payload.dedup_key, core.intake_dedup_key("github-devloop/issue/owner/repo/42", "2026-06-03T01:02:03Z"))
+    t.eq(result.raises[1].payload.effect_id, core.intake_decision_dedup_key("github-devloop/issue/owner/repo/42", {
+      title = "Issue",
+      body = "",
+    }))
+    t.is_true(result.raises[1].payload.dedup_key:find("intake%-candidate/github%-devloop/issue/owner/repo/42", 1, false) ~= nil)
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
     t.eq(count_rendered_calls("--json labels,comments,state,assignees"), 0)
   end,

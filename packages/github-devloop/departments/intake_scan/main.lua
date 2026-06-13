@@ -50,7 +50,7 @@ local function handle_pending_reintake(repo, issue, current, proposal_id)
   if not core.claim_issue_for_management("intake_scan", repo, issue.number, current, proposal_id) then
     return true
   end
-  local payload = core.build_intake_scan_candidate(repo, issue, command)
+  local payload = core.build_intake_scan_candidate(repo, issue, command, now())
   core.log_apply("intake_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
     "devloop_intake_candidate",
   })
@@ -88,7 +88,7 @@ function pipeline(event)
         and not core.should_skip_known_intake_issue(current.labels)
         and not core.has_intake_decision_marker(current.comments, proposal_id)
         and core.claim_issue_for_management("intake_scan", repo, issue_number, current, proposal_id) then
-        local payload = core.build_intake_scan_candidate(repo, issue, nil)
+        local payload = core.build_intake_scan_candidate(repo, issue, nil, now())
         core.log_apply("intake_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
           "devloop_intake_candidate",
         })

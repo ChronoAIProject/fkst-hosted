@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import shutil
+import subprocess
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -209,6 +213,53 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
+
+    def test_full_test_blocks_on_repository_check_before_engine_resolution(self) -> None:
+        source = self.source()
+
+        self.assertIn("elif ! _chk_out=\"$(cmd_check 2>&1)\"; then", source)
+        self.assertIn("printf '%s\\n' \"$_chk_out\"; exit 1", source)
+        self.assertLess(source.index("cmd_check"), source.index("resolve_bin; ensure_fresh_bin; cmd_test"))
+
+    def test_full_test_fails_on_g1_before_bin_resolution(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "repo"
+            scripts = probe / "scripts"
+            pkg = probe / ".fkst" / "packages" / "oversized"
+            scripts.mkdir(parents=True)
+            pkg.mkdir(parents=True)
+
+            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py"):
+                shutil.copy2(root / "scripts" / name, scripts / name)
+            for name in ("check_repo_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "doctor_test.py"):
+                (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
+
+            core_lines = [
+                "local M = {}",
+                "function M.persistence_class() return \"stateless_adapter\" end",
+                "return M",
+            ]
+            core_lines.extend("-- filler" for _ in range(check_repo.LINE_LIMIT + 1 - len(core_lines)))
+            (pkg / "core.lua").write_text("\n".join(core_lines) + "\n", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["BIN"] = str(probe / "missing-fkst-framework")
+            result = subprocess.run(
+                ["/bin/bash", "scripts/run.sh", "test"],
+                cwd=probe,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("repository check failed:", combined)
+        self.assertIn("G1: packages/oversized/core.lua has 1001 lines; limit is 1000", combined)
+        self.assertNotIn("explicit BIN is not executable", combined)
 
 
 class RepositoryInterfaceContractTest(unittest.TestCase):
