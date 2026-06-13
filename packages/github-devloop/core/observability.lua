@@ -960,6 +960,7 @@ function M.observe_devloop_entities(event)
     log.info(M.state_gap_log_line(edge))
   end
   reap_orphan_prs(repo, list)
+  local queue_starvation = M.observe_queue_starvation(repo, list, limits, deadline, now_seconds)
   local conflict_hotspot = M.observe_conflict_hotspots(repo, M.observability_call_timeout(limits, deadline))
   local dashboard = M.render_observability_dashboard({
     entities = list,
@@ -973,6 +974,7 @@ function M.observe_devloop_entities(event)
   return {
     entity_count = #list,
     counts = counts,
+    queue_starvation = queue_starvation,
     conflict_hotspot = conflict_hotspot,
     state_gap_report = state_gap_report,
     dashboard_hash = dashboard.hash,
