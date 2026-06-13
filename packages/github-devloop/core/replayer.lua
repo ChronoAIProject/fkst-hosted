@@ -573,92 +573,6 @@ local function replay_impl_failed(dept, issue, state, row, facts)
   return replay_ready(dept, issue, retry_state, M.restart_transition_row("ready"), replay_facts)
 end
 
-local function replay_pr_open(dept, issue, state, row, facts)
-  local proposal_id = facts.proposal_id
-  local link = facts.link
-  if link == nil or M.strip_transition_version_suffixes(state.version) ~= M.strip_transition_version_suffixes(link.impl_version) then
-    return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(pr-link)", "pr-open replay requires a same-version pr-link marker")
-  end
-  for _, item in ipairs(facts.snapshot.prs or {}) do
-    if tostring(item.number or "") == tostring(link.pr_number or "") then
-      local pr = item.current or {}
-      if tostring(pr.state or ""):lower() ~= "open" then
-        return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-stale(pr-closed)", "linked PR is not open")
-      end
-      if tostring(pr.head_ref_name or "") ~= tostring(link.branch or "") then
-        return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "linked PR head branch does not match pr-link marker")
-      end
-      if tostring(pr.base_ref_name or "") ~= tostring(link.base_branch or "") then
-        return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(base)", "linked PR base branch does not match pr-link marker")
-      end
-      if not M._is_git_sha(pr.head_sha) then
-        return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
-      end
-      local review_proposal_id = M.pr_review_proposal_id(issue.repo, link.pr_number, state.version, pr.head_sha)
-      if M.has_any_review_result_marker(facts.snapshot.comments, review_proposal_id, proposal_id) then
-        return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
-      end
-      local fields = resolve_payload_fields(row, state, {
-        issue = issue,
-        state = state,
-        link = link,
-        proposal_id = proposal_id,
-      })
-      local reviewing_payload = M.build_devloop_reviewing_payload({
-        proposal_id = fields.proposal_id,
-        impl_version = fields.version,
-      }, fields.pr_number, fields.source_ref, fields.version)
-      local reviewing_comment = M.build_reviewing_comment_request(issue.repo, issue.number, {
-        proposal_id = fields.proposal_id,
-        impl_version = fields.version,
-      }, fields.pr_number, fields.source_ref)
-      M.log_cas_decision(dept, proposal_id, state, "pr-open", "reviewing", "applied(replay)", "linked PR head/base match pr-link marker")
-      return raise_effects(dept, proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
-        { queue = "github-proxy.github_pr_comment_request", payload = reviewing_comment },
-        { queue = "devloop_reviewing", payload = reviewing_payload },
-      })
-    end
-  end
-  return log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(pr-link)", "linked PR fact is not visible")
-end
-
-local function replay_reviewing(dept, issue, state, row, facts)
-  local proposal_id = facts.proposal_id
-  local link = facts.link
-  if link == nil then
-    return log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-foreign(pr-link)", "reviewing recovery requires a pr-link marker")
-  end
-  local current_pr = find_linked_pr(facts.snapshot, link.pr_number)
-  if current_pr == nil then
-    return log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-foreign(pr-link)", "linked PR fact is not visible")
-  end
-  if tostring(current_pr.state or ""):lower() ~= "open" then
-    return log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-stale(pr-closed)", "linked PR is not open")
-  end
-  if not M._is_git_sha(current_pr.head_sha) then
-    return log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
-  end
-  local fields = resolve_payload_fields(row, state, {
-    issue = issue,
-    state = state,
-    link = link,
-    proposal_id = proposal_id,
-  })
-  local review_proposal_id = M.pr_review_proposal_id(issue.repo, fields.pr_number, fields.version, current_pr.head_sha)
-  if M.has_any_review_result_marker(current_pr.comments, review_proposal_id, proposal_id) then
-    log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
-    return true
-  end
-  local payload = M.build_devloop_reviewing_payload({
-    proposal_id = fields.proposal_id,
-    impl_version = fields.version,
-  }, fields.pr_number, fields.source_ref, fields.version)
-  M.log_cas_decision(dept, proposal_id, state, "reviewing", "reviewing", "applied(replay)", "current PR head has no trusted review result")
-  return raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
-    { queue = "devloop_reviewing", payload = payload },
-  })
-end
-
 local function replay_fixing_to_reviewing(dept, issue, state, proposal_id, link, current_pr, feedback, source_ref)
   local intended_head_sha = M.current_branch_head_sha(link.branch)
   if intended_head_sha == nil then
@@ -970,14 +884,19 @@ local replayers = {
   ready = replay_ready,
   implementing = replay_implementing,
   ["impl-failed"] = replay_impl_failed,
-  ["pr-open"] = replay_pr_open,
-  reviewing = replay_reviewing,
   fixing = replay_fixing,
   ["review-meta"] = replay_review_meta,
   ["merge-ready"] = replay_merge_ready_like,
   merging = replay_merge_ready_like,
   blocked = replay_blocked,
 }
+
+M.install_pr_review_replayers(replayers, {
+  find_linked_pr = find_linked_pr,
+  log_skip = log_skip,
+  raise_effects = raise_effects,
+  resolve_payload_fields = resolve_payload_fields,
+})
 
 function M.replay_from_table(dept, entity, state, table_row, facts)
   local row = table_row or transition_row(state and state.state)
