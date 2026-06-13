@@ -202,6 +202,7 @@ local function raise_work_card(repo, fix, card)
   }, {
     proposal_id = fix.proposal_id,
     role = "fix",
+    run_id = core.work_card_run_id({ "fix", fix.dedup_key }),
     version = fix.version,
     round = core.version_fix_round(fix.version),
     started_at = card.started_at,
@@ -265,6 +266,9 @@ local function run_fix_attempt(plan)
     core.log_conflict_files("fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
   end
   local codex_started_at = now()
+  raise_work_card(plan.repo, plan.fix, {
+    started_at = codex_started_at,
+  })
   core.log_codex_start("fix", plan.fix.proposal_id, "fix")
   local content_fetch = core.context_fetch_from_bundle({
     dept = "fix",
@@ -286,7 +290,14 @@ local function run_fix_attempt(plan)
       source_ref = plan.fix.source_ref,
       terminal = false,
     })
-    error("github-devloop: fix codex failed: " .. tostring(stderr))
+    return {
+      kind = "review-meta",
+      reason = "codex-failed",
+      detail = stderr,
+      outcome = "failed: codex-failed",
+      started_at = codex_started_at,
+      finished_at = now(),
+    }
   end
   core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=completed", nil)
   assert_no_unmerged_paths(worktree)

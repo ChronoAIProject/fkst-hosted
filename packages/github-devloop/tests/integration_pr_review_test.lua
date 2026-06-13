@@ -88,6 +88,12 @@ local function find_label_raise(raises, target_kind)
   end)
 end
 
+local function find_comment_with(raises, text)
+  return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
+    return tostring(payload.body or ""):find(text, 1, true) ~= nil
+  end)
+end
+
 return {
   test_implement_ready_runs_codex_in_worktree_and_marks_implementing = function()
     local event = ready()
@@ -100,7 +106,10 @@ return {
 
     local result = run_implement(event, opts("implement-success"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
+    t.eq(#result.raises, 5)
+    local attempt_raise = find_comment_with(result.raises, "fkst:github-devloop:implement-attempt:v1")
+    t.is_true(attempt_raise.payload.body:find('proposal="' .. event.proposal_id .. '"', 1, true) ~= nil)
+    t.is_true(attempt_raise.payload.body:find('dedup="' .. event.dedup_key .. '"', 1, true) ~= nil)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
       return tostring(payload.body or ""):find("github-devloop implementation started", 1, true) ~= nil
