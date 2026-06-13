@@ -65,6 +65,7 @@ return {
     mock_implement_codex(0, "implemented after retry")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("def456", branch)
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
 
     local result = run_implement(event, opts("implement-liveness-rerun"))
     t.eq(result.exit_code, 0)
