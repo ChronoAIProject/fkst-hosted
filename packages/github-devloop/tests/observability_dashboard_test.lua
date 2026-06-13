@@ -40,6 +40,16 @@ local function dashboard_issue_list_stdout(body)
     .. '"}]]\n'
 end
 
+local function dashboard_issue_list_stdout_many(bodies)
+  local items = {}
+  for index, body in ipairs(bodies or {}) do
+    table.insert(items, '{"number":' .. tostring(98 + index) .. ',"title":"fkst-dev board","user":{"login":"fkst-test-bot"},"body":"'
+      .. encode_body(body)
+      .. '"}')
+  end
+  return "[[" .. table.concat(items, ",") .. "]]\n"
+end
+
 local function command_input_path(command)
   return tostring(command or ""):match("%-%-input '([^']+)'")
 end
@@ -151,6 +161,43 @@ return {
 
     t.eq(ok, false)
     t.is_true(tostring(err):find("gh dashboard issue list failed: empty output", 1, true) ~= nil)
+    t.eq(create_calls, 0)
+  end,
+
+  test_dashboard_publish_adopts_duplicate_marker_issue_without_create = function()
+    mock_env("1")
+    local old_body = "old\n" .. core.dashboard_marker("old", "2026-06-01T00:00:00Z")
+    local newer_body = "newer\n" .. core.dashboard_marker("newer", "2026-06-01T00:01:00Z")
+    local old_gh_exec = core.gh_exec
+    local create_calls = 0
+    local get_calls = 0
+    core.gh_exec = function(cmd_or_opts)
+      local cmd = type(cmd_or_opts) == "table" and tostring(cmd_or_opts.cmd or "") or tostring(cmd_or_opts or "")
+      if cmd == core.gh_dashboard_label_get_cmd("owner/repo", core.dashboard_label()) then
+        return { stdout = '{"name":"fkst-dashboard"}\n', stderr = "", exit_code = 0 }
+      end
+      if cmd == core.gh_dashboard_issue_list_cmd("owner/repo", core.dashboard_label()) then
+        return { stdout = dashboard_issue_list_stdout_many({ old_body, newer_body }), stderr = "", exit_code = 0 }
+      end
+      if cmd == core.gh_dashboard_issue_get_cmd("owner/repo", 99) then
+        get_calls = get_calls + 1
+        return { stdout = 'HTTP/2.0 200 OK\netag: "dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"' .. encode_body(old_body) .. '"}\n', stderr = "", exit_code = 0 }
+      end
+      if cmd:find("gh api %-%-method PATCH 'repos/owner/repo/issues/99'", 1) == 1 then
+        return { stdout = '{"number":99}\n', stderr = "", exit_code = 0 }
+      end
+      if cmd:find("gh api %-%-method POST 'repos/owner/repo/issues'", 1) == 1 then
+        create_calls = create_calls + 1
+        return { stdout = '{"number":101}\n', stderr = "", exit_code = 0 }
+      end
+      error("unexpected command: " .. cmd)
+    end
+
+    local result = core.publish_observability_dashboard("owner/repo", dashboard_fixture(), core.observability_limits(), now() + 90)
+    core.gh_exec = old_gh_exec
+
+    t.eq(result, "updated")
+    t.eq(get_calls, 1)
     t.eq(create_calls, 0)
   end,
 }
