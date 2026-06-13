@@ -323,6 +323,18 @@ function M.gh_pr_list_head_base_cmd(repo, head, base)
       .. "&per_page=100") -- gh api --paginate
 end
 
+function M.gh_pr_list_head_cmd(repo, head)
+  if not M._is_git_ref_safe(head) then
+    error("github-devloop: invalid PR head branch")
+  end
+  local owner = repo_owner(repo)
+  local head_filter = owner ~= nil and (owner .. ":" .. tostring(head)) or tostring(head)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo)
+      .. "/pulls?state=open&head=" .. url_encode(head_filter)
+      .. "&per_page=100")
+end
+
 function M.gh_pr_create_cmd(repo, head, base, title, body_file)
   if not M._is_git_ref_safe(head) then
     error("github-devloop: invalid PR head branch")
@@ -454,6 +466,18 @@ function M.git_fetch_branch_cmd(remote, branch)
   return "git fetch " .. M._shell_single_quote(remote) .. " " .. M._shell_single_quote(branch)
 end
 
+function M.git_ls_remote_branch_cmd(remote, branch)
+  local selected_remote = tostring(remote or "")
+  if selected_remote == "" or selected_remote:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid remote branch")
+  end
+  return "git ls-remote " .. M._shell_single_quote(selected_remote)
+    .. " " .. M._shell_single_quote("refs/heads/" .. tostring(branch))
+end
+
 function M.git_fetch_pr_merge_ref_cmd(remote, pr_number)
   if not M._is_git_ref_safe(remote) then
     error("github-devloop: invalid git remote")
@@ -544,6 +568,23 @@ function M.git_push_branch_cmd(branch)
   return "git push origin " .. M._shell_single_quote(branch)
 end
 
+function M.git_switch_branch_cmd(worktree, branch)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " switch " .. M._shell_single_quote(branch)
+end
+
+function M.git_write_file_cmd(worktree, relative_path, contents)
+  local path = tostring(relative_path or "")
+  if path == "" or path:find("[\r\n]") ~= nil or path:sub(1, 1) == "/" or path:find("%.%.", 1, true) ~= nil then
+    error("github-devloop: invalid write path")
+  end
+  return "printf %s " .. M._shell_single_quote(tostring(contents or ""))
+    .. " > " .. M._shell_single_quote(tostring(worktree):gsub("/+$", "") .. "/" .. path)
+end
+
 function M.read_runtime_root_cmd()
   return 'printf %s "$FKST_RUNTIME_ROOT"'
 end
@@ -556,6 +597,14 @@ function M.mkdir_p_cmd(path)
   return "mkdir -p " .. M._shell_single_quote(value) .. " && chmod 0555 " .. M._shell_single_quote(value)
 end
 
+function M.git_worktree_remove_if_present_cmd(worktree)
+  local value = tostring(worktree or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid worktree path")
+  end
+  return "if [ -d " .. M._shell_single_quote(value) .. " ]; then git worktree remove --force " .. M._shell_single_quote(value) .. "; fi"
+end
+
 function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
@@ -565,6 +614,19 @@ function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
   end
   return "mkdir -p " .. M._shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
     .. " && git worktree add -b " .. M._shell_single_quote(branch)
+    .. " " .. M._shell_single_quote(worktree)
+    .. " " .. M._shell_single_quote(base)
+end
+
+function M.git_worktree_add_reset_branch_cmd(worktree, branch, base)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid branch")
+  end
+  if not M._is_git_sha(base) then
+    error("github-devloop: invalid base head")
+  end
+  return "mkdir -p " .. M._shell_single_quote(tostring(worktree):gsub("/+$", ""):match("^(.*)/[^/]+$") or ".")
+    .. " && git worktree add -B " .. M._shell_single_quote(branch)
     .. " " .. M._shell_single_quote(worktree)
     .. " " .. M._shell_single_quote(base)
 end
