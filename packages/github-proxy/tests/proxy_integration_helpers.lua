@@ -46,6 +46,10 @@ local function mock_repo_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = value or "owner/x" })
 end
 
+local function mock_replay_budget_env(value)
+  t.mock_command('printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"', { stdout = value or "" })
+end
+
 local function mock_write_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = value or "" })
 end
@@ -469,6 +473,7 @@ return {
   runtime_root = runtime_root,
   opts = opts,
   mock_repo_env = mock_repo_env,
+  mock_replay_budget_env = mock_replay_budget_env,
   mock_write_env = mock_write_env,
   mock_bot_env = mock_bot_env,
   mock_issue_list = mock_issue_list,

@@ -15,6 +15,15 @@ local function split_repo(repo)
   return owner, name
 end
 
+local function managed_sibling_repo(current_repo, blocker_repo, managed_repos)
+  local current_owner = split_repo(current_repo)
+  local blocker_owner = split_repo(blocker_repo)
+  if current_owner == nil or blocker_owner == nil or current_owner ~= blocker_owner then
+    return false
+  end
+  return type(managed_repos) == "table" and managed_repos[tostring(blocker_repo)] == true
+end
+
 local function gate(kind, reason, unmet)
   return {
     ok = kind == "satisfied",
@@ -241,6 +250,53 @@ local function prove_blocker_merged(repo, blocker_number)
   return merged, reason
 end
 
+local has_dependency_waiver
+
+local function evaluate_terminal_blocker(repo, blocker, context, notes)
+  local state_reason = normalized_state_reason(blocker.state_reason)
+  if blocker.state == "CLOSED" and state_reason == "not-planned" then
+    add_gate_note(notes, {
+      kind = "dependency-void",
+      blocker_number = blocker.number,
+      reason = "not_planned",
+    })
+    return true, nil
+  end
+
+  local merged, merged_reason = prove_blocker_merged(repo, blocker.number)
+  if merged == nil then
+    return nil, merged_reason or "unknown-blocker"
+  end
+  if merged then
+    return true, nil
+  end
+  if blocker.state == "CLOSED"
+    and state_reason == "completed"
+    and has_dependency_waiver(context, blocker.number) then
+    add_gate_note(notes, {
+      kind = "dependency-waiver",
+      blocker_number = blocker.number,
+      reason = "completed_without_merged_marker",
+    })
+    return true, nil
+  end
+  if blocker.state == "CLOSED" and state_reason == "completed" then
+    return false, "dependency-waiver-required"
+  end
+  return false, nil
+end
+
+local function evaluate_managed_sibling_blocker(repo, blocker)
+  local merged, reason = prove_blocker_merged(repo, blocker.number)
+  if merged == nil then
+    return nil, reason or "unknown-blocker"
+  end
+  if merged then
+    return true, nil
+  end
+  return false, "waiting-on-dependency"
+end
+
 function M.dependency_waiver_fact(comments, proposal_id, version, blocker_number)
   local core = root()
   if type(comments) ~= "table" then
@@ -265,7 +321,7 @@ function M.dependency_waiver_fact(comments, proposal_id, version, blocker_number
   return nil
 end
 
-local function has_dependency_waiver(context, blocker_number)
+has_dependency_waiver = function(context, blocker_number)
   if type(context) ~= "table" then
     return false
   end
@@ -303,28 +359,30 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth, c
 
   for _, blocker in ipairs(blockers) do
     if tostring(blocker.repo or "") ~= tostring(repo) then
-      stack[key] = nil
-      add_unmet(unmet, unmet_seen, blocker.number)
-      return gate("unresolvable", "cross-repo-blocker", unmet)
-    end
-
-    local state_reason = normalized_state_reason(blocker.state_reason)
-    if blocker.state == "CLOSED" and state_reason == "not-planned" then
-      add_gate_note(notes, {
-        kind = "dependency-void",
-        blocker_number = blocker.number,
-        reason = "not_planned",
-      })
+      if not managed_sibling_repo(repo, blocker.repo, context and context.managed_sibling_repos) then
+        stack[key] = nil
+        add_unmet(unmet, unmet_seen, blocker.number)
+        return gate("unresolvable", "cross-repo-blocker", unmet)
+      end
+      local satisfied, reason = evaluate_managed_sibling_blocker(blocker.repo, blocker)
+      if satisfied == nil then
+        stack[key] = nil
+        add_unmet(unmet, unmet_seen, blocker.number)
+        return gate("unresolvable", reason or "unknown-blocker", unmet)
+      end
+      if not satisfied then
+        add_unmet(unmet, unmet_seen, blocker.number)
+      end
     elseif not cached_blocker_merged(repo, blocker.number) then
       local prefer_terminal_proof = blocker.state == "CLOSED"
-      local merged = nil
-      local merged_reason = nil
+      local satisfied = nil
+      local satisfied_reason = nil
 
       if prefer_terminal_proof then
-        merged, merged_reason = prove_blocker_merged(repo, blocker.number)
+        satisfied, satisfied_reason = evaluate_terminal_blocker(repo, blocker, context, notes)
       end
 
-      if not prefer_terminal_proof or (merged == false and state_reason ~= "completed") then
+      if not prefer_terminal_proof or (satisfied == false and satisfied_reason ~= "dependency-waiver-required") then
         local nested = visit(repo, blocker.number, stack, visited, unmet, unmet_seen, depth + 1, context, notes)
         if nested.kind == "cycle" or nested.kind == "unresolvable" then
           stack[key] = nil
@@ -333,27 +391,19 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth, c
       end
 
       if not prefer_terminal_proof then
-        merged, merged_reason = prove_blocker_merged(repo, blocker.number)
+        satisfied, satisfied_reason = evaluate_terminal_blocker(repo, blocker, context, notes)
       end
 
-      if merged == nil then
+      if satisfied == nil then
         stack[key] = nil
         add_unmet(unmet, unmet_seen, blocker.number)
-        return gate("unresolvable", merged_reason or "unknown-blocker", unmet)
+        return gate("unresolvable", satisfied_reason or "unknown-blocker", unmet)
       end
-      if not merged then
-        if prefer_terminal_proof and state_reason == "completed" and has_dependency_waiver(context, blocker.number) then
-          add_gate_note(notes, {
-            kind = "dependency-waiver",
-            blocker_number = blocker.number,
-            reason = "completed_without_merged_marker",
-          })
-        else
-          add_unmet(unmet, unmet_seen, blocker.number)
-          if prefer_terminal_proof and state_reason == "completed" then
-            stack[key] = nil
-            return gate("waiting", "dependency-waiver-required", unmet)
-          end
+      if not satisfied then
+        add_unmet(unmet, unmet_seen, blocker.number)
+        if satisfied_reason == "dependency-waiver-required" then
+          stack[key] = nil
+          return gate("waiting", "dependency-waiver-required", unmet)
         end
       end
     end
@@ -389,7 +439,12 @@ function M.dependency_gate(repo, issue_number, context)
   if split_repo(repo) == nil or not core._is_positive_pr_number(issue_number) then
     return gate("unresolvable", "invalid-target", {})
   end
-  local ok, result = pcall(visit, repo, issue_number, {}, {}, {}, {}, 0, context, {})
+  local gate_context = context
+  if type(gate_context) ~= "table" then
+    gate_context = {}
+  end
+  gate_context.managed_sibling_repos = core.managed_sibling_repos()
+  local ok, result = pcall(visit, repo, issue_number, {}, {}, {}, {}, 0, gate_context, {})
   if not ok or type(result) ~= "table" then
     return gate("unresolvable", "dependency-gate-exception", {})
   end
