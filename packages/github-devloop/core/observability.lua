@@ -70,8 +70,8 @@ local function command_indicates_already_exists(result)
     or stderr:find("409", 1, true) ~= nil
 end
 
-local function ensure_dashboard_label(repo)
-  local existing = M.gh_exec({ cmd = M.gh_dashboard_label_get_cmd(repo, dashboard_label), timeout = 30 })
+local function ensure_dashboard_label(repo, limits, deadline)
+  local existing = M.observability_exec(M.gh_dashboard_label_get_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label get")
   if existing.exit_code == 0 then
     return "exists"
   end
@@ -79,7 +79,7 @@ local function ensure_dashboard_label(repo)
     error("github-devloop: gh dashboard label get failed: " .. tostring(existing.stderr))
   end
 
-  local created = M.gh_exec({ cmd = M.gh_dashboard_label_create_cmd(repo, dashboard_label), timeout = 30 })
+  local created = M.observability_exec(M.gh_dashboard_label_create_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label create")
   if created.exit_code == 0 then
     log.info("github-devloop dept=observability tag=DASHBOARD_LABEL_CREATED label=" .. dashboard_label)
     return "created"
@@ -209,28 +209,13 @@ local function require_observe_bot()
   end
 end
 
-local function sorted_numbers(items)
-  local numbers = {}
-  local seen = {}
-  for _, item in ipairs(items or {}) do
-    local number = tonumber(item and item.number)
-    local state = tostring(item and item.state or ""):lower()
-    if number ~= nil and number >= 1 and number % 1 == 0 and state == "open" and not seen[number] then
-      seen[number] = true
-      table.insert(numbers, number)
-    end
-  end
-  table.sort(numbers)
-  return numbers
-end
-
-local function fetch_issue(repo, issue_number)
-  local view = run_cmd(M.gh_issue_view_observe_cmd(repo, issue_number), 30, "gh observability issue view")
+local function fetch_issue(repo, issue_number, limits, deadline)
+  local view = M.observability_run_cmd(M.gh_issue_view_observe_cmd(repo, issue_number), limits, deadline, "gh observability issue view")
   return M.parse_issue_view_observe(view.stdout)
 end
 
-local function fetch_pr(repo, pr_number)
-  local view = run_cmd(M.gh_pr_view_observe_cmd(repo, pr_number), 30, "gh observability PR view")
+local function fetch_pr(repo, pr_number, limits, deadline)
+  local view = M.observability_run_cmd(M.gh_pr_view_observe_cmd(repo, pr_number), limits, deadline, "gh observability PR view")
   return M.parse_pr_view_origin(view.stdout)
 end
 
@@ -421,7 +406,7 @@ local function reap_orphan_pr(repo, entity)
     return
   end
 
-  local parent = entity.parent_issue or fetch_issue(repo, origin.issue_number)
+  local parent = entity.parent_issue or fetch_issue(repo, origin.issue_number, entity.observability_limits, entity.observability_deadline)
   local parent_state = M.current_state(parent.comments, proposal_id)
   local reason = terminal_parent_reason(parent, entity)
   if reason == nil then
@@ -442,17 +427,11 @@ local function reap_orphan_pr(repo, entity)
     return
   end
 
-  local closed = M.gh_exec({ cmd = M.gh_pr_close_cmd(repo, pr_number), timeout = 30 })
-  if closed.exit_code ~= 0 then
-    error("github-devloop: gh orphan PR close failed: " .. tostring(closed.stderr))
-  end
+  M.observability_run_cmd(M.gh_pr_close_cmd(repo, pr_number), entity.observability_limits, entity.observability_deadline, "gh orphan PR close")
   M.invalidate_entity_after_write(repo, "pr", pr_number)
   local path = reaper_body_path(repo, pr_number, proposal_id)
   file.write(path, reaper_comment_body(proposal_id, pr_number, reason))
-  local commented = M.gh_exec({ cmd = M.gh_pr_comment_cmd(repo, pr_number, path), timeout = 30 })
-  if commented.exit_code ~= 0 then
-    error("github-devloop: gh orphan PR reaper comment failed: " .. tostring(commented.stderr))
-  end
+  M.observability_run_cmd(M.gh_pr_comment_cmd(repo, pr_number, path), entity.observability_limits, entity.observability_deadline, "gh orphan PR reaper comment")
   M.invalidate_entity_after_write(repo, "pr", pr_number)
   log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "closed", reason.code))
 end
@@ -463,28 +442,63 @@ local function reap_orphan_prs(repo, entities)
   end
 end
 
-local function observe_issue_candidates(repo, issue_numbers, entities, seen_prs)
-  for _, issue_number in ipairs(issue_numbers) do
-    local issue = fetch_issue(repo, issue_number)
-    local entity, link = put_issue_entity(entities, repo, issue_number, issue)
-    if link ~= nil and seen_prs[link.pr_number] == nil then
-      seen_prs[link.pr_number] = true
-      local pr = fetch_pr(repo, link.pr_number)
-      put_pr_entity(entities, repo, link.pr_number, pr)
-    elseif entity ~= nil and entity.pr_number ~= nil then
-      seen_prs[entity.pr_number] = true
-    end
+local function observe_issue_candidate(repo, issue_number, entities, seen_prs, limits, deadline, budget)
+  local issue_views = 0
+  local pr_views = 0
+  if (budget.remaining or 0) <= 0 or not M.observability_has_budget(deadline) then
+    return issue_views, pr_views
   end
+  local issue = fetch_issue(repo, issue_number, limits, deadline)
+  budget.remaining = budget.remaining - 1
+  issue_views = issue_views + 1
+  local entity, link = put_issue_entity(entities, repo, issue_number, issue)
+  if link ~= nil and seen_prs[link.pr_number] == nil then
+    if (budget.remaining or 0) <= 0 or not M.observability_has_budget(deadline) then
+      return issue_views, pr_views
+    end
+    seen_prs[link.pr_number] = true
+    local pr = fetch_pr(repo, link.pr_number, limits, deadline)
+    budget.remaining = budget.remaining - 1
+    pr_views = pr_views + 1
+    put_pr_entity(entities, repo, link.pr_number, pr)
+  elseif entity ~= nil and entity.pr_number ~= nil then
+    seen_prs[entity.pr_number] = true
+  end
+  return issue_views, pr_views
 end
 
-local function observe_pr_candidates(repo, pr_numbers, entities, seen_prs)
-  for _, pr_number in ipairs(pr_numbers) do
-    if seen_prs[pr_number] == nil then
-      seen_prs[pr_number] = true
-      local pr = fetch_pr(repo, pr_number)
-      put_pr_entity(entities, repo, pr_number, pr)
+local function observe_pr_candidate(repo, pr_number, entities, seen_prs, limits, deadline, budget)
+  local pr_views = 0
+  if (budget.remaining or 0) <= 0 or not M.observability_has_budget(deadline) then
+    return pr_views
+  end
+  if seen_prs[pr_number] == nil then
+    seen_prs[pr_number] = true
+    local pr = fetch_pr(repo, pr_number, limits, deadline)
+    budget.remaining = budget.remaining - 1
+    pr_views = pr_views + 1
+    put_pr_entity(entities, repo, pr_number, pr)
+  end
+  return pr_views
+end
+
+local function observe_candidates(repo, candidates, entities, seen_prs, limits, deadline)
+  local budget = { remaining = limits.entity_cap }
+  local processed_issues = 0
+  local processed_prs = 0
+  for _, candidate in ipairs(candidates or {}) do
+    if budget.remaining <= 0 or not M.observability_has_budget(deadline) then
+      break
+    end
+    if candidate.kind == "issue" then
+      local issue_views, pr_views = observe_issue_candidate(repo, candidate.number, entities, seen_prs, limits, deadline, budget)
+      processed_issues = processed_issues + issue_views
+      processed_prs = processed_prs + pr_views
+    elseif candidate.kind == "pr" then
+      processed_prs = processed_prs + observe_pr_candidate(repo, candidate.number, entities, seen_prs, limits, deadline, budget)
     end
   end
+  return processed_issues, processed_prs, budget.remaining
 end
 
 local function entity_sort_key(entity)
@@ -746,8 +760,8 @@ function M.render_observability_dashboard(args)
   }
 end
 
-local function trusted_dashboard_issue(repo, bot_login)
-  local listed = M.gh_exec({ cmd = M.gh_dashboard_issue_list_cmd(repo, dashboard_label), timeout = 30 })
+local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
+  local listed = M.observability_exec(M.gh_dashboard_issue_list_cmd(repo, dashboard_label), limits, deadline, "gh dashboard issue list")
   if listed.exit_code ~= 0 then
     log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED"
       .. " locator=label-list"
@@ -766,8 +780,8 @@ local function trusted_dashboard_issue(repo, bot_login)
   return nil
 end
 
-local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login)
-  local view = run_cmd(M.gh_dashboard_issue_get_cmd(repo, issue_number), 30, "gh dashboard issue get")
+local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login, limits, deadline)
+  local view = M.observability_run_cmd(M.gh_dashboard_issue_get_cmd(repo, issue_number), limits, deadline, "gh dashboard issue get")
   local issue = parse_dashboard_issue_get(view.stdout)
   if issue.number == tonumber(issue_number)
     and issue.author_login == bot_login
@@ -787,7 +801,7 @@ local function write_dashboard_input(repo, title, body)
   return path
 end
 
-function M.publish_observability_dashboard(repo, dashboard)
+function M.publish_observability_dashboard(repo, dashboard, limits, deadline)
   if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
     log.info("github-devloop dept=observability tag=DASHBOARD_DRY_RUN hash=" .. tostring(dashboard.hash))
     log.info(dashboard.body)
@@ -795,8 +809,8 @@ function M.publish_observability_dashboard(repo, dashboard)
   end
 
   local bot_login = M.assert_trusted_bot_configured()
-  ensure_dashboard_label(repo)
-  local current = trusted_dashboard_issue(repo, bot_login)
+  ensure_dashboard_label(repo, limits, deadline)
+  local current = trusted_dashboard_issue(repo, bot_login, limits, deadline)
   local current_version = current ~= nil and dashboard_version_from_body(current.body) or nil
   local current_hash = current ~= nil and dashboard_hash_from_body(current.body) or nil
   if current ~= nil and current_hash == dashboard.hash then
@@ -807,7 +821,7 @@ function M.publish_observability_dashboard(repo, dashboard)
 
   if current == nil then
     local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-    run_cmd(M.gh_dashboard_issue_create_cmd(repo, path), 30, "gh dashboard issue create")
+    M.observability_run_cmd(M.gh_dashboard_issue_create_cmd(repo, path), limits, deadline, "gh dashboard issue create")
     log.info("github-devloop dept=observability tag=DASHBOARD_CREATED hash=" .. tostring(dashboard.hash))
     return "created"
   end
@@ -820,7 +834,7 @@ function M.publish_observability_dashboard(repo, dashboard)
     return "stale"
   end
 
-  local refreshed = trusted_dashboard_issue_by_number(repo, current.number, bot_login)
+  local refreshed = trusted_dashboard_issue_by_number(repo, current.number, bot_login, limits, deadline)
   local refreshed_version = refreshed ~= nil and dashboard_version_from_body(refreshed.body) or nil
   local refreshed_hash = refreshed ~= nil and dashboard_hash_from_body(refreshed.body) or nil
   if refreshed ~= nil and tonumber(refreshed.number) == tonumber(current.number)
@@ -854,7 +868,7 @@ function M.publish_observability_dashboard(repo, dashboard)
   end
 
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-  local updated = M.gh_exec({ cmd = M.gh_dashboard_issue_update_cmd(repo, current.number, path, refreshed.etag), timeout = 30 })
+  local updated = M.observability_exec(M.gh_dashboard_issue_update_cmd(repo, current.number, path, refreshed.etag), limits, deadline, "gh dashboard issue update")
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")
     if stderr:find("412", 1, true) ~= nil or stderr:find("Precondition Failed", 1, true) ~= nil then
@@ -886,31 +900,42 @@ function M.observe_entity_log_line(proposal_id, fields)
   }, " ")
 end
 
-function M.observe_devloop_entities()
+function M.observe_devloop_entities(event)
   require_observe_bot()
   local repo = require_observe_repo()
-  local issue_candidates = {}
+  local limits = M.observability_limits()
+  local deadline = M.observability_deadline(now(), limits)
   local labels = { M._enabled_label }
   for _, state in ipairs(M._state_order) do
     table.insert(labels, M.state_label(state))
   end
-  for _, label in ipairs(labels) do
-    local issue_list = run_cmd(M.gh_issue_list_observe_cmd(repo, label), 60, "gh observability issue list")
-    for _, issue in ipairs(M.parse_issue_list_observe(issue_list.stdout)) do
-      table.insert(issue_candidates, issue)
-    end
-  end
-  local pr_list = run_cmd(M.gh_pr_list_observe_cmd(repo), 60, "gh observability PR list")
-  local issue_numbers = sorted_numbers(issue_candidates)
-  local pr_numbers = sorted_numbers(M.parse_pr_list_observe(pr_list.stdout))
+  local rotation_seed = M.observability_rotation_seed(event)
+  local issue_items, deferred_issue_pages = M.observability_list_issue_candidates(repo, labels, limits, deadline, rotation_seed)
+  local pr_items, deferred_pr_pages = M.observability_list_pr_candidates(repo, limits, deadline, rotation_seed)
+  local issue_numbers = M.observability_sorted_numbers(issue_items)
+  local pr_numbers = M.observability_sorted_numbers(pr_items)
+  local candidates, deferred_candidates = M.observability_entity_candidates(issue_numbers, pr_numbers, rotation_seed, limits.entity_cap)
   local entities = {}
   local seen_prs = {}
 
-  observe_issue_candidates(repo, issue_numbers, entities, seen_prs)
-  observe_pr_candidates(repo, pr_numbers, entities, seen_prs)
+  local processed_issues, processed_prs, remaining_budget = observe_candidates(repo, candidates, entities, seen_prs, limits, deadline)
+  if deferred_issue_pages > 0 or deferred_pr_pages > 0 or deferred_candidates > 0 or remaining_budget == 0 or not M.observability_has_budget(deadline) then
+    log.warn(M.observability_deferred_log_line({
+      reason = M.observability_has_budget(deadline) and "batch-cap" or "deadline",
+      listed_issues = #issue_numbers,
+      listed_prs = #pr_numbers,
+      processed_issues = processed_issues,
+      processed_prs = processed_prs,
+      deferred_issues = math.max(0, #issue_numbers - processed_issues),
+      deferred_prs = math.max(0, #pr_numbers - processed_prs),
+      entity_cap = limits.entity_cap,
+    }))
+  end
 
   local list = {}
   for _, entity in pairs(entities) do
+    entity.observability_limits = limits
+    entity.observability_deadline = deadline
     table.insert(list, entity)
   end
   table.sort(list, function(a, b)
@@ -935,7 +960,7 @@ function M.observe_devloop_entities()
     log.info(M.state_gap_log_line(edge))
   end
   reap_orphan_prs(repo, list)
-  local conflict_hotspot = M.observe_conflict_hotspots(repo)
+  local conflict_hotspot = M.observe_conflict_hotspots(repo, M.observability_call_timeout(limits, deadline))
   local dashboard = M.render_observability_dashboard({
     entities = list,
     counts = counts,
@@ -943,7 +968,7 @@ function M.observe_devloop_entities()
     state_gap_report = state_gap_report,
     now_seconds = now_seconds,
   })
-  M.publish_observability_dashboard(repo, dashboard)
+  M.publish_observability_dashboard(repo, dashboard, limits, deadline)
 
   return {
     entity_count = #list,
