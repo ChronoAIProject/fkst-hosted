@@ -277,6 +277,46 @@ return {
     t.eq(second.raises[2].payload.number, 8)
   end,
 
+  test_inbound_poll_replay_budget_tie_breaks_shared_lanes_deterministically = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("shared-replay-budget-tie", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+    })
+    local timestamp = "2026-06-03T01:02:00Z"
+    local issues = issue_list_from({
+      issue_json(42, timestamp),
+      issue_json(44, timestamp),
+    })
+    local prs = pr_list_from({
+      pr_json(42, timestamp),
+      pr_json(43, timestamp),
+    })
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 2)
+    t.eq(first.raises[1].payload.type, "issue")
+    t.eq(first.raises[1].payload.number, 42)
+    t.eq(first.raises[2].payload.type, "pr")
+    t.eq(first.raises[2].payload.number, 42)
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 2)
+    t.eq(second.raises[1].payload.type, "pr")
+    t.eq(second.raises[1].payload.number, 43)
+    t.eq(second.raises[2].payload.type, "issue")
+    t.eq(second.raises[2].payload.number, 44)
+  end,
+
   test_inbound_poll_defaults_cold_replay_budget_to_ten = function()
     local event = { queue = "github_poll_tick", payload = {} }
     local items = {}
