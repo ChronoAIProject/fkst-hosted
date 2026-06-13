@@ -16,6 +16,7 @@ local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_WRITE = true,
+  FKST_DEVLOOP_REPLAY_BUDGET = true,
 }
 local trusted_bot_login = nil
 local max_branch_len = 160
@@ -107,6 +108,22 @@ function M.read_env(name, exec)
     return nil
   end
   return out.stdout
+end
+
+function M.devloop_replay_budget(exec)
+  local ok, value = pcall(M.read_env, "FKST_DEVLOOP_REPLAY_BUDGET", exec)
+  if not ok then
+    return 10
+  end
+  if value == nil then
+    return 10
+  end
+  value = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
+  local parsed = tonumber(value)
+  if parsed == nil or parsed ~= math.floor(parsed) or parsed < 1 or parsed > 100 then
+    error("github-proxy: invalid FKST_DEVLOOP_REPLAY_BUDGET")
+  end
+  return parsed
 end
 
 function M.log_line(level, dept, tag, fields)
