@@ -369,6 +369,7 @@ function M.parse_pr_view_origin(stdout)
     base_ref_oid = decoded.baseRefOid or decoded.base_ref_oid,
     state = decoded.state,
     updated_at = decoded.updatedAt or decoded.updated_at,
+    labels = label_names(decoded.labels),
     comments = M.comments_from_json(decoded.comments),
     head_repository = head_repo,
     is_cross_repository = is_cross_repository,

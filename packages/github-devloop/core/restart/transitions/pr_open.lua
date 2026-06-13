@@ -26,7 +26,11 @@ return function(M, h)
       source_ref = "source_ref:pr",
     },
     version_identity = "pr-link.impl_version",
-    effects = effect({ "devloop_reviewing" }, "reviewing payload is complete when linked open PR head/base still match the pr-link marker"),
+    effects = effect(
+      { "devloop_reviewing", "pr-state-label" },
+      "reviewing replay is complete when linked open PR head/base still match the pr-link marker and the PR-local state label projection is requested",
+      "build_reconcile_pr_state_label_request"
+    ),
     marker_facts = "state:v1 pr-open plus pr-link:v1",
     kickoff = "devloop_reviewing",
     replay = "Observe re-fetches the linked PR and raises review for the linked PR head.",
