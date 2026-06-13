@@ -135,15 +135,17 @@ end
 
 local function mock_intake_judge_view(labels, comments, extra)
   local fields = extra or {}
+  local assignees_json = fields.assignees_json or '{"login":"fkst-test-bot"}'
   t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
       json_string(fields.title or "Add retry backoff to failed widget sync"),
       json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
       json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
       json_string(fields.state or "OPEN"),
       labels_json(labels or {}),
-      comments_json(comments or {})
+      comments_json(comments or {}),
+      assignees_json
     ),
     stderr = "",
     exit_code = 0,
@@ -438,6 +440,19 @@ return {
     t.is_true(has_value(label.remove_labels, "fkst-class:standard"))
     t.is_true(has_value(label.remove_labels, "fkst-class:background"))
     assert_intake_judgment_call()
+  end,
+
+  test_judge_skips_issue_claimed_by_other_login = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({}, {}, {
+      assignees_json = '{"login":"other-bot"}',
+    })
+
+    local result = run_judge(payload, opts("intake-claimed-by-other"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
   end,
 
   test_judge_standard_class_is_default_and_replaces_other_class_labels = function()

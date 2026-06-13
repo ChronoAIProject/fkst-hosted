@@ -60,17 +60,14 @@ local function mock_probe_issue_list(issues, since)
   })
 end
 
-local function mock_intake_scan_view(labels, comments, state)
-  t.mock_command("--json labels,comments,state,assignees", {
-    stdout = string.format(
-      '{"state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
-      json_string(state or "OPEN"),
-      labels_json(labels or {}),
-      comments_json(comments or {})
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+local function count_rendered_calls(needle)
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 local function run_probe(run_opts)
@@ -98,7 +95,6 @@ return {
     mock_probe_issue_list({
       { number = 42, created_at = "2026-06-03T01:01:00Z", updated_at = "2026-06-03T01:02:03Z", labels = {} },
     })
-    mock_intake_scan_view({}, {}, "OPEN")
 
     local result = run_probe(opts("intake-probe-new-issue"))
     t.eq(result.exit_code, 0)
@@ -107,21 +103,20 @@ return {
     t.eq(result.raises[1].payload.issue_number, "42")
     t.eq(result.raises[1].payload.dedup_key, core.intake_dedup_key("github-devloop/issue/owner/repo/42", "2026-06-03T01:02:03Z"))
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(count_rendered_calls("--json labels,comments,state,assignees"), 0)
   end,
 
-  test_probe_skips_existing_intake_decision_marker = function()
+  test_probe_skips_known_devloop_state_label_without_issue_view = function()
     h.mock_bot_env()
     mock_repo_env()
     mock_probe_issue_list({
-      { number = 42, created_at = "2026-06-03T01:01:00Z", labels = {} },
+      { number = 42, created_at = "2026-06-03T01:01:00Z", labels = { "fkst-dev:enabled" } },
     })
-    mock_intake_scan_view({}, {
-      core.intake_decision_marker("github-devloop/issue/owner/repo/42", "decline", "intake/github-devloop/issue/owner/repo/42/v1"),
-    }, "OPEN")
 
-    local result = run_probe(opts("intake-probe-existing-marker"))
+    local result = run_probe(opts("intake-probe-existing-state-label"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
+    t.eq(count_rendered_calls("--json labels,comments,state,assignees"), 0)
   end,
 
   test_probe_cursor_uses_since_and_same_second_issue_number_tiebreak = function()
@@ -133,7 +128,6 @@ return {
       { number = 43, created_at = "2026-06-03T01:01:00Z", updated_at = "2026-06-03T01:02:04Z", labels = {} },
       { number = 42, created_at = "2026-06-03T01:01:00Z", updated_at = "2026-06-03T01:02:03Z", labels = {} },
     }, "2026-06-03T01:00:59Z")
-    mock_intake_scan_view({}, {}, "OPEN")
 
     local result = run_probe(run_opts)
     t.eq(result.exit_code, 0)
@@ -151,14 +145,10 @@ return {
       { number = 47, created_at = "2026-06-03T01:02:00Z", labels = { "fkst-dev:enabled" } },
       { number = 46, created_at = "2026-06-03T01:01:00Z", labels = { "fkst-dev:enabled" } },
     })
-    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
-    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
-    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
-    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
-    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
 
     local result = run_probe(opts("intake-probe-full-window"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
+    t.eq(count_rendered_calls("--json labels,comments,state,assignees"), 0)
   end,
 }

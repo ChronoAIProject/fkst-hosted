@@ -56,22 +56,15 @@ local function maybe_raise_candidate(repo, issue)
     return
   end
   local proposal_id = core.proposal_id(repo, issue_number)
-  local view = core.gh_exec({ cmd = core.gh_issue_view_intake_scan_cmd(repo, issue_number), timeout = 30 })
-  if view.exit_code ~= 0 then
-    error("github-devloop: intake-probe-view-failed: " .. tostring(view.stderr))
+  if core.should_skip_known_intake_issue(issue.labels) then
+    core.log_cas_decision("intake_probe", proposal_id, { state = nil, version = nil }, "probe", "candidate", "skip-known-state", "probe list labels show an active devloop state")
+    return
   end
-  local current = core.parse_issue_view_intake_scan(view.stdout)
-  core.log_forged_markers("intake_probe", proposal_id, current.comments)
-  if current.state == "OPEN"
-    and not core.should_skip_known_intake_issue(current.labels)
-    and not core.has_intake_decision_marker(current.comments, proposal_id)
-    and core.claim_issue_for_management("intake_probe", repo, issue_number, current, proposal_id) then
-    local payload = core.build_intake_scan_candidate(repo, issue, nil)
-    core.log_apply("intake_probe", proposal_id, nil, nil, { add = {}, remove = {} }, {
-      "devloop_intake_candidate",
-    })
-    core.log_raise("intake_probe", proposal_id, "devloop_intake_candidate", payload)
-  end
+  local payload = core.build_intake_scan_candidate(repo, issue, nil)
+  core.log_apply("intake_probe", proposal_id, nil, nil, { add = {}, remove = {} }, {
+    "devloop_intake_candidate",
+  })
+  core.log_raise("intake_probe", proposal_id, "devloop_intake_candidate", payload)
 end
 
 function pipeline(event)
