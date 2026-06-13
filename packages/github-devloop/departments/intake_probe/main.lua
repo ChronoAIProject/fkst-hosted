@@ -51,7 +51,7 @@ local function is_after_cursor(issue, cursor_created_at, cursor_number)
   )
 end
 
-local function maybe_raise_candidate(repo, issue)
+local function maybe_raise_candidate(repo, issue, delivery_version)
   local issue_number = tostring(issue.number or "")
   if not core.issue_ref_round_trips(repo, issue_number) then
     return
@@ -61,7 +61,7 @@ local function maybe_raise_candidate(repo, issue)
     core.log_cas_decision("intake_probe", proposal_id, { state = nil, version = nil }, "probe", "candidate", "skip-known-state", "probe list labels show an active devloop state")
     return
   end
-  local payload = core.build_intake_scan_candidate(repo, issue, nil)
+  local payload = core.build_intake_scan_candidate(repo, issue, nil, delivery_version)
   core.log_apply("intake_probe", proposal_id, nil, nil, { add = {}, remove = {} }, {
     "devloop_intake_candidate",
   })
@@ -102,7 +102,7 @@ function pipeline(event)
       newest_number = tonumber(issue.number) or 0
     end
     if is_after_cursor(issue, cursor_created_at, cursor_number) then
-      maybe_raise_candidate(repo, issue)
+      maybe_raise_candidate(repo, issue, event.ts or now())
     end
   end
   local cursor = encode_cursor(newest_created_at, newest_number)
