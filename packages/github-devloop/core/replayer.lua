@@ -852,34 +852,33 @@ local function maybe_replay_review_carry_over(dept, issue, state, row, facts, li
   if tostring(current_pr.state or ""):lower() ~= "open" or not M.is_safe_head_sha(current_pr.head_sha) then
     return false
   end
-  local fact = M.merge_ready_fact(facts.snapshot.comments, proposal_id, state.version, link.pr_number)
-  if fact == nil or tostring(fact.head_sha or "") == tostring(current_pr.head_sha or "") then
+  local carry, carry_reason = M.approved_lineage_carry_over(
+    issue.repo,
+    link.pr_number,
+    proposal_id,
+    state.version,
+    facts.snapshot.comments,
+    link.base_branch,
+    current_pr.head_sha
+  )
+  if carry_reason == "missing-merge-ready-fact" or carry_reason == "head-unchanged" then
     return false
   end
-  local approved = { proposal_id = proposal_id, pr_number = link.pr_number, version = state.version, review_proposal_id = fact.review_proposal_id, review_dedup_key = fact.review_dedup_key, reviewed_head_sha = fact.head_sha }
-  local approval_ok = M.review_result_approval_matches_event(facts.snapshot.comments, approved)
-  if not approval_ok then
+  if carry_reason == "missing-review-result-approve" then
     return false
   end
-  local base_head, base_error = M.current_base_head(link.base_branch)
-  if base_head == nil then
-    return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, fact.head_sha, "skip-stale(carry-over-proof-unavailable)", base_error)
+  if carry == nil then
+    local outcome = "skip-stale(" .. tostring(carry_reason):match("^([^:]+)") .. ")"
+    return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, outcome, tostring(carry_reason))
   end
-  local empty_delta, delta_reason = M.has_empty_resolution_delta(fact.head_sha, base_head, current_pr.head_sha)
-  if not empty_delta then
-    return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, fact.head_sha, "skip-stale(non-empty-resolution-delta)", delta_reason)
-  end
-  local new_review_proposal = M.pr_review_proposal_id(issue.repo, link.pr_number, state.version, current_pr.head_sha)
-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
-  if M.has_any_review_result_marker(current_pr.comments, new_review_proposal, proposal_id) then
+  if M.has_any_review_result_marker(current_pr.comments, carry.new_review_proposal_id, proposal_id) then
     return false
   end
-  local carry = { version = state.version, old_review_proposal_id = fact.review_proposal_id, old_review_dedup_key = fact.review_dedup_key, approved_head_sha = fact.head_sha, new_review_proposal_id = new_review_proposal, new_review_dedup_key = new_review_dedup, new_head_sha = current_pr.head_sha, base_head_sha = base_head }
   local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
   local comment_request = M.build_review_carry_over_comment_request(issue.repo, link.pr_number, proposal_id, state.version, carry, source_ref)
   local merge_payload = M.build_devloop_merge_ready_payload(proposal_id, link.pr_number, state.version, {
-    review_proposal_id = new_review_proposal,
-    review_dedup_key = new_review_dedup,
+    review_proposal_id = carry.new_review_proposal_id,
+    review_dedup_key = carry.new_review_dedup_key,
     reviewed_head_sha = current_pr.head_sha,
     current_head_sha = current_pr.head_sha,
   }, source_ref)
