@@ -46,6 +46,9 @@ function M.validate_proposal(proposal)
   if not M._has_bounded_source_ref(proposal.source_ref) then
     return false
   end
+  if proposal.effect_version ~= nil and not M._is_bounded_string(proposal.effect_version, M._max_dedup_len) then
+    return false
+  end
   return proposal.intake_hand_off == nil or M.is_intake_hand_off(proposal.intake_hand_off, proposal)
 end
 end

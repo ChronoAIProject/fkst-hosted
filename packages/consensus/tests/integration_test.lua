@@ -555,6 +555,31 @@ return {
     t.eq(#codex_calls(), 3)
   end,
 
+  test_same_decision_dedup_key_skips_updated_effect_version_refire = function()
+    local run_opts = opts("effect-version-refire")
+    mock_judgment_runtime()
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "approve", "Structural angle approves.")
+    mock_angle("delete", "approve", "Delete angle approves.")
+
+    local first = run_decide(proposal({
+      dedup_key = "proposal-42/intake/1234567890",
+      effect_version = "intake/proposal-42/2026-06-03T01-02-03Z",
+    }), run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 1)
+    t.eq(first.raises[1].payload.dedup_key, "consensus:proposal-42/intake/1234567890")
+    t.eq(first.raises[1].payload.effect_version, "intake/proposal-42/2026-06-03T01-02-03Z")
+
+    local second = run_decide(proposal({
+      dedup_key = "proposal-42/intake/1234567890",
+      effect_version = "intake/proposal-42/2026-06-03T01-22-03Z",
+    }), run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 0)
+    t.eq(#codex_calls(), 3)
+  end,
+
   test_new_version_reruns_consensus = function()
     local run_opts = opts("new-version")
     mock_judgment_runtime()

@@ -512,6 +512,18 @@ return {
     t.is_true(payload.body:find("minimal reply", 1, true) ~= nil)
   end,
 
+  test_build_reached_payload_preserves_effect_version = function()
+    local payload = core.build_reached_payload(proposal({
+      dedup_key = "proposal-42/intake/1234567890",
+      effect_version = "intake/proposal-42/2026-06-03T01-02-03Z",
+    }), "approve", {
+      result("minimal", "approve"),
+    })
+
+    t.eq(payload.dedup_key, "consensus:proposal-42/intake/1234567890")
+    t.eq(payload.effect_version, "intake/proposal-42/2026-06-03T01-02-03Z")
+  end,
+
   test_build_reached_payload_omits_nil_framing = function()
     local payload = core.build_reached_payload(proposal(), "approve", {
       result("minimal", "approve"),
@@ -701,6 +713,19 @@ return {
     t.eq(#payload.angle_digests, 3)
     t.eq(payload.angle_digests[1].reply, "minimal reply")
     t.eq(payload.angle_digests[3].verdict, "invalid")
+  end,
+
+  test_build_converge_payload_preserves_effect_version = function()
+    local payload = core.build_converge_payload(proposal({
+      dedup_key = "proposal-42/intake/1234567890",
+      effect_version = "intake/proposal-42/2026-06-03T01-02-03Z",
+    }), "Narrow the disagreement.", {
+      result("minimal", "approve"),
+      result("structural", "abstain"),
+    })
+
+    t.eq(payload.dedup_key, "consensus:proposal-42/intake/1234567890")
+    t.eq(payload.effect_version, "intake/proposal-42/2026-06-03T01-02-03Z")
   end,
 
   test_build_converge_payload_bounds_worst_case = function()

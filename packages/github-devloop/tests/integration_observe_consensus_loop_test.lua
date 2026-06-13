@@ -642,6 +642,29 @@ return {
     t.is_true(find_raise(result.raises, "devloop_ready") ~= nil)
   end,
 
+  test_consensus_result_uses_effect_version_for_ready_state_marker = function()
+    local current = reached({
+      dedup_key = "consensus:github-devloop/issue/owner/repo/42/intake/1234567890",
+      effect_version = "intake/github-devloop/issue/owner/repo/42/2026-06-03T02-02-03Z",
+    })
+    mock_issue_result({ "fkst-dev:thinking" }, {
+      core.state_marker(current.proposal_id, "thinking", current.effect_version),
+    })
+
+    local result = run_result(current, opts("result-effect-version-cas"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment_raise.payload.body:find(core.state_marker(current.proposal_id, "ready", current.effect_version, "result-marker,ready-label,devloop-ready"), 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(core.result_marker(current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.eq(ready_raise.payload.dedup_key, core.build_devloop_ready_payload({
+      proposal_id = current.proposal_id,
+      dedup_key = current.effect_version,
+      source_ref = current.source_ref,
+    }).dedup_key)
+  end,
+
   test_consensus_result_old_version_skips_when_newer_ready_marker_exists = function()
     local old = reached({
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",

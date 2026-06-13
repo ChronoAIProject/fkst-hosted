@@ -99,16 +99,30 @@ local function find_label_add(raises, label)
   return nil
 end
 
-local function assert_direct_enable_chain(raises, payload)
+local function default_intake_current(extra)
+  local fields = extra or {}
+  return {
+    title = fields.title or "Add retry backoff to failed widget sync",
+    body = fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries.",
+  }
+end
+
+local function expected_decision_key(payload, extra, reintake_command)
+  return core.intake_decision_dedup_key(payload.proposal_id, default_intake_current(extra), reintake_command)
+end
+
+local function assert_direct_enable_chain(raises, payload, extra, reintake_command)
+  local expected_dedup = expected_decision_key(payload, extra, reintake_command)
   local proposal = find_raise(raises, "consensus.proposal").payload
   t.eq(proposal.schema, "consensus.proposal.v1")
   t.eq(proposal.proposal_id, payload.proposal_id)
-  t.eq(proposal.dedup_key, payload.dedup_key)
+  t.eq(proposal.dedup_key, expected_dedup)
+  t.eq(proposal.effect_version, payload.dedup_key)
   t.eq(proposal.source_ref.ref, payload.source_ref.ref)
   t.eq(proposal.intake_hand_off.kind, "own-intake-decision")
   t.eq(proposal.intake_hand_off.proposal_id, payload.proposal_id)
   t.eq(proposal.intake_hand_off.decision, "enable")
-  t.eq(proposal.intake_hand_off.dedup_key, payload.dedup_key)
+  t.eq(proposal.intake_hand_off.dedup_key, expected_dedup)
   t.eq(proposal.intake_hand_off.source_ref.ref, payload.source_ref.ref)
   t.is_true(tostring(proposal.content_fetch or ""):find("^runtime%-cache:") ~= nil)
 
@@ -731,7 +745,10 @@ return {
     t.is_true(comment.body:find('decision="enable"', 1, true) ~= nil)
     t.is_true(comment.body:find("No stable recurring-class identity was found", 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:enabled")
-    assert_direct_enable_chain(result.raises, payload)
+    assert_direct_enable_chain(result.raises, payload, {
+      title = "Repair widget sync timeout residual",
+      body = "Another instance after #80 and #81, but the siblings have no stable recurrence label.",
+    })
     t.is_nil(find_comment_body(result.raises, "intake class follow-up: folded"))
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
@@ -750,7 +767,10 @@ return {
     t.eq(#result.raises, 5)
     t.is_true(find_comment_body(result.raises, 'decision="enable"').body:find('decision="enable"', 1, true) ~= nil)
     t.eq(find_label_add(result.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
-    assert_direct_enable_chain(result.raises, payload)
+    assert_direct_enable_chain(result.raises, payload, {
+      title = "Recurrence-aware widget sync policy",
+      body = "This issue cites #80 and #81 and proposes the class-level retry policy.",
+    })
     t.is_nil(find_raise(result.raises, "github-proxy.github_issue_create_request"))
   end,
 
@@ -782,7 +802,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:tracking" }, {
-      core.intake_decision_marker(payload.proposal_id, "track", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "track", expected_decision_key(payload)),
     })
 
     local result = run_judge(payload, opts("intake-track-idempotent"))
@@ -805,7 +825,10 @@ return {
     t.eq(#ambiguous.raises, 5)
     t.is_true(find_comment_body(ambiguous.raises, 'decision="enable"').body:find('decision="enable"', 1, true) ~= nil)
     t.eq(find_label_add(ambiguous.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
-    assert_direct_enable_chain(ambiguous.raises, payload)
+    assert_direct_enable_chain(ambiguous.raises, payload, {
+      title = "Make sync less flaky",
+      body = "The sync behavior is ambiguous and needs investigation to find the right code change.",
+    })
 
     mock_bot_env()
     mock_intake_judge_view({}, {}, {
@@ -838,7 +861,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "decline", payload.dedup_key),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload)),
     })
 
     local result = run_judge(payload, opts("intake-idempotent"))
@@ -851,7 +874,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:enabled" }, {
-      core.intake_decision_marker(payload.proposal_id, "enable", payload.dedup_key, "expedite"),
+      core.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
     })
     h.mock_context_bundle()
 
@@ -869,7 +892,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:thinking" }, {
-      core.intake_decision_marker(payload.proposal_id, "enable", payload.dedup_key, "expedite"),
+      core.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
       core.state_marker(payload.proposal_id, "thinking", payload.dedup_key),
     })
 
@@ -898,7 +921,7 @@ return {
     t.is_true(intake_comment ~= nil)
     t.is_true(command_comment.body:find('command="reintake"', 1, true) ~= nil)
     t.eq(find_label_add(result.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
-    assert_direct_enable_chain(result.raises, payload)
+    assert_direct_enable_chain(result.raises, payload, nil, command)
     t.eq(count_calls("codex exec"), 1)
   end,
 
