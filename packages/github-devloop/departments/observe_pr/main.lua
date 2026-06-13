@@ -268,6 +268,20 @@ local function direct_opened_matches_origin(pr, origin, current_pr)
     and tostring(pr.base_branch or "") == tostring(origin.base_branch or "")
 end
 
+local function liveness_timeout_state(state)
+  local row = core.restart_transition_row(state and state.state)
+  if row == nil or core.liveness_timeout_due(row, state, now()) ~= true then
+    return state
+  end
+  return {
+    state = state.state,
+    version = core.next_liveness_timeout_version(row, state),
+    proposal_id = state.proposal_id,
+    stage_rank = state.stage_rank,
+    marker_created_at = state.marker_created_at,
+  }
+end
+
 function pipeline(event)
   local pr = pr_context(event)
   local raw = event.payload or {}
@@ -325,9 +339,10 @@ function pipeline(event)
       return
     end
     if state.state ~= nil and state.state ~= "pr-open" then
+      local replay_state = pr.source == "poll" and raw.source == "liveness-scan" and liveness_timeout_state(state) or state
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
-      if raise_current_state(origin, pr.number, current_pr, state, source_ref) then
-        maybe_label_hints(origin, pr.number, current_pr, state, source_ref)
+      if raise_current_state(origin, pr.number, current_pr, replay_state, source_ref) then
+        maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref)
       end
       return
     end
