@@ -5,6 +5,7 @@ local M = {}
 M.spec = {
   consumes = { "devloop_intake_candidate" },
   produces = {
+    "consensus.proposal",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_create_request",
     "github-proxy.github_issue_label_request",
@@ -25,6 +26,27 @@ end
 
 local function tracks_umbrella(action)
   return action == "track"
+end
+
+local function build_direct_proposal(repo, issue_number, candidate, current, event_ts)
+  local issue = {
+    repo = repo,
+    number = issue_number,
+    title = current.title,
+    updated_at = current.updated_at,
+    source_ref = candidate.source_ref,
+    content_fetch = core.context_fetch_ref_from_bundle({
+      dept = "intake_judge",
+      repo = repo,
+      issue_number = issue_number,
+      proposal_id = candidate.proposal_id,
+      version = candidate.dedup_key,
+      tick = event_ts,
+    }),
+  }
+  local proposal = core.build_board_proposal(issue, event_ts)
+  proposal.dedup_key = candidate.dedup_key
+  return core.validate_proposal(proposal) and proposal or nil
 end
 
 local function has_devloop_state_label(labels)
@@ -187,6 +209,29 @@ function pipeline(event)
     local class_add, class_remove = core.intake_service_class_label_changes(parsed.service_class)
     local apply_add = { class_add[1] }
     local apply_remove = class_remove
+    local direct_proposal = nil
+    local thinking_comment_request = nil
+    local thinking_label_request = nil
+    if enables_pipeline(parsed.action) then
+      direct_proposal = build_direct_proposal(repo, issue_number, candidate, current, event.ts)
+      if direct_proposal == nil then
+        log.warn("github-devloop dept=intake_judge proposal_id=" .. tostring(candidate.proposal_id) .. " tag=SKIP reason=cannot-build-valid-direct-proposal")
+        return
+      end
+      thinking_comment_request = core.build_observe_comment_request({
+        repo = repo,
+        number = issue_number,
+        source_ref = candidate.source_ref,
+      }, direct_proposal)
+      thinking_label_request = core.build_thinking_label_request({
+        repo = repo,
+        number = issue_number,
+        source_ref = candidate.source_ref,
+      }, direct_proposal)
+      table.insert(raised, "consensus.proposal")
+      table.insert(raised, "github-proxy.github_issue_comment_request")
+      table.insert(raised, "github-proxy.github_issue_label_request")
+    end
     if enables_pipeline(parsed.action) then
       table.insert(apply_add, 1, core._enabled_label)
     elseif tracks_umbrella(parsed.action) then
@@ -220,6 +265,9 @@ function pipeline(event)
     if enables_pipeline(parsed.action) then
       local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", thinking_comment_request)
+      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", thinking_label_request)
+      core.log_raise("intake_judge", candidate.proposal_id, "consensus.proposal", direct_proposal)
     elseif tracks_umbrella(parsed.action) then
       local label_request = core.build_intake_tracking_label_request(repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
