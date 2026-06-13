@@ -132,11 +132,13 @@ usage() {
 }
 
 cmd_check() {
-  python3 -B "$ROOT/scripts/check_repo.py"
-  python3 -B "$ROOT/scripts/check_repo_test.py"
-  python3 -B "$ROOT/scripts/bin_cache_test.py"
-  python3 -B "$ROOT/scripts/bin_bootstrap_test.py"
-  python3 -B "$ROOT/scripts/doctor_test.py"
+  local fail=0
+  python3 -B "$ROOT/scripts/check_repo.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
+  python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
+  python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
+  python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
+  return "$fail"
 }
 
 check_test_file_coverage() {
