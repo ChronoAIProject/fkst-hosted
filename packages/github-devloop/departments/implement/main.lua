@@ -138,6 +138,12 @@ local function ready_for_implementation_version(ready, version)
 end
 
 local function raise_work_card(repo, issue_number, ready, card)
+  local run_id = core.work_card_run_id({
+    "implement",
+    tostring(ready.dedup_key),
+    "attempt",
+    tostring(card.attempt or 1),
+  })
   local request = core.build_work_card_comment_request({
     kind = "issue",
     repo = repo,
@@ -145,6 +151,7 @@ local function raise_work_card(repo, issue_number, ready, card)
   }, {
     proposal_id = ready.proposal_id,
     role = "implement",
+    run_id = run_id,
     version = ready.dedup_key,
     started_at = card.started_at,
     finished_at = card.finished_at,
@@ -299,6 +306,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   raise_work_card(repo, issue_number, ready, {
     started_at = codex_started_at,
     base_sha = base_head,
+    attempt = attempt,
   })
   core.log_codex_start("implement", ready.proposal_id, "implement")
   local content_fetch = core.context_fetch_from_bundle({
@@ -326,6 +334,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       finished_at = now(),
       outcome = "failed: codex-failed",
       base_sha = base_head,
+      attempt = attempt,
     })
     raise_impl_failed(repo, issue_number, ready, "codex-failed", stderr, attempt)
     return
@@ -350,6 +359,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
         finished_at = now(),
         outcome = "completed",
         base_sha = base_head,
+        attempt = attempt,
       })
       raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, branches.integration, base_head, attempt, codex_started_at)
       return
@@ -369,6 +379,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       finished_at = now(),
       outcome = "failed: no-changes",
       base_sha = base_head,
+      attempt = attempt,
     })
     raise_impl_failed(repo, issue_number, ready, "no-changes", detail, attempt)
     return
@@ -416,6 +427,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     finished_at = now(),
     outcome = "completed",
     base_sha = base_head,
+    attempt = attempt,
   })
   raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, branches.integration, base_head, attempt, codex_started_at)
 end

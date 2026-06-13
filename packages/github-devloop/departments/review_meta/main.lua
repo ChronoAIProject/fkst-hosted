@@ -21,6 +21,7 @@ local function raise_work_card(repo, review_meta, card)
   }, {
     proposal_id = review_meta.proposal_id,
     role = "review-meta",
+    run_id = core.work_card_run_id({ "review-meta", review_meta.dedup_key }),
     version = review_meta.version,
     round = core.version_fix_round(review_meta.version),
     started_at = card.started_at,
