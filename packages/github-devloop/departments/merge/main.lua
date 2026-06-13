@@ -1,4 +1,5 @@
 local core = require("core")
+local runtime = require("departments.merge.runtime")
 
 local M = {}
 
@@ -14,29 +15,6 @@ M.spec = {
   fanout = { "devloop_merge_queue_tick" },
   stall_window = "2m",
 }
-
-local MAX_RUNTIME_ID_LEN = 180
-
-local function safe_segment(value)
-  local safe = tostring(value or ""):gsub("[^%w._-]", "_")
-  safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
-  if safe == "" then
-    return "empty"
-  end
-  return safe
-end
-
-local function runtime_identity(repo, issue_number)
-  local id = "merge-" .. safe_segment(repo) .. "-issue-" .. safe_segment(issue_number)
-  if #id > MAX_RUNTIME_ID_LEN then
-    return id:sub(1, MAX_RUNTIME_ID_LEN)
-  end
-  return id
-end
-
-local function temp_body_file(repo, issue_number)
-  return "/tmp/fkst-github-devloop-" .. runtime_identity(repo, issue_number) .. ".md"
-end
 
 local function log_gate(merge_ready, outcome, reason)
   local pass = merge_ready and merge_ready._merge_pass
@@ -279,7 +257,7 @@ local function write_merging_marker(repo, merge_ready, comments)
   if core.merging_fact(comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) ~= nil then
     return
   end
-  local path = temp_body_file(repo, merge_ready.pr_number)
+  local path = runtime.temp_body_file(repo, merge_ready.pr_number)
   file.write(path, build_merging_body(merge_ready))
   local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, merge_ready.pr_number, path), timeout = 30 })
   if result.exit_code ~= 0 then
