@@ -781,16 +781,24 @@ local function mock_issue_title_labels_comments(labels, comments, extra, default
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  t.mock_command("--json title,labels,comments", {
-    stdout = string.format(
+  local stdout = string.format(
       '{"title":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Implement decision recorder"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ",")
-    ),
+    )
+  t.mock_command("--json title,labels,comments", {
+    stdout = stdout,
     stderr = "",
     exit_code = 0,
   })
+  if include_default_marker and has_value(selected_labels, "fkst-dev:ready") then
+    t.mock_command("--json title,labels,comments", {
+      stdout = stdout,
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   mock_issue_commit_subject_title(fields)
 end
 

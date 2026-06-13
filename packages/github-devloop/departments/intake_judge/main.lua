@@ -118,6 +118,105 @@ local function judgment_worktree(role, identity)
   return worktree
 end
 
+local function copy_table(value)
+  local result = {}
+  for key, field in pairs(value or {}) do
+    result[key] = field
+  end
+  return result
+end
+
+local function read_current_for_candidate(repo, issue_number, candidate, event_ts, expected_decision_dedup_key)
+  local view = core.gh_exec({ cmd = core.gh_issue_view_intake_judge_cmd(repo, issue_number), timeout = 30 })
+  if view.exit_code ~= 0 then
+    error("github-devloop: gh issue intake judge view failed: " .. tostring(view.stderr))
+  end
+
+  local current = core.parse_issue_view_intake_judge(view.stdout)
+  core.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
+  if current.state ~= "OPEN" then
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
+    return nil
+  end
+  if not core.claim_issue_for_management("intake_judge", repo, issue_number, current, candidate.proposal_id) then
+    return nil
+  end
+
+  local reintake_command = core.operator_command_fact(current.comments, "reintake")
+  local has_pending_reintake = reintake_command ~= nil and not core.has_operator_command_response(current.comments, reintake_command)
+  if has_pending_reintake and not core.has_intake_decision_marker(current.comments, candidate.proposal_id) then
+    local refusal = core.build_operator_issue_command_refusal_request(
+      repo,
+      issue_number,
+      reintake_command,
+      "reintake requires an existing intake decision",
+      candidate.source_ref
+    )
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-no-intake-decision)", "operator reintake requires an existing intake decision")
+    core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
+    return nil
+  end
+  if has_pending_reintake and (core.is_opted_in(current.labels) or has_devloop_state_label(current.labels)) then
+    local refusal = core.build_operator_issue_command_refusal_request(
+      repo,
+      issue_number,
+      reintake_command,
+      "reintake requires no active devloop state",
+      candidate.source_ref
+    )
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-active-state)", "operator reintake requires no active devloop state")
+    core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
+    return nil
+  end
+  if has_pending_reintake then
+    local expected = core.build_devloop_intake_candidate_payload(repo, issue_number, reintake_command.created_at)
+    if tostring(candidate.dedup_key or "") ~= tostring(expected.dedup_key or "") then
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command timestamp")
+      return nil
+    end
+  end
+
+  local decision_dedup_key = core.intake_decision_dedup_key(candidate.proposal_id, current, has_pending_reintake and reintake_command or nil)
+  if expected_decision_dedup_key ~= nil and tostring(decision_dedup_key or "") ~= tostring(expected_decision_dedup_key or "") then
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-stale(decision-dedup-changed)", "issue intake inputs changed while codex was running")
+    return nil
+  end
+
+  local intake_fact = core.intake_decision_fact(current.comments, candidate.proposal_id)
+  local authoritative_state = core.current_state(current.comments, candidate.proposal_id)
+  local can_replay_enable_successor = intake_fact ~= nil
+    and intake_fact.decision == "enable"
+    and tostring(intake_fact.dedup_key or "") == tostring(decision_dedup_key or "")
+    and authoritative_state.state == nil
+    and not has_pending_reintake
+  if core.is_opted_in(current.labels) and not can_replay_enable_successor then
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
+    return nil
+  end
+  if intake_fact ~= nil and not has_pending_reintake then
+    if can_replay_enable_successor then
+      local replay_candidate = copy_table(candidate)
+      replay_candidate.service_class = intake_fact.service_class
+      raise_enable_successor("intake_judge", repo, issue_number, replay_candidate, current, event_ts, intake_fact.dedup_key, {
+        log_apply = true,
+        reason = "visible-intake-fact",
+      })
+      return nil
+    end
+    if tostring(intake_fact.dedup_key or "") == tostring(decision_dedup_key or "") then
+      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-idempotent(intake marker already visible)", "trusted intake decision marker exists")
+      return nil
+    end
+  end
+
+  return {
+    current = current,
+    decision_dedup_key = decision_dedup_key,
+    reintake_command = reintake_command,
+    has_pending_reintake = has_pending_reintake,
+  }
+end
+
 function pipeline(event)
   local candidate = event.payload or {}
   if not core.is_supported_intake_candidate(candidate) then
@@ -133,121 +232,61 @@ function pipeline(event)
     return
   end
 
-  with_lock(core.observe_lock_key(repo, issue_number), function()
+  local lock_key = core.observe_lock_key(repo, issue_number)
+  local gate = nil
+  with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
+    gate = read_current_for_candidate(repo, issue_number, candidate, event.ts)
+  end)
+  if gate == nil then
+    return
+  end
 
-    local view = core.gh_exec({ cmd = core.gh_issue_view_intake_judge_cmd(repo, issue_number), timeout = 30 })
-    if view.exit_code ~= 0 then
-      error("github-devloop: gh issue intake judge view failed: " .. tostring(view.stderr))
-    end
-
-    local current = core.parse_issue_view_intake_judge(view.stdout)
-    core.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
-    if current.state ~= "OPEN" then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
-      return
-    end
-    if not core.claim_issue_for_management("intake_judge", repo, issue_number, current, candidate.proposal_id) then
-      return
-    end
-    local reintake_command = core.operator_command_fact(current.comments, "reintake")
-    local has_pending_reintake = reintake_command ~= nil and not core.has_operator_command_response(current.comments, reintake_command)
-    if has_pending_reintake and not core.has_intake_decision_marker(current.comments, candidate.proposal_id) then
-      local refusal = core.build_operator_issue_command_refusal_request(
-        repo,
-        issue_number,
-        reintake_command,
-        "reintake requires an existing intake decision",
-        candidate.source_ref
-      )
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-no-intake-decision)", "operator reintake requires an existing intake decision")
-      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
-      return
-    end
-    if has_pending_reintake and (core.is_opted_in(current.labels) or has_devloop_state_label(current.labels)) then
-      local refusal = core.build_operator_issue_command_refusal_request(
-        repo,
-        issue_number,
-        reintake_command,
-        "reintake requires no active devloop state",
-        candidate.source_ref
-      )
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-active-state)", "operator reintake requires no active devloop state")
-      core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
-      return
-    end
-    if has_pending_reintake then
-      local expected = core.build_devloop_intake_candidate_payload(repo, issue_number, reintake_command.created_at)
-      if tostring(candidate.dedup_key or "") ~= tostring(expected.dedup_key or "") then
-        core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command timestamp")
-        return
-      end
-    end
-    local decision_dedup_key = core.intake_decision_dedup_key(candidate.proposal_id, current, has_pending_reintake and reintake_command or nil)
-    local intake_fact = core.intake_decision_fact(current.comments, candidate.proposal_id)
-    local authoritative_state = core.current_state(current.comments, candidate.proposal_id)
-    local can_replay_enable_successor = intake_fact ~= nil
-      and intake_fact.decision == "enable"
-      and tostring(intake_fact.dedup_key or "") == tostring(decision_dedup_key or "")
-      and authoritative_state.state == nil
-      and not has_pending_reintake
-    if core.is_opted_in(current.labels) and not can_replay_enable_successor then
-      core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
-      return
-    end
-    if intake_fact ~= nil and not has_pending_reintake then
-      if can_replay_enable_successor then
-        candidate.service_class = intake_fact.service_class
-        raise_enable_successor("intake_judge", repo, issue_number, candidate, current, event.ts, intake_fact.dedup_key, {
-          log_apply = true,
-          reason = "visible-intake-fact",
-        })
-        return
-      end
-      if tostring(intake_fact.dedup_key or "") == tostring(decision_dedup_key or "") then
-        core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-idempotent(intake marker already visible)", "trusted intake decision marker exists")
-        return
-      end
-    end
-
-    core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
-    local content_fetch = core.context_fetch_from_bundle({
-      dept = "intake_judge",
-      repo = repo,
-      issue_number = issue_number,
-      proposal_id = candidate.proposal_id,
-      version = candidate.dedup_key,
-      tick = event.ts,
+  core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
+  local content_fetch = core.context_fetch_from_bundle({
+    dept = "intake_judge",
+    repo = repo,
+    issue_number = issue_number,
+    proposal_id = candidate.proposal_id,
+    version = candidate.dedup_key,
+    tick = event.ts,
+  })
+  local result = spawn_codex_sync(core.judgment_codex_opts(
+    core.build_intake_prompt(candidate.proposal_id, gate.current, content_fetch),
+    judgment_worktree("intake", candidate.dedup_key)
+  ))
+  if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
+    local stderr = type(result) == "table" and result.stderr or "nil result"
+    core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr, {
+      queue = event.queue,
+      source_ref = candidate.source_ref,
+      terminal = false,
     })
-    local result = spawn_codex_sync(core.judgment_codex_opts(
-      core.build_intake_prompt(candidate.proposal_id, current, content_fetch),
-      judgment_worktree("intake", candidate.dedup_key)
-    ))
-    if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
-      local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr, {
-        queue = event.queue,
-        source_ref = candidate.source_ref,
-        terminal = false,
-      })
-      error("github-devloop: intake codex failed: " .. tostring(stderr))
-    end
+    error("github-devloop: intake codex failed: " .. tostring(stderr))
+  end
 
-    local parsed = core.parse_intake_action(result.stdout)
-    if parsed == nil then
-      parsed = decline_result()
-      parsed.service_class = core.normalize_intake_service_class(nil)
-      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
-    else
-      parsed.service_class = core.normalize_intake_service_class(parsed.service_class)
-      core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " class=" .. tostring(parsed.service_class) .. " reason=" .. tostring(parsed.reason), nil)
+  local parsed = core.parse_intake_action(result.stdout)
+  if parsed == nil then
+    parsed = decline_result()
+    parsed.service_class = core.normalize_intake_service_class(nil)
+    core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
+  else
+    parsed.service_class = core.normalize_intake_service_class(parsed.service_class)
+    core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " class=" .. tostring(parsed.service_class) .. " reason=" .. tostring(parsed.reason), nil)
+  end
+
+  with_lock(lock_key, function()
+    local current_gate = read_current_for_candidate(repo, issue_number, candidate, event.ts, gate.decision_dedup_key)
+    if current_gate == nil then
+      return
     end
+    local current = current_gate.current
+    local decision_dedup_key = current_gate.decision_dedup_key
+    local reintake_command = current_gate.reintake_command
+    local has_pending_reintake = current_gate.has_pending_reintake
 
     candidate.service_class = parsed.service_class
-    local decision_candidate = {}
-    for key, value in pairs(candidate) do
-      decision_candidate[key] = value
-    end
+    local decision_candidate = copy_table(candidate)
     decision_candidate.dedup_key = decision_dedup_key
     local command_comment_request = has_pending_reintake
       and core.build_operator_issue_reintake_comment_request(repo, issue_number, reintake_command, candidate, candidate.source_ref)

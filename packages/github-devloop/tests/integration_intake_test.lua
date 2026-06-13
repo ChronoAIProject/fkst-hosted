@@ -183,8 +183,7 @@ end
 local function mock_intake_judge_view(labels, comments, extra)
   local fields = extra or {}
   local assignees_json = fields.assignees_json or '{"login":"fkst-test-bot"}'
-  t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
-    stdout = string.format(
+  local assignee_stdout = string.format(
       '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
       json_string(fields.title or "Add retry backoff to failed widget sync"),
       json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
@@ -193,7 +192,14 @@ local function mock_intake_judge_view(labels, comments, extra)
       labels_json(labels or {}),
       comments_json(comments or {}),
       assignees_json
-    ),
+    )
+  t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
+    stdout = assignee_stdout,
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees", {
+    stdout = assignee_stdout,
     stderr = "",
     exit_code = 0,
   })

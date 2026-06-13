@@ -130,7 +130,7 @@ return {
     end
     t.eq(saw_worktree_prefix, true)
     t.eq(saw_prompt, true)
-    t.eq(count_calls("--json title,labels,comments"), 1)
+    t.eq(count_calls("--json title,labels,comments"), 2)
     t.eq(count_calls("git -C"), 8)
     t.eq(count_calls("git worktree add -b"), 1)
     t.eq(count_calls("codex exec"), 1)
