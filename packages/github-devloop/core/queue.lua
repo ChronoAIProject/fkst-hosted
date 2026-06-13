@@ -186,6 +186,39 @@ function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)
   return true, "merge-queue-head"
 end
 
+function M.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry)
+  if type(next_entry) ~= "table" then
+    error("github-devloop: invalid merge queue next entry")
+  end
+  return M._dedup_key({
+    "merge-queue",
+    "requeue",
+    M.safe_repo(repo),
+    "merged-pr",
+    M.safe_issue(merged_pr_number),
+    "next-pr",
+    M.safe_issue(next_entry.pr_number),
+    M.safe_head_segment(next_entry.head_sha),
+  })
+end
+
+function M.merge_queue_tick_payload(repo, merged_pr_number, next_entry)
+  if type(next_entry) ~= "table" then
+    return nil
+  end
+  return {
+    schema = "github-devloop.merge-queue-tick.v1",
+    dedup_key = M.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry),
+    source_ref = M.pr_source_ref(repo, next_entry.pr_number),
+    cause = {
+      kind = "merge-progress",
+      merged_pr_number = tonumber(merged_pr_number),
+      next_pr_number = tonumber(next_entry.pr_number),
+      next_head_sha = tostring(next_entry.head_sha or ""),
+    },
+  }
+end
+
 function M.merge_ready_payload_from_queue_entry(entry, source_ref)
   if type(entry) ~= "table" then
     return nil
