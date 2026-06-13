@@ -97,8 +97,7 @@ local function guarded_pr_label_view(repo, pr_number, payload)
   local current = core.parse_entity_label_view(view.stdout)
   local state = core.current_devloop_state(current.comments, tostring(payload.expected_proposal_id), bot_login)
   if state.state == nil then
-    log_skip(payload, repo, {}, {}, "pr-state-marker-not-visible")
-    return nil
+    error("github-proxy: PR state marker not yet visible for label guard")
   end
   if tostring(state.state or "") ~= tostring(payload.expected_state)
     or tostring(state.version or "") ~= tostring(payload.expected_version) then
