@@ -222,7 +222,7 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
     return false, "trusted review-result approve missing", state
   end
 
-  local fact = core.merge_ready_fact(pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number)
+  local fact = core.merge_ready_fact(pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number, merge_ready.reviewed_head_sha)
   local approval_ok, approval_reason = core.merge_ready_approval_matches_event(fact, merge_ready)
   if not approval_ok then
     return false, "merge-ready fact changed: " .. tostring(approval_reason), state
@@ -398,7 +398,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(version-mismatch)", "merge-ready event version does not match canonical issue marker")
     return
   end
-  local fact = core.merge_ready_fact(current_pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number)
+  local fact = core.merge_ready_fact(current_pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number, merge_ready.reviewed_head_sha)
   if fact == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "retry-pending(merge-ready fact marker not visible)", "trusted merge-ready fact marker missing")
     error("github-devloop: merge-ready fact marker not visible for merge; retrying")
@@ -444,6 +444,10 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       return
     end
     if pr_reason == "head-sha-mismatch" and state.state == "merge-ready" then
+      local carried = core.raise_review_carry_over("merge", repo, merge_ready.pr_number, merge_ready.proposal_id, merge_ready.version, state, current_pr, origin.base_branch)
+      if carried ~= nil then
+        return
+      end
       log_gate(merge_ready, "reviewing", "head-sha-mismatch")
       raise_reviewing_for_current_head(repo, issue_number, merge_ready, state, current_pr, "head-sha-mismatch")
       return

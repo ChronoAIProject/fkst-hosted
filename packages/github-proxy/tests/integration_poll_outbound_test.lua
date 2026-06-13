@@ -6,6 +6,7 @@ local pr_list_json = h.pr_list_json
 local runtime_root = h.runtime_root
 local opts = h.opts
 local mock_repo_env = h.mock_repo_env
+local mock_replay_budget_env = h.mock_replay_budget_env
 local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local mock_issue_list = h.mock_issue_list
@@ -58,6 +59,38 @@ local function pr_list_many_json(count, target_number, target_updated_at)
   end
   table.insert(parts, pr_json(target_number, target_updated_at, "OPEN"))
   return "[[" .. table.concat(parts, ",") .. "]]\n"
+end
+
+local function issue_json(number, updated_at)
+  return string.format(
+    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","labels":[{"name":"fkst-dev:enabled"}]}',
+    number, number, number, updated_at
+  )
+end
+
+local function issue_list_from(items)
+  return "[[" .. table.concat(items, ",") .. "]]\n"
+end
+
+local function pr_list_from(items)
+  return "[[" .. table.concat(items, ",") .. "]]\n"
+end
+
+local function numbers(raises)
+  local result = {}
+  for _, raised in ipairs(raises or {}) do
+    table.insert(result, raised.payload.number)
+  end
+  return table.concat(result, ",")
+end
+
+local function find_entity_raise(raises, entity_type, number)
+  for _, raised in ipairs(raises or {}) do
+    if raised.payload.type == entity_type and tonumber(raised.payload.number) == tonumber(number) then
+      return raised
+    end
+  end
+  return nil
 end
 
 return {
@@ -151,22 +184,206 @@ return {
     local event = { queue = "github_poll_tick", payload = {} }
 
     mock_repo_env()
+    mock_replay_budget_env("100")
     mock_issue_list("[]\n")
     mock_pr_list(pr_list_many_json(35, 12, "2026-06-02T00:00:00Z"))
-    local result = t.run_department("departments/github_poll/main.lua", event, opts("open-pr-coverage"))
+    local result = t.run_department("departments/github_poll/main.lua", event, opts("open-pr-coverage", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "100",
+    }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 36)
-    t.eq(result.raises[36].queue, "github_entity_changed")
-    t.eq(result.raises[36].payload.type, "pr")
-    t.eq(result.raises[36].payload.number, 12)
-    t.eq(result.raises[36].payload.updated_at, "2026-06-02T00:00:00Z")
-    t.eq(result.raises[36].payload.dedup_key, "owner/x#pr#12@2026-06-02T00:00:00Z")
+    local target = find_entity_raise(result.raises, "pr", 12)
+    t.is_true(target ~= nil)
+    t.eq(target.queue, "github_entity_changed")
+    t.eq(target.payload.updated_at, "2026-06-02T00:00:00Z")
+    t.eq(target.payload.dedup_key, "owner/x#pr#12@2026-06-02T00:00:00Z")
     t.eq(core.gh_pr_list_cmd("owner/x"), "gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'")
     t.is_true(core.gh_pr_list_cmd("owner/x"):find("state=open", 1, true) ~= nil)
     t.is_true(core.gh_pr_list_cmd("owner/x"):find("per_page=100", 1, true) ~= nil)
     t.eq(core.gh_pr_list_cmd("owner/x"):find("--state all", 1, true), nil)
     t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
     t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 1)
+  end,
+
+  test_inbound_poll_paces_cold_replay_and_continues_next_cycle = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("replay-budget", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+    })
+    local issues = issue_list_from({
+      issue_json(44, "2026-06-03T01:04:00Z"),
+      issue_json(42, "2026-06-03T01:02:00Z"),
+      issue_json(43, "2026-06-03T01:03:00Z"),
+    })
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list("[]\n")
+    local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 2)
+    t.eq(numbers(first.raises), "42,43")
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list("[]\n")
+    local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 1)
+    t.eq(second.raises[1].payload.number, 44)
+  end,
+
+  test_inbound_poll_replay_budget_is_shared_across_issue_and_pr_lanes = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("shared-replay-budget", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+    })
+    local issues = issue_list_from({
+      issue_json(42, "2026-06-03T01:02:00Z"),
+      issue_json(44, "2026-06-03T01:04:00Z"),
+    })
+    local prs = pr_list_from({
+      pr_json(7, "2026-06-03T01:03:00Z"),
+      pr_json(8, "2026-06-03T01:05:00Z"),
+    })
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 2)
+    t.eq(first.raises[1].payload.type, "issue")
+    t.eq(first.raises[1].payload.number, 42)
+    t.eq(first.raises[2].payload.type, "pr")
+    t.eq(first.raises[2].payload.number, 7)
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 2)
+    t.eq(second.raises[1].payload.type, "issue")
+    t.eq(second.raises[1].payload.number, 44)
+    t.eq(second.raises[2].payload.type, "pr")
+    t.eq(second.raises[2].payload.number, 8)
+  end,
+
+  test_inbound_poll_replay_budget_tie_breaks_shared_lanes_deterministically = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("shared-replay-budget-tie", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+    })
+    local timestamp = "2026-06-03T01:02:00Z"
+    local issues = issue_list_from({
+      issue_json(42, timestamp),
+      issue_json(44, timestamp),
+    })
+    local prs = pr_list_from({
+      pr_json(42, timestamp),
+      pr_json(43, timestamp),
+    })
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 2)
+    t.eq(first.raises[1].payload.type, "issue")
+    t.eq(first.raises[1].payload.number, 42)
+    t.eq(first.raises[2].payload.type, "pr")
+    t.eq(first.raises[2].payload.number, 42)
+
+    mock_repo_env()
+    mock_replay_budget_env("2")
+    mock_issue_list(issues)
+    mock_pr_list(prs)
+    local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 2)
+    t.eq(second.raises[1].payload.type, "pr")
+    t.eq(second.raises[1].payload.number, 43)
+    t.eq(second.raises[2].payload.type, "issue")
+    t.eq(second.raises[2].payload.number, 44)
+  end,
+
+  test_inbound_poll_defaults_cold_replay_budget_to_ten = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local items = {}
+    for number = 1, 11 do
+      table.insert(items, issue_json(number, string.format("2026-06-03T01:%02d:00Z", number)))
+    end
+
+    mock_repo_env()
+    mock_replay_budget_env("")
+    mock_issue_list(issue_list_from(items))
+    mock_pr_list("[]\n")
+    local result = t.run_department("departments/github_poll/main.lua", event, opts("default-replay-budget"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 10)
+    t.eq(result.raises[1].payload.number, 1)
+    t.eq(result.raises[10].payload.number, 10)
+  end,
+
+  test_inbound_poll_prioritizes_cached_fresh_changes_over_replay_budget = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("fresh-before-replay", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "1",
+    })
+
+    mock_repo_env()
+    mock_replay_budget_env("1")
+    mock_issue_list(issue_list_from({
+      issue_json(42, "2026-06-03T01:02:00Z"),
+    }))
+    mock_pr_list("[]\n")
+    local seeded = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(seeded.exit_code, 0)
+    t.eq(#seeded.raises, 1)
+
+    mock_repo_env()
+    mock_replay_budget_env("1")
+    mock_issue_list(issue_list_from({
+      issue_json(43, "2026-06-03T01:03:00Z"),
+      issue_json(42, "2026-06-03T01:05:00Z"),
+      issue_json(44, "2026-06-03T01:04:00Z"),
+    }))
+    mock_pr_list("[]\n")
+    local changed = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(changed.exit_code, 0)
+    t.eq(#changed.raises, 2)
+    t.eq(numbers(changed.raises), "42,43")
+  end,
+
+  test_inbound_poll_prioritizes_cold_intake_candidates_over_replay_budget = function()
+    local event = { queue = "github_poll_tick", payload = {} }
+    local run_opts = opts("cold-intake-before-replay", { FKST_DEVLOOP_REPLAY_BUDGET = "1" })
+    mock_repo_env() mock_replay_budget_env("1")
+    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}]}'
+    mock_issue_list(issue_list_from({ issue_json(42, "2026-06-03T01:02:00Z"), issue_json(43, "2026-06-03T01:03:00Z"), intake }))
+    mock_pr_list("[]\n")
+    local result = t.run_department("departments/github_poll/main.lua", event, run_opts)
+    t.eq(result.exit_code, 0) t.eq(#result.raises, 2)
+    t.eq(numbers(result.raises), "50,42")
+  end,
+
+  test_inbound_poll_rejects_invalid_replay_budget = function()
+    mock_repo_env()
+    mock_replay_budget_env("0")
+    mock_issue_list()
+    mock_pr_list()
+
+    local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, opts("invalid-replay-budget", {
+      FKST_DEVLOOP_REPLAY_BUDGET = "0",
+    }))
+    t.eq(result.exit_code, 1)
   end,
 
   test_inbound_poll_continues_when_issue_list_fails = function()

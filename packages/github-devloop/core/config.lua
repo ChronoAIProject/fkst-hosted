@@ -8,6 +8,7 @@ local allowed_env = {
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
   FKST_DEVLOOP_INTEGRATION_BRANCH = true,
   FKST_DEVLOOP_MAX_INFLIGHT = true,
+  FKST_DEVLOOP_MANAGED_SIBLING_REPOS = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
   FKST_DEVLOOP_CONFLICT_LOG_CMD = true,
   FKST_DEVLOOP_TEST_COMMAND = true,
@@ -80,6 +81,21 @@ function M.max_inflight(exec)
     error("github-devloop: invalid FKST_DEVLOOP_MAX_INFLIGHT")
   end
   return parsed
+end
+
+function M.managed_sibling_repos(exec)
+  local raw = M.read_env("FKST_DEVLOOP_MANAGED_SIBLING_REPOS", exec)
+  local repos = {}
+  if raw == nil then
+    return repos
+  end
+  for entry in tostring(raw):gmatch("[^,%s]+") do
+    local repo = tostring(entry)
+    if M.issue_ref_round_trips(repo, 1) then
+      repos[repo] = true
+    end
+  end
+  return repos
 end
 
 function M.max_fix_rounds()
