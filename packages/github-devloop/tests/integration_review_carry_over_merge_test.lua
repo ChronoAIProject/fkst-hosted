@@ -112,4 +112,42 @@ return {
     t.eq(count_calls("git merge-tree --write-tree"), 1)
     t.eq(count_calls("gh pr merge"), 0)
   end,
+
+  test_merge_carried_approval_ci_red_stays_in_fixing_without_rereview = function()
+    local event = merge_ready()
+    local new_head = "feedface"
+    mock_bot_env()
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge({ origin_marker(event) }, "devloop-owner-repo-42-01HY", new_head)
+    mock_base_fetch("ba5e1234")
+    mock_resolution_delta(0)
+
+    local carry_result = run_merge(event, opts("merge-carry-over-before-ci-red", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(carry_result.exit_code, 0)
+    local carried = find_raise(carry_result.raises, "devloop_merge_ready", function(payload)
+      return payload.reviewed_head_sha == new_head
+    end)
+    t.eq(carried.payload.reviewed_head_sha, new_head)
+
+    local carried_comments = merge_comments(event)
+    local carry_body = find_raise(carry_result.raises, "github-proxy.github_pr_comment_request").payload.body
+    table.insert(carried_comments, carry_body)
+
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, carried_comments)
+    mock_pr_merge(carried_comments, "devloop-owner-repo-42-01HY", new_head, "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+
+    local ci_red = run_merge(carried.payload, opts("merge-carry-over-ci-red", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(ci_red.exit_code, 0)
+    t.eq(find_raise(ci_red.raises, "devloop_reviewing"), nil)
+    t.eq(find_raise(ci_red.raises, "devloop_merge_ready"), nil)
+    t.eq(find_raise(ci_red.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+    t.eq(find_raise(ci_red.raises, "devloop_fixing").payload.reviewed_head_sha, new_head)
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
 }

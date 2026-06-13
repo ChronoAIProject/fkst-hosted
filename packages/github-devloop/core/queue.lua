@@ -97,7 +97,8 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
   if not merge_queue_lane_states[state.state] then
     return nil
   end
-  local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number)
+  local current_head_sha = tostring(pr.head_sha or "")
+  local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number, current_head_sha)
   if fact == nil then
     for _, comment in ipairs(M._trusted_marker_comments(pr.comments)) do
       for marker in M._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
@@ -107,7 +108,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
           local merge_ready_version = merge_ready_version_for_lane_state(M, candidate_state)
           if merge_queue_lane_states[candidate_state.state]
             and tostring(merge_ready_version or "") == tostring(marker:match('version="([^"]*)"') or "") then
-            fact = M.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number)
+            fact = M.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number, current_head_sha)
             state = candidate_state
             break
           end
