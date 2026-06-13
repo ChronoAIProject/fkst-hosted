@@ -47,11 +47,7 @@ local function raise_converge(proposal, angle_results, narrowed_question)
   )
 end
 
-local function decide_locked(proposal)
-  local cache_key = core.reached_cache_key(proposal.dedup_key)
-  if cache_get(cache_key) then
-    return
-  end
+local function decide(proposal)
   local runtime_root = read_runtime_root()
 
   local angle_results = {}
@@ -81,9 +77,11 @@ local function decide_locked(proposal)
 
   local decision = core.aggregate(angle_results, verdict_mode)
   if decision ~= nil then
-    raise("consensus_reached", core.build_reached_payload(proposal, decision, angle_results))
-    cache_set(cache_key, proposal.dedup_key)
-    return
+    return {
+      queue = "consensus_reached",
+      payload = core.build_reached_payload(proposal, decision, angle_results),
+      cache = true,
+    }
   end
 
   local meta_result = spawn_meta_judge(proposal, angle_results, runtime_root)
@@ -92,21 +90,30 @@ local function decide_locked(proposal)
     parsed = core.parse_meta_judge_output(meta_result.stdout, verdict_mode)
   end
   if parsed ~= nil and parsed.kind == "reached" then
-    raise("consensus_reached", core.build_reached_payload(
-      proposal,
-      parsed.decision,
-      angle_results,
-      parsed.framing
-    ))
-    cache_set(cache_key, proposal.dedup_key)
-    return
+    return {
+      queue = "consensus_reached",
+      payload = core.build_reached_payload(
+        proposal,
+        parsed.decision,
+        angle_results,
+        parsed.framing
+      ),
+      cache = true,
+    }
   end
   if parsed ~= nil and (parsed.kind == "converge" or parsed.kind == "plan") then
-    raise_converge(proposal, angle_results, parsed.narrowed_question)
-    return
+    return {
+      queue = "consensus_converge",
+      angle_results = angle_results,
+      narrowed_question = parsed.narrowed_question,
+    }
   end
 
-  raise_converge(proposal, angle_results, core.default_narrowed_question(proposal, angle_results))
+  return {
+    queue = "consensus_converge",
+    angle_results = angle_results,
+    narrowed_question = core.default_narrowed_question(proposal, angle_results),
+  }
 end
 
 function pipeline(event)
@@ -120,12 +127,17 @@ function pipeline(event)
   end
 
   local cache_key = core.reached_cache_key(proposal.dedup_key)
+  local already_reached = false
   with_lock(cache_key, function()
-    local ok, err = pcall(decide_locked, proposal)
-    if ok then
-      return
-    end
-    if core.is_stale_generation_context_error(err) then
+    already_reached = cache_get(cache_key) ~= nil
+  end)
+  if already_reached then
+    return
+  end
+
+  local ok, result = pcall(decide, proposal)
+  if not ok then
+    if core.is_stale_generation_context_error(result) then
       log.warn(
         "consensus dept=decide tag=STALE_GENERATION_CONTEXT"
           .. " proposal_id=" .. tostring(proposal.proposal_id)
@@ -134,7 +146,25 @@ function pipeline(event)
       )
       return
     end
-    error(err)
+    error(result)
+  end
+
+  with_lock(cache_key, function()
+    if cache_get(cache_key) then
+      return
+    end
+    if result.queue == "consensus_reached" then
+      raise("consensus_reached", result.payload)
+      if result.cache then
+        cache_set(cache_key, proposal.dedup_key)
+      end
+      return
+    end
+    if result.queue == "consensus_converge" then
+      raise_converge(proposal, result.angle_results, result.narrowed_question)
+      return
+    end
+    error("consensus: unknown decision result")
   end)
 end
 
