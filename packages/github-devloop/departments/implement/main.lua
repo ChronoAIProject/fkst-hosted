@@ -465,7 +465,7 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
   error("github-devloop: unknown implementation outcome")
 end
 
-local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states)
+local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
   local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
@@ -499,6 +499,14 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   end
   local transition = core.versioned_transition_status(state, expected_from_states or { "ready" }, "implementing", marker_ready.dedup_key)
   if transition ~= "apply" then
+    if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
+      core.log_cas_decision("implement", marker_ready.proposal_id, {
+        state = "ready",
+        version = marker_ready.dedup_key,
+        stage_rank = core.stage_rank("ready"),
+      }, "ready", "implementing", "apply(own-ready-hand-off)", "write-time ready hand-off still matches this generation")
+      return true
+    end
     core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "write-time issue state changed")
     return false
   end
@@ -624,8 +632,10 @@ function pipeline(event)
       return
     end
     local accepts_ready_hand_off = event.queue == "devloop_ready_session"
+    local accepted_ready_hand_off = nil
     if transition == "pending" then
       if accepts_ready_hand_off and retry_failure == nil and ready.impl_retry_attempt == nil and core.is_ready_hand_off(ready.ready_hand_off, ready) then
+        accepted_ready_hand_off = ready.ready_hand_off
         core.log_cas_decision("implement", ready.proposal_id, {
           state = "ready",
           version = ready.dedup_key,
@@ -660,6 +670,7 @@ function pipeline(event)
       base_head = prepare_base(branches),
       attempt = ready.impl_retry_attempt or 1,
       expected_from_states = expected_states,
+      accepted_ready_hand_off = accepted_ready_hand_off,
     }
   end)
   if attempt_plan == nil then
@@ -679,7 +690,7 @@ function pipeline(event)
     event.queue
   )
   with_lock(lock_key, function()
-    if recheck_implementation_write_gate(repo, issue_number, attempt_plan.marker_ready, attempt_plan.expected_from_states) then
+    if recheck_implementation_write_gate(repo, issue_number, attempt_plan.marker_ready, attempt_plan.expected_from_states, attempt_plan.accepted_ready_hand_off) then
       raise_attempt_outcome(repo, issue_number, outcome)
     end
   end)

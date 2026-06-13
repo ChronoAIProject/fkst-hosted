@@ -566,6 +566,34 @@ return {
 
     local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"), "devloop_ready_session")
     t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_implement_ready_hand_off_rechecks_state_before_publish = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    event.ready_hand_off = {
+      kind = "own-ready-state-marker",
+      proposal_id = event.proposal_id,
+      state = "ready",
+      version = event.dedup_key,
+      stage_rank = core.stage_rank("ready"),
+      effects = "result-marker,ready-label,devloop-ready",
+    }
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    mock_fresh_implement_worktree("/tmp/fkst-packages-test/github-devloop/runtime")
+    mock_implement_codex(0, "implemented")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+    mock_issue_implement_raw({ "fkst-dev:fixing" }, {
+      core.state_marker(event.proposal_id, "fixing", event.dedup_key),
+    })
+
+    local result = run_implement(event, opts("implement-ready-hand-off-stale-at-write"), "devloop_ready_session")
+    t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 1)
   end,
