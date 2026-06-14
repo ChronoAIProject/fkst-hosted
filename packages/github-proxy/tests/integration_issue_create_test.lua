@@ -56,6 +56,19 @@ local function mock_parent_pr_comment_write()
   h.mock_pr_comment_write()
 end
 
+local function mock_parent_issue_comment_write()
+  t.mock_command("gh issue comment '42' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-intent-", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh issue comment '42' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-created-", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function first_call_index(needle)
   for index, call in ipairs(t.command_calls()) do
     if call.rendered:find(needle, 1, true) ~= nil then
@@ -110,7 +123,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
   end,
@@ -136,7 +149,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 0)
   end,
@@ -162,14 +175,16 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 0)
   end,
 
   test_issue_create_request_real_write_calls_gh_issue_create = function()
-    local payload = event().payload
+    local payload = event({
+      assignees = { "fkst-test-bot" },
+    }).payload
     mock_write_env("1")
     mock_bot_env()
     mock_parent_pr_comments({})
@@ -191,11 +206,85 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 2)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 1)
+    t.eq(count_calls("--assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("gh pr comment"), 2)
     t.is_true(first_call_index("gh pr comment") < first_call_index("gh issue create"))
+  end,
+
+  test_issue_create_request_raises_blocked_by_after_fresh_create = function()
+    local payload = event({
+      parent_comment_target = {
+        repo = "owner/x",
+        issue_number = 42,
+      },
+      post_create_blocked_by = {
+        blocked_issue_number = 42,
+        dedup_key = "decompose/github-devloop/issue/owner/x/42/v1/1/123/blocked-by",
+      },
+    }).payload
+    mock_write_env("1")
+    mock_bot_env()
+    h.mock_comment_view({})
+    h.mock_comment_view({
+      {
+        body = core.issue_create_intent_marker(payload.dedup_key),
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_issue_create()
+    mock_parent_issue_comment_write()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("issue-create-post-blocked-by", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    local raised = result.raises[1]
+    t.eq(raised.queue, "github_issue_blocked_by_request")
+    t.eq(raised.payload.schema, "github-proxy.issue-blocked-by.v1")
+    t.eq(raised.payload.blocked_issue_number, 42)
+    t.eq(raised.payload.blocking_issue_number, 99)
+    t.eq(raised.payload.dedup_key, payload.post_create_blocked_by.dedup_key)
+  end,
+
+  test_issue_create_request_raises_blocked_by_from_existing_created_marker = function()
+    local payload = event({
+      parent_comment_target = {
+        repo = "owner/x",
+        issue_number = 42,
+      },
+      post_create_blocked_by = {
+        blocked_issue_number = 42,
+        dedup_key = "decompose/github-devloop/issue/owner/x/42/v1/1/123/blocked-by",
+      },
+    }).payload
+    mock_write_env("1")
+    mock_bot_env()
+    h.mock_comment_view({
+      {
+        body = core.issue_created_marker(payload.dedup_key, "99"),
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_issue_create()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("issue-create-post-blocked-by-existing", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue create"), 0)
+    t.eq(result.raises[1].queue, "github_issue_blocked_by_request")
+    t.eq(result.raises[1].payload.blocking_issue_number, 99)
   end,
 
   test_issue_create_request_real_write_records_parent_ledger_marker = function()
@@ -274,7 +363,7 @@ return {
       payload = payload,
     }, run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 3)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 3)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 1)
   end,
@@ -298,7 +387,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
   end,

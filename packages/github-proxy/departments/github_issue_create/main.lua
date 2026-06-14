@@ -4,6 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "github_issue_create_request" },
+  produces = { "github_issue_blocked_by_request" },
   stall_window = "30s",
 }
 

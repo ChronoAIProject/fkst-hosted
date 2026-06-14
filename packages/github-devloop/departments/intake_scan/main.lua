@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "devloop_intake_candidate",
     "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_create_request",
   },
   fanout = { "devloop_intake_tick" },
   stall_window = "30s",

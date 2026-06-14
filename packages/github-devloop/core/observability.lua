@@ -70,7 +70,14 @@ local function command_indicates_already_exists(result)
     or stderr:find("409", 1, true) ~= nil
 end
 
+local function dashboard_deferred_if_deadline(deadline)
+  if M.observability_has_budget(deadline) then return nil end
+  log.info("github-devloop dept=observability tag=DASHBOARD_DEFERRED reason=deadline")
+  return "deferred"
+end
+
 local function ensure_dashboard_label(repo, limits, deadline)
+  local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local existing = M.observability_exec(M.gh_dashboard_label_get_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label get")
   if existing.exit_code == 0 then
     return "exists"
@@ -79,6 +86,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
     error("github-devloop: gh dashboard label get failed: " .. tostring(existing.stderr))
   end
 
+  deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local created = M.observability_exec(M.gh_dashboard_label_create_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label create")
   if created.exit_code == 0 then
     log.info("github-devloop dept=observability tag=DASHBOARD_LABEL_CREATED label=" .. dashboard_label)
@@ -800,8 +808,10 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
     return "dry-run"
   end
 
+  local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local bot_login = M.assert_trusted_bot_configured()
-  ensure_dashboard_label(repo, limits, deadline)
+  deferred = ensure_dashboard_label(repo, limits, deadline); if deferred == "deferred" then return deferred end
+  deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local current = trusted_dashboard_issue(repo, bot_login, limits, deadline)
   local current_version = current ~= nil and dashboard_version_from_body(current.body) or nil
   local current_hash = current ~= nil and dashboard_hash_from_body(current.body) or nil
@@ -812,6 +822,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   end
 
   if current == nil then
+    deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
     local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
     M.observability_run_cmd(M.gh_dashboard_issue_create_cmd(repo, path), limits, deadline, "gh dashboard issue create")
     log.info("github-devloop dept=observability tag=DASHBOARD_CREATED hash=" .. tostring(dashboard.hash))
@@ -826,6 +837,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
     return "stale"
   end
 
+  deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local refreshed = trusted_dashboard_issue_by_number(repo, current.number, bot_login, limits, deadline)
   local refreshed_version = refreshed ~= nil and dashboard_version_from_body(refreshed.body) or nil
   local refreshed_hash = refreshed ~= nil and dashboard_hash_from_body(refreshed.body) or nil
@@ -851,6 +863,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
     return "stale"
   end
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
+  deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local updated = M.observability_exec(M.gh_dashboard_issue_update_cmd(repo, current.number, path), limits, deadline, "gh dashboard issue update")
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")
@@ -873,6 +886,7 @@ function M.publish_observability_dashboard(repo, dashboard, limits, deadline)
   if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
     return publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
   end
+  local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local outcome = nil
   with_lock("github-devloop/dashboard/" .. M.safe_repo(repo), function()
     outcome = publish_observability_dashboard_locked(repo, dashboard, limits, deadline)

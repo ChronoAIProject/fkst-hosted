@@ -61,12 +61,185 @@ return {
     t.eq(key, "github-proxy/view/owner/repo/issue/12/2026-06-03T01-02-03Z")
     t.eq(
       core.gh_issue_view_entity_cmd("owner/repo", 12),
-      "gh issue view '12' --repo 'owner/repo' --json title,body,comments,labels,state,updatedAt"
+      "gh api 'repos/owner/repo/issues/12'"
     )
     t.eq(
       core.gh_pr_view_entity_cmd("owner/repo", 7),
-      "gh pr view '7' --repo 'owner/repo' --json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+      "gh api 'repos/owner/repo/pulls/7'"
     )
+  end,
+
+  test_rest_issue_view_adapter_maps_gh_view_shape = function()
+    local adapted = core.rest_issue_to_view_json(
+      '{"title":"Issue","body":"Body","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}],"assignees":[{"login":"fkst-test-bot"}]}',
+      '[[{"id":1,"body":"first","user":{"login":"a"}},{"id":2,"body":"second","user":{"login":"b"}}],[{"id":3,"body":"third","user":{"login":"c"}}]]'
+    )
+    local state = core.parse_issue_state(adapted)
+    t.eq(state.labels[1], "bug")
+    t.eq(state.assignees[1], "fkst-test-bot")
+    t.eq(#state.comments, 3)
+    t.eq(state.comments[1].body, "first")
+    t.eq(state.comments[2].body, "second")
+    t.eq(state.comments[3].body, "third")
+    local decoded = json.decode(adapted)
+    t.eq(decoded.state, "OPEN")
+    t.eq(decoded.updatedAt, "2026-06-03T01:02:03Z")
+  end,
+
+  test_rest_view_adapter_escapes_json_control_bytes = function()
+    local adapted = core.rest_issue_to_view_json(
+      '{"title":"Issue","body":"control\\u0001byte","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[],"assignees":[]}',
+      '[[{"id":1,"body":"comment\\u0002byte","user":{"login":"a"}}]]'
+    )
+    local decoded = json.decode(adapted)
+    t.eq(decoded.body, "control" .. string.char(1) .. "byte")
+    t.eq(decoded.comments[1].body, "comment" .. string.char(2) .. "byte")
+  end,
+
+  test_rest_issue_view_fails_closed_on_malformed_success_stdout = function()
+    t.mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
+      stdout = '{"title":',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
+      stdout = "[]",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = core.fetch_rest_issue_view("owner/repo", 3)
+    t.is_true(result.exit_code ~= 0)
+    t.eq(result.stdout, "")
+    t.is_true(result.stderr:find("github%-proxy: REST response is not valid JSON") ~= nil)
+  end,
+
+  test_rest_issue_view_fails_closed_on_empty_success_stdout = function()
+    t.mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
+      stdout = "[]",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = core.fetch_rest_issue_view("owner/repo", 3)
+    t.is_true(result.exit_code ~= 0)
+    t.eq(result.stdout, "")
+    t.is_true(result.stderr:find("github%-proxy: REST entity response is empty") ~= nil)
+  end,
+
+  test_rest_pr_view_fails_closed_on_malformed_success_stdout = function()
+    t.mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
+      stdout = "not json",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
+      stdout = "[]",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = core.fetch_rest_pr_view("owner/repo", 7)
+    t.is_true(result.exit_code ~= 0)
+    t.eq(result.stdout, "")
+    t.is_true(result.stderr:find("github%-proxy: REST response is not valid JSON") ~= nil)
+  end,
+
+  test_rest_pr_view_fails_closed_on_empty_success_stdout = function()
+    t.mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
+      stdout = "[]",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = core.fetch_rest_pr_view("owner/repo", 7)
+    t.is_true(result.exit_code ~= 0)
+    t.eq(result.stdout, "")
+    t.is_true(result.stderr:find("github%-proxy: REST entity response is empty") ~= nil)
+  end,
+
+  test_rest_issue_view_empty_comments_stdout_uses_empty_comments_fallback = function()
+    t.mock_command(core.gh_issue_rest_view_cmd("owner/repo", 4), {
+      stdout = '{"title":"Issue","body":"Body","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[],"assignees":[]}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 4), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = core.fetch_rest_issue_view("owner/repo", 4)
+    t.eq(result.exit_code, 0)
+    local decoded = json.decode(result.stdout)
+    local state = core.parse_issue_state(result.stdout)
+    t.eq(decoded.title, "Issue")
+    t.eq(#state.comments, 0)
+  end,
+
+  test_rest_pr_view_adapter_maps_states_and_repository_facts = function()
+    local open = core.rest_pr_to_view_json(
+      '{"head":{"ref":"branch","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open","updated_at":"2026-06-03T02:03:04Z"}',
+      '[[{"id":1,"body":"hello","user":{"login":"fkst-test-bot"}}]]'
+    )
+    local parsed_open = core.parse_pr_view_head_state(open, "owner/repo")
+    t.eq(parsed_open.head_ref_oid, "abc123")
+    t.eq(parsed_open.base_ref_name, "dev")
+    t.eq(parsed_open.state, "OPEN")
+    t.eq(parsed_open.head_repository, "owner/repo")
+    t.eq(parsed_open.is_cross_repository, false)
+    t.eq(parsed_open.is_target_repository, true)
+    t.eq(#core.parse_issue_comments(open), 1)
+
+    local merged = core.parse_pr_view_head_state(core.rest_pr_to_view_json(
+      '{"head":{"ref":"branch","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"closed","merged":true}',
+      "[]"
+    ), "owner/repo")
+    t.eq(merged.state, "MERGED")
+
+    local open_with_null_merged_at = core.parse_pr_view_head_state(core.rest_pr_to_view_json(
+      '{"head":{"ref":"branch","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open","merged":false,"merged_at":null}',
+      "[]"
+    ), "owner/repo")
+    t.eq(open_with_null_merged_at.state, "OPEN")
+
+    local closed_with_null_merged_at = core.parse_pr_view_head_state(core.rest_pr_to_view_json(
+      '{"head":{"ref":"branch","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"closed","merged":false,"merged_at":null}',
+      "[]"
+    ), "owner/repo")
+    t.eq(closed_with_null_merged_at.state, "CLOSED")
+
+    local merged_at_string = core.parse_pr_view_head_state(core.rest_pr_to_view_json(
+      '{"head":{"ref":"branch","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"closed","merged":false,"merged_at":"2026-06-03T03:04:05Z"}',
+      "[]"
+    ), "owner/repo")
+    t.eq(merged_at_string.state, "MERGED")
+
+    local fork = core.parse_pr_view_head_state(core.rest_pr_to_view_json(
+      '{"head":{"ref":"branch","sha":"ABC123","repo":{"full_name":"fork/repo","owner":{"login":"fork"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open"}',
+      "[]"
+    ), "owner/repo")
+    t.eq(fork.is_cross_repository, true)
+    t.eq(fork.is_target_repository, false)
+
+    local deleted_ok = pcall(function()
+      core.rest_pr_to_view_json(
+        '{"head":{"ref":"branch","sha":"ABC123","repo":null},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open"}',
+        "[]"
+      )
+    end)
+    t.eq(deleted_ok, false)
   end,
 
   test_entity_dedup_key = function()
@@ -455,33 +628,30 @@ return {
     t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","state":"CLOSED"}]', "devloop-owner-repo-42-01HY"), nil)
     t.eq(
       core.gh_pr_view_head_oid_cmd("owner/repo", 7),
-      "gh pr view '7' --repo 'owner/repo' --json headRefOid,baseRefName,state,headRepository,headRepositoryOwner,isCrossRepository"
+      "gh api 'repos/owner/repo/pulls/7'"
     )
     local same_repo_pr = core.parse_pr_view_head_state(
-      '{"headRefOid":"ABC123","state":"OPEN","headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false}',
+      '{"head":{"ref":"feature","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open","merged":false}',
       "owner/repo"
     )
     t.eq(same_repo_pr.head_ref_oid, "abc123")
     t.eq(same_repo_pr.state, "OPEN")
     t.eq(same_repo_pr.head_repository, "owner/repo")
     t.eq(same_repo_pr.is_target_repository, true)
-    -- Real gh form (observed via dogfood): a merged / branch-deleted PR returns
-    -- headRepository.nameWithOwner as an empty string. Fall back to owner/name so
-    -- a legitimate same-repo PR is not misjudged as cross-repo.
     local empty_nwo_pr = core.parse_pr_view_head_state(
-      '{"headRefOid":"ABC123","state":"MERGED","headRepository":{"name":"fkst-packages","nameWithOwner":""},"headRepositoryOwner":{"login":"ChronoAIProject"},"isCrossRepository":false}',
+      '{"head":{"ref":"feature","sha":"ABC123","repo":{"name":"fkst-packages","owner":{"login":"ChronoAIProject"}}},"base":{"ref":"dev","repo":{"full_name":"ChronoAIProject/fkst-packages","owner":{"login":"ChronoAIProject"}}},"state":"closed","merged":true}',
       "ChronoAIProject/fkst-packages"
     )
     t.eq(empty_nwo_pr.head_repository, "ChronoAIProject/fkst-packages")
     t.eq(empty_nwo_pr.is_target_repository, true)
     t.eq(core.parse_pr_view_head_state(
-      '{"headRefOid":"ABC123","state":"OPEN","headRepository":{"nameWithOwner":"fork/repo"},"isCrossRepository":true}',
+      '{"head":{"ref":"feature","sha":"ABC123","repo":{"full_name":"fork/repo","owner":{"login":"fork"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open","merged":false}',
       "owner/repo"
     ).is_target_repository, false)
     t.eq(core.parse_pr_create("https://example.test/pull/8\n").number, 8)
     t.eq(
       core.gh_issue_view_comments_cmd("owner/repo", 3),
-      "gh issue view '3' --repo 'owner/repo' --json comments"
+      "gh api --paginate --slurp 'repos/owner/repo/issues/3/comments?per_page=100'"
     )
     local expected_label_colors = {
       ["fkst-dev:enabled"] = "1D76DB",

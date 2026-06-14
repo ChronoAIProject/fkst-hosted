@@ -61,7 +61,7 @@ end
 local function issue_view_cmd(repo, issue_number)
   return "gh issue view " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,comments,labels,state,updatedAt,assignees"
+    .. " --json title,body,comments,labels,state,updatedAt,assignees,author"
 end
 
 local function pr_view_cmd(repo, pr_number)

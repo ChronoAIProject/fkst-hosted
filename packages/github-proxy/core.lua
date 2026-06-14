@@ -7,6 +7,8 @@ function M.persistence_class()
 end
 
 require("core.issue_create").install(M)
+require("core.blocked_by").install(M)
+require("core.rest_view").install(M)
 require("core.entity_view").install(M)
 require("core.gh_rate").install(M)
 require("core.comment").install(M)
@@ -235,7 +237,7 @@ function M.issue_dedup_key(repo, number, updated_at)
 end
 
 -- Stable source pointer for the durable-delivery engine: a reliable consumer
--- re-derives the current entity from this ref (e.g. `gh issue view`) instead of
+-- re-derives the current entity from this ref (e.g. REST issue detail) instead of
 -- trusting a possibly-stale payload. ref is the entity identity WITHOUT the
 -- version (updated_at lives in dedup_key / the payload).
 function M.entity_source_ref(repo, entity_type, number)
@@ -573,12 +575,6 @@ function M.gh_pr_list_head_cmd(repo, branch, base_branch)
   return "gh api --paginate --slurp " .. shell_single_quote(query)
 end
 
-function M.gh_issue_view_pr_open_guard_cmd(repo, issue_number)
-  return "gh issue view " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json labels,comments,assignees"
-end
-
 function M.parse_pr_list_for_head(gh_json_stdout, branch)
   local decoded = json.decode(gh_json_stdout or "[]")
   for _, item in ipairs(decoded) do
@@ -681,9 +677,7 @@ function M.gh_pr_view_head_oid_cmd(repo, pr_number)
   if not is_positive_number(pr_number) then
     error("github-proxy: invalid PR number")
   end
-  return "gh pr view " .. shell_single_quote(pr_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json headRefOid,baseRefName,state,headRepository,headRepositoryOwner,isCrossRepository"
+  return M.gh_pr_rest_view_cmd(repo, pr_number)
 end
 
 local function repository_name_with_owner(head_repository, head_repository_owner)
@@ -694,9 +688,15 @@ local function repository_name_with_owner(head_repository, head_repository_owner
     return nil
   end
   if head_repository.nameWithOwner ~= nil and head_repository.nameWithOwner ~= "" then
+    if type(head_repository.nameWithOwner) == "userdata" then
+      return nil
+    end
     return tostring(head_repository.nameWithOwner)
   end
   if head_repository.name_with_owner ~= nil and head_repository.name_with_owner ~= "" then
+    if type(head_repository.name_with_owner) == "userdata" then
+      return nil
+    end
     return tostring(head_repository.name_with_owner)
   end
   local name = head_repository.name
@@ -714,17 +714,27 @@ local function repository_name_with_owner(head_repository, head_repository_owner
   return nil
 end
 
+local function nil_if_json_null(value)
+  if type(value) == "userdata" then
+    return nil
+  end
+  return value
+end
+
 function M.parse_pr_view_head_state(gh_json_stdout, target_repo)
   local decoded = json.decode(gh_json_stdout or "{}")
+  if decoded.headRefOid == nil and decoded.head_ref_oid == nil and decoded.head ~= nil then
+    decoded = json.decode(M.rest_pr_to_view_json(gh_json_stdout or "{}", "[]") or "{}")
+  end
   local head = decoded.headRefOid or decoded.head_ref_oid
   local state = decoded.state
   local head_repo = repository_name_with_owner(
-    decoded.headRepository or decoded.head_repository,
-    decoded.headRepositoryOwner or decoded.head_repository_owner
+    nil_if_json_null(decoded.headRepository or decoded.head_repository),
+    nil_if_json_null(decoded.headRepositoryOwner or decoded.head_repository_owner)
   )
-  local is_cross_repository = decoded.isCrossRepository
+  local is_cross_repository = nil_if_json_null(decoded.isCrossRepository)
   if is_cross_repository == nil then
-    is_cross_repository = decoded.is_cross_repository
+    is_cross_repository = nil_if_json_null(decoded.is_cross_repository)
   end
   if is_git_sha(head) and state ~= nil then
     return {
@@ -739,24 +749,6 @@ function M.parse_pr_view_head_state(gh_json_stdout, target_repo)
     }
   end
   return nil
-end
-
-function M.gh_issue_view_labels_cmd(repo, issue_number)
-  return "gh issue view " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json labels"
-end
-
-function M.gh_pr_view_labels_cmd(repo, pr_number)
-  return "gh pr view " .. shell_single_quote(pr_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json labels"
-end
-
-function M.gh_pr_view_label_guard_cmd(repo, pr_number)
-  return "gh pr view " .. shell_single_quote(pr_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json labels,comments"
 end
 
 function M.gh_label_list_cmd(repo)
@@ -935,7 +927,7 @@ function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_lab
     30,
     edit_context
   )
-  M.invalidate_entity_after_write(repo, "issue", issue_number)
+  M.invalidate_entity_after_write(repo, kind, number)
   return true
 end
 

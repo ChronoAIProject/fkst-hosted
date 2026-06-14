@@ -4,6 +4,7 @@ function S.install(M)
 local max_title_len = 240
 local max_body_len = 12000
 local max_label_len = 80
+local max_login_len = 80
 local max_dedup_len = 512
 local max_runtime_id_len = 180
 local max_issue_number_len = 32
@@ -51,6 +52,24 @@ local function labels_arg(labels)
   for _, label in ipairs(labels) do
     if is_bounded_string(label, max_label_len) then
       args = args .. " --label " .. shell_single_quote(label)
+    end
+  end
+  return args
+end
+
+local function is_valid_login(value)
+  return is_bounded_string(value, max_login_len)
+    and tostring(value):find("^[%w%-%[%]_.]+$") ~= nil
+end
+
+local function assignees_arg(assignees)
+  local args = ""
+  if type(assignees) ~= "table" then
+    return args
+  end
+  for _, login in ipairs(assignees) do
+    if is_valid_login(login) then
+      args = args .. " --assignee " .. shell_single_quote(login)
     end
   end
   return args
@@ -112,11 +131,12 @@ function M.gh_issue_create_search_cmd(repo, dedup_key)
     .. " --json number,title,state,author,body,url"
 end
 
-function M.gh_issue_create_cmd(repo, title, body_file, labels)
+function M.gh_issue_create_cmd(repo, title, body_file, labels, assignees)
   return "gh issue create --repo " .. shell_single_quote(repo)
     .. " --title " .. shell_single_quote(title)
     .. " --body-file " .. shell_single_quote(body_file)
     .. labels_arg(labels)
+    .. assignees_arg(assignees)
 end
 
 local function normalize_parent_comment_target(target)
@@ -210,6 +230,27 @@ function M.has_trusted_issue_created_marker(comments, dedup_key, bot_login)
   return false
 end
 
+function M.trusted_issue_created_number(comments, dedup_key, bot_login)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
+  for _, comment in ipairs(comments) do
+    if issue_author_login(comment) == tostring(bot_login) then
+      local body = tostring(comment.body or "")
+      for marker in body:gmatch(marker_pattern) do
+        if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
+          local issue_number = marker:match('issue="(%d+)"')
+          if is_positive_integer(issue_number) then
+            return tostring(math.floor(tonumber(issue_number)))
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
 function M.has_trusted_issue_create_intent_marker(comments, dedup_key, bot_login)
   if type(comments) ~= "table" then
     return false
@@ -284,11 +325,47 @@ function M.validate_issue_create_payload(payload)
       end
     end
   end
+  if payload.assignees ~= nil then
+    if type(payload.assignees) ~= "table" then
+      return false
+    end
+    for _, login in ipairs(payload.assignees) do
+      if not is_valid_login(login) then
+        return false
+      end
+    end
+  end
+  if payload.post_create_blocked_by ~= nil then
+    local post = payload.post_create_blocked_by
+    if type(post) ~= "table"
+      or not is_positive_integer(post.blocked_issue_number)
+      or not is_bounded_marker_value(post.dedup_key, max_dedup_len) then
+      return false
+    end
+  end
   local parent = normalize_parent_comment_target(payload.parent_comment_target)
   if parent == false then
     return false
   end
   return true
+end
+
+local function maybe_raise_post_create_blocked_by(payload, issue_number)
+  local post = payload.post_create_blocked_by
+  if post == nil then
+    return
+  end
+  if not is_positive_integer(issue_number) then
+    error("github-proxy: issue-create post_create_blocked_by missing created issue number")
+  end
+  raise("github_issue_blocked_by_request", {
+    schema = "github-proxy.issue-blocked-by.v1",
+    repo = payload.repo,
+    blocked_issue_number = tonumber(post.blocked_issue_number),
+    blocking_issue_number = tonumber(issue_number),
+    dedup_key = tostring(post.dedup_key),
+    source_ref = payload.source_ref,
+  })
 end
 
 function M.write_issue_create_request(payload)
@@ -314,7 +391,14 @@ function M.write_issue_create_request(payload)
     local parent = normalize_parent_comment_target(payload.parent_comment_target)
     if parent ~= nil then
       local parent_view = M.gh_exec(M.gh_issue_create_parent_view_cmd(parent), 30, "gh parent comment view")
-      if M.has_trusted_issue_create_parent_marker(M.parse_issue_comments(parent_view.stdout), payload.dedup_key, bot_login) then
+      local parent_comments = M.parse_issue_comments(parent_view.stdout)
+      local existing_created_issue = M.trusted_issue_created_number(parent_comments, payload.dedup_key, bot_login)
+      if existing_created_issue ~= nil then
+        log.info("github-proxy: skip-idempotent issue-create parent marker already present")
+        maybe_raise_post_create_blocked_by(payload, existing_created_issue)
+        return
+      end
+      if M.has_trusted_issue_create_intent_marker(parent_comments, payload.dedup_key, bot_login) then
         log.info("github-proxy: skip-idempotent issue-create parent marker already present")
         return
       end
@@ -344,7 +428,7 @@ function M.write_issue_create_request(payload)
       local body = tostring(payload.body) .. "\n\n" .. M.issue_create_marker(payload.dedup_key) .. "\n"
       local path = "/tmp/fkst-github-proxy-" .. issue_create_runtime_identity(payload.dedup_key) .. ".md"
       file.write(path, body)
-      local created = M.gh_exec(M.gh_issue_create_cmd(repo, payload.title, path, payload.labels), 30, "gh issue create")
+      local created = M.gh_exec(M.gh_issue_create_cmd(repo, payload.title, path, payload.labels, payload.assignees), 30, "gh issue create")
       local issue_number = M.parse_created_issue_number(created.stdout)
       if issue_number ~= nil then
         M.invalidate_entity_after_write(repo, "issue", issue_number)
@@ -355,6 +439,7 @@ function M.write_issue_create_request(payload)
         M.gh_exec(M.gh_issue_create_parent_comment_cmd(parent, marker_path), 30, "gh parent issue-created comment")
         M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
       end
+      maybe_raise_post_create_blocked_by(payload, issue_number)
     end)
     if not ran then
       log.info("github-proxy: skip-idempotent issue-create once marker already present")

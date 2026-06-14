@@ -112,6 +112,26 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
     return false
   end
 
+  local author = M.issue_author_login(current)
+  if author == nil or author == "" then
+    log_claim(dept, proposal_id, "skip-fork-author-unknown", "issue author is missing or unknown")
+    return false
+  end
+  if author ~= owner then
+    local request = M.build_fork_issue_create_request(repo, issue_number, current, M.issue_source_ref(repo, issue_number))
+    if request == nil then
+      log_claim(dept, proposal_id, "skip-fork-author-unknown", "fork request could not be built from current issue author")
+      return false
+    end
+    if M.has_trusted_issue_create_parent_marker(current and current.comments, request.dedup_key, owner) then
+      log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
+      return false
+    end
+    log_claim(dept, proposal_id, "fork-raised", "other-authored unassigned issue is forked before management")
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_create_request", request)
+    return false
+  end
+
   if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
     log_claim(dept, proposal_id, "dry-run-claim", "FKST_GITHUB_WRITE!=1")
     return true

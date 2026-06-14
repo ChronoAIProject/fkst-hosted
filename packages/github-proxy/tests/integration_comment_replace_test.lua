@@ -67,7 +67,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
     t.eq(count_calls("issues/comments/IC_kwDOSwWu288AAAABF40Vmg"), 0)
     t.eq(count_calls(pr_comment_create), 0)
@@ -85,7 +85,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls("gh api --method PATCH"), 0)
     t.eq(count_calls(pr_comment_create), 1)
   end,
@@ -110,7 +110,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 2)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
     t.eq(count_calls(pr_comment_create), 1)
   end,
@@ -141,7 +141,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 2)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/654321' --field body=@"), 1)
     t.eq(count_calls(pr_comment_create), 0)

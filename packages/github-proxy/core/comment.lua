@@ -80,6 +80,26 @@ local function rest_comment_id(comment)
   return id
 end
 
+local function append_rest_comments(comments, value)
+  if type(value) ~= "table" then
+    return
+  end
+  if value.id ~= nil or value.body ~= nil or value.user ~= nil or value.author ~= nil then
+    local id = comment_id(value) or rest_comment_id(value)
+    if id ~= nil then
+      table.insert(comments, {
+        id = id,
+        body = comment_body(value),
+        author_login = comment_author_login(value),
+      })
+    end
+    return
+  end
+  for _, item in ipairs(value) do
+    append_rest_comments(comments, item)
+  end
+end
+
 function M.comment_marker(dedup_key)
   return "<!-- fkst:github-proxy:comment:" .. tostring(dedup_key) .. " -->"
 end
@@ -94,6 +114,10 @@ end
 function M.parse_issue_comments(gh_json_stdout)
   local decoded = json.decode(gh_json_stdout or "{}")
   local comments = {}
+  if decoded.comments == nil then
+    append_rest_comments(comments, decoded)
+    return comments
+  end
   for _, comment in ipairs(decoded.comments or {}) do
     table.insert(comments, {
       id = comment_id(comment),
@@ -161,26 +185,6 @@ local function load_comments(M, target, repo)
   return M.parse_issue_comments(view.stdout)
 end
 
-local function append_rest_comments(comments, value)
-  if type(value) ~= "table" then
-    return
-  end
-  if value.id ~= nil or value.body ~= nil or value.user ~= nil then
-    local id = rest_comment_id(value)
-    if id ~= nil then
-      table.insert(comments, {
-        id = id,
-        body = comment_body(value),
-        author_login = comment_author_login(value),
-      })
-    end
-    return
-  end
-  for _, item in ipairs(value) do
-    append_rest_comments(comments, item)
-  end
-end
-
 local function parse_rest_comments(stdout)
   local ok, decoded = pcall(json.decode, stdout or "[]")
   if not ok then
@@ -189,11 +193,6 @@ local function parse_rest_comments(stdout)
   local comments = {}
   append_rest_comments(comments, decoded)
   return comments
-end
-
-function M.gh_issue_comments_api_cmd(repo, issue_number)
-  return "gh api --paginate --slurp "
-    .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
 end
 
 local function load_rest_comments(M, target, repo)
@@ -213,15 +212,11 @@ function M.gh_pr_comment_cmd(repo, pr_number, body_file)
 end
 
 function M.gh_pr_view_comments_cmd(repo, pr_number)
-  return "gh pr view " .. shell_single_quote(pr_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json comments"
+  return M.gh_issue_comments_api_cmd(repo, pr_number)
 end
 
 function M.gh_issue_view_comments_cmd(repo, issue_number)
-  return "gh issue view " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json comments"
+  return M.gh_issue_comments_api_cmd(repo, issue_number)
 end
 
 function M.gh_issue_comment_cmd(repo, issue_number, body_file)

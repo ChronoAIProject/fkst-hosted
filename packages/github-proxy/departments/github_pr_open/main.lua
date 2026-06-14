@@ -56,11 +56,11 @@ local function verify_pr_remote_head(repo, pr_number, expected_head_sha, expecte
   local pr_head = core.gh_exec(
     core.gh_pr_view_head_oid_cmd(repo, pr_number),
     30,
-    "gh pr view head repository/headRefOid/state"
+    "gh PR REST head repository/headRefOid/state"
   )
   local remote_pr = core.parse_pr_view_head_state(pr_head.stdout, repo)
   if remote_pr == nil then
-    error("github-proxy: gh pr view head repository/headRefOid/state did not return a valid open PR fact")
+    error("github-proxy: gh PR REST head repository/headRefOid/state did not return a valid open PR fact")
   end
   if tostring(remote_pr.state):lower() ~= "open" then
     error("github-proxy: PR is not open")
@@ -99,11 +99,10 @@ local function guard_pr_open_write(repo, payload, bot_login)
     return nil
   end
 
-  local view = core.gh_exec(
-    core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number),
-    30,
-    "gh issue view before PR open"
-  )
+  local view = core.fetch_issue_view(repo, payload.issue_number, nil, { fresh = true, marker_bearing = true })
+  if view.exit_code ~= 0 then
+    error("github-proxy: gh issue REST guard failed")
+  end
 
   local issue = core.parse_issue_state(view.stdout)
   if not core.verify_issue_claim_in_issue(issue, payload, repo, payload.issue_number, "github_pr_open") then
@@ -218,11 +217,10 @@ local function raise_pr_entity_changed(repo, pr, payload)
 end
 
 local function current_issue_state_for_label_edit(repo, payload, bot_login)
-  local view = core.gh_exec(
-    core.gh_issue_view_pr_open_guard_cmd(repo, payload.issue_number),
-    30,
-    "gh issue view before PR open label edit"
-  )
+  local view = core.fetch_issue_view(repo, payload.issue_number, nil, { fresh = true, marker_bearing = true })
+  if view.exit_code ~= 0 then
+    error("github-proxy: gh issue REST label guard failed")
+  end
   local issue = core.parse_issue_state(view.stdout)
   return core.current_devloop_state(issue.comments, payload.proposal_id, bot_login)
 end
@@ -311,7 +309,7 @@ function pipeline(event)
       local issue_view = core.gh_exec(
         core.gh_issue_view_comments_cmd(repo, payload.issue_number),
         30,
-        "gh issue view after PR open"
+        "gh issue REST comments after PR open"
       )
       if core.has_trusted_marker(core.parse_issue_comments(issue_view.stdout), payload.dedup_key, bot_login) then
         guard.pr_open_visible = true
@@ -334,7 +332,7 @@ function pipeline(event)
     local pr_view = core.gh_exec(
       core.gh_pr_view_comments_cmd(repo, pr.number),
       30,
-      "gh pr view after PR open"
+      "gh PR REST comments after PR open"
     )
     if not core.has_trusted_comment_fragment(core.parse_issue_comments(pr_view.stdout), tostring(payload.body), bot_login) then
       local pr_body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"

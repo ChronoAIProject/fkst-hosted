@@ -81,7 +81,7 @@ return {
     t.eq(#comment_calls, 1)
     t.is_true(comment_calls[1].rendered:find(issue_comment_create, 1, true) ~= nil)
     t.eq(comment_calls[1].rendered:find("github.com", 1, true), nil)
-    t.eq(count_calls("gh issue view"), 2)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 2)
   end,
 
   test_existing_comment_replay_emits_rest_comment_id = function()

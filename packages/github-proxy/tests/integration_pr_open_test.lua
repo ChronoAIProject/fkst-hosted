@@ -36,6 +36,22 @@ local pr_open_event = h.pr_open_event
 local pr_open_guard_comments = h.pr_open_guard_comments
 local pr_open_visible_comments = h.pr_open_visible_comments
 local reviewing_marker = h.reviewing_marker
+require("tests.entity_view_probe_helpers")
+
+local function count_exact_calls(rendered)
+  local total = 0
+  for _, call in ipairs(t.command_calls()) do
+    if call.rendered == rendered then
+      total = total + 1
+    end
+  end
+  return total
+end
+
+local function assert_pr_rest_view_fetch(pr_number)
+  t.eq(count_exact_calls(core.gh_pr_rest_view_cmd("owner/x", pr_number)), 1)
+  t.is_true(count_calls(core.gh_issue_comments_api_cmd("owner/x", pr_number)) >= 1)
+end
 
 return {
   test_pr_open_request_dry_run_does_not_push_or_create = function()
@@ -95,7 +111,8 @@ return {
     t.eq(result.raises[2].payload.head_sha, "abc123")
     t.eq(result.raises[2].payload.base_branch, "dev")
     t.eq(result.raises[2].payload.source_ref.ref, "owner/x#pr/7")
-    t.eq(count_calls("--json labels,comments"), 2)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    assert_pr_rest_view_fetch(7)
     local create = calls_matching("gh pr create")[1]
     t.eq(create.rendered:find("--json", 1, true), nil)
     t.is_true(create.rendered:find("--base 'dev'", 1, true) ~= nil)
@@ -151,7 +168,8 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue comment"), 1)
     t.eq(count_calls("gh pr comment"), 1)
-    t.eq(count_calls("--json labels,comments"), 2)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    assert_pr_rest_view_fetch(7)
     t.eq(count_calls("gh issue edit"), 0)
   end,
 
@@ -176,7 +194,8 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue comment"), 1)
     t.eq(count_calls("gh pr comment"), 1)
-    t.eq(count_calls("--json labels,comments"), 2)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    assert_pr_rest_view_fetch(7)
     t.eq(count_calls("gh issue edit"), 0)
   end,
 
@@ -212,8 +231,13 @@ return {
     })
     mock_write_env("1")
     mock_bot_env()
-    t.mock_command("--json title,body,comments,labels,state", {
-      stdout = '{"title":"Cached","body":"","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[]}\n',
+    t.mock_command("gh api 'repos/owner/x/issues/42'", {
+      stdout = '{"title":"Cached","body":"","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"fkst-dev:enabled"}],"assignees":[]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'", {
+      stdout = "[]\n",
       stderr = "",
       exit_code = 0,
     })
@@ -222,10 +246,19 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    local cached = core.fetch_issue_view("owner/x", 42, "2026-06-03T01:02:03Z")
+    local cached = t.run_department("tests/entity_view_probe_helpers.lua", {
+      queue = "entity_view_probe",
+      payload = {
+        repo = "owner/x",
+        kind = "issue",
+        number = 42,
+        updated_at = "2026-06-03T01:02:03Z",
+        consumer = "cache-warmer",
+      },
+    }, run_opts)
     t.eq(cached.exit_code, 0)
 
-    local guard_calls_before = count_calls("--json labels,comments")
+    local guard_calls_before = count_calls("gh api 'repos/owner/x/issues/42'")
     local pr_create_calls_before = count_calls("gh pr create")
     mock_pr_open_guard(nil, pr_open_guard_comments())
     mock_branch_head("abc123")
@@ -242,7 +275,7 @@ return {
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), run_opts)
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("--json labels,comments") - guard_calls_before, 2)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'") - guard_calls_before, 2)
     t.eq(count_calls("gh pr create") - pr_create_calls_before, 1)
   end,
 
@@ -394,7 +427,7 @@ return {
     mock_git_push()
     mock_pr_create_stdout("created pull request\n")
     mock_pr_head_list('[{"number":11,"url":"https://github.example/owner/x/pull/11","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
-    mock_pr_head_state("abc123", "OPEN")
+    mock_pr_head_state("abc123", "OPEN", nil, nil, nil, 11)
     mock_comment_view("existing issue comment")
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
@@ -414,6 +447,7 @@ return {
     t.eq(result.raises[1].payload.number, 11)
     t.eq(result.raises[2].queue, "github_pr_opened")
     t.eq(result.raises[2].payload.pr_number, 11)
+    assert_pr_rest_view_fetch(11)
     local issue_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-issue-comment.md")
     t.is_true(issue_written:find("github-devloop PR opened: #11", 1, true) ~= nil)
   end,
@@ -488,7 +522,7 @@ return {
     mock_pr_open_guard(nil, pr_open_guard_comments())
     mock_branch_head("abc123")
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
-    mock_pr_head_state("abc123", "OPEN")
+    mock_pr_head_state("abc123", "OPEN", nil, nil, nil, 9)
     mock_comment_view("existing issue comment")
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
@@ -519,7 +553,7 @@ return {
     mock_pr_open_guard(nil, pr_open_guard_comments())
     mock_branch_head("abc123")
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
-    mock_pr_head_state("def456", "OPEN")
+    mock_pr_head_state("def456", "OPEN", nil, nil, nil, 9)
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-existing-head-mismatch", {
       FKST_GITHUB_WRITE = "1",
@@ -538,7 +572,7 @@ return {
     mock_pr_open_guard(nil, pr_open_guard_comments())
     mock_branch_head("abc123")
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
-    mock_pr_head_state("abc123", "OPEN", "fork/x", true)
+    mock_pr_head_state("abc123", "OPEN", "fork/x", true, nil, 9)
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), opts("pr-open-existing-fork", {
       FKST_GITHUB_WRITE = "1",
@@ -559,7 +593,7 @@ return {
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"CLOSED"}]\n')
     mock_git_push()
     mock_pr_create(10)
-    mock_pr_head_state("abc123", "OPEN")
+    mock_pr_head_state("abc123", "OPEN", nil, nil, nil, 10)
     mock_comment_view("existing issue comment")
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
@@ -582,7 +616,7 @@ return {
     mock_bot_env()
     mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
-    mock_pr_head_state("abc123", "OPEN")
+    mock_pr_head_state("abc123", "OPEN", nil, nil, nil, 9)
     mock_pr_comment_view("existing pr comment without origin")
     mock_pr_comment_write()
     mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
@@ -598,7 +632,7 @@ return {
     t.eq(count_calls("gh issue comment"), 0)
     t.eq(count_calls("gh pr comment"), 1)
     t.eq(count_calls("gh issue edit"), 1)
-    t.eq(count_calls("--json labels,comments"), 2)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "github_entity_changed")
     t.eq(result.raises[1].payload.type, "pr")
@@ -650,8 +684,7 @@ return {
       '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="reviewing" version="v1" stage_rank="675" -->',
     }))
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
-    mock_pr_head_state("abc123", "OPEN")
-    mock_pr_comment_view({ {
+    mock_pr_head_state("abc123", "OPEN", nil, nil, nil, 9, { {
       body = 'github-devloop implementation PR for issue #42\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/x/42" issue="42" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->',
       author_login = "fkst-test-bot",
     } })
@@ -667,7 +700,7 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("gh issue edit"), 0)
-    t.eq(count_calls("--json labels,comments"), 2)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
   end,
 
   test_pr_open_retry_after_fixing_suffix_does_not_revert_issue_label = function()
@@ -688,8 +721,7 @@ return {
     mock_bot_env()
     mock_pr_open_guard({ "fkst-dev:pr-open" }, comments)
     mock_pr_head_list('[{"number":9,"url":"https://github.example/owner/x/pull/9","headRefName":"devloop-owner-x-42-01HY","state":"OPEN"}]\n')
-    mock_pr_head_state("abc123", "OPEN")
-    mock_pr_comment_view({ {
+    mock_pr_head_state("abc123", "OPEN", nil, nil, nil, 9, { {
       body = event.payload.body,
       author_login = "fkst-test-bot",
     } })
@@ -703,6 +735,6 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("gh issue edit"), 0)
-    t.eq(count_calls("--json labels,comments"), 2)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
   end,
 }

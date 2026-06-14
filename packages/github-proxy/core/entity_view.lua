@@ -64,13 +64,9 @@ end
 
 local function entity_view_cmd(repo, kind, number)
   if kind == "pr" then
-    return "gh pr view " .. shell_single_quote(number)
-      .. " --repo " .. shell_single_quote(repo)
-      .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+    return M.gh_pr_rest_view_cmd(repo, number)
   end
-  return "gh issue view " .. shell_single_quote(number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json title,body,comments,labels,state,updatedAt"
+  return M.gh_issue_rest_view_cmd(repo, number)
 end
 
 local function entity_updated_at_cmd(repo, kind, number)
@@ -121,6 +117,9 @@ local function json_string(value)
   text = text:gsub("\n", "\\n")
   text = text:gsub("\r", "\\r")
   text = text:gsub("\t", "\\t")
+  text = text:gsub("[%z\1-\31]", function(char)
+    return string.format("\\u%04X", string.byte(char))
+  end)
   return '"' .. text .. '"'
 end
 
@@ -136,11 +135,13 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
     error("github-proxy: invalid entity view kind")
   end
   local options = opts or {}
-  local cmd = entity_view_cmd(repo, selected_kind, number)
   local freshness = tostring(updated_at or "")
   local consumer = tostring(options.consumer or "")
   if options.fresh == true or options.marker_bearing == true or freshness == "" then
-    return M.gh_exec(cmd, 30)
+    if selected_kind == "pr" then
+      return M.fetch_rest_pr_view(repo, number)
+    end
+    return M.fetch_rest_issue_view(repo, number)
   end
 
   local key = entity_view_storage_cache_key(repo, selected_kind, number, freshness)
@@ -160,7 +161,7 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
     end
     cache_set(key, "")
   end
-  local result = M.gh_exec(cmd, 30)
+  local result = selected_kind == "pr" and M.fetch_rest_pr_view(repo, number) or M.fetch_rest_issue_view(repo, number)
   if type(result) == "table" and result.exit_code == 0 and parse_view_updated_at(result.stdout) == freshness then
     cache_set(key, encode_cached_view(result.stdout or "", consumer))
   end

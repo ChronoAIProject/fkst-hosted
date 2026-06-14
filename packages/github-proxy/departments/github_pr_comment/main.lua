@@ -65,7 +65,7 @@ function pipeline(event)
     number_field = "pr_number",
     view_comments_cmd = core.gh_pr_view_comments_cmd,
     comment_create_cmd = core.gh_issue_comment_create_cmd,
-    view_label = "gh pr view",
+    view_label = "gh PR REST comments",
     comment_label = "gh pr comment",
   })
   if written ~= nil and written.id ~= nil then

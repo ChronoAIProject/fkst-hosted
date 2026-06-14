@@ -58,7 +58,7 @@ return {
     mock_pr_label_guard({ "fkst-dev:pr-open" }, { state_marker("reviewing", "v1") })
     mock_repo_label_list({ "fkst-dev:reviewing", "fkst-dev:pr-open" })
     t.mock_command("gh pr edit", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("gh issue view", {
+    t.mock_command("gh api 'repos/owner/x/issues/42'", {
       stdout = '{"assignees":[{"login":"fkst-test-bot"}]}\n',
       stderr = "",
       exit_code = 0,
@@ -69,8 +69,9 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view '7' --repo 'owner/x' --json labels,comments"), 1)
-    t.eq(count_calls("gh issue view '42' --repo 'owner/x' --json assignees"), 1)
+    t.eq(count_calls("gh api 'repos/owner/x/pulls/7'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 1)
     t.eq(count_calls("gh pr edit"), 1)
     t.eq(count_calls("gh issue edit"), 0)
     local edit = calls_matching("gh pr edit")[1]
@@ -88,9 +89,10 @@ return {
     }))
 
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("gh pr view '7' --repo 'owner/x' --json labels,comments"), 1)
+    t.eq(count_calls("gh api 'repos/owner/x/pulls/7'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls("gh pr edit"), 0)
-    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 0)
   end,
 
   test_pr_label_request_skips_stale_visible_pr_marker = function()
@@ -103,8 +105,9 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view '7' --repo 'owner/x' --json labels,comments"), 1)
+    t.eq(count_calls("gh api 'repos/owner/x/pulls/7'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls("gh pr edit"), 0)
-    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 0)
   end,
 }

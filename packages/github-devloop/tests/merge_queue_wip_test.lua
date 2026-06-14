@@ -141,7 +141,7 @@ local function mock_claimed_issue_for_event(event, times)
   for _ = 1, times or 1 do
     t.mock_command(core.gh_issue_view_merge_cmd("owner/repo", entity.issue_number), {
       stdout = string.format(
-        '{"title":"Implement decision recorder","state":"OPEN","labels":[{"name":"fkst-dev:merge-ready"}],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+        '{"title":"Implement decision recorder","state":"OPEN","labels":[{"name":"fkst-dev:merge-ready"}],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
         comments_for(event, "2026-06-03T01:00:00Z")
       ),
       stderr = "",
@@ -304,9 +304,9 @@ end
 
 local function mock_wip_issue_state(issue_number, state)
   local proposal_id = core.proposal_id("owner/repo", issue_number)
-  t.mock_command("gh issue view '" .. tostring(issue_number) .. "' --repo 'owner/repo' --json labels,state,comments", {
+  t.mock_command(core.gh_issue_view_state_cmd("owner/repo", issue_number), {
     stdout = string.format(
-      '{"state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[%s]}\n',
+      '{"title":"Issue","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
       render_comment(core.state_marker(proposal_id, state, "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/2026-06-03T01-02-03Z"))
     ),
     stderr = "",

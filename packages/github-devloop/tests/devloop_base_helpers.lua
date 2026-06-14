@@ -515,7 +515,7 @@ local function assignees_json(assignees)
   return table.concat(rendered, ",")
 end
 
-local function mock_issue_state(labels, state, comments, assignees)
+local function mock_issue_state(labels, state, comments, assignees, author_login)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:enabled" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
@@ -553,11 +553,12 @@ local function mock_issue_state(labels, state, comments, assignees)
     end
   end
   t.mock_command("--json title,body,comments,labels,state,updatedAt,assignees", {
-    stdout = string.format('{"title":"Implement decision recorder","body":"","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
+    stdout = string.format('{"title":"Implement decision recorder","body":"","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s],"author":{"login":"%s"}}\n',
       json_string(state or "OPEN"),
       table.concat(rendered_labels, ","),
       table.concat(rendered_comments, ","),
-      assignees_json(assignees)),
+      assignees_json(assignees),
+      json_string(author_login or "fkst-test-bot")),
     stderr = "",
     exit_code = 0,
   })
