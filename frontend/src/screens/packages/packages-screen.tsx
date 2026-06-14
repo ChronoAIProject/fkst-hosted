@@ -561,7 +561,7 @@ export function PackageRow({ name, pkg, isLoading, error }: PackageRowProps) {
       leftContent={
         <div className="min-w-0">
           <div className="flex items-center gap-[10px] flex-wrap">
-            <span className="font-mono text-[14px] font-medium text-fg">{name}</span>
+            <span data-testid="pkg-name" className="font-mono text-[14px] font-medium text-fg">{name}</span>
             {isComposed ? (
               <span
                 style={{ borderColor: 'color-mix(in oklab, var(--amber) 38%, var(--line))' }}

@@ -534,7 +534,7 @@ export function SettingsScreen() {
             <div className="font-mono text-[11px] text-ghost leading-relaxed">
               <span className="text-faint">deployment</span> unknown · host-side deployment metadata is not exposed by the v1 API<br />
               <span className="text-faint">api v1</span> <span className="font-mono">GET /health · GET/POST /api/v1/packages · POST/GET/stop /api/v1/sessions</span><br />
-              <span className="text-faint">backend build</span> {health.version || 'unknown'}<br />
+              <span className="text-faint">backend build</span> <span data-testid="engine-version">{health.version || 'unknown'}</span><br />
               <span className="text-faint">MongoDB</span> <span className={cn('inline-block w-1.5 h-1.5 rounded-full mr-1', health.mongo === 'up' ? 'bg-green' : health.mongo === 'down' ? 'bg-red' : 'bg-ghost')} />
               {health.mongo || 'unknown'}
             </div>

@@ -43,6 +43,17 @@ export const SessionRegistryProvider: React.FC<{ children: React.ReactNode }> = 
     clearAllSessions,
   }), [registerSession, getSessionId, clearSession, clearAllSessions]);
 
+  // E2E-only seam (flag-gated; never present in a prod build): lets a test seed a
+  // tab-known session so the §1.1 session controls (Apply-changes / Settings Stop)
+  // become drivable through the UI against a live backend.
+  React.useEffect(() => {
+    if ((import.meta.env as Record<string, string | undefined>).VITE_E2E === '1') {
+      const w = window as unknown as Record<string, unknown>;
+      w.__fkstSeedSession = registerSession;
+      w.__fkstClearSessions = clearAllSessions;
+    }
+  }, [registerSession, clearAllSessions]);
+
   return (
     <SessionRegistryContext.Provider value={contextValue}>
       {children}
