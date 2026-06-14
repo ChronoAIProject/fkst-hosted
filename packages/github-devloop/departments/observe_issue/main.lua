@@ -33,6 +33,15 @@ local observe_replay_states = {
   ["impl-failed"] = true,
 }
 
+local function issue_label_state(snapshot_state, issue_state)
+  if issue_state ~= nil
+    and (issue_state.state == "blocked" or issue_state.state == "merged")
+    and tostring(issue_state.version or "") ~= tostring(snapshot_state and snapshot_state.version or "") then
+    return issue_state
+  end
+  return snapshot_state
+end
+
 local function thinking_state_budget_exceeded(state)
   local threshold = core.stall_suspect_threshold_minutes("thinking")
   local marker_seconds = core.iso_timestamp_epoch_seconds(state and state.marker_created_at)
@@ -399,10 +408,24 @@ function pipeline(event)
       if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state) then
         return
       end
-      if not core.state_label_hint_matches(current.labels, state.state) then
-        local label_request = core.build_reconcile_state_label_request(issue.repo, issue.number, proposal_id, state.state, state.version, issue.source_ref)
-        local add_labels, remove_labels = core.state_label_changes(state.state)
-        core.log_apply("observe_issue", proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
+      local label_state = issue_label_state(state, issue_state)
+      local add_labels, remove_labels = core.state_label_reconcile_changes(current.labels, label_state.state)
+      if #add_labels > 0 or #remove_labels > 0 then
+        local label_request = core.build_label_request(
+          issue.repo,
+          issue.number,
+          add_labels,
+          remove_labels,
+          core._dedup_key({
+            "reconcile",
+            "label",
+            proposal_id,
+            label_state.state,
+            tostring(label_state.version or "unversioned"),
+          }),
+          issue.source_ref
+        )
+        core.log_apply("observe_issue", proposal_id, label_state.state, label_state.version, { add = add_labels, remove = remove_labels }, {
           "github-proxy.github_issue_label_request",
         })
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)

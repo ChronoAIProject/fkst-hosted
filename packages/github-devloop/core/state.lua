@@ -549,6 +549,29 @@ function M.state_label_changes(to_state)
   return { add_label }, remove_labels
 end
 
+function M.state_label_reconcile_changes(labels, to_state)
+  local expected_label = M.state_label(to_state)
+  if expected_label == nil then
+    error("github-devloop: invalid state")
+  end
+
+  local add_labels = {}
+  local remove_labels = {}
+  local has_expected = false
+  for _, label in ipairs(labels or {}) do
+    local label_text = tostring(label)
+    if label_text == expected_label then
+      has_expected = true
+    elseif M._state_labels[label_text] then
+      table.insert(remove_labels, label_text)
+    end
+  end
+  if not has_expected then
+    table.insert(add_labels, expected_label)
+  end
+  return add_labels, remove_labels
+end
+
 function M.state_label_hint_matches(labels, state)
   local expected_label = M.state_label(state)
   if expected_label == nil then
