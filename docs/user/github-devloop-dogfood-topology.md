@@ -4,28 +4,28 @@
 
 ```text
 develop feature branch
-  -> PR to integration/<device>
-  -> CI on integration/<device>
+  -> PR to integration-<device>
+  -> CI on integration-<device>
   -> rollup PR to dev after test success
   -> protected dev
 ```
 
-`<device>` is the stable identity for that machine: the bot login used by that host, such as `ElonSG` or `loning`. The branch name is therefore `integration/<bot-login>`, for example `integration/ElonSG`.
+`<device>` is the stable identity for that machine: the bot login used by that host, such as `ElonSG` or `loning`. The branch name is therefore `integration-<bot-login>`, for example `integration-ElonSG`.
 
-中文补充：每台机器使用自己的 `integration/<device>` 测试分支，`<device>` 等于该机器的 bot login；`dev` 仍是受保护的最终集成分支。
+中文补充：每台机器使用自己的 `integration-<device>` 测试分支，`<device>` 等于该机器的 bot login；`dev` 仍是受保护的最终集成分支。
 
 ## Host Config
 
 The package does not derive or create the integration branch. Host env supplies the topology:
 
 ```sh
-# github-devloop autonomous dogfood (per-device topology): develop -> integration/<device> -> rollup -> dev
+# github-devloop autonomous dogfood (per-device topology): develop -> integration-<device> -> rollup -> dev
 # Values below are illustrative for a host whose bot login is ElonSG; substitute this host's identity.
 FKST_GITHUB_REPO=ChronoAIProject/fkst-packages
 FKST_GITHUB_WRITE=1
 FKST_GITHUB_BOT_LOGIN=ElonSG                       # this host's bot login = the <device> identity
 FKST_DEVLOOP_UPSTREAM_BRANCH=dev
-FKST_DEVLOOP_INTEGRATION_BRANCH=integration/ElonSG  # integration/<bot-login>, one per machine
+FKST_DEVLOOP_INTEGRATION_BRANCH=integration-ElonSG  # integration-<bot-login>, one per machine
 FKST_DEVLOOP_ROLLUP_MERGE=auto
 ```
 
@@ -48,7 +48,7 @@ Run these steps once on each additional machine:
 
    ```sh
    git fetch origin dev
-   git push origin "FETCH_HEAD:refs/heads/integration/$DEVICE"
+   git push origin "FETCH_HEAD:refs/heads/integration-$DEVICE"
    ```
 
 3. Set the host env:
@@ -58,13 +58,13 @@ Run these steps once on each additional machine:
    export FKST_GITHUB_WRITE=1
    export FKST_GITHUB_BOT_LOGIN="$DEVICE"
    export FKST_DEVLOOP_UPSTREAM_BRANCH=dev
-   export FKST_DEVLOOP_INTEGRATION_BRANCH="integration/$DEVICE"
+   export FKST_DEVLOOP_INTEGRATION_BRANCH="integration-$DEVICE"
    export FKST_DEVLOOP_ROLLUP_MERGE=auto
    ```
 
 4. Launch `github-devloop` supervise from a worktree checked out to the merged `dev`, with the host's normal `BIN`, runtime, durable, and rate-pool env.
 
-The `integration/<device>` branch must already exist before launch. By design, `github-devloop` holds instead of auto-creating a missing integration branch, because remote branch creation is an explicit host topology action.
+The `integration-<device>` branch must already exist before launch. By design, `github-devloop` holds instead of auto-creating a missing integration branch, because remote branch creation is an explicit host topology action.
 
 ## Transition Note
 

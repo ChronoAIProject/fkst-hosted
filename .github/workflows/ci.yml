@@ -2,9 +2,9 @@ name: ci
 
 on:
   push:
-    branches: [main, dev, integration, "integration/**"]
+    branches: [main, dev, integration, "integration-*"]
   pull_request:
-    branches: [main, dev, integration, "integration/**"]
+    branches: [main, dev, integration, "integration-*"]
   workflow_dispatch:
     inputs:
       substrate_ref:
