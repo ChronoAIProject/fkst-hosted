@@ -131,6 +131,8 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
     TestApp {

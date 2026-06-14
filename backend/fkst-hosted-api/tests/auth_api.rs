@@ -285,6 +285,8 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
     AuthTestApp {
@@ -330,6 +332,8 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
     (container, router)
@@ -590,6 +594,8 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
 
@@ -664,6 +670,8 @@ async fn kid_rotation_recovers_after_refresh() {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
 
@@ -754,6 +762,8 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     };
 
     // Build a router with a route that extracts AuthContext but is NOT

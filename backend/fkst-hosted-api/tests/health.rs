@@ -52,6 +52,8 @@ async fn test_router() -> axum::Router {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router")
 }

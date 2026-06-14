@@ -80,6 +80,8 @@ async fn app() -> TestApp {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
     TestApp {

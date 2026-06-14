@@ -39,4 +39,12 @@ pub struct AppState {
     /// Repository over the `goals` collection (domain layer owned by the goals
     /// module). Goal CRUD handlers go through this, never raw Mongo.
     pub goals: GoalRepo,
+    /// Cloned engine config so the generate-endpoint's conformance dry-run can
+    /// reach the engine plumbing (materialize + conformance) WITHOUT coupling
+    /// to `SessionService` (which owns the long-lived session lifecycle).
+    pub engine: crate::engine::EngineConfig,
+    /// LLM gateway for package generation: `None` when `FKST_HOSTED_LLM_GATEWAY_URL`
+    /// is unset → `POST /api/v1/packages/generate` answers 503. The trait object
+    /// is the only LLM seam, so the concrete gateway stays swappable/mockable.
+    pub llm: Option<std::sync::Arc<dyn crate::llm::LlmGateway>>,
 }
