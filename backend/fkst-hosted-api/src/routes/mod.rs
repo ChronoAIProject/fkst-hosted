@@ -5,6 +5,7 @@ pub mod generate;
 pub mod github;
 pub mod goals;
 pub mod health;
+pub mod orgs;
 pub mod packages;
 pub mod sessions;
 

@@ -785,3 +785,74 @@ async fn list_filters_to_visible_set() {
         "user_D must see legacy pkg-legacy, got: {names_d:?}"
     );
 }
+
+// ---- GET /api/v1/orgs ----
+
+#[tokio::test]
+async fn orgs_endpoint_lists_the_callers_orgs() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = authz_app_with_db().await;
+    let token_d = token_for("user_D");
+    // Per-user override for this caller's bearer at priority 1 (highest).
+    // wiremock evaluates lower priority numbers first, so this beats the
+    // default empty-orgs mock, which sits at the default priority 5.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/orgs"))
+        .and(header("authorization", format!("Bearer {token_d}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{ "id": "org_alpha" }])))
+        .with_priority(1)
+        .mount(&app.mock_server)
+        .await;
+
+    let (status, body) = get_with_auth(&app.router, "/api/v1/orgs", &token_d).await;
+    assert_eq!(status, StatusCode::OK, "orgs body: {body}");
+    assert_eq!(
+        body,
+        json!([{ "id": "org_alpha" }]),
+        "lists the caller's orgs from NyxID"
+    );
+}
+
+#[tokio::test]
+async fn orgs_endpoint_empty_when_user_has_no_orgs() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = authz_app_with_db().await;
+    // user_B has no per-user override; the default user-orgs mock returns [].
+    let token_b = token_for("user_B");
+
+    let (status, body) = get_with_auth(&app.router, "/api/v1/orgs", &token_b).await;
+    assert_eq!(status, StatusCode::OK, "orgs body: {body}");
+    assert_eq!(body, json!([]), "a user with no orgs gets 200 []");
+}
+
+#[tokio::test]
+async fn orgs_endpoint_is_fail_closed_503_on_nyxid_outage() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = authz_app_with_db().await;
+    let token_x = token_for("user_X");
+    // Override the default empty mock with a 5xx for this caller's bearer.
+    // Priority 1 (highest) wins over the default-priority (5) empty mock.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/orgs"))
+        .and(header("authorization", format!("Bearer {token_x}")))
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(&app.mock_server)
+        .await;
+
+    let (status, body) = get_with_auth(&app.router, "/api/v1/orgs", &token_x).await;
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a NyxID outage is fail-closed 503, never a silent empty: {body}"
+    );
+}

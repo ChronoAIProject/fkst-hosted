@@ -1082,3 +1082,21 @@ async fn logs_endpoint_tails_pending_cross_pod_and_id_errors() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["message"], "invalid session id: must be a UUID");
 }
+
+// ---- (13) orgs: owner-only (NyxID-disabled) mode ----------------------------
+
+/// In owner-only mode (NyxID not configured), `GET /api/v1/orgs` answers
+/// `200 []`, never a 503. This auth-disabled harness builds the Authorizer with
+/// no NyxID client, exercising exactly that branch (the populated/empty/outage
+/// NyxID-backed cases live in `authz_api.rs`).
+#[tokio::test]
+async fn orgs_endpoint_empty_when_nyxid_disabled() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = app(PASS_CONFORMANCE, READY_SUPERVISE).await;
+    let (status, _h, body) = get_path(&app.router, "/api/v1/orgs").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!([]), "owner-only mode lists no orgs, not 503");
+}
