@@ -454,7 +454,19 @@ export function Overview({
           </span>
         </div>
 
-        {needsYou && needsYou.length > 0 ? (
+        {needsYou === undefined ? (
+          <div className="border border-dashed border-line rounded-panel p-6 bg-raise/50 flex flex-col items-center justify-center text-center">
+            <span className="text-faint font-mono text-[12px]">
+              Needs-you unavailable — requires GitHub plane (NyxID) integration
+            </span>
+          </div>
+        ) : needsYou.length === 0 ? (
+          <div className="border border-dashed border-line rounded-panel p-6 bg-raise/50 flex flex-col items-center justify-center text-center">
+            <span className="text-faint font-mono text-[12px]">
+              Nothing needs you
+            </span>
+          </div>
+        ) : (
           <div className="flex flex-col border border-line rounded-panel overflow-hidden bg-line gap-px">
             {needsYou.map((item, idx) => (
               <div
@@ -493,12 +505,6 @@ export function Overview({
                 </button>
               </div>
             ))}
-          </div>
-        ) : (
-          <div className="border border-dashed border-line rounded-panel p-6 bg-raise/50 flex flex-col items-center justify-center text-center">
-            <span className="text-faint font-mono text-[12px]">
-              Needs-you unavailable — requires GitHub plane (NyxID) integration
-            </span>
           </div>
         )}
       </div>
