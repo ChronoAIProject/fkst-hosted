@@ -15,6 +15,13 @@ local function run_read()
   })
 end
 
+local function run_git_push()
+  exec_sync({
+    cmd = "git -C '/tmp/std-saga-worktree' push origin HEAD:branch",
+    timeout = 30,
+  })
+end
+
 return {
   test_write_class_classifier_is_explicit = function()
     t.eq(conformance.is_write_class("gh issue comment '42' --repo 'owner/x'"), true)
@@ -26,12 +33,19 @@ return {
     t.eq(conformance.is_write_class("gh label create 'fkst-dev:ready' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh workflow run 'ci.yml' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("git push origin HEAD:branch"), true)
+    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' push origin HEAD:branch"), true)
     t.eq(conformance.is_write_class("gh api --method POST 'repos/owner/x/issues/42/comments'"), true)
     t.eq(conformance.is_write_class("gh api graphql\nmutation { addLabelsToLabelable(input: {}) { clientMutationId } }"), true)
     t.eq(conformance.is_write_class("gh issue view '42' --repo 'owner/x'"), false)
     t.eq(conformance.is_write_class("gh pr diff '7' --repo 'owner/x'"), false)
     t.eq(conformance.is_write_class("gh api 'repos/owner/x/issues/42'"), false)
     t.eq(conformance.is_write_class("gh api graphql\nquery { viewer { login } }"), false)
+    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' log --oneline"), false)
+    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' show HEAD"), false)
+    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' rev-parse HEAD"), false)
+    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' status --short"), false)
+    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' diff --stat"), false)
+    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' cat-file -t HEAD"), false)
   end,
 
   test_assert_progress_passes_when_first_writes = function()
@@ -94,6 +108,62 @@ return {
       conformance.assert_idempotent(t, {
         first = run_write,
         second = run_write,
+      })
+    end)
+    t.eq(ok, false)
+    t.eq(tostring(err):find("observed effects on second delivery", 1, true) ~= nil, true)
+  end,
+
+  test_assert_idempotent_fails_when_second_errors_before_writing = function()
+    t.mock_command("gh issue comment '42'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    t.raises(function()
+      conformance.assert_idempotent(t, {
+        first = run_write,
+        second = function()
+          error("replay exploded before write")
+        end,
+      })
+    end)
+
+    t.mock_command("gh issue comment '42'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local ok, err = pcall(function()
+      conformance.assert_idempotent(t, {
+        first = run_write,
+        second = function()
+          error("replay exploded before write")
+        end,
+      })
+    end)
+    t.eq(ok, false)
+    t.eq(tostring(err):find("second delivery errored; idempotent no-op not proven", 1, true) ~= nil, true)
+  end,
+
+  test_assert_idempotent_fails_when_second_git_c_pushes = function()
+    t.mock_command("gh issue comment '42'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git -C '/tmp/std-saga-worktree' push", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local ok, err = pcall(function()
+      conformance.assert_idempotent(t, {
+        first = run_write,
+        second = run_git_push,
       })
     end)
     t.eq(ok, false)

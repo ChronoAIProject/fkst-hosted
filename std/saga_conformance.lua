@@ -39,8 +39,26 @@ local function is_graphql_mutation(command)
     and command:find("mutation") ~= nil
 end
 
+local function is_git_push(command)
+  local first = true
+  for token in command:gmatch("%S+") do
+    if first then
+      if token ~= "git" then
+        return false
+      end
+      first = false
+    elseif token == "push" then
+      return true
+    end
+  end
+  return false
+end
+
 function C.is_write_class(command_string)
   local command = tostring(command_string or "")
+  if is_git_push(command) then
+    return true
+  end
   for _, prefix in ipairs(write_prefixes) do
     if starts_with(command, prefix) then
       return true
@@ -82,6 +100,28 @@ local function count_raises(result)
   return 0
 end
 
+local function assert_delivery_succeeded(label, ok, result_or_err)
+  if not ok then
+    error(
+      "std.saga_conformance: "
+        .. label
+        .. " delivery errored; idempotent no-op not proven: "
+        .. tostring(result_or_err)
+    )
+  end
+  if type(result_or_err) == "table"
+    and result_or_err.exit_code ~= nil
+    and tonumber(result_or_err.exit_code) ~= 0 then
+    error(
+      "std.saga_conformance: "
+        .. label
+        .. " delivery failed with exit_code="
+        .. tostring(result_or_err.exit_code)
+        .. "; idempotent no-op not proven"
+    )
+  end
+end
+
 local function validate_case(name, case)
   if type(case) ~= "table" then
     error("std.saga_conformance: " .. name .. " requires case")
@@ -115,7 +155,8 @@ function C.assert_idempotent(_t, case)
     error("std.saga_conformance: assert_idempotent: first delivery made no write-class effect; nothing to prove")
   end
   local before_second = #fkst.test.command_calls()
-  local second_result = case.second()
+  local ok, second_result = pcall(case.second)
+  assert_delivery_succeeded("second", ok, second_result)
   local second_effects = count_write_calls(before_second) + count_raises(second_result)
   if second_effects ~= 0 then
     error("std.saga_conformance: assert_idempotent observed effects on second delivery")
