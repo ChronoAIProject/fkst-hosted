@@ -78,6 +78,29 @@ local function log_claim(dept, proposal_id, action, reason)
   M.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "claim", "claim", action, reason)
 end
 
+function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
+  if issue_number == nil then
+    return true
+  end
+  local owner = M.trusted_bot_login()
+  if current_issue ~= nil and current_issue.assignees ~= nil then
+    local status = M.issue_claim_state(current_issue.assignees, owner)
+    if status == "self" then
+      return true
+    end
+    if status == "other" then
+      log_claim(dept, proposal_id, "skip-claimed-by-other", "backing issue assignee claim is held by another login")
+      return false
+    end
+  end
+  local fresh = M.read_current_issue_assignees(repo, issue_number)
+  if M.issue_claim_state(fresh, owner) == "self" then
+    return true
+  end
+  log_claim(dept, proposal_id, "skip-claim-missing", "backing issue assignee claim is not self-only")
+  return false
+end
+
 function M.claim_issue_for_management(dept, repo, issue_number, current, proposal_id)
   local owner = M.claim_owner()
   local status = M.issue_claim_state(current and current.assignees, owner)

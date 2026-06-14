@@ -308,7 +308,10 @@ function M.parse_issue_view_reviewing(stdout)
 end
 
 function M.parse_issue_view_review(stdout)
-  return M.parse_issue_view_meta(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_meta(stdout)
+  result.assignees = M.assignee_logins(decoded.assignees)
+  return result
 end
 
 function M.parse_issue_view_decompose(stdout)
@@ -327,7 +330,10 @@ function M.parse_issue_view_fix(stdout)
 end
 
 function M.parse_issue_view_review_loop(stdout)
-  return M.parse_issue_view_meta(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_meta(stdout)
+  result.assignees = M.assignee_logins(decoded.assignees)
+  return result
 end
 
 function M.parse_issue_view_merge(stdout)

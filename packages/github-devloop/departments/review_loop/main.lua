@@ -211,6 +211,9 @@ function pipeline(event)
         error("github-devloop: gh issue review loop view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = core.parse_issue_view_review_loop(issue_view.stdout)
+      if not core.verify_pr_review_issue_claim("review_loop", origin.repo, origin.issue_number, current_issue, origin.proposal_id) then
+        return
+      end
     end
     local next_n = round + 1
     local next_dedup = core._dedup_key({

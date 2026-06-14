@@ -680,10 +680,10 @@ return {
       { core.gh_issue_view_implement_cmd, "title,labels,comments" },
       { core.gh_issue_view_open_pr_cmd, "title,labels,comments" },
       { core.gh_issue_view_reviewing_cmd, "labels,comments" },
-      { core.gh_issue_view_review_cmd, "title,labels,comments" },
+      { core.gh_issue_view_review_cmd, "title,labels,comments,assignees" },
       { core.gh_issue_view_decompose_cmd, "title,body,labels,comments" },
       { core.gh_issue_view_fix_cmd, "title,labels,comments" },
-      { core.gh_issue_view_review_loop_cmd, "title,labels,comments" },
+      { core.gh_issue_view_review_loop_cmd, "title,labels,comments,assignees" },
       { core.gh_issue_view_merge_cmd, "title,labels,comments,state,assignees" },
       { core.gh_issue_view_observe_cmd, "title,comments,state,stateReason" },
     }
