@@ -347,5 +347,35 @@ class CrossPackageRequireTest(unittest.TestCase):
         self.assertEqual(self.names(src, ["consensus"], "consensus"), [])
 
 
+class SagaHandlerRatchetTest(unittest.TestCase):
+    def violations(self, source: str, allowlist: set[str]) -> list[str]:
+        return check_repo.saga_handler_ratchet_violations({
+            "packages/example/departments/dept/main.lua": source,
+        }, allowlist)
+
+    def test_saga_shaped_department_not_on_allowlist_passes(self) -> None:
+        source = 'local saga = require("std.saga")\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        self.assertEqual(self.violations(source, set()), [])
+
+    def test_free_form_department_on_allowlist_passes(self) -> None:
+        source = 'function pipeline(event)\n  return event\nend\n'
+        allowlist = {"packages/example/departments/dept/main.lua"}
+        self.assertEqual(self.violations(source, allowlist), [])
+
+    def test_free_form_department_not_on_allowlist_fails(self) -> None:
+        source = 'pipeline = function(event)\n  return event\nend\n'
+        self.assertEqual(len(self.violations(source, set())), 1)
+        self.assertIn("free-form department not on saga-handler allowlist", self.violations(source, set())[0])
+
+    def test_saga_shaped_department_on_allowlist_fails(self) -> None:
+        source = 'return require("std.saga").department{done = d, act = a, consumes = {"q"}}\n'
+        allowlist = {"packages/example/departments/dept/main.lua"}
+        self.assertIn("saga-shaped department remains on saga-handler allowlist", self.violations(source, allowlist)[0])
+
+    def test_saga_shaped_department_with_leftover_pipeline_fails(self) -> None:
+        source = 'local saga = require("std.saga")\npipeline = function() end\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        self.assertIn("still defines free-form top-level pipeline", self.violations(source, set())[0])
+
+
 if __name__ == "__main__":
     unittest.main()

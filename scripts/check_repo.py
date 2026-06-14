@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Hermetic repository guards for fkst packages.
-
-This file is a fast, best-effort static lint. It checks repository-local
-invariants that do not require the engine binary: source file size, test file
-naming, helper shape, helper reachability, and whether a test file appears to
-contain a test definition.
-
-It is not a Lua parser and does not decide which top-level returned-table
-``test_`` keys the engine actually enumerates. The authoritative coverage check
-is the full-suite engine report-json audit in scripts/run.sh. A deeper
-engine-loader-based Lua audit remains an engine-PR backlog item.
-"""
+"""Hermetic repository guards for fkst packages."""
 
 from __future__ import annotations
 
@@ -19,6 +8,7 @@ import sys
 import os
 import base64
 import binascii
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -883,17 +873,15 @@ def check_persistence_classes(root: Path, violations: list[str]) -> None:
 
 
 REQUIRE_RE = re.compile(r"""require\(\s*["']([A-Za-z0-9_.\-]+)["']""")
+SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']std\.saga["']""")
+SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*\{")
+FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 
 
 def cross_package_require_names(
     source: str, package_names: set[str], current_pkg: str
 ) -> list[str]:
-    """Top-level require names in `source` that name a *sibling* package.
-
-    Sharing is one-way: packages may require `std.*`, their own `core.*`,
-    `departments.*`, engine `fkst.*`, etc. Requiring another package's modules
-    (peer cross-package require) is forbidden — share via `std/` instead.
-    """
+    """Top-level require names in `source` that name a sibling package."""
     hits: set[str] = set()
     for match in REQUIRE_RE.finditer(source):
         top = match.group(1).split(".")[0]
@@ -922,6 +910,51 @@ def check_cross_package_require(root: Path, violations: list[str]) -> None:
                 )
 
 
+def is_saga_handler_source(source: str) -> bool:
+    return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
+
+
+def has_free_form_pipeline_source(source: str) -> bool:
+    return FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None
+
+
+def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
+    violations: list[str] = []
+    source_paths = set(sources)
+    for path, source in sorted(sources.items()):
+        saga_shaped = is_saga_handler_source(source)
+        if saga_shaped and path in allowlist:
+            violations.append(f"G10: {path} saga-shaped department remains on saga-handler allowlist; remove it")
+        if saga_shaped and has_free_form_pipeline_source(source):
+            violations.append(f"G10: {path} saga-shaped department still defines free-form top-level pipeline")
+        if not saga_shaped and path not in allowlist:
+            violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to std.saga.department or (only for pre-existing) keep listed")
+    for path in sorted(allowlist - source_paths):
+        violations.append(f"G10: {path} listed in saga-handler allowlist but does not exist")
+    if base_allowlist is not None:
+        for path in sorted(allowlist - base_allowlist):
+            violations.append(f"G10: {path} grows saga-handler allowlist relative to dev; migrate instead")
+    return violations
+
+
+def saga_allowlist_at_dev_base(root: Path) -> set[str] | None:
+    try:
+        base = subprocess.run(["git", "merge-base", "HEAD", "dev"], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+        if base.returncode != 0 or base.stdout.strip() == "":
+            return None
+        shown = subprocess.run(["git", "show", base.stdout.strip() + ":migration/saga-handler.allowlist"], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+        return None if shown.returncode != 0 else {line.strip() for line in shown.stdout.splitlines() if line.strip() and not line.lstrip().startswith("#")}
+    except Exception:
+        return None
+
+
+def check_saga_handler_ratchet(root: Path, violations: list[str]) -> None:
+    allow_path = root / "migration" / "saga-handler.allowlist"
+    allowlist = set() if not allow_path.exists() else {line.strip() for line in read_text(allow_path).splitlines() if line.strip() and not line.lstrip().startswith("#")}
+    sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}
+    violations.extend(saga_handler_ratchet_violations(sources, allowlist, saga_allowlist_at_dev_base(root)))
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -937,6 +970,7 @@ def main() -> int:
     check_error_class_prefixes(root, warnings)
     check_persistence_classes(root, violations)
     check_cross_package_require(root, violations)
+    check_saga_handler_ratchet(root, violations)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
