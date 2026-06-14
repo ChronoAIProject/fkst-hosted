@@ -265,6 +265,26 @@ class RunScriptContractTest(unittest.TestCase):
 
 
 class LineLimitGuardTest(unittest.TestCase):
+    def test_line_limit_guard_scans_department_local_submodules(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "repo"
+            module_dir = probe / ".fkst" / "packages" / "github-devloop" / "departments" / "observability"
+            module_dir.mkdir(parents=True)
+            (module_dir / "dashboard.lua").write_text("-- filler\n" * (check_repo.LINE_LIMIT + 1), encoding="utf-8")
+
+            violations: list[str] = []
+            warnings: list[str] = []
+            check_repo.check_line_limit(probe, violations, warnings)
+
+        self.assertEqual(
+            violations,
+            [
+                "G1: packages/github-devloop/departments/observability/dashboard.lua has 1001 lines; limit is 1000",
+            ],
+        )
+        self.assertEqual(warnings, [])
+
     def test_near_limit_source_file_warns_without_failing(self) -> None:
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
@@ -315,6 +335,35 @@ class LineLimitGuardTest(unittest.TestCase):
             ],
         )
         self.assertEqual(warnings, [])
+
+
+class ObservabilitySplitArchitectureTest(unittest.TestCase):
+    def test_observability_source_is_split_into_department_responsibilities(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        package_root = root / "packages" / "github-devloop"
+        module_dir = package_root / "departments" / "observability"
+        expected_modules = {
+            "common.lua",
+            "dashboard.lua",
+            "census.lua",
+            "reaper.lua",
+        }
+
+        for name in sorted(expected_modules):
+            path = module_dir / name
+            self.assertTrue(path.is_file(), f"missing department-local observability module: {path}")
+            self.assertLess(
+                check_repo.line_count(path),
+                check_repo.LINE_LIMIT - check_repo.LINE_WARNING_MARGIN,
+                f"{path} must stay below the line-limit warning threshold",
+            )
+
+        core_observability = package_root / "core" / "observability.lua"
+        self.assertLess(
+            check_repo.line_count(core_observability),
+            check_repo.LINE_LIMIT - check_repo.LINE_WARNING_MARGIN,
+            "core/observability.lua must remain an orchestration layer, not a near-limit monolith",
+        )
 
 
 class RepositoryInterfaceContractTest(unittest.TestCase):
