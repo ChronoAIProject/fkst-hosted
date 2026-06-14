@@ -398,6 +398,13 @@ class SagaHandlerRatchetTest(unittest.TestCase):
         source = 'local saga = require("std.saga")\npipeline = function() end\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
         self.assertIn("still defines free-form top-level pipeline", self.violations(source, set())[0])
 
+    def test_paren_call_saga_department_is_detected(self) -> None:
+        # `.department(...)` (paren spelling) must be recognized as saga-shaped so a
+        # paren-form migration cannot silently remain on the allowlist and false-pass.
+        source = 'local saga = require("std.saga")\nreturn saga.department({done = d, act = a, consumes = {"q"}})\n'
+        allowlist = {"packages/example/departments/dept/main.lua"}
+        self.assertIn("saga-shaped department remains on saga-handler allowlist", self.violations(source, allowlist)[0])
+
     def test_allowlist_growth_relative_to_base_fails(self) -> None:
         source = 'function pipeline(event)\n  return event\nend\n'
         allowlist = {

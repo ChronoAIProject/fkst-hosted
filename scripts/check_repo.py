@@ -873,7 +873,7 @@ REQUIRE_RE = re.compile(
     r"""\brequire\s*(?:\(\s*)?(?:"([A-Za-z0-9_.\-]+)"|'([A-Za-z0-9_.\-]+)'|\[(=*)\[([A-Za-z0-9_.\-]+)\]\3\])"""
 )
 SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']std\.saga["']""")
-SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*\{")
+SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*[({]")
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 
 
