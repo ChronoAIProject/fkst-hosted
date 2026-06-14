@@ -364,7 +364,7 @@ return {
     mock_intake_scan_view({ "fkst-class:expedite" }, {}, "OPEN")
     mock_intake_scan_view({}, {}, "CLOSED")
     mock_intake_scan_view({}, {
-      core.intake_decision_marker("github-devloop/issue/owner/repo/44", "decline", "intake/github-devloop/issue/owner/repo/44/v1"),
+      core.intake_decision_marker("github-devloop/issue/owner/repo/44", "decline", "intake/github-devloop/issue/owner/repo/44/v1", "standard"),
     }, "OPEN")
 
     local result = run_scan(opts("intake-scan-filter"))
@@ -382,7 +382,7 @@ return {
     mock_repo_env()
     mock_issue_list({ { number = 42, labels = {} } })
     mock_intake_scan_view({}, {
-      core.intake_decision_marker(proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v1"),
+      core.intake_decision_marker(proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
       command,
     }, "OPEN")
 
@@ -421,7 +421,7 @@ return {
     mock_repo_env()
     mock_issue_list({ { number = 42, labels = { "fkst-dev:thinking" } } })
     mock_intake_scan_view({ "fkst-dev:thinking" }, {
-      core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1"),
+      core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
       trusted_reintake_command("IC_reintake_active"),
     }, "OPEN")
 
@@ -440,7 +440,7 @@ return {
     mock_repo_env()
     mock_issue_list({ { number = 42, labels = {} } })
     mock_intake_scan_view({}, {
-      core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1"),
+      core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
       untrusted_reintake_command("IC_reintake_forged"),
     }, "OPEN")
 
@@ -455,7 +455,7 @@ return {
     mock_issue_list({ { number = 42, labels = {} } })
     mock_intake_scan_view({}, {
       {
-        body = core.intake_decision_marker("github-devloop/issue/owner/repo/42", "decline", "intake/github-devloop/issue/owner/repo/42/v1"),
+        body = core.intake_decision_marker("github-devloop/issue/owner/repo/42", "decline", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
         author_login = "ordinary-user",
       },
     }, "OPEN")
@@ -505,7 +505,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-class:expedite" }, {})
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded implementation task.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Clear bounded implementation task.")
 
     local result = run_judge(payload, opts("intake-standard-default"))
     t.eq(result.exit_code, 0)
@@ -524,7 +524,7 @@ return {
     mock_intake_judge_view({ "fkst-class:background" }, {}, {
       body = "Rotate the production deploy credentials after confirming with the on-call engineer.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ decline\n⟦FKST:REASON⟧ Requires production credentials and human confirmation.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ decline\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Requires production credentials and human confirmation.")
 
     local negative = run_judge(payload, opts("intake-negative"))
     t.eq(negative.exit_code, 0)
@@ -571,7 +571,7 @@ return {
     t.is_true(has_value(label.remove_labels, "fkst-class:standard"))
   end,
 
-  test_judge_invalid_class_normalizes_to_standard_display_label = function()
+  test_judge_invalid_class_fails_closed_to_decline_with_standard_display_label = function()
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-class:background" }, {})
@@ -579,12 +579,12 @@ return {
 
     local result = run_judge(payload, opts("intake-invalid-class-standard"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 5)
-    local comment = find_comment_body(result.raises, 'decision="enable"')
-    local label = find_label_add(result.raises, "fkst-dev:enabled")
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.is_true(comment.body:find('decision="decline"', 1, true) ~= nil)
     t.is_true(comment.body:find('class="standard"', 1, true) ~= nil)
-    t.eq(label.add_labels[1], "fkst-dev:enabled")
-    t.eq(label.add_labels[2], "fkst-class:standard")
+    t.eq(label.add_labels[1], "fkst-class:standard")
     t.is_true(has_value(label.remove_labels, "fkst-class:expedite"))
     t.is_true(has_value(label.remove_labels, "fkst-class:background"))
   end,
@@ -596,7 +596,7 @@ return {
       title = "Fix widget sync retry overflow again",
       body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
     mock_recent_closed_class_siblings()
     mock_intake_class_lookup({})
 
@@ -631,7 +631,7 @@ return {
       title = "Fix widget sync retry overflow again",
       body = "Third recurrence after #80 and #81; decide whether this needs a class-level retry policy.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Cites #80 and #81 as prior siblings; Rule of Three requires class-level retry policy.")
     mock_recent_closed_class_siblings()
     mock_intake_class_lookup({
       {
@@ -672,7 +672,7 @@ return {
         { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
       }
     )
-    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Prior occurrences #80 and #82 share the widget-sync failure fingerprint; open a broader timeout/backoff fix.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Prior occurrences #80 and #82 share the widget-sync failure fingerprint; open a broader timeout/backoff fix.")
     mock_recent_closed_class_siblings()
     mock_intake_class_lookup({
       {
@@ -725,7 +725,7 @@ return {
       { number = 81, title = "Widget sync timeout fix", labels = { "fkst-dev:merged" } },
     }
     mock_intake_codex_with_closed_issues(
-      "⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:REASON⟧ Prior occurrences #80 and #81 look related, but no structured fingerprint is available.",
+      "⟦FKST:INTAKE⟧ escalate-to-class\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Prior occurrences #80 and #81 look related, but no structured fingerprint is available.",
       sibling_issues
     )
     mock_recent_closed_class_siblings(sibling_issues)
@@ -759,7 +759,7 @@ return {
       title = "Recurrence-aware widget sync policy",
       body = "This issue cites #80 and #81 and proposes the class-level retry policy.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ This issue is the class carrier, so Rule of Three is satisfied in-pipeline.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ This issue is the class carrier, so Rule of Three is satisfied in-pipeline.")
 
     local result = run_judge(payload, opts("intake-class-carrier-enable"))
     t.eq(result.exit_code, 0)
@@ -780,7 +780,7 @@ return {
       title = "[umbrella] Fold the babysitter into the system",
       body = "Tracks independent waves.\n\n- wave-1 stall watchdog\n- wave-2 DLQ triage\n\nSplit into independent wave proposals.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ track\n⟦FKST:REASON⟧ Umbrella tracker issue; individual waves should be separate proposals.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ track\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Umbrella tracker issue; individual waves should be separate proposals.")
 
     local result = run_judge(payload, opts("intake-umbrella-codex-track"))
     t.eq(result.exit_code, 0)
@@ -801,7 +801,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:tracking" }, {
-      core.intake_decision_marker(payload.proposal_id, "track", expected_decision_key(payload)),
+      core.intake_decision_marker(payload.proposal_id, "track", expected_decision_key(payload), "standard"),
     })
 
     local result = run_judge(payload, opts("intake-track-idempotent"))
@@ -818,7 +818,7 @@ return {
       title = "Make sync less flaky",
       body = "The sync behavior is ambiguous and needs investigation to find the right code change.",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Implementation request; downstream consensus can narrow scope.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Implementation request; downstream consensus can narrow scope.")
     local ambiguous = run_judge(payload, opts("intake-enable-ambiguous"))
     t.eq(ambiguous.exit_code, 0)
     t.eq(#ambiguous.raises, 5)
@@ -835,7 +835,7 @@ return {
       body = "This may span packages and another repository; determine the code change needed.",
       updated_at = "2026-06-03T01:03:03Z",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Cross-repository uncertainty is not a human gate.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Cross-repository uncertainty is not a human gate.")
     local cross_repo = run_judge(candidate({ updated_at = "2026-06-03T01:03:03Z" }), opts("intake-enable-cross-repo"))
     t.eq(cross_repo.exit_code, 0)
     t.eq(#cross_repo.raises, 5)
@@ -848,7 +848,7 @@ return {
       body = "It fails sometimes; there are not enough acceptance details yet.",
       updated_at = "2026-06-03T01:04:03Z",
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Insufficient detail should converge downstream.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Insufficient detail should converge downstream.")
     local insufficient = run_judge(candidate({ updated_at = "2026-06-03T01:04:03Z" }), opts("intake-enable-insufficient"))
     t.eq(insufficient.exit_code, 0)
     t.eq(#insufficient.raises, 5)
@@ -860,7 +860,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload)),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload), "standard"),
     })
 
     local result = run_judge(payload, opts("intake-idempotent"))
@@ -920,10 +920,10 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", expected_decision_key(payload, nil, command)),
+      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", expected_decision_key(payload, nil, command), "standard"),
       command,
     })
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Class-level carrier; reintake enables after calibration.")
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Class-level carrier; reintake enables after calibration.")
 
     local result = run_judge(payload, opts("intake-reintake"))
     t.eq(result.exit_code, 0)
@@ -943,7 +943,7 @@ return {
     local command = trusted_reintake_command("IC_reintake_stale")
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload)),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload), "standard"),
       command,
     })
 
@@ -958,7 +958,7 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:thinking" }, {
-      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload, nil, command)),
+      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload, nil, command), "standard"),
       command,
     })
 

@@ -531,7 +531,7 @@ return {
     t.is_true(proposal.body:find("Reviewed PR head: def456", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.eq(core.validate_proposal(proposal), true)
-    t.eq(count_calls("--json title,labels,comments"), 1)
+    t.eq(count_calls("--json title,labels,comments,assignees"), 1)
     t.eq(count_calls("gh pr diff"), 1)
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 1)
   end,

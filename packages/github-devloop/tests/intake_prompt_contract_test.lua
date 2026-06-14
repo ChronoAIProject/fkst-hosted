@@ -12,15 +12,22 @@ return {
     t.eq(fact.service_class, "background")
     t.eq(fact.proposal_id, proposal_id)
 
-    local track_marker = core.intake_decision_marker(proposal_id, "track", "intake/github-devloop/issue/owner/repo/42/v-track")
+    local track_marker = core.intake_decision_marker(proposal_id, "track", "intake/github-devloop/issue/owner/repo/42/v-track", "standard")
     local tracked = core.intake_decision_fact({ { body = track_marker, author_login = core.trusted_bot_login() } }, proposal_id)
     t.eq(tracked.decision, "track")
     t.eq(tracked.service_class, "standard")
 
-    local escalation_marker = core.intake_decision_marker(proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v2")
+    local escalation_marker = core.intake_decision_marker(proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v2", "standard")
     local escalation = core.intake_decision_fact({ { body = escalation_marker, author_login = core.trusted_bot_login() } }, proposal_id)
     t.eq(escalation.decision, "escalate-to-class")
     t.eq(escalation.service_class, "standard")
+
+    local missing_class_marker = '<!-- fkst:github-devloop:intake-decision:v1 proposal="' .. proposal_id
+      .. '" decision="enable" dedup="intake/github-devloop/issue/owner/repo/42/old" -->'
+    local invalid_class_marker = '<!-- fkst:github-devloop:intake-decision:v1 proposal="' .. proposal_id
+      .. '" decision="enable" class="urgent" dedup="intake/github-devloop/issue/owner/repo/42/bad" -->'
+    t.is_nil(core.intake_decision_fact({ { body = missing_class_marker, author_login = core.trusted_bot_login() } }, proposal_id))
+    t.is_nil(core.intake_decision_fact({ { body = invalid_class_marker, author_login = core.trusted_bot_login() } }, proposal_id))
   end,
   test_intake_prompt_neutralizes_sentinels_and_markers = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"

@@ -185,7 +185,7 @@ local function comment_cases()
     { id = "reconcile", request = core.build_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-actionable-framing") },
     { id = "fix-reconcile", request = core.build_fix_reconcile_comment_request("owner/repo", "42", fix_reconcile, "drop", "fix-loop-max-rounds") },
     { id = "review-reconcile", request = core.build_review_reconcile_comment_request("owner/repo", "42", review_reconcile, "drop", "review-loop-stalled") },
-    { id = "intake", request = core.build_intake_decision_comment_request("owner/repo", "42", { proposal_id = issue_proposal_id, dedup_key = "intake:v1", source_ref = source_ref() }, "enable", "clear code change") },
+    { id = "intake", request = core.build_intake_decision_comment_request("owner/repo", "42", { proposal_id = issue_proposal_id, dedup_key = "intake:v1", source_ref = source_ref() }, "enable", "clear code change", "standard") },
     { id = "implementing", request = core.build_implementing_comment_request("owner/repo", "42", ready, "/tmp/worktree", "devloop-owner-repo-42", "abc123", "dev", "abc123") },
     { id = "impl-failure", request = core.build_impl_failure_comment_request("owner/repo", "42", ready, "no-changes", "") },
     { id = "pr-open-template", request = { body = core.build_pr_open_request("owner/repo", "42", issue_proposal_id, { state = "implementing", version = ready.dedup_key }, "Implement", "devloop-owner-repo-42", "abc123", "dev").issue_comment_body_template } },
