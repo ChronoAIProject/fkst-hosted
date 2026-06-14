@@ -34,6 +34,25 @@ pub const USERS_PATH: &str = "/api/v1/users";
 /// the exact route shape is isolated from the rest of the codebase.
 pub const GITHUB_PROXY_PATH: &str = "/api/v1/proxy/github";
 
+/// Endpoint that lists the user's linked GitHub connections (one per linked
+/// GitHub account) under the caller's delegated token.
+///
+/// **UNVERIFIED — confirm against NyxID main; confined here.** NyxID `main`
+/// today exposes `GET /api/v1/keys` (per-`UserService` instances, addressed by
+/// id/slug/label) and `GET /api/v1/connections` (one row per service) — neither
+/// yet projects a per-github-login `{connection_id, login, primary}` shape; the
+/// multi-connection github listing is still a NyxID draft. This constant + the
+/// [`GithubConnection`] deserialize mapping are the ONLY places that change when
+/// that listing ships; the wiremock tests pin the contract regardless.
+pub const GITHUB_CONNECTIONS_PATH: &str = "/api/v1/connections?provider=github";
+
+/// NyxID-internal query selector that pins a proxied request to one specific
+/// linked credential instance (verified `_nyxid_via` mechanism on NyxID main:
+/// it routes by user-service / connection id and is stripped before the request
+/// is forwarded to GitHub). Confined here so per-account routing lives in one
+/// place.
+const NYXID_VIA_PARAM: &str = "_nyxid_via";
+
 /// Per-request HTTP timeout.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -88,6 +107,24 @@ pub struct OrgMember {
 #[derive(Debug, Clone, Deserialize)]
 pub struct OrgSummary {
     pub id: String,
+}
+
+/// One linked GitHub account, as projected from NyxID's connections listing.
+///
+/// Tolerant by design: unknown NyxID fields are ignored and `primary` defaults
+/// to `false` when NyxID omits it, so the type survives NyxID field drift while
+/// the wiremock tests pin the contract. See [`GITHUB_CONNECTIONS_PATH`] for the
+/// confined, UNVERIFIED route assumption.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GithubConnection {
+    /// Opaque connection identifier; fed verbatim to NyxID's `_nyxid_via`
+    /// selector to target this account on a proxied request.
+    pub connection_id: String,
+    /// The GitHub login (username) the connection is authorized as.
+    pub login: String,
+    /// Whether this is the user's primary GitHub connection.
+    #[serde(default)]
+    pub primary: bool,
 }
 
 /// Delegated token obtained via RFC 8693 token exchange.
@@ -165,6 +202,33 @@ impl fmt::Debug for NyxIdClient {
 /// Reduce a reqwest error to a credential-free string.
 fn http_err(context: &str, err: reqwest::Error) -> NyxIdError {
     NyxIdError::Http(format!("{context}: {err}"))
+}
+
+/// Percent-encode a value for use as a URL query-component (RFC 3986): keep the
+/// unreserved set `A-Za-z0-9-._~`, escape everything else. A tiny confined
+/// helper so no extra dependency is needed to encode the `_nyxid_via` value.
+fn encode_query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
+/// Append the `_nyxid_via=<connection_id>` selector to a GitHub proxy path,
+/// choosing `&` vs `?` based on whether the path already has a query string.
+/// The connection id is URL-encoded so arbitrary ids stay well-formed.
+fn with_via_selector(github_path: &str, connection_id: &str) -> String {
+    let separator = if github_path.contains('?') { '&' } else { '?' };
+    format!(
+        "{github_path}{separator}{NYXID_VIA_PARAM}={}",
+        encode_query_value(connection_id)
+    )
 }
 
 impl NyxIdClient {
@@ -482,6 +546,63 @@ impl NyxIdClient {
         Ok(response)
     }
 
+    /// Proxy a GitHub request pinned to ONE linked GitHub account.
+    ///
+    /// Appends NyxID's verified `_nyxid_via=<connection_id>` selector to the
+    /// proxied path (URL-encoded; joined with `&` when `github_path` already
+    /// carries a query string, `?` otherwise) and delegates to the unchanged
+    /// [`proxy_github`]. NyxID strips this selector before forwarding to GitHub.
+    /// All per-account routing is confined to this helper.
+    pub async fn proxy_github_for(
+        &self,
+        delegated: &DelegatedToken,
+        connection: &GithubConnection,
+        method: reqwest::Method,
+        github_path: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<reqwest::Response, NyxIdError> {
+        let routed = with_via_selector(github_path, &connection.connection_id);
+        self.proxy_github(delegated, method, &routed, body).await
+    }
+
+    /// List the caller's linked GitHub connections via NyxID, using the
+    /// delegated bearer. Maps NyxID's response into [`GithubConnection`]s.
+    ///
+    /// See [`GITHUB_CONNECTIONS_PATH`] for the confined, UNVERIFIED route
+    /// assumption. No credentials appear in any error.
+    pub async fn github_connections(
+        &self,
+        delegated: &DelegatedToken,
+    ) -> Result<Vec<GithubConnection>, NyxIdError> {
+        let url = format!("{}{}", self.inner.base_url, GITHUB_CONNECTIONS_PATH);
+        let response = self
+            .inner
+            .http
+            .get(&url)
+            .bearer_auth(delegated.access_token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| http_err("github connections", e))?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            let body = response.text().await.unwrap_or_default();
+            return Err(NyxIdError::ExchangeRejected(body));
+        }
+        if !status.is_success() {
+            tracing::error!(status = %status, "nyxid github connections request failed");
+            return Err(NyxIdError::Http(format!(
+                "github connections status {status}"
+            )));
+        }
+
+        let connections: Vec<GithubConnection> = response
+            .json()
+            .await
+            .map_err(|e| NyxIdError::Malformed(format!("github connections body: {e}")))?;
+        Ok(connections)
+    }
+
     /// Check whether a user exists in NyxID via service-account lookup.
     /// Returns `Ok(true)` when the user is found, `Ok(false)` when not.
     /// Uses `GET /api/v1/users/{user_id}` via the service token.
@@ -733,6 +854,119 @@ mod tests {
         };
         let resp = client
             .proxy_github(&delegated, reqwest::Method::GET, "/repos/owner/repo", None)
+            .await
+            .expect("proxy");
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    // ---- github_connections ----
+
+    fn delegated_token(value: &str) -> DelegatedToken {
+        DelegatedToken {
+            access_token: SecretString::from(value.to_string()),
+            expires_in: 300,
+        }
+    }
+
+    #[tokio::test]
+    async fn github_connections_lists_linked_accounts() {
+        let server = MockServer::start().await;
+        // The path constant carries a query string; match on the path prefix.
+        Mock::given(method("GET"))
+            .and(path("/api/v1/connections"))
+            .and(header("authorization", "Bearer delegated_tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                { "connection_id": "c1", "login": "octocat", "primary": true },
+                { "connection_id": "c2", "login": "hubber", "extra": "ignored" }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let connections = client
+            .github_connections(&delegated_token("delegated_tok"))
+            .await
+            .expect("connections");
+        assert_eq!(connections.len(), 2);
+        assert_eq!(connections[0].login, "octocat");
+        assert!(connections[0].primary);
+        // `primary` defaults to false when omitted (tolerant deserialize).
+        assert_eq!(connections[1].connection_id, "c2");
+        assert!(!connections[1].primary);
+    }
+
+    #[tokio::test]
+    async fn github_connections_rejection_is_typed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/connections"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let err = client
+            .github_connections(&delegated_token("delegated_tok"))
+            .await
+            .expect_err("must fail");
+        assert!(
+            matches!(err, NyxIdError::ExchangeRejected(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn github_connections_secret_never_appears_in_error_or_debug() {
+        // Point at nothing to trigger a transport error carrying the URL.
+        let client = test_client("http://127.0.0.1:1");
+        let secret = "delegated_super_secret_tok";
+        let err = client
+            .github_connections(&delegated_token(secret))
+            .await
+            .expect_err("unreachable");
+        assert!(!format!("{err}").contains(secret), "Display leaked secret");
+        assert!(!format!("{err:?}").contains(secret), "Debug leaked secret");
+    }
+
+    #[test]
+    fn with_via_selector_uses_question_mark_then_ampersand() {
+        assert_eq!(with_via_selector("/issues", "c1"), "/issues?_nyxid_via=c1");
+        assert_eq!(
+            with_via_selector("/issues?state=open", "c1"),
+            "/issues?state=open&_nyxid_via=c1"
+        );
+        // The connection id is URL-encoded.
+        assert_eq!(
+            with_via_selector("/issues", "a b/c"),
+            "/issues?_nyxid_via=a%20b%2Fc"
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_github_for_appends_via_selector() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("{GITHUB_PROXY_PATH}/issues")))
+            .and(wiremock::matchers::query_param("_nyxid_via", "c-42"))
+            .and(wiremock::matchers::query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let connection = GithubConnection {
+            connection_id: "c-42".to_string(),
+            login: "octocat".to_string(),
+            primary: true,
+        };
+        let resp = client
+            .proxy_github_for(
+                &delegated_token("delegated_tok"),
+                &connection,
+                reqwest::Method::GET,
+                "/issues?state=open",
+                None,
+            )
             .await
             .expect("proxy");
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
