@@ -70,9 +70,36 @@ function pipeline(event)
     core.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, reviewing.proposal_id)
     local transition = reviewing_transition_status(state, reviewing.version)
-    if transition == "pending" then
-      core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
-      error("github-devloop: reviewing state marker not yet visible for PR review; retrying")
+    if transition == "pending" or transition == "version-mismatch" then
+      local verified_state = nil
+      local hand_off_reason = "missing"
+      if reviewing.reviewing_hand_off ~= nil then
+        verified_state, hand_off_reason = core.verified_hand_off_state(repo, reviewing.reviewing_hand_off, {
+          proposal_id = reviewing.proposal_id,
+          state = "reviewing",
+          marker_version = reviewing.version,
+          event_version = reviewing.version,
+        })
+      end
+      if verified_state ~= nil then
+        state = verified_state
+        transition = "apply"
+        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "apply(verified-own-reviewing-hand-off)", "reviewing marker comment verified by direct id lookup")
+      else
+        if reviewing.reviewing_hand_off ~= nil then
+          core.log_line("info", "review_pr", reviewing.proposal_id, "HANDOFF", {
+            "state=reviewing",
+            "outcome=verify-failed",
+            "reason=" .. tostring(hand_off_reason),
+          })
+        end
+        if transition == "version-mismatch" then
+          core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
+          return
+        end
+        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
+        error("github-devloop: reviewing state marker not yet visible for PR review; retrying")
+      end
     end
     if transition == "stale" then
       core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale/diverged", "issue is not currently reviewing")

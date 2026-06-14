@@ -566,45 +566,48 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
-  test_implement_accepts_own_ready_hand_off_before_marker_visibility = function()
+  test_implement_rejects_unverified_ready_hand_off_before_marker_visibility = function()
     local event = ready()
-    local branch = deterministic_branch_for(event)
     event.ready_hand_off = {
-      kind = "own-ready-state-marker",
+      kind = "own-state-marker",
       proposal_id = event.proposal_id,
       state = "ready",
-      version = event.dedup_key,
+      marker_version = event.dedup_key,
+      event_version = event.dedup_key,
       stage_rank = core.stage_rank("ready"),
       effects = "result-marker,ready-label,devloop-ready",
     }
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
-    mock_fresh_implement_worktree("/tmp/fkst-packages-test/github-devloop/runtime")
-    mock_implement_codex(0, "implemented")
-    mock_git_status(" M packages/github-devloop/core.lua\n")
-    mock_git_commit("def456", branch)
-    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
 
-    local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"), "devloop_ready_session")
+    local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 5)
-    assert_implement_attempt(result.raises, event)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    assert_open_pr_kickoff(result.raises, event, branch, "def456")
-    t.eq(count_calls("codex exec"), 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git -C"), 0)
   end,
 
   test_implement_ready_hand_off_rechecks_state_before_publish = function()
     local event = ready()
     local branch = deterministic_branch_for(event)
     event.ready_hand_off = {
-      kind = "own-ready-state-marker",
+      kind = "own-state-marker",
       proposal_id = event.proposal_id,
       state = "ready",
-      version = event.dedup_key,
+      marker_version = event.dedup_key,
+      event_version = event.dedup_key,
       stage_rank = core.stage_rank("ready"),
       effects = "result-marker,ready-label,devloop-ready",
+      comment_id = "IC_ready_stale",
     }
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    for _ = 1, 2 do
+      t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_ready_stale'", {
+        stdout = '{"body":"' .. json_string(core.state_marker(event.proposal_id, "ready", event.ready_hand_off.marker_version, "result-marker,ready-label,devloop-ready")) .. '","user":{"login":"fkst-test-bot"}}\n',
+        stderr = "",
+        exit_code = 0,
+      })
+    end
     mock_fresh_implement_worktree("/tmp/fkst-packages-test/github-devloop/runtime")
     mock_implement_codex(0, "implemented")
     mock_git_status(" M packages/github-devloop/core.lua\n")
@@ -613,7 +616,7 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.dedup_key),
     })
 
-    local result = run_implement(event, opts("implement-ready-hand-off-stale-at-write"), "devloop_ready_session")
+    local result = run_implement(event, opts("implement-ready-hand-off-stale-at-write"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     assert_implement_attempt(result.raises, event)
@@ -625,14 +628,21 @@ return {
   test_implement_replay_with_ready_hand_off_requires_visible_marker = function()
     local event = ready()
     event.ready_hand_off = {
-      kind = "own-ready-state-marker",
+      kind = "own-state-marker",
       proposal_id = event.proposal_id,
       state = "ready",
-      version = event.dedup_key,
+      marker_version = event.dedup_key,
+      event_version = event.dedup_key,
       stage_rank = core.stage_rank("ready"),
       effects = "result-marker,ready-label,devloop-ready",
+      comment_id = "IC_ready_missing",
     }
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_ready_missing'", {
+      stdout = "",
+      stderr = "not found",
+      exit_code = 1,
+    })
 
     local result = run_implement(event, opts("implement-replay-hand-off-marker-pending"))
     t.eq(result.exit_code, 1)
@@ -652,14 +662,51 @@ return {
     t.eq(count_calls("git -C"), 0)
   end,
 
+  test_implement_accepts_verified_durable_ready_hand_off_before_marker_visibility = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    event.ready_hand_off = {
+      kind = "own-state-marker",
+      proposal_id = event.proposal_id,
+      state = "ready",
+      marker_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      event_version = event.dedup_key,
+      stage_rank = core.stage_rank("ready"),
+      effects = "result-marker,ready-label,devloop-ready",
+      comment_id = "IC_ready_1",
+    }
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    for _ = 1, 2 do
+      t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_ready_1'", {
+        stdout = '{"body":"' .. json_string(core.state_marker(event.proposal_id, "ready", event.ready_hand_off.marker_version, "result-marker,ready-label,devloop-ready")) .. '","user":{"login":"fkst-test-bot"}}\n',
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+    mock_fresh_implement_worktree("/tmp/fkst-packages-test/github-devloop/runtime")
+    mock_implement_codex(0, "implemented")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+
+    local result = run_implement(event, opts("implement-durable-ready-hand-off-marker-pending"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 5)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
+    t.eq(count_calls("repos/owner/repo/issues/comments/IC_ready_1"), 1)
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
   test_implement_retry_ignores_ready_hand_off_before_marker_visibility = function()
     local event = ready({
       impl_retry_attempt = 2,
       ready_hand_off = {
-        kind = "own-ready-state-marker",
+        kind = "own-state-marker",
         proposal_id = ready().proposal_id,
         state = "ready",
-        version = ready().dedup_key,
+        marker_version = ready().dedup_key,
+        event_version = ready().dedup_key,
         stage_rank = core.stage_rank("ready"),
         effects = "result-marker,ready-label,devloop-ready",
       },

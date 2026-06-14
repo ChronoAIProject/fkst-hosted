@@ -8,6 +8,7 @@ local mock_pr_comment_view = h.mock_pr_comment_view
 local mock_pr_comment_write = h.mock_pr_comment_write
 local count_calls = h.count_calls
 local capture_comment_department_logs = h.capture_comment_department_logs
+local pr_comment_create = "gh api --method POST 'repos/owner/x/issues/7/comments'"
 
 local function event(extra)
   local payload = {
@@ -61,6 +62,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls(pr_comment_create), 0)
   end,
 
   test_pr_comment_request_missing_required_fields_fail_closed = function()
@@ -86,6 +88,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls(pr_comment_create), 0)
   end,
 
   test_pr_comment_request_trusted_dedup_skips_write = function()
@@ -93,6 +96,7 @@ return {
     mock_bot_env()
     mock_pr_comment_view({
       {
+        id = "IC_graphql_existing",
         body = "already wrote\n" .. core.comment_marker("review-result/comment/owner/x/7/v1"),
         author = "fkst-test-bot",
       },
@@ -105,10 +109,12 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 1)
-    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
+    t.eq(count_calls(pr_comment_create), 0)
+    t.eq(#result.raises, 0)
   end,
 
-  test_pr_comment_request_real_write_uses_gh_pr_comment = function()
+  test_pr_comment_request_real_write_uses_rest_create = function()
     mock_write_env("1")
     mock_bot_env()
     mock_pr_comment_view("existing PR comment")
@@ -120,6 +126,6 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 1)
-    t.eq(count_calls("gh pr comment"), 1)
+    t.eq(count_calls(pr_comment_create), 1)
   end,
 }

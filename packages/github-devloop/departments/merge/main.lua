@@ -2,7 +2,6 @@ local core = require("core")
 local runtime_files = require("departments.merge.runtime_files")
 
 local M = {}
-
 M.spec = {
   consumes = { "devloop_merge_ready", "devloop_merge_queue_tick" },
   produces = {

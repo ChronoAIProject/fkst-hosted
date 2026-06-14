@@ -31,6 +31,8 @@ function M.comments_from_json(comments_json)
       local author_login = nil
       if type(comment.author) == "table" and comment.author.login ~= nil then
         author_login = tostring(comment.author.login)
+      elseif type(comment.user) == "table" and comment.user.login ~= nil then
+        author_login = tostring(comment.user.login)
       elseif comment.author_login ~= nil then
         author_login = tostring(comment.author_login)
       end
@@ -503,7 +505,15 @@ end
 
 local function comment_author_login(comment)
   if type(comment) == "table" then
-    return comment.author_login
+    if comment.author_login ~= nil then
+      return comment.author_login
+    end
+    if type(comment.author) == "table" and comment.author.login ~= nil then
+      return tostring(comment.author.login)
+    end
+    if type(comment.user) == "table" and comment.user.login ~= nil then
+      return tostring(comment.user.login)
+    end
   end
   return M._test_bot_login
 end

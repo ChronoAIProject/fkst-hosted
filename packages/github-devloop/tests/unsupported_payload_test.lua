@@ -285,6 +285,23 @@ local function payload_for_queue(queue)
     }, {
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout/ready/1",
     }, "github-devloop/issue/owner/repo/42", { kind = "external", ref = "owner/repo#issue/42" }, 1),
+    ["github-proxy.github_comment_written"] = {
+      schema = "github-proxy.comment-written.v1",
+      repo = "owner/repo",
+      target = "issue",
+      issue_number = 42,
+      comment_id = "123456",
+      request_dedup_key = "github-devloop/issue/owner/repo/42/comment/approve/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      dedup_key = "github-devloop/issue/owner/repo/42/comment/approve/written/123456",
+      source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+      handoff = {
+        kind = "github-devloop.ready",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        marker_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+        source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+      },
+    },
     ["github-proxy.github_entity_changed"] = issue_entity_payload(),
     ["github-proxy.github_pr_opened"] = {
       schema = "github-proxy.pr-opened.v1",
