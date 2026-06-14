@@ -362,6 +362,56 @@ function M.merge_queue_tick_payload(repo, merged_pr_number, next_entry)
   }
 end
 
+function M.merge_queue_starvation_tick_payload(repo, incident_identity, head_entry, attempt_key)
+  if type(head_entry) ~= "table" then
+    return nil
+  end
+  local bounded_attempt = M.sanitize_key(attempt_key or "attempt", false)
+  return {
+    schema = "github-devloop.merge-queue-tick.v1",
+    dedup_key = M._dedup_key({
+      "merge-queue",
+      "queue-starvation",
+      M.safe_repo(repo),
+      tostring(incident_identity or "merge-ready"),
+      bounded_attempt,
+    }),
+    source_ref = M.pr_source_ref(repo, head_entry.pr_number),
+    cause = {
+      kind = "queue-starvation",
+      incident_identity = tostring(incident_identity or "merge-ready"),
+      attempt_key = bounded_attempt,
+      head_pr_number = tonumber(head_entry.pr_number),
+      head_sha = tostring(head_entry.head_sha or ""),
+      proposal_id = tostring(head_entry.proposal_id or ""),
+      version = tostring(head_entry.version or ""),
+    },
+  }
+end
+
+function M.queue_starvation_reconcile_marker(issue_proposal_id, pr_number, version, head_sha, incident_identity, attempt_key, outcome)
+  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid queue-starvation reconcile marker")
+  end
+  local incident = M.sanitize_key(tostring(incident_identity or "merge-ready"), false)
+  local attempt = M.sanitize_key(tostring(attempt_key or "attempt"), false)
+  local proof = M.sanitize_key(tostring(outcome or "head-redriven"), false):gsub("/", "-")
+  if not M._is_bounded_string(version, M._max_dedup_len)
+    or not M._is_path_safe_key(incident, M._max_dedup_len)
+    or not M._is_path_safe_key(attempt, M._max_dedup_len)
+    or not M._is_bounded_string(proof, M._max_key_len) then
+    error("github-devloop: invalid queue-starvation reconcile marker")
+  end
+  return '<!-- fkst:github-devloop:queue-starvation-reconcile:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" incident="' .. incident
+    .. '" attempt="' .. attempt
+    .. '" outcome="' .. proof
+    .. '" -->'
+end
+
 function M.merge_ready_payload_from_queue_entry(entry, source_ref)
   if type(entry) ~= "table" then
     return nil

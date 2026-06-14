@@ -794,6 +794,8 @@ local function chain_merge_queue_if_non_empty(repo, branches, merged_pr_number)
 end
 
 local function process_merge_queue_tick(event)
+  local cause = type(event and event.payload) == "table" and event.payload.cause or nil
+  local cause_kind = type(cause) == "table" and tostring(cause.kind or "") or ""
   local repo = core.read_env("FKST_GITHUB_REPO")
   if repo == nil or repo == "" then
     core.log_entry("merge", event, "unknown", "")
@@ -838,6 +840,16 @@ local function process_merge_queue_tick(event)
       })
       return
     end
+    if cause_kind == "queue-starvation" then
+      core.log_line("info", "merge", head.proposal_id, "GATE", {
+        "pr=" .. tostring(head.pr_number),
+        "version=" .. tostring(head.version),
+        "outcome=reconcile",
+        "reason=queue-starvation-redrive",
+        "incident=" .. tostring(cause.incident_identity or ""),
+        "pass=poll",
+      })
+    end
     local merge_ready = synthesize_merge_ready_from_queue_head(repo, head)
     if merge_ready == nil or not core.is_supported_merge_ready(merge_ready) then
       core.log_line("info", "merge", head.proposal_id, "GATE", {
@@ -848,6 +860,11 @@ local function process_merge_queue_tick(event)
         "pass=poll",
       })
       return
+    end
+    if cause_kind == "queue-starvation" then
+      local comment_request = core.build_queue_starvation_reconcile_comment_request(repo, merge_ready, cause)
+      core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+      raise("github-proxy.github_pr_comment_request", comment_request)
     end
     merge_ready._merge_pass = "poll"
     core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)

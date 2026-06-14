@@ -842,6 +842,36 @@ function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_
   }), source_ref)
 end
 
+function M.build_queue_starvation_reconcile_comment_request(repo, merge_ready, cause)
+  local attempt_key = cause and cause.attempt_key or "attempt"
+  local marker = M.queue_starvation_reconcile_marker(
+    merge_ready.proposal_id,
+    merge_ready.pr_number,
+    merge_ready.version,
+    merge_ready.reviewed_head_sha,
+    cause and cause.incident_identity or "merge-ready",
+    attempt_key,
+    "head-redriven"
+  )
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = merge_ready.pr_number,
+  }, "github-devloop queue-starvation reconciliation redrove the merge-ready queue head"
+    .. "\n\nQueue head PR: #" .. tostring(merge_ready.pr_number)
+    .. "\nReviewed head: " .. tostring(merge_ready.reviewed_head_sha)
+    .. "\nAttempt: " .. tostring(attempt_key)
+    .. "\n\n" .. marker, M._dedup_key({
+    "queue-starvation",
+    "reconcile",
+    tostring(merge_ready.proposal_id),
+    tostring(merge_ready.pr_number),
+    tostring(merge_ready.version),
+    tostring(merge_ready.reviewed_head_sha),
+    tostring(attempt_key),
+  }), M.pr_source_ref(repo, merge_ready.pr_number))
+end
+
 function M.build_review_carry_over_comment_request(repo, pr_number, issue_proposal_id, version, carry, source_ref)
   local state_marker = M.state_marker(issue_proposal_id, "merge-ready", version)
   local review_marker = M.review_result_marker(carry.new_review_proposal_id, issue_proposal_id, "approve", carry.new_review_dedup_key)

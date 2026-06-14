@@ -396,7 +396,20 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
   evidence.incident_identity = stable_incident_identity(queue_head)
   local snapshot = write_snapshot(repo, evidence.window_key, evidence)
   local request = M.build_queue_starvation_issue_create_request(repo, evidence, snapshot)
+  local redrive = nil
+  if queue_head.entity ~= nil and queue_head.entity.pr_number ~= nil then
+    redrive = M.merge_queue_starvation_tick_payload(repo, evidence.incident_identity, {
+      pr_number = queue_head.entity.pr_number,
+      proposal_id = queue_head.entity.proposal_id,
+      version = queue_head.entity.state and queue_head.entity.state.version or nil,
+      head_sha = queue_head.entity.head_sha,
+    }, evidence.window_key)
+  end
   M.log_raise("observability", detector .. "/merge-ready", "github-proxy.github_issue_create_request", request)
+  if redrive ~= nil then
+    M.log_raise("observability", detector .. "/merge-ready", "devloop_merge_queue_tick", redrive)
+    raise("devloop_merge_queue_tick", redrive)
+  end
   log.info("github-devloop dept=observability tag=QUEUE_STARVATION"
     .. " action=raise"
     .. " queue_head=" .. tostring(queue_head.entity and queue_head.entity.proposal_id or "")
@@ -408,6 +421,7 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
   return {
     action = "raise",
     request = request,
+    redrive = redrive,
     snapshot_path = snapshot,
   }
 end

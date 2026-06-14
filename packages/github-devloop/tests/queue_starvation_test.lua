@@ -251,6 +251,29 @@ return {
     t.is_true(written:find('"age_minutes":90', 1, true) ~= nil)
   end,
 
+  test_queue_starvation_raises_bounded_merge_queue_redrive = function()
+    mock_env()
+    mock_merge_queue_list({ 459 })
+    mock_merge_queue_pr(459, 459, 120, "abcdef123456")
+    mock_observe_lists(42)
+    mock_queue_head(90)
+    mock_recent_closed("[]\n")
+
+    local result = run_observability("queue-starvation-redrive")
+
+    t.eq(result.exit_code, 0)
+    local redrive = find_raise(result.raises, "devloop_merge_queue_tick")
+    t.is_true(redrive ~= nil)
+    t.eq(redrive.payload.schema, "github-devloop.merge-queue-tick.v1")
+    t.eq(redrive.payload.source_ref.ref, "owner/repo#pr/459")
+    t.eq(redrive.payload.cause.kind, "queue-starvation")
+    t.eq(redrive.payload.cause.attempt_key, core.queue_starvation_window_key(now()))
+    t.eq(redrive.payload.cause.head_pr_number, 459)
+    t.eq(redrive.payload.cause.head_sha, "abcdef123456")
+    t.is_true(redrive.payload.cause.incident_identity:find("merge-ready/pr/459/proposal/github-devloop/issue/owner/repo/459", 1, true) ~= nil)
+    t.is_true(redrive.payload.dedup_key:find("/window-", 1, true) ~= nil)
+  end,
+
   test_queue_starvation_suppresses_when_trusted_recent_merge_exists = function()
     prepare_stale_head()
     mock_closed_merged_issue(77, 30)
@@ -300,6 +323,7 @@ return {
     t.is_true(create.payload.body:find("Queue head PR: #459", 1, true) ~= nil)
     t.is_true(create.payload.body:find("Head source: `merge-queue`", 1, true) ~= nil)
     t.is_true(create.payload.dedup_key:find("merge-ready/pr/459/proposal/github-devloop/issue/owner/repo/459", 1, true) ~= nil)
+    t.is_true(find_raise(result.raises, "devloop_merge_queue_tick") ~= nil)
   end,
 
   test_queue_starvation_has_no_repair_side_effects = function()
