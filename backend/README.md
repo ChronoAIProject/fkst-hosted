@@ -232,6 +232,65 @@ Constraints enforced during zip extraction:
 - **Manage** (DELETE): owner, org admin, admin scope
 - Foreign private packages return 404 (anti-enumeration)
 
+## GitHub issues hub API
+
+Aggregate a user's GitHub issues across **all** their linked GitHub accounts and
+run single-target issue operations (create / read / update / comment). GitHub is
+reached **only** through NyxID's credential-injection proxy with an RFC 8693
+delegated token — fkst-hosted never holds a GitHub token. All endpoints require
+authentication. Issue bodies and tokens are never logged (only counts/sizes).
+
+| Method | Path | Status | Description |
+|--------|------|--------|-------------|
+| `GET` | `/api/v1/github/accounts` | 200 | List the caller's linked GitHub accounts (`connection_id`, `login`, `primary`) |
+| `GET` | `/api/v1/github/issues` | 200 | Aggregate issues across linked accounts (resilient fan-out; see below) |
+| `POST` | `/api/v1/github/repos/{owner}/{repo}/issues` | 201 | Create an issue (`title`, optional `body`/`labels`/`assignees`/`account`) |
+| `GET` | `/api/v1/github/repos/{owner}/{repo}/issues/{number}` | 200 | Fetch one issue (body populated) |
+| `PATCH` | `/api/v1/github/repos/{owner}/{repo}/issues/{number}` | 200 | Update an issue (`title`/`body`/`state`/`labels`/`assignees`/`account`) |
+| `GET` | `/api/v1/github/repos/{owner}/{repo}/issues/{number}/comments` | 200 | List an issue's comments |
+| `POST` | `/api/v1/github/repos/{owner}/{repo}/issues/{number}/comments` | 201 | Add a comment (`body`, optional `account`) |
+
+### Aggregate (`GET /api/v1/github/issues`)
+
+Query params: `accounts` (comma-separated logins to restrict to; default all),
+`filter` (default `assigned`), `state` (default `open`), `labels`
+(comma-separated; each URL-encoded individually upstream), `page` (default `1`),
+`per_page` (default `30`, clamped to `1..=50`).
+
+The response is **always `200`** once the account listing resolves — a slow or
+failing account never sinks the whole request. Each account is queried
+concurrently (10 s budget each) and reported separately:
+
+```json
+{ "results": [
+  { "account": "octocat", "issues": [ /* IssueView, body suppressed in lists */ ],
+    "page": 1, "per_page": 30, "has_more": true,
+    "rate_limit": { "remaining": 4998, "reset_epoch": 1700000000 } },
+  { "account": "hubber", "issues": [], "page": 1, "per_page": 30, "has_more": false,
+    "error": { "kind": "rate_limited", "message": "github rate limited; retry later",
+               "retry_after_secs": 41 } }
+] }
+```
+
+Per-account `error.kind` is one of `rate_limited` | `auth` | `upstream` |
+`network`. `has_more` is derived from GitHub's `Link: …; rel="next"` header.
+Only a delegation / connection-listing failure bubbles up as a `503`. Zero
+linked accounts yields `{ "results": [] }` (still `200`).
+
+### Account selection (single-target ops)
+
+`account` (a linked GitHub login) selects which linked account to act under. It
+is **implied** when exactly one account is linked; when several are linked it is
+**required** — an absent `account` yields `422 "multiple GitHub accounts linked;
+specify account"`, and an unknown login yields `422`.
+
+### Upstream status mapping (single-target ops)
+
+GitHub `404` → `404`; `401` / `403`-without-rate-limit → `403`; `422` → `422`
+(surfacing GitHub's first error message); `403`/`429` with rate-limit evidence →
+`429` with a `Retry-After` header; any other `5xx` → `502 upstream_error`.
+Successful create/read responses copy GitHub's `x-ratelimit-*` headers through.
+
 ## Testing
 
 ```sh
