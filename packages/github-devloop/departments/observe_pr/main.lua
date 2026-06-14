@@ -121,12 +121,30 @@ local function issue_comments_for_origin(origin)
   return core.parse_issue_view_result(issue_view.stdout).comments
 end
 
-local function raise_current_state(origin, pr_number, current_pr, state, source_ref, known_issue_comments)
+local function issue_reviewing_for_origin(origin)
+  if origin.issue_number == nil then
+    return nil
+  end
+  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_reviewing_cmd(origin.repo, origin.issue_number), timeout = 30 })
+  if issue_view.exit_code ~= 0 then
+    error("github-devloop: gh issue reviewing view failed: " .. tostring(issue_view.stderr))
+  end
+  return core.parse_issue_view_reviewing(issue_view.stdout)
+end
+
+local function issue_claim_for_origin(origin)
+  if origin.issue_number == nil then
+    return nil
+  end
+  return { assignees = core.read_current_issue_assignees(origin.repo, origin.issue_number) }
+end
+
+local function raise_current_state(origin, pr_number, current_pr, state, source_ref, known_issue)
   if state.state == "fixing" and tostring(current_pr.state or ""):lower() ~= "open" then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(pr-closed)", "re-derived PR is not open")
     return false
   end
-  local issue_comments = known_issue_comments
+  local issue_comments = known_issue and known_issue.comments or nil
   if issue_comments == nil and state.state == "fixing" then
     issue_comments = issue_comments_for_origin(origin)
   end
@@ -320,20 +338,36 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    local issue_current = nil
+    local function issue_claim_ok()
+      if issue_current == nil then
+        issue_current = issue_claim_for_origin(origin)
+      end
+      return core.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id)
+    end
     local merge_gate_feedback = nil
     if state.state == "reviewing" and origin.issue_number ~= nil then
       merge_gate_feedback = core.merge_gate_fix_fact(current_pr.comments, origin.proposal_id, core.next_fix_version(state.version))
     end
     if merge_gate_feedback ~= nil then
-      local issue_comments = issue_comments_for_origin(origin)
+      if not issue_claim_ok() then
+        return
+      end
+      if issue_current == nil or issue_current.comments == nil then
+        issue_current = issue_reviewing_for_origin(origin)
+      end
+      local issue_comments = issue_current and issue_current.comments or issue_comments_for_origin(origin)
       local issue_state = core.current_entity_state(issue_comments, origin.proposal_id)
       if issue_state.state == "fixing" then
         core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
-        if raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, issue_comments) then
+        if raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, { comments = issue_comments }) then
           maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref)
         end
         return
       end
+    end
+    if core.operator_command_fact(current_pr.comments, "rereview") ~= nil and not issue_claim_ok() then
+      return
     end
     if maybe_apply_rereview_command(origin, pr.number, current_pr, state, source_ref) then
       return
@@ -341,7 +375,10 @@ function pipeline(event)
     if state.state ~= nil and state.state ~= "pr-open" then
       local replay_state = pr.source == "poll" and raw.source == "liveness-scan" and liveness_timeout_state(state) or state
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
-      if raise_current_state(origin, pr.number, current_pr, replay_state, source_ref) then
+      if replay_state.state == "reviewing" and not issue_claim_ok() then
+        return
+      end
+      if raise_current_state(origin, pr.number, current_pr, replay_state, source_ref, issue_current) then
         maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref)
       end
       return
@@ -371,6 +408,9 @@ function pipeline(event)
     end
     if tostring(current_pr.state or ""):lower() ~= "open" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
+      return
+    end
+    if not issue_claim_ok() then
       return
     end
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "applied", "writing PR-local reviewing marker")

@@ -88,6 +88,9 @@ function pipeline(event)
 
   with_lock(lock_key, function()
     local pr_source_ref = core.pr_source_ref(origin.repo, pr_number)
+    if not core.verify_pr_review_issue_claim("review_result", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+      return
+    end
     core.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
     local effective_decision = reached.decision

@@ -274,7 +274,7 @@ function M.gh_issue_view_reviewing_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_review_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,assignees")
 end
 
 function M.gh_issue_view_decompose_cmd(repo, issue_number)
@@ -290,7 +290,7 @@ function M.gh_issue_view_commit_subject_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_review_loop_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,assignees")
 end
 
 function M.gh_issue_view_merge_cmd(repo, issue_number)

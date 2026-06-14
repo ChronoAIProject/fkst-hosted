@@ -68,6 +68,11 @@ return {
     mock_pr_view_origin({
       core.pr_origin_marker(event.proposal_id, "42", event.branch, event.impl_version, event.base_branch),
     }, event.branch, event.head_sha)
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = '{"assignees":[{"login":"fkst-test-bot"}]}\n',
+      stderr = "",
+      exit_code = 0,
+    })
 
     local result = t.run_department("departments/observe_pr/main.lua", {
       queue = "github-proxy.github_pr_opened",

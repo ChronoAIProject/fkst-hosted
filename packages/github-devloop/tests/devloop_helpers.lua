@@ -28,6 +28,14 @@ local function mock_empty_dependencies()
   })
 end
 
+local function mock_default_issue_claim()
+  helpers.t.mock_command(helpers.core.gh_issue_view_claim_cmd("owner/repo", 42), {
+    stdout = '{"assignees":[{"login":"fkst-test-bot"}]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_context_bundle()
   local ok = { stdout = "", stderr = "", exit_code = 0 }
   for _ = 1, 8 do
@@ -119,8 +127,21 @@ for _, name in ipairs({
   local base_run = helpers[name]
   helpers[name] = function(...)
     mock_context_bundle()
+    mock_default_issue_claim()
     return base_run(...)
   end
+end
+
+local base_run_observe_pr = helpers.run_observe_pr
+helpers.run_observe_pr = function(...)
+  mock_default_issue_claim()
+  return base_run_observe_pr(...)
+end
+
+local base_run_review_result = helpers.run_review_result
+helpers.run_review_result = function(...)
+  mock_default_issue_claim()
+  return base_run_review_result(...)
 end
 
 helpers.mock_bot_env = function(...)
