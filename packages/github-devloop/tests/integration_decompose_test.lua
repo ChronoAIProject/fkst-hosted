@@ -29,6 +29,7 @@ end
 local function run_decompose_with_post_marker(event, run_opts, count)
   h.mock_default_issue_claim()
   mock_pr_view(event, blocked_comments(event), "2026-06-03T02:03:04Z")
+  mock_pr_view(event, blocked_comments(event), "2026-06-03T02:03:04Z")
   mock_pr_view(event, blocked_comments(event, {
     core.decomposed_marker(event.proposal_id, event.version, event.pr_number, count),
   }), "2026-06-03T02:03:05Z")
@@ -76,6 +77,12 @@ local function mock_child_issue_list(event, indexes)
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function mock_child_issue_list_repeated(event, indexes, times)
+  for _ = 1, times do
+    mock_child_issue_list(event, indexes)
+  end
 end
 
 local function issue_created_marker(dedup_key, issue_number)
@@ -202,7 +209,7 @@ return {
     })
     mock_decompose_codex(two_issue_json)
     mock_pr_comment_write(0)
-    mock_child_issue_list(event, {})
+    mock_child_issue_list_repeated(event, {}, 2)
 
     local result = run_decompose_with_post_marker(event, opts("decompose-two-issues"), 2)
 
@@ -260,7 +267,11 @@ return {
       core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
       issue_created_marker(stale_dedup, "101"),
     }))
-    mock_child_issue_list(event, {})
+    mock_pr_view(event, blocked_comments(event, {
+      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
+      issue_created_marker(stale_dedup, "101"),
+    }))
+    mock_child_issue_list_repeated(event, {}, 4)
     mock_decompose_codex(two_issue_json)
 
     local result = run_decompose(event, opts("decompose-idempotent-heal-zero"))
@@ -284,7 +295,10 @@ return {
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
       core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
     }))
-    mock_child_issue_list(event, { 1, 3 })
+    mock_pr_view(event, blocked_comments(event, {
+      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+    }))
+    mock_child_issue_list_repeated(event, { 1, 3 }, 3)
     mock_decompose_codex([[{"issues":[{"title":"One","body":"Smaller scope: one.\nNon-goals: none.\nAcceptance: one."},{"title":"Two","body":"Smaller scope: two.\nNon-goals: none.\nAcceptance: two."},{"title":"Three","body":"Smaller scope: three.\nNon-goals: none.\nAcceptance: three."}]}]])
 
     local result = run_decompose(event, opts("decompose-idempotent-heal-partial"))
@@ -305,6 +319,7 @@ return {
       title = "Original large issue",
       body = "Original body that describes too much scope.",
     })
+    mock_pr_view(event, blocked_comments(event))
     mock_decompose_codex(two_issue_json)
     mock_pr_comment_write(1)
 
@@ -327,14 +342,14 @@ return {
     })
     mock_decompose_codex(two_issue_json)
     mock_pr_comment_write(0)
-    mock_child_issue_list(event, {})
+    mock_child_issue_list_repeated(event, {}, 2)
 
     local result = run_decompose_with_post_marker(event, opts("decompose-marker-before-create"), 2)
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     t.eq(count_calls("gh pr comment"), 1)
-    t.eq(count_calls("gh pr view"), 3)
+    t.eq(count_calls("gh pr view"), 4)
   end,
 
   test_decompose_depth_cap_skips_lineage_child = function()
@@ -346,6 +361,7 @@ return {
       title = "Child issue",
       body = "Child body.\n\n" .. core.decompose_lineage_marker(event.proposal_id, 1),
     })
+    mock_pr_view(event, blocked_comments(event))
 
     local result = run_decompose(event, opts("decompose-depth-cap"))
 
@@ -363,6 +379,7 @@ return {
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex("not json")
+    mock_pr_view(event, blocked_comments(event))
 
     local first = run_decompose(event, run_opts)
     t.eq(first.exit_code, 1)
@@ -392,7 +409,7 @@ return {
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex([[{"issues":[{"title":"One","body":"Smaller scope: one.\nNon-goals: no extra.\nAcceptance: one."},{"title":"Two","body":"Smaller scope: two.\nNon-goals: no extra.\nAcceptance: two."},{"title":"Three","body":"Smaller scope: three.\nNon-goals: no extra.\nAcceptance: three."},{"title":"Four","body":"Smaller scope: four.\nNon-goals: no extra.\nAcceptance: four."}]}]])
     mock_pr_comment_write(0)
-    mock_child_issue_list(event, {})
+    mock_child_issue_list_repeated(event, {}, 3)
 
     local result = run_decompose_with_post_marker(event, opts("decompose-cap-three"), 3)
 

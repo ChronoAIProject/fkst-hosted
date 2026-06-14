@@ -872,7 +872,9 @@ def check_persistence_classes(root: Path, violations: list[str]) -> None:
                     )
 
 
-REQUIRE_RE = re.compile(r"""require\(\s*["']([A-Za-z0-9_.\-]+)["']""")
+REQUIRE_RE = re.compile(
+    r"""\brequire\s*(?:\(\s*)?(?:"([A-Za-z0-9_.\-]+)"|'([A-Za-z0-9_.\-]+)'|\[(=*)\[([A-Za-z0-9_.\-]+)\]\3\])"""
+)
 SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']std\.saga["']""")
 SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*\{")
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
@@ -884,7 +886,8 @@ def cross_package_require_names(
     """Top-level require names in `source` that name a sibling package."""
     hits: set[str] = set()
     for match in REQUIRE_RE.finditer(source):
-        top = match.group(1).split(".")[0]
+        name = next(group for group in (match.group(1), match.group(2), match.group(4)) if group is not None)
+        top = name.split(".")[0]
         if top in package_names and top != current_pkg:
             hits.add(top)
     return sorted(hits)
@@ -948,11 +951,14 @@ def saga_allowlist_at_dev_base(root: Path) -> set[str] | None:
         return None
 
 
-def check_saga_handler_ratchet(root: Path, violations: list[str]) -> None:
+def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list[str]) -> None:
     allow_path = root / "migration" / "saga-handler.allowlist"
     allowlist = set() if not allow_path.exists() else {line.strip() for line in read_text(allow_path).splitlines() if line.strip() and not line.lstrip().startswith("#")}
     sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}
-    violations.extend(saga_handler_ratchet_violations(sources, allowlist, saga_allowlist_at_dev_base(root)))
+    base_allowlist = saga_allowlist_at_dev_base(root)
+    if base_allowlist is None:
+        warnings.append("G10: saga-handler allowlist growth check skipped because dev base allowlist is unavailable")
+    violations.extend(saga_handler_ratchet_violations(sources, allowlist, base_allowlist))
 
 
 def main() -> int:
@@ -970,7 +976,7 @@ def main() -> int:
     check_error_class_prefixes(root, warnings)
     check_persistence_classes(root, violations)
     check_cross_package_require(root, violations)
-    check_saga_handler_ratchet(root, violations)
+    check_saga_handler_ratchet(root, violations, warnings)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

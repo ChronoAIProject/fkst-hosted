@@ -1,4 +1,12 @@
 -- std.saga: shared department shape for event-level idempotent sagas.
+-- Contract: done(event) must be cheap, side-effect-free, and re-derived from
+-- the durable fact source. It may cache immutable event decoding, but it must
+-- never cache mutable durable facts for act(event).
+--
+-- act(event) must re-derive mutable durable facts inside its own fenced
+-- critical section and re-check completion before each write-class effect.
+-- At-least-once idempotency belongs at the write boundary, not at the earlier
+-- done probe.
 local S = {}
 
 local function always_accept(_event)

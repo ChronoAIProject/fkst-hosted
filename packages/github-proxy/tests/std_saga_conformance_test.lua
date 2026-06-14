@@ -19,11 +19,16 @@ return {
   test_write_class_classifier_is_explicit = function()
     t.eq(conformance.is_write_class("gh issue comment '42' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh pr merge '7' --repo 'owner/x'"), true)
+    t.eq(conformance.is_write_class("gh pr ready '7' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh label create 'fkst-dev:ready' --repo 'owner/x'"), true)
+    t.eq(conformance.is_write_class("gh workflow run 'ci.yml' --repo 'owner/x'"), true)
+    t.eq(conformance.is_write_class("git push origin HEAD:branch"), true)
     t.eq(conformance.is_write_class("gh api --method POST 'repos/owner/x/issues/42/comments'"), true)
+    t.eq(conformance.is_write_class("gh api graphql\nmutation { addLabelsToLabelable(input: {}) { clientMutationId } }"), true)
     t.eq(conformance.is_write_class("gh issue view '42' --repo 'owner/x'"), false)
     t.eq(conformance.is_write_class("gh pr diff '7' --repo 'owner/x'"), false)
     t.eq(conformance.is_write_class("gh api 'repos/owner/x/issues/42'"), false)
+    t.eq(conformance.is_write_class("gh api graphql\nquery { viewer { login } }"), false)
   end,
 
   test_assert_progress_passes_when_first_writes = function()

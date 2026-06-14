@@ -119,8 +119,9 @@ local function raise_issue_create(repo, decompose, issue, index)
   core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_issue_create_request", create_request)
 end
 
-local function child_completion_check(child_issues, decompose, index)
+local function child_completion_check(repo, decompose, index)
   return function()
+    local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
     local completed = core.decompose_child_issue_fact_indexes(
       child_issues,
       decompose.proposal_id,
@@ -129,6 +130,21 @@ local function child_completion_check(child_issues, decompose, index)
     )
     return completed[index] == true
   end
+end
+
+local function all_children_complete(child_issues, decompose, count)
+  local completed = core.decompose_child_issue_fact_indexes(
+    child_issues,
+    decompose.proposal_id,
+    decompose.version,
+    decompose.pr_number
+  )
+  for index = 1, count do
+    if completed[index] ~= true then
+      return false
+    end
+  end
+  return true
 end
 
 local function effect_id_for_create(repo, decompose, issue, index)
@@ -141,8 +157,8 @@ local function perform_issue_create(repo, decompose, issue, index)
   end
 end
 
-local function heal_missing_children(event, repo, issue_number, decompose, state, decomposed, known_child_issues)
-  local child_issues = known_child_issues or read_decompose_child_issues(repo, decompose.proposal_id)
+local function heal_missing_children(event, repo, issue_number, decompose, state, decomposed)
+  local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
   local completed = core.decompose_child_issue_fact_indexes(
     child_issues,
     decompose.proposal_id,
@@ -191,7 +207,7 @@ local function heal_missing_children(event, repo, issue_number, decompose, state
   for _, index in ipairs(missing) do
     core.effect_once({
       effect_id = effect_id_for_create(repo, decompose, issues[index], index),
-      completion_check = child_completion_check(child_issues, decompose, index),
+      completion_check = child_completion_check(repo, decompose, index),
       perform = perform_issue_create(repo, decompose, issues[index], index),
     })
   end
@@ -210,6 +226,7 @@ local function write_decomposed_marker(repo, decompose, count)
   if not core.has_decomposed_marker(confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then
     error("github-devloop: decomposed marker not yet visible after write; retrying")
   end
+  return confirmed_pr
 end
 
 local function decompose_context(event)
@@ -295,12 +312,9 @@ local function decomposed_done(event)
   local done = false
   with_lock(context.lock_key, function()
     core.assert_trusted_bot_configured()
-    context.asserted_bot = true
     local current_pr = read_current_pr(context.repo, context.decompose.pr_number)
-    context.current_pr = current_pr
     core.log_forged_markers("decompose", context.decompose.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, context.decompose.proposal_id)
-    context.state = state
     if not core.has_fix_reconcile_marker(current_pr.comments, context.decompose.proposal_id, context.decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(context.decompose.version) then
@@ -315,19 +329,9 @@ local function decomposed_done(event)
     if decomposed == nil then
       return
     end
-    context.decomposed = decomposed
     local child_issues = read_decompose_child_issues(context.repo, context.decompose.proposal_id)
-    context.child_issues = child_issues
-    local completed = core.decompose_child_issue_fact_indexes(
-      child_issues,
-      context.decompose.proposal_id,
-      context.decompose.version,
-      context.decompose.pr_number
-    )
-    for index = 1, decomposed.count do
-      if completed[index] ~= true then
-        return
-      end
+    if not all_children_complete(child_issues, context.decompose, decomposed.count) then
+      return
     end
     core.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
     done = true
@@ -350,30 +354,26 @@ local function act_decompose(event)
   local repo = context.repo
   local issue_number = context.issue_number
   with_lock(context.lock_key, function()
-    if not context.asserted_bot then
-      core.assert_trusted_bot_configured()
-    end
+    core.assert_trusted_bot_configured()
 
-    local current_pr = context.current_pr or read_current_pr(repo, decompose.pr_number)
-    if context.current_pr == nil then
-      core.log_forged_markers("decompose", decompose.proposal_id, current_pr.comments)
-    end
+    local current_pr = read_current_pr(repo, decompose.pr_number)
+    core.log_forged_markers("decompose", decompose.proposal_id, current_pr.comments)
 
-    local state = context.state or core.current_entity_state(current_pr.comments, decompose.proposal_id)
+    local state = core.current_entity_state(current_pr.comments, decompose.proposal_id)
     if not core.has_fix_reconcile_marker(current_pr.comments, decompose.proposal_id, decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(decompose.version) then
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(blocked-fix-reconcile-not-visible)", "blocked/fix-reconcile marker is not yet visible")
       error("github-devloop: blocked fix reconcile marker not yet visible for decompose; retrying")
     end
-    local decomposed = context.decomposed or core.decomposed_fact(
+    local decomposed = core.decomposed_fact(
       current_pr.comments,
       decompose.proposal_id,
       decompose.version,
       decompose.pr_number
     )
     if decomposed ~= nil then
-      heal_missing_children(event, repo, issue_number, decompose, state, decomposed, context.child_issues)
+      heal_missing_children(event, repo, issue_number, decompose, state, decomposed)
       return
     end
 
@@ -398,11 +398,10 @@ local function act_decompose(event)
     core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
       "github-proxy.github_issue_create_request",
     })
-    local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
     for index = 1, count do
       core.effect_once({
         effect_id = effect_id_for_create(repo, decompose, issues[index], index),
-        completion_check = child_completion_check(child_issues, decompose, index),
+        completion_check = child_completion_check(repo, decompose, index),
         perform = perform_issue_create(repo, decompose, issues[index], index),
       })
     end

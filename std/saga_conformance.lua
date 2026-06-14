@@ -10,9 +10,12 @@ local write_prefixes = {
   "gh pr comment",
   "gh pr edit",
   "gh pr create",
+  "gh pr ready",
   "gh label add",
   "gh label remove",
   "gh label create",
+  "gh workflow run",
+  "git push",
 }
 
 local write_fragments = {
@@ -28,6 +31,11 @@ local function starts_with(value, prefix)
   return value:sub(1, #prefix) == prefix
 end
 
+local function is_graphql_mutation(command)
+  return command:find("gh api graphql", 1, true) ~= nil
+    and command:find("mutation") ~= nil
+end
+
 function C.is_write_class(command_string)
   local command = tostring(command_string or "")
   for _, prefix in ipairs(write_prefixes) do
@@ -40,12 +48,15 @@ function C.is_write_class(command_string)
       return true
     end
   end
+  if is_graphql_mutation(command) then
+    return true
+  end
   return false
 end
 
 local function command_text(call)
   if type(call) == "table" then
-    return call.rendered or call.cmd or call.command or ""
+    return tostring(call.rendered or call.cmd or call.command or "") .. "\n" .. tostring(call.stdin or "")
   end
   return call
 end

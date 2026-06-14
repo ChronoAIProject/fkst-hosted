@@ -4,6 +4,7 @@ local t = h.t
 local core = h.core
 
 local two_issue_json = [[{"issues":[{"title":"Extract retry helper","body":"Smaller scope: implement retry helper.\nNon-goals: no workflow rewrite.\nAcceptance: helper tests pass."},{"title":"Wire retry helper","body":"Smaller scope: wire one caller.\nNon-goals: no unrelated states.\nAcceptance: integration test passes."}]}]]
+local first_delivery_facts = nil
 
 local function blocked_comments(event, extra)
   local comments = {
@@ -45,6 +46,30 @@ local function mock_child_issue_list(event, indexes)
   })
 end
 
+local function mock_child_issue_list_from_bodies(event, bodies)
+  local rendered = {}
+  for index, body in ipairs(bodies or {}) do
+    table.insert(rendered, string.format(
+      '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
+      100 + index,
+      index,
+      h.json_string(body),
+      100 + index
+    ))
+  end
+  t.mock_command(core.gh_issue_list_decompose_children_cmd("owner/repo", event.proposal_id), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_child_issue_list_repeated(event, indexes, times)
+  for _ = 1, times do
+    mock_child_issue_list(event, indexes)
+  end
+end
+
 local function mock_pr_view(event, comments)
   local rendered = {
     h.render_comment(core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
@@ -58,6 +83,36 @@ local function mock_pr_view(event, comments)
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function pr_comment_body_path()
+  for _, call in ipairs(t.command_calls()) do
+    local rendered = tostring(call.rendered or "")
+    if rendered:find("gh pr comment", 1, true) ~= nil then
+      return rendered:match("%-%-body%-file '([^']+)'")
+    end
+  end
+  return nil
+end
+
+local function capture_first_delivery_facts(result)
+  local path = pr_comment_body_path()
+  if path == nil then
+    error("decompose saga test: first delivery did not write decomposed marker")
+  end
+  local child_bodies = {}
+  for _, raised in ipairs(result.raises or {}) do
+    if raised.queue == "github-proxy.github_issue_create_request" then
+      table.insert(child_bodies, raised.payload.body)
+    end
+  end
+  if #child_bodies == 0 then
+    error("decompose saga test: first delivery did not raise child issue creates")
+  end
+  first_delivery_facts = {
+    marker_body = file.read(path),
+    child_bodies = child_bodies,
+  }
 end
 
 local function mock_decompose_codex(stdout)
@@ -112,6 +167,7 @@ local function mock_decompose_codex(stdout)
 end
 
 local function mock_first_delivery(event)
+  first_delivery_facts = nil
   h.mock_bot_env()
   mock_write_env_real()
   h.mock_default_issue_claim()
@@ -120,21 +176,25 @@ local function mock_first_delivery(event)
     body = "Original body that describes too much scope.",
   })
   mock_pr_view(event, blocked_comments(event))
-  mock_pr_view(event, blocked_comments(event, {
-    core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
-  }))
+  mock_pr_view(event, blocked_comments(event))
   mock_decompose_codex(two_issue_json)
   t.mock_command("gh pr comment", { stdout = "", stderr = "", exit_code = 0 })
-  mock_child_issue_list(event, {})
+  mock_pr_view(event, blocked_comments(event, {
+    core.decomposed_comment_body(event, 2),
+  }))
+  mock_child_issue_list_repeated(event, {}, 2)
 end
 
 local function mock_second_delivery(event)
   h.mock_bot_env()
   h.mock_default_issue_claim()
+  if first_delivery_facts == nil then
+    error("decompose saga test: first delivery facts were not captured")
+  end
   mock_pr_view(event, blocked_comments(event, {
-    core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
+    first_delivery_facts.marker_body,
   }))
-  mock_child_issue_list(event, { 1, 2 })
+  mock_child_issue_list_from_bodies(event, first_delivery_facts.child_bodies)
 end
 
 local function run_decompose(event, name)
@@ -160,7 +220,9 @@ return {
     saga_conformance.assert_idempotent(t, {
       first = function()
         mock_first_delivery(event)
-        return run_decompose(event, "decompose-saga-first")
+        local result = run_decompose(event, "decompose-saga-first")
+        capture_first_delivery_facts(result)
+        return result
       end,
       second = function()
         mock_second_delivery(event)

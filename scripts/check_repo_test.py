@@ -335,6 +335,13 @@ class CrossPackageRequireTest(unittest.TestCase):
             ["github-proxy"],
         )
 
+    def test_flags_string_call_sibling_package_require(self) -> None:
+        src = 'local a = require "github-proxy.core"\nlocal b = require[[github-proxy.util]]\n'
+        self.assertEqual(
+            self.names(src, ["github-proxy", "consensus"], "consensus"),
+            ["github-proxy"],
+        )
+
     def test_allows_std_core_departments_fkst(self) -> None:
         src = (
             'require("std.saga") require("core") require("core.markers") '
@@ -375,6 +382,19 @@ class SagaHandlerRatchetTest(unittest.TestCase):
     def test_saga_shaped_department_with_leftover_pipeline_fails(self) -> None:
         source = 'local saga = require("std.saga")\npipeline = function() end\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
         self.assertIn("still defines free-form top-level pipeline", self.violations(source, set())[0])
+
+    def test_allowlist_growth_relative_to_base_fails(self) -> None:
+        source = 'function pipeline(event)\n  return event\nend\n'
+        allowlist = {
+            "packages/example/departments/dept/main.lua",
+            "packages/example/departments/new/main.lua",
+        }
+        base = {"packages/example/departments/dept/main.lua"}
+        violations = check_repo.saga_handler_ratchet_violations({
+            "packages/example/departments/dept/main.lua": source,
+            "packages/example/departments/new/main.lua": source,
+        }, allowlist, base)
+        self.assertIn("grows saga-handler allowlist relative to dev", violations[0])
 
 
 if __name__ == "__main__":
