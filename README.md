@@ -60,6 +60,8 @@ scripts/run.sh build
 
 `supervise` 是真实 `fkst-framework supervise` 的薄封装，不搭 host harness、不模拟事件、不注入 fake `gh`；它在前台运行，按 `Ctrl-C` 退出。脚本会显式传 `--project-root`、`--package-root` 和 `--framework-bin`，并在未设置时使用彼此不同的 `.fkst/runtime` / `.fkst/durable`。真实 supervise 还会 fail-closed 要求 `FKST_RATE_POOL_ROOT` 是 host 提供的绝对路径；每个消耗同一 GitHub 配额的实例必须指向同一个目录。
 
+`github-devloop` autonomous dogfood branch topology is documented in [`docs/user/github-devloop-dogfood-topology.md`](docs/user/github-devloop-dogfood-topology.md).
+
 本库不做版本化 manifest、root-list 或 override DSL。图由固定的 `departments/` 和 `raisers/` 目录扫描得到。flat 包可独立加载；composed 包显式承担跨包 wiring，并用 `composed.deps` 告诉测试脚本组合 conformance 需要一起加载哪些兄弟包。
 
 共享代码只在包内共享：共享库放 package-root（如 `core.lua`），被本包的 `departments/`、`raisers/` 按 `require("core")` 引用。不跨包 `require`。跨包组合只通过事件队列契约连接；唯一同时引用 `github-proxy.*` 与 `autochrono.*` 的代码在 `packages/github-autochrono/`。多个包都需要的通用、稳定能力应进引擎 SDK（像 `json.decode`），否则各包自带一份；宁可重复，不可耦合。

@@ -49,14 +49,15 @@ The memory files carry detail and incident history. This skill is the decision t
    ```sh
    BIN=<engine-bin> \
    FKST_GITHUB_REPO=<owner/repo> FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN=<gh-login> \
-   FKST_DEVLOOP_UPSTREAM_BRANCH=dev FKST_DEVLOOP_INTEGRATION_BRANCH=integration FKST_DEVLOOP_ROLLUP_MERGE=auto \
+   FKST_DEVLOOP_UPSTREAM_BRANCH=dev FKST_DEVLOOP_INTEGRATION_BRANCH=integration/<device> FKST_DEVLOOP_ROLLUP_MERGE=auto \
    FKST_RUNTIME_ROOT=<fresh-scratch> FKST_DURABLE_ROOT=<STABLE, reused across restarts> \
    "$BIN" supervise --project-root <worktree> \
      --package-root <worktree>/packages/github-devloop --package-root <worktree>/packages/github-proxy --package-root <worktree>/packages/consensus \
      --framework-bin "$BIN"
    ```
+   `<device>` is this host's bot login, for example `integration/ElonSG` for `FKST_GITHUB_BOT_LOGIN=ElonSG`.
 
-2. **Keep the running code current.** The supervise loads `packages/` from the worktree at STARTUP — branch auto-sync (`sync_scan` ff'ing `dev`→`integration`) propagates branch CONTENT but does NOT reload a running process's code. So after ANY code change merges to `dev` (your out-of-band hotfix, or an autonomous rollup), sync the worktree to the latest remote `dev` and restart the supervise PROMPTLY, so it always runs the latest code. A supervise left running on stale code re-introduces already-fixed defects.
+2. **Keep the running code current.** The supervise loads `packages/` from the worktree at STARTUP — branch auto-sync (`sync_scan` ff'ing `dev`→`integration/<device>`) propagates branch CONTENT but does NOT reload a running process's code. So after ANY code change merges to `dev` (your out-of-band hotfix, or an autonomous rollup), sync the worktree to the latest remote `dev` and restart the supervise PROMPTLY, so it always runs the latest code. A supervise left running on stale code re-introduces already-fixed defects.
 3. Watch it. Use "What to observe". If state keeps advancing, do NOT intervene - observe, and file issues only for real system defects.
 4. When it stalls, go to the Stall decision tree.
 
@@ -71,7 +72,7 @@ Only after the board sweep, check the running process:
 
 - Supervise alive + 0 panic.
 - State transitions advancing: consensus, review, implement, and merge activity; not only `github_poll`.
-- Churn regression absent: `integration == dev`, no `+0/-0` rollup PR.
+- Churn regression absent: `integration/<device> == dev`, no `+0/-0` rollup PR.
 - No recurring `dead_letter publish failed` in steady-state. If it recurs, it is a real robustness gap, such as marker-lag retry exhaustion.
 - Reviews not stuck in `reviewing` across runs with no transition. That is a mid-loop stall.
 - GraphQL quota healthy.

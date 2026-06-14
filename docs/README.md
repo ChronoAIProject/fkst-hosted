@@ -6,6 +6,8 @@ Docs are split by audience:
   onboarding, install, configuration, operation. Read these to *use* fkst.
   - [`user/new-package-repo-bootstrap.md`](user/new-package-repo-bootstrap.md) — bootstrap a new
     fkst package/host repo scaffold.
+  - [`user/github-devloop-dogfood-topology.md`](user/github-devloop-dogfood-topology.md) —
+    reproduce the per-device `github-devloop` dogfood branch topology on another machine.
 
 - **[`dev/`](dev/)** — for **contributors** developing the system: design specs, architecture, and
   methodology. Read these to *change* fkst.
