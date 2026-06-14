@@ -101,23 +101,30 @@ fkst-packages/
 
 **Requiring.** A package does `require("std.saga")`. For the engine's
 owner-scoped `package.path` (= package root) to resolve that, `std/` must be
-*visible under each package root at run/test time*.
+*visible under each package root*.
 
-**Vendoring via the assembly boundary.** `.fkst/packages/<pkg>` is already an
-**assembly artifact** — a hardlink mirror of `packages/<pkg>` (verified: same
-inode `193195037` for `core.lua` in both trees). The vendoring step **projects
-`std/` into each assembled package root**, e.g. `.fkst/packages/<pkg>/std/ →`
-repo-root `std/` (hardlink or copy). The git source tree stays clean (`std/`
-lives once at repo root; `packages/` untouched); only the assembled tree carries
-the projection. Tests and `supervise` both run against `.fkst/packages/<pkg>`,
-so both see `std`.
+**Vendoring via a per-package symlink (verified).** `.fkst/packages` is a
+**symlink** to `packages/` (verified: `.fkst/packages -> ../packages`; the `-H`
+flag in `scripts/run.sh`'s `find` exists precisely to follow it). There is **no
+separate assembly artifact** to project into — the package root *is*
+`packages/<pkg>/`. So the vendoring is a single **git-committed symlink per
+package**:
 
-> **Implementation task 0 (must confirm first):** locate the code that creates
-> `.fkst/packages/<pkg>` as a hardlink mirror. It is **not** in
-> `scripts/bin_bootstrap.sh` (grep found nothing). The `std/` projection hooks
-> wherever that mirror is produced (likely `scripts/run.sh` setup or a separate
-> bootstrap). If no single assembler exists, add one and route all of
-> `test`/`run`/`supervise` through it.
+```
+packages/<pkg>/std -> ../../std     # one symlink per package, committed to git
+```
+
+The engine sets `package.path` to the package root, so `require("std.saga")`
+resolves to `packages/<pkg>/std/saga.lua` → repo-root `std/saga.lua` through the
+symlink. `std/` lives once at repo root; each package gains one symlink.
+
+> **Verified by spike (2026-06-15):** created `std/probe.lua`, symlinked
+> `packages/github-proxy/std -> ../../std`, added a test doing
+> `require("std.probe")`, ran `scripts/run.sh test github-proxy` (a **flat**
+> package — the strictest single-root conformance gate). Result: `134 passed, 0
+> failed`, exit 0. The symlinked `std` module resolves via `require` **and** flat
+> single-root conformance accepts it. The earlier "hardlink mirror / assembly
+> projection" assumption was wrong and is replaced by this.
 
 ## 6. Placement decision: this-repo now → substrate later; **not** a separate repo
 
@@ -174,13 +181,15 @@ depends on the `std` root being projected in. This is the same compromise
 
 ## 10. Risks / open questions
 
-- **R1 — assembler location (task 0).** The `std/` projection depends on finding
-  the single point that builds `.fkst/packages`. Mitigation: if none exists,
-  introduce one and route all entrypoints through it.
-- **R2 — projection drift.** Hardlink vs copy: hardlink keeps one inode (edits
-  propagate, no staleness) but is fragile across filesystems; copy is robust but
-  needs re-sync on change. Recommendation: hardlink locally, copy in CI (clean
-  checkout each run, so no staleness).
+- **R1 — symlink portability (resolved for current targets).** Git-committed
+  symlinks work on macOS + Linux (the dev + CI targets) and `core.autocrlf`/
+  symlink support is on by default there. Windows is not a target. The spike
+  confirmed resolution + conformance on macOS; CI (ubuntu) must be confirmed in
+  the first plan task.
+- **R2 — one symlink per package to maintain.** Each new package needs its
+  `std -> ../../std` symlink. Mitigation: a conformance probe asserts every
+  package has a resolvable `std` (fail-closed if missing — see §9), so a
+  forgotten symlink is caught, not silently degraded.
 - **R3 — shared-lib blast radius.** A `std` change can break all packages at
   once. Mitigation: it is a monorepo — one CI run catches it; this is the
   accepted price of the uniformity the harness needs.
