@@ -1,8 +1,48 @@
 # FKST Console — QA Test Plan (v1-basic)
 
-Manual + automated QA for the FKST frontend. Covers every flow the **hosted v1 API** serves, every **honest-gap** surface (GitHub plane / NyxID cut from v1), and the cross-cutting invariants (honesty, responsive, a11y, anti-slop). Grounded in the 2026-06-15 end-to-end verification (`./VERIFY-REPORT.md`, 31/31).
+Manual + automated QA for the FKST frontend. Covers every flow the **hosted v1 API** serves, every **honest-gap** surface (GitHub plane / NyxID cut from v1), and the cross-cutting invariants (honesty, responsive, a11y, anti-slop). Grounded in the 2026-06-15 verification (`./VERIFY-REPORT.md`): the **API contract** is direct-verified (repeatable) and the **UI** is verified at **smoke level** (live-data render + a proven UI→backend write + honest gaps). The cases below marked beyond that — topology detail, Apply-changes/Settings-Stop, 400/409 inline mapping, Board, empty-vs-unreachable, a11y depth — are **manual sign-off** until the UI E2E harness is strengthened (per the codex audit in VERIFY-REPORT).
 
 **Legend:** each case has **Steps** → **Expected** → record **PASS/FAIL**. "Honesty rules" are release-blocking: unreachable → `unknown` (never `0`); v1 gaps render disabled + an honest note; amber is brand-only (never a status); nothing fakes "live".
+
+---
+
+## A. Data provenance — what is LIVE API data vs hardcoded
+
+So a reviewer can tell a real-backend showcase from static chrome. **On a live route pointed at the hosted backend:**
+
+- 🟢 **LIVE** — real data from the hosted v1 API; changes when the backend changes.
+- 🔵 **FE-DERIVED** — computed by the FE *from* live API data (no dedicated endpoint); changes with the package data.
+- 🟡 **SEED** — hardcoded placeholder/example shipped in the app; identical every load; NOT from any API.
+- ⚪ **GAP** — honest `unknown`/disabled; no data plane in v1 (lights up post-NyxID / when an endpoint lands).
+- 🟣 **MOCK** — populated fixtures that exist **only** in Storybook `Mock /` pages; never on a live route.
+
+| Surface / element | Source | Notes |
+|---|---|---|
+| Topbar — logo, primary nav | 🟡 SEED | static chrome |
+| Topbar — GitHub freshness chip (`github — unknown`) | 🟡 SEED | hardcoded literal; **never** fed by `/health` (by design) |
+| Topbar — avatar / "Sign-in pending" | ⚪ GAP | NyxID not wired |
+| **Packages** — list (names, flat/composed badge, deps chips) | 🟢 LIVE | `GET /packages` + `GET /packages/:name` |
+| **Packages** — intro lede + Company·Dept·Person levels | 🟡 SEED | static explanatory copy |
+| **Packages** — topology (SOURCES band, department rows) | 🔵 FE-DERIVED | parsed from the package's `files[].path` — there is **no topology endpoint** |
+| **Packages** — queue wiring / codex tags / conformance / role / dept counts / namespace / "graph …" | ⚪ GAP | render `unknown` + "not parsed / not exposed by the v1 API" |
+| **Packages** — enable toggle | 🟡 SEED (intent) | local UI intent only (no enable endpoint); "applies via session restart" |
+| **Add-package** — form fields | user input | submitted verbatim |
+| **Add-package** — result (201 / 409 dup / 400 invalid, inline) | 🟢 LIVE | `POST /packages`; server authoritative |
+| **Settings** — engine status, mongo, version "backend build" | 🟢 LIVE | `GET /health` |
+| **Settings** — session status + Stop (tab-known sessions only, §1.1) | 🟢 LIVE | `GET/POST /sessions/:id` |
+| **Settings** — posture (`FKST_GITHUB_WRITE`/repo/checks/"posture as of") | ⚪ GAP | hardcoded `unknown` — no posture endpoint in v1 |
+| **Settings** — deployment knobs, identity, repos, sign-out | ⚪ GAP | disabled + grounding notes |
+| **Settings** — poll-interval note ("interval = 5m declared statically") | 🟡 SEED | static fact, not a setter |
+| **New-goal** — package graph | 🟢 LIVE | `GET /packages` + `composed_deps` |
+| **New-goal** — repository dropdown (`example-org/repo-a…c — example`) | 🟡 SEED | three hardcoded EXAMPLE repos — **not** live GitHub repos |
+| **New-goal** — title/description fields | user input | |
+| **New-goal** — "Create issue & enable" submit | ⚪ GAP | disabled "requires NyxID sign-in" |
+| **Overview** — Pipeline/Board, vitals, Needs-you | ⚪ GAP (live) / 🟣 MOCK | live routes pass **no data** → `—`/`unknown` + "no GitHub plane connected"; the populated look exists only as Storybook mock |
+| **Goals** — Issues table / Activity | ⚪ GAP (live) / 🟣 MOCK | empty shell + "host telemetry not connected" live; populated = mock |
+| **Goal page** (`/goals/:id`) — decision/timeline/merge-gate/diagnostics | ⚪ GAP (live) / 🟣 MOCK | skeleton/empty live; populated = mock |
+| Storybook `Mock /` Overview/Goals/Goal pages | 🟣 MOCK | fixtures transcribed from the locked mockups; carry a visible MOCK-DATA banner |
+
+**Showcase summary:** the screens that render **LIVE backend data** are **Packages** (list/detail/create + FE-derived topology), **Settings → hosted engine** (health + tab-known sessions), and the **New-goal package graph**. Every GitHub-plane screen (Overview/Goals/Goal) is an **honest empty shell** on live routes and is only *populated* in Storybook mocks. The **GitHub chip** and the **New-goal repo dropdown** are **static placeholders**, not live. When demoing "the APIs", drive **Packages + Settings + the New-goal graph**.
 
 ---
 
