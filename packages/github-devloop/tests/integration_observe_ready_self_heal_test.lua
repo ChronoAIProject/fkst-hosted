@@ -506,6 +506,75 @@ return {
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
   end,
 
+  test_observe_issue_reconciles_blocked_terminal_label_from_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/13"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.state_marker(proposal_id, "blocked", version),
+    })
+    mock_decompose_child_issue_list({ proposal_id = proposal_id }, {})
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:reviewing" } }), opts("observe-issue-terminal-label-reconcile-blocked"))
+    t.eq(result.exit_code, 0)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(label_raise ~= nil)
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
+    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:reviewing"))
+    t.eq(label_raise.payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 0)
+  end,
+
+  test_observe_issue_reconciles_issue_terminal_label_over_linked_pr_state = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/13"
+    local link_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", link_version, "dev"),
+      core.state_marker(proposal_id, "blocked", version),
+    })
+    mock_linked_pr_state({
+      core.state_marker(proposal_id, "reviewing", link_version),
+    })
+    mock_decompose_child_issue_list({ proposal_id = proposal_id }, {})
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:reviewing" } }), opts("observe-issue-terminal-label-over-pr-state"))
+    t.eq(result.exit_code, 0)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(label_raise ~= nil)
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
+    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:reviewing"))
+    t.eq(has_value(label_raise.payload.remove_labels, "fkst-dev:thinking"), false)
+    t.eq(label_raise.payload.dedup_key, core._dedup_key({
+      "reconcile",
+      "label",
+      proposal_id,
+      "blocked",
+      version,
+    }))
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
+  end,
+
+  test_observe_issue_reconciles_merged_terminal_label_from_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:merge-ready" }, "OPEN", {
+      core.state_marker(proposal_id, "merged", version),
+    })
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:merge-ready" } }), opts("observe-issue-terminal-label-reconcile-merged"))
+    t.eq(result.exit_code, 0)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(label_raise ~= nil)
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:merged")
+    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-ready"))
+    t.eq(label_raise.payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
+  end,
+
   test_observe_issue_missing_reviewing_label_does_not_change_pr_local_state = function()
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)
