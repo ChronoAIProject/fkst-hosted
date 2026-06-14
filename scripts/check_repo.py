@@ -882,6 +882,46 @@ def check_persistence_classes(root: Path, violations: list[str]) -> None:
                     )
 
 
+REQUIRE_RE = re.compile(r"""require\(\s*["']([A-Za-z0-9_.\-]+)["']""")
+
+
+def cross_package_require_names(
+    source: str, package_names: set[str], current_pkg: str
+) -> list[str]:
+    """Top-level require names in `source` that name a *sibling* package.
+
+    Sharing is one-way: packages may require `std.*`, their own `core.*`,
+    `departments.*`, engine `fkst.*`, etc. Requiring another package's modules
+    (peer cross-package require) is forbidden — share via `std/` instead.
+    """
+    hits: set[str] = set()
+    for match in REQUIRE_RE.finditer(source):
+        top = match.group(1).split(".")[0]
+        if top in package_names and top != current_pkg:
+            hits.add(top)
+    return sorted(hits)
+
+
+def check_cross_package_require(root: Path, violations: list[str]) -> None:
+    pkgs = package_dirs(root)
+    names = {pkg.name for pkg in pkgs}
+    for pkg in pkgs:
+        for path in sorted(pkg.rglob("*.lua")):
+            if not path.is_file():
+                continue
+            parts = path.relative_to(pkg).parts
+            # Skip the vendored std symlink tree (shared source, not this package's).
+            if parts and parts[0] == "std":
+                continue
+            for name in cross_package_require_names(read_text(path), names, pkg.name):
+                add(
+                    violations,
+                    "G9",
+                    f"{rel(root, path)} peer cross-package require of {name!r}; "
+                    f"share via std/ (peer cross-package require is forbidden)",
+                )
+
+
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -896,6 +936,7 @@ def main() -> int:
     check_gh_rate_pool_sizing(root, violations)
     check_error_class_prefixes(root, warnings)
     check_persistence_classes(root, violations)
+    check_cross_package_require(root, violations)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

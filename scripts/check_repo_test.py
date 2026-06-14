@@ -324,5 +324,28 @@ class RepositoryInterfaceContractTest(unittest.TestCase):
         self.assertEqual(check_repo.packages_root(root), root / ".fkst" / "packages")
 
 
+class CrossPackageRequireTest(unittest.TestCase):
+    def names(self, source: str, packages: list[str], current: str) -> list[str]:
+        return check_repo.cross_package_require_names(source, set(packages), current)
+
+    def test_flags_sibling_package_require(self) -> None:
+        src = 'local x = require("github-proxy.core")\n'
+        self.assertEqual(
+            self.names(src, ["github-proxy", "consensus"], "consensus"),
+            ["github-proxy"],
+        )
+
+    def test_allows_std_core_departments_fkst(self) -> None:
+        src = (
+            'require("std.saga") require("core") require("core.markers") '
+            'require("departments.foo") require("fkst")\n'
+        )
+        self.assertEqual(self.names(src, ["github-proxy", "consensus"], "consensus"), [])
+
+    def test_self_reference_is_not_cross_package(self) -> None:
+        src = 'require("consensus.thing")\n'
+        self.assertEqual(self.names(src, ["consensus"], "consensus"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
