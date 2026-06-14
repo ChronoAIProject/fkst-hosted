@@ -321,7 +321,7 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
   local state_base_version = M.version_loop_round(stable_version) > 0 and M.converge_base_version(stable_version) or nil
   local latest = M.latest_complete_converge_round(current.comments, proposal_id, state_base_version, issue.source_ref)
   if latest ~= nil then
-    local base_version = M.proposal_dedup_key(proposal_id, issue.updated_at)
+    local base_version = M.converge_proposal_base_dedup(latest.dedup)
     local next_n = latest.round + 1
     local next_dedup = base_version .. "/loop/" .. tostring(next_n)
     local content_fetch = M.context_fetch_ref_from_bundle({
@@ -338,8 +338,7 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
     }, issue.source_ref, next_n, {
       narrowed_question = latest.narrowed_question,
       angle_digests = latest.angle_digests,
-    }, event_ts, content_fetch)
-    proposal.dedup_key = next_dedup
+    }, event_ts, content_fetch, next_dedup)
     return M.validate_proposal(proposal) and proposal or nil
   end
 

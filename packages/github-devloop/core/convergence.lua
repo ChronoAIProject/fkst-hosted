@@ -204,6 +204,11 @@ function M.converge_base_version(consensus_dedup)
   return (tostring(consensus_dedup or ""):gsub("/loop/%d+$", ""))
 end
 
+function M.converge_proposal_base_dedup(consensus_dedup)
+  local base_version = M.converge_base_version(consensus_dedup)
+  return base_version:match("^consensus:(.+)$") or base_version
+end
+
 function M.build_devloop_reconcile_payload(unresolved, round, base_version)
   return {
     schema = "github-devloop.reconcile.v1",

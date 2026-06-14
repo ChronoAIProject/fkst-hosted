@@ -780,7 +780,7 @@ local function apply_converge_fields(proposal, n, converge)
   return proposal
 end
 
-function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch)
+function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key)
   local issue = {
     repo = repo,
     number = issue_number,
@@ -790,12 +790,12 @@ function M.build_loop_proposal(repo, issue_number, current, source_ref, n, conve
     content_fetch = content_fetch,
   }
   local proposal = M.build_proposal(issue)
-  proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
+  proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n, converge, tick, content_fetch)
-  return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch), repo, tick)
+function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n, converge, tick, content_fetch, dedup_key)
+  return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key), repo, tick)
 end
 
 function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
@@ -854,14 +854,14 @@ function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version
   return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch), repo, tick)
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch)
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, dedup_key)
   local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
-  proposal.dedup_key = proposal.dedup_key .. "/loop/" .. tostring(n)
+  proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch)
-  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch), repo, tick)
+function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch, dedup_key)
+  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, dedup_key), repo, tick)
 end
 
 function M.implement_commit_subject(issue_number, current)
