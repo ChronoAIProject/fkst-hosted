@@ -52,25 +52,14 @@ GH_RATE_POOL_FUNCTION_RE = re.compile(
     r"\bfunction\b[^\n]*\bgh_rate_pool\b|\bgh_rate_pool\b\s*=\s*function\b"
 )
 GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
+OWNERSHIP_GATE_RE = re.compile(r"(?ms)^\s*function\s+M\s*\.\s*verify_pr_review_issue_claim\s*\([^)]*\).*?(?=^\s*function\s+M\s*\.|\Z)")
 PERSISTENCE_CLASS_RE = re.compile(
     r"\bfunction\s+M\s*\.\s*persistence_class\s*\([^)]*\)\s*"
     r"return\s*(?P<quote>[\"'])(?P<class>[A-Za-z0-9_]+)(?P=quote)",
     re.DOTALL,
 )
-ALLOWED_PERSISTENCE_CLASSES = {
-    "saga",
-    "stateless_adapter",
-    "judgment_pipeline",
-    "composed_judgment_pipeline",
-}
-SAGA_RECOVERY_TOKENS = (
-    "fkst:github-devloop:state:v1",
-    "current_entity_state",
-    "restart_completeness",
-    "transition_status",
-    "versioned_transition_status",
-    "cyclic_transition_status",
-)
+ALLOWED_PERSISTENCE_CLASSES = {"saga", "stateless_adapter", "judgment_pipeline", "composed_judgment_pipeline"}
+SAGA_RECOVERY_TOKENS = ("fkst:github-devloop:state:v1", "current_entity_state", "restart_completeness", "transition_status", "versioned_transition_status", "cyclic_transition_status")
 HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
 BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
@@ -92,24 +81,12 @@ def rel(root: Path, path: Path) -> str:
     try:
         return "packages/" + path.relative_to(packages_view).as_posix()
     except ValueError:
-        pass
-    return path.relative_to(root).as_posix()
+        return path.relative_to(root).as_posix()
 
-
-def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
-
-
-def packages_root(root: Path) -> Path:
-    return root / ".fkst" / "packages"
-
-
-def line_count(path: Path) -> int:
-    return len(read_text(path).splitlines())
-
-
-def add(violations: list[str], rule: str, message: str) -> None:
-    violations.append(f"{rule}: {message}")
+def read_text(path: Path) -> str: return path.read_text(encoding="utf-8")
+def packages_root(root: Path) -> Path: return root / ".fkst" / "packages"
+def line_count(path: Path) -> int: return len(read_text(path).splitlines())
+def add(violations: list[str], rule: str, message: str) -> None: violations.append(f"{rule}: {message}")
 
 
 def long_bracket_at(text: str, index: int) -> tuple[int, str] | None:
@@ -132,9 +109,7 @@ def mask_span(chars: list[str], start: int, end: int) -> None:
 
 def end_of_long_bracket(text: str, body_start: int, closer: str) -> int:
     close_start = text.find(closer, body_start)
-    if close_start == -1:
-        return len(text)
-    return close_start + len(closer)
+    return len(text) if close_start == -1 else close_start + len(closer)
 
 
 def end_of_quoted_string(text: str, start: int) -> int:
@@ -376,12 +351,8 @@ def unclassified_error_call_lines(text: str) -> list[int]:
     return lines
 
 
-def helper_name(value: str) -> str:
-    return re.sub(r"\s+", "", value).lower()
-
-
 def looks_like_decode_helper(func: str) -> bool:
-    normalized = helper_name(func)
+    normalized = re.sub(r"\s+", "", func).lower()
     base_name = normalized.rsplit(".", 1)[-1]
     if base_name in {"h", "b", "u", "hex", "base64", "b64", "bytes", "byte"}:
         return True
@@ -454,6 +425,14 @@ def hidden_text_encoded_literal_lines(text: str) -> list[int]:
         if encoded_literal_kind(content) is not None:
             lines.append(text.count("\n", 0, match.start()) + 1)
     return sorted(set(lines))
+
+
+def ownership_gate_defaulting_bot_login_lines(text: str) -> list[int]:
+    stripped = strip_lua_comments_and_strings(text)
+    gate = OWNERSHIP_GATE_RE.search(stripped)
+    return [] if gate is None else [
+        text.count("\n", 0, gate.start() + m.start()) + 1
+        for m in re.finditer(r"\bM\s*\.\s*trusted_bot_login\s*\(", gate.group(0))]
 
 
 def line_warning_threshold() -> int:
@@ -828,6 +807,18 @@ def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
             )
 
 
+def check_ownership_gate_claim_owner(root: Path, violations: list[str]) -> None:
+    path = packages_root(root) / "github-devloop" / "core" / "claims.lua"
+    if not path.exists():
+        return
+    for line in ownership_gate_defaulting_bot_login_lines(read_text(path)):
+        add(
+            violations,
+            "G8",
+            f"{rel(root, path)}:{line} verify_pr_review_issue_claim must use claim_owner(), not the defaulting trusted_bot_login() getter",
+        )
+
+
 def package_persistence_class(core_path: Path) -> str | None:
     match = PERSISTENCE_CLASS_RE.search(read_text(core_path))
     if match is None:
@@ -979,6 +970,7 @@ def main() -> int:
     check_hidden_text_encoded_literals(root, violations)
     check_gh_rate_pool_sizing(root, violations)
     check_error_class_prefixes(root, warnings)
+    check_ownership_gate_claim_owner(root, violations)
     check_persistence_classes(root, violations)
     check_cross_package_require(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)

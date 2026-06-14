@@ -109,7 +109,7 @@ function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue,
     log_claim(dept, proposal_id, "skip-not-owned", "backing issue is absent")
     return false
   end
-  local owner = M.trusted_bot_login()
+  local owner = M.claim_owner()
   local ownership = nil
   if type(current_issue) == "table"
     and current_issue.assignees ~= nil

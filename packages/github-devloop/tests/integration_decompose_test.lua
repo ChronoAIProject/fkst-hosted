@@ -51,6 +51,7 @@ local function mock_write_env_real()
   mock_write_env("1")
   mock_write_env("1")
   mock_write_env("1")
+  mock_write_env("1")
 end
 
 local function mock_pr_comment_write(exit_code)

@@ -414,6 +414,23 @@ return {
     t.eq(core.verify_pr_review_issue_claim("claim_contract", "owner/repo", nil, nil, "github-devloop/pr/owner/repo/7"), false)
   end,
 
+  test_verify_pr_review_issue_claim_uses_configured_claim_owner_before_assert = function()
+    mock_bot("real-bot", "")
+
+    local self_owned = core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+      assignees = { "real-bot" },
+      author_login = "human",
+    }, "github-devloop/issue/owner/repo/42")
+    local other_owned = core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+      assignees = { "fkst-test-bot" },
+      author_login = "human",
+    }, "github-devloop/issue/owner/repo/42")
+    core.configure_trusted_bot_login(nil)
+
+    t.eq(self_owned, true)
+    t.eq(other_owned, false)
+  end,
+
   test_verify_pr_review_issue_claim_rederives_missing_ownership_and_fails_closed = function()
     mock_bot("fkst-test-bot", "")
     t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {

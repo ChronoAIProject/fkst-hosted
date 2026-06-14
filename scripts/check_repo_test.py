@@ -189,6 +189,47 @@ end
         self.assertEqual(self.sizing_lines(source), [])
 
 
+class OwnershipGateClaimOwnerGuardTest(unittest.TestCase):
+    def violation_lines(self, source: str) -> list[int]:
+        return check_repo.ownership_gate_defaulting_bot_login_lines(source)
+
+    def test_flags_defaulting_getter_inside_pr_review_ownership_gate(self) -> None:
+        source = """
+function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
+  local owner = M.trusted_bot_login()
+  return M.is_self_owned_issue(current_issue, owner)
+end
+"""
+        self.assertEqual(self.violation_lines(source), [3])
+
+    def test_allows_claim_owner_inside_pr_review_ownership_gate(self) -> None:
+        source = """
+function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
+  local owner = M.claim_owner()
+  return M.is_self_owned_issue(current_issue, owner)
+end
+
+function M.trusted_bot_login()
+  return "fkst-test-bot"
+end
+"""
+        self.assertEqual(self.violation_lines(source), [])
+
+    def test_ignores_comments_and_other_functions(self) -> None:
+        source = """
+function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
+  -- M.trusted_bot_login()
+  local text = "M.trusted_bot_login()"
+  return M.claim_owner()
+end
+
+function M.audit_trusted_bot()
+  return M.trusted_bot_login()
+end
+"""
+        self.assertEqual(self.violation_lines(source), [])
+
+
 class RunScriptContractTest(unittest.TestCase):
     def source(self) -> str:
         return Path(__file__).with_name("run.sh").read_text(encoding="utf-8")

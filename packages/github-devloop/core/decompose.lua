@@ -191,6 +191,7 @@ function M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_n
   local child_pattern = "<!%-%- fkst:github%-devloop:decompose%-child:v1.-%-%->"
   for _, issue in ipairs(issues or {}) do
     local body = tostring(type(issue) == "table" and issue.body or "")
+    -- decompose_context verifies the parent issue claim with claim_owner before child completion checks.
     local trusted_child = type(issue) == "table"
       and M.comment_author_login(issue) == M.trusted_bot_login()
       and tostring(issue.state or ""):upper() == "OPEN"

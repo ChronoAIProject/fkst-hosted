@@ -531,9 +531,19 @@ local function mock_write_env(value)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
+    stdout = value or "",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_bot_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = value or "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
     stdout = value or "fkst-test-bot",
     stderr = "",

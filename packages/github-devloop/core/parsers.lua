@@ -546,6 +546,7 @@ local function comment_created_at(comment)
 end
 
 local function is_trusted_comment(comment)
+  -- Parser-only trust filtering keeps the test default; pre-assert ownership gates use claim_owner.
   return comment_author_login(comment) == M.trusted_bot_login()
 end
 
