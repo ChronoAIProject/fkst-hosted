@@ -206,7 +206,7 @@ function M.parse_intake_action(stdout)
   while #lines > 0 and M._trim(lines[#lines]) == "" do
     table.remove(lines)
   end
-  if #lines ~= 2 and #lines ~= 3 then
+  if #lines ~= 3 then
     return nil
   end
 
@@ -214,22 +214,20 @@ function M.parse_intake_action(stdout)
     or lines[1]:match("^" .. M._intake_label .. " (track)$")
     or lines[1]:match("^" .. M._intake_label .. " (decline)$")
     or lines[1]:match("^" .. M._intake_label .. " (escalate%-to%-class)$")
-  local service_class = nil
-  local reason_line = lines[2]
-  if #lines == 3 then
-    if lines[2]:match("^⟦FKST:CLASS⟧ ") == nil then
-      return nil
-    end
-    service_class = lines[2]:match("^⟦FKST:CLASS⟧ (expedite)$")
-      or lines[2]:match("^⟦FKST:CLASS⟧ (standard)$")
-      or lines[2]:match("^⟦FKST:CLASS⟧ (background)$")
-    reason_line = lines[3]
+  if lines[2]:match("^" .. M._class_label .. " ") == nil then
+    return nil
   end
+  local service_class = lines[2]:match("^" .. M._class_label .. " (expedite)$")
+    or lines[2]:match("^" .. M._class_label .. " (standard)$")
+    or lines[2]:match("^" .. M._class_label .. " (background)$")
+  if service_class == nil then
+    return nil
+  end
+  local reason_line = lines[3]
   local reason = reason_line:match("^" .. M._reason_label .. " (.+)$")
   if action == nil or not is_intake_action(action) then
     return nil
   end
-  service_class = M.normalize_intake_service_class(service_class)
   if reason == nil or M._trim(reason) == "" then
     return nil
   end

@@ -340,6 +340,9 @@ function M.intake_decision_marker(issue_proposal_id, decision, dedup_key, servic
   if not M._is_bounded_string(dedup_key, M._max_dedup_len) then
     error("github-devloop: invalid intake dedup")
   end
+  if not M.is_intake_service_class(service_class) then
+    error("github-devloop: invalid intake service class")
+  end
   local normalized_class = M.normalize_intake_service_class(service_class)
   return '<!-- fkst:github-devloop:intake-decision:v1 proposal="' .. tostring(issue_proposal_id)
     .. '" decision="' .. tostring(decision)
@@ -357,15 +360,16 @@ function M.intake_decision_fact(comments, issue_proposal_id)
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local decision = marker:match('decision="([^"]+)"')
-      local service_class = M.normalize_intake_service_class(marker:match('class="([^"]+)"'))
+      local service_class = marker:match('class="([^"]+)"')
       local dedup = marker:match('dedup="([^"]*)"')
       if marker_issue == tostring(issue_proposal_id)
         and (decision == "enable" or decision == "track" or decision == "decline" or decision == "escalate-to-class")
+        and M.is_intake_service_class(service_class)
         and M._is_bounded_string(dedup, M._max_dedup_len) then
         return {
           proposal_id = marker_issue,
           decision = decision,
-          service_class = service_class,
+          service_class = M.normalize_intake_service_class(service_class),
           dedup_key = dedup,
           comment_created_at = M._comment_created_at(comment),
         }

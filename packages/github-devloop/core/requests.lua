@@ -406,6 +406,9 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
 end
 
 function M.build_intake_decision_comment_request(repo, issue_number, candidate, decision, reason, service_class)
+  if not M.is_intake_service_class(service_class) then
+    error("github-devloop: invalid intake service class")
+  end
   local normalized_class = M.normalize_intake_service_class(service_class)
   local marker = M.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")

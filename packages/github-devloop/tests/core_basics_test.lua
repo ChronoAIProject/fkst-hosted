@@ -975,7 +975,7 @@ return {
     t.eq(current.version, base_version .. "/loop/3")
   end,
   test_intake_parser_is_strict_and_conservative = function()
-    local parsed = core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded task.")
+    local parsed = core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Clear bounded task.")
     t.eq(parsed.action, "enable")
     t.eq(parsed.service_class, "standard")
     t.eq(parsed.reason, "Clear bounded task.")
@@ -990,10 +990,10 @@ return {
     t.eq(escalated.service_class, "expedite")
     t.eq(escalated.reason, "Third widget-sync recurrence; class-level retry policy is required.")
 
-    t.is_nil(core.parse_intake_action("prefix\n⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded task."))
-    t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ enable extra\n⟦FKST:REASON⟧ Clear bounded task."))
-    t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ park\n⟦FKST:REASON⟧ Unknown values must fail closed."))
-    t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n\n⟦FKST:REASON⟧ Clear bounded task."))
+    t.is_nil(core.parse_intake_action("prefix\n⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Clear bounded task."))
+    t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ enable extra\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Clear bounded task."))
+    t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ park\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Unknown values must fail closed."))
+    t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ urgent\n⟦FKST:REASON⟧ Invalid class facts must fail closed."))
     t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Clear bounded task.\n⟦FKST:INTAKE⟧ decline"))
   end,
 
