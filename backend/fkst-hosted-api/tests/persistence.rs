@@ -12,9 +12,9 @@ use fkst_hosted_api::auth::AuthMode;
 use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{
-    Db, IDX_LEASES_EXPIRES_AT, IDX_SESSIONS_GOAL_ID, IDX_SESSIONS_ORG_ID,
-    IDX_SESSIONS_OWNER_USER_ID, IDX_SESSIONS_PACKAGE_NAME, IDX_SESSIONS_POD_ID,
-    IDX_SESSIONS_STATUS,
+    Db, IDX_LEASES_EXPIRES_AT, IDX_SESSIONS_GOAL_ID, IDX_SESSIONS_ORG_CREATED, IDX_SESSIONS_ORG_ID,
+    IDX_SESSIONS_OWNER_CREATED, IDX_SESSIONS_OWNER_USER_ID, IDX_SESSIONS_PACKAGE_NAME,
+    IDX_SESSIONS_POD_ID, IDX_SESSIONS_STATUS,
 };
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::goals::GoalRepo;
@@ -175,6 +175,8 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
     assert_eq!(IDX_SESSIONS_OWNER_USER_ID, "sessions_owner_user_id");
     assert_eq!(IDX_SESSIONS_ORG_ID, "sessions_org_id");
     assert_eq!(IDX_SESSIONS_GOAL_ID, "sessions_goal_id");
+    assert_eq!(IDX_SESSIONS_OWNER_CREATED, "sessions_owner_created");
+    assert_eq!(IDX_SESSIONS_ORG_CREATED, "sessions_org_created");
     assert_eq!(IDX_LEASES_EXPIRES_AT, "leases_expires_at");
     assert_eq!(IDX_LEASES_HOLDER_POD, "leases_holder_pod");
 
@@ -183,7 +185,15 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
     let expected_sessions = vec![
         ("_id_".to_string(), doc! { "_id": 1 }),
         ("sessions_goal_id".to_string(), doc! { "goal_id": 1 }),
+        (
+            "sessions_org_created".to_string(),
+            doc! { "org_id": 1, "created_at": -1 },
+        ),
         ("sessions_org_id".to_string(), doc! { "org_id": 1 }),
+        (
+            "sessions_owner_created".to_string(),
+            doc! { "owner_user_id": 1, "created_at": -1 },
+        ),
         (
             "sessions_owner_user_id".to_string(),
             doc! { "owner_user_id": 1 },
