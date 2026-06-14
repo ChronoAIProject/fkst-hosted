@@ -35,6 +35,36 @@ local function age_minutes(timestamp, now_seconds)
   return math.floor(age / 60)
 end
 
+local function failed_check_timestamp(entry)
+  if type(entry) ~= "table" then
+    return nil
+  end
+  return entry.completedAt or entry.completed_at or entry.updatedAt or entry.updated_at or entry.createdAt or entry.created_at
+end
+
+local function rollup_red_started_at(pr)
+  local entries = type(pr) == "table" and pr.status_check_rollup or nil
+  if type(entries) ~= "table" then
+    return nil
+  end
+  local started_at = nil
+  for _, entry in ipairs(entries) do
+    local single_pr = { status_check_rollup = { entry } }
+    local green, reason = M.pr_rollup_green(single_pr)
+    if not green and reason == "rollup-red" then
+      local timestamp = failed_check_timestamp(entry)
+      local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+      if seconds ~= nil then
+        local current_started_seconds = M.iso_timestamp_epoch_seconds(started_at)
+        if current_started_seconds == nil or seconds < current_started_seconds then
+          started_at = timestamp
+        end
+      end
+    end
+  end
+  return started_at
+end
+
 local function snapshot_path(repo, pr_number, head_sha)
   local safe_repo = M.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
   local safe_head = M.sanitize_key(tostring(head_sha or "unknown"), false):gsub("[/%s]+", "-")
@@ -58,6 +88,7 @@ local function write_snapshot(repo, evidence)
     .. ',"integration_branch":' .. json_string(evidence.integration_branch)
     .. ',"head_sha":' .. json_string(evidence.head_sha)
     .. ',"updated_at":' .. json_string(evidence.updated_at)
+    .. ',"red_started_at":' .. json_string(evidence.red_started_at)
     .. ',"age_minutes":' .. tostring(tonumber(evidence.age_minutes) or 0)
     .. ',"threshold_minutes":' .. tostring(tonumber(evidence.threshold_minutes) or 0)
     .. ',"failing_check":' .. json_string(evidence.failing_check)
@@ -162,7 +193,8 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     return { action = "no-op", reason = reason }
   end
 
-  local age = age_minutes(pr and pr.updated_at, current_seconds)
+  local red_started_at = rollup_red_started_at(pr)
+  local age = age_minutes(red_started_at, current_seconds)
   if age == nil then
     log.info("github-devloop dept=rollup_scan tag=ROLLUP_HEALTH action=no-op reason=age-unknown")
     return { action = "no-op", reason = "age-unknown" }
@@ -187,6 +219,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     integration_branch = integration,
     head_sha = pr and pr.head_sha,
     updated_at = pr and pr.updated_at,
+    red_started_at = red_started_at,
     age_minutes = age,
     threshold_minutes = threshold,
     failing_check = failing_check,

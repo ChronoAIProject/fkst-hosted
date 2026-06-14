@@ -149,16 +149,18 @@ local function mock_rollup_pr_view(fields)
     conclusion = ""
   end
   local updated_at = fields.updated_at or "2026-06-14T01:02:03Z"
+  local completed_at = fields.completed_at or updated_at
   t.mock_command("gh pr view '" .. tostring(fields.pr_number or 9) .. "'", {
     stdout = string.format(
-      '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"test","state":"%s","conclusion":"%s","headSha":"%s"}]}\n',
+      '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"test","state":"%s","conclusion":"%s","headSha":"%s","completedAt":"%s"}]}\n',
       fields.pr_number or 9,
       h.json_string(fields.head_ref or "integration/dev"),
       h.json_string(fields.head_sha or "def456"),
       h.json_string(updated_at),
       h.json_string(state),
       h.json_string(conclusion),
-      h.json_string(fields.head_sha or "def456")
+      h.json_string(fields.head_sha or "def456"),
+      h.json_string(completed_at)
     ),
     stderr = "",
     exit_code = 0,
@@ -436,7 +438,33 @@ return {
     local written = file.read(snapshot)
     t.is_true(written:find('"detector":"rollup-health"', 1, true) ~= nil)
     t.is_true(written:find('"failing_check":"test: COMPLETED/FAILURE"', 1, true) ~= nil)
+    t.is_true(written:find('"red_started_at"', 1, true) ~= nil)
     t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_scan_red_window_uses_failed_check_time_not_pr_update_time = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({
+      status = "red",
+      updated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 5 * 60),
+      completed_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 45 * 60),
+    })
+    local result = run_scan(opts("rollup-red-check-age", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = "30",
+    }))
+    t.eq(result.exit_code, 0)
+    local create = h.find_raise(result.raises, "github-proxy.github_issue_create_request")
+    t.is_true(create ~= nil)
+    local snapshot = create.payload.body:match("Evidence snapshot: `([^`]+)`")
+    t.is_true(snapshot ~= nil)
+    local written = file.read(snapshot)
+    t.is_true(written:find('"age_minutes":45', 1, true) ~= nil)
   end,
 
   test_rollup_scan_suppresses_red_rollup_inside_window = function()
