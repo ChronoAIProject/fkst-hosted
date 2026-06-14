@@ -964,3 +964,121 @@ async fn list_endpoint_empty_is_200_empty_array() {
         "no sessions yields an empty array, not 404"
     );
 }
+
+// ---- (12) logs: tail, pending, cross-pod, id errors --------------------------
+
+/// Build a session document with a fixed owner/status and an explicit
+/// `runtime_dir`, for the logs-tail tests.
+fn mk_session_with_rt(owner_user_id: &str, status: SessionStatus, runtime_dir: &str) -> SessionDoc {
+    SessionDoc {
+        id: bson::Uuid::new(),
+        package_name: "demo".to_string(),
+        status,
+        pod_id: None,
+        fencing_token: None,
+        pid: None,
+        runtime_dir: Some(runtime_dir.to_string()),
+        error: None,
+        run_key: None,
+        owner_user_id: Some(owner_user_id.to_string()),
+        org_id: None,
+        package_names: vec![],
+        goal_id: None,
+        repo: None,
+        triggered_by: None,
+        created_at: bson::DateTime::from_millis(1_000),
+        started_at: None,
+        stopped_at: None,
+    }
+}
+
+/// `GET /api/v1/sessions/{id}/logs` tails child logs, clamps `?lines=`, answers
+/// pending and cross-pod cases with `200 logs:null` (note only for cross-pod),
+/// and maps unknown/malformed ids to 404/400.
+#[tokio::test]
+async fn logs_endpoint_tails_pending_cross_pod_and_id_errors() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = app(PASS_CONFORMANCE, READY_SUPERVISE).await;
+    let repo = SessionRepo::new(&app.db);
+
+    // (a) runtime dir with a child log -> 200 with the tail.
+    let rt = tempfile::tempdir().expect("rt");
+    let log_dir = rt.path().join("logs").join("framework-child");
+    std::fs::create_dir_all(&log_dir).expect("log dir");
+    std::fs::write(
+        log_dir.join("hello-1-2-0.log"),
+        "line one\nline two\nline three",
+    )
+    .expect("write log");
+    let with_logs = mk_session_with_rt(
+        "dev-local",
+        SessionStatus::Running,
+        rt.path().to_str().expect("utf8 path"),
+    );
+    repo.insert(&with_logs).await.expect("seed with_logs");
+
+    let (status, _h, body) = get_path(
+        &app.router,
+        &format!("/api/v1/sessions/{}/logs", with_logs.id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["session_id"], with_logs.id.to_string());
+    assert_eq!(body["logs"], "line one\nline two\nline three");
+    assert_eq!(body["lines"], 3);
+    assert!(
+        body["note"].is_null(),
+        "tail present carries no note: {body}"
+    );
+
+    // ?lines=1 clamps to just the newest line.
+    let (status, _h, body) = get_path(
+        &app.router,
+        &format!("/api/v1/sessions/{}/logs?lines=1", with_logs.id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["logs"], "line three");
+    assert_eq!(body["lines"], 1);
+
+    // (b) pending session (no runtime_dir) -> 200 logs:null, no note.
+    let pending = mk_list_session(Some("dev-local"), None, SessionStatus::Pending, 2_000);
+    repo.insert(&pending).await.expect("seed pending");
+    let (status, _h, body) = get_path(
+        &app.router,
+        &format!("/api/v1/sessions/{}/logs", pending.id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["logs"].is_null());
+    assert_eq!(body["lines"], 0);
+    assert!(body["note"].is_null(), "pending carries no note: {body}");
+
+    // (c) runtime_dir set but no readable child logs -> 200 logs:null + note.
+    let empty_rt = tempfile::tempdir().expect("empty rt");
+    let cross = mk_session_with_rt(
+        "dev-local",
+        SessionStatus::Running,
+        empty_rt.path().to_str().expect("utf8 path"),
+    );
+    repo.insert(&cross).await.expect("seed cross");
+    let (status, _h, body) =
+        get_path(&app.router, &format!("/api/v1/sessions/{}/logs", cross.id)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["logs"].is_null());
+    assert!(
+        body["note"].as_str().expect("note present").contains("pod"),
+        "cross-pod note: {body}"
+    );
+
+    // (d) unknown id -> 404; malformed id -> 400.
+    let ghost = "f4e2c0a1-9b3d-4d2e-8c11-3a6b5e0d7f12";
+    let (status, _h, _b) = get_path(&app.router, &format!("/api/v1/sessions/{ghost}/logs")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _h, body) = get_path(&app.router, "/api/v1/sessions/not-a-uuid/logs").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["message"], "invalid session id: must be a UUID");
+}
