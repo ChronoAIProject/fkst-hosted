@@ -340,11 +340,96 @@ fn authorize_session_write<'a>(
     })
 }
 
+/// Query parameters for `GET /api/v1/sessions/{id}/logs`.
+#[derive(Debug, Deserialize, Default)]
+pub struct LogsQuery {
+    /// How many trailing lines to return; clamped to `1..=log_tail_lines`,
+    /// defaulting to `log_tail_lines`.
+    pub lines: Option<usize>,
+}
+
+/// Response body for `GET /api/v1/sessions/{id}/logs`. `logs` is the best-effort
+/// tail (explicit `null` when none are available); `lines` is the number of
+/// lines actually returned; `note` carries an explanatory message when the tail
+/// is empty for a reason a client should understand (e.g. cross-pod locality).
+#[derive(Debug, Serialize)]
+pub struct SessionLogsView {
+    pub session_id: String,
+    pub logs: Option<String>,
+    pub lines: usize,
+    pub note: Option<String>,
+}
+
+/// Note returned when a session has a `runtime_dir` but its child logs are not
+/// readable on the replica serving the request. Child logs live on the local
+/// filesystem of the pod that ran the session; a durable/streamed log store is
+/// a deliberate follow-up, so cross-pod reads degrade to an empty best-effort
+/// tail rather than a 5xx.
+const LOGS_CROSS_POD_NOTE: &str =
+    "logs are local to the executing pod and may be unavailable from another replica";
+
+/// `GET /api/v1/sessions/{id}/logs`: best-effort tail of the session's engine
+/// child logs. Authorized exactly like the session read (`404` for an
+/// unauthorized or unknown id, anti-enumeration; `400` for a malformed id).
+///
+/// A pending session (no `runtime_dir`) returns `logs: null` with no note; a
+/// session whose logs are absent here (idle, or local to another pod) returns
+/// `logs: null` with [`LOGS_CROSS_POD_NOTE`]. Never a 404 for "no logs yet".
+/// The tail is bounded by `log_tail_lines` and [`crate::engine::logs::TAIL_BYTE_CAP`].
+async fn logs(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(id): Path<String>,
+    Query(query): Query<LogsQuery>,
+) -> Result<Json<SessionLogsView>, AppError> {
+    let sid = parse_session_id(&id)?;
+    let session = state
+        .sessions
+        .get(sid)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("session not found: {id}")))?;
+    authorize_session_read(&state, &ctx, &session, &id).await?;
+
+    // `cap` is validated >= 1 at config load, but EngineConfig can also be
+    // built directly; `cap.max(1)` keeps the clamp well-formed (min <= max)
+    // so a degenerate cap can never panic this handler.
+    let cap = state.engine.log_tail_lines.max(1);
+    let max_lines = query.lines.unwrap_or(cap).clamp(1, cap);
+
+    let (logs, note) = match session.runtime_dir.as_deref() {
+        // Pending session: no runtime dir yet — a normal empty answer.
+        None => (None, None),
+        Some(dir) => {
+            match crate::engine::logs::tail_child_logs(std::path::Path::new(dir), max_lines) {
+                Some(tail) => (Some(tail), None),
+                // runtime_dir set but no readable child logs here: idle, or the
+                // files live on the pod that ran the session.
+                None => (None, Some(LOGS_CROSS_POD_NOTE.to_string())),
+            }
+        }
+    };
+    let lines = logs.as_ref().map(|s| s.lines().count()).unwrap_or(0);
+
+    tracing::debug!(
+        session_id = %sid,
+        lines,
+        has_logs = logs.is_some(),
+        "session logs tailed"
+    );
+    Ok(Json(SessionLogsView {
+        session_id: id,
+        logs,
+        lines,
+        note,
+    }))
+}
+
 /// Session routes, to be nested under `/api/v1`.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/sessions", get(list).post(create))
         .route("/sessions/:id", get(get_one))
+        .route("/sessions/:id/logs", get(logs))
         .route("/sessions/:id/stop", post(stop))
 }
 

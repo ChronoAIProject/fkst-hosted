@@ -599,6 +599,57 @@ async fn org_member_creates_and_stops_sessions() {
 }
 
 #[tokio::test]
+async fn stranger_cannot_read_session_logs() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = authz_app_with_db().await;
+    let token_a = token_for("user_A");
+    let token_b = token_for("user_B");
+
+    // user_A creates a personal package and a session.
+    let (status, _) = post_json_with_auth(
+        &app.router,
+        "/api/v1/packages",
+        &token_a,
+        &valid_package_body("logs-pkg"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, body) = post_json_with_auth(
+        &app.router,
+        "/api/v1/sessions",
+        &token_a,
+        &session_body("logs-pkg"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "session create: {body}");
+    let session_id = body["id"].as_str().expect("session id").to_string();
+
+    // Stranger user_B reading the logs -> 404, exactly like the session read
+    // (anti-enumeration: indistinguishable from a truly absent session).
+    let (status, body) = get_with_auth(
+        &app.router,
+        &format!("/api/v1/sessions/{session_id}/logs"),
+        &token_b,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "stranger logs body: {body}");
+    assert_eq!(body["error"], "not_found");
+
+    // Owner user_A may read -> 200 (no runtime dir yet, so logs are null).
+    let (status, body) = get_with_auth(
+        &app.router,
+        &format!("/api/v1/sessions/{session_id}/logs"),
+        &token_a,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "owner logs body: {body}");
+    assert_eq!(body["session_id"], session_id);
+}
+
+#[tokio::test]
 async fn create_into_org_requires_membership() {
     if !docker_available() {
         eprintln!("skipped: docker unavailable");
