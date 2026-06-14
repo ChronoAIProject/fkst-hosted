@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -371,6 +372,174 @@ class RepositoryInterfaceContractTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
 
         self.assertEqual(check_repo.packages_root(root), root / ".fkst" / "packages")
+
+
+class CrossPackageRequireTest(unittest.TestCase):
+    def names(self, source: str, packages: list[str], current: str) -> list[str]:
+        return check_repo.cross_package_require_names(source, set(packages), current)
+
+    def test_flags_sibling_package_require(self) -> None:
+        src = 'local x = require("github-proxy.core")\n'
+        self.assertEqual(
+            self.names(src, ["github-proxy", "consensus"], "consensus"),
+            ["github-proxy"],
+        )
+
+    def test_flags_string_call_sibling_package_require(self) -> None:
+        src = 'local a = require "github-proxy.core"\nlocal b = require[[github-proxy.util]]\n'
+        self.assertEqual(
+            self.names(src, ["github-proxy", "consensus"], "consensus"),
+            ["github-proxy"],
+        )
+
+    def test_allows_std_core_departments_fkst(self) -> None:
+        src = (
+            'require("std.saga") require("core") require("core.markers") '
+            'require("departments.foo") require("fkst")\n'
+        )
+        self.assertEqual(self.names(src, ["github-proxy", "consensus"], "consensus"), [])
+
+    def test_self_reference_is_not_cross_package(self) -> None:
+        src = 'require("consensus.thing")\n'
+        self.assertEqual(self.names(src, ["consensus"], "consensus"), [])
+
+    def test_ignores_require_text_inside_comments_and_strings(self) -> None:
+        src = """
+-- local x = require("github-proxy.core")
+local text = 'require("github-proxy.core")'
+local block = [[
+  require("github-proxy.core")
+]]
+local real = require("consensus.thing")
+"""
+        self.assertEqual(
+            self.names(src, ["github-proxy", "consensus"], "consensus"),
+            [],
+        )
+
+
+class SagaHandlerRatchetTest(unittest.TestCase):
+    def violations(self, source: str, allowlist: set[str]) -> list[str]:
+        return check_repo.saga_handler_ratchet_violations({
+            "packages/example/departments/dept/main.lua": source,
+        }, allowlist)
+
+    def test_saga_shaped_department_not_on_allowlist_passes(self) -> None:
+        source = 'local saga = require("std.saga")\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        self.assertEqual(self.violations(source, set()), [])
+
+    def test_free_form_department_on_allowlist_passes(self) -> None:
+        source = 'function pipeline(event)\n  return event\nend\n'
+        allowlist = {"packages/example/departments/dept/main.lua"}
+        self.assertEqual(self.violations(source, allowlist), [])
+
+    def test_free_form_department_not_on_allowlist_fails(self) -> None:
+        source = 'pipeline = function(event)\n  return event\nend\n'
+        self.assertEqual(len(self.violations(source, set())), 1)
+        self.assertIn("free-form department not on saga-handler allowlist", self.violations(source, set())[0])
+
+    def test_saga_shaped_department_on_allowlist_fails(self) -> None:
+        source = 'return require("std.saga").department{done = d, act = a, consumes = {"q"}}\n'
+        allowlist = {"packages/example/departments/dept/main.lua"}
+        self.assertIn("saga-shaped department remains on saga-handler allowlist", self.violations(source, allowlist)[0])
+
+    def test_saga_shaped_department_with_leftover_pipeline_fails(self) -> None:
+        source = 'local saga = require("std.saga")\npipeline = function() end\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        self.assertIn("still defines free-form top-level pipeline", self.violations(source, set())[0])
+
+    def test_paren_call_saga_department_is_detected(self) -> None:
+        # `.department(...)` (paren spelling) must be recognized as saga-shaped so a
+        # paren-form migration cannot silently remain on the allowlist and false-pass.
+        source = 'local saga = require("std.saga")\nreturn saga.department({done = d, act = a, consumes = {"q"}})\n'
+        allowlist = {"packages/example/departments/dept/main.lua"}
+        self.assertIn("saga-shaped department remains on saga-handler allowlist", self.violations(source, allowlist)[0])
+
+    def test_allowlist_growth_relative_to_base_fails(self) -> None:
+        source = 'function pipeline(event)\n  return event\nend\n'
+        allowlist = {
+            "packages/example/departments/dept/main.lua",
+            "packages/example/departments/new/main.lua",
+        }
+        base = {"packages/example/departments/dept/main.lua"}
+        violations = check_repo.saga_handler_ratchet_violations({
+            "packages/example/departments/dept/main.lua": source,
+            "packages/example/departments/new/main.lua": source,
+        }, allowlist, base)
+        self.assertIn("grows saga-handler allowlist relative to dev", violations[0])
+
+    def test_allowlist_equal_or_shrunk_relative_to_base_passes(self) -> None:
+        free_form = 'function pipeline(event)\n  return event\nend\n'
+        saga_shaped = 'local saga = require("std.saga")\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        base = {
+            "packages/example/departments/dept/main.lua",
+            "packages/example/departments/old/main.lua",
+        }
+        self.assertEqual(
+            check_repo.saga_handler_ratchet_violations({
+                "packages/example/departments/dept/main.lua": free_form,
+                "packages/example/departments/old/main.lua": free_form,
+            }, set(base), base),
+            [],
+        )
+        self.assertEqual(
+            check_repo.saga_handler_ratchet_violations(
+                {
+                    "packages/example/departments/dept/main.lua": free_form,
+                    "packages/example/departments/old/main.lua": saga_shaped,
+                },
+                {"packages/example/departments/dept/main.lua"},
+                base,
+            ),
+            [],
+        )
+
+    def test_missing_dev_base_is_violation_not_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dept = root / ".fkst" / "packages" / "example" / "departments" / "dept"
+            dept.mkdir(parents=True)
+            (dept / "main.lua").write_text(
+                'function pipeline(event)\n  return event\nend\n',
+                encoding="utf-8",
+            )
+            migration = root / "migration"
+            migration.mkdir()
+            (migration / "saga-handler.allowlist").write_text(
+                "packages/example/departments/dept/main.lua\n",
+                encoding="utf-8",
+            )
+
+            violations: list[str] = []
+            warnings: list[str] = []
+            with mock.patch.object(check_repo, "saga_allowlist_at_dev_base", return_value=("unresolved", None)):
+                check_repo.check_saga_handler_ratchet(root, violations, warnings)
+
+        self.assertEqual(warnings, [])
+        self.assertIn("cannot resolve dev base allowlist", violations[0])
+
+    def test_first_introduction_without_base_allowlist_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dept = root / ".fkst" / "packages" / "example" / "departments" / "dept"
+            dept.mkdir(parents=True)
+            (dept / "main.lua").write_text(
+                'function pipeline(event)\n  return event\nend\n',
+                encoding="utf-8",
+            )
+            migration = root / "migration"
+            migration.mkdir()
+            (migration / "saga-handler.allowlist").write_text(
+                "packages/example/departments/dept/main.lua\n",
+                encoding="utf-8",
+            )
+
+            violations: list[str] = []
+            warnings: list[str] = []
+            with mock.patch.object(check_repo, "saga_allowlist_at_dev_base", return_value=("absent", None)):
+                check_repo.check_saga_handler_ratchet(root, violations, warnings)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(violations, [])
 
 
 if __name__ == "__main__":

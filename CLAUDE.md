@@ -25,7 +25,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 ## 包结构约定
 
-- **包内共享库放 package-root**：`packages/<pkg>/core.lua`，department 内 `require("core")`。**只做包内共享**——不跨包 require、不建 `fkst/` 目录、不引包间版本管理。
+- **包内共享库放 package-root**：`packages/<pkg>/core.lua`，department 内 `require("core")`。**跨包共享放 repo-root `std/`**（单向、分层：经 `packages/<pkg>/std -> ../../std` 符号链接引入，`require("std.<m>")`；引擎对 Lua module 是 owner-scoped 硬隔离、无共享根原语，故 symlink 是当前唯一零引擎解，未来由引擎 `--lib-root` 共享根原语取代、symlink 删除）。`std` 分 Tier S（substrate 契约：saga 形状/幂等 oracle/`source_ref`/version-CAS——可升 substrate）与 Tier R（本仓领域，永久留本仓）。纪律:**禁 peer 跨包 require（A→B 内部，`check_repo.py` G9 强制）；只允许唯一 blessed 共享库根（all→std）**。`std` 不是包间版本管理 / manifest / 依赖解析。
 - **按稳定职责拆文件，绝不为凑行数把多职责挤进单文件**：department 不必只有一个 `main.lua`——逻辑变大时按职责边界拆出 department-local 子模块（同目录，`require("departments.<dept>.<mod>")`，如 `autochrono` 的 `mapping.lua`），跨 department 复用的才上提到 package-root `core.lua`。`raisers/`、`tests/*_test.lua`、`core.lua` 等其他文件同理：满足 1000 行上限的唯一正解是**按职责拆成多个有边界的文件**，不是把逻辑硬塞进一个文件来「遵守」上限，也不是无职责边界地碎片化。
 - **flat 包 vs composed 包**：flat 包必须自有契约、自有裸名队列、0 外部 package namespace 引用，并通过单根 conformance；composed 包可以引用兄弟包 namespace 做组合/适配，但必须放 `composed.deps` 声明所组合的兄弟包，并经组合 conformance 验证。`composed.deps` 是测试组合的最小约定，不是版本/依赖解析 manifest，也不是部署配置；这是本仓为了让组合 glue 成为 CI 覆盖的一等包而接受的取舍。
 - 事件带 `schema` 字段（如 `"github-proxy.v1"`）；幂等靠 `dedup_key`（+ 出站用评论里的 HTML marker 等外部 durable 源）。
