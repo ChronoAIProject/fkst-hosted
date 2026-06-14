@@ -1,17 +1,8 @@
 local core = require("core")
-
-local M = {}
-
-M.spec = {
-  consumes = { "devloop_decompose" },
-  produces = {
-    "github-proxy.github_issue_create_request",
-  },
-  stall_window = "2m",
-  retry = { max_attempts = 2, base = "5s", cap = "10s" },
-}
+local saga = require("std.saga")
 
 local MAX_RUNTIME_ID_LEN = 180
+local context_cache = setmetatable({}, { __mode = "k" })
 
 local function safe_segment(value)
   local safe = tostring(value or ""):gsub("[^%w._-]", "_")
@@ -140,6 +131,21 @@ local function child_completion_check(child_issues, decompose, index)
   end
 end
 
+local function all_children_complete(child_issues, decompose, count)
+  local completed = core.decompose_child_issue_fact_indexes(
+    child_issues,
+    decompose.proposal_id,
+    decompose.version,
+    decompose.pr_number
+  )
+  for index = 1, count do
+    if completed[index] ~= true then
+      return false
+    end
+  end
+  return true
+end
+
 local function effect_id_for_create(repo, decompose, issue, index)
   return core.build_issue_create_request(repo, decompose, issue, index).dedup_key
 end
@@ -219,40 +225,134 @@ local function write_decomposed_marker(repo, decompose, count)
   if not core.has_decomposed_marker(confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then
     error("github-devloop: decomposed marker not yet visible after write; retrying")
   end
+  return confirmed_pr
 end
 
-function pipeline(event)
+local function decompose_context(event)
+  if type(event) == "table" and context_cache[event] ~= nil then
+    if context_cache[event] == false then
+      return nil
+    end
+    return context_cache[event]
+  end
   local decompose = event.payload or {}
   if not core.is_supported_decompose(decompose) then
     core.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
     core.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
-    return
+    if type(event) == "table" then
+      context_cache[event] = false
+    end
+    return nil
   end
 
   core.log_entry("decompose", event, decompose.proposal_id, decompose.dedup_key)
   local entity = core.parse_entity_proposal_id(decompose.proposal_id)
   if entity == nil or entity.issue_number == nil then
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "proposal_id is outside issue-backed github-devloop")
-    return
+    if type(event) == "table" then
+      context_cache[event] = false
+    end
+    return nil
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
   local _, pr_number = core.parse_pr_source_ref(decompose.source_ref)
   if tostring(pr_number or "") ~= tostring(decompose.pr_number) then
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(source_ref)", "source_ref PR does not match decompose payload")
-    return
+    if type(event) == "table" then
+      context_cache[event] = false
+    end
+    return nil
   end
   if not core.verify_pr_review_issue_claim("decompose", repo, issue_number, nil, decompose.proposal_id) then
-    return
+    if type(event) == "table" then
+      context_cache[event] = false
+    end
+    return nil
   end
 
   local lock_key = core.transition_lock_key(decompose.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "no transition lock key")
-    return
+    if type(event) == "table" then
+      context_cache[event] = false
+    end
+    return nil
   end
 
-  with_lock(lock_key, function()
+  local context = {
+    decompose = decompose,
+    repo = repo,
+    issue_number = issue_number,
+    lock_key = lock_key,
+  }
+  if type(event) == "table" then
+    context_cache[event] = context
+  end
+  return context
+end
+
+local function accepted_decompose(event)
+  local context = decompose_context(event)
+  if context == nil and type(event) == "table" then
+    context_cache[event] = nil
+  end
+  return context ~= nil
+end
+
+local function decomposed_done(event)
+  local context = decompose_context(event)
+  if context == nil then
+    if type(event) == "table" then
+      context_cache[event] = nil
+    end
+    return false
+  end
+  local done = false
+  with_lock(context.lock_key, function()
+    core.assert_trusted_bot_configured()
+    local current_pr = read_current_pr(context.repo, context.decompose.pr_number)
+    core.log_forged_markers("decompose", context.decompose.proposal_id, current_pr.comments)
+    local state = core.current_entity_state(current_pr.comments, context.decompose.proposal_id)
+    if not core.has_fix_reconcile_marker(current_pr.comments, context.decompose.proposal_id, context.decompose.version)
+      or state.state ~= "blocked"
+      or tostring(state.version or "") ~= tostring(context.decompose.version) then
+      return
+    end
+    local decomposed = core.decomposed_fact(
+      current_pr.comments,
+      context.decompose.proposal_id,
+      context.decompose.version,
+      context.decompose.pr_number
+    )
+    if decomposed == nil then
+      return
+    end
+    local child_issues = read_decompose_child_issues(context.repo, context.decompose.proposal_id)
+    if not all_children_complete(child_issues, context.decompose, decomposed.count) then
+      return
+    end
+    core.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
+    done = true
+  end)
+  if done and type(event) == "table" then
+    context_cache[event] = nil
+  end
+  return done
+end
+
+local function act_decompose(event)
+  local context = decompose_context(event)
+  if context == nil then
+    return
+  end
+  if type(event) == "table" then
+    context_cache[event] = nil
+  end
+  local decompose = context.decompose
+  local repo = context.repo
+  local issue_number = context.issue_number
+  with_lock(context.lock_key, function()
     core.assert_trusted_bot_configured()
 
     local current_pr = read_current_pr(repo, decompose.pr_number)
@@ -293,11 +393,11 @@ function pipeline(event)
       return
     end
     write_decomposed_marker(repo, decompose, count)
+    local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
 
     core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
       "github-proxy.github_issue_create_request",
     })
-    local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
     for index = 1, count do
       core.effect_once({
         effect_id = effect_id_for_create(repo, decompose, issues[index], index),
@@ -308,6 +408,16 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("decompose", pipeline)
-
-return M
+return saga.department{
+  consumes = { "devloop_decompose" },
+  produces = {
+    "github-proxy.github_issue_create_request",
+  },
+  stall_window = "2m",
+  retry = { max_attempts = 2, base = "5s", cap = "10s" },
+  accept = accepted_decompose,
+  done = decomposed_done,
+  act = act_decompose,
+  wrap = core.wrap_pipeline_failure,
+  name = "decompose",
+}
