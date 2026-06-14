@@ -99,6 +99,14 @@ mod defaults {
     pub(super) fn nyxid_org_cache_ttl_secs() -> u64 {
         30
     }
+
+    pub(super) fn llm_timeout_secs() -> u64 {
+        20
+    }
+
+    pub(super) fn llm_max_output_bytes() -> usize {
+        1_048_576
+    }
 }
 
 /// `FKST_HOSTED_*`-prefixed variables (HTTP/server settings).
@@ -112,6 +120,23 @@ struct HttpVars {
     log_level: String,
     #[serde(default = "defaults::request_timeout_secs")]
     request_timeout_secs: u64,
+    /// NyxID LLM-gateway base URL for package generation. Absent => generation
+    /// is disabled (the endpoint answers 503). Env: `FKST_HOSTED_LLM_GATEWAY_URL`.
+    #[serde(default)]
+    llm_gateway_url: Option<String>,
+    /// LLM model name routed by the gateway. Required when the gateway URL is
+    /// set. Env: `FKST_HOSTED_LLM_MODEL`.
+    #[serde(default)]
+    llm_model: Option<String>,
+    /// Per-request timeout (seconds) for one LLM completion call.
+    /// Env: `FKST_HOSTED_LLM_TIMEOUT_SECS`. Default 20, zero rejected.
+    #[serde(default = "defaults::llm_timeout_secs")]
+    llm_timeout_secs: u64,
+    /// Max bytes accepted from a single LLM completion before the draft is
+    /// rejected. Env: `FKST_HOSTED_LLM_MAX_OUTPUT_BYTES`. Default 1 MiB,
+    /// zero rejected.
+    #[serde(default = "defaults::llm_max_output_bytes")]
+    llm_max_output_bytes: usize,
 }
 
 /// Unprefixed MongoDB variables. `MONGODB_URI` has no default: a backend
@@ -246,6 +271,21 @@ pub struct Config {
     /// TTL in seconds for the NyxID org-role and user-orgs caches.
     /// Env: `FKST_NYXID_ORG_CACHE_TTL_SECS`. Default 30, zero rejected.
     pub nyxid_org_cache_ttl_secs: u64,
+    /// NyxID LLM-gateway base URL for package generation. `None` => the
+    /// generate endpoint is disabled (answers 503). Env:
+    /// `FKST_HOSTED_LLM_GATEWAY_URL`. Non-secret (the route is logged): a set
+    /// URL requires both NyxID service-account credentials and a model name.
+    pub llm_gateway_url: Option<String>,
+    /// LLM model name the gateway routes by; required when the gateway URL is
+    /// set (fail-closed). Env: `FKST_HOSTED_LLM_MODEL`.
+    pub llm_model: Option<String>,
+    /// Per-request timeout (seconds) for one LLM completion call.
+    /// Env: `FKST_HOSTED_LLM_TIMEOUT_SECS`. Default 20, zero rejected.
+    pub llm_timeout_secs: u64,
+    /// Max bytes accepted from a single LLM completion before the generated
+    /// draft is rejected (a retry budget guard against a runaway model).
+    /// Env: `FKST_HOSTED_LLM_MAX_OUTPUT_BYTES`. Default 1 MiB, zero rejected.
+    pub llm_max_output_bytes: usize,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -284,6 +324,11 @@ impl fmt::Debug for Config {
                 &self.nyxid_client_secret.as_ref().map(|_| "<redacted>"),
             )
             .field("nyxid_org_cache_ttl_secs", &self.nyxid_org_cache_ttl_secs)
+            // URL/model/numbers are non-secret routing config — show them.
+            .field("llm_gateway_url", &self.llm_gateway_url)
+            .field("llm_model", &self.llm_model)
+            .field("llm_timeout_secs", &self.llm_timeout_secs)
+            .field("llm_max_output_bytes", &self.llm_max_output_bytes)
             .finish()
     }
 }
@@ -312,6 +357,10 @@ impl Default for Config {
             nyxid_client_id: None,
             nyxid_client_secret: None,
             nyxid_org_cache_ttl_secs: defaults::nyxid_org_cache_ttl_secs(),
+            llm_gateway_url: None,
+            llm_model: None,
+            llm_timeout_secs: defaults::llm_timeout_secs(),
+            llm_max_output_bytes: defaults::llm_max_output_bytes(),
         }
     }
 }
@@ -333,6 +382,19 @@ impl Config {
         if http.request_timeout_secs == 0 {
             return Err(AppError::Config(
                 "FKST_HOSTED_REQUEST_TIMEOUT_SECS must be at least 1".to_string(),
+            ));
+        }
+        // A zero LLM timeout would fail every completion instantly and a zero
+        // output cap would reject every draft — reject both loudly, mirroring
+        // the request-timeout guard above.
+        if http.llm_timeout_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_HOSTED_LLM_TIMEOUT_SECS must be at least 1".to_string(),
+            ));
+        }
+        if http.llm_max_output_bytes == 0 {
+            return Err(AppError::Config(
+                "FKST_HOSTED_LLM_MAX_OUTPUT_BYTES must be at least 1".to_string(),
             ));
         }
 
@@ -431,6 +493,25 @@ impl Config {
             AuthMode::Disabled
         };
 
+        // Fail-closed wiring for LLM package generation: a configured gateway
+        // is useless without the service-account credentials that mint its
+        // bearer token, and the gateway routes by model name, so an unset model
+        // would be an unroutable call. Reject both at startup, naming the var.
+        if http.llm_gateway_url.is_some()
+            && (nyxid_client_id.is_none() || nyxid_client_secret.is_none())
+        {
+            return Err(AppError::Config(
+                "FKST_HOSTED_LLM_GATEWAY_URL requires NYXID_CLIENT_ID and NYXID_CLIENT_SECRET"
+                    .to_string(),
+            ));
+        }
+        if http.llm_gateway_url.is_some() && http.llm_model.is_none() {
+            return Err(AppError::Config(
+                "FKST_HOSTED_LLM_MODEL must be set when FKST_HOSTED_LLM_GATEWAY_URL is set"
+                    .to_string(),
+            ));
+        }
+
         Ok(Config {
             port: http.port,
             bind_addr: http.bind_addr,
@@ -453,6 +534,10 @@ impl Config {
             nyxid_client_id,
             nyxid_client_secret,
             nyxid_org_cache_ttl_secs: auth.nyxid_org_cache_ttl_secs,
+            llm_gateway_url: http.llm_gateway_url,
+            llm_model: http.llm_model,
+            llm_timeout_secs: http.llm_timeout_secs,
+            llm_max_output_bytes: http.llm_max_output_bytes,
         })
     }
 
@@ -906,5 +991,135 @@ mod tests {
             err.to_string().contains("FKST_NYXID_ORG_CACHE_TTL_SECS"),
             "error must name the variable, got: {err}"
         );
+    }
+
+    // ---- LLM gateway configuration tests --------------------------------------
+
+    /// Service-account credentials any test enabling the gateway needs.
+    const NYXID_CREDS: [(&str, &str); 2] = [
+        ("NYXID_CLIENT_ID", "sa_test"),
+        ("NYXID_CLIENT_SECRET", "sas_test"),
+    ];
+
+    #[test]
+    fn llm_defaults_when_gateway_unset() {
+        let config =
+            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        assert!(config.llm_gateway_url.is_none());
+        assert!(config.llm_model.is_none());
+        assert_eq!(config.llm_timeout_secs, 20);
+        assert_eq!(config.llm_max_output_bytes, 1_048_576);
+    }
+
+    #[test]
+    fn llm_vars_are_all_overridable() {
+        let mut pairs = vec![
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            (
+                "FKST_HOSTED_LLM_GATEWAY_URL",
+                "https://nyxid.example.com/llm",
+            ),
+            ("FKST_HOSTED_LLM_MODEL", "claude-sonnet"),
+            ("FKST_HOSTED_LLM_TIMEOUT_SECS", "45"),
+            ("FKST_HOSTED_LLM_MAX_OUTPUT_BYTES", "2048"),
+        ];
+        pairs.extend_from_slice(&NYXID_CREDS);
+        let config = Config::from_vars(vars(&pairs)).expect("overrides");
+        assert_eq!(
+            config.llm_gateway_url.as_deref(),
+            Some("https://nyxid.example.com/llm")
+        );
+        assert_eq!(config.llm_model.as_deref(), Some("claude-sonnet"));
+        assert_eq!(config.llm_timeout_secs, 45);
+        assert_eq!(config.llm_max_output_bytes, 2048);
+    }
+
+    #[test]
+    fn zero_llm_timeout_is_a_config_error_naming_the_var() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_LLM_TIMEOUT_SECS", "0"),
+        ]))
+        .expect_err("zero LLM timeout must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_HOSTED_LLM_TIMEOUT_SECS"),
+            "error must name the var, got: {err}"
+        );
+    }
+
+    #[test]
+    fn zero_llm_max_output_bytes_is_a_config_error_naming_the_var() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_LLM_MAX_OUTPUT_BYTES", "0"),
+        ]))
+        .expect_err("zero LLM output cap must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_HOSTED_LLM_MAX_OUTPUT_BYTES"),
+            "error must name the var, got: {err}"
+        );
+    }
+
+    #[test]
+    fn llm_gateway_without_nyxid_creds_is_a_config_error() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            (
+                "FKST_HOSTED_LLM_GATEWAY_URL",
+                "https://nyxid.example.com/llm",
+            ),
+            ("FKST_HOSTED_LLM_MODEL", "claude-sonnet"),
+        ]))
+        .expect_err("gateway without creds must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("NYXID_CLIENT_ID"),
+            "error must name the credential vars, got: {err}"
+        );
+    }
+
+    #[test]
+    fn llm_gateway_without_model_is_a_config_error() {
+        let mut pairs = vec![
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            (
+                "FKST_HOSTED_LLM_GATEWAY_URL",
+                "https://nyxid.example.com/llm",
+            ),
+        ];
+        pairs.extend_from_slice(&NYXID_CREDS);
+        let err = Config::from_vars(vars(&pairs)).expect_err("gateway without model must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_HOSTED_LLM_MODEL"),
+            "error must name the var, got: {err}"
+        );
+    }
+
+    #[test]
+    fn llm_gateway_with_creds_and_model_is_accepted() {
+        let mut pairs = vec![
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            (
+                "FKST_HOSTED_LLM_GATEWAY_URL",
+                "https://nyxid.example.com/llm",
+            ),
+            ("FKST_HOSTED_LLM_MODEL", "claude-sonnet"),
+        ];
+        pairs.extend_from_slice(&NYXID_CREDS);
+        let config = Config::from_vars(vars(&pairs)).expect("fully configured gateway");
+        assert_eq!(
+            config.llm_gateway_url.as_deref(),
+            Some("https://nyxid.example.com/llm")
+        );
+        assert_eq!(config.llm_model.as_deref(), Some("claude-sonnet"));
     }
 }

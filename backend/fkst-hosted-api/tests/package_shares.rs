@@ -391,6 +391,8 @@ async fn share_app() -> ShareTestApp {
         authz,
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
 

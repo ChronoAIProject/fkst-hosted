@@ -222,6 +222,8 @@ async fn e2e_happy_path_runs_then_stops_against_the_real_engine() {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
 

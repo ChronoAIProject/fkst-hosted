@@ -83,6 +83,15 @@ timeout) are rejected at startup with a clear error.
 | `NYXID_CLIENT_ID` | no | — | NyxID service-account client ID for org APIs (e.g. `sa_…`). Both-or-neither with `NYXID_CLIENT_SECRET`. Without both, org features degrade gracefully (owner-only authorization). |
 | `NYXID_CLIENT_SECRET` | no | — | NyxID service-account client secret (SECRET). Both-or-neither with `NYXID_CLIENT_ID`. |
 | `FKST_NYXID_ORG_CACHE_TTL_SECS` | no | `30` | TTL in seconds for NyxID org-role and user-orgs caches. Controls how stale org membership data may be. Must be ≥ 1; `0` is rejected at startup. |
+| `FKST_HOSTED_LLM_GATEWAY_URL` | no | — | NyxID LLM-gateway base URL (NyxID's `{base}/api/v1/llm/gateway/v1`) for `POST /api/v1/packages/generate`. Absent → generation is disabled (the endpoint answers `503`). When set, it **requires** `NYXID_CLIENT_ID`/`NYXID_CLIENT_SECRET` (the service account that mints the `llm:proxy` bearer) and `FKST_HOSTED_LLM_MODEL` — both are rejected at startup if missing. Non-secret (logged). |
+| `FKST_HOSTED_LLM_MODEL` | when gateway set | — | Model name the gateway routes by (e.g. `claude-sonnet`). Required when `FKST_HOSTED_LLM_GATEWAY_URL` is set; fail-closed. |
+| `FKST_HOSTED_LLM_TIMEOUT_SECS` | no | `20` | Per-request timeout (seconds) for one LLM completion call. Must be ≥ 1; `0` is rejected at startup. |
+| `FKST_HOSTED_LLM_MAX_OUTPUT_BYTES` | no | `1048576` | Max bytes accepted from a single completion before the draft is rejected and a corrective retry is attempted. Must be ≥ 1; `0` is rejected at startup. |
+
+> **Deployment note (generation enabled):** the conformance dry-run runs inside
+> the HTTP request, so set `FKST_HOSTED_REQUEST_TIMEOUT_SECS` to **≥ 90** when
+> `FKST_HOSTED_LLM_GATEWAY_URL` is set — the request budget must cover up to two
+> LLM round-trips plus the (≤ 20 s) engine conformance pre-flight.
 
 ### Claiming legacy packages and sessions
 
@@ -136,6 +145,65 @@ files at spawn — a PUT affects only sessions started afterwards.
 | `DELETE` | `/api/v1/packages/{name}` | 204 | Delete package (409 if active session or live lease exists) |
 | `POST` | `/api/v1/packages/{name}/archive` | 201 | Create package from zip archive (`Content-Type: application/zip`) |
 | `PUT` | `/api/v1/packages/{name}/archive` | 200 | Replace package from zip archive (`Content-Type: application/zip`) |
+| `POST` | `/api/v1/packages/generate` | 200 | Generate a package draft from a natural-language `description` (LLM); see below |
+
+### LLM package generation (`POST /api/v1/packages/generate`)
+
+Generate a validated fkst package draft from a natural-language `description`.
+Requires the LLM gateway to be configured (`FKST_HOSTED_LLM_GATEWAY_URL`); when
+it is not, the endpoint answers `503`.
+
+**Request** (JSON):
+
+```json
+{ "description": "a department that greets every tick event",
+  "name": "my-pkg",      // optional; a unique gen-<hex> name is minted when absent
+  "save": false }         // optional; persist the draft as your own package when it validates
+```
+
+- `description` — 1..=8192 bytes (a `400` otherwise).
+- `name` — optional; when present it must match `^[A-Za-z0-9_-]+$` (a `400`
+  otherwise). When absent a unique `gen-<8 hex>` name is generated.
+- `save` — when `true`, a **validated** draft whose conformance did not fail is
+  persisted as the caller's own package; otherwise `save_error` records why and
+  nothing is stored.
+
+**Response** (`200 OK` — even when the draft fails validation/conformance):
+
+```json
+{
+  "package": { "name": "my-pkg", "files": [ { "path": "...", "content": "..." } ], "composed_deps": [] },
+  "validation": { "ok": true, "errors": [] },
+  "conformance": { "status": "ok", "errors": [], "skipped_reason": null },
+  "saved": false,
+  "save_error": null,
+  "attempts": 1
+}
+```
+
+- `validation.ok` — the SAME `NewPackage::validate` gate every uploaded package
+  passes. A draft that fails it is reported with `ok:false` and `errors`, and
+  one corrective retry (with the validation errors fed back to the model) is
+  attempted before giving up.
+- `conformance.status` — `ok` / `failed` / `skipped`. The optional engine
+  conformance dry-run runs only when the draft validates and the request budget
+  allows; a raiser-only draft, a missing engine binary, or an exhausted budget
+  yields `skipped` (with `skipped_reason`).
+- `attempts` — `1` or `2`.
+
+**Status codes:** `200` (generation ran), `400` (empty/oversize description or
+invalid explicit name), `409` (`save:true` collided with an existing name),
+`503` (generation not configured, or the gateway is unreachable).
+
+**Trust model & privacy.** The model is reached through NyxID's LLM gateway
+using a service-account bearer (scope `llm:proxy`); fkst-hosted never sees a raw
+provider key. The LLM has **no tool access** and never touches the host — the
+generated package is schema-parsed and then hard-validated by the exact gate
+every uploaded package passes, so a **generated package is exactly as trusted as
+a user-uploaded one** (it runs under the engine like everything else). The
+caller's `description`, the prompts, and the raw model output are **never
+logged** — only byte sizes, file counts, the attempt count, and the conformance
+status.
 
 ### Zip archive upload
 

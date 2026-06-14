@@ -390,6 +390,8 @@ async fn authz_app_with_db() -> AuthzTestAppWithDb {
         authz,
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
 

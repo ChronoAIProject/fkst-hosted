@@ -15,6 +15,7 @@ pub mod github_app;
 pub mod goals;
 pub mod journal;
 pub mod leases;
+pub mod llm;
 pub mod models;
 pub mod nyxid;
 pub mod packages;

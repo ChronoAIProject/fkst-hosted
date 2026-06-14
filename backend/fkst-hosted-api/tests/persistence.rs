@@ -323,6 +323,8 @@ async fn health_endpoints_reflect_mongo_liveness() {
         authz: Authorizer::disabled(),
         github_app: None,
         goals,
+        engine: EngineConfig::default(),
+        llm: None,
     })
     .expect("router");
 
