@@ -231,9 +231,17 @@ export function Goal({
               {mergeGate ? (
                 <span className={cn(
                   "text-[10.5px] font-mono lowercase",
-                  Object.values(mergeGate).every(v => v === 'ok') ? "text-green" : "text-ghost"
+                  Object.values(mergeGate).every(v => v === 'ok')
+                    ? "text-green"
+                    : mergeGate.posture === 'unknown'
+                      ? "text-ghost"
+                      : "text-ghost"
                 )}>
-                  {Object.values(mergeGate).every(v => v === 'ok') ? 'passing' : 'blocked'}
+                  {Object.values(mergeGate).every(v => v === 'ok')
+                    ? 'passing'
+                    : mergeGate.posture === 'unknown'
+                      ? 'unknown'
+                      : 'blocked'}
                 </span>
               ) : (
                 <span className="text-ghost text-[10px] lowercase">not at the gate yet</span>
