@@ -59,9 +59,12 @@ local function entity_json(entity, age_minutes)
   return "{"
     .. '"proposal_id":' .. json_string(entity and entity.proposal_id or "")
     .. ',"issue_number":' .. json_string(entity and entity.issue_number or "")
+    .. ',"pr_number":' .. json_string(entity and entity.pr_number or "")
     .. ',"title":' .. json_string(entity and entity.title or "")
     .. ',"state":' .. json_string(entity and entity.state and entity.state.state or "")
     .. ',"version":' .. json_string(entity and entity.state and entity.state.version or "")
+    .. ',"head_sha":' .. json_string(entity and entity.head_sha or "")
+    .. ',"source":' .. json_string(entity and entity.source or "")
     .. ',"age_minutes":' .. tostring(tonumber(age_minutes) or 0)
     .. "}"
 end
@@ -209,18 +212,97 @@ local function merge_ready_queue_head(entities, now_seconds)
   return selected
 end
 
+local function merge_queue_head_entity(repo, now_seconds)
+  local branches = M.branch_config()
+  local head = M.merge_queue_head(repo, branches.integration)
+  if head == nil or tostring(head.state or "") ~= "merge-ready" then
+    return nil
+  end
+  local repo_from_proposal, issue_number = M.parse_proposal_id(head.proposal_id)
+  if repo_from_proposal == nil then
+    return nil
+  end
+  local age = M.stall_suspect_age_minutes(head.version, now_seconds)
+  if tonumber(age) == nil or tonumber(age) <= merge_ready_stale_threshold_minutes then
+    return nil
+  end
+  return {
+    entity = {
+      proposal_id = head.proposal_id,
+      issue_number = tonumber(issue_number) or issue_number,
+      pr_number = head.pr_number,
+      title = "PR #" .. tostring(head.pr_number),
+      state = {
+        state = "merge-ready",
+        version = head.version,
+      },
+      head_sha = head.head_sha,
+      source = "merge-queue",
+    },
+    state = "merge-ready",
+    age_minutes = age,
+    threshold_minutes = merge_ready_stale_threshold_minutes,
+  }
+end
+
+local function observed_queue_head(entities, now_seconds)
+  local selected = merge_ready_queue_head(entities, now_seconds)
+  if selected ~= nil and selected.entity ~= nil then
+    selected.entity.source = selected.entity.source or "observability-sample"
+  end
+  return selected
+end
+
+local function queue_head_for_starvation(repo, entities, now_seconds)
+  local ok, head = pcall(function()
+    return merge_queue_head_entity(repo, now_seconds)
+  end)
+  if ok and head ~= nil then
+    return head
+  end
+  if not ok then
+    log.warn("github-devloop dept=observability tag=QUEUE_STARVATION action=fallback reason=merge-queue-source-failed")
+  end
+  return observed_queue_head(entities, now_seconds)
+end
+
 function M.queue_starvation_window_key(now_seconds)
   local bucket_seconds = merge_recent_threshold_minutes * 60
   local bucket = math.floor((tonumber(now_seconds) or now()) / bucket_seconds)
   return "window-" .. tostring(bucket)
 end
 
-function M.queue_starvation_dedup_key(repo, identity, window_key)
+local function stable_incident_identity(queue_head)
+  local entity = queue_head and queue_head.entity or queue_head
+  if type(entity) ~= "table" then
+    return "merge-ready"
+  end
+  local parts = { "merge-ready" }
+  if entity.pr_number ~= nil then
+    table.insert(parts, "pr")
+    table.insert(parts, tostring(entity.pr_number))
+  end
+  if entity.proposal_id ~= nil then
+    table.insert(parts, "proposal")
+    table.insert(parts, tostring(entity.proposal_id))
+  end
+  local version = entity.state and entity.state.version or entity.version
+  if version ~= nil then
+    table.insert(parts, "version")
+    table.insert(parts, M.safe_version_segment(version))
+  end
+  if entity.head_sha ~= nil and M._is_git_sha(entity.head_sha) then
+    table.insert(parts, "head")
+    table.insert(parts, M.safe_head_segment(entity.head_sha))
+  end
+  return table.concat(parts, "/")
+end
+
+function M.queue_starvation_dedup_key(repo, identity)
   return M._dedup_key({
     detector,
     tostring(repo or ""),
     tostring(identity or "queue"),
-    tostring(window_key or "window"),
   })
 end
 
@@ -236,9 +318,11 @@ local function alert_body(evidence, snapshot)
     "",
     "Detector: `" .. detector .. "`",
     "Queue head: #" .. tostring(head.issue_number or "unknown") .. " " .. M.neutralize_untrusted_comment_text(head.title or ""),
+    "Queue head PR: #" .. tostring(head.pr_number or "unknown"),
     "Queue head age: " .. tostring(evidence.queue_head_age_minutes) .. " minutes",
     "Threshold: " .. tostring(evidence.threshold_minutes) .. " minutes",
     "Last merge age: " .. tostring(evidence.last_merge_age_minutes or "none"),
+    "Head source: `" .. tostring(head.source or "unknown") .. "`",
     "Evidence snapshot: `" .. tostring(snapshot) .. "`",
     "",
     "Requested outcome:",
@@ -254,7 +338,7 @@ local function alert_body(evidence, snapshot)
 end
 
 function M.build_queue_starvation_issue_create_request(repo, evidence, snapshot)
-  local identity = "merge-ready"
+  local identity = evidence.incident_identity or stable_incident_identity(evidence.queue_head)
   local window_key = evidence.window_key
   return {
     schema = "github-proxy.issue-create.v1",
@@ -262,7 +346,7 @@ function M.build_queue_starvation_issue_create_request(repo, evidence, snapshot)
     title = alert_title(evidence.queue_head),
     body = alert_body(evidence, snapshot),
     labels = json.decode("[]"),
-    dedup_key = M.queue_starvation_dedup_key(repo, identity, window_key),
+    dedup_key = M.queue_starvation_dedup_key(repo, identity),
     parent_comment_target = {
       repo = repo,
       issue_number = tostring(evidence.queue_head.issue_number),
@@ -275,7 +359,7 @@ function M.build_queue_starvation_issue_create_request(repo, evidence, snapshot)
 end
 
 function M.observe_queue_starvation(repo, entities, limits, deadline, now_seconds)
-  local queue_head = merge_ready_queue_head(entities, now_seconds)
+  local queue_head = queue_head_for_starvation(repo, entities, now_seconds)
   if queue_head == nil then
     log.info("github-devloop dept=observability tag=QUEUE_STARVATION action=no-op reason=no-stale-merge-ready")
     return { action = "no-op", reason = "no-stale-merge-ready" }
@@ -309,9 +393,23 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
     last_merge_age_minutes = newest and newest.age_minutes or nil,
     recent_closed = recent_closed,
   }
+  evidence.incident_identity = stable_incident_identity(queue_head)
   local snapshot = write_snapshot(repo, evidence.window_key, evidence)
   local request = M.build_queue_starvation_issue_create_request(repo, evidence, snapshot)
+  local redrive = nil
+  if queue_head.entity ~= nil and queue_head.entity.pr_number ~= nil then
+    redrive = M.merge_queue_starvation_tick_payload(repo, evidence.incident_identity, {
+      pr_number = queue_head.entity.pr_number,
+      proposal_id = queue_head.entity.proposal_id,
+      version = queue_head.entity.state and queue_head.entity.state.version or nil,
+      head_sha = queue_head.entity.head_sha,
+    }, evidence.window_key)
+  end
   M.log_raise("observability", detector .. "/merge-ready", "github-proxy.github_issue_create_request", request)
+  if redrive ~= nil then
+    M.log_raise("observability", detector .. "/merge-ready", "devloop_merge_queue_tick", redrive)
+    raise("devloop_merge_queue_tick", redrive)
+  end
   log.info("github-devloop dept=observability tag=QUEUE_STARVATION"
     .. " action=raise"
     .. " queue_head=" .. tostring(queue_head.entity and queue_head.entity.proposal_id or "")
@@ -323,6 +421,7 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
   return {
     action = "raise",
     request = request,
+    redrive = redrive,
     snapshot_path = snapshot,
   }
 end

@@ -35,6 +35,18 @@ local function run_merge_queue_tick(run_opts)
   }, run_opts)
 end
 
+local function run_starvation_merge_queue_tick(event, run_opts)
+  return t.run_department("departments/merge/main.lua", {
+    queue = "devloop_merge_queue_tick",
+    payload = core.merge_queue_starvation_tick_payload("owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
+      pr_number = event.pr_number,
+      proposal_id = event.proposal_id,
+      version = event.version,
+      head_sha = event.reviewed_head_sha,
+    }),
+  }, run_opts)
+end
+
 local function mock_repo_env()
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
     stdout = "owner/repo",
@@ -416,6 +428,26 @@ return {
     }))
     t.eq(find_raise(polled.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
     t.is_true(find_raise(polled.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+  end,
+
+  test_queue_starvation_redrive_processes_current_merge_queue_head = function()
+    local current = merge_ready()
+    local origin_marker = core.pr_origin_marker(current.proposal_id, "42", "devloop-owner-repo-42-01HY", current.version, "dev")
+    mock_bot_env()
+    mock_repo_env()
+    mock_queue_list({ 7 })
+    mock_queue_pr(current, "2026-06-03T02:00:00Z")
+    mock_pr_merge(merge_comments_with_origin(current, origin_marker))
+
+    local result = run_starvation_merge_queue_tick(current, opts("merge-queue-starvation-redrive", {
+      FKST_GITHUB_REPO = "owner/repo",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+    local reconcile = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(reconcile.payload.body:find("fkst:github-devloop:queue-starvation-reconcile:v1", 1, true) ~= nil)
+    t.is_true(reconcile.payload.body:find('outcome="head-redriven"', 1, true) ~= nil)
   end,
 
   test_merge_queue_tick_dispatches_namespaced_queue_to_scan = function()

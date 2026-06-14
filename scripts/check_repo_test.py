@@ -262,6 +262,59 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertNotIn("explicit BIN is not executable", combined)
 
 
+class LineLimitGuardTest(unittest.TestCase):
+    def test_near_limit_source_file_warns_without_failing(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "repo"
+            script_dir = probe / "scripts"
+            pkg = probe / ".fkst" / "packages" / "near-limit"
+            script_dir.mkdir(parents=True)
+            pkg.mkdir(parents=True)
+            (script_dir / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+            (pkg / "core.lua").write_text("-- filler\n" * check_repo.LINE_WARNING_MARGIN, encoding="utf-8")
+
+            violations: list[str] = []
+            warnings: list[str] = []
+            old_threshold = os.environ.get("FKST_G1_LINE_WARNING_THRESHOLD")
+            os.environ["FKST_G1_LINE_WARNING_THRESHOLD"] = str(check_repo.LINE_WARNING_MARGIN)
+            try:
+                check_repo.check_line_limit(probe, violations, warnings)
+            finally:
+                if old_threshold is None:
+                    os.environ.pop("FKST_G1_LINE_WARNING_THRESHOLD", None)
+                else:
+                    os.environ["FKST_G1_LINE_WARNING_THRESHOLD"] = old_threshold
+
+        self.assertEqual(violations, [])
+        self.assertEqual(
+            warnings,
+            [
+                "G1: packages/near-limit/core.lua has 50 lines; warning threshold is 50; hard limit is 1000",
+            ],
+        )
+
+    def test_over_limit_source_file_fails_without_duplicate_warning(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "repo"
+            pkg = probe / ".fkst" / "packages" / "oversized"
+            pkg.mkdir(parents=True)
+            (pkg / "core.lua").write_text("-- filler\n" * (check_repo.LINE_LIMIT + 1), encoding="utf-8")
+
+            violations: list[str] = []
+            warnings: list[str] = []
+            check_repo.check_line_limit(probe, violations, warnings)
+
+        self.assertEqual(
+            violations,
+            [
+                "G1: packages/oversized/core.lua has 1001 lines; limit is 1000",
+            ],
+        )
+        self.assertEqual(warnings, [])
+
+
 class RepositoryInterfaceContractTest(unittest.TestCase):
     def test_repository_checks_scan_fkst_packages_view(self) -> None:
         root = Path(__file__).resolve().parents[1]
