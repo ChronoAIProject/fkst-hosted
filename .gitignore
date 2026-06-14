@@ -1,5 +1,6 @@
 # Local, machine-specific config. Tracked template lives in .fkst/env.example.
 .fkst/env
+.fkst/board-cache.json
 .fkst/runtime/
 .fkst/durable/
 

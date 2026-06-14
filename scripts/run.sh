@@ -25,6 +25,12 @@
 #       running GitHub repository. Exact engine queue/DLQ depths remain
 #       unavailable here and need fkst-framework doctor support.
 #
+#   scripts/run.sh board [--refresh] [--ttl seconds] [--stall seconds]
+#       Render the local github-devloop observability board from the engine's
+#       generic `observe --json` event/entity timeline and queue/DLQ state.
+#       Uses .fkst/board-cache.json by default as a TTL cache; --refresh forces
+#       a read from the engine. The cache is local only and never authoritative.
+#
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
 #
@@ -76,6 +82,14 @@ resolve_bin() {
   fi
   BIN="$RESOLVED_BIN"
   export BIN
+}
+
+shell_single_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+default_board_cmd() {
+  printf 'FKST_NO_AUTOBUILD=1 %s board' "$(shell_single_quote "$ROOT/scripts/run.sh")"
 }
 
 # Resolve a path to its physical location, following file symlinks too (portable:
@@ -137,6 +151,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
+  python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
   return "$fail"
 }
@@ -489,6 +504,7 @@ cmd_run() {
     mkdir -p "$rt"
   fi
   export FKST_RUNTIME_ROOT="$rt"
+  export FKST_DEVLOOP_BOARD_CMD="${FKST_DEVLOOP_BOARD_CMD:-$(default_board_cmd)}"
 
   echo "BIN=$BIN"
   echo "run $pkg/$dept  FKST_RUNTIME_ROOT=$rt${fresh:+ (fresh)}"
@@ -555,6 +571,17 @@ cmd_doctor() {
   esac
 }
 
+cmd_board() {
+  local durable="${FKST_DURABLE_ROOT:-$DEFAULT_DURABLE_ROOT}"
+  local cache="$FKST_DIR/board-cache.json"
+  python3 -B "$ROOT/scripts/board.py" \
+    --bin "$BIN" \
+    --project-root "$ROOT" \
+    --durable-root "$durable" \
+    --cache "$cache" \
+    "$@"
+}
+
 cmd_supervise() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
@@ -586,6 +613,7 @@ cmd_supervise() {
   fi
   export FKST_RUNTIME_ROOT="$rt"
   export FKST_DURABLE_ROOT="$durable"
+  export FKST_DEVLOOP_BOARD_CMD="${FKST_DEVLOOP_BOARD_CMD:-$(default_board_cmd)}"
 
   echo "BIN=$BIN"
   echo "FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT"
@@ -626,6 +654,7 @@ main() {
   case "${1:-}" in
     check) shift; cmd_check "$@" ;;
     doctor) shift; cmd_doctor "$@" ;;
+    board) shift; resolve_bin; ensure_fresh_bin; cmd_board "$@" ;;
     test) shift
       # Quiet cmd_check's advisory warnings during a test run unless verbose;
       # surface its full output only when it hard-fails (non-zero). `run.sh check`
