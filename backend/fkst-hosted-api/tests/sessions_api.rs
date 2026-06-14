@@ -766,3 +766,201 @@ async fn graceful_shutdown_records_running_sessions_as_stopped() {
     assert!(body["stopped_at"].as_str().is_some(), "stopped_at set");
     assert!(body["error"].is_null(), "clean shutdown carries no error");
 }
+
+// ---- (11) list: visibility, status filter, pagination -------------------------
+
+/// Build a session document with a controlled owner/org/status/created_at so
+/// list visibility and ordering can be asserted deterministically.
+fn mk_list_session(
+    owner_user_id: Option<&str>,
+    org_id: Option<&str>,
+    status: SessionStatus,
+    created_at_millis: i64,
+) -> SessionDoc {
+    SessionDoc {
+        id: bson::Uuid::new(),
+        package_name: "demo".to_string(),
+        status,
+        pod_id: None,
+        fencing_token: None,
+        pid: None,
+        runtime_dir: None,
+        error: None,
+        run_key: None,
+        owner_user_id: owner_user_id.map(str::to_string),
+        org_id: org_id.map(str::to_string),
+        package_names: vec![],
+        goal_id: None,
+        repo: None,
+        triggered_by: None,
+        created_at: bson::DateTime::from_millis(created_at_millis),
+        started_at: None,
+        stopped_at: None,
+    }
+}
+
+/// `SessionRepo::list` enforces the visibility `$or` (owner + visible orgs +
+/// legacy-null), honors the admin override, filters by status, orders
+/// newest-first, and paginates.
+#[tokio::test]
+async fn session_repo_list_filters_visibility_status_and_paginates() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = app(PASS_CONFORMANCE, READY_SUPERVISE).await;
+    let repo = SessionRepo::new(&app.db);
+
+    // created_at increases with each seed so the newest has the largest millis.
+    let owned = mk_list_session(Some("dev-local"), None, SessionStatus::Running, 1_000);
+    let org = mk_list_session(
+        Some("someone-else"),
+        Some("org-x"),
+        SessionStatus::Pending,
+        2_000,
+    );
+    let legacy = mk_list_session(None, None, SessionStatus::Stopped, 3_000);
+    let stranger = mk_list_session(
+        Some("stranger"),
+        Some("org-y"),
+        SessionStatus::Running,
+        4_000,
+    );
+    for doc in [&owned, &org, &legacy, &stranger] {
+        repo.insert(doc).await.expect("seed session");
+    }
+
+    // Caller "dev-local" with org-x visible: sees owned + org + legacy, never
+    // the stranger (different owner, non-visible org).
+    let visible = repo
+        .list("dev-local", &["org-x".to_string()], false, None, 50, 0)
+        .await
+        .expect("list visible");
+    let ids: Vec<_> = visible.iter().map(|s| s.id).collect();
+    assert!(ids.contains(&owned.id), "owner session visible");
+    assert!(ids.contains(&org.id), "visible-org session visible");
+    assert!(
+        ids.contains(&legacy.id),
+        "legacy null-owner session visible"
+    );
+    assert!(
+        !ids.contains(&stranger.id),
+        "stranger session must be hidden"
+    );
+    assert_eq!(visible.len(), 3, "exactly the three visible sessions");
+    // Newest-first: legacy(3000) before org(2000) before owned(1000).
+    assert_eq!(
+        ids,
+        vec![legacy.id, org.id, owned.id],
+        "results ordered newest-first by created_at"
+    );
+
+    // Admin override: every session, regardless of owner/org.
+    let all = repo
+        .list("dev-local", &[], true, None, 50, 0)
+        .await
+        .expect("list admin");
+    assert_eq!(all.len(), 4, "admin scope is unrestricted");
+
+    // Status filter intersects with visibility: only the visible Running one
+    // (the stranger is Running but hidden).
+    let running = repo
+        .list(
+            "dev-local",
+            &["org-x".to_string()],
+            false,
+            Some(SessionStatus::Running),
+            50,
+            0,
+        )
+        .await
+        .expect("list running");
+    assert_eq!(running.len(), 1);
+    assert_eq!(running[0].id, owned.id);
+
+    // Pagination over the three visible sessions (newest-first).
+    let page1 = repo
+        .list("dev-local", &["org-x".to_string()], false, None, 2, 0)
+        .await
+        .expect("page1");
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1[0].id, legacy.id);
+    assert_eq!(page1[1].id, org.id);
+    let page2 = repo
+        .list("dev-local", &["org-x".to_string()], false, None, 2, 2)
+        .await
+        .expect("page2");
+    assert_eq!(page2.len(), 1, "offset past the first page");
+    assert_eq!(page2[0].id, owned.id);
+}
+
+/// `GET /api/v1/sessions` returns the caller's visible sessions newest-first,
+/// honors `?status=` (400 on a bad value), and paginates via `?limit`/`?offset`.
+#[tokio::test]
+async fn list_endpoint_projects_filters_and_paginates() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = app(PASS_CONFORMANCE, READY_SUPERVISE).await;
+    let repo = SessionRepo::new(&app.db);
+
+    // Auth is disabled => caller is "dev-local" (no admin). Seed two owned
+    // sessions plus one stranger that must never surface.
+    let newer = mk_list_session(Some("dev-local"), None, SessionStatus::Running, 2_000);
+    let older = mk_list_session(Some("dev-local"), None, SessionStatus::Stopped, 1_000);
+    let stranger = mk_list_session(Some("stranger"), None, SessionStatus::Running, 3_000);
+    for doc in [&newer, &older, &stranger] {
+        repo.insert(doc).await.expect("seed session");
+    }
+
+    // Full list: both owned sessions, newest-first, stranger excluded.
+    let (status, _h, body) = get_path(&app.router, "/api/v1/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = body.as_array().expect("array body");
+    assert_eq!(arr.len(), 2, "only the caller's sessions: {body}");
+    assert_eq!(arr[0]["id"], newer.id.to_string(), "newest-first");
+    assert_eq!(arr[1]["id"], older.id.to_string());
+
+    // Status filter.
+    let (status, _h, body) = get_path(&app.router, "/api/v1/sessions?status=running").await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = body.as_array().expect("array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], newer.id.to_string());
+
+    // Invalid status -> 400.
+    let (status, _h, body) = get_path(&app.router, "/api/v1/sessions?status=bogus").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "invalid_request");
+
+    // Pagination: limit caps the page; offset walks it.
+    let (status, _h, body) = get_path(&app.router, "/api/v1/sessions?limit=1").await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = body.as_array().expect("array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], newer.id.to_string(), "first page is newest");
+
+    let (status, _h, body) = get_path(&app.router, "/api/v1/sessions?limit=1&offset=1").await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = body.as_array().expect("array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], older.id.to_string(), "second page is older");
+}
+
+/// An empty result is `200 []`, never `404`.
+#[tokio::test]
+async fn list_endpoint_empty_is_200_empty_array() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = app(PASS_CONFORMANCE, READY_SUPERVISE).await;
+    let (status, _h, body) = get_path(&app.router, "/api/v1/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        json!([]),
+        "no sessions yields an empty array, not 404"
+    );
+}

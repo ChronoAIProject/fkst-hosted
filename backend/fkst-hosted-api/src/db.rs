@@ -26,6 +26,10 @@ pub const IDX_SESSIONS_POD_ID: &str = "sessions_pod_id";
 pub const IDX_SESSIONS_OWNER_USER_ID: &str = "sessions_owner_user_id";
 pub const IDX_SESSIONS_ORG_ID: &str = "sessions_org_id";
 pub const IDX_SESSIONS_GOAL_ID: &str = "sessions_goal_id";
+/// Compound indexes backing `GET /api/v1/sessions` (visibility `$or` branches
+/// sorted newest-first by `created_at`).
+pub const IDX_SESSIONS_OWNER_CREATED: &str = "sessions_owner_created";
+pub const IDX_SESSIONS_ORG_CREATED: &str = "sessions_org_created";
 pub const IDX_LEASES_EXPIRES_AT: &str = "leases_expires_at";
 
 /// Cheap-to-clone handle to the Mongo database (`mongodb::Database` is
@@ -119,6 +123,14 @@ impl Db {
             (doc! { "owner_user_id": 1 }, IDX_SESSIONS_OWNER_USER_ID),
             (doc! { "org_id": 1 }, IDX_SESSIONS_ORG_ID),
             (doc! { "goal_id": 1 }, IDX_SESSIONS_GOAL_ID),
+            (
+                doc! { "owner_user_id": 1, "created_at": -1 },
+                IDX_SESSIONS_OWNER_CREATED,
+            ),
+            (
+                doc! { "org_id": 1, "created_at": -1 },
+                IDX_SESSIONS_ORG_CREATED,
+            ),
         ];
         self.sessions()
             .create_indexes(

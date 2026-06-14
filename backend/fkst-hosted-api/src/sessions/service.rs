@@ -386,6 +386,23 @@ impl SessionService {
         self.inner.repo.get(id).await
     }
 
+    /// List sessions visible to the caller, newest-first. Thin facade over
+    /// [`SessionRepo::list`]; visibility/pagination semantics live there.
+    pub async fn list(
+        &self,
+        owner_user_id: &str,
+        visible_org_ids: &[String],
+        admin: bool,
+        status: Option<SessionStatus>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<SessionDoc>, AppError> {
+        self.inner
+            .repo
+            .list(owner_user_id, visible_org_ids, admin, status, limit, offset)
+            .await
+    }
+
     /// Create a session from a goal trigger. Handles steps 4-8 of the trigger
     /// flow:
     /// 4. Goal CAS: not_started/stopped/failed -> triggered
