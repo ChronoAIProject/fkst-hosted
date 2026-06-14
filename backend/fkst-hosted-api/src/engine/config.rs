@@ -143,9 +143,11 @@ impl EngineConfig {
             .map_err(|e| AppError::Config(e.to_string()))?;
 
         // A zero grace would jump straight to SIGKILL and a zero timeout
-        // would fail every conformance run / ready-wait instantly — total
-        // breakage from a one-character misconfiguration. Reject loudly,
-        // naming the exact env var so the startup error is actionable.
+        // would fail every conformance run / ready-wait instantly; a zero
+        // log-tail line count would make the logs endpoint's `clamp(1, cap)`
+        // ill-formed (min > max) — total breakage from a one-character
+        // misconfiguration. Reject loudly, naming the exact env var so the
+        // startup error is actionable.
         for (value, var) in [
             (config.stop_grace_secs, "FKST_HOSTED_ENGINE_STOP_GRACE_SECS"),
             (
@@ -159,6 +161,10 @@ impl EngineConfig {
             (
                 config.github_token_refresh_secs,
                 "FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS",
+            ),
+            (
+                config.log_tail_lines as u64,
+                "FKST_HOSTED_ENGINE_LOG_TAIL_LINES",
             ),
         ] {
             if value == 0 {
@@ -324,6 +330,18 @@ mod tests {
         assert!(err
             .to_string()
             .contains("FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS"));
+    }
+
+    #[test]
+    fn zero_log_tail_lines_is_a_config_error_naming_the_env_var() {
+        // A zero tail would make the logs endpoint's `clamp(1, cap)` ill-formed
+        // (min > max); reject it at the config boundary like the other fields.
+        let err = EngineConfig::from_vars(vars(&[("FKST_HOSTED_ENGINE_LOG_TAIL_LINES", "0")]))
+            .expect_err("zero log-tail must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err
+            .to_string()
+            .contains("FKST_HOSTED_ENGINE_LOG_TAIL_LINES"));
     }
 
     #[test]
