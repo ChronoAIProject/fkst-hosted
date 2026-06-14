@@ -8,6 +8,7 @@ M.spec = {
     "consensus.proposal",
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_create_request",
     "github-proxy.github_pr_comment_request",
     "devloop_ready",
     "devloop_reviewing",
@@ -108,7 +109,13 @@ local function ensure_managed_issue_claim(issue, proposal_id, current, state)
     return false
   end
   if core.maybe_release_stale_self_claim("observe_issue", issue.repo, issue.number, current, proposal_id, state) then
-    return core.claim_issue_for_management("observe_issue", issue.repo, issue.number, { assignees = {} }, proposal_id)
+    local released_current = {
+      assignees = {},
+      author_login = current.author_login,
+      title = current.title,
+      comments = current.comments,
+    }
+    return core.claim_issue_for_management("observe_issue", issue.repo, issue.number, released_current, proposal_id)
   end
   if claim_state == "self" then
     return true

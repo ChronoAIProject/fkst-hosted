@@ -43,6 +43,33 @@ local function state(name, created_at)
   }
 end
 
+local function self_current(extra)
+  local fields = extra or {}
+  return {
+    assignees = fields.assignees or {},
+    title = fields.title or "Implement fork isolation",
+    author_login = fields.author_login or "fkst-test-bot",
+    comments = fields.comments or {},
+  }
+end
+
+local function capture_raises(fn)
+  local old_raise = raise
+  local raised = {}
+  raise = function(queue, payload)
+    table.insert(raised, {
+      queue = queue,
+      payload = payload,
+    })
+  end
+  local ok, result = pcall(fn)
+  raise = old_raise
+  if not ok then
+    error(result)
+  end
+  return result, raised
+end
+
 return {
   test_issue_claim_state_is_current_assignees_only = function()
     t.eq(core.issue_claim_state({}, "fkst-test-bot"), "unassigned")
@@ -58,7 +85,7 @@ return {
       "claim_contract",
       "owner/repo",
       42,
-      { assignees = {} },
+      self_current(),
       "github-devloop/issue/owner/repo/42"
     )
 
@@ -83,7 +110,7 @@ return {
       "claim_contract",
       "owner/repo",
       42,
-      { assignees = {} },
+      self_current(),
       "github-devloop/issue/owner/repo/42"
     )
 
@@ -114,7 +141,7 @@ return {
       "claim_contract",
       "owner/repo",
       42,
-      { assignees = {} },
+      self_current(),
       "github-devloop/issue/owner/repo/42"
     )
 
@@ -135,6 +162,131 @@ return {
     )
 
     t.eq(ok, false)
+    t.eq(count_calls("gh issue edit"), 0)
+  end,
+
+  test_other_author_unassigned_issue_raises_self_assigned_fork_without_assigning = function()
+    mock_bot("fkst-test-bot", "1")
+
+    local ok, raised = capture_raises(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        self_current({ author_login = "human" }),
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(count_calls("gh issue edit"), 0)
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "github-proxy.github_issue_create_request")
+    t.eq(raised[1].payload.schema, "github-proxy.issue-create.v1")
+    t.eq(raised[1].payload.assignees[1], "fkst-test-bot")
+    t.eq(raised[1].payload.dedup_key, core.fork_issue_dedup_key("owner/repo", 42))
+    t.eq(raised[1].payload.post_create_blocked_by.blocked_issue_number, 42)
+    t.eq(raised[1].payload.post_create_blocked_by.dedup_key, core.fork_issue_dedup_key("owner/repo", 42) .. "/blocked-by")
+  end,
+
+  test_missing_author_unassigned_issue_skips_without_assigning_or_forking = function()
+    mock_bot("fkst-test-bot", "1")
+
+    local ok, raised = capture_raises(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        { assignees = {}, title = "Unknown author", comments = {} },
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(#raised, 0)
+    t.eq(count_calls("gh issue edit"), 0)
+  end,
+
+  test_existing_fork_parent_ledger_skips_duplicate_fork = function()
+    mock_bot("fkst-test-bot", "1")
+    local dedup_key = core.fork_issue_dedup_key("owner/repo", 42)
+
+    local ok, raised = capture_raises(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        self_current({
+          author_login = "human",
+          comments = {
+            {
+              body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_key .. '" issue="99" -->',
+              author_login = "fkst-test-bot",
+            },
+          },
+        }),
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(#raised, 0)
+    t.eq(count_calls("gh issue edit"), 0)
+  end,
+
+  test_existing_fork_parent_intent_skips_duplicate_fork = function()
+    mock_bot("fkst-test-bot", "1")
+    local dedup_key = core.fork_issue_dedup_key("owner/repo", 42)
+
+    local ok, raised = capture_raises(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        self_current({
+          author_login = "human",
+          comments = {
+            {
+              body = '<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. dedup_key .. '" -->',
+              author_login = "fkst-test-bot",
+            },
+          },
+        }),
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(#raised, 0)
+    t.eq(count_calls("gh issue edit"), 0)
+  end,
+
+  test_forged_fork_parent_intent_does_not_suppress_fork = function()
+    mock_bot("fkst-test-bot", "1")
+    local dedup_key = core.fork_issue_dedup_key("owner/repo", 42)
+
+    local ok, raised = capture_raises(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        self_current({
+          author_login = "human",
+          comments = {
+            {
+              body = '<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. dedup_key .. '" -->',
+              author_login = "human",
+            },
+          },
+        }),
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "github-proxy.github_issue_create_request")
+    t.eq(raised[1].payload.dedup_key, dedup_key)
     t.eq(count_calls("gh issue edit"), 0)
   end,
 
@@ -200,7 +352,7 @@ return {
       "claim_contract",
       "owner/repo",
       42,
-      { assignees = {} },
+      self_current(),
       "github-devloop/issue/owner/repo/42"
     )
 

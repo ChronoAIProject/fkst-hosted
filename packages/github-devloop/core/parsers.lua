@@ -17,10 +17,12 @@ function M.issue_state_from_json(decoded)
   end
 
   return {
+    title = decoded.title ~= nil and tostring(decoded.title) or nil,
     labels = labels,
     comments = M.comments_from_json(decoded.comments),
     state = decoded.state,
     assignees = M.assignee_logins(decoded.assignees),
+    author_login = M.issue_author_login(decoded),
   }
 end
 
@@ -102,6 +104,7 @@ function M.parse_issue_list_intake(stdout, limit)
         updated_at = issue.updatedAt or issue.updated_at,
         labels = label_names(issue.labels),
         assignees = M.assignee_logins(issue.assignees),
+        author_login = M.issue_author_login(issue),
       })
     end
   end)
@@ -247,6 +250,7 @@ function M.parse_issue_view_result(stdout)
     labels = state.labels,
     comments = state.comments,
     assignees = M.assignee_logins(decoded.assignees),
+    author_login = state.author_login,
   }
 end
 
@@ -260,6 +264,7 @@ function M.parse_issue_view_loop(stdout)
     labels = result.labels,
     comments = result.comments,
     assignees = result.assignees,
+    author_login = result.author_login,
   }
 end
 
@@ -278,6 +283,7 @@ function M.parse_issue_view_intake_judge(stdout)
     labels = result.labels,
     comments = result.comments,
     assignees = result.assignees,
+    author_login = result.author_login,
   }
 end
 
