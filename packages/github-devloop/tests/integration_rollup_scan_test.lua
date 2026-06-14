@@ -27,6 +27,11 @@ local function mock_env(write_mode, rollup_merge, integration, release_notes_fal
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', { stdout = integration or "integration/dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"', { stdout = rollup_merge or "auto", stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('printf %s "$FKST_DEVLOOP_RELEASE_NOTES_FALLBACK"', {
     stdout = release_notes_fallback or "",
     stderr = "",
@@ -132,6 +137,34 @@ local function mock_integration_head_for(integration, head)
   })
 end
 
+local function mock_rollup_pr_view(fields)
+  fields = fields or {}
+  local status = fields.status or "green"
+  local state = "COMPLETED"
+  local conclusion = "SUCCESS"
+  if status == "red" then
+    conclusion = "FAILURE"
+  elseif status == "pending" then
+    state = "IN_PROGRESS"
+    conclusion = ""
+  end
+  local updated_at = fields.updated_at or "2026-06-14T01:02:03Z"
+  t.mock_command("gh pr view '" .. tostring(fields.pr_number or 9) .. "'", {
+    stdout = string.format(
+      '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"test","state":"%s","conclusion":"%s","headSha":"%s"}]}\n',
+      fields.pr_number or 9,
+      h.json_string(fields.head_ref or "integration/dev"),
+      h.json_string(fields.head_sha or "def456"),
+      h.json_string(updated_at),
+      h.json_string(state),
+      h.json_string(conclusion),
+      h.json_string(fields.head_sha or "def456")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_release_notes(body)
   t.mock_command("codex exec", {
     stdout = body or ("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel),
@@ -179,6 +212,7 @@ return {
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
+    mock_rollup_pr_view()
     local result = run_scan(opts("rollup-create", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 1)
@@ -239,6 +273,7 @@ return {
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/9\n", stderr = "", exit_code = 0 })
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
+    mock_rollup_pr_view()
     local result = run_scan(opts("rollup-fallback", {
       FKST_GITHUB_WRITE = "1",
       FKST_DEVLOOP_RELEASE_NOTES_FALLBACK = "1",
@@ -331,6 +366,7 @@ return {
     mock_content_diff(true)
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
+    mock_rollup_pr_view()
     local result = run_scan(opts("rollup-existing", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 0)
@@ -343,6 +379,7 @@ return {
     mock_content_diff(true)
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
+    mock_rollup_pr_view()
     local result = run_scan(opts("rollup-manual", { FKST_GITHUB_WRITE = "1", FKST_DEVLOOP_ROLLUP_MERGE = "manual" }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
@@ -355,6 +392,7 @@ return {
     mock_content_diff(true)
     mock_pr_list({ number = 9 })
     mock_integration_head("def456")
+    mock_rollup_pr_view()
     local result = run_scan(opts("rollup-auto", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
@@ -367,6 +405,98 @@ return {
     t.eq(raised.payload.head_sha, "def456")
     t.eq(raised.payload.source_ref.ref, "owner/repo#pr/9")
     t.eq(raised.payload.dedup_key, core.rollup_dedup_key("owner/repo", "dev", "integration/dev", 9, "def456"))
+  end,
+
+  test_rollup_scan_surfaces_stale_red_rollup_as_deduped_issue = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({
+      status = "red",
+      updated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 45 * 60),
+    })
+    local result = run_scan(opts("rollup-red-health", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = "30",
+    }))
+    t.eq(result.exit_code, 0)
+    local create = h.find_raise(result.raises, "github-proxy.github_issue_create_request")
+    t.is_true(create ~= nil)
+    t.eq(create.payload.schema, "github-proxy.issue-create.v1")
+    t.eq(create.payload.repo, "owner/repo")
+    t.eq(create.payload.dedup_key, core.rollup_health_dedup_key("owner/repo", "test: COMPLETED/FAILURE"))
+    t.eq(create.payload.parent_comment_target.issue_number, "9")
+    t.is_true(create.payload.body:find("Rollup PR: #9", 1, true) ~= nil)
+    t.is_true(create.payload.body:find("Failing check: `test: COMPLETED/FAILURE`", 1, true) ~= nil)
+    local snapshot = create.payload.body:match("Evidence snapshot: `([^`]+)`")
+    t.is_true(snapshot ~= nil)
+    local written = file.read(snapshot)
+    t.is_true(written:find('"detector":"rollup-health"', 1, true) ~= nil)
+    t.is_true(written:find('"failing_check":"test: COMPLETED/FAILURE"', 1, true) ~= nil)
+    t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_scan_suppresses_red_rollup_inside_window = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({
+      status = "red",
+      updated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 5 * 60),
+    })
+    local result = run_scan(opts("rollup-red-window", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = "30",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(h.find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+    t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_scan_pending_rollup_does_not_alert = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({
+      status = "pending",
+      updated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 120 * 60),
+    })
+    local result = run_scan(opts("rollup-pending-health", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(h.find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+    t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_health_has_no_repair_side_effects = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({
+      status = "red",
+      updated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 45 * 60),
+    })
+    local result = run_scan(opts("rollup-red-no-repair", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = "30",
+    }))
+    t.eq(result.exit_code, 0)
+    t.is_true(h.find_raise(result.raises, "github-proxy.github_issue_create_request") ~= nil)
+    t.eq(h.count_calls("gh issue edit"), 0)
+    t.eq(h.count_calls("gh pr merge"), 0)
+    t.eq(h.count_calls("gh pr close"), 0)
+    t.eq(h.count_calls("gh issue comment"), 0)
   end,
 
   test_rollup_scan_dry_run_never_creates_pr = function()

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sys
+import os
 import base64
 import binascii
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from pathlib import Path
 
 
 LINE_LIMIT = 1000
+LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
 TEST_DEF_RE = re.compile(
     r"\b(?P<bare>test_[A-Za-z0-9_]+)\s*=\s*function\b"
@@ -467,7 +469,21 @@ def hidden_text_encoded_literal_lines(text: str) -> list[int]:
     return sorted(set(lines))
 
 
-def check_line_limit(root: Path, violations: list[str]) -> None:
+def line_warning_threshold() -> int:
+    raw = os.environ.get("FKST_G1_LINE_WARNING_THRESHOLD")
+    if raw is None or raw == "":
+        return LINE_LIMIT - LINE_WARNING_MARGIN
+    try:
+        threshold = int(raw)
+    except ValueError:
+        return LINE_LIMIT - LINE_WARNING_MARGIN
+    if threshold < 1:
+        return LINE_LIMIT - LINE_WARNING_MARGIN
+    return threshold
+
+
+def check_line_limit(root: Path, violations: list[str], warnings: list[str]) -> None:
+    warning_threshold = line_warning_threshold()
     for scan_root in (packages_root(root), root / "scripts"):
         if not scan_root.exists():
             continue
@@ -480,6 +496,12 @@ def check_line_limit(root: Path, violations: list[str]) -> None:
                     violations,
                     "G1",
                     f"{rel(root, path)} has {count} lines; limit is {LINE_LIMIT}",
+                )
+            elif count >= warning_threshold:
+                add(
+                    warnings,
+                    "G1",
+                    f"{rel(root, path)} has {count} lines; warning threshold is {warning_threshold}; hard limit is {LINE_LIMIT}",
                 )
 
 
@@ -865,7 +887,7 @@ def main() -> int:
     violations: list[str] = []
     warnings: list[str] = []
 
-    check_line_limit(root, violations)
+    check_line_limit(root, violations, warnings)
     check_test_shape(root, violations, warnings)
     check_helper_reachability(root, violations)
     check_graphql_connection_guards(root, warnings)

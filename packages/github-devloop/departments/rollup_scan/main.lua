@@ -4,7 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "devloop_branch_tick" },
-  produces = { "devloop_rollup_ready" },
+  produces = { "devloop_rollup_ready", "github-proxy.github_issue_create_request" },
   fanout = { "devloop_branch_tick" },
   stall_window = "5m",
 }
@@ -78,6 +78,13 @@ local function list_open_pr(repo, integration, upstream)
     return nil
   end
   return prs[1]
+end
+
+local function fetch_rollup_pr(repo, pr_number)
+  local viewed = run_gh_cmd(core.gh_pr_view_merge_cmd(repo, pr_number), 30, "gh rollup PR view")
+  local pr = core.parse_pr_view_merge(viewed.stdout)
+  pr.number = tonumber(pr_number)
+  return pr
 end
 
 local function is_no_commits_between_error(stderr, upstream, integration)
@@ -163,6 +170,14 @@ function pipeline(event)
     end
 
     integration_head = integration_head or remote_head(branches.integration)
+    core.observe_rollup_health(
+      repo,
+      branches.upstream,
+      branches.integration,
+      fetch_rollup_pr(repo, pr.number),
+      now(),
+      core.rollup_red_window_minutes()
+    )
     if cfg.rollup_merge == "manual" then
       core.log_line("info", "rollup_scan", "rollup", "POSTURE", {
         "posture=manual",
