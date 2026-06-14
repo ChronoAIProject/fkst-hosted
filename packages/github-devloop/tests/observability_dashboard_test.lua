@@ -113,6 +113,33 @@ local function dashboard_fixture()
 end
 
 return {
+  test_dashboard_publish_defers_without_gh_calls_when_deadline_exhausted = function()
+    mock_env("1")
+    local gh_calls = 0
+    local lock_calls = 0
+    local old_gh_exec = core.gh_exec
+    local old_with_lock = with_lock
+    core.gh_exec = function()
+      gh_calls = gh_calls + 1
+      error("unexpected dashboard gh call")
+    end
+    with_lock = function(_, fn)
+      lock_calls = lock_calls + 1
+      return fn()
+    end
+
+    local ok, result = pcall(function()
+      return core.publish_observability_dashboard("owner/repo", dashboard_fixture(), core.observability_limits(), now() - 1)
+    end)
+    core.gh_exec = old_gh_exec
+    with_lock = old_with_lock
+
+    t.eq(ok, true)
+    t.eq(result, "deferred")
+    t.eq(gh_calls, 0)
+    t.eq(lock_calls, 0)
+  end,
+
   test_dashboard_publish_rereads_singleton_under_repo_lock = function()
     mock_env("1")
     local fake = { commands = {}, list_calls = 0, create_calls = 0, issue_body = nil }
