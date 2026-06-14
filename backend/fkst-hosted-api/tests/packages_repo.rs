@@ -74,6 +74,24 @@ fn sample_new_package(name: &str) -> NewPackage {
     }
 }
 
+/// Insert a legacy package directly into MongoDB (no owner_user_id, no org_id).
+/// This simulates a pre-auth document that predates the ownership system.
+async fn insert_legacy_package(database: &mongodb::Database, name: &str) {
+    let now = bson::DateTime::now();
+    let doc = bson::doc! {
+        "_id": name,
+        "files": [{ "path": "departments/x/main.lua", "content": "return {}" }],
+        "composed_deps": [],
+        "created_at": now,
+        "updated_at": now,
+    };
+    database
+        .collection::<bson::Document>(PACKAGES_COLLECTION)
+        .insert_one(doc)
+        .await
+        .expect("insert legacy package");
+}
+
 #[tokio::test]
 async fn ensure_indexes_is_idempotent_and_adds_nothing_beyond_implicit_id() {
     if !docker_available() {
@@ -88,7 +106,7 @@ async fn ensure_indexes_is_idempotent_and_adds_nothing_beyond_implicit_id() {
 
     // Materialize the collection, ensure again, then prove only `_id_`.
     repository
-        .create(sample_new_package("demo-package"))
+        .create(sample_new_package("demo-package"), "test-user", None)
         .await
         .expect("create");
     repository.ensure_indexes().await.expect("third ensure");
@@ -103,10 +121,15 @@ async fn ensure_indexes_is_idempotent_and_adds_nothing_beyond_implicit_id() {
         let model = cursor.deserialize_current().expect("index model");
         names.push(model.options.and_then(|o| o.name).expect("index name"));
     }
+    names.sort();
     assert_eq!(
         names,
-        vec!["_id_".to_string()],
-        "only the implicit _id index"
+        vec![
+            "_id_".to_string(),
+            "packages_org_id".to_string(),
+            "packages_owner_user_id".to_string()
+        ],
+        "implicit _id plus ownership indexes"
     );
 }
 
@@ -119,7 +142,10 @@ async fn create_then_get_round_trips_deeply() {
     let (_container, _database, repository) = repo().await;
     let input = sample_new_package("demo-package");
 
-    let created = repository.create(input.clone()).await.expect("create");
+    let created = repository
+        .create(input.clone(), "test-user", None)
+        .await
+        .expect("create");
     assert_eq!(created.name, input.name);
     assert_eq!(created.files, input.files);
     assert_eq!(created.composed_deps, input.composed_deps);
@@ -159,7 +185,10 @@ async fn stored_bson_shape_matches_canon() {
         ],
         composed_deps: Vec::new(),
     };
-    repository.create(input).await.expect("create");
+    repository
+        .create(input, "test-user", None)
+        .await
+        .expect("create");
 
     let raw = database
         .collection::<bson::Document>(PACKAGES_COLLECTION)
@@ -201,12 +230,12 @@ async fn duplicate_create_returns_duplicate_not_db() {
     let (_container, _database, repository) = repo().await;
 
     repository
-        .create(sample_new_package("dup-pkg"))
+        .create(sample_new_package("dup-pkg"), "test-user", None)
         .await
         .expect("first create");
     // Exercises the real is_duplicate_key path against a real server 11000.
     let err = repository
-        .create(sample_new_package("dup-pkg"))
+        .create(sample_new_package("dup-pkg"), "test-user", None)
         .await
         .expect_err("second create must fail");
     match err {
@@ -224,8 +253,8 @@ async fn concurrent_creates_of_the_same_name_yield_one_ok_one_duplicate() {
     let (_container, _database, repository) = repo().await;
 
     let (left, right) = tokio::join!(
-        repository.create(sample_new_package("race-pkg")),
-        repository.create(sample_new_package("race-pkg")),
+        repository.create(sample_new_package("race-pkg"), "test-user", None),
+        repository.create(sample_new_package("race-pkg"), "test-user", None),
     );
     let outcomes = [left, right];
     let oks = outcomes.iter().filter(|r| r.is_ok()).count();
@@ -250,11 +279,11 @@ async fn list_returns_only_names_sorted_ascending() {
 
     // Insert out of order to prove the sort.
     repository
-        .create(sample_new_package("beta-pkg"))
+        .create(sample_new_package("beta-pkg"), "test-user", None)
         .await
         .expect("create beta");
     repository
-        .create(sample_new_package("alpha-pkg"))
+        .create(sample_new_package("alpha-pkg"), "test-user", None)
         .await
         .expect("create alpha");
 
@@ -274,7 +303,7 @@ async fn get_missing_is_none_and_exists_reports_presence() {
     assert!(!repository.exists("missing").await.expect("exists"));
 
     repository
-        .create(sample_new_package("present-pkg"))
+        .create(sample_new_package("present-pkg"), "test-user", None)
         .await
         .expect("create");
     assert!(repository.exists("present-pkg").await.expect("exists"));
@@ -295,7 +324,7 @@ async fn invalid_input_is_rejected_before_any_write() {
         composed_deps: Vec::new(),
     };
     let err = repository
-        .create(input)
+        .create(input, "test-user", None)
         .await
         .expect_err("traversal path must be rejected");
     match err {
@@ -320,11 +349,11 @@ async fn case_variant_package_names_are_distinct_documents() {
     // Names are case-sensitive, consistent with the engine and `_id`
     // semantics: "MY-PKG" and "my-pkg" must coexist as distinct documents.
     let upper = repository
-        .create(sample_new_package("MY-PKG"))
+        .create(sample_new_package("MY-PKG"), "test-user", None)
         .await
         .expect("create MY-PKG");
     let lower = repository
-        .create(sample_new_package("my-pkg"))
+        .create(sample_new_package("my-pkg"), "test-user", None)
         .await
         .expect("create my-pkg");
 
@@ -351,4 +380,109 @@ async fn case_variant_package_names_are_distinct_documents() {
     assert_ne!(found_upper, found_lower);
     assert_eq!(found_upper.name, "MY-PKG");
     assert_eq!(found_lower.name, "my-pkg");
+}
+
+// ---- list_visible tests ----
+
+#[tokio::test]
+async fn list_visible_returns_all_three_for_owner_and_org_member() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, database, repository) = repo().await;
+    repository.ensure_indexes().await.expect("indexes");
+
+    // (a) owned by user_A
+    repository
+        .create(sample_new_package("pkg-a"), "user_A", None)
+        .await
+        .expect("create pkg-a");
+    // (b) in org_X (owned by someone else)
+    repository
+        .create(sample_new_package("pkg-b"), "other", Some("org_X"))
+        .await
+        .expect("create pkg-b");
+    // (c) legacy — no owner
+    insert_legacy_package(&database, "pkg-c").await;
+
+    let visible = repository
+        .list_visible("user_A", &["org_X".to_string()])
+        .await
+        .expect("list_visible");
+    assert_eq!(
+        visible,
+        vec![
+            "pkg-a".to_string(),
+            "pkg-b".to_string(),
+            "pkg-c".to_string()
+        ],
+        "user_A in org_X should see all three packages"
+    );
+}
+
+#[tokio::test]
+async fn list_visible_returns_org_and_legacy_for_org_member_not_owner() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, database, repository) = repo().await;
+    repository.ensure_indexes().await.expect("indexes");
+
+    // (a) owned by user_A (NOT user_B)
+    repository
+        .create(sample_new_package("pkg-a"), "user_A", None)
+        .await
+        .expect("create pkg-a");
+    // (b) in org_X
+    repository
+        .create(sample_new_package("pkg-b"), "other", Some("org_X"))
+        .await
+        .expect("create pkg-b");
+    // (c) legacy
+    insert_legacy_package(&database, "pkg-c").await;
+
+    let visible = repository
+        .list_visible("user_B", &["org_X".to_string()])
+        .await
+        .expect("list_visible");
+    assert_eq!(
+        visible,
+        vec!["pkg-b".to_string(), "pkg-c".to_string()],
+        "user_B in org_X should see org package + legacy only"
+    );
+}
+
+#[tokio::test]
+async fn list_visible_returns_legacy_only_for_user_with_no_orgs() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let (_container, database, repository) = repo().await;
+    repository.ensure_indexes().await.expect("indexes");
+
+    // (a) owned by user_A
+    repository
+        .create(sample_new_package("pkg-a"), "user_A", None)
+        .await
+        .expect("create pkg-a");
+    // (b) in org_X
+    repository
+        .create(sample_new_package("pkg-b"), "other", Some("org_X"))
+        .await
+        .expect("create pkg-b");
+    // (c) legacy
+    insert_legacy_package(&database, "pkg-c").await;
+
+    let visible = repository
+        .list_visible("user_C", &[])
+        .await
+        .expect("list_visible");
+    assert_eq!(
+        visible,
+        vec!["pkg-c".to_string()],
+        "user_C with no orgs should see only the legacy package"
+    );
 }

@@ -168,13 +168,10 @@ impl Distributor {
             let (Some(pod_id), Some(token)) = (&session.pod_id, session.fencing_token) else {
                 continue;
             };
-            if let Err(error) = self
-                .store_for(pod_id)
-                .release(&session.package_name, token)
-                .await
-            {
+            let lease_key = session.lease_key();
+            if let Err(error) = self.store_for(pod_id).release(&lease_key, token).await {
                 tracing::error!(
-                    package_name = %session.package_name,
+                    lease_key = %lease_key,
                     session_id = %session.id,
                     pod_id = %pod_id,
                     error = %error,
@@ -249,39 +246,44 @@ impl Distributor {
             Some(session) => session,
         };
 
-        // Package deleted while the session is active: fail it (clear
-        // error), release the lease — no infinite redo.
-        let package_exists = self
-            .db
-            .collection::<bson::Document>(PACKAGES_COLLECTION)
-            .find_one(doc! { "_id": package_name })
-            .await?
-            .is_some();
-        if !package_exists {
-            tracing::warn!(
-                package_name,
-                session_id = %session.id,
-                "package deleted while session active; failing the session"
-            );
-            let _ = self
+        // Package-deleted check: for classic sessions, verify the single
+        // package; for goal sessions, verify ALL package names in the
+        // effective set. A deleted package means the session must fail
+        // rather than redo indefinitely.
+        let names_to_check = session.effective_package_names();
+        for name in &names_to_check {
+            let exists = self
                 .db
-                .sessions()
-                .update_one(
-                    doc! {
-                        "_id": session.id,
-                        "status": { "$in": active_status_bson() },
-                    },
-                    doc! { "$set": {
-                        "status": status_bson(SessionStatus::Failed),
-                        "error": format!(
-                            "package {package_name} deleted while session active"
-                        ),
-                        "stopped_at": bson::DateTime::now(),
-                    } },
-                )
-                .await?;
-            self.release_as_holder(lease).await;
-            return Ok(None);
+                .collection::<bson::Document>(PACKAGES_COLLECTION)
+                .find_one(doc! { "_id": name })
+                .await?
+                .is_some();
+            if !exists {
+                tracing::warn!(
+                    package_name = %name,
+                    session_id = %session.id,
+                    "package deleted while session active; failing the session"
+                );
+                let _ = self
+                    .db
+                    .sessions()
+                    .update_one(
+                        doc! {
+                            "_id": session.id,
+                            "status": { "$in": active_status_bson() },
+                        },
+                        doc! { "$set": {
+                            "status": status_bson(SessionStatus::Failed),
+                            "error": format!(
+                                "package {name} deleted while session active"
+                            ),
+                            "stopped_at": bson::DateTime::now(),
+                        } },
+                    )
+                    .await?;
+                self.release_as_holder(lease).await;
+                return Ok(None);
+            }
         }
 
         // A healthy holder (other than us) with a lapsed lease is a GC
@@ -298,16 +300,17 @@ impl Distributor {
             return Ok(None);
         }
 
-        // Takeover acquire: wins only while the lease is still expired at
-        // write time (atomic inside the lease store); token bumps by 1 on
-        // the SURVIVING document, so it is strictly greater than the old
-        // holder's token. The session binding is re-asserted (same session,
-        // redo).
-        let new_lease = match self.leases.acquire(package_name, lease.session_id).await? {
+        // Takeover acquire using the session's lease key (goal-<uuid> for
+        // goal sessions, package_name for classic). Wins only while the
+        // lease is still expired at write time (atomic inside the lease
+        // store); token bumps by 1 on the SURVIVING document, so it is
+        // strictly greater than the old holder's token.
+        let lease_key = session.lease_key();
+        let new_lease = match self.leases.acquire(&lease_key, lease.session_id).await? {
             AcquireOutcome::Acquired(new_lease) => new_lease,
             AcquireOutcome::NotAcquired => {
                 tracing::debug!(
-                    package_name,
+                    lease_key = %lease_key,
                     session_id = %session.id,
                     reason = "lost_race",
                     "takeover.skipped: another survivor won"
@@ -337,7 +340,7 @@ impl Distributor {
             .await?;
         if updated.matched_count == 0 {
             tracing::debug!(
-                package_name,
+                lease_key = %lease_key,
                 session_id = %session.id,
                 reason = "terminal",
                 "takeover.skipped: session went terminal during takeover; \
@@ -345,14 +348,14 @@ impl Distributor {
             );
             let _ = self
                 .leases
-                .release(package_name, new_lease.fencing_token)
+                .release(&lease_key, new_lease.fencing_token)
                 .await;
             return Ok(None);
         }
 
         tracing::info!(
             session_id = %session.id,
-            package_name,
+            lease_key = %lease_key,
             from_pod = %lease.holder_pod,
             to_pod = %self.pod_id(),
             old_token = lease.fencing_token,
@@ -361,7 +364,7 @@ impl Distributor {
         );
         Ok(Some(Placement {
             session_id: session.id,
-            package_name: package_name.to_string(),
+            package_name: lease_key,
             pod_id: self.pod_id().to_string(),
             fencing_token: new_lease.fencing_token,
         }))
@@ -385,10 +388,12 @@ impl Distributor {
             unplaced.push(cursor.deserialize_current()?);
         }
         for session in unplaced {
-            match self.place(&session.package_name, session.id).await {
+            let lease_key = session.lease_key();
+            match self.place(&lease_key, session.id).await {
                 Ok(placement) => tracing::info!(
                     session_id = %session.id,
                     package_name = %session.package_name,
+                    lease_key = %lease_key,
                     pod_id = %placement.pod_id,
                     "reaper placed an unassigned pending session"
                 ),
@@ -412,6 +417,7 @@ impl Distributor {
                     tracing::warn!(
                         session_id = %session.id,
                         package_name = %session.package_name,
+                        lease_key = %lease_key,
                         "unassigned pending session failed: live lease for the package"
                     );
                 }
@@ -420,12 +426,14 @@ impl Distributor {
                     tracing::warn!(
                         session_id = %session.id,
                         package_name = %session.package_name,
+                        lease_key = %lease_key,
                         "no capacity for an unassigned pending session; will retry"
                     );
                 }
                 Err(error) => tracing::error!(
                     session_id = %session.id,
                     package_name = %session.package_name,
+                    lease_key = %lease_key,
                     pod_id = %self.pod_id(),
                     error = %error,
                     "placement of an unassigned pending session failed; continuing"
@@ -458,15 +466,13 @@ impl Distributor {
             let Some(token) = session.fencing_token else {
                 continue;
             };
-            match self
-                .leases
-                .holds_current(&session.package_name, token)
-                .await
-            {
+            let lease_key = session.lease_key();
+            match self.leases.holds_current(&lease_key, token).await {
                 Ok(true) => {
                     tracing::debug!(
                         session_id = %session.id,
                         package_name = %session.package_name,
+                        lease_key = %lease_key,
                         "ensuring a local driver for an owned pending session"
                     );
                     host.ensure_driver(&session).await;
@@ -475,6 +481,7 @@ impl Distributor {
                 Err(error) => tracing::error!(
                     session_id = %session.id,
                     package_name = %session.package_name,
+                    lease_key = %lease_key,
                     pod_id = %self.pod_id(),
                     error = %error,
                     "lease check failed for an owned pending session; continuing"

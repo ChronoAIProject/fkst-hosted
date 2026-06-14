@@ -41,6 +41,7 @@ fn config(bin: &Path, temp_root: &Path) -> EngineConfig {
         ready_timeout_secs: 30,
         error_capture_bytes: 8192,
         log_tail_lines: 200,
+        github_token_refresh_secs: 2400,
     }
 }
 

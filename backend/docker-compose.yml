@@ -5,5 +5,7 @@ services:
       - "27017:27017"
     volumes:
       - fkst_mongo_data:/data/db
+    environment:
+      FKST_AUTH_ENABLED: "false"
 volumes:
   fkst_mongo_data:

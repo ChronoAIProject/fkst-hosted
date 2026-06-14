@@ -5,7 +5,8 @@ use mongodb::error::{ErrorKind, WriteFailure};
 /// Errors surfaced by the packages domain.
 ///
 /// Conceptual HTTP mapping (the `IntoResponse` rendering lives in the API
-/// layer): `Validation` -> 400, `Duplicate` -> 409, `Db` -> 500.
+/// layer): `Validation` -> 400, `Duplicate` -> 409, `NotFound` -> 404,
+/// `Db` -> 500.
 #[derive(Debug, thiserror::Error)]
 pub enum PackageError {
     /// The input failed `NewPackage::validate`. The message is the stable,
@@ -16,6 +17,9 @@ pub enum PackageError {
     /// duplicate-key code 11000). Carries the offending package name.
     #[error("package already exists: {0}")]
     Duplicate(String),
+    /// No package with this name was found. Carries the offending name.
+    #[error("package not found: {0}")]
+    NotFound(String),
     /// Any other MongoDB failure. The `Display` is deliberately the static
     /// `"database error"` — the driver text may carry host/connection
     /// details and must never reach a client. The underlying error stays
@@ -124,6 +128,10 @@ mod tests {
         assert_eq!(
             PackageError::Duplicate("demo".to_string()).to_string(),
             "package already exists: demo"
+        );
+        assert_eq!(
+            PackageError::NotFound("demo".to_string()).to_string(),
+            "package not found: demo"
         );
     }
 }

@@ -23,10 +23,13 @@ use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
+use fkst_hosted_api::auth::AuthMode;
+use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::goals::GoalRepo;
+use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -206,13 +209,23 @@ async fn e2e_happy_path_runs_then_stops_against_the_real_engine() {
         ..EngineConfig::default()
     };
     let packages = PackageRepository::new(&db.database);
+    let shares = ShareRepo::new(&db.database);
+    let goals = GoalRepo::new(&db.database);
     let sessions = SessionService::new(SessionRepo::new(&db), packages.clone(), engine);
     let router = build_router(AppState {
         config,
         db,
         packages,
+        shares,
         sessions,
-    });
+        auth_mode: AuthMode::Disabled,
+        authz: Authorizer::disabled(),
+        github_app: None,
+        goals,
+        engine: EngineConfig::default(),
+        llm: None,
+    })
+    .expect("router");
 
     // -- 1. create the package from the on-disk fixture --------------------
     let (status, body) = post_json(

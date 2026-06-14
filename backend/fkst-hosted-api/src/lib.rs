@@ -4,14 +4,21 @@
 //! routes) so both the binary entrypoint and the integration tests can build
 //! the application without a real TCP bind.
 
+pub mod auth;
+pub mod authz;
 pub mod config;
 pub mod db;
 pub mod distribution;
 pub mod engine;
 pub mod error;
+pub mod github_app;
+pub mod github_hub;
+pub mod goals;
 pub mod journal;
 pub mod leases;
+pub mod llm;
 pub mod models;
+pub mod nyxid;
 pub mod packages;
 pub mod reconcile;
 pub mod router;

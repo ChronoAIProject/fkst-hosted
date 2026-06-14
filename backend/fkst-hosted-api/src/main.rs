@@ -5,14 +5,19 @@ use std::process::ExitCode;
 
 use std::sync::Arc;
 
+use fkst_hosted_api::authz::Authorizer;
 use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::{redact_mongodb_uri, Db};
 use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost, SelfOnlyHealth};
 use fkst_hosted_api::engine::EngineConfig;
+use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::journal::store::MongoProgressStore;
 use fkst_hosted_api::journal::JournalConfig;
 use fkst_hosted_api::leases::LeaseStore;
-use fkst_hosted_api::packages::PackageRepository;
+use fkst_hosted_api::llm::gateway::NyxLlmGateway;
+use fkst_hosted_api::llm::{LlmConfig, LlmGateway};
+use fkst_hosted_api::nyxid::NyxIdClient;
+use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
@@ -95,6 +100,22 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // 4b-bis. Ensure the package_shares-collection indexes (idempotent;
+    //         fail-closed on error). Share-aware policy checks depend on these.
+    let shares = ShareRepo::new(&db.database);
+    if let Err(error) = shares.ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure package_shares indexes");
+        return ExitCode::FAILURE;
+    }
+
+    // 4b-ter. Ensure the goals-collection indexes (idempotent; fail-closed on
+    //          error). Goal CRUD and list queries depend on these.
+    let goals = GoalRepo::new(&db.database);
+    if let Err(error) = goals.ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure goals indexes");
+        return ExitCode::FAILURE;
+    }
+
     // 4c. Load the engine configuration (fail-closed: a zero timeout or a
     //     malformed value must never reach a live session).
     let engine_config = match EngineConfig::load_from_env() {
@@ -122,6 +143,10 @@ async fn main() -> ExitCode {
         }
     };
     let reconcile_engine_config = engine_config.clone();
+    // The generate endpoint's conformance dry-run reaches the engine plumbing
+    // through AppState; clone the config here because `engine_config` is moved
+    // into the session service below.
+    let state_engine_config = engine_config.clone();
 
     // 4d. Load the distribution configuration (fail-closed: a bad cadence
     //     or pod identity must never reach the lease layer).
@@ -164,6 +189,7 @@ async fn main() -> ExitCode {
         JournalConfig::from_config(&config),
         MongoProgressStore::new(&db.database),
     );
+
     match distributor.fail_orphans_at_boot().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),
         Err(error) => {
@@ -206,12 +232,140 @@ async fn main() -> ExitCode {
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
-    let app = build_router(AppState {
+    let auth_mode = config.auth.clone();
+
+    // Build the NyxID client ONCE and share it across the Authorizer and the
+    // LLM gateway. Only construct a NyxIdClient when auth is enabled AND both
+    // service-account credentials are present.
+    let nyxid_client: Option<NyxIdClient> = match (
+        &auth_mode,
+        &config.nyxid_client_id,
+        &config.nyxid_client_secret,
+    ) {
+        (fkst_hosted_api::auth::AuthMode::Enabled(settings), Some(id), Some(secret)) => {
+            match NyxIdClient::new(
+                &settings.base_url,
+                id.clone(),
+                secret.clone(),
+                std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
+            ) {
+                Ok(client) => {
+                    tracing::info!("NyxID org features enabled");
+                    Some(client)
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "failed to build NyxID client");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        (fkst_hosted_api::auth::AuthMode::Enabled(_), None, None) => {
+            tracing::warn!("NyxID org features disabled: NYXID_CLIENT_ID/SECRET not configured");
+            None
+        }
+        _ => None,
+    };
+
+    // The Authorizer is given the (optional) NyxID client and the ShareRepo for
+    // share-aware policy checks.
+    let authz = Authorizer::with_shares(nyxid_client.clone(), shares.clone());
+
+    // Build the LLM gateway for package generation. When the gateway URL is set
+    // (config has already verified the credentials + model are present), the
+    // NyxID client MUST exist (auth enabled with service credentials); a missing
+    // one is a fail-closed startup error. When the URL is unset, generation is
+    // disabled and the endpoint answers 503.
+    let llm: Option<Arc<dyn LlmGateway>> = match &config.llm_gateway_url {
+        Some(url) => {
+            let client = match &nyxid_client {
+                Some(client) => client.clone(),
+                None => {
+                    tracing::error!(
+                        "FKST_HOSTED_LLM_GATEWAY_URL set but NyxID service client unavailable \
+                         (auth must be enabled with NYXID_CLIENT_ID/SECRET)"
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
+            let model = config.llm_model.clone().unwrap_or_default();
+            let llm_config = LlmConfig {
+                gateway_url: url.clone(),
+                model,
+                timeout: std::time::Duration::from_secs(config.llm_timeout_secs),
+                max_output_bytes: config.llm_max_output_bytes,
+            };
+            match NyxLlmGateway::new(client, llm_config) {
+                Ok(gateway) => {
+                    tracing::info!("llm package generation enabled");
+                    Some(Arc::new(gateway))
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "failed to build llm gateway");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        None => {
+            tracing::info!("llm package generation disabled (FKST_HOSTED_LLM_GATEWAY_URL not set)");
+            None
+        }
+    };
+
+    // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must
+    //     never reach a live session).
+    let github_app = match fkst_hosted_api::github_app::GithubAppConfig::load_from_env() {
+        Ok(Some(config)) => {
+            let app_id = config.app_id;
+            match fkst_hosted_api::github_app::GithubAppTokens::new(&config) {
+                Ok(tokens) => {
+                    tracing::info!(app_id, "github app enabled");
+                    Some(tokens)
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "failed to initialize github app tokens");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        Ok(None) => {
+            tracing::info!("github app disabled (FKST_GITHUB_APP_ID not set)");
+            None
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "failed to load github app configuration");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // 5a-bis. Enable goal support in the session service: goal-status sync
+    //         writes + token refresh. Requires both the goals repo and the
+    //         GitHub App tokens service.
+    if let Some(ref gh_app) = github_app {
+        sessions.enable_goal_support(goals.clone(), gh_app.clone());
+        tracing::info!("goal support enabled in session service");
+    } else {
+        tracing::info!("github app not configured; goal support disabled in session service");
+    }
+
+    let app = match build_router(AppState {
         config,
         db,
         packages,
+        shares,
         sessions: sessions.clone(),
-    });
+        auth_mode,
+        authz,
+        github_app,
+        goals,
+        engine: state_engine_config,
+        llm,
+    }) {
+        Ok(router) => router,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to build router");
+            return ExitCode::FAILURE;
+        }
+    };
     tracing::info!("router built");
 
     // 6. Bind and serve with graceful shutdown.

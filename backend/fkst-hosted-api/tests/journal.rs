@@ -402,14 +402,18 @@ async fn driver_journals_raised_lines_lifecycle_and_run_key_end_to_end() {
     let packages = PackageRepository::new(&db.database);
     packages.ensure_indexes().await.expect("package indexes");
     let package = packages
-        .create(NewPackage {
-            name: "demo".to_string(),
-            files: vec![PackageFile {
-                path: "departments/hello/main.lua".to_string(),
-                content: "return {}".to_string(),
-            }],
-            composed_deps: vec![],
-        })
+        .create(
+            NewPackage {
+                name: "demo".to_string(),
+                files: vec![PackageFile {
+                    path: "departments/hello/main.lua".to_string(),
+                    content: "return {}".to_string(),
+                }],
+                composed_deps: vec![],
+            },
+            "test-user",
+            None,
+        )
         .await
         .expect("create package");
     let expected_run_key = fkst_hosted_api::journal::run_key(
@@ -428,7 +432,16 @@ async fn driver_journals_raised_lines_lifecycle_and_run_key_end_to_end() {
         MongoProgressStore::new(&db.database),
     );
 
-    let created = sessions.create("demo").await.expect("create session");
+    let created = sessions
+        .create(
+            "demo",
+            fkst_hosted_api::sessions::SessionOwner {
+                owner_user_id: "test-user".to_string(),
+                org_id: None,
+            },
+        )
+        .await
+        .expect("create session");
     let id = created.id;
 
     // The driver advances to running and the journal fills up.
@@ -599,14 +612,18 @@ async fn service_with_failing_github(
     let packages = PackageRepository::new(&db.database);
     packages.ensure_indexes().await.expect("package indexes");
     packages
-        .create(NewPackage {
-            name: "demo".to_string(),
-            files: vec![PackageFile {
-                path: "departments/hello/main.lua".to_string(),
-                content: "return {}".to_string(),
-            }],
-            composed_deps: vec![],
-        })
+        .create(
+            NewPackage {
+                name: "demo".to_string(),
+                files: vec![PackageFile {
+                    path: "departments/hello/main.lua".to_string(),
+                    content: "return {}".to_string(),
+                }],
+                composed_deps: vec![],
+            },
+            "test-user",
+            None,
+        )
         .await
         .expect("create package");
 
@@ -650,7 +667,16 @@ async fn failing_journal_sink_never_blocks_a_normal_stop() {
     };
     let (sessions, _packages) = service_with_failing_github(&db, engine, &github.uri()).await;
 
-    let created = sessions.create("demo").await.expect("create session");
+    let created = sessions
+        .create(
+            "demo",
+            fkst_hosted_api::sessions::SessionOwner {
+                owner_user_id: "test-user".to_string(),
+                org_id: None,
+            },
+        )
+        .await
+        .expect("create session");
     let id = created.id;
 
     // Despite the failing journal sink, the session reaches `running`...
@@ -739,7 +765,16 @@ async fn failing_journal_sink_preserves_a_conformance_failure_disposition() {
     };
     let (sessions, _packages) = service_with_failing_github(&db, engine, &github.uri()).await;
 
-    let created = sessions.create("demo").await.expect("create session");
+    let created = sessions
+        .create(
+            "demo",
+            fkst_hosted_api::sessions::SessionOwner {
+                owner_user_id: "test-user".to_string(),
+                org_id: None,
+            },
+        )
+        .await
+        .expect("create session");
     let id = created.id;
 
     // The conformance failure (not the journal failure) decides disposition:
