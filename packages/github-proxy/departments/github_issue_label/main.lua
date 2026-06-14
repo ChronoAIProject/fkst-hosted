@@ -93,8 +93,11 @@ local function guarded_pr_label_view(repo, pr_number, payload)
     return nil
   end
   local bot_login = core.assert_trusted_bot_configured()
-  local view = core.gh_exec(core.gh_pr_view_label_guard_cmd(repo, pr_number), 30, "gh pr view label guard")
-  local current = core.parse_entity_label_view(view.stdout)
+  local current = core.fetch_pr_view(repo, pr_number, nil, { fresh = true, marker_bearing = true })
+  if current.exit_code ~= 0 then
+    error("github-proxy: gh PR REST label guard failed")
+  end
+  current = core.parse_entity_label_view(current.stdout)
   local state = core.current_devloop_state(current.comments, tostring(payload.expected_proposal_id), bot_login)
   if state.state == nil then
     error("github-proxy: PR state marker not yet visible for label guard")

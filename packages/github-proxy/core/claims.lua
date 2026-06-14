@@ -34,9 +34,7 @@ function M.assignee_logins(value)
 end
 
 function M.gh_issue_view_assignees_cmd(repo, issue_number)
-  return "gh issue view " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json assignees"
+  return M.gh_issue_rest_view_cmd(repo, issue_number)
 end
 
 function M.gh_issue_assign_cmd(repo, issue_number, login)
@@ -57,7 +55,7 @@ function M.parse_issue_assignees(stdout)
 end
 
 function M.issue_claim_held_by_self(repo, issue_number, login)
-  local view = M.gh_exec(M.gh_issue_view_assignees_cmd(repo, issue_number), 30, "gh issue view assignees")
+  local view = M.gh_exec(M.gh_issue_view_assignees_cmd(repo, issue_number), 30, "gh issue REST assignees")
   local logins = M.parse_issue_assignees(view.stdout)
   return #logins == 1 and logins[1] == tostring(login or "")
 end

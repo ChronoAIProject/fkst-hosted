@@ -60,7 +60,7 @@ return {
     local result = t.run_department("departments/github_pr_comment/main.lua", event(), opts("pr-comment-dry-run"))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls(pr_comment_create), 0)
   end,
@@ -86,7 +86,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls(pr_comment_create), 0)
   end,
@@ -108,8 +108,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls(pr_comment_create), 0)
     t.eq(#result.raises, 0)
   end,
@@ -125,7 +124,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
     t.eq(count_calls(pr_comment_create), 1)
   end,
 }

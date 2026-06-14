@@ -57,12 +57,12 @@ end
 
 local function mock_node_ids()
   t.mock_command(core.gh_issue_node_id_cmd("owner/x", 42), {
-    stdout = '{"id":"I_blocked"}\n',
+    stdout = '{"node_id":"I_blocked"}\n',
     stderr = "",
     exit_code = 0,
   })
   t.mock_command(core.gh_issue_node_id_cmd("owner/x", 99), {
-    stdout = '{"id":"I_blocking"}\n',
+    stdout = '{"node_id":"I_blocking"}\n',
     stderr = "",
     exit_code = 0,
   })
@@ -92,7 +92,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("addBlockedBy"), 0)
-    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 0)
   end,
 
   test_blocked_by_real_write_adds_graphql_edge_and_marker = function()

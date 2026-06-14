@@ -86,14 +86,12 @@ function M.issue_blocked_by_lock_key(repo, issue_number)
 end
 
 function M.gh_issue_node_id_cmd(repo, issue_number)
-  return "gh issue view " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --json id"
+  return M.gh_issue_rest_view_cmd(repo, issue_number)
 end
 
 function M.parse_issue_node_id(stdout)
   local decoded = json.decode(stdout or "{}")
-  local id = decoded.id
+  local id = decoded.node_id or decoded.id
   if type(id) ~= "string" or id == "" or id:find("%s") ~= nil then
     return nil
   end

@@ -646,9 +646,9 @@ return {
     }))
     t.eq(result.exit_code, 0)
 
-    local view_calls = calls_matching("gh issue view")
+    local view_calls = calls_matching("gh api --paginate --slurp 'repos/owner/payload/issues/42/comments?per_page=100'")
     t.eq(#view_calls, 1)
-    t.is_true(view_calls[1].rendered:find("--repo 'owner/payload'", 1, true) ~= nil)
+    t.is_true(view_calls[1].rendered:find("repos/owner/payload/issues/42/comments", 1, true) ~= nil)
     local comment_calls = calls_matching("gh api --method POST")
     t.eq(#comment_calls, 1)
     t.is_true(comment_calls[1].rendered:find("repos/owner/payload/issues/42/comments", 1, true) ~= nil)
@@ -702,7 +702,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("gh issue view"), 1)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 1)
     t.eq(count_calls(issue_comment_create), 0)
   end,
 
@@ -894,7 +894,7 @@ return {
     mock_label_write()
     local current = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
     t.eq(current.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local current_edit = calls_matching("gh issue edit")[1]
     t.is_true(current_edit.rendered:find("--add-label 'fkst-dev:ready'", 1, true) ~= nil)
@@ -925,7 +925,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 0)
+    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local edit = calls_matching("gh issue edit")[1]
     t.is_true(edit.rendered:find("--add-label 'fkst-dev:blocked'", 1, true) ~= nil)

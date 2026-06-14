@@ -81,10 +81,18 @@ local function mock_poll(issue_stdout, pr_stdout)
 end
 
 local function json_string(value)
-  return tostring(value or "")
-    :gsub("\\", "\\\\")
-    :gsub('"', '\\"')
-    :gsub("\n", "\\n")
+  local text = tostring(value or "")
+  text = text:gsub("\\", "\\\\")
+  text = text:gsub('"', '\\"')
+  text = text:gsub("\b", "\\b")
+  text = text:gsub("\f", "\\f")
+  text = text:gsub("\n", "\\n")
+  text = text:gsub("\r", "\\r")
+  text = text:gsub("\t", "\\t")
+  text = text:gsub("[%z\1-\31]", function(char)
+    return string.format("\\u%04X", string.byte(char))
+  end)
+  return text
 end
 
 local function comment_json(body, author, id, database_id)
@@ -99,24 +107,53 @@ local function comment_json(body, author, id, database_id)
   return string.format('{%s%s"body":"%s","author":{"login":"%s"}}', id_field, database_id_field, json_string(body), json_string(author or "fkst-test-bot"))
 end
 
-local function mock_comment_view(comments, author)
-  local rendered_comments = comments
+local function rest_comment_json(body, author, id)
+  local comment_id = id
+  if comment_id == nil or tostring(comment_id):find("^%d+$") == nil then
+    comment_id = 123456
+  end
+  return string.format(
+    '{"id":%s,"body":"%s","user":{"login":"%s"}}',
+    tostring(comment_id),
+    json_string(body),
+    json_string(author or "fkst-test-bot")
+  )
+end
+
+local function render_rest_comments(comments, author)
   if type(comments) == "table" then
     local parts = {}
-    for _, comment in ipairs(comments) do
-      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author, comment.id, comment.databaseId or comment.database_id))
+    for index, comment in ipairs(comments) do
+      if type(comment) == "table" then
+        table.insert(parts, rest_comment_json(comment.body, comment.author_login or comment.author, comment.databaseId or comment.database_id or comment.id or index))
+      else
+        table.insert(parts, rest_comment_json(comment, "fkst-test-bot", index))
+      end
     end
-    rendered_comments = table.concat(parts, ",")
-  else
-    rendered_comments = comment_json(comments or "existing comment", author)
+    return table.concat(parts, ",")
   end
-  t.mock_command("gh issue view", {
-    stdout = '{"comments":[' .. rendered_comments .. "]}\n",
+  return rest_comment_json(comments or "existing comment", author)
+end
+
+local function mock_comment_view(comments, author)
+  local rendered = render_rest_comments(comments, author)
+  if type(comments) ~= "table" then
+    rendered = rendered
+      .. ","
+      .. rest_comment_json('<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" version="v1" stage_rank="600" -->')
+      .. ","
+      .. rest_comment_json('<!-- fkst:github-devloop:implementing:v1 proposal="github-devloop/issue/owner/x/42" dedup="v1" branch="devloop-owner-x-42-01HY" head_sha="abc123" base_branch="dev" base_sha="abc123" -->')
+  end
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'", {
+    stdout = "[[" .. rendered .. "]]\n",
+  })
+  t.mock_command("gh api --paginate --slurp 'repos/owner/payload/issues/42/comments?per_page=100'", {
+    stdout = "[[" .. rendered .. "]]\n",
   })
 end
 
 local function mock_comment_view_failure()
-  t.mock_command("gh issue view", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'", {
     stdout = "",
     stderr = "forced comment view failure",
     exit_code = 1,
@@ -128,7 +165,7 @@ local function mock_label_view(labels)
   for _, label in ipairs(labels or {}) do
     table.insert(parts, string.format('{"name":"%s"}', label))
   end
-  t.mock_command("gh issue view", {
+  t.mock_command("gh api 'repos/owner/x/issues/42'", {
     stdout = '{"labels":[' .. table.concat(parts, ",") .. "]}\n",
   })
 end
@@ -138,16 +175,13 @@ local function mock_pr_label_guard(labels, comments)
   for _, label in ipairs(labels or {}) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
-  local rendered_comments = {}
-  for _, comment in ipairs(comments or {}) do
-    if type(comment) == "table" then
-      table.insert(rendered_comments, comment_json(comment.body, comment.author_login or comment.author))
-    else
-      table.insert(rendered_comments, comment_json(comment, "fkst-test-bot"))
-    end
-  end
-  t.mock_command("--json labels,comments", {
-    stdout = '{"labels":[' .. table.concat(rendered_labels, ",") .. '],"comments":[' .. table.concat(rendered_comments, ",") .. "]}\n",
+  t.mock_command("gh api 'repos/owner/x/pulls/7'", {
+    stdout = '{"head":{"ref":"devloop-owner-x-42-01HY","sha":"abc123","repo":{"full_name":"owner/x","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/x","owner":{"login":"owner"}}},"state":"open","updated_at":"2026-06-03T02:03:04Z","labels":[' .. table.concat(rendered_labels, ",") .. "]}\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'", {
+    stdout = "[[" .. render_rest_comments(comments or {}) .. "]]\n",
     stderr = "",
     exit_code = 0,
   })
@@ -166,16 +200,13 @@ local function mock_pr_open_guard(labels, comments, assignees)
   for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
     table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
   end
-  local rendered_comments = {}
-  for _, comment in ipairs(comments or {}) do
-    if type(comment) == "table" then
-      table.insert(rendered_comments, comment_json(comment.body, comment.author_login or comment.author))
-    else
-      table.insert(rendered_comments, comment_json(comment, "fkst-test-bot"))
-    end
-  end
-  t.mock_command("--json labels,comments,assignees", {
-    stdout = '{"labels":[' .. table.concat(rendered_labels, ",") .. '],"comments":[' .. table.concat(rendered_comments, ",") .. '],"assignees":[' .. assignees_json(assignees) .. "]}\n",
+  t.mock_command("gh api 'repos/owner/x/issues/42'", {
+    stdout = '{"title":"Bridge issue","body":"","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[' .. table.concat(rendered_labels, ",") .. '],"assignees":[' .. assignees_json(assignees) .. "]}\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'", {
+    stdout = "[[" .. render_rest_comments(comments or {}) .. "]]\n",
     stderr = "",
     exit_code = 0,
   })
@@ -271,20 +302,26 @@ local function mock_pr_head_list(stdout)
   })
 end
 
-local function mock_pr_head_state(head_sha, state, head_repo, is_cross_repository, base_branch)
-  local cross = "false"
-  if is_cross_repository == true then
-    cross = "true"
-  end
-  t.mock_command("--json headRefOid", {
+local function mock_pr_head_state(head_sha, state, head_repo, is_cross_repository, base_branch, pr_number, comments)
+  local repo = head_repo or "owner/x"
+  local base_repo = is_cross_repository == true and "owner/x" or repo
+  local number = pr_number or 7
+  t.mock_command(core.gh_pr_rest_view_cmd("owner/x", number), {
     stdout = string.format(
-      '{"headRefOid":"%s","baseRefName":"%s","state":"%s","headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s}\n',
+      '{"head":{"ref":"devloop-owner-x-42-01HY","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","repo":{"full_name":"%s","owner":{"login":"owner"}}},"state":"%s","merged":%s,"updated_at":"2026-06-03T02:03:04Z"}\n',
       head_sha or "abc123",
+      repo,
+      tostring(repo):match("^([^/]+)/") or "owner",
       base_branch or "dev",
-      state or "OPEN",
-      head_repo or "owner/x",
-      cross
+      base_repo,
+      tostring(state or "OPEN"):lower(),
+      tostring(state or ""):upper() == "MERGED" and "true" or "false"
     ),
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.gh_issue_comments_api_cmd("owner/x", number), {
+    stdout = "[[" .. render_rest_comments(comments or {}) .. "]]\n",
     stderr = "",
     exit_code = 0,
   })
@@ -315,19 +352,12 @@ local function mock_pr_create_stdout(stdout)
 end
 
 local function mock_pr_comment_view(comments, author)
-  local rendered_comments = comments
-  if type(comments) == "table" then
-    local parts = {}
-    for _, comment in ipairs(comments) do
-      table.insert(parts, comment_json(comment.body, comment.author_login or comment.author, comment.id, comment.databaseId or comment.database_id))
-    end
-    rendered_comments = table.concat(parts, ",")
-  else
-    rendered_comments = comment_json(comments or "existing pr comment", author)
+  local stdout = "[[" .. render_rest_comments(comments or "existing pr comment", author) .. "]]\n"
+  for _, number in ipairs({ 7, 9, 10, 11 }) do
+    t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/" .. tostring(number) .. "/comments?per_page=100'", {
+      stdout = stdout,
+    })
   end
-  t.mock_command("gh pr view", {
-    stdout = '{"comments":[' .. rendered_comments .. "]}\n",
-  })
 end
 
 local function mock_pr_comment_write()

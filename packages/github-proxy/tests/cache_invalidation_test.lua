@@ -10,6 +10,19 @@ local mock_poll = h.mock_poll
 local count_calls = h.count_calls
 require("tests.entity_view_probe_helpers")
 
+local function mock_issue_view(title)
+  t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
+    stdout = '{"title":"' .. tostring(title) .. '","body":"","state":"open","labels":[],"assignees":[],"updated_at":"2026-06-03T01:02:03Z"}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.gh_issue_view_comments_cmd("owner/x", 42), {
+    stdout = "[[]]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function issue_comment_event()
   return {
     queue = "github_issue_comment_request",
@@ -79,11 +92,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     })
 
-    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
-      stdout = '{"title":"Before","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_issue_view("Before")
     t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
       stdout = "2026-06-03T01:02:03Z\n",
       stderr = "",
@@ -100,11 +109,7 @@ return {
     local written = t.run_department("departments/github_comment/main.lua", issue_comment_event(), run_opts)
     t.eq(written.exit_code, 0)
 
-    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
-      stdout = '{"title":"After","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_issue_view("After")
     local after = run_entity_view_probe(run_opts, "second")
     t.eq(after.exit_code, 0)
     t.is_true(after.stdout:find('"After"', 1, true) ~= nil)
@@ -113,11 +118,7 @@ return {
 
   test_marker_bearing_fetch_bypasses_proxy_entity_view_cache = function()
     local run_opts = opts("proxy-marker-fresh")
-    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
-      stdout = '{"title":"Before","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_issue_view("Before")
     t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
       stdout = "2026-06-03T01:02:03Z\n",
       stderr = "",
@@ -126,11 +127,7 @@ return {
     local first = run_entity_view_probe(run_opts, "marker-reader")
     t.eq(first.exit_code, 0)
 
-    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
-      stdout = '{"title":"After","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_issue_view("After")
     local marker_read = run_entity_view_probe(run_opts, "marker-reader-2", true)
     t.eq(marker_read.exit_code, 0)
     t.is_true(marker_read.stdout:find('"After"', 1, true) ~= nil)
@@ -140,11 +137,7 @@ return {
 
   test_named_marker_issue_fetch_bypasses_proxy_entity_view_cache = function()
     local run_opts = opts("proxy-named-marker-fresh")
-    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
-      stdout = '{"title":"Before","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_issue_view("Before")
     t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
       stdout = "2026-06-03T01:02:03Z\n",
       stderr = "",
@@ -154,11 +147,7 @@ return {
     t.eq(first.exit_code, 0)
     t.is_true(first.stdout:find('"Before"', 1, true) ~= nil)
 
-    t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
-      stdout = '{"title":"After","body":"","state":"OPEN","labels":[],"comments":[],"updatedAt":"2026-06-03T01:02:03Z"}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_issue_view("After")
     local marker_read = run_entity_view_probe(run_opts, "state-reader", false, true)
     t.eq(marker_read.exit_code, 0)
     t.is_true(marker_read.stdout:find('"After"', 1, true) ~= nil)
