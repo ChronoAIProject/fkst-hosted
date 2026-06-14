@@ -104,7 +104,7 @@ local function mock_issue_view(comments)
 end
 
 local function mock_pr_view(comments)
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
     stdout = '{"headRefName":"devloop-owner-repo-42","headRefOid":"def456","baseRefName":"integration/dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":['
       .. table.concat(comments or {}, ",") .. "]}\n",
     stderr = "",

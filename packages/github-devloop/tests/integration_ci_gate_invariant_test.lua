@@ -37,7 +37,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "consensus.proposal").payload.schema, "consensus.proposal.v1")
     t.eq(count_calls("statusCheckRollup"), 0)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"), 1)
   end,
 
   test_review_pr_review_loop_suffix_proceeds_against_base_reviewing_marker = function()

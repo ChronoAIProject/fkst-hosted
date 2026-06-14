@@ -70,7 +70,7 @@ local function pr_native_comments(event, include_review_result)
   return comments
 end
 
-local function mock_pr_origin(comments, head, head_sha, state, base_branch, times)
+local function mock_pr_origin(comments, head, head_sha, state, base_branch, times, labels)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   local has_state_marker = false
@@ -88,6 +88,7 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch, time
       head_sha = head_sha or "def456",
       state = state or "OPEN",
       base_branch = base_branch or "dev",
+      labels = labels or {},
     })
     return
   end
@@ -121,14 +122,19 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch, time
   for _, comment in ipairs(input_comments or {}) do
     table.insert(rendered_comments, render_comment(comment))
   end
+  local rendered_labels = {}
+  for _, label in ipairs(labels or {}) do
+    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  end
   for _ = 1, times or 1 do
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
       stdout = string.format(
-        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","labels":[],"comments":[%s]}\n',
+        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","labels":[%s],"comments":[%s]}\n',
         json_string(head or "devloop-owner-repo-42-01HY"),
         json_string(head_sha or "def456"),
         json_string(base_branch or "dev"),
         json_string(state or "OPEN"),
+        table.concat(rendered_labels, ","),
         table.concat(rendered_comments, ",")
       ),
       stderr = "",
@@ -406,9 +412,9 @@ local function mock_pr_origin_sequence(entries)
     for _, comment in ipairs(comments or {}) do
       table.insert(rendered_comments, render_comment(comment))
     end
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
       stdout = string.format(
-        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s],"labels":[]}\n',
         json_string(entry.head or "devloop-owner-repo-42-01HY"),
         json_string(entry.head_sha or "def456"),
         json_string(entry.state or "OPEN"),

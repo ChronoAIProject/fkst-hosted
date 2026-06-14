@@ -1,8 +1,13 @@
 local S = {}
 
 function S.install(M)
-function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_id, to_state, version, dedup_key_value, source_ref)
-  local add_labels, remove_labels = M.state_label_changes(to_state)
+function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_id, to_state, version, dedup_key_value, source_ref, current_labels)
+  local add_labels, remove_labels
+  if current_labels ~= nil then
+    add_labels, remove_labels = M.state_label_reconcile_changes(current_labels, to_state)
+  else
+    add_labels, remove_labels = M.state_label_changes(to_state)
+  end
   return M.attach_issue_claim({
     schema = "github-proxy.label.v1",
     repo = repo,
@@ -20,7 +25,7 @@ function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_
   }, issue_number ~= nil and M.issue_source_ref(repo, issue_number) or nil)
 end
 
-function M.build_reconcile_pr_state_label_request(repo, issue_number, pr_number, proposal_id, state, version, source_ref)
+function M.build_reconcile_pr_state_label_request(repo, issue_number, pr_number, proposal_id, state, version, source_ref, current_labels)
   return M.build_pr_state_label_request(
     repo,
     issue_number,
@@ -36,7 +41,8 @@ function M.build_reconcile_pr_state_label_request(repo, issue_number, pr_number,
       tostring(version or "unversioned"),
       tostring(pr_number),
     }),
-    source_ref
+    source_ref,
+    current_labels
   )
 end
 

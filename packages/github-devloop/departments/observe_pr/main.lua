@@ -80,12 +80,21 @@ local function origin_matches_pr(origin, current_pr, repo, branches, require_iss
   return true, "ok"
 end
 
-local function maybe_issue_label_hint(origin, state, source_ref)
-  if origin.issue_number == nil then
+local function maybe_issue_label_hint(origin, state, source_ref, current_issue)
+  if origin.issue_number == nil or state.state == nil then
     return
   end
-  local label_request = core.build_reconcile_state_label_request(origin.repo, origin.issue_number, origin.proposal_id, state.state, state.version, source_ref)
-  local add_labels, remove_labels = core.state_label_changes(state.state)
+  local current_labels = current_issue and current_issue.labels or nil
+  local add_labels, remove_labels
+  if current_labels ~= nil then
+    add_labels, remove_labels = core.state_label_reconcile_changes(current_labels, state.state)
+    if #add_labels == 0 and #remove_labels == 0 then
+      return
+    end
+  else
+    add_labels, remove_labels = core.state_label_changes(state.state)
+  end
+  local label_request = core.build_reconcile_state_label_request(origin.repo, origin.issue_number, origin.proposal_id, state.state, state.version, source_ref, current_labels)
   core.log_apply("observe_pr", origin.proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_label_request",
   })
@@ -96,17 +105,20 @@ local function maybe_pr_label_hint(origin, pr_number, current_pr, state, source_
   if state.state == nil or core.state_label_hint_matches(current_pr.labels, state.state) then
     return
   end
-  local label_request = core.build_reconcile_pr_state_label_request(origin.repo, origin.issue_number, pr_number, origin.proposal_id, state.state, state.version, source_ref)
-  local add_labels, remove_labels = core.state_label_changes(state.state)
+  local add_labels, remove_labels = core.state_label_reconcile_changes(current_pr.labels, state.state)
+  if #add_labels == 0 and #remove_labels == 0 then
+    return
+  end
+  local label_request = core.build_reconcile_pr_state_label_request(origin.repo, origin.issue_number, pr_number, origin.proposal_id, state.state, state.version, source_ref, current_pr.labels)
   core.log_apply("observe_pr", origin.proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_label_request",
   })
   core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
-local function maybe_label_hints(origin, pr_number, current_pr, state, pr_source_ref_value)
+local function maybe_label_hints(origin, pr_number, current_pr, state, pr_source_ref_value, current_issue)
   local issue_source_ref_value = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or nil
-  maybe_issue_label_hint(origin, state, issue_source_ref_value)
+  maybe_issue_label_hint(origin, state, issue_source_ref_value, current_issue)
   maybe_pr_label_hint(origin, pr_number, current_pr, state, pr_source_ref_value)
 end
 
@@ -312,7 +324,7 @@ function pipeline(event)
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   core.assert_trusted_bot_configured()
   local branches = core.branch_config()
-    local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
+  local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end
@@ -361,7 +373,7 @@ function pipeline(event)
       if issue_state.state == "fixing" then
         core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
         if raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, { comments = issue_comments }) then
-          maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref)
+          maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref, issue_current)
         end
         return
       end
@@ -379,7 +391,7 @@ function pipeline(event)
         return
       end
       if raise_current_state(origin, pr.number, current_pr, replay_state, source_ref, issue_current) then
-        maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref)
+        maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref, issue_current)
       end
       return
     end
