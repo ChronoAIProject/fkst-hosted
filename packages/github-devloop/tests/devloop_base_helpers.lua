@@ -691,8 +691,7 @@ mock_pr_origin_from_cached = function(payload, head_sha)
       '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s],"labels":[%s]}\n',
       json_string(head),
       json_string(effective_head_sha),
-      json_string(base_branch),
-      json_string(state),
+      json_string(base_branch), json_string(state),
       table.concat(rendered_comments, ","), table.concat(rendered_labels, ",")
     ),
     stderr = "",

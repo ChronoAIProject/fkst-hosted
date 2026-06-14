@@ -102,7 +102,7 @@ local function maybe_issue_label_hint(origin, state, source_ref, current_issue)
 end
 
 local function maybe_pr_label_hint(origin, pr_number, current_pr, state, source_ref)
-  if state.state == nil or core.state_label_hint_matches(current_pr.labels, state.state) then
+  if state.state == nil then
     return
   end
   local add_labels, remove_labels = core.state_label_reconcile_changes(current_pr.labels, state.state)
@@ -390,8 +390,11 @@ function pipeline(event)
       if replay_state.state == "reviewing" and not issue_claim_ok() then
         return
       end
-      if raise_current_state(origin, pr.number, current_pr, replay_state, source_ref, issue_current) then
+      local raised_current_state = raise_current_state(origin, pr.number, current_pr, replay_state, source_ref, issue_current)
+      if raised_current_state then
         maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref, issue_current)
+      elseif replay_state.state == "blocked" or replay_state.state == "merged" then
+        maybe_pr_label_hint(origin, pr.number, current_pr, replay_state, source_ref)
       end
       return
     end
