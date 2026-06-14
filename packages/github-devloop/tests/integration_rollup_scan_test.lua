@@ -46,6 +46,11 @@ local function mock_fetches()
   t.mock_command("git fetch 'origin' 'integration/dev'", { stdout = "", stderr = "", exit_code = 0 })
 end
 
+local function mock_fetches_for(integration)
+  t.mock_command("git fetch 'origin' 'dev'", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("git fetch 'origin' '" .. tostring(integration) .. "'", { stdout = "", stderr = "", exit_code = 0 })
+end
+
 local function mock_ahead(count)
   t.mock_command("git rev-list --count refs/remotes/origin/'dev'..refs/remotes/origin/'integration/dev'", {
     stdout = tostring(count) .. "\n",
@@ -54,8 +59,24 @@ local function mock_ahead(count)
   })
 end
 
+local function mock_ahead_for(integration, count)
+  t.mock_command("git rev-list --count refs/remotes/origin/'dev'..refs/remotes/origin/'" .. tostring(integration) .. "'", {
+    stdout = tostring(count) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_content_diff(has_diff)
   t.mock_command("git diff --quiet refs/remotes/origin/'dev' refs/remotes/origin/'integration/dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = has_diff and 1 or 0,
+  })
+end
+
+local function mock_content_diff_for(integration, has_diff)
+  t.mock_command("git diff --quiet refs/remotes/origin/'dev' refs/remotes/origin/'" .. tostring(integration) .. "'", {
     stdout = "",
     stderr = "",
     exit_code = has_diff and 1 or 0,
@@ -78,8 +99,33 @@ local function mock_pr_list(pr)
   })
 end
 
+local function mock_pr_list_for(integration, pr)
+  local stdout = "[]\n"
+  if pr ~= nil then
+    stdout = string.format(
+      '[[{"number":%d,"head":{"sha":"%s","ref":"%s"},"base":{"ref":"dev"},"state":"open"}]]\n',
+      pr.number or 9,
+      h.json_string(pr.head_sha or "def456"),
+      h.json_string(integration)
+    )
+  end
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3A" .. tostring(integration) .. "&base=dev&per_page=100'", {
+    stdout = stdout,
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_integration_head(head)
   t.mock_command("refs/remotes/'origin'/'integration/dev'^{commit}", {
+    stdout = (head or "def456") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_integration_head_for(integration, head)
+  t.mock_command("refs/remotes/'origin'/'" .. tostring(integration) .. "'^{commit}", {
     stdout = (head or "def456") .. "\n",
     stderr = "",
     exit_code = 0,
@@ -221,6 +267,49 @@ return {
     t.eq(h.count_calls("gh pr create"), 1)
     t.eq(h.count_calls("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'"), 0)
     t.eq(h.count_calls("rm -f --"), 0)
+  end,
+
+  test_rollup_scan_no_commits_between_create_failure_noops = function()
+    mock_env("1")
+    mock_fetches()
+    mock_ahead(1)
+    mock_content_diff(true)
+    mock_pr_list(nil)
+    mock_integration_head("def456")
+    mock_release_notes("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel)
+    t.mock_command("gh pr create", {
+      stdout = "",
+      stderr = "pull request create failed: GraphQL: No commits between dev and integration/dev",
+      exit_code = 1,
+    })
+    local result = run_scan(opts("rollup-no-commits-between", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(h.count_calls("gh pr create"), 1)
+    t.eq(h.count_calls("gh api --paginate --slurp 'repos/owner/repo/pulls"), 1)
+  end,
+
+  test_rollup_scan_no_commits_between_unslashed_integration_noops = function()
+    mock_env("1", "auto", "integration")
+    mock_fetches_for("integration")
+    mock_ahead_for("integration", 1)
+    mock_content_diff_for("integration", true)
+    mock_pr_list_for("integration", nil)
+    mock_integration_head_for("integration", "def456")
+    mock_release_notes("Release highlights\n\nZh: fa bu zhai yao.\n" .. core._release_notes_ai_sentinel)
+    t.mock_command("gh pr create", {
+      stdout = "",
+      stderr = "pull request create failed: GraphQL: No commits between dev and integration",
+      exit_code = 1,
+    })
+    local result = run_scan(opts("rollup-no-commits-between-unslashed", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_DEVLOOP_INTEGRATION_BRANCH = "integration",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(h.count_calls("gh pr create"), 1)
+    t.eq(h.count_calls("gh api --paginate --slurp 'repos/owner/repo/pulls"), 1)
   end,
 
   test_rollup_scan_ahead_without_content_diff_skips_pr = function()

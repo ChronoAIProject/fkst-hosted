@@ -80,6 +80,12 @@ local function list_open_pr(repo, integration, upstream)
   return prs[1]
 end
 
+local function is_no_commits_between_error(stderr, upstream, integration)
+  local text = tostring(stderr or "")
+  local expected = "No commits between " .. tostring(upstream) .. " and " .. tostring(integration)
+  return text:find(expected, 1, true) ~= nil
+end
+
 local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, publish_policy)
   local notes = core.draft_release_notes({
     repo = repo,
@@ -90,7 +96,14 @@ local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, pu
     publish_policy = publish_policy,
   })
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
-  run_gh_cmd(core.gh_pr_create_body_cmd(repo, integration, upstream, title, notes), 60, "gh rollup PR create")
+  local result = core.gh_exec({ cmd = core.gh_pr_create_body_cmd(repo, integration, upstream, title, notes), timeout = 60 })
+  if result.exit_code == 0 then
+    return true
+  end
+  if is_no_commits_between_error(result.stderr, upstream, integration) then
+    return false
+  end
+  error("github-devloop: gh rollup PR create failed: " .. tostring(result.stderr))
 end
 
 function pipeline(event)
@@ -131,7 +144,7 @@ function pipeline(event)
         return
       end
       integration_head = remote_head(branches.integration)
-      create_rollup_pr(
+      local created = create_rollup_pr(
         repo,
         branches.upstream,
         branches.integration,
@@ -139,6 +152,10 @@ function pipeline(event)
         ahead,
         core.release_notes_publish_policy(cfg)
       )
+      if not created then
+        core.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(no-commits-between)", "GitHub reports no commits between upstream and integration")
+        return
+      end
       pr = list_open_pr(repo, branches.integration, branches.upstream)
       if pr == nil then
         error("github-devloop: gh rollup PR create/list did not return an open PR")
