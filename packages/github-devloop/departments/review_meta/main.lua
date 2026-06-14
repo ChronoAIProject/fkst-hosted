@@ -13,26 +13,6 @@ M.spec = {
   stall_window = "2m",
 }
 
-local function raise_work_card(repo, review_meta, card)
-  local request = core.build_work_card_comment_request({
-    kind = "pr",
-    repo = repo,
-    number = review_meta.pr_number,
-  }, {
-    proposal_id = review_meta.proposal_id,
-    role = "review-meta",
-    run_id = core.work_card_run_id({ "review-meta", review_meta.dedup_key }),
-    version = review_meta.version,
-    round = core.version_fix_round(review_meta.version),
-    started_at = card.started_at,
-    finished_at = card.finished_at,
-    outcome = card.outcome,
-    last_stage = review_meta.blocking_gap,
-    source_ref = review_meta.source_ref,
-  })
-  core.log_work_card("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", request)
-end
-
 local function judgment_worktree(role, identity)
   local runtime = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
   if runtime.exit_code ~= 0 then
@@ -114,9 +94,6 @@ function pipeline(event)
 
     core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
     local codex_started_at = now()
-    raise_work_card(repo, review_meta, {
-      started_at = codex_started_at,
-    })
     core.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
     local content_fetch = core.context_fetch_from_bundle({
       dept = "review_meta",
@@ -137,11 +114,6 @@ function pipeline(event)
         queue = event.queue,
         source_ref = review_meta.source_ref,
         terminal = false,
-      })
-      raise_work_card(repo, review_meta, {
-        started_at = codex_started_at,
-        finished_at = now(),
-        outcome = "failed: codex-failed",
       })
       error("github-devloop: review-meta codex failed: " .. tostring(stderr))
     end
@@ -180,11 +152,6 @@ function pipeline(event)
       }
     end
     core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
-    raise_work_card(repo, review_meta, {
-      started_at = codex_started_at,
-      finished_at = now(),
-      outcome = "action: " .. tostring(parsed.action),
-    })
 
     local to_state = (parsed.action == "fix" or parsed.action == "continue") and "fixing" or "blocked"
     local exit_version = core.next_review_meta_action_version(review_meta.version)

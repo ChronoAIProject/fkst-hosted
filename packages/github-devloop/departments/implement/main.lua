@@ -136,31 +136,6 @@ local function ready_for_implementation_version(ready, version)
   return copy
 end
 
-local function raise_work_card(repo, issue_number, ready, card)
-  local run_id = core.work_card_run_id({
-    "implement",
-    tostring(ready.dedup_key),
-    "attempt",
-    tostring(card.attempt or 1),
-  })
-  local request = core.build_work_card_comment_request({
-    kind = "issue",
-    repo = repo,
-    number = issue_number,
-  }, {
-    proposal_id = ready.proposal_id,
-    role = "implement",
-    run_id = run_id,
-    version = ready.dedup_key,
-    started_at = card.started_at,
-    finished_at = card.finished_at,
-    outcome = card.outcome,
-    base_sha = card.base_sha,
-    source_ref = ready.source_ref,
-  })
-  core.log_work_card("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
-end
-
 implemented_branch_head = function(base_head, branch)
   local ahead_result = exec_sync({ cmd = core.git_branch_ahead_count_cmd(base_head, branch), timeout = 30 })
   if ahead_result.exit_code ~= 0 then
@@ -302,11 +277,6 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
 
   local codex_started_at = now()
   raise_implement_attempt(repo, issue_number, ready, attempt, codex_started_at)
-  raise_work_card(repo, issue_number, ready, {
-    started_at = codex_started_at,
-    base_sha = base_head,
-    attempt = attempt,
-  })
   core.log_codex_start("implement", ready.proposal_id, "implement")
   local content_fetch = core.context_fetch_from_bundle({
     dept = "implement",
@@ -449,12 +419,6 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
     return
   end
   raise_implement_attempt(repo, issue_number, outcome.ready, outcome.attempt, outcome.started_at)
-  raise_work_card(repo, issue_number, outcome.ready, {
-    started_at = outcome.started_at,
-    finished_at = outcome.finished_at,
-    outcome = outcome.outcome,
-    base_sha = outcome.base_sha,
-  })
   if outcome.kind == "implementing" then
     raise_implementing(
       repo,

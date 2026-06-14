@@ -342,27 +342,6 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
   core.log_raise("fix", fix.proposal_id, "devloop_fixing", refix_payload)
 end
 
-local function raise_work_card(repo, fix, card)
-  local request = core.build_work_card_comment_request({
-    kind = "pr",
-    repo = repo,
-    number = fix.pr_number,
-  }, {
-    proposal_id = fix.proposal_id,
-    role = "fix",
-    run_id = core.work_card_run_id({ "fix", fix.dedup_key }),
-    version = fix.version,
-    round = core.version_fix_round(fix.version),
-    started_at = card.started_at,
-    finished_at = card.finished_at,
-    outcome = card.outcome,
-    gate_baseline_sha = fix.gate_baseline_sha,
-    last_stage = fix.blocking_gap or fix.gate_failure_excerpt,
-    source_ref = fix.source_ref,
-  })
-  core.log_work_card("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", request)
-end
-
 local function assert_fix_write_gate(fix, repo, issue_number)
   local write_enabled = core.write_mode() == "real"
   if write_enabled then
@@ -434,9 +413,6 @@ local function run_fix_attempt(plan)
     core.log_conflict_files("fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
   end
   local codex_started_at = now()
-  raise_work_card(plan.repo, plan.fix, {
-    started_at = codex_started_at,
-  })
   core.log_codex_start("fix", plan.fix.proposal_id, "fix")
   local content_fetch = core.context_fetch_from_bundle({
     dept = "fix",
@@ -594,11 +570,6 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     return
   end
   if outcome.kind == "review-meta" then
-    raise_work_card(repo, fix, {
-      started_at = outcome.started_at,
-      finished_at = outcome.finished_at,
-      outcome = outcome.outcome,
-    })
     raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)
     return
   end
@@ -622,11 +593,6 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     error("github-devloop: pushed PR head verification failed")
   end
 
-  raise_work_card(repo, fix, {
-    started_at = outcome.started_at,
-    finished_at = outcome.finished_at,
-    outcome = outcome.outcome,
-  })
   raise_reviewing(repo, issue_number, fix, outcome.old_head_sha, outcome.new_head_sha, outcome.reason, outcome.summary)
 end
 

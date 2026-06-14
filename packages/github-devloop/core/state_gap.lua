@@ -5,14 +5,6 @@ function S.install(M)
 local max_dashboard_edges = 8
 local max_worst_offenders = 3
 local session_hand_off_seconds = 60
-local implement_runtime_candidate_seconds = 600
-local implement_start_batch_window_seconds = 60
-local work_card_runtime_states = {
-  implementing = true,
-  fixing = true,
-  reviewing = true,
-  ["review-meta"] = true,
-}
 
 local function pattern_escape(value)
   return tostring(value or ""):gsub("([^%w])", "%%%1")
@@ -128,33 +120,11 @@ local function has_dependency_marker_between(entity, proposal_id, version, from_
 end
 
 local function ready_implementing_wait_evidence(entity, previous, marker)
-  local work_card = find_marker_between(entity, previous.proposal_id, "work-card", nil, previous.created_seconds, marker.created_seconds)
-  if work_card == nil then
-    return {
-      wait_class = marker.created_seconds - previous.created_seconds > session_hand_off_seconds
-        and "visibility-retry"
-        or "direct-marker",
-      handoff_class = "unknown",
-    }
-  end
-  local pre_start_seconds = work_card.created_seconds - previous.created_seconds
-  local post_start_seconds = marker.created_seconds - work_card.created_seconds
-  local wait_class = "visibility-retry"
-  if post_start_seconds >= implement_runtime_candidate_seconds and post_start_seconds >= pre_start_seconds then
-    wait_class = "spawn-slot-candidate"
-  elseif pre_start_seconds <= session_hand_off_seconds then
-    wait_class = "session-hand-off"
-  elseif pre_start_seconds < post_start_seconds then
-    wait_class = "codex-runtime"
-  end
   return {
-    wait_class = wait_class,
-    handoff_class = pre_start_seconds <= session_hand_off_seconds and "session-hand-off" or "durable-visibility-path",
-    work_card_created_at = work_card.created_at,
-    work_card_created_seconds = work_card.created_seconds,
-    ready_pre_start_seconds = pre_start_seconds,
-    ready_post_start_seconds = post_start_seconds,
-    spawn_slot_candidate = post_start_seconds >= implement_runtime_candidate_seconds,
+    wait_class = marker.created_seconds - previous.created_seconds > session_hand_off_seconds
+      and "visibility-retry"
+      or "direct-marker",
+    handoff_class = "unknown",
   }
 end
 
@@ -168,10 +138,6 @@ function M.state_gap_wait_evidence(entity, previous, marker)
   end
   if previous.state == "ready" and marker.state == "implementing" then
     return ready_implementing_wait_evidence(entity, previous, marker)
-  end
-  if work_card_runtime_states[previous.state] == true
-    and has_marker_between(entity, previous.proposal_id, "work-card", nil, previous.created_seconds, marker.created_seconds) then
-    return { wait_class = "codex-runtime" }
   end
   if previous.state == "merge-ready" and marker.state == "merging" then
     return { wait_class = "merge-queue" }
@@ -275,24 +241,6 @@ local function sort_edge_summaries(summaries)
   end)
 end
 
-local function annotate_ready_implementing_batches(edges)
-  local starts = {}
-  for _, edge in ipairs(edges or {}) do
-    if edge.edge == "ready->implementing" and edge.work_card_created_seconds ~= nil then
-      table.insert(starts, edge)
-    end
-  end
-  for _, edge in ipairs(starts) do
-    local count = 0
-    for _, other in ipairs(starts) do
-      if math.abs(tonumber(edge.work_card_created_seconds) - tonumber(other.work_card_created_seconds)) <= implement_start_batch_window_seconds then
-        count = count + 1
-      end
-    end
-    edge.implement_start_batch_count = count
-  end
-end
-
 function M.state_gap_report(entities)
   local all_edges = {}
   for _, entity in ipairs(entities or {}) do
@@ -300,8 +248,6 @@ function M.state_gap_report(entities)
       table.insert(all_edges, edge)
     end
   end
-  annotate_ready_implementing_batches(all_edges)
-
   local by_edge = {}
   for _, edge in ipairs(all_edges) do
       by_edge[edge.edge] = by_edge[edge.edge] or {
@@ -312,8 +258,6 @@ function M.state_gap_report(entities)
         offenders = {},
         wait_class_counts = {},
         handoff_counts = {},
-        spawn_slot_candidate_count = 0,
-        start_batch_peak = 0,
         over_budget_count = 0,
         near_budget_count = 0,
         budget_seconds = edge.budget_seconds,
@@ -326,13 +270,6 @@ function M.state_gap_report(entities)
       if edge.handoff_class ~= nil then
         local handoff_class = tostring(edge.handoff_class)
         bucket.handoff_counts[handoff_class] = (bucket.handoff_counts[handoff_class] or 0) + 1
-      end
-      if edge.spawn_slot_candidate == true then
-        bucket.spawn_slot_candidate_count = bucket.spawn_slot_candidate_count + 1
-      end
-      if tonumber(edge.implement_start_batch_count) ~= nil
-        and tonumber(edge.implement_start_batch_count) > bucket.start_batch_peak then
-        bucket.start_batch_peak = tonumber(edge.implement_start_batch_count)
       end
       if edge.budget_status == "over-budget" then
         bucket.over_budget_count = bucket.over_budget_count + 1
@@ -363,8 +300,6 @@ function M.state_gap_report(entities)
       near_budget_count = bucket.near_budget_count,
       wait_class_counts = bucket.wait_class_counts,
       handoff_counts = bucket.handoff_counts,
-      spawn_slot_candidate_count = bucket.spawn_slot_candidate_count,
-      start_batch_peak = bucket.start_batch_peak,
       offenders = bucket.offenders,
     })
   end
@@ -387,10 +322,6 @@ function M.state_gap_log_line(edge)
     "budget_status=" .. tostring(edge and edge.budget_status or "unknown"),
     "wait_class=" .. tostring(edge and edge.wait_class or "unattributed"),
     "handoff_class=" .. tostring(edge and edge.handoff_class or ""),
-    "ready_pre_start_seconds=" .. tostring(edge and edge.ready_pre_start_seconds or ""),
-    "ready_post_start_seconds=" .. tostring(edge and edge.ready_post_start_seconds or ""),
-    "implement_start_batch_count=" .. tostring(edge and edge.implement_start_batch_count or ""),
-    "spawn_slot_candidate=" .. tostring(edge and edge.spawn_slot_candidate == true),
     "from_created_at=" .. tostring(edge and edge.from_created_at or ""),
     "to_created_at=" .. tostring(edge and edge.to_created_at or ""),
   }, " ")
@@ -508,8 +439,6 @@ function M.append_state_gap_dashboard_section(lines, report)
       .. ", over " .. tostring(summary.over_budget_count or 0)
       .. ", classes " .. wait_class_summary(summary.wait_class_counts)
       .. ", handoff " .. handoff_summary(summary.handoff_counts)
-      .. ", spawn_slot_candidates " .. tostring(summary.spawn_slot_candidate_count or 0)
-      .. ", start_batch_peak " .. tostring(summary.start_batch_peak or 0)
       .. "; worst " .. offender_summary(summary.offenders))
     shown = shown + 1
   end
