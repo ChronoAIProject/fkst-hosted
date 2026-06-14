@@ -425,16 +425,20 @@ return {
     t.eq(core.is_supported_ready(ready_without_framing), true)
     local ready_with_hand_off = core.build_devloop_ready_payload(copy_table(reached(), {
       include_ready_hand_off = true,
+      ready_comment_id = "IC_123",
     }))
-    t.eq(ready_with_hand_off.ready_hand_off.version, ready_with_hand_off.dedup_key)
+    t.eq(ready_with_hand_off.ready_hand_off.kind, "own-state-marker")
+    t.eq(ready_with_hand_off.ready_hand_off.event_version, ready_with_hand_off.dedup_key)
+    t.eq(ready_with_hand_off.ready_hand_off.comment_id, "IC_123")
     t.eq(core.is_supported_ready(ready_with_hand_off), true)
-    ready_with_hand_off.ready_hand_off.version = "ready/other"
+    ready_with_hand_off.ready_hand_off.event_version = "ready/other"
     t.eq(core.is_supported_ready(ready_with_hand_off), false)
     ready_with_hand_off = core.build_devloop_ready_payload(copy_table(reached(), {
       include_ready_hand_off = true,
       impl_retry_attempt = 2,
     }))
-    t.eq(core.is_supported_ready(ready_with_hand_off), false)
+    t.is_nil(ready_with_hand_off.ready_hand_off)
+    t.eq(core.is_supported_ready(ready_with_hand_off), true)
 
     t.eq(core.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
     local deterministic_branch = core.implement_branch("owner/repo", "42", ready.dedup_key)

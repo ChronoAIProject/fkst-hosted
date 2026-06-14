@@ -4,6 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "github_issue_comment_request" },
+  produces = { "github_comment_written" },
   stall_window = "30s",
 }
 
@@ -45,26 +46,41 @@ local function write_with_outbound_log(payload, target)
     return value
   end
 
+  local written = nil
   local ok, err = pcall(function()
-    core.write_comment_request(payload, target)
+    written = core.write_comment_request(payload, target)
   end)
   core.read_env = read_env
   if not ok then
     error(err)
   end
+  return written, repo
 end
 
 function pipeline(event)
   local payload = event.payload or {}
-  write_with_outbound_log(payload, {
+  local written, repo = write_with_outbound_log(payload, {
     kind = "issue",
     number = payload.issue_number,
     number_field = "issue_number",
     view_comments_cmd = core.gh_issue_view_comments_cmd,
-    comment_cmd = core.gh_issue_comment_cmd,
+    comment_create_cmd = core.gh_issue_comment_create_cmd,
     view_label = "gh issue view",
     comment_label = "gh issue comment",
   })
+  if written ~= nil and written.id ~= nil then
+    raise("github_comment_written", {
+      schema = "github-proxy.comment-written.v1",
+      repo = repo,
+      target = "issue",
+      issue_number = payload.issue_number,
+      comment_id = written.id,
+      dedup_key = tostring(payload.dedup_key) .. "/written/" .. tostring(written.id),
+      request_dedup_key = payload.dedup_key,
+      handoff = payload.handoff,
+      source_ref = payload.source_ref,
+    })
+  end
 end
 
 pipeline = core.wrap_pipeline_failure("github_comment", pipeline)

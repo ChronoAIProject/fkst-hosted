@@ -1,5 +1,4 @@
 local S = {}
-
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
 local display_separator = " — "
@@ -9,7 +8,6 @@ local max_display_attr_len = 120
 local max_display_block_len = 5000
 local max_verdict_summary_items = 8
 local max_verdict_summary_len = 600
-
 local function bounded_neutralized_text(value, limit)
   local text = tostring(value or "")
   local cap = limit or max_display_digest_len
@@ -158,7 +156,6 @@ function M.build_observe_comment_request(issue, proposal)
     source_ref = M.normalize_source_ref(issue.source_ref),
   }, issue.source_ref)
 end
-
 function M.build_result_label_request(repo, issue_number, reached)
   return M.build_state_label_request(
     repo,
@@ -168,7 +165,6 @@ function M.build_result_label_request(repo, issue_number, reached)
     reached.source_ref
   )
 end
-
 function M.build_result_comment_request(repo, issue_number, reached)
   local marker = M.result_marker(reached.proposal_id, reached.decision, reached.dedup_key)
   local state_marker = M.state_marker(reached.proposal_id, "ready", tostring(reached.effect_version or reached.dedup_key), "result-marker,ready-label,devloop-ready")
@@ -183,19 +179,24 @@ function M.build_result_comment_request(repo, issue_number, reached)
     .. "\n\n" .. state_marker
     .. "\n" .. marker
     .. "\n" .. ai_sentinel
-  return M.attach_issue_claim({
+  local request = M.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
     body = body,
-    -- Include the consensus M._dedup_key (version) so a new decision/version writes a fresh result
-    -- marker instead of being suppressed by an older same-direction github-proxy comment marker.
     dedup_key = tostring(reached.proposal_id) .. "/comment/" .. tostring(reached.decision)
       .. "/" .. (tostring(reached.dedup_key):gsub(":", "-")),
     source_ref = M.normalize_source_ref(reached.source_ref),
   }, reached.source_ref)
+  request.handoff = {
+    kind = "github-devloop.ready",
+    proposal_id = reached.proposal_id,
+    version = reached.dedup_key,
+    marker_version = tostring(reached.effect_version or reached.dedup_key),
+    source_ref = M.normalize_source_ref(reached.source_ref),
+  }
+  return request
 end
-
 function M.result_effects_complete(current, reached)
   if type(current) ~= "table" or type(reached) ~= "table" then
     return false
@@ -685,10 +686,9 @@ function M.build_pr_open_label_request(repo, issue_number, proposal_id, current,
     source_ref
   )
 end
-
 function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number, source_ref)
   local state_marker = M.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -700,8 +700,15 @@ function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number
     tostring(origin.impl_version),
     tostring(pr_number),
   }), source_ref)
+  request.handoff = {
+    kind = "github-devloop.reviewing",
+    proposal_id = origin.proposal_id,
+    pr_number = pr_number,
+    version = origin.impl_version,
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+  return request
 end
-
 function M.build_reviewing_label_request(repo, issue_number, origin, pr_number, source_ref)
   return M.build_state_label_request(
     repo,
@@ -976,7 +983,6 @@ function M.build_review_carry_over_comment_request(repo, pr_number, issue_propos
     tostring(carry.new_head_sha),
   }), source_ref)
 end
-
 function M.build_merging_comment_body(merge_ready)
   return M.comment_string("is_merging_pr_prefix") .. tostring(merge_ready.pr_number)
     .. "\n\n" .. M.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)
@@ -990,7 +996,5 @@ function M.build_merged_comment_body(merge_ready)
     .. "\n" .. M.state_marker(merge_ready.proposal_id, "merged", merge_ready.version)
     .. "\n" .. M.merged_marker(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
 end
-
 end
-
 return S

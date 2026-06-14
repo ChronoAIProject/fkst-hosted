@@ -7,6 +7,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_pr_comment_view = h.mock_pr_comment_view
 local mock_pr_comment_write = h.mock_pr_comment_write
 local count_calls = h.count_calls
+local pr_comment_create = "gh api --method POST 'repos/owner/x/issues/7/comments'"
 
 local function event(extra)
   local payload = {
@@ -69,7 +70,7 @@ return {
     t.eq(count_calls("gh pr view"), 1)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
     t.eq(count_calls("issues/comments/IC_kwDOSwWu288AAAABF40Vmg"), 0)
-    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls(pr_comment_create), 0)
   end,
 
   test_replace_marker_creates_when_card_is_absent = function()
@@ -86,7 +87,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 1)
     t.eq(count_calls("gh api --method PATCH"), 0)
-    t.eq(count_calls("gh pr comment"), 1)
+    t.eq(count_calls(pr_comment_create), 1)
   end,
 
   test_replace_marker_falls_back_to_create_when_edit_target_is_stale = function()
@@ -111,7 +112,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr view"), 2)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
-    t.eq(count_calls("gh pr comment"), 1)
+    t.eq(count_calls(pr_comment_create), 1)
   end,
 
   test_replace_marker_rereads_once_when_edit_404_then_edits_refreshed_comment = function()
@@ -143,7 +144,7 @@ return {
     t.eq(count_calls("gh pr view"), 2)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
     t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/654321' --field body=@"), 1)
-    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls(pr_comment_create), 0)
   end,
 
   test_parse_issue_comments_preserves_comment_id = function()

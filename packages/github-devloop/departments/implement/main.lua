@@ -6,8 +6,7 @@ local MAX_IMPLEMENT_ATTEMPTS = 2
 local implemented_branch_head
 
 M.spec = {
-  consumes = { "devloop_ready", "devloop_ready_session" },
-  ephemeral = { "devloop_ready_session" },
+  consumes = { "devloop_ready" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
@@ -644,18 +643,32 @@ local function process_ready_event(event)
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
     end
-    local accepts_ready_hand_off = core.event_queue_matches(event, "devloop_ready_session")
     local accepted_ready_hand_off = nil
     if transition == "pending" then
-      if accepts_ready_hand_off and retry_failure == nil and ready.impl_retry_attempt == nil and core.is_ready_hand_off(ready.ready_hand_off, ready) then
-        accepted_ready_hand_off = ready.ready_hand_off
-        core.log_cas_decision("implement", ready.proposal_id, {
+      local verified_state = nil
+      local hand_off_reason = "missing"
+      if ready.ready_hand_off ~= nil then
+        verified_state, hand_off_reason = core.verified_hand_off_state(repo, ready.ready_hand_off, {
+          proposal_id = ready.proposal_id,
           state = "ready",
-          version = ready.dedup_key,
-          stage_rank = core.stage_rank("ready"),
-        }, "ready", "implementing", "apply(own-ready-hand-off)", "ready marker was written by the same in-band generation")
+          marker_version = ready.ready_hand_off.marker_version,
+          event_version = ready.dedup_key,
+          effects = "result-marker,ready-label,devloop-ready",
+        })
+      end
+      if retry_failure == nil and ready.impl_retry_attempt == nil and verified_state ~= nil then
+        state = verified_state
+        accepted_ready_hand_off = ready.ready_hand_off
+        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "apply(verified-own-ready-hand-off)", "ready marker comment verified by direct id lookup")
       else
         core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
+        if ready.ready_hand_off ~= nil then
+          core.log_line("info", "implement", ready.proposal_id, "HANDOFF", {
+            "state=ready",
+            "outcome=verify-failed",
+            "reason=" .. tostring(hand_off_reason),
+          })
+        end
         error("github-devloop: ready state marker not yet visible for implement; retrying")
       end
     else
@@ -712,7 +725,6 @@ end
 function pipeline(event)
   core.dispatch_consumed_queue("implement", M.spec, event, {
     devloop_ready = process_ready_event,
-    devloop_ready_session = process_ready_event,
   })
 end
 
