@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -353,6 +354,20 @@ class CrossPackageRequireTest(unittest.TestCase):
         src = 'require("consensus.thing")\n'
         self.assertEqual(self.names(src, ["consensus"], "consensus"), [])
 
+    def test_ignores_require_text_inside_comments_and_strings(self) -> None:
+        src = """
+-- local x = require("github-proxy.core")
+local text = 'require("github-proxy.core")'
+local block = [[
+  require("github-proxy.core")
+]]
+local real = require("consensus.thing")
+"""
+        self.assertEqual(
+            self.names(src, ["github-proxy", "consensus"], "consensus"),
+            [],
+        )
+
 
 class SagaHandlerRatchetTest(unittest.TestCase):
     def violations(self, source: str, allowlist: set[str]) -> list[str]:
@@ -395,6 +410,80 @@ class SagaHandlerRatchetTest(unittest.TestCase):
             "packages/example/departments/new/main.lua": source,
         }, allowlist, base)
         self.assertIn("grows saga-handler allowlist relative to dev", violations[0])
+
+    def test_allowlist_equal_or_shrunk_relative_to_base_passes(self) -> None:
+        free_form = 'function pipeline(event)\n  return event\nend\n'
+        saga_shaped = 'local saga = require("std.saga")\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        base = {
+            "packages/example/departments/dept/main.lua",
+            "packages/example/departments/old/main.lua",
+        }
+        self.assertEqual(
+            check_repo.saga_handler_ratchet_violations({
+                "packages/example/departments/dept/main.lua": free_form,
+                "packages/example/departments/old/main.lua": free_form,
+            }, set(base), base),
+            [],
+        )
+        self.assertEqual(
+            check_repo.saga_handler_ratchet_violations(
+                {
+                    "packages/example/departments/dept/main.lua": free_form,
+                    "packages/example/departments/old/main.lua": saga_shaped,
+                },
+                {"packages/example/departments/dept/main.lua"},
+                base,
+            ),
+            [],
+        )
+
+    def test_missing_dev_base_is_violation_not_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dept = root / ".fkst" / "packages" / "example" / "departments" / "dept"
+            dept.mkdir(parents=True)
+            (dept / "main.lua").write_text(
+                'function pipeline(event)\n  return event\nend\n',
+                encoding="utf-8",
+            )
+            migration = root / "migration"
+            migration.mkdir()
+            (migration / "saga-handler.allowlist").write_text(
+                "packages/example/departments/dept/main.lua\n",
+                encoding="utf-8",
+            )
+
+            violations: list[str] = []
+            warnings: list[str] = []
+            with mock.patch.object(check_repo, "saga_allowlist_at_dev_base", return_value=("unresolved", None)):
+                check_repo.check_saga_handler_ratchet(root, violations, warnings)
+
+        self.assertEqual(warnings, [])
+        self.assertIn("cannot resolve dev base allowlist", violations[0])
+
+    def test_first_introduction_without_base_allowlist_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dept = root / ".fkst" / "packages" / "example" / "departments" / "dept"
+            dept.mkdir(parents=True)
+            (dept / "main.lua").write_text(
+                'function pipeline(event)\n  return event\nend\n',
+                encoding="utf-8",
+            )
+            migration = root / "migration"
+            migration.mkdir()
+            (migration / "saga-handler.allowlist").write_text(
+                "packages/example/departments/dept/main.lua\n",
+                encoding="utf-8",
+            )
+
+            violations: list[str] = []
+            warnings: list[str] = []
+            with mock.patch.object(check_repo, "saga_allowlist_at_dev_base", return_value=("absent", None)):
+                check_repo.check_saga_handler_ratchet(root, violations, warnings)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(violations, [])
 
 
 if __name__ == "__main__":

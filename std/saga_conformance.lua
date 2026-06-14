@@ -6,11 +6,14 @@ local write_prefixes = {
   "gh issue edit",
   "gh issue close",
   "gh issue create",
+  "gh issue reopen",
   "gh pr merge",
   "gh pr comment",
   "gh pr edit",
   "gh pr create",
+  "gh pr close",
   "gh pr ready",
+  "gh pr reopen",
   "gh label add",
   "gh label remove",
   "gh label create",
@@ -106,8 +109,11 @@ function C.assert_idempotent(_t, case)
     error("std.saga_conformance: assert_idempotent requires second")
   end
   local before_first = #fkst.test.command_calls()
-  case.first()
-  count_write_calls(before_first)
+  local first_result = case.first()
+  local first_effects = count_write_calls(before_first) + count_raises(first_result)
+  if first_effects == 0 then
+    error("std.saga_conformance: assert_idempotent: first delivery made no write-class effect; nothing to prove")
+  end
   local before_second = #fkst.test.command_calls()
   local second_result = case.second()
   local second_effects = count_write_calls(before_second) + count_raises(second_result)

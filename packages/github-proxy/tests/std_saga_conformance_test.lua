@@ -18,8 +18,11 @@ end
 return {
   test_write_class_classifier_is_explicit = function()
     t.eq(conformance.is_write_class("gh issue comment '42' --repo 'owner/x'"), true)
+    t.eq(conformance.is_write_class("gh issue reopen '42' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh pr merge '7' --repo 'owner/x'"), true)
+    t.eq(conformance.is_write_class("gh pr close '7' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh pr ready '7' --repo 'owner/x'"), true)
+    t.eq(conformance.is_write_class("gh pr reopen '7' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh label create 'fkst-dev:ready' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh workflow run 'ci.yml' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("git push origin HEAD:branch"), true)
@@ -81,12 +84,19 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command("gh issue comment '42'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
 
-    t.raises(function()
+    local ok, err = pcall(function()
       conformance.assert_idempotent(t, {
         first = run_write,
         second = run_write,
       })
     end)
+    t.eq(ok, false)
+    t.eq(tostring(err):find("observed effects on second delivery", 1, true) ~= nil, true)
   end,
 }

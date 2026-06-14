@@ -5,10 +5,7 @@ from __future__ import annotations
 
 import re
 import sys
-import os
-import base64
-import binascii
-import subprocess
+import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -885,7 +882,15 @@ def cross_package_require_names(
 ) -> list[str]:
     """Top-level require names in `source` that name a sibling package."""
     hits: set[str] = set()
+    stripped = strip_lua_comments_and_strings(source)
     for match in REQUIRE_RE.finditer(source):
+        group = 1 if match.group(1) is not None else 2 if match.group(2) is not None else 4
+        string_start = match.start(group) - 1
+        string_end = match.end(group) + 1
+        if group == 4:
+            string_end += 1 + len(match.group(3))
+        if not (is_unmasked_range(source, stripped, match.start(), string_start) and is_unmasked_range(source, stripped, string_end, match.end())):
+            continue
         name = next(group for group in (match.group(1), match.group(2), match.group(4)) if group is not None)
         top = name.split(".")[0]
         if top in package_names and top != current_pkg:
@@ -923,7 +928,6 @@ def has_free_form_pipeline_source(source: str) -> bool:
 
 def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
     violations: list[str] = []
-    source_paths = set(sources)
     for path, source in sorted(sources.items()):
         saga_shaped = is_saga_handler_source(source)
         if saga_shaped and path in allowlist:
@@ -932,32 +936,33 @@ def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str]
             violations.append(f"G10: {path} saga-shaped department still defines free-form top-level pipeline")
         if not saga_shaped and path not in allowlist:
             violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to std.saga.department or (only for pre-existing) keep listed")
-    for path in sorted(allowlist - source_paths):
+    for path in sorted(allowlist - set(sources)):
         violations.append(f"G10: {path} listed in saga-handler allowlist but does not exist")
     if base_allowlist is not None:
-        for path in sorted(allowlist - base_allowlist):
-            violations.append(f"G10: {path} grows saga-handler allowlist relative to dev; migrate instead")
+        violations.extend(f"G10: {path} grows saga-handler allowlist relative to dev; migrate instead" for path in sorted(allowlist - base_allowlist))
     return violations
 
 
-def saga_allowlist_at_dev_base(root: Path) -> set[str] | None:
+def saga_allowlist_at_dev_base(root: Path) -> tuple[str, set[str] | None]:
     try:
-        base = subprocess.run(["git", "merge-base", "HEAD", "dev"], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
-        if base.returncode != 0 or base.stdout.strip() == "":
-            return None
-        shown = subprocess.run(["git", "show", base.stdout.strip() + ":migration/saga-handler.allowlist"], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
-        return None if shown.returncode != 0 else {line.strip() for line in shown.stdout.splitlines() if line.strip() and not line.lstrip().startswith("#")}
+        git = lambda args, **kwargs: subprocess.run(["git", *args], cwd=root, check=False, **kwargs)
+        if git(["rev-parse", "--verify", "dev"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0: return "unresolved", None
+        base = git(["merge-base", "HEAD", "dev"], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        base_commit = base.stdout.strip()
+        if base.returncode != 0 or base_commit == "": return "unresolved", None
+        base_allowlist = base_commit + ":migration/saga-handler.allowlist"
+        if git(["cat-file", "-e", base_allowlist], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0: return "absent", None
+        shown = git(["show", base_allowlist], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        return ("unresolved", None) if shown.returncode != 0 else ("present", {line.strip() for line in shown.stdout.splitlines() if line.strip() and not line.lstrip().startswith("#")})
     except Exception:
-        return None
-
+        return "unresolved", None
 
 def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list[str]) -> None:
     allow_path = root / "migration" / "saga-handler.allowlist"
     allowlist = set() if not allow_path.exists() else {line.strip() for line in read_text(allow_path).splitlines() if line.strip() and not line.lstrip().startswith("#")}
     sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}
-    base_allowlist = saga_allowlist_at_dev_base(root)
-    if base_allowlist is None:
-        warnings.append("G10: saga-handler allowlist growth check skipped because dev base allowlist is unavailable")
+    base_status, base_allowlist = saga_allowlist_at_dev_base(root)
+    if base_status == "unresolved": violations.append("G10: cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
     violations.extend(saga_handler_ratchet_violations(sources, allowlist, base_allowlist))
 
 
