@@ -34,7 +34,9 @@ local observe_replay_states = {
 }
 
 local function issue_label_state(snapshot_state, issue_state)
-  if issue_state ~= nil and (issue_state.state == "blocked" or issue_state.state == "merged") then
+  if issue_state ~= nil
+    and (issue_state.state == "blocked" or issue_state.state == "merged")
+    and tostring(issue_state.version or "") ~= tostring(snapshot_state and snapshot_state.version or "") then
     return issue_state
   end
   return snapshot_state

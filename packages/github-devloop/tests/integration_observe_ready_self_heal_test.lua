@@ -545,6 +545,7 @@ return {
     t.is_true(label_raise ~= nil)
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:reviewing"))
+    t.eq(has_value(label_raise.payload.remove_labels, "fkst-dev:thinking"), false)
     t.eq(label_raise.payload.dedup_key, core._dedup_key({
       "reconcile",
       "label",

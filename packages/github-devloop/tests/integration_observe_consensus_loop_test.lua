@@ -143,9 +143,8 @@ return {
     t.eq(#result.raises, 1)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
-    t.eq(label_raise.payload.remove_labels[3], "fkst-dev:implementing")
-    t.is_true(#label_raise.payload.remove_labels >= 10)
+    t.eq(label_raise.payload.remove_labels[1], "fkst-dev:pr-open")
+    t.eq(#label_raise.payload.remove_labels, 1)
     t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
