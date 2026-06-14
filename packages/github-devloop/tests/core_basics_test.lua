@@ -606,7 +606,7 @@ return {
   test_gh_issue_view_state_command_and_parse = function()
     t.eq(
       core.gh_issue_list_intake_cmd("owner/repo", 50),
-      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels,assignees"
+      "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels,assignees,author"
     )
     t.eq(
       core.gh_issue_list_intake_probe_cmd("owner/repo", 5),
@@ -645,7 +645,7 @@ return {
 
     t.eq(
       core.gh_issue_view_state_cmd("owner/repo", 42),
-      "gh issue view '42' --repo 'owner/repo' --json labels,state,comments,assignees"
+      "gh issue view '42' --repo 'owner/repo' --json title,labels,state,comments,assignees,author"
     )
     t.eq(
       core.gh_issue_view_result_cmd("owner/repo", 42),
@@ -671,9 +671,9 @@ return {
   end,
   test_gh_issue_view_commands_match_existing_strings = function()
     local cases = {
-      { core.gh_issue_view_intake_scan_cmd, "labels,comments,state,assignees" },
-      { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state,assignees" },
-      { core.gh_issue_view_state_cmd, "labels,state,comments,assignees" },
+      { core.gh_issue_view_intake_scan_cmd, "title,labels,comments,state,assignees,author" },
+      { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state,assignees,author" },
+      { core.gh_issue_view_state_cmd, "title,labels,state,comments,assignees,author" },
       { core.gh_issue_view_result_cmd, "labels,comments" },
       { core.gh_issue_view_loop_cmd, "title,updatedAt,labels,comments,state" },
       { core.gh_issue_view_meta_cmd, "title,labels,comments" },

@@ -106,6 +106,20 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
+  test_observe_other_authored_unmanaged_issue_raises_fork_request_only = function()
+    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human")
+
+    local result = run_observe(issue(), opts("observe-other-author-fork"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local request = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
+    t.eq(request.schema, "github-proxy.issue-create.v1")
+    t.eq(request.assignees[1], "fkst-test-bot")
+    t.eq(request.dedup_key, core.fork_issue_dedup_key("owner/repo", 42))
+    t.eq(request.post_create_blocked_by.blocked_issue_number, 42)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+  end,
+
   test_observe_skips_not_opt_in_and_already_stateful = function()
     mock_issue_state({ "bug" })
     local not_opted = run_observe(issue({ labels = { "bug" } }), opts("observe-no-label")) t.eq(not_opted.exit_code, 0) t.eq(#not_opted.raises, 0)
