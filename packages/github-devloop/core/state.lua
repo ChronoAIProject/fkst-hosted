@@ -549,6 +549,13 @@ function M.state_label_changes(to_state)
   return { add_label }, remove_labels
 end
 
+function M.state_label_reconcile_changes(labels, to_state)
+  if M.state_label_hint_matches(labels, to_state) then
+    return {}, {}
+  end
+  return M.state_label_changes(to_state)
+end
+
 function M.state_label_hint_matches(labels, state)
   local expected_label = M.state_label(state)
   if expected_label == nil then

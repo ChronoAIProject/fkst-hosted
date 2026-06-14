@@ -399,9 +399,9 @@ function pipeline(event)
       if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state) then
         return
       end
-      if not core.state_label_hint_matches(current.labels, state.state) then
+      local add_labels, remove_labels = core.state_label_reconcile_changes(current.labels, state.state)
+      if #add_labels > 0 or #remove_labels > 0 then
         local label_request = core.build_reconcile_state_label_request(issue.repo, issue.number, proposal_id, state.state, state.version, issue.source_ref)
-        local add_labels, remove_labels = core.state_label_changes(state.state)
         core.log_apply("observe_issue", proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
           "github-proxy.github_issue_label_request",
         })
