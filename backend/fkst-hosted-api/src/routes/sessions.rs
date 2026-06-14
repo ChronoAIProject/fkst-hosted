@@ -5,14 +5,14 @@
 //! orchestration (driver task, engine lifecycle, CAS transitions) lives in
 //! [`crate::sessions::SessionService`].
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthContext;
-use crate::authz::{Action, Ownership};
+use crate::authz::{Action, Ownership, ADMIN_SCOPE};
 use crate::error::AppError;
 use crate::models::{SessionDoc, SessionStatus};
 use crate::packages::is_valid_name;
@@ -26,6 +26,17 @@ use crate::state::AppState;
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionRequest {
     pub package_name: String,
+}
+
+/// Query parameters for `GET /api/v1/sessions` (mirrors `ListGoalsQuery`).
+#[derive(Debug, Deserialize, Default)]
+pub struct ListSessionsQuery {
+    /// One [`SessionStatus`]; an unknown value is a 400.
+    pub status: Option<String>,
+    /// Page size, default 50, capped at 200.
+    pub limit: Option<u64>,
+    /// Page offset, default 0.
+    pub offset: Option<u64>,
 }
 
 /// Response body for `POST /api/v1/sessions` (201).
@@ -196,6 +207,43 @@ async fn create(
     ))
 }
 
+/// `GET /api/v1/sessions`: list the sessions visible to the caller (owned +
+/// visible orgs + legacy; `fkst:admin` sees all), newest-first. Supports
+/// `?status=`, `?limit=` (default 50, max 200), and `?offset=`. An empty
+/// result is `200 []`, never `404`.
+async fn list(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Query(query): Query<ListSessionsQuery>,
+) -> Result<Json<Vec<SessionView>>, AppError> {
+    let org_ids = state.authz.visible_org_ids(&ctx).await?;
+    let admin = ctx.has_scope(ADMIN_SCOPE);
+
+    let status: Option<SessionStatus> = match query.status.as_deref() {
+        Some(s) => Some(
+            serde_json::from_value(serde_json::Value::String(s.to_string()))
+                .map_err(|_| AppError::Validation(format!("invalid status filter: {s}")))?,
+        ),
+        None => None,
+    };
+
+    let limit = query.limit.unwrap_or(50).min(200);
+    let offset = query.offset.unwrap_or(0);
+
+    let sessions = state
+        .sessions
+        .list(&ctx.user_id, &org_ids, admin, status, limit, offset)
+        .await?;
+
+    let views: Vec<SessionView> = sessions
+        .iter()
+        .map(SessionView::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    tracing::debug!(count = views.len(), "sessions listed");
+    Ok(Json(views))
+}
+
 /// `GET /api/v1/sessions/{id}`: full status projection or `404`.
 ///
 /// Authorization for goal sessions:
@@ -295,7 +343,7 @@ fn authorize_session_write<'a>(
 /// Session routes, to be nested under `/api/v1`.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/sessions", post(create))
+        .route("/sessions", get(list).post(create))
         .route("/sessions/:id", get(get_one))
         .route("/sessions/:id/stop", post(stop))
 }
