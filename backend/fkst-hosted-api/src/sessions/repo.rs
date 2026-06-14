@@ -67,6 +67,76 @@ impl SessionRepo {
         Ok(found)
     }
 
+    /// List sessions visible to the caller, newest-first by `created_at`.
+    ///
+    /// Visibility mirrors the other list endpoints (goals, packages):
+    /// - sessions owned by `owner_user_id`,
+    /// - sessions whose `org_id` is in `visible_org_ids`,
+    /// - legacy sessions whose `owner_user_id` is null/absent (grandfathered
+    ///   open, consistent with the read-authz policy).
+    ///
+    /// `admin` short-circuits the visibility `$or` to an unrestricted scan
+    /// (the `fkst:admin` scope sees every session). `status` optionally pins
+    /// the lifecycle state; `limit`/`offset` paginate (the caller caps
+    /// `limit` at 200). A `null`-owner branch is expressed as `owner_user_id:
+    /// null`, which Mongo matches for both explicit-null and missing fields.
+    pub async fn list(
+        &self,
+        owner_user_id: &str,
+        visible_org_ids: &[String],
+        admin: bool,
+        status: Option<SessionStatus>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<SessionDoc>, AppError> {
+        let mut filter = if admin {
+            Document::new()
+        } else {
+            let mut or_branches = vec![
+                doc! { "owner_user_id": owner_user_id },
+                doc! { "owner_user_id": Bson::Null },
+            ];
+            if !visible_org_ids.is_empty() {
+                or_branches.push(doc! { "org_id": { "$in": visible_org_ids } });
+            }
+            doc! { "$or": or_branches }
+        };
+        if let Some(s) = status {
+            filter.insert("status", status_bson(s));
+        }
+
+        let mut cursor = self
+            .coll
+            .find(filter)
+            .sort(doc! { "created_at": -1 })
+            .skip(offset)
+            .limit(limit as i64)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "session list failed");
+                AppError::Mongo(error)
+            })?;
+
+        let mut results = Vec::new();
+        while cursor.advance().await.map_err(|error| {
+            tracing::error!(error = %error, "session list cursor failed");
+            AppError::Mongo(error)
+        })? {
+            results.push(cursor.deserialize_current().map_err(|error| {
+                tracing::error!(error = %error, "session list decode failed");
+                AppError::Mongo(error)
+            })?);
+        }
+        tracing::debug!(
+            owner = owner_user_id,
+            orgs = visible_org_ids.len(),
+            admin,
+            count = results.len(),
+            "sessions listed"
+        );
+        Ok(results)
+    }
+
     /// Atomic compare-and-swap: apply `$set: set` to the session iff its
     /// current status is one of `from`. Returns the post-update document, or
     /// `None` when the filter missed (the document is absent or its status
