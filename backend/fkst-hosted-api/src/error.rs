@@ -50,6 +50,19 @@ pub enum AppError {
     /// dependent resource is missing or in an invalid state). Renders as 422.
     #[error("unprocessable: {0}")]
     Unprocessable(String),
+    /// An upstream provider (reached via a proxy) rate-limited the request.
+    /// Renders as 429 with a `Retry-After` header. The message is
+    /// client-safe (no token or body detail).
+    #[error("rate limited: {message}")]
+    RateLimited {
+        message: String,
+        retry_after_secs: u64,
+    },
+    /// An upstream provider (reached via a proxy) returned an unexpected
+    /// error. Renders as 502. The string is client-safe (no token/body
+    /// detail).
+    #[error("upstream error: {0}")]
+    Upstream(String),
 }
 
 /// Map packages-domain errors onto the unified type: `Validation` -> 400,
@@ -201,30 +214,60 @@ impl From<crate::github_app::GithubAppError> for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, code, message, www_authenticate) = match &self {
+        // The tuple also carries `retry_after`: `Some(secs)` only for
+        // `RateLimited` (rendered as a `Retry-After` header), `None` otherwise.
+        let (status, code, message, www_authenticate, retry_after) = match &self {
             AppError::Validation(msg) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 msg.clone(),
                 false,
+                None,
             ),
-            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg.clone(), false),
-            AppError::Conflict(msg) => (StatusCode::CONFLICT, "conflict", msg.clone(), false),
+            AppError::NotFound(msg) => {
+                (StatusCode::NOT_FOUND, "not_found", msg.clone(), false, None)
+            }
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, "conflict", msg.clone(), false, None),
             AppError::Unavailable(msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "unavailable",
                 msg.clone(),
                 false,
+                None,
             ),
-            AppError::Unauthorized(msg) => {
-                (StatusCode::UNAUTHORIZED, "unauthorized", msg.clone(), true)
+            AppError::Unauthorized(msg) => (
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                msg.clone(),
+                true,
+                None,
+            ),
+            AppError::Forbidden(msg) => {
+                (StatusCode::FORBIDDEN, "forbidden", msg.clone(), false, None)
             }
-            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, "forbidden", msg.clone(), false),
             AppError::Unprocessable(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "unprocessable",
                 msg.clone(),
                 false,
+                None,
+            ),
+            AppError::RateLimited {
+                message,
+                retry_after_secs,
+            } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                message.clone(),
+                false,
+                Some(*retry_after_secs),
+            ),
+            AppError::Upstream(msg) => (
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                msg.clone(),
+                false,
+                None,
             ),
             AppError::Config(_)
             | AppError::Mongo(_)
@@ -234,10 +277,15 @@ impl IntoResponse for AppError {
                 "internal",
                 INTERNAL_CLIENT_MESSAGE.to_string(),
                 false,
+                None,
             ),
         };
 
-        if status.is_server_error() {
+        // `Upstream` renders as 502 (a server status) but is a CLIENT-tier
+        // failure of the *upstream* provider, not of this service, so it is
+        // logged at debug like the 4xx arms — not as a server error.
+        let upstream_tier = matches!(self, AppError::Upstream(_) | AppError::RateLimited { .. });
+        if status.is_server_error() && !upstream_tier {
             tracing::error!(error = ?self, "request failed");
         } else {
             tracing::debug!(error = %self, "client error");
@@ -253,6 +301,14 @@ impl IntoResponse for AppError {
             response
                 .headers_mut()
                 .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        }
+
+        if let Some(secs) = retry_after {
+            // A numeric Retry-After (delta-seconds). `from_str` cannot fail for
+            // a decimal integer, but handle the error rather than unwrap.
+            if let Ok(value) = HeaderValue::from_str(&secs.to_string()) {
+                response.headers_mut().insert(header::RETRY_AFTER, value);
+            }
         }
 
         response
@@ -464,6 +520,30 @@ mod tests {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body["error"], "unprocessable");
         assert_eq!(body["message"], "semantic issue");
+    }
+
+    #[tokio::test]
+    async fn rate_limited_renders_429_with_retry_after_header() {
+        let (status, body, headers) = render(AppError::RateLimited {
+            message: "github rate limited; retry later".into(),
+            retry_after_secs: 42,
+        })
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body["error"], "rate_limited");
+        assert_eq!(body["message"], "github rate limited; retry later");
+        let retry = headers.iter().find(|(k, _)| k == "retry-after");
+        assert!(retry.is_some(), "Retry-After header must be present");
+        assert_eq!(retry.unwrap().1, "42");
+    }
+
+    #[tokio::test]
+    async fn upstream_renders_502_upstream_error() {
+        let (status, body, _headers) =
+            render(AppError::Upstream("github returned 500".into())).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"], "upstream_error");
+        assert_eq!(body["message"], "github returned 500");
     }
 
     #[tokio::test]
