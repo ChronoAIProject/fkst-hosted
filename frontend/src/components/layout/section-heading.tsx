@@ -22,7 +22,7 @@ export function SectionHeading({
         {children}
       </h2>
       {count !== undefined && (
-        <span className="font-mono text-[11.5px] text-ghost tabular-nums flex-none select-none">
+        <span className="font-mono text-[11.5px] text-ghost tabular-nums min-w-0 select-none">
           {count}
         </span>
       )}
