@@ -192,6 +192,14 @@ local function recent_closed_issue_list_cmd(M, repo)
     .. " --json number,title,closedAt,labels"
 end
 
+local function board_feed_cmd(M)
+  local cmd = M.read_env("FKST_DEVLOOP_BOARD_CMD")
+  if cmd == nil or M._trim(cmd) == "" then
+    return nil
+  end
+  return cmd
+end
+
 local function label_names(labels_json)
   local labels = {}
   for _, label in ipairs(labels_json or {}) do
@@ -302,6 +310,25 @@ local function render_board_digest(M, issues, prs, closed_issues)
   return table.concat(lines, "\n")
 end
 
+local function fetch_board_feed(M)
+  local cmd = board_feed_cmd(M)
+  if cmd == nil then
+    return nil
+  end
+  local result = exec_sync({ cmd = cmd, timeout = 30 })
+  if type(result) ~= "table" or result.exit_code ~= 0 then
+    error("github-devloop: FKST_DEVLOOP_BOARD_CMD failed")
+  end
+  local stdout = tostring(result.stdout or "")
+  if stdout == "" then
+    return nil
+  end
+  return M._untrusted_issue_data_begin .. "\n"
+    .. "Board feed-through from FKST_DEVLOOP_BOARD_CMD:\n"
+    .. stdout:gsub("%s*$", "")
+    .. "\n" .. M._untrusted_issue_data_end
+end
+
 function M.board_digest_block(repo, tick)
   if tick == nil or tostring(tick) == "" then
     return ""
@@ -310,6 +337,12 @@ function M.board_digest_block(repo, tick)
   local cached = cache_get(key)
   if cached ~= nil and cached ~= "" then
     return cached
+  end
+
+  local feed = fetch_board_feed(M)
+  if feed ~= nil then
+    cache_set(key, feed)
+    return feed
   end
 
   local ok_issue, issue_result = pcall(M.gh_exec, { cmd = board_digest_issue_list_cmd(M, repo), timeout = 30 })

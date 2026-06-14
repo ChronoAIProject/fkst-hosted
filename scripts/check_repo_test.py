@@ -207,11 +207,13 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_bootstrap_test.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/board_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/doctor_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/board_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
 
     def test_full_test_blocks_on_repository_check_before_engine_resolution(self) -> None:
@@ -232,7 +234,7 @@ class RunScriptContractTest(unittest.TestCase):
 
             for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py"):
                 shutil.copy2(root / "scripts" / name, scripts / name)
-            for name in ("check_repo_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "doctor_test.py"):
+            for name in ("check_repo_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "board_test.py", "doctor_test.py"):
                 (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
 
             core_lines = [
