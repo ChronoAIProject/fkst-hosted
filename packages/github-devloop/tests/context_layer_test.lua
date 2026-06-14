@@ -281,6 +281,31 @@ return {
     t.eq(count_calls("gh issue list --repo 'other/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
   end,
 
+  test_board_digest_feeds_existing_context_path_from_local_board_command = function()
+    t.mock_command('printf %s "$FKST_DEVLOOP_BOARD_CMD"', {
+      stdout = "scripts/run.sh board --ttl 60",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("scripts/run.sh board --ttl 60", {
+      stdout = "fkst-dev local board\nsource=observe cached_at=2026-06-10T02:02:03Z durable_root=.fkst/durable\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local body = probe_result(run_probe({
+      mode = "block",
+      repo = "owner/repo",
+      tick = "2026-06-10T02:02:03Z",
+    }, h.opts("board-digest-feed-through"))).body
+
+    t.is_true(body:find("Board feed-through from FKST_DEVLOOP_BOARD_CMD:", 1, true) ~= nil)
+    t.is_true(body:find("fkst-dev local board", 1, true) ~= nil)
+    t.is_true(body:find("source=observe", 1, true) ~= nil)
+    t.eq(count_calls("gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 0)
+    t.eq(count_calls("gh pr list --repo 'owner/repo' --state open --limit 100 --json number,title,labels"), 0)
+  end,
+
   test_board_digest_keeps_open_context_when_closed_digest_fetch_fails = function()
     mock_board_lists_closed_failure(2, 1)
 

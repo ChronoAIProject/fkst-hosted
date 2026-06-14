@@ -84,6 +84,14 @@ resolve_bin() {
   export BIN
 }
 
+shell_single_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+default_board_cmd() {
+  printf 'FKST_NO_AUTOBUILD=1 %s board' "$(shell_single_quote "$ROOT/scripts/run.sh")"
+}
+
 # Resolve a path to its physical location, following file symlinks too (portable:
 # no realpath / `readlink -f` dependency, works with macOS BSD readlink). This
 # lets a symlinked BIN (e.g. a PATH install pointing into a checkout target) be
@@ -496,6 +504,7 @@ cmd_run() {
     mkdir -p "$rt"
   fi
   export FKST_RUNTIME_ROOT="$rt"
+  export FKST_DEVLOOP_BOARD_CMD="${FKST_DEVLOOP_BOARD_CMD:-$(default_board_cmd)}"
 
   echo "BIN=$BIN"
   echo "run $pkg/$dept  FKST_RUNTIME_ROOT=$rt${fresh:+ (fresh)}"
@@ -604,6 +613,7 @@ cmd_supervise() {
   fi
   export FKST_RUNTIME_ROOT="$rt"
   export FKST_DURABLE_ROOT="$durable"
+  export FKST_DEVLOOP_BOARD_CMD="${FKST_DEVLOOP_BOARD_CMD:-$(default_board_cmd)}"
 
   echo "BIN=$BIN"
   echo "FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT"
