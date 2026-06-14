@@ -304,7 +304,7 @@ end
 function M.gh_pr_view_origin_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,comments"
+    .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"
 end
 
 function M.gh_pr_view_observe_cmd(repo, pr_number)

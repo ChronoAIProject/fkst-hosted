@@ -590,11 +590,18 @@ function M.state_label_hint_matches(labels, state)
   return has_expected
 end
 
-function M.build_reconcile_state_label_request(repo, issue_number, proposal_id, state, version, source_ref)
-  return M.build_state_label_request(
+function M.build_reconcile_state_label_request(repo, issue_number, proposal_id, state, version, source_ref, current_labels)
+  local add_labels, remove_labels
+  if current_labels ~= nil then
+    add_labels, remove_labels = M.state_label_reconcile_changes(current_labels, state)
+  else
+    add_labels, remove_labels = M.state_label_changes(state)
+  end
+  return M.build_label_request(
     repo,
     issue_number,
-    state,
+    add_labels,
+    remove_labels,
     M._dedup_key({
       "reconcile",
       "label",

@@ -15,7 +15,7 @@ local function mock_pr_view_origin(comments, head, head_sha, state, base_branch)
   for _, comment in ipairs(comments or {}) do
     table.insert(rendered_comments, h.render_comment(comment))
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
     stdout = string.format(
       '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
       h.json_string(head or "devloop-owner-repo-42-01HY"),

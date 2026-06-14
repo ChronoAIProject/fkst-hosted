@@ -144,7 +144,7 @@ local function mock_pr_view(comments, extra)
   extra = extra or {}
   local head = extra.head_ref_name or "devloop-owner-repo-42"
   local state = extra.state or "OPEN"
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
     stdout = '{"headRefName":"' .. json_string(head) .. '","headRefOid":"def456","baseRefName":"integration/dev","state":"' .. json_string(state) .. '","updatedAt":"2026-06-03T02:03:04Z","comments":['
       .. table.concat(comments or {}, ",") .. "]}\n",
     stderr = "",

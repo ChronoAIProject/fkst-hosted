@@ -36,7 +36,7 @@ local function mock_linked_pr_state(comments, state, exit_code, times)
     stderr = "pr view failed"
   end
   for _ = 1, times or 1 do
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
       stdout = string.format(
         '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
         json_string(state or "OPEN"),
@@ -264,7 +264,7 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"))
     t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"), 1)
   end,
 
   test_observe_issue_pr_open_reraises_reviewing_for_poll_self_heal = function()
@@ -384,7 +384,7 @@ return {
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
     for _ = 1, 2 do
-      t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+      t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
         stdout = "",
         stderr = "HTTP 404: Not Found\n",
         exit_code = 1,
@@ -523,7 +523,7 @@ return {
     t.eq(label_raise.payload.source_ref.ref, "owner/repo#issue/42")
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
     t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 0)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"), 0)
   end,
 
   test_observe_issue_reconciles_issue_terminal_label_over_linked_pr_state = function()
@@ -555,7 +555,7 @@ return {
     }))
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
     t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments"), 1)
+    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"), 1)
   end,
 
   test_observe_issue_reconciles_merged_terminal_label_from_marker = function()

@@ -53,6 +53,12 @@ local function find_pr_comment_with(raises, needle)
   return nil
 end
 
+local function find_pr_label_raise(raises)
+  return find_raise(raises, "github-proxy.github_issue_label_request", function(payload)
+    return tostring(payload.target_kind or "issue") == "pr"
+  end)
+end
+
 local function review_origin_marker(version, head_sha)
   return core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", version, "dev")
 end
@@ -579,6 +585,41 @@ return {
     t.eq(decompose.payload.review_dedup_key, event.review_dedup_key)
     t.eq(decompose.payload.head_sha, event.head_sha)
     t.eq(decompose.payload.source_ref.ref, "owner/repo#pr/7")
+  end,
+
+  test_observe_pr_reconciles_stale_state_label_when_expected_label_is_present = function()
+    local event = core.build_devloop_decompose_payload(h.fix_reconcile())
+    local comments = {
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      core.state_marker(event.proposal_id, "blocked", event.version),
+      core.merge_gate_marker(
+        event.proposal_id,
+        event.pr_number,
+        event.version,
+        event.review_proposal_id,
+        event.review_dedup_key,
+        event.head_sha,
+        nil,
+        "rollup-red"
+      ),
+      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+    }
+    mock_bot_env()
+    mock_pr_origin(comments, nil, nil, nil, nil, nil, { "fkst-dev:blocked", "fkst-dev:reviewing" })
+    mock_issue_result_view({ "fkst-dev:blocked" }, {
+      core.state_marker(event.proposal_id, "blocked", event.version),
+    })
+    mock_decompose_child_issue_list(event, { 1, 2, 3 })
+
+    local result = run_observe_pr_direct(opts("observe-pr-reconcile-stale-reviewing-label"))
+
+    t.eq(result.exit_code, 0)
+    local label = find_pr_label_raise(result.raises).payload
+    t.eq(#label.add_labels, 0)
+    t.eq(#label.remove_labels, 1)
+    t.eq(label.remove_labels[1], "fkst-dev:reviewing")
+    t.eq(label.target_number, 7)
+    t.eq(find_raise(result.raises, "devloop_decompose"), nil)
   end,
 
   test_observe_pr_live_308_decompose_reconcile_marker_substream_replay_does_not_require_fix_feedback = function()
