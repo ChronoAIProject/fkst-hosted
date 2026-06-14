@@ -106,7 +106,7 @@ function pipeline(event)
     end
 
     local next_n = round + 1
-    local next_dedup = core.proposal_dedup_key(unresolved.proposal_id, current.updated_at) .. "/loop/" .. tostring(next_n)
+    local next_dedup = core.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
     local content_fetch = core.context_fetch_ref_from_bundle({
       dept = "loop",
       repo = repo,
@@ -118,7 +118,7 @@ function pipeline(event)
     local proposal = core.build_board_loop_proposal(repo, issue_number, current, unresolved.source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
-    }, event.ts, content_fetch)
+    }, event.ts, content_fetch, next_dedup)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")
       return

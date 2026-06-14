@@ -7,9 +7,44 @@ local review_unresolved = h.review_unresolved
 local run_review_loop = h.run_review_loop
 local mock_bot_env = h.mock_bot_env
 local mock_pr_origin = h.mock_pr_origin
+local mock_issue_review = h.mock_issue_review
 local find_raise = h.find_raise
 
 return {
+  test_review_loop_reraised_proposal_dedup_follows_incoming_review_lineage = function()
+    local event = review_unresolved({
+      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/1",
+      round = 1,
+      narrowed_question = "Is the named PR gap closed now?",
+      angle_digests = {
+        { angle = "minimal", verdict = "approve", digest = "still-disagrees" },
+      },
+    })
+    local impl_version = reviewing().version
+    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    mock_bot_env()
+    mock_pr_origin({
+      origin_marker,
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    }, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = run_review_loop(event, opts("review-loop-dedup-lineage"))
+    t.eq(result.exit_code, 0)
+    local proposal = find_raise(result.raises, "consensus.proposal").payload
+    t.eq(proposal.dedup_key, core.converge_proposal_base_dedup(event.dedup_key) .. "/loop/2")
+    t.eq(proposal.round, 2)
+    t.eq(proposal.convergence_question, event.narrowed_question)
+    t.eq(proposal.source_ref.ref, "owner/repo#pr/7")
+
+    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload
+    t.is_true(comment.body:find('version="' .. review_version .. '"', 1, true) ~= nil)
+    t.is_true(comment.body:find('round="1"', 1, true) ~= nil)
+  end,
+
   test_review_loop_round_cap_records_round_and_raises_review_reconcile_even_when_question_varies = function()
     local cap = core.max_converge_rounds()
     local event = review_unresolved({
