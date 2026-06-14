@@ -1,6 +1,7 @@
 //! HTTP route handlers.
 
 pub mod extract;
+pub mod generate;
 pub mod goals;
 pub mod health;
 pub mod packages;
