@@ -78,7 +78,10 @@ fn http_err(context: &str, err: reqwest::Error) -> JournalError {
 
 /// Seconds until the rate-limit reset, from `retry-after` (delta seconds) or
 /// `x-ratelimit-reset` (epoch seconds). Defaults to 60s when unparseable.
-fn reset_seconds(headers: &HeaderMap) -> u64 {
+///
+/// Crate-visible so the github-hub upstream classifier reuses the same
+/// header parsing as the journal client.
+pub(crate) fn reset_seconds(headers: &HeaderMap) -> u64 {
     if let Some(retry_after) = headers
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
@@ -102,7 +105,10 @@ fn reset_seconds(headers: &HeaderMap) -> u64 {
 
 /// True when a 403 carries rate-limit evidence (exhausted quota or an
 /// explicit retry hint) rather than an auth refusal.
-fn is_rate_limited(headers: &HeaderMap) -> bool {
+///
+/// Crate-visible so the github-hub upstream classifier reuses the same
+/// rate-limit detection as the journal client.
+pub(crate) fn is_rate_limited(headers: &HeaderMap) -> bool {
     let remaining_zero = headers
         .get("x-ratelimit-remaining")
         .and_then(|v| v.to_str().ok())
