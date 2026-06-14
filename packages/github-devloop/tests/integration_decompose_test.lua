@@ -209,7 +209,7 @@ return {
     })
     mock_decompose_codex(two_issue_json)
     mock_pr_comment_write(0)
-    mock_child_issue_list_repeated(event, {}, 2)
+    mock_child_issue_list(event, {})
 
     local result = run_decompose_with_post_marker(event, opts("decompose-two-issues"), 2)
 
@@ -229,6 +229,7 @@ return {
     t.is_true(first.body:find('decompose-lineage:v1 root="github-devloop/issue/owner/repo/42" depth="1"', 1, true) ~= nil)
     t.eq(#first.labels, 0)
     t.eq(count_calls("codex exec"), 1)
+    t.eq(count_calls(core.gh_issue_list_decompose_children_cmd("owner/repo", event.proposal_id)), 1)
     assert_decompose_judgment_call()
   end,
 

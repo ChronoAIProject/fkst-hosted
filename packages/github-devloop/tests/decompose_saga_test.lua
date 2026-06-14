@@ -182,7 +182,7 @@ local function mock_first_delivery(event)
   mock_pr_view(event, blocked_comments(event, {
     core.decomposed_comment_body(event, 2),
   }))
-  mock_child_issue_list_repeated(event, {}, 2)
+  mock_child_issue_list(event, {})
 end
 
 local function mock_second_delivery(event)
