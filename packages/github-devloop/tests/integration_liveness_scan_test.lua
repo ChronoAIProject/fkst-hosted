@@ -118,7 +118,7 @@ local function mock_linked_pr_state(comments, state, exit_code, times)
     stderr = "pr view failed"
   end
   for _ = 1, times or 1 do
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments", {
+    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
       stdout = string.format(
         '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-04T01:02:03Z","comments":[%s]}\n',
         json_string(state or "OPEN"),

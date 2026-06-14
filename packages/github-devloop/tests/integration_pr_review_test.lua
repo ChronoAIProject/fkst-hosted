@@ -91,6 +91,24 @@ local function find_comment_with(raises, text)
     return tostring(payload.body or ""):find(text, 1, true) ~= nil
   end)
 end
+local function mock_decompose_child_issue_list(proposal_id, version, pr_number, indexes)
+  local repo = core.parse_proposal_id(proposal_id)
+  local rendered = {}
+  for _, index in ipairs(indexes or {}) do
+    table.insert(rendered, string.format(
+      '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
+      100 + index,
+      index,
+      json_string(core.decompose_child_marker(proposal_id, version, pr_number, index)),
+      100 + index
+    ))
+  end
+  t.mock_command(core.gh_issue_list_decompose_children_cmd(repo or "owner/repo", proposal_id), {
+    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
 return {
   test_implement_ready_runs_codex_in_worktree_and_marks_implementing = function()
     local event = ready()
@@ -273,6 +291,34 @@ return {
     t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
     t.is_true(#label_raise.payload.remove_labels >= 10)
     t.eq(count_calls("--json labels,comments"), 0)
+  end,
+  test_observe_pr_removes_stale_reviewing_label_from_blocked_pr_marker = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "blocked", impl_version .. "/blocked"),
+      core.decomposed_marker("github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, 1),
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev", nil, { "fkst-dev:reviewing" })
+    mock_decompose_child_issue_list("github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, {})
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-reconcile-blocked-stale-reviewing"))
+
+    t.eq(result.exit_code, 0)
+    local pr_label_raise = find_label_raise(result.raises, "pr")
+    t.eq(pr_label_raise.payload.target_number, 7)
+    t.eq(pr_label_raise.payload.expected_state, "blocked")
+    t.eq(pr_label_raise.payload.add_labels[1], "fkst-dev:blocked")
+    t.is_true(has_value(pr_label_raise.payload.remove_labels, "fkst-dev:reviewing"))
   end,
   test_observe_pr_reraises_merge_ready_for_poll_self_heal = function()
     local event = merge_ready()

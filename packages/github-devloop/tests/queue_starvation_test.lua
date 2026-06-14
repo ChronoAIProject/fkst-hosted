@@ -111,11 +111,11 @@ local function mock_observe_lists(issue_number)
   })
 end
 
-local function mock_queue_head(age_minutes)
+local function mock_queue_head(age_minutes, version)
   local proposal_id = "github-devloop/issue/owner/repo/42"
   t.mock_command("--json title,comments,state,stateReason", {
     stdout = '{"title":"Merge-ready head","state":"OPEN","comments":['
-      .. render_comment(core.state_marker(proposal_id, "merge-ready", version_minutes_ago(age_minutes or 90)))
+      .. render_comment(core.state_marker(proposal_id, "merge-ready", version or version_minutes_ago(age_minutes or 90)))
       .. "]}\n",
     stderr = "",
     exit_code = 0,
@@ -208,11 +208,11 @@ local function count_calls(needle)
   return count
 end
 
-local function prepare_stale_head()
+local function prepare_stale_head(version)
   mock_env()
   mock_merge_queue_list({})
   mock_observe_lists(42)
-  mock_queue_head(90)
+  mock_queue_head(90, version)
 end
 
 return {
@@ -229,7 +229,8 @@ return {
   end,
 
   test_queue_starvation_fires_for_stale_merge_ready_with_no_recent_merge = function()
-    prepare_stale_head()
+    local expected_version = version_minutes_ago(90)
+    prepare_stale_head(expected_version)
     mock_recent_closed("[]\n")
 
     local result = run_observability("queue-starvation-fire")
@@ -240,7 +241,7 @@ return {
     local payload = create.payload
     t.eq(payload.schema, "github-proxy.issue-create.v1")
     t.eq(payload.repo, "owner/repo")
-    t.eq(payload.dedup_key, core.queue_starvation_dedup_key("owner/repo", "merge-ready/proposal/github-devloop/issue/owner/repo/42/version/" .. version_minutes_ago(90)))
+    t.eq(payload.dedup_key, core.queue_starvation_dedup_key("owner/repo", "merge-ready/proposal/github-devloop/issue/owner/repo/42/version/" .. expected_version))
     t.eq(payload.parent_comment_target.issue_number, "42")
     t.is_true(payload.body:find("Queue head: #42 Merge-ready head", 1, true) ~= nil)
     t.is_true(payload.body:find("Evidence snapshot: `/tmp/fkst-github-devloop-queue-starvation-owner-repo-", 1, true) ~= nil)
