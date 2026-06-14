@@ -121,6 +121,9 @@ function pipeline(event)
     core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-stale(head-advanced)", "PR head advanced since unresolved review")
     return
   end
+  if not core.verify_pr_review_issue_claim("review_loop", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+    return
+  end
 
   local lock_key = core.transition_lock_key(origin.proposal_id)
   if lock_key == nil then
@@ -211,9 +214,6 @@ function pipeline(event)
         error("github-devloop: gh issue review loop view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = core.parse_issue_view_review_loop(issue_view.stdout)
-      if not core.verify_pr_review_issue_claim("review_loop", origin.repo, origin.issue_number, current_issue, origin.proposal_id) then
-        return
-      end
     end
     local next_n = round + 1
     local next_dedup = core.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)

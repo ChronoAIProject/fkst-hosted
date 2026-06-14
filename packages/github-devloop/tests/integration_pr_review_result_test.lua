@@ -13,6 +13,30 @@ local find_raise = h.find_raise
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
 local verdict_summary_label = "Three-angle verdicts: "
 
+local function mock_issue_claim(assignees, author_login)
+  local rendered = {}
+  for _, assignee in ipairs(assignees or {}) do
+    table.insert(rendered, string.format('{"login":"%s"}', h.json_string(assignee)))
+  end
+  t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+    stdout = string.format(
+      '{"assignees":[%s],"author":{"login":"%s"}}\n',
+      table.concat(rendered, ","),
+      h.json_string(author_login or "fkst-test-bot")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_claim_failure()
+  t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+    stdout = "",
+    stderr = "claim read failed",
+    exit_code = 1,
+  })
+end
+
 return {
   test_review_result_approve_marks_issue_merge_ready = function()
     local event = review_reached({
@@ -76,6 +100,63 @@ return {
     t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
     t.eq(fixing_raise.payload.version, fix_version)
     t.eq(fixing_raise.payload.reviewed_head_sha, "def456")
+  end,
+
+  test_review_result_skips_other_owned_backing_issue_before_raising = function()
+    local event = review_reached()
+    local impl_version = reviewing().version
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    mock_issue_claim({ "human" })
+
+    local result = run_review_result(event, opts("review-result-other-owned"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 1)
+    t.eq(count_calls("--json labels,comments"), 0)
+  end,
+
+  test_review_result_accepts_unassigned_self_authored_backing_issue = function()
+    local event = review_reached()
+    local impl_version = reviewing().version
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    mock_issue_claim({}, "fkst-test-bot")
+    mock_issue_result({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = run_review_result(event, opts("review-result-unassigned-self-author"))
+    t.eq(result.exit_code, 0)
+    t.is_true(find_raise(result.raises, "devloop_merge_ready") ~= nil)
+  end,
+
+  test_review_result_fails_closed_when_claim_read_fails = function()
+    local event = review_reached()
+    local impl_version = reviewing().version
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    mock_issue_claim_failure()
+
+    local result = run_review_result(event, opts("review-result-claim-fails"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("--json labels,comments"), 0)
+  end,
+
+  test_review_result_skips_without_backing_issue_before_raising = function()
+    local event = review_reached()
+    local impl_version = reviewing().version
+    mock_pr_origin({}, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev")
+
+    local result = run_review_result(event, opts("review-result-no-backing-issue"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 0)
+    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
   test_review_result_skips_when_pr_head_advanced_since_review = function()
@@ -232,7 +313,7 @@ return {
       },
     }, "devloop/issue/owner/repo/v1")
     local forged = run_review_result(event, opts("review-result-forged-origin"))
-    t.eq(forged.exit_code, 1)
+    t.eq(forged.exit_code, 0)
     t.eq(#forged.raises, 0)
 
     local foreign = run_review_result(review_reached({

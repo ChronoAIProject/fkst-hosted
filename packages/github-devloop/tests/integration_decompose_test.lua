@@ -27,6 +27,7 @@ local function mock_pr_view(event, comments, updated_at)
 end
 
 local function run_decompose_with_post_marker(event, run_opts, count)
+  h.mock_default_issue_claim()
   mock_pr_view(event, blocked_comments(event), "2026-06-03T02:03:04Z")
   mock_pr_view(event, blocked_comments(event, {
     core.decomposed_marker(event.proposal_id, event.version, event.pr_number, count),

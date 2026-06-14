@@ -132,11 +132,20 @@ local function mock_pr_list(items)
   end
 end
 
-local function mock_issue_view(comments, state)
+local function render_assignees(logins)
+  local rendered = {}
+  for _, login in ipairs(logins or {}) do rendered[#rendered + 1] = '{"login":"' .. json_string(login) .. '"}' end
+  return "[" .. table.concat(rendered, ",") .. "]"
+end
+
+local function mock_issue_view(comments, state, extra)
+  extra = extra or {}
+  local author = extra.author or "fkst-test-bot"
   t.mock_command("--json title,comments,state", {
-    stdout = '{"title":"Observed issue","state":"' .. json_string(state or "OPEN") .. '","comments":[' .. table.concat(comments or {}, ",") .. "]}\n",
-    stderr = "",
-    exit_code = 0,
+    stdout = '{"title":"Observed issue","state":"' .. json_string(state or "OPEN")
+      .. '","comments":[' .. table.concat(comments or {}, ",") .. '],"assignees":'
+      .. render_assignees(extra.assignees or {}) .. ',"author":{"login":"' .. json_string(author) .. '"}}\n',
+    stderr = "", exit_code = 0,
   })
 end
 
@@ -347,6 +356,29 @@ local function mock_dashboard_issue_list(stdout, exit_code, stderr)
   })
 end
 
+local function mock_dashboard_create()
+  t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", { stdout = '{"number":99}\n', stderr = "", exit_code = 0 })
+end
+
+local function mock_dashboard_patch(stdout, stderr, exit_code)
+  t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", { stdout = stdout or '{"number":99}\n', stderr = stderr or "", exit_code = exit_code or 0 })
+end
+
+local function assert_orphan_reaper_skips_parent_owned_by(ownership)
+  local proposal_id = "github-devloop/issue/owner/repo/42"
+  mock_env("fkst-test-bot", "1")
+  mock_all_issue_lists({})
+  mock_pr_list({ 7 })
+  mock_reaper_pr(proposal_id, 42, 7)
+  mock_issue_view({}, "CLOSED", ownership)
+  mock_dashboard_issue_list()
+  mock_dashboard_create()
+  local logs = table.concat(capture_observability_logs(), "\n")
+  t.eq(count_calls("gh pr comment"), 0)
+  t.eq(count_calls("gh pr close"), 0)
+  t.is_true(logs:find("reason=backing-issue-not-self-owned", 1, true) ~= nil)
+end
+
 return {
   test_summary_logs_all_known_states_with_zero_defaults = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -475,11 +507,7 @@ return {
     mock_pr_close()
     mock_pr_comment_write()
     mock_dashboard_issue_list()
-    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_create()
 
     local result = run_observability(opts("observability-reap-closed-parent", { FKST_GITHUB_WRITE = "1" }))
 
@@ -525,6 +553,14 @@ return {
     t.is_true(table.concat(logs, "\n"):find("action=dry-run", 1, true) ~= nil)
   end,
 
+  test_orphan_reaper_skips_foreign_owned_parent_without_write = function()
+    assert_orphan_reaper_skips_parent_owned_by({ assignees = { "human" }, author = "fkst-test-bot" })
+  end,
+
+  test_orphan_reaper_skips_unassigned_foreign_author_parent_without_write = function()
+    assert_orphan_reaper_skips_parent_owned_by({ assignees = {}, author = "human" })
+  end,
+
   test_orphan_reaper_leaves_managed_pr_when_parent_issue_is_open = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     mock_env("fkst-test-bot", "1")
@@ -537,11 +573,7 @@ return {
       render_comment(core.state_marker(proposal_id, "fixing", "v1/fix/11"), "fkst-test-bot"),
     }, "OPEN")
     mock_dashboard_issue_list()
-    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_create()
 
     local result = run_observability(opts("observability-reap-open-parent", { FKST_GITHUB_WRITE = "1" }))
 
@@ -559,11 +591,7 @@ return {
       render_comment(core.orphan_reaped_marker(proposal_id, 7, "parent-closed"), "fkst-test-bot"),
     })
     mock_dashboard_issue_list()
-    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_create()
 
     local result = run_observability(opts("observability-reap-idempotent", { FKST_GITHUB_WRITE = "1" }))
 
@@ -590,11 +618,7 @@ return {
     mock_pr_close()
     mock_pr_comment_write()
     mock_dashboard_issue_list()
-    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_create()
 
     local result = run_observability(opts("observability-reap-decomposed-parent", { FKST_GITHUB_WRITE = "1" }))
 
@@ -620,11 +644,7 @@ return {
       render_comment(core.state_marker(proposal_id, "blocked", version), "fkst-test-bot"),
     }, "OPEN")
     mock_dashboard_issue_list()
-    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_create()
 
     local result = run_observability(opts("observability-reap-decomposed-waits-successors", { FKST_GITHUB_WRITE = "1" }))
 
@@ -795,11 +815,7 @@ return {
       render_comment(core.state_marker(proposal_id, "implementing", "2026-06-03T01-02-03Z"), "fkst-test-bot", "2026-06-03T01:02:03Z"),
     })
     mock_dashboard_issue_list()
-    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_create()
 
     local result = run_observability(opts("observability-dashboard-create", { FKST_GITHUB_WRITE = "1" }))
 
@@ -833,11 +849,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_patch()
 
     local result = run_observability(opts("observability-dashboard-update", { FKST_GITHUB_WRITE = "1" }))
 
@@ -894,11 +906,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh api --method POST 'repos/owner/repo/issues' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = '{"number":99}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_dashboard_create()
 
     local result = run_observability(opts("observability-dashboard-label-bootstrap", { FKST_GITHUB_WRITE = "1" }))
 
@@ -922,11 +930,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh api --method PATCH 'repos/owner/repo/issues/99' --input '/tmp/fkst-github-devloop-dashboard-owner-repo-", {
-      stdout = "",
-      stderr = "HTTP 412: Precondition Failed\n",
-      exit_code = 1,
-    })
+    mock_dashboard_patch("", "HTTP 412: Precondition Failed\n", 1)
 
     local result = run_observability(opts("observability-dashboard-patch-precondition", { FKST_GITHUB_WRITE = "1" }))
 

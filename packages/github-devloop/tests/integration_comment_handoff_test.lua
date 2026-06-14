@@ -87,6 +87,11 @@ return {
   test_comment_written_reviewing_ack_raises_durable_reviewing_with_verifiable_hand_off = function()
     local source_ref = core.pr_source_ref("owner/repo", 7)
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
     local result = run_handoff({
       schema = "github-proxy.comment-written.v1",
       repo = "owner/repo",
@@ -113,5 +118,36 @@ return {
     t.eq(reviewing.reviewing_hand_off.marker_version, version)
     t.eq(reviewing.reviewing_hand_off.event_version, version)
     t.eq(core.is_supported_reviewing(reviewing), true)
+  end,
+
+  test_comment_written_reviewing_ack_skips_other_owned_issue = function()
+    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = '{"assignees":[{"login":"human"}],"author":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_handoff({
+      schema = "github-proxy.comment-written.v1",
+      repo = "owner/repo",
+      target = "pr",
+      pr_number = 7,
+      comment_id = "IC_reviewing_other_1",
+      request_dedup_key = "observe-pr/comment/github-devloop/issue/owner/repo/42/" .. version .. "/7",
+      dedup_key = "observe-pr/comment/github-devloop/issue/owner/repo/42/" .. version .. "/7/written/IC_reviewing_other_1",
+      source_ref = source_ref,
+      handoff = {
+        kind = "github-devloop.reviewing",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        pr_number = 7,
+        version = version,
+        source_ref = source_ref,
+      },
+    }, "comment-handoff-reviewing-other-owned")
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
   end,
 }

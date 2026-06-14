@@ -308,6 +308,8 @@ function M.parse_issue_view_open_pr(stdout)
     title = tostring(decoded.title or ""),
     labels = result.labels,
     comments = result.comments,
+    assignees = result.assignees,
+    author_login = result.author_login,
   }
 end
 
@@ -319,6 +321,7 @@ function M.parse_issue_view_review(stdout)
   local decoded = json.decode(stdout or "{}")
   local result = M.parse_issue_view_meta(stdout)
   result.assignees = M.assignee_logins(decoded.assignees)
+  result.author_login = M.issue_author_login(decoded)
   return result
 end
 
@@ -330,6 +333,8 @@ function M.parse_issue_view_decompose(stdout)
     body = tostring(decoded.body or ""),
     labels = result.labels,
     comments = result.comments,
+    assignees = result.assignees,
+    author_login = result.author_login,
   }
 end
 
@@ -341,6 +346,7 @@ function M.parse_issue_view_review_loop(stdout)
   local decoded = json.decode(stdout or "{}")
   local result = M.parse_issue_view_meta(stdout)
   result.assignees = M.assignee_logins(decoded.assignees)
+  result.author_login = M.issue_author_login(decoded)
   return result
 end
 
@@ -359,6 +365,8 @@ function M.parse_issue_view_observe(stdout)
     state = decoded.state,
     state_reason = decoded.stateReason or decoded.state_reason,
     comments = M.comments_from_json(decoded.comments),
+    assignees = M.assignee_logins(decoded.assignees),
+    author_login = M.issue_author_login(decoded),
   }
 end
 

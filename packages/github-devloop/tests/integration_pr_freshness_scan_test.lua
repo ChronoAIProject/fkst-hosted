@@ -112,6 +112,24 @@ local function mock_issue_view(labels, comments)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("--json assignees,author", {
+    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_view_other_owned()
+  t.mock_command("--json labels,comments", {
+    stdout = '{"labels":[],"comments":[]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("--json assignees,author", {
+    stdout = '{"assignees":[{"login":"human"}],"author":{"login":"fkst-test-bot"}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_fetch_and_heads(current_branch_sha)
@@ -215,6 +233,19 @@ return {
     t.eq(raised.payload.integration_sha, branch_sha)
     t.eq(raised.payload.dedup_key, core.pr_freshness_dedup_key("owner/repo", branch, integration_sha))
     t.eq(core.is_supported_sync_conflict(raised.payload), true)
+  end,
+
+  test_pr_freshness_skips_other_owned_pr_before_branch_work = function()
+    mock_env("")
+    mock_pr_list(false)
+    mock_pr_view("merge-ready")
+    mock_issue_view_other_owned()
+
+    local result = run_scan()
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(h.count_calls("merge-base --is-ancestor"), 0)
+    t.eq(h.count_calls("git fetch"), 0)
   end,
 
   test_pr_freshness_dry_run_does_not_consume_same_baseline_retry = function()

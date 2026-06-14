@@ -255,6 +255,9 @@ local function process_pr(repo, branches, listed_pr)
   end
 
   local issue = issue_state(repo, origin.issue_number)
+  if not core.verify_pr_review_issue_claim("pr_freshness_scan", origin.repo, origin.issue_number, issue, origin.proposal_id) then
+    return
+  end
   local state = core.current_entity_state(pr.comments, origin.proposal_id)
   local reason, skip_reason = candidate_reason(pr, origin, issue, state)
   if reason == nil then

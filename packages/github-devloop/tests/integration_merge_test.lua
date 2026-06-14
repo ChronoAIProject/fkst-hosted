@@ -151,39 +151,18 @@ return {
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
   end,
 
-  test_pr_native_merge_ready_green_merges_marks_pr_and_skips_issue_side_effects = function()
+  test_pr_native_merge_ready_without_backing_issue_is_not_owned = function()
     local event = pr_native_merge_ready()
-    local branch = "pr-native-branch"
     mock_bot_env()
     mock_write_env("1")
-    mock_pr_merge(pr_native_comments(event), branch)
-    mock_write_env("1")
-    mock_pr_merge(pr_native_comments(event), branch)
-    mock_pr_merge(pr_native_comments(event), branch)
-    mock_merging_comment()
-    t.mock_command("gh pr merge '7' --repo 'owner/repo' --merge --match-head-commit 'def456'", {
-      stdout = "merged\n",
-      stderr = "",
-      exit_code = 0,
-    })
-    mock_pr_merge(nil, branch, "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
-    mock_pr_merge(nil, branch, "def456", "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
 
-    local result = run_merge(event, opts("merge-pr-native-success", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_merge(event, opts("merge-pr-native-no-backing-issue", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(count_calls("gh pr merge '7' --repo 'owner/repo' --merge --match-head-commit 'def456'"), 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("gh pr merge"), 0)
     t.eq(count_calls("gh issue close"), 0)
     t.eq(count_calls("gh issue view"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
-    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    t.eq(comment_raise.payload.pr_number, 7)
-    t.eq(comment_raise.payload.issue_number, nil)
-    t.is_true(comment_raise.payload.body:find('proposal="' .. event.proposal_id .. '"', 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find('state="merging"', 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find("fkst:github-devloop:merging:v1", 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find('state="merged"', 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
   end,
 
   test_merge_legacy_status_context_success_merges = function()

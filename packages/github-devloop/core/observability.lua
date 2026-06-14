@@ -418,6 +418,11 @@ local function reap_orphan_pr(repo, entity)
     return
   end
 
+  if not M.verify_pr_review_issue_claim(dept, repo, origin.issue_number, parent, proposal_id) then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "backing-issue-not-self-owned"))
+    return
+  end
+
   if M.write_mode() ~= "real" then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "dry-run", reason.code))
     return

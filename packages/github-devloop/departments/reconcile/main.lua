@@ -128,6 +128,9 @@ local function pipeline_review(event)
   if pr_number == nil then
     pr_number = entity.pr_number
   end
+  if not core.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+    return
+  end
 
   local lock_key = core.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
@@ -198,6 +201,9 @@ local function pipeline_fix(event)
   local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
   if pr_number == nil then
     pr_number = entity.pr_number
+  end
+  if not core.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+    return
   end
 
   local lock_key = core.transition_lock_key(reconcile.proposal_id)

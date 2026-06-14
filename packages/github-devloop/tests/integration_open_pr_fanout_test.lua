@@ -29,13 +29,15 @@ local function full_issue_view(labels, comments, extra)
   local fields = extra or {}
   t.mock_command("--json title,body,comments,labels,state,updatedAt,assignees", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","state":"%s","updatedAt":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+      '{"title":"%s","body":"%s","state":"%s","updatedAt":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"%s"}],"author":{"login":"%s"}}\n',
       h.json_string(fields.title or "Implement decision recorder"),
       h.json_string(fields.body or ""),
       h.json_string(fields.state or "OPEN"),
       h.json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
       table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ",")
+      table.concat(rendered_comments, ","),
+      h.json_string(fields.assignee_login or "fkst-test-bot"),
+      h.json_string(fields.author_login or "fkst-test-bot")
     ),
     stderr = "",
     exit_code = 0,

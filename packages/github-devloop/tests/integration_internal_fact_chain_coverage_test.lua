@@ -77,6 +77,11 @@ local function mock_issue_result_view(labels, comments)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("--json assignees,author", {
+    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_decompose_child_issue_list(event, indexes)

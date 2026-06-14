@@ -139,10 +139,9 @@ end
 local function mock_claimed_issue_for_event(event, times)
   local entity = core.parse_entity_proposal_id(event.proposal_id)
   for _ = 1, times or 1 do
-    t.mock_command(core.gh_issue_view_merge_cmd("owner/repo", entity.issue_number), {
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", entity.issue_number), {
       stdout = string.format(
-        '{"title":"Implement decision recorder","state":"OPEN","labels":[{"name":"fkst-dev:merge-ready"}],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
-        comments_for(event, "2026-06-03T01:00:00Z")
+        '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n'
       ),
       stderr = "",
       exit_code = 0,
@@ -437,6 +436,7 @@ return {
     mock_repo_env()
     mock_queue_list({ 7 })
     mock_queue_pr(current, "2026-06-03T02:00:00Z")
+    mock_claimed_issue_for_event(current, 1)
     mock_pr_merge(merge_comments_with_origin(current, origin_marker))
 
     local result = run_starvation_merge_queue_tick(current, opts("merge-queue-starvation-redrive", {
@@ -448,6 +448,27 @@ return {
     local reconcile = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(reconcile.payload.body:find("fkst:github-devloop:queue-starvation-reconcile:v1", 1, true) ~= nil)
     t.is_true(reconcile.payload.body:find('outcome="head-redriven"', 1, true) ~= nil)
+  end,
+
+  test_merge_queue_poll_skips_other_owned_head_before_pr_work = function()
+    local current = merge_ready()
+    mock_bot_env()
+    mock_repo_env()
+    mock_queue_list({ 7 })
+    mock_queue_pr(current, "2026-06-03T02:00:00Z")
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = '{"assignees":[{"login":"human"}],"author":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_merge_queue_tick(opts("merge-queue-poll-other-owned", {
+      FKST_GITHUB_REPO = "owner/repo",
+    }))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    t.eq(count_calls("gh pr merge"), 0)
   end,
 
   test_merge_queue_tick_dispatches_namespaced_queue_to_scan = function()
@@ -655,6 +676,7 @@ return {
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/a.lua" })
     mock_current_base_head("abc124")
+    mock_claimed_issue_for_event(second)
     mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_merge_pr_view(second)
@@ -695,6 +717,7 @@ return {
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/a.lua" })
     mock_current_base_head("abc124")
+    mock_claimed_issue_for_event(second)
     mock_candidate_head_contains_base(second, false)
     mock_queue_list({ 8 })
     mock_queue_pr(second, "2026-06-03T01:01:00Z")
@@ -749,6 +772,7 @@ return {
     mock_repo_env()
     mock_queue_list({ 8 })
     mock_queue_pr(next, "2026-06-03T01:01:00Z")
+    mock_claimed_issue_for_event(next)
     mock_merge_pr_view(next, "OPEN", "UNKNOWN", "CLEAN")
 
     local retry = run_merge_queue_tick(opts("merge-queue-self-requeue-unknown", {
@@ -764,6 +788,7 @@ return {
     mock_repo_env()
     mock_queue_list({ 8 })
     mock_queue_pr(next, "2026-06-03T01:01:00Z")
+    mock_claimed_issue_for_event(next)
     mock_merge_pr_view(next)
     mock_merge_pr_view(next)
     mock_merge_pr_view(next)
@@ -802,6 +827,7 @@ return {
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/shared.lua" })
     mock_current_base_head("abc124")
+    mock_claimed_issue_for_event(second)
     mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/shared.lua" })
     mock_queue_list({ 8 })
@@ -839,6 +865,7 @@ return {
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/a.lua" })
     mock_current_base_head("abc124")
+    mock_claimed_issue_for_event(second)
     mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_write_env("1")
@@ -880,6 +907,7 @@ return {
     mock_issue_close_for(first)
     mock_diff_name_only(7, { "packages/a.lua" })
     mock_current_base_head("abc124")
+    mock_claimed_issue_for_event(second)
     mock_candidate_head_contains_base(second, true)
     mock_diff_name_only(8, { "packages/b.lua" })
     mock_write_env("1")

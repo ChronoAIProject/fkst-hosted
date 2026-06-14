@@ -242,6 +242,9 @@ function pipeline(event)
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(source_ref)", "source_ref PR does not match decompose payload")
     return
   end
+  if not core.verify_pr_review_issue_claim("decompose", repo, issue_number, nil, decompose.proposal_id) then
+    return
+  end
 
   local lock_key = core.transition_lock_key(decompose.proposal_id)
   if lock_key == nil then

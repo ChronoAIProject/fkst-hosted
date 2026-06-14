@@ -74,6 +74,15 @@ local function head_contains_base(base_head, entry)
   return false, "current-base-not-contained"
 end
 
+local function entry_issue_number(entry)
+  local entity = M.parse_entity_proposal_id(entry and entry.proposal_id)
+  return entity and entity.issue_number or nil
+end
+
+local function batch_entry_claim_ok(repo, entry)
+  return M.verify_pr_review_issue_claim("merge_batch", repo, entry_issue_number(entry), nil, entry and entry.proposal_id)
+end
+
 local function find_queue_entry(entries, merge_ready)
   for index, entry in ipairs(entries or {}) do
     if tostring(entry.pr_number) == tostring(merge_ready.pr_number)
@@ -132,6 +141,15 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=lane-state-" .. tostring(entry.state),
+        "size=" .. tostring(merged_count),
+      })
+      return last_merged_pr_number
+    end
+    if not batch_entry_claim_ok(repo, entry) then
+      log_batch_window(entry.proposal_id, {
+        "action=stop",
+        "pr=" .. tostring(entry.pr_number),
+        "reason=claim-not-owned",
         "size=" .. tostring(merged_count),
       })
       return last_merged_pr_number

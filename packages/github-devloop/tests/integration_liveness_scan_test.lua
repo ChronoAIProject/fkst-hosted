@@ -223,6 +223,11 @@ return {
       core.pr_origin_marker(event.proposal_id, 42, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "reviewing", event.version),
     }, "OPEN")
+    t.mock_command(core.gh_issue_view_claim_cmd(repo, 42), {
+      stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
 
     local result = run_liveness_scan("liveness-scan-pr-reviewing")
     t.eq(result.exit_code, 0)
@@ -252,6 +257,24 @@ return {
     local reviewing_raise = find_raise(observed.raises, "devloop_reviewing")
     t.is_true(reviewing_raise ~= nil)
     t.eq(reviewing_raise.payload.version, event.version .. "/review-loop/1")
+  end,
+
+  test_liveness_scan_skips_other_owned_pr_before_reinjecting = function()
+    local event = reviewing()
+    mock_repo()
+    mock_issue_list({})
+    mock_pr_list({ { number = 7, state = "open", updated_at = "2026-06-04T01:02:03Z" } })
+    mock_pr_state({
+      core.pr_origin_marker(event.proposal_id, 42, "devloop-owner-repo-42-01HY", event.version, "dev"),
+      core.state_marker(event.proposal_id, "reviewing", event.version),
+    }, "OPEN")
+    t.mock_command(core.gh_issue_view_claim_cmd(repo, 42), {
+      stdout = '{"assignees":[{"login":"human"}],"author":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    assert_no_entity_change(run_liveness_scan("liveness-scan-pr-other-owned"))
   end,
 
   test_liveness_scan_caps_before_fresh_entity_views = function()

@@ -31,20 +31,6 @@ local function log_gate(merge_ready, outcome, reason)
   core.log_line("info", "merge", merge_ready.proposal_id, "GATE", fields)
 end
 
-local function verify_issue_claim_before_merge_write(repo, issue_number, merge_ready, current_issue)
-  if issue_number == nil then
-    return true
-  end
-  if current_issue == nil and merge_ready._merge_pass == "poll" then
-    return true
-  end
-  if core.issue_claim_state(current_issue and current_issue.assignees, core.claim_owner()) == "self" then
-    return true
-  end
-  core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "claim", "merge-write", "skip-claim-lost", "CLAIM lost before merge external write")
-  return false
-end
-
 local function require_consensus_review_approve(comments, merge_ready)
   local ok, reason = core.review_result_approval_matches_event(comments, merge_ready)
   if ok then
@@ -416,6 +402,14 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
+  if not core.verify_pr_review_issue_claim("merge", repo, issue_number, nil, merge_ready.proposal_id) then
+    return
+  end
+  if options ~= nil and type(options.queue_starvation_cause) == "table" then
+    local comment_request = core.build_queue_starvation_reconcile_comment_request(repo, merge_ready, options.queue_starvation_cause)
+    core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+    raise("github-proxy.github_pr_comment_request", comment_request)
+  end
   local current_pr = initial_pr
   if current_pr == nil then
     local pr_view = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
@@ -430,14 +424,6 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-idempotent(already at to_state)", "merged marker already visible")
     return
   end
-  local issue_view = nil
-  if issue_number ~= nil and merge_ready._merge_pass ~= "poll" then
-    issue_view = core.gh_exec({ cmd = core.gh_issue_view_merge_cmd(repo, issue_number), timeout = 30 })
-    if issue_view.exit_code ~= 0 then
-      error("github-devloop: gh issue merge view failed: " .. tostring(issue_view.stderr))
-    end
-  end
-  local current_issue = issue_view ~= nil and core.parse_issue_view_merge(issue_view.stdout) or nil
   local transition = core.cyclic_transition_status(state, { "merge-ready", "merging" }, "merging", merge_ready.version)
   if state.state ~= "merge-ready" and state.state ~= "merging" and state.state ~= "merged" then
     core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(from-state-mismatch)", "issue is not currently merge-ready or merging")
@@ -600,9 +586,6 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     log_gate(merge_ready, "dry-run", "merge requires FKST_GITHUB_WRITE=1")
     return
   end
-  if not verify_issue_claim_before_merge_write(repo, issue_number, merge_ready, current_issue) then
-    return
-  end
   if not require_consensus_review_approve(current_pr.comments, merge_ready) then
     return
   end
@@ -682,9 +665,6 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   if not write_enabled then
     log_gate(merge_ready, "dry-run", "write-time FKST_GITHUB_WRITE missing")
-    return
-  end
-  if not verify_issue_claim_before_merge_write(repo, issue_number, merge_ready, current_issue) then
     return
   end
   log_gate(merge_ready, "write-ready", "write-time FKST_GITHUB_WRITE=1 and trusted review-result approve")
@@ -861,22 +841,18 @@ local function process_merge_queue_tick(event)
       })
       return
     end
-    if cause_kind == "queue-starvation" then
-      local comment_request = core.build_queue_starvation_reconcile_comment_request(repo, merge_ready, cause)
-      core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-      raise("github-proxy.github_pr_comment_request", comment_request)
-    end
-    merge_ready._merge_pass = "poll"
-    core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
     local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
     if entity == nil then
       core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
       return
     end
+    merge_ready._merge_pass = "poll"
+    core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
     local write_mode = core.write_mode()
     local outcome = process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches, nil, {
       enforce_queue = false,
       write_mode = write_mode,
+      queue_starvation_cause = cause_kind == "queue-starvation" and cause or nil,
     })
     if outcome ~= nil and outcome.status == "merged" then
       local last_merged_pr_number = core.run_merge_batch_window(repo, branches, merge_ready, entries, { write_mode = write_mode }, process_merge_ready_locked)

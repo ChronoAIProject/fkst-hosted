@@ -30,7 +30,7 @@ end
 
 local function mock_default_issue_claim()
   helpers.t.mock_command(helpers.core.gh_issue_view_claim_cmd("owner/repo", 42), {
-    stdout = '{"assignees":[{"login":"fkst-test-bot"}]}\n',
+    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
     stderr = "",
     exit_code = 0,
   })
@@ -122,6 +122,8 @@ for _, name in ipairs({
   "run_review_loop",
   "run_fix",
   "run_review_meta",
+  "run_review_reconcile",
+  "run_fix_reconcile",
   "run_decompose",
 }) do
   local base_run = helpers[name]
@@ -144,6 +146,15 @@ helpers.run_review_result = function(...)
   return base_run_review_result(...)
 end
 
+local base_run_merge = helpers.run_merge
+helpers.run_merge = function(payload, ...)
+  local entity = helpers.core.parse_entity_proposal_id(payload and payload.proposal_id)
+  if entity ~= nil and entity.issue_number ~= nil then
+    mock_default_issue_claim()
+  end
+  return base_run_merge(payload, ...)
+end
+
 helpers.mock_bot_env = function(...)
   if type(helpers.reset_pr_helper_state) == "function" then
     helpers.reset_pr_helper_state()
@@ -152,4 +163,5 @@ helpers.mock_bot_env = function(...)
 end
 
 helpers.mock_context_bundle = mock_context_bundle
+helpers.mock_default_issue_claim = mock_default_issue_claim
 return helpers

@@ -246,7 +246,7 @@ function M.gh_issue_view_state_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_claim_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "assignees")
+  return M.gh_issue_view_cmd(repo, issue_number, "assignees,author")
 end
 
 function M.gh_issue_view_result_cmd(repo, issue_number)
@@ -266,7 +266,7 @@ function M.gh_issue_view_implement_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_open_pr_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,assignees,author")
 end
 
 function M.gh_issue_view_reviewing_cmd(repo, issue_number)
@@ -274,7 +274,7 @@ function M.gh_issue_view_reviewing_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_review_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,assignees")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,assignees,author")
 end
 
 function M.gh_issue_view_decompose_cmd(repo, issue_number)
@@ -290,7 +290,7 @@ function M.gh_issue_view_commit_subject_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_review_loop_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,assignees")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments,assignees,author")
 end
 
 function M.gh_issue_view_merge_cmd(repo, issue_number)
@@ -298,7 +298,7 @@ function M.gh_issue_view_merge_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_observe_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state,stateReason")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,comments,state,stateReason,assignees,author")
 end
 
 function M.gh_pr_view_origin_cmd(repo, pr_number)

@@ -60,6 +60,10 @@ function pipeline(event)
     return
   end
 
+  local entity = core.parse_entity_proposal_id(handoff.proposal_id)
+  if entity == nil or not core.verify_pr_review_issue_claim("comment_handoff", entity.repo, entity.issue_number, nil, handoff.proposal_id) then
+    return
+  end
   local reviewing = core.build_devloop_reviewing_payload({
     proposal_id = handoff.proposal_id,
     impl_version = handoff.version,

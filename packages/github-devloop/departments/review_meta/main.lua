@@ -42,6 +42,9 @@ function pipeline(event)
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
+  if not core.verify_pr_review_issue_claim("review_meta", repo, issue_number, nil, review_meta.proposal_id) then
+    return
+  end
 
   local lock_key = core.transition_lock_key(review_meta.proposal_id)
   if lock_key == nil then

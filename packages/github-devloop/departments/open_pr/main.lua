@@ -67,6 +67,9 @@ function pipeline(event)
     end
 
     local current_issue = core.parse_issue_view_open_pr(view.stdout)
+    if not core.verify_pr_review_issue_claim("open_pr", input.repo, input.issue_number, current_issue, proposal_id) then
+      return
+    end
     core.log_forged_markers("open_pr", proposal_id, current_issue.comments)
     local state = core.current_state(current_issue.comments, proposal_id)
     if state.state == "pr-open" then

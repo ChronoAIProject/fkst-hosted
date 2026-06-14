@@ -49,6 +49,21 @@ function M.issue_claim_state(assignees, owner)
   return "other"
 end
 
+function M.is_self_owned_issue(ownership, owner)
+  if type(ownership) ~= "table" then
+    return false
+  end
+  local claim_state = M.issue_claim_state(ownership.assignees, owner)
+  if claim_state == "self" then
+    return true
+  end
+  if claim_state ~= "unassigned" then
+    return false
+  end
+  -- Unassigned+self-author is intentional for fork-and-block isolation: a different bot login sees author!=self and skips.
+  return M.issue_author_login(ownership) == tostring(owner or "")
+end
+
 function M.gh_issue_assign_cmd(repo, issue_number, login)
   return "gh issue edit " .. M._shell_single_quote(issue_number)
     .. " --repo " .. M._shell_single_quote(repo)
@@ -62,12 +77,23 @@ function M.gh_issue_unassign_cmd(repo, issue_number, login)
 end
 
 function M.read_current_issue_assignees(repo, issue_number)
+  local ownership = M.read_current_issue_ownership(repo, issue_number)
+  return M.assignee_logins(ownership and ownership.assignees)
+end
+
+function M.read_current_issue_ownership(repo, issue_number)
+  if issue_number == nil then
+    return nil
+  end
   local view = M.gh_exec({ cmd = M.gh_issue_view_claim_cmd(repo, issue_number), timeout = 30 })
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue claim view failed: " .. tostring(view.stderr))
   end
   local decoded = json.decode(view.stdout or "{}")
-  return M.assignee_logins(decoded.assignees)
+  return {
+    assignees = M.assignee_logins(decoded.assignees),
+    author_login = M.issue_author_login(decoded),
+  }
 end
 
 function M.verify_issue_claim(repo, issue_number, owner)
@@ -80,24 +106,27 @@ end
 
 function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
   if issue_number == nil then
-    return true
+    log_claim(dept, proposal_id, "skip-not-owned", "backing issue is absent")
+    return false
   end
   local owner = M.trusted_bot_login()
-  if current_issue ~= nil and current_issue.assignees ~= nil then
-    local status = M.issue_claim_state(current_issue.assignees, owner)
-    if status == "self" then
-      return true
-    end
-    if status == "other" then
-      log_claim(dept, proposal_id, "skip-claimed-by-other", "backing issue assignee claim is held by another login")
-      return false
-    end
+  local ownership = nil
+  if type(current_issue) == "table"
+    and current_issue.assignees ~= nil
+    and M.issue_author_login(current_issue) ~= nil then
+    ownership = current_issue
+  else
+    ownership = M.read_current_issue_ownership(repo, issue_number)
   end
-  local fresh = M.read_current_issue_assignees(repo, issue_number)
-  if M.issue_claim_state(fresh, owner) == "self" then
+  if M.is_self_owned_issue(ownership, owner) then
     return true
   end
-  log_claim(dept, proposal_id, "skip-claim-missing", "backing issue assignee claim is not self-only")
+  local status = M.issue_claim_state(ownership and ownership.assignees, owner)
+  if status == "other" then
+    log_claim(dept, proposal_id, "skip-claimed-by-other", "backing issue assignee claim is held by another login")
+  else
+    log_claim(dept, proposal_id, "skip-not-owned", "backing issue is not self-owned")
+  end
   return false
 end
 

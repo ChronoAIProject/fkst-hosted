@@ -52,6 +52,14 @@ local function pr_opened_event(extra)
   return value
 end
 
+local function mock_self_owned_issue()
+  t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 return {
   test_pr_opened_direct_event_raises_reviewing = function()
     local event = pr_opened_event()
@@ -68,11 +76,7 @@ return {
     mock_pr_view_origin({
       core.pr_origin_marker(event.proposal_id, "42", event.branch, event.impl_version, event.base_branch),
     }, event.branch, event.head_sha)
-    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
-      stdout = '{"assignees":[{"login":"fkst-test-bot"}]}\n',
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_self_owned_issue()
 
     local result = t.run_department("departments/observe_pr/main.lua", {
       queue = "github-proxy.github_pr_opened",
@@ -111,6 +115,7 @@ return {
     mock_pr_view_origin({
       core.pr_origin_marker(event.proposal_id, "42", event.branch, event.impl_version, event.base_branch),
     }, event.branch, "def456")
+    mock_self_owned_issue()
 
     local result = t.run_department("departments/observe_pr/main.lua", {
       queue = "github-proxy.github_pr_opened",

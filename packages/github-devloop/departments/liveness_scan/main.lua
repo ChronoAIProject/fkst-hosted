@@ -106,6 +106,9 @@ local function should_reinject_pr(repo, pr)
     core.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "PR has no origin marker")
     return false
   end
+  if not core.verify_pr_review_issue_claim("liveness_scan", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+    return false
+  end
 
   return should_reinject_state(proposal_id, core.current_entity_state(current.comments, origin.proposal_id))
 end

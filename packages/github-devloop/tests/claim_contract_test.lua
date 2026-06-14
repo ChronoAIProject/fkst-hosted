@@ -27,12 +27,13 @@ local function count_calls(needle)
   return count
 end
 
-local function assignees_json(logins)
+local function ownership_json(logins, author_login)
   local rendered = {}
   for _, login in ipairs(logins or {}) do
     table.insert(rendered, string.format('{"login":"%s"}', tostring(login)))
   end
-  return '{"assignees":[' .. table.concat(rendered, ",") .. "]}\n"
+  return '{"assignees":[' .. table.concat(rendered, ",") .. '],"author":{"login":"'
+    .. tostring(author_login or "fkst-test-bot") .. '"}}\n'
 end
 
 local function state(name, created_at)
@@ -78,6 +79,14 @@ return {
     t.eq(core.issue_claim_state({ { login = "fkst-test-bot" }, { login = "other-bot" } }, "fkst-test-bot"), "other")
   end,
 
+  test_is_self_owned_issue_allows_self_assignee_or_unassigned_self_author = function()
+    t.eq(core.is_self_owned_issue(nil, "fkst-test-bot"), false)
+    t.eq(core.is_self_owned_issue({ assignees = { "fkst-test-bot" }, author_login = "human" }, "fkst-test-bot"), true)
+    t.eq(core.is_self_owned_issue({ assignees = {}, author_login = "fkst-test-bot" }, "fkst-test-bot"), true)
+    t.eq(core.is_self_owned_issue({ assignees = {}, author_login = "human" }, "fkst-test-bot"), false)
+    t.eq(core.is_self_owned_issue({ assignees = { "human" }, author_login = "fkst-test-bot" }, "fkst-test-bot"), false)
+  end,
+
   test_dry_run_claim_proceeds_without_assigning = function()
     mock_bot("fkst-test-bot", "")
 
@@ -100,8 +109,8 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
-      stdout = assignees_json({ "fkst-test-bot" }),
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "fkst-test-bot" }),
       stderr = "",
       exit_code = 0,
     })
@@ -126,8 +135,8 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
-      stdout = assignees_json({ "other-bot" }),
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "other-bot" }),
       stderr = "",
       exit_code = 0,
     })
@@ -292,8 +301,8 @@ return {
 
   test_timeout_release_requires_fresh_self_only_read = function()
     mock_bot("fkst-test-bot", "1")
-    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
-      stdout = assignees_json({ "fkst-test-bot" }),
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "fkst-test-bot" }),
       stderr = "",
       exit_code = 0,
     })
@@ -313,14 +322,14 @@ return {
     )
 
     t.eq(released, true)
-    t.eq(count_calls("gh issue view '42' --repo 'owner/repo' --json assignees"), 1)
+    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 1)
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
   end,
 
   test_timeout_release_can_be_followed_by_reclaim = function()
     mock_bot("fkst-test-bot", "1", 4)
-    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
-      stdout = assignees_json({ "fkst-test-bot" }),
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "fkst-test-bot" }),
       stderr = "",
       exit_code = 0,
     })
@@ -334,8 +343,8 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
-      stdout = assignees_json({ "fkst-test-bot" }),
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "fkst-test-bot" }),
       stderr = "",
       exit_code = 0,
     })
@@ -360,13 +369,13 @@ return {
     t.eq(reclaimed, true)
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
-    t.eq(count_calls("gh issue view '42' --repo 'owner/repo' --json assignees"), 2)
+    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 2)
   end,
 
   test_timeout_release_skips_when_fresh_read_is_not_self_only = function()
     mock_bot("fkst-test-bot", "1")
-    t.mock_command("gh issue view '42' --repo 'owner/repo' --json assignees", {
-      stdout = assignees_json({ "fkst-test-bot", "human" }),
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "fkst-test-bot", "human" }),
       stderr = "",
       exit_code = 0,
     })
@@ -382,5 +391,49 @@ return {
 
     t.eq(released, false)
     t.eq(count_calls("--remove-assignee"), 0)
+  end,
+
+  test_verify_pr_review_issue_claim_predicate_contract = function()
+    mock_bot("fkst-test-bot", "")
+    t.eq(core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+      assignees = { "fkst-test-bot" },
+      author_login = "human",
+    }, "github-devloop/issue/owner/repo/42"), true)
+    t.eq(core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+      assignees = { "human" },
+      author_login = "fkst-test-bot",
+    }, "github-devloop/issue/owner/repo/42"), false)
+    t.eq(core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+      assignees = {},
+      author_login = "fkst-test-bot",
+    }, "github-devloop/issue/owner/repo/42"), true)
+    t.eq(core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+      assignees = {},
+      author_login = "human",
+    }, "github-devloop/issue/owner/repo/42"), false)
+    t.eq(core.verify_pr_review_issue_claim("claim_contract", "owner/repo", nil, nil, "github-devloop/pr/owner/repo/7"), false)
+  end,
+
+  test_verify_pr_review_issue_claim_rederives_missing_ownership_and_fails_closed = function()
+    mock_bot("fkst-test-bot", "")
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({}, "fkst-test-bot"),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.eq(core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
+      assignees = {},
+    }, "github-devloop/issue/owner/repo/42"), true)
+
+    mock_bot("fkst-test-bot", "")
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = "",
+      stderr = "forced failure",
+      exit_code = 1,
+    })
+    local ok = pcall(function()
+      core.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, nil, "github-devloop/issue/owner/repo/42")
+    end)
+    t.eq(ok, false)
   end,
 }

@@ -481,9 +481,9 @@ return {
       },
     }, opts("observe-pr-backpointer-pending"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.proposal_id, core.pr_proposal_id("owner/repo", 7))
-    t.eq(find_label_raise(result.raises, "pr").payload.issue_number, nil)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(find_label_raise(result.raises, "pr"), nil)
     t.eq(count_calls("--json labels,comments"), 0)
   end,
   test_observe_pr_non_devloop_branch_without_visible_backpointer_uses_pr_native_origin = function()
@@ -500,9 +500,9 @@ return {
       },
     }, opts("observe-pr-backpointer-foreign"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.proposal_id, core.pr_proposal_id("owner/repo", 7))
-    t.eq(find_label_raise(result.raises, "pr").payload.issue_number, nil)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(find_label_raise(result.raises, "pr"), nil)
     t.eq(count_calls("--json labels,comments"), 0)
   end,
   test_observe_pr_closed_pr_does_not_advance_issue_to_reviewing = function()
@@ -546,9 +546,9 @@ return {
       },
     }, opts("observe-pr-forged"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.proposal_id, core.pr_proposal_id("owner/repo", 7))
-    t.eq(find_label_raise(result.raises, "pr").payload.issue_number, nil)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(find_label_raise(result.raises, "pr"), nil)
     t.eq(count_calls("--json labels,comments"), 0)
   end,
   test_review_pr_builds_pr_review_consensus_proposal = function()
@@ -577,7 +577,7 @@ return {
     t.is_true(proposal.body:find("Reviewed PR head: def456", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.eq(core.validate_proposal(proposal), true)
-    t.eq(count_calls("--json title,labels,comments,assignees"), 1)
+    t.eq(count_calls("--json title,labels,comments,assignees,author"), 1)
     t.eq(count_calls("gh pr diff"), 1)
     t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 1)
   end,
