@@ -57,6 +57,18 @@ local function mock_env()
     exit_code = 0,
   })
   for _ = 1, 8 do
+    t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+      stdout = "dev",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+      stdout = "integration/dev",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  for _ = 1, 8 do
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
       stdout = "",
       stderr = "",
@@ -105,6 +117,42 @@ local function mock_queue_head(age_minutes)
     stdout = '{"title":"Merge-ready head","state":"OPEN","comments":['
       .. render_comment(core.state_marker(proposal_id, "merge-ready", version_minutes_ago(age_minutes or 90)))
       .. "]}\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_merge_queue_list(pr_numbers)
+  local items = {}
+  for _, number in ipairs(pr_numbers or {}) do
+    table.insert(items, string.format('{"number":%d,"state":"open","base":{"ref":"integration/dev"},"head":{"ref":"devloop-owner-repo-%d","sha":"def%d"}}', number, number, number))
+  end
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&base=integration%2Fdev&per_page=100'", {
+    stdout = "[" .. table.concat(items, ",") .. "]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_merge_queue_pr(pr_number, issue_number, age_minutes, head_sha)
+  local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(issue_number)
+  local version = version_minutes_ago(age_minutes or 90)
+  local review_proposal_id = core.pr_review_proposal_id("owner/repo", pr_number, version, head_sha or "abcdef123456")
+  local comments = {
+    core.state_marker(proposal_id, "merge-ready", version),
+    core.merge_ready_marker(proposal_id, pr_number, version, review_proposal_id, "consensus:" .. review_proposal_id .. "/review", head_sha or "abcdef123456"),
+  }
+  local rendered = {}
+  for _, comment in ipairs(comments) do
+    table.insert(rendered, render_comment(comment, "fkst-test-bot", closed_at_minutes_ago(age_minutes or 90)))
+  end
+  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+    stdout = string.format(
+      '{"headRefName":"devloop-owner-repo-%d","headRefOid":"%s","baseRefName":"integration/dev","baseRefOid":"abc123","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
+      pr_number,
+      json_string(head_sha or "abcdef123456"),
+      table.concat(rendered, ",")
+    ),
     stderr = "",
     exit_code = 0,
   })
@@ -162,6 +210,7 @@ end
 
 local function prepare_stale_head()
   mock_env()
+  mock_merge_queue_list({})
   mock_observe_lists(42)
   mock_queue_head(90)
 end
@@ -191,7 +240,7 @@ return {
     local payload = create.payload
     t.eq(payload.schema, "github-proxy.issue-create.v1")
     t.eq(payload.repo, "owner/repo")
-    t.eq(payload.dedup_key, core.queue_starvation_dedup_key("owner/repo", "merge-ready", core.queue_starvation_window_key(now())))
+    t.eq(payload.dedup_key, core.queue_starvation_dedup_key("owner/repo", "merge-ready/proposal/github-devloop/issue/owner/repo/42/version/" .. version_minutes_ago(90)))
     t.eq(payload.parent_comment_target.issue_number, "42")
     t.is_true(payload.body:find("Queue head: #42 Merge-ready head", 1, true) ~= nil)
     t.is_true(payload.body:find("Evidence snapshot: `/tmp/fkst-github-devloop-queue-starvation-owner-repo-", 1, true) ~= nil)
@@ -223,13 +272,34 @@ return {
   end,
 
   test_queue_starvation_dedup_is_stable_for_detector_identity_and_window = function()
-    local first = core.queue_starvation_dedup_key("owner/repo", "merge-ready", "window-123")
-    local second = core.queue_starvation_dedup_key("owner/repo", "merge-ready", "window-123")
-    local third = core.queue_starvation_dedup_key("owner/repo", "merge-ready", "window-124")
+    local identity = "merge-ready/pr/9/proposal/github-devloop/issue/owner/repo/42/version/v1/head/abcdef123456"
+    local first = core.queue_starvation_dedup_key("owner/repo", identity, "window-123")
+    local second = core.queue_starvation_dedup_key("owner/repo", identity, "window-124")
+    local third = core.queue_starvation_dedup_key("owner/repo", identity .. "/next", "window-123")
 
     t.eq(first, second)
-    t.eq(first, "queue-starvation/owner/repo/merge-ready/window-123")
+    t.eq(first, "queue-starvation/owner/repo/" .. identity)
     t.is_true(first ~= third)
+  end,
+
+  test_queue_starvation_derives_actual_head_from_merge_queue_when_sample_misses_it = function()
+    mock_env()
+    mock_merge_queue_list({ 459 })
+    mock_merge_queue_pr(459, 459, 120, "abcdef123456")
+    mock_observe_lists(42)
+    mock_queue_head(90)
+    mock_recent_closed("[]\n")
+
+    local result = run_observability("queue-starvation-merge-queue-head")
+
+    t.eq(result.exit_code, 0)
+    local create = find_raise(result.raises, "github-proxy.github_issue_create_request")
+    t.is_true(create ~= nil)
+    t.eq(create.payload.parent_comment_target.issue_number, "459")
+    t.is_true(create.payload.body:find("Queue head: #459 PR #459", 1, true) ~= nil)
+    t.is_true(create.payload.body:find("Queue head PR: #459", 1, true) ~= nil)
+    t.is_true(create.payload.body:find("Head source: `merge-queue`", 1, true) ~= nil)
+    t.is_true(create.payload.dedup_key:find("merge-ready/pr/459/proposal/github-devloop/issue/owner/repo/459", 1, true) ~= nil)
   end,
 
   test_queue_starvation_has_no_repair_side_effects = function()
