@@ -501,6 +501,7 @@ mod tests {
         // Use a NyxID client pointed at nothing to simulate failure.
         let client = NyxIdClient::new(
             "http://127.0.0.1:1",
+            "api-github",
             "sa_test".to_string(),
             SecretString::from("sas_test".to_string()),
             std::time::Duration::from_secs(30),

@@ -369,6 +369,7 @@ async fn share_app() -> ShareTestApp {
 
     let nyxid_client = NyxIdClient::new(
         &mock_server.uri(),
+        "api-github",
         NYXID_CLIENT_ID.to_string(),
         SecretString::from(NYXID_CLIENT_SECRET.to_string()),
         Duration::from_secs(30),

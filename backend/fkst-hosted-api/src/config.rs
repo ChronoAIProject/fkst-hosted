@@ -100,6 +100,14 @@ mod defaults {
         30
     }
 
+    pub(super) fn nyxid_github_proxy_slug() -> String {
+        // NyxID `main`/v0.7.0 seeds its GitHub OAuth proxy under slug
+        // `api-github` (`backend/src/services/provider_service.rs`,
+        // `DefaultServiceSeed`); kept in sync with
+        // `crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG`.
+        crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG.to_string()
+    }
+
     pub(super) fn llm_timeout_secs() -> u64 {
         20
     }
@@ -226,6 +234,8 @@ struct AuthVars {
     auth_jwks_cache_ttl_secs: u64,
     #[serde(default = "defaults::nyxid_org_cache_ttl_secs")]
     nyxid_org_cache_ttl_secs: u64,
+    #[serde(default = "defaults::nyxid_github_proxy_slug")]
+    nyxid_github_proxy_slug: String,
 }
 
 /// Runtime configuration assembled from both envy passes.
@@ -296,6 +306,12 @@ pub struct Config {
     /// TTL in seconds for the NyxID org-role and user-orgs caches.
     /// Env: `FKST_NYXID_ORG_CACHE_TTL_SECS`. Default 30, zero rejected.
     pub nyxid_org_cache_ttl_secs: u64,
+    /// Downstream-service slug NyxID resolves to inject the user's GitHub
+    /// credential on proxied requests; the client builds the proxy base path
+    /// `/api/v1/proxy/{slug}` from it. Env: `FKST_NYXID_GITHUB_PROXY_SLUG`.
+    /// Default `api-github` (the slug NyxID `main`/v0.7.0 seeds). Rejected when
+    /// blank (fail-closed: an empty slug yields an unresolvable proxy route).
+    pub nyxid_github_proxy_slug: String,
     /// NyxID LLM-gateway base URL for package generation. `None` => the
     /// generate endpoint is disabled (answers 503). Env:
     /// `FKST_HOSTED_LLM_GATEWAY_URL`. Non-secret (the route is logged): a set
@@ -361,6 +377,7 @@ impl fmt::Debug for Config {
                 &self.nyxid_client_secret.as_ref().map(|_| "<redacted>"),
             )
             .field("nyxid_org_cache_ttl_secs", &self.nyxid_org_cache_ttl_secs)
+            .field("nyxid_github_proxy_slug", &self.nyxid_github_proxy_slug)
             // URL/model/numbers are non-secret routing config — show them.
             .field("llm_gateway_url", &self.llm_gateway_url)
             .field("llm_model", &self.llm_model)
@@ -404,6 +421,7 @@ impl Default for Config {
             nyxid_client_id: None,
             nyxid_client_secret: None,
             nyxid_org_cache_ttl_secs: defaults::nyxid_org_cache_ttl_secs(),
+            nyxid_github_proxy_slug: defaults::nyxid_github_proxy_slug(),
             llm_gateway_url: None,
             llm_model: None,
             llm_timeout_secs: defaults::llm_timeout_secs(),
@@ -522,6 +540,14 @@ impl Config {
                 "FKST_NYXID_ORG_CACHE_TTL_SECS must be at least 1".to_string(),
             ));
         }
+        // Fail-closed: a blank slug builds `/api/v1/proxy/` which NyxID cannot
+        // resolve to a downstream GitHub credential, so reject it loudly rather
+        // than degrade GitHub proxying silently. `trim` also rejects whitespace.
+        if auth.nyxid_github_proxy_slug.trim().is_empty() {
+            return Err(AppError::Config(
+                "FKST_NYXID_GITHUB_PROXY_SLUG must not be blank".to_string(),
+            ));
+        }
         let auth_mode = if auth.auth_enabled {
             let base_url = match auth.auth_nyxid_base_url {
                 Some(url) => url.trim_end_matches('/').to_string(),
@@ -623,6 +649,7 @@ impl Config {
             nyxid_client_id,
             nyxid_client_secret,
             nyxid_org_cache_ttl_secs: auth.nyxid_org_cache_ttl_secs,
+            nyxid_github_proxy_slug: auth.nyxid_github_proxy_slug,
             llm_gateway_url: http.llm_gateway_url,
             llm_model: http.llm_model,
             llm_timeout_secs: http.llm_timeout_secs,
@@ -1081,6 +1108,39 @@ mod tests {
         assert!(matches!(err, AppError::Config(_)));
         assert!(
             err.to_string().contains("FKST_NYXID_ORG_CACHE_TTL_SECS"),
+            "error must name the variable, got: {err}"
+        );
+    }
+
+    #[test]
+    fn nyxid_github_proxy_slug_defaults_to_api_github() {
+        let config =
+            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        assert_eq!(config.nyxid_github_proxy_slug, "api-github");
+    }
+
+    #[test]
+    fn nyxid_github_proxy_slug_is_overridable() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_NYXID_GITHUB_PROXY_SLUG", "api-github-pat"),
+        ]))
+        .expect("override");
+        assert_eq!(config.nyxid_github_proxy_slug, "api-github-pat");
+    }
+
+    #[test]
+    fn blank_nyxid_github_proxy_slug_is_a_config_error_naming_the_variable() {
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_NYXID_GITHUB_PROXY_SLUG", "   "),
+        ]))
+        .expect_err("blank slug must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_NYXID_GITHUB_PROXY_SLUG"),
             "error must name the variable, got: {err}"
         );
     }

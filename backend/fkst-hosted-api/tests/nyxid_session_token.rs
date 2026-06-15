@@ -87,6 +87,7 @@ async fn ctx(nyxid_uri: &str) -> TestCtx {
 
     let client = NyxIdClient::new(
         nyxid_uri,
+        "api-github",
         "sa_client".to_string(),
         SecretString::from("sa_secret".to_string()),
         Duration::from_secs(30),

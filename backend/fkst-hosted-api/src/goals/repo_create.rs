@@ -229,6 +229,7 @@ mod tests {
         // Wire up a NyxID client pointed at the mock.
         let client = crate::nyxid::NyxIdClient::new(
             &server.uri(),
+            "api-github",
             "test_client".to_string(),
             secrecy::SecretString::from("test_secret".to_string()),
             std::time::Duration::from_secs(30),
@@ -237,8 +238,8 @@ mod tests {
 
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path(format!(
-                "{}{}",
-                crate::nyxid::GITHUB_PROXY_PATH,
+                "/api/v1/proxy/{}{}",
+                crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG,
                 "/user/repos"
             )))
             .respond_with(
@@ -273,6 +274,7 @@ mod tests {
 
         let client = crate::nyxid::NyxIdClient::new(
             &server.uri(),
+            "api-github",
             "test_client".to_string(),
             secrecy::SecretString::from("test_secret".to_string()),
             std::time::Duration::from_secs(30),
@@ -281,8 +283,8 @@ mod tests {
 
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path(format!(
-                "{}{}",
-                crate::nyxid::GITHUB_PROXY_PATH,
+                "/api/v1/proxy/{}{}",
+                crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG,
                 "/orgs/acme/repos"
             )))
             .respond_with(
@@ -317,6 +319,7 @@ mod tests {
 
         let client = crate::nyxid::NyxIdClient::new(
             &server.uri(),
+            "api-github",
             "test_client".to_string(),
             secrecy::SecretString::from("test_secret".to_string()),
             std::time::Duration::from_secs(30),
@@ -358,6 +361,7 @@ mod tests {
 
         let client = crate::nyxid::NyxIdClient::new(
             &server.uri(),
+            "api-github",
             "test_client".to_string(),
             secrecy::SecretString::from("test_secret".to_string()),
             std::time::Duration::from_secs(30),
@@ -394,6 +398,7 @@ mod tests {
 
         let client = crate::nyxid::NyxIdClient::new(
             &server.uri(),
+            "api-github",
             "test_client".to_string(),
             secrecy::SecretString::from("test_secret".to_string()),
             std::time::Duration::from_secs(30),
@@ -431,6 +436,7 @@ mod tests {
 
         let client = crate::nyxid::NyxIdClient::new(
             &server.uri(),
+            "api-github",
             "test_client".to_string(),
             secrecy::SecretString::from("test_secret".to_string()),
             std::time::Duration::from_secs(30),
@@ -469,6 +475,7 @@ mod tests {
         // Point at nothing to trigger transport error.
         let client = crate::nyxid::NyxIdClient::new(
             "http://127.0.0.1:1",
+            "api-github",
             "test_client".to_string(),
             secrecy::SecretString::from("test_secret".to_string()),
             std::time::Duration::from_secs(30),

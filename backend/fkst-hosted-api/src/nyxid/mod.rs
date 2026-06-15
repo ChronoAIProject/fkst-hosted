@@ -33,11 +33,16 @@ pub const USERS_PATH: &str = "/api/v1/users";
 /// Verified against NyxID main v0.7.0 (`models/api_key.rs`, `key_service.rs`).
 pub const API_KEYS_PATH: &str = "/api/v1/api-keys";
 
-/// GitHub credential-injection proxy path.
+/// Default downstream-service slug for NyxID's GitHub credential-injection
+/// proxy, used when `FKST_NYXID_GITHUB_PROXY_SLUG` is unset.
 ///
-/// **UNVERIFIED — confirm against NyxID main.** Kept in one constant so
-/// the exact route shape is isolated from the rest of the codebase.
-pub const GITHUB_PROXY_PATH: &str = "/api/v1/proxy/github";
+/// Verified against NyxID `main`/v0.7.0 (`backend/src/services/provider_service.rs`,
+/// `DefaultServiceSeed` table): NyxID seeds its GitHub OAuth proxy under slug
+/// `api-github` (`base_url = https://api.github.com`). The per-deployment value
+/// is configurable; the production proxy path is built once at client
+/// construction (see [`Inner::github_proxy_path`]), never read as a hardcoded
+/// route from anywhere else in the codebase.
+pub const DEFAULT_GITHUB_PROXY_SLUG: &str = "api-github";
 
 /// Endpoint that lists the user's linked GitHub connections (one per linked
 /// GitHub account) under the caller's delegated token.
@@ -200,6 +205,10 @@ struct CachedOrgs {
 /// Inner state behind `Arc`.
 struct Inner {
     base_url: String,
+    /// Full GitHub-proxy base path, built once from the configured slug as
+    /// `/api/v1/proxy/{slug}`. Isolates the route shape in one place so the
+    /// downstream-service slug is configurable per deployment.
+    github_proxy_path: String,
     client_id: String,
     client_secret: SecretString,
     http: reqwest::Client,
@@ -266,10 +275,14 @@ fn with_via_selector(github_path: &str, connection_id: &str) -> String {
 
 impl NyxIdClient {
     /// Build a new NyxIdClient. `base_url` is the NyxID issuer base (injectable
-    /// for wiremock testing). `cache_ttl` controls how long org-role and
-    /// user-orgs results are cached.
+    /// for wiremock testing). `github_proxy_slug` is the downstream-service slug
+    /// NyxID resolves to inject the user's GitHub credential; the full proxy
+    /// base path `/api/v1/proxy/{slug}` is built once here so the route shape
+    /// stays configurable per deployment (default [`DEFAULT_GITHUB_PROXY_SLUG`]).
+    /// `cache_ttl` controls how long org-role and user-orgs results are cached.
     pub fn new(
         base_url: &str,
+        github_proxy_slug: &str,
         client_id: String,
         client_secret: SecretString,
         cache_ttl: Duration,
@@ -282,6 +295,7 @@ impl NyxIdClient {
         Ok(Self {
             inner: Arc::new(Inner {
                 base_url: base_url.trim_end_matches('/').to_string(),
+                github_proxy_path: format!("/api/v1/proxy/{github_proxy_slug}"),
                 client_id,
                 client_secret,
                 http,
@@ -562,7 +576,7 @@ impl NyxIdClient {
     ) -> Result<reqwest::Response, NyxIdError> {
         let url = format!(
             "{}{}{}",
-            self.inner.base_url, GITHUB_PROXY_PATH, github_path
+            self.inner.base_url, self.inner.github_proxy_path, github_path
         );
         let mut request = self
             .inner
@@ -797,8 +811,15 @@ mod tests {
     const CLIENT_SECRET: &str = "sas_supersecret_value_12345";
 
     fn test_client(server_uri: &str) -> NyxIdClient {
+        client_with_slug(server_uri, DEFAULT_GITHUB_PROXY_SLUG)
+    }
+
+    /// Build a test client with an explicit GitHub-proxy slug so the proxy-path
+    /// tests can assert both the default and an override route shape.
+    fn client_with_slug(server_uri: &str, slug: &str) -> NyxIdClient {
         NyxIdClient::new(
             server_uri,
+            slug,
             CLIENT_ID.to_string(),
             SecretString::from(CLIENT_SECRET.to_string()),
             Duration::from_secs(30),
@@ -963,16 +984,43 @@ mod tests {
     // ---- proxy_github ----
 
     #[tokio::test]
-    async fn proxy_github_hits_the_single_path_constant() {
+    async fn proxy_github_uses_the_default_slug_when_unset() {
         let server = MockServer::start().await;
+        // The default client (no override) must hit `/api/v1/proxy/api-github`.
         Mock::given(method("GET"))
-            .and(path(format!("{GITHUB_PROXY_PATH}/repos/owner/repo")))
+            .and(path(format!(
+                "/api/v1/proxy/{DEFAULT_GITHUB_PROXY_SLUG}/repos/owner/repo"
+            )))
             .and(header("authorization", "Bearer delegated_tok"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
             .mount(&server)
             .await;
 
         let client = test_client(&server.uri());
+        let delegated = DelegatedToken {
+            access_token: SecretString::from("delegated_tok".to_string()),
+            expires_in: 300,
+        };
+        let resp = client
+            .proxy_github(&delegated, reqwest::Method::GET, "/repos/owner/repo", None)
+            .await
+            .expect("proxy");
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn proxy_github_honours_an_override_slug() {
+        let server = MockServer::start().await;
+        // An override slug must reshape the proxy base path accordingly; the
+        // request must hit `/api/v1/proxy/<override>/...`, not the default.
+        Mock::given(method("GET"))
+            .and(path("/api/v1/proxy/custom-gh-slug/repos/owner/repo"))
+            .and(header("authorization", "Bearer delegated_tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server)
+            .await;
+
+        let client = client_with_slug(&server.uri(), "custom-gh-slug");
         let delegated = DelegatedToken {
             access_token: SecretString::from("delegated_tok".to_string()),
             expires_in: 300,
@@ -1071,7 +1119,9 @@ mod tests {
     async fn proxy_github_for_appends_via_selector() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path(format!("{GITHUB_PROXY_PATH}/issues")))
+            .and(path(format!(
+                "/api/v1/proxy/{DEFAULT_GITHUB_PROXY_SLUG}/issues"
+            )))
             .and(wiremock::matchers::query_param("_nyxid_via", "c-42"))
             .and(wiremock::matchers::query_param("state", "open"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
@@ -1303,6 +1353,7 @@ mod tests {
     async fn no_error_variant_or_debug_ever_contains_the_secret() {
         let unreachable = NyxIdClient::new(
             "http://127.0.0.1:1",
+            DEFAULT_GITHUB_PROXY_SLUG,
             CLIENT_ID.to_string(),
             SecretString::from(CLIENT_SECRET.to_string()),
             Duration::from_secs(30),

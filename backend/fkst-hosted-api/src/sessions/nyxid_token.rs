@@ -161,6 +161,7 @@ mod tests {
     fn client(uri: &str) -> NyxIdClient {
         NyxIdClient::new(
             uri,
+            "api-github",
             "sa_client".to_string(),
             SecretString::from("sa_secret".to_string()),
             std::time::Duration::from_secs(30),
