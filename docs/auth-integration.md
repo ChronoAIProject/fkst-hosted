@@ -24,19 +24,19 @@ The following matrix covers all environment variables supported by the backend a
 | **`FKST_AUTH_ISSUER`** | No | `nyxid` | `nyxid` | — | Expected JWT `iss` claim in the incoming token. |
 | **`FKST_AUTH_AUDIENCE`** | No | base URL | `https://nyx.chrono-ai.fun` | — | Expected JWT `aud` claim (defaults to base URL). |
 | **`FKST_AUTH_JWKS_CACHE_TTL_SECS`** | No | `300` | `300` | — | JWKS key cache TTL in seconds. |
-| **`NYXID_CLIENT_ID`** | No (Both-or-none)| — | `sa_fkst_prod` | — | NyxID service-account client ID for org membership check. |
-| **`NYXID_CLIENT_SECRET`** | No (Both-or-none)| — | `prod-secret-key` | — | NyxID service-account client secret. |
+| **`NYXID_CLIENT_ID`** | No (Both-or-none)| — | `sa_REPLACE_ME_prod` | — | NyxID service-account client ID for org membership check. |
+| **`NYXID_CLIENT_SECRET`** | No (Both-or-none)| — | `sa_sec_REPLACE_ME_prod` | — | NyxID service-account client secret. |
 | **`FKST_NYXID_ORG_CACHE_TTL_SECS`** | No | `30` | `30` | — | Cache TTL for NyxID org membership queries. |
 | **`FKST_GITHUB_APP_ID`** | No (app enabled) | — | `123456` | — | Numeric ID of the fkst-hosted GitHub App. |
 | **`FKST_GITHUB_APP_PRIVATE_KEY_PEM`** | If ID set (no PATH)| — | `"-----BEGIN RSA..."` | — | Inline PEM key content with `\n` normalization. |
 | **`FKST_GITHUB_APP_PRIVATE_KEY_PATH`** | If ID set (no PEM) | — | — | — | Path to the private key PEM file. |
 | **`FKST_GITHUB_APP_SLUG`** | No | — | `fkst-hosted` | — | Slug of the app (used for install-hint URLs in 422s). |
-| **`FKST_GITHUB_WRITE`** | No | `DRY-RUN` | `REAL` | `DRY-RUN` | Global write posture. `REAL` enables merges on integration branch. |
+| **`FKST_GITHUB_WRITE`** | No | `DRY-RUN` | `REAL` | `DRY-RUN` | Engine/deployment-level — not consumed by fkst-hosted-api; governs the substrate dev-loop write posture. |
 | **`FKST_HOSTED_LLM_GATEWAY_URL`** | No | — | `https://nyx.chrono-ai.fun/...` | — | NyxID LLM-gateway base URL for package generation. |
 | **`FKST_HOSTED_LLM_MODEL`** | When gateway set| — | `claude-3-5-sonnet` | — | Model name required by the LLM gateway. |
 | **`FKST_HOSTED_LLM_TIMEOUT_SECS`** | No | `20` | `20` | — | LLM completion request timeout limit. |
 | **`FKST_HOSTED_LLM_MAX_OUTPUT_BYTES`** | No | `1048576` | `1048576` | — | Limit on LLM generation output size. |
-| **`GITHUB_TOKEN`** | No | — | `ghp_journaling` | — | Deploy-level token for backing up journaling repositories. |
+| **`GITHUB_TOKEN`** | No | — | `ghp_REPLACE_ME` | — | Deploy-level token for backing up journaling repositories. |
 | **`FKST_JOURNAL_GITHUB_ENABLED`** | No | `true` | `true` | `false` | Enable/disable git journaling. |
 | **`FKST_JOURNAL_GITHUB_REPO`** | No | — | `ChronoAI/journals` | — | Dedicated repository where session logs are pushed. |
 | **`FKST_JOURNAL_GITHUB_BRANCH`** | No | `main` | `main` | — | Branch name for journal logs. |
@@ -67,7 +67,7 @@ The following matrix covers all environment variables supported by the backend a
 *   **Behavior:**
     *   `FKST_AUTH_ENABLED=true` forces JWT RS256 token verification at the API boundary on all endpoints except `/health`.
     *   `VITE_AUTH_REQUIRED=true` directs the frontend to enforce login screens.
-    *   `FKST_GITHUB_WRITE=REAL` tells the execution environment that it is allowed to autonomously perform writes and merge pull requests on target repositories.
+    *   `FKST_GITHUB_WRITE=REAL` (engine/deployment-level — not consumed by fkst-hosted-api) tells the execution environment that it is allowed to autonomously perform writes and merge pull requests on target repositories.
     *   The GitHub App variables must be fully configured with correct credentials (PEM key or path and App ID), or the backend will fail-closed and crash at startup.
 
 ### Profile (B): DEV / Observer
@@ -75,7 +75,7 @@ The following matrix covers all environment variables supported by the backend a
 *   **Behavior:**
     *   `FKST_AUTH_ENABLED=false` opens all backend routes. Authentication extracts yield developer stub contexts.
     *   `VITE_AUTH_REQUIRED=false` allows the frontend client to bypass the login redirects and work anonymously.
-    *   `FKST_GITHUB_WRITE=DRY-RUN` ensures no autonomous writes or merging operations occur during testing.
+    *   `FKST_GITHUB_WRITE=DRY-RUN` (engine/deployment-level — not consumed by fkst-hosted-api) ensures no autonomous writes or merging operations occur during testing.
     *   The GitHub App variables can remain unset. The engine logs `github app disabled (FKST_GITHUB_APP_ID not set)` at startup and degrades gracefully.
 
 ---
