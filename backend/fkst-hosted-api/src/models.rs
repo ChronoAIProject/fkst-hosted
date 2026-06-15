@@ -97,6 +97,12 @@ pub struct SessionDoc {
     /// `nyxid_ag_abc`). Never the full key. Omitted with `nyxid_key_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nyxid_key_prefix: Option<String>,
+    /// Resolved Ornn skill/skillset pins to inject into the per-session codex
+    /// (issue #114): name + concrete version + kind, NON-secret. Persisted so a
+    /// failover rebuild re-resolves + re-injects the identical set. Omitted when
+    /// the session pinned no skills (the common case) or on a pre-#114 document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
     pub created_at: bson::DateTime,
     pub started_at: Option<bson::DateTime>,
     pub stopped_at: Option<bson::DateTime>,
@@ -167,6 +173,7 @@ mod tests {
             triggered_by: None,
             nyxid_key_id: None,
             nyxid_key_prefix: None,
+            ornn_skills: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
             stopped_at: None,
@@ -469,6 +476,40 @@ mod tests {
         let back: SessionDoc = bson::from_document(raw).expect("deserialize");
         assert_eq!(back.nyxid_key_id, None);
         assert_eq!(back.nyxid_key_prefix, None);
+    }
+
+    // ---- ornn_skills (pinned skill set, issue #114) serde tests ----
+
+    #[test]
+    fn ornn_skills_is_omitted_when_absent() {
+        let raw = bson::to_document(&sample_session()).expect("serialize");
+        assert!(
+            !raw.contains_key("ornn_skills"),
+            "ornn_skills must be omitted when None"
+        );
+    }
+
+    #[test]
+    fn ornn_skills_round_trips_and_holds_only_non_secret_pins() {
+        let mut doc = sample_session();
+        doc.ornn_skills = Some(vec![crate::ornn::OrnnSkillPin {
+            kind: crate::ornn::OrnnPinKind::Skillset,
+            name: "web-research".to_string(),
+            version: "2.0".to_string(),
+        }]);
+        let raw = bson::to_document(&doc).expect("serialize");
+        let pins = raw.get_array("ornn_skills").expect("ornn_skills array");
+        assert_eq!(pins.len(), 1);
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn pre_114_docs_without_ornn_skills_still_deserialize() {
+        let mut raw = bson::to_document(&sample_session()).expect("serialize");
+        raw.remove("ornn_skills");
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back.ornn_skills, None);
     }
 
     #[test]

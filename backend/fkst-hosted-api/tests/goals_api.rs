@@ -86,6 +86,7 @@ async fn app() -> TestApp {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
     TestApp {

@@ -576,23 +576,48 @@ pending → validating → running → stopping → stopped
 | Field | Type | Required | Notes |
 |-------|------|:--------:|-------|
 | `package_name` | string | yes | `^[A-Za-z0-9_-]+$`, ≤ 128 bytes |
+| `ornn_skills` | array | no | Ornn skills/skillsets to inject — see [Pinning Ornn skills](#pinning-ornn-skills) |
 
 **Responses**
 
 | Status | Meaning |
 |--------|---------|
 | `201 Created` | `{ "id": "<uuid>", "status": "pending" }`; `Location: /api/v1/sessions/<id>` |
-| `400` | Invalid package name |
+| `400` | Invalid package name or invalid `ornn_skills` pin (name/version grammar) |
 | `403` | No `use` access to the package |
 | `404` | Package not found |
 | `409` | Another live session already holds this package |
+| `422` | Conflicting `ornn_skills` versions (same skill pinned at two versions) |
 
 ```sh
 curl -X POST "$FKST_API/api/v1/sessions" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{ "package_name": "billing-pipeline" }'
+  -d '{ "package_name": "billing-pipeline",
+        "ornn_skills": [ { "kind": "skillset", "name": "web-research", "version": "2.0" } ] }'
 # 201 -> { "id": "f4e2c0a1-…", "status": "pending" }
 ```
+
+#### Pinning Ornn skills
+
+Both `POST /api/v1/sessions` and `POST /api/v1/goals/{id}/trigger` accept an
+optional `ornn_skills` array. Each pin is a concrete `{ kind, name, version }`:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `kind` | string | `"skill"` or `"skillset"` |
+| `name` | string | `^[a-z0-9][a-z0-9-]*$`, ≤ 64 bytes |
+| `version` | string | `<major>.<minor>` (no leading zeros, no patch, no `@latest`) |
+
+At session start fkst-hosted fetches each pinned skill **as you** — through
+NyxID's `ornn-api` proxy, so Ornn enforces your private/shared/public/system
+visibility — and installs it into the session's private codex home so the run's
+`codex` can invoke it. A **skillset** is expanded to its closure (every member
+skill is installed) and its master prompt is added to the session's
+`AGENTS.md`. Pinning the same skill at two different versions (directly, or via
+a skillset member) is rejected (`422`); a missing or forbidden pin makes the
+session start **fail** rather than silently dropping it. Browse what you can
+pin via the [catalog API](#skill-catalog-ornn). The picker UI should
+pre-validate the version-conflict before triggering.
 
 ---
 
@@ -777,6 +802,7 @@ Spawns a new session for the goal against a GitHub repository.
 | `repo_mode` | `"existing"` \| `"create_new"` | no | Defaults to `existing` |
 | `repo` | `{ owner, name }` | no | **existing** mode only — overrides the goal's stored repo for this run |
 | `create` | `CreateRepoSpec` | for `create_new` | Required in `create_new` mode; forbidden in `existing` mode |
+| `ornn_skills` | array | no | Ornn skills/skillsets to inject — see [Pinning Ornn skills](#pinning-ornn-skills) |
 
 `CreateRepoSpec`:
 
@@ -815,6 +841,80 @@ curl -X POST "$FKST_API/api/v1/goals/a1b2…/trigger" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{ "repo_mode": "create_new", "create": { "name": "new-billing-repo", "private": true, "org_login": "acme" } }'
 ```
+
+---
+
+## Skill catalog (Ornn)
+
+Browse the Ornn **skills / skillsets** you may attach to a session via
+[`ornn_skills`](#pinning-ornn-skills), and list their concrete versions for a
+picker. Every call forwards **your** NyxID token to Ornn through the credential
+proxy, so the results honor your private / shared / public / system visibility —
+**fkst-hosted applies no permission logic of its own**; Ornn's result (including
+any `4xx`/`5xx`) is passed through as the authoritative answer. When NyxID is not
+configured these endpoints answer `503`. All endpoints require authentication.
+
+### `GET /api/v1/catalog/skills` · `GET /api/v1/catalog/skillsets`
+
+List skills (or skillsets) visible to you in a scope.
+
+**Query parameters**
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `scope` | `mine` \| `shared` \| `public` | Defaults to `public` |
+| `system` | `any` \| `only` \| `exclude` | **skills only** — filter by the system flag (default `any`); ignored for skillsets |
+| `kind` | string | Optional Ornn kind filter |
+| `tags` | string | Optional comma-separated tag filter |
+| `q` | string | Optional free-text query |
+| `page` | string | Optional page number |
+
+**Response** `200 OK` — the requested collection is populated, the other is
+omitted:
+
+```jsonc
+{
+  "data": {
+    "skills": [
+      { "name": "code-format", "guid": "…", "description": "…",
+        "tags": ["lint"], "is_private": false, "is_system_skill": false }
+    ],
+    "page": 1, "page_size": 20, "total": 1
+  }
+}
+```
+
+| Status | Meaning |
+|--------|---------|
+| `200` | Listing (Ornn's result, relayed) |
+| `400` | Invalid `scope` / `system` value |
+| `401`/`403`/`404`/`429` | Relayed verbatim from Ornn |
+| `503` | NyxID/Ornn not configured |
+
+```sh
+# Your own private skills
+curl -H "Authorization: Bearer $TOKEN" \
+  "$FKST_API/api/v1/catalog/skills?scope=mine"
+# Public system skills only
+curl -H "Authorization: Bearer $TOKEN" \
+  "$FKST_API/api/v1/catalog/skills?scope=public&system=only"
+```
+
+### `GET /api/v1/catalog/skills/{name}/versions` · `GET /api/v1/catalog/skillsets/{name}/versions`
+
+List a skill's (or skillset's) versions, newest-first — load lazily for the
+picker once a row is selected.
+
+```jsonc
+// 200
+{ "data": { "name": "code-format",
+            "versions": [ { "version": "2.0", "is_deprecated": false },
+                          { "version": "1.0", "is_deprecated": true } ] } }
+```
+
+- **Path parameters:** `name` (`^[a-z0-9][a-z0-9-]*$`).
+- **Responses:** `200`; `400` malformed name; `401`/`403`/`404` relayed from
+  Ornn; `503` NyxID/Ornn not configured.
 
 ---
 

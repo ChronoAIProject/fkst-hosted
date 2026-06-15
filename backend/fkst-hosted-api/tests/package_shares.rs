@@ -398,6 +398,7 @@ async fn share_app() -> ShareTestApp {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
 

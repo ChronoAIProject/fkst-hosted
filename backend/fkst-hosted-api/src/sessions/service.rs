@@ -57,6 +57,7 @@ use crate::journal::{
 use crate::leases::RenewOutcome;
 use crate::models::{SessionDoc, SessionStatus};
 use crate::nyxid::NyxIdClient;
+use crate::ornn::OrnnClient;
 use crate::packages::{is_valid_name, PackageRepository};
 use crate::sessions::codex_provider::{self, AssumeConnected, ChronoLlmCheck};
 use crate::sessions::nyxid_token::{self, NyxidTokenHandle};
@@ -83,6 +84,10 @@ pub struct GoalTriggerInfo {
     pub org_id: Option<String>,
     /// The prior goal status before trigger (captured for compensating CAS).
     pub prior_status: GoalStatus,
+    /// Resolved Ornn skill/skillset pins to inject into the session's codex
+    /// (issue #114). Already boundary-validated by the trigger handler. `None`
+    /// (or empty) means no skills are pinned (the common case).
+    pub ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
 }
 
 /// Outcome of a successful `create_for_goal` call.
@@ -170,6 +175,13 @@ struct Inner {
     /// DEFAULT model + base URL the renderer uses. Rendering also requires the
     /// vault (#100) to be wired so the user's override/connection can be read.
     codex: OnceLock<CodexSetup>,
+    /// Per-session Ornn skill injection (issue #114), enabled once at startup
+    /// via [`SessionService::enable_ornn`]. Unset => the driver skips injection
+    /// entirely (legacy tests / minimal runs behave exactly as pre-#114). When
+    /// set it carries the [`OrnnClient`]; injection ALSO requires a per-session
+    /// CODEX_HOME (#112) and the session's NyxID token (#111) — without either,
+    /// there is nowhere to install or no identity to fetch as, so it is skipped.
+    ornn: OnceLock<OrnnClient>,
 }
 
 /// Per-session codex provider wiring shared by every driver this service
@@ -255,6 +267,7 @@ impl SessionService {
                 vault: OnceLock::new(),
                 nyxid: OnceLock::new(),
                 codex: OnceLock::new(),
+                ornn: OnceLock::new(),
             }),
         }
     }
@@ -344,6 +357,21 @@ impl SessionService {
         tracing::info!("per-session codex provider config enabled (wired into the driver)");
     }
 
+    /// Enable per-session Ornn skill injection (issue #114): when a session
+    /// pins Ornn skills/skillsets, the driver fetches them as the session user
+    /// (via the #111 NyxID token through the `ornn-api` proxy) and installs them
+    /// into the per-session CODEX_HOME (#112) before the engine spawns. Call
+    /// once at startup, before any session is created; a second call is a logged
+    /// no-op. When never called the driver skips injection entirely (legacy
+    /// behaviour for tests / minimal runs).
+    pub fn enable_ornn(&self, client: OrnnClient) {
+        if self.inner.ornn.set(client).is_err() {
+            tracing::warn!("ornn skill injection already enabled; ignoring the second call");
+            return;
+        }
+        tracing::info!("per-session ornn skill injection enabled (wired into the driver)");
+    }
+
     /// The repository handle (startup hooks: orphan sweep).
     pub fn repo(&self) -> &SessionRepo {
         &self.inner.repo
@@ -364,6 +392,7 @@ impl SessionService {
         package_name: &str,
         owner: SessionOwner,
         raw_token: SecretString,
+        ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
     ) -> Result<SessionDoc, AppError> {
         if !is_valid_name(package_name) || package_name.len() > MAX_PACKAGE_NAME_BYTES {
             tracing::warn!(
@@ -404,6 +433,9 @@ impl SessionService {
             triggered_by: None,
             nyxid_key_id: None,
             nyxid_key_prefix: None,
+            // Persisted (resolved, non-secret) so a failover rebuild re-injects
+            // the identical pin set (#114). Empty is normalized to `None`.
+            ornn_skills: ornn_skills.filter(|p| !p.is_empty()),
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,
@@ -549,6 +581,9 @@ impl SessionService {
             triggered_by: Some("goal-trigger".to_string()),
             nyxid_key_id: None,
             nyxid_key_prefix: None,
+            // Persisted (resolved, non-secret) so a failover rebuild re-injects
+            // the identical pin set (#114). Empty is normalized to `None`.
+            ornn_skills: trigger.ornn_skills.clone().filter(|p| !p.is_empty()),
             created_at: now,
             started_at: None,
             stopped_at: None,
@@ -1258,6 +1293,73 @@ async fn drive_inner(
             .await;
             fail_session(inner, id, &fence, reason, goal_info).await;
             return true;
+        }
+    }
+
+    // (B6) Per-session Ornn skill injection (#114): when the session pinned
+    // Ornn skills/skillsets, fetch them as the session user (the #111 NyxID
+    // token already merged into `env_profile`) through the `ornn-api` proxy and
+    // install them into the per-session CODEX_HOME (#112) BEFORE the engine
+    // spawns, so codex discovers them. Only runs when Ornn is wired AND a
+    // CODEX_HOME exists AND the session has the NyxID token AND pins are present
+    // — any of those absent means there is nothing to do / nowhere to fetch as,
+    // so it is skipped and behaviour is byte-identical to pre-#114. Any Ornn
+    // 404/403 (missing or forbidden pin) or download/unzip failure FAILS the
+    // start LOUDLY — a pinned capability must never be silently dropped. The pin
+    // set is read from the persisted SessionDoc, so a failover rebuild
+    // re-resolves and re-injects the identical set.
+    if let (Some(ornn_client), Some(codex_dir), Some(pins)) = (
+        inner.ornn.get(),
+        codex_home.as_ref(),
+        session_doc.ornn_skills.as_ref(),
+    ) {
+        if !pins.is_empty() {
+            // The session NyxID token is the user identity the fetch acts as
+            // (#111). It is a SecretString in the env_profile; clone it for the
+            // proxy call and NEVER log it. Absent => the run has no NyxID
+            // identity, so a pinned (private/visibility-gated) fetch cannot be
+            // performed as the user — fail loudly rather than fetch anonymously.
+            match env_profile.get(nyxid_token::NYXID_ACCESS_TOKEN_KEY) {
+                Some(user_token) => {
+                    if let Err(error) =
+                        crate::ornn::inject_pins(ornn_client, user_token, codex_dir, pins).await
+                    {
+                        // `inject_pins` already logged the precise cause (and
+                        // never the token/presigned URL); the served `error`
+                        // stays client-safe.
+                        tracing::error!(session_id = %id, error = %error, "failed to inject ornn skills");
+                        let reason = "failed to inject pinned Ornn skills";
+                        journal_finish(
+                            &mut journaler,
+                            Transition::Failed {
+                                exit_code: None,
+                                error: reason.to_string(),
+                            },
+                        )
+                        .await;
+                        fail_session(inner, id, &fence, reason, goal_info).await;
+                        return true;
+                    }
+                    tracing::info!(session_id = %id, pin_count = pins.len(), "injected pinned ornn skills");
+                }
+                None => {
+                    tracing::error!(
+                        session_id = %id,
+                        "cannot inject pinned ornn skills without a session NyxID token"
+                    );
+                    let reason = "cannot inject pinned Ornn skills without a NyxID session token";
+                    journal_finish(
+                        &mut journaler,
+                        Transition::Failed {
+                            exit_code: None,
+                            error: reason.to_string(),
+                        },
+                    )
+                    .await;
+                    fail_session(inner, id, &fence, reason, goal_info).await;
+                    return true;
+                }
+            }
         }
     }
 
@@ -2337,6 +2439,7 @@ mod tests {
             triggered_by: None,
             nyxid_key_id: None,
             nyxid_key_prefix: None,
+            ornn_skills: None,
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,

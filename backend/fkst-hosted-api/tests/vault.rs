@@ -361,6 +361,7 @@ fn router(db: Db, vault: VaultService) -> axum::Router {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router")
 }

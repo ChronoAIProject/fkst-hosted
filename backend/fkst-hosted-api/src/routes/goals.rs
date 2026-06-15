@@ -149,6 +149,10 @@ pub struct TriggerRequest {
     /// `create_new`; forbidden when `repo_mode` is `existing`.
     #[serde(default)]
     pub create: Option<CreateRepoSpecBody>,
+    /// Optional Ornn skills/skillsets to inject into the triggered session's
+    /// codex (issue #114). Each `{kind, name, version}`; boundary-validated.
+    #[serde(default)]
+    pub ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
 }
 
 /// Request-body specification for creating a new GitHub repo during trigger.
@@ -674,6 +678,13 @@ async fn trigger(
         }
     }
 
+    // Boundary-validate the Ornn pins (#114): name/version grammar + the cheap
+    // cross-pin version conflict (skillset-closure conflicts are re-checked at
+    // resolve time in the driver).
+    if let Some(ref pins) = body.ornn_skills {
+        crate::ornn::validate_pins(pins)?;
+    }
+
     // Step 1: Load goal.
     let mut goal = state
         .goals
@@ -877,6 +888,7 @@ async fn trigger(
         owner_user_id: goal.owner_user_id.clone(),
         org_id: goal.org_id.clone(),
         prior_status: goal.status,
+        ornn_skills: body.ornn_skills.clone(),
     };
 
     let result = state

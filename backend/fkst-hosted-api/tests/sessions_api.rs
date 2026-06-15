@@ -137,6 +137,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
     TestApp {
@@ -693,6 +694,7 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         triggered_by: None,
         nyxid_key_id: None,
         nyxid_key_prefix: None,
+        ornn_skills: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,

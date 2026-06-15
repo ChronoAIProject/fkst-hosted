@@ -415,6 +415,36 @@ async fn main() -> ExitCode {
         }
     }
 
+    // 5a-ter-quinquies. Wire the Ornn skill-registry client (issue #114): when
+    //         a session pins Ornn skills/skillsets, the driver fetches them as
+    //         the session user (via the #111 NyxID token through the `ornn-api`
+    //         proxy) and installs them into the per-session CODEX_HOME (#112)
+    //         before the engine spawns. The catalog API consumes the same
+    //         client. Requires the NyxID service client (the proxy host); when
+    //         absent, injection stays disabled and the catalog answers 503.
+    let ornn_client: Option<fkst_hosted_api::ornn::OrnnClient> = match &nyxid_client {
+        Some(client) => match fkst_hosted_api::ornn::OrnnClient::with_nyxid(
+            client.clone(),
+            fkst_hosted_api::ornn::DEFAULT_ORNN_SLUG,
+        ) {
+            Ok(ornn) => {
+                sessions.enable_ornn(ornn.clone());
+                tracing::info!("ornn skill injection + catalog enabled");
+                Some(ornn)
+            }
+            Err(error) => {
+                tracing::error!(error = %error, "failed to build ornn client");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => {
+            tracing::info!(
+                "ornn skill injection + catalog disabled (requires NYXID_CLIENT_ID/SECRET)"
+            );
+            None
+        }
+    };
+
     // 5a-bis. Enable goal support in the session service: goal-status sync
     //         writes + token refresh. Requires both the goals repo and the
     //         GitHub App tokens service.
@@ -438,6 +468,7 @@ async fn main() -> ExitCode {
         engine: state_engine_config,
         llm,
         vault,
+        ornn: ornn_client,
     }) {
         Ok(router) => router,
         Err(error) => {
