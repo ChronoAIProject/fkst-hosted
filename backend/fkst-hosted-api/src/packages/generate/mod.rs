@@ -347,12 +347,16 @@ async fn run_conformance_dry_run(
         Err(e) => return skipped(format!("could not create runtime dir: {e}")),
     };
 
+    // The package-generation dry-run has no per-session env profile; pass an
+    // empty map so it runs under the same isolated (#101) env (env_clear + host
+    // allow-list + FKST_RUNTIME_ROOT) as every other conformance run.
     let outcome = run_conformance(
         &engine.framework_bin,
         pkg_dir.path(),
         rt_dir.path(),
         conf_timeout,
         engine.error_capture_bytes,
+        &std::collections::BTreeMap::new(),
     )
     .await;
 

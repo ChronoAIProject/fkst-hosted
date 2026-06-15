@@ -24,6 +24,7 @@
 //!   env substitution exists upstream but its precedence against the flag is
 //!   untested (spike Q8), so both variables are removed from the child env.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -31,9 +32,11 @@ use std::time::{Duration, Instant};
 
 use nix::sys::signal::{kill, killpg, Signal};
 use nix::unistd::Pid;
+use secrecy::ExposeSecret;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+use crate::engine::config::{is_reserved_env_key, ENGINE_ENV_ALLOWLIST};
 use crate::engine::error::{truncate_output_lossy, RunnerError};
 
 /// Byte cap of the shared output ring buffer (64 KiB) that merges the
@@ -284,6 +287,53 @@ pub struct SpawnedChild {
     pub stdout_lines: tokio::sync::mpsc::Receiver<Vec<u8>>,
 }
 
+/// Build an **isolated** child environment for an engine subprocess (issue
+/// #101): `env_clear()` so the pod's ambient environment (and any secret in
+/// it) never bleeds into a session, then layer, in increasing precedence:
+///
+/// 1. the [`ENGINE_ENV_ALLOWLIST`] host vars, copied from the parent *if
+///    present* (never set empty);
+/// 2. the user-supplied `env_profile`, but **only its non-reserved keys** —
+///    every key for which [`is_reserved_env_key`] is true is dropped so a user
+///    value can never shadow an allow-listed host var or a platform var;
+/// 3. the goal-session GitHub vars, when a [`GoalEnv`] is present.
+///
+/// Platform-managed vars that differ per child (`FKST_RUNTIME_ROOT`, and for
+/// supervise also `FKST_DURABLE_ROOT`) are layered by the caller AFTER this
+/// helper. They are `FKST_`-prefixed, hence reserved, so the `env_profile`
+/// filtering above guarantees they can never be shadowed regardless of order.
+///
+/// Secret-handling: `env_profile` values are `SecretString` and `GoalEnv` is
+/// never `Debug`-printed here; only the exposed string reaches `Command::env`.
+fn apply_isolated_env(
+    cmd: &mut Command,
+    env_profile: &BTreeMap<String, secrecy::SecretString>,
+    goal: Option<&GoalEnv>,
+) {
+    cmd.env_clear();
+
+    // 1. Allow-listed host vars (only when actually present in the parent).
+    for key in ENGINE_ENV_ALLOWLIST {
+        if let Some(value) = std::env::var_os(key) {
+            cmd.env(key, value);
+        }
+    }
+
+    // 2. User profile — additive over NON-reserved keys only.
+    for (key, value) in env_profile {
+        if !is_reserved_env_key(key) {
+            cmd.env(key, value.expose_secret());
+        }
+    }
+
+    // 3. Goal-session GitHub wiring (platform-owned, reserved keys).
+    if let Some(env) = goal {
+        cmd.env("GITHUB_TOKEN", &env.github_token)
+            .env("FKST_GITHUB_TOKEN_FILE", &env.github_token_file)
+            .env("FKST_GOAL_FILE", &env.goal_file);
+    }
+}
+
 /// Spawn `fkst-framework supervise` for the materialized package(s) with
 /// runtime root `rt_root`.
 ///
@@ -292,17 +342,19 @@ pub struct SpawnedChild {
 ///   `--package-root` flag. When `package_roots` has exactly one entry and
 ///   `goal_env` is `None`, the argv is byte-identical to the pre-multi-root
 ///   contract (CANON: existing tests must stay green).
+/// - `env_profile` is the per-session env applied via [`apply_isolated_env`]
+///   (issue #101); reserved keys are dropped.
 /// - `goal_env`, when present, adds `GITHUB_TOKEN`, `FKST_GITHUB_TOKEN_FILE`,
 ///   and `FKST_GOAL_FILE` to the child environment.
 ///
-/// All other wiring (own process group, env vars, stream draining) is
-/// unchanged from the single-root version. See the original doc comments for
-/// the full rationale.
+/// The child environment is now fully isolated (`env_clear()` + allow-list +
+/// profile + platform roots) rather than inherited; see [`apply_isolated_env`].
 pub fn spawn_supervise(
     framework_bin: &Path,
     project_root: &Path,
     package_roots: &[PathBuf],
     rt_root: &Path,
+    env_profile: &BTreeMap<String, secrecy::SecretString>,
     goal_env: Option<&GoalEnv>,
 ) -> Result<SpawnedChild, RunnerError> {
     let mut command = Command::new(framework_bin);
@@ -318,24 +370,25 @@ pub fn spawn_supervise(
     command
         .arg("--framework-bin")
         .arg(framework_bin)
-        .env("FKST_RUNTIME_ROOT", rt_root)
-        .env("FKST_DURABLE_ROOT", rt_root.join("durable"))
-        .env_remove("FKST_PACKAGE_ROOT")
-        .env_remove("FKST_PACKAGE_ROOTS")
         .process_group(0)
         .kill_on_drop(false)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    // Goal env vars are added after the base wiring so they do not interfere
-    // with the FKST_PACKAGE_ROOT / FKST_PACKAGE_ROOTS removal above.
-    if let Some(env) = goal_env {
-        command
-            .env("GITHUB_TOKEN", &env.github_token)
-            .env("FKST_GITHUB_TOKEN_FILE", &env.github_token_file)
-            .env("FKST_GOAL_FILE", &env.goal_file);
-    }
+    // Isolated env: env_clear() + curated host allow-list + the (filtered)
+    // per-session env_profile + the optional goal-session GitHub vars. After
+    // env_clear the inherited FKST_PACKAGE_ROOT / FKST_PACKAGE_ROOTS are gone
+    // without an explicit env_remove (they are neither allow-listed nor settable
+    // by a user profile, since FKST_-prefixed keys are reserved).
+    apply_isolated_env(&mut command, env_profile, goal_env);
+
+    // Platform-managed roots: supervise sets BOTH the runtime and durable roots
+    // (the durable root is supervise-only — the conformance preflight gets only
+    // FKST_RUNTIME_ROOT, preserving the pre-#101 per-child asymmetry).
+    command
+        .env("FKST_RUNTIME_ROOT", rt_root)
+        .env("FKST_DURABLE_ROOT", rt_root.join("durable"));
 
     let mut child = command.spawn().map_err(RunnerError::Spawn)?;
     let pid = child.id().map(|id| id as i32).ok_or_else(|| {
@@ -529,6 +582,7 @@ pub async fn run_conformance(
     rt_root: &Path,
     timeout: Duration,
     error_capture_bytes: usize,
+    env_profile: &BTreeMap<String, secrecy::SecretString>,
 ) -> Result<(), RunnerError> {
     let started = Instant::now();
     let mut command = Command::new(framework_bin);
@@ -538,14 +592,18 @@ pub async fn run_conformance(
         .arg(pkg_root)
         .arg("--package-root")
         .arg(pkg_root)
-        .env("FKST_RUNTIME_ROOT", rt_root)
-        .env_remove("FKST_PACKAGE_ROOT")
-        .env_remove("FKST_PACKAGE_ROOTS")
         .process_group(0)
         .kill_on_drop(false)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // Same isolated-env machinery as supervise (issue #101) so the preflight
+    // and the run never diverge. The conformance child has no goal env and —
+    // preserving the pre-#101 asymmetry — gets ONLY FKST_RUNTIME_ROOT (no
+    // FKST_DURABLE_ROOT).
+    apply_isolated_env(&mut command, env_profile, None);
+    command.env("FKST_RUNTIME_ROOT", rt_root);
 
     let mut child = command.spawn().map_err(RunnerError::Spawn)?;
     let pid = child.id().map(|id| id as i32).ok_or_else(|| {
@@ -770,6 +828,12 @@ mod tests {
         path
     }
 
+    /// An empty per-session env profile — the default for tests that exercise
+    /// the spawn path without injecting any user env (#101).
+    fn empty_env() -> BTreeMap<String, secrecy::SecretString> {
+        BTreeMap::new()
+    }
+
     /// Poll `predicate` every 25 ms for up to ~20 s. The wide budget keeps
     /// these real-`sh`-child drain tests reliable under a saturated
     /// full-workspace run (many parallel engine spawns + containers), where
@@ -912,6 +976,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn stub supervise");
@@ -958,6 +1023,217 @@ sleep 30"#,
         assert!(!is_pid_alive(spawned.pid));
     }
 
+    /// A stub body that dumps the env vars the #101 tests assert on to stderr,
+    /// emits the ready markers (so supervise reaches "ready"), prints a
+    /// sentinel, then sleeps so the test can inspect the captured env.
+    const ENV_DUMP_BODY: &str = r#"echo "FOO=${FOO:-UNSET}" >&2
+echo "SAFE=${SAFE:-UNSET}" >&2
+echo "CANARY=${LEAK_CANARY:-UNSET}" >&2
+echo "HOME_SET=${HOME:+yes}" >&2
+echo "PATH_SET=${PATH:+yes}" >&2
+echo "GHTOK=${GITHUB_TOKEN:-UNSET}" >&2
+echo "FKST_HACK=${FKST_HACK:-UNSET}" >&2
+echo "RT=${FKST_RUNTIME_ROOT:-UNSET}" >&2
+echo "DURABLE=${FKST_DURABLE_ROOT:-UNSET}" >&2
+echo "event runtime running handles=3" >&2
+echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+echo "ENVDUMP_DONE" >&2
+sleep 30"#;
+
+    fn profile(pairs: &[(&str, &str)]) -> BTreeMap<String, secrecy::SecretString> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), secrecy::SecretString::from(v.to_string())))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn spawn_supervise_clears_ambient_env_and_applies_profile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(dir.path(), "envdump.sh", ENV_DUMP_BODY);
+        let env_profile = profile(&[("FOO", "bar")]);
+
+        // A pod-ambient secret that env_clear() must drop. Set immediately
+        // before spawn and removed immediately after (the child snapshots its
+        // env at spawn), keeping the global mutation tight for parallel tests.
+        std::env::set_var("LEAK_CANARY", "leaked-secret-value");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            &env_profile,
+            None,
+        )
+        .expect("spawn");
+        std::env::remove_var("LEAK_CANARY");
+
+        assert!(
+            wait_until(|| spawned.output.snapshot().contains("ENVDUMP_DONE")).await,
+            "env dump must surface"
+        );
+        let snap = spawned.output.snapshot();
+        assert!(snap.contains("FOO=bar"), "profile key applied:\n{snap}");
+        assert!(
+            snap.contains("CANARY=UNSET"),
+            "env_clear drops canary:\n{snap}"
+        );
+        assert!(snap.contains("HOME_SET=yes"), "HOME allow-listed:\n{snap}");
+        assert!(snap.contains("PATH_SET=yes"), "PATH allow-listed:\n{snap}");
+        assert!(
+            snap.contains(&format!("RT={}", rt.path().display())),
+            "platform FKST_RUNTIME_ROOT set:\n{snap}"
+        );
+        assert!(
+            snap.contains(&format!("DURABLE={}/durable", rt.path().display())),
+            "supervise sets FKST_DURABLE_ROOT:\n{snap}"
+        );
+
+        let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
+    }
+
+    #[tokio::test]
+    async fn two_profiles_for_the_same_key_are_isolated() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run = |value: &str| {
+            let pkg = tempfile::tempdir().expect("pkg dir");
+            let rt = tempfile::tempdir().expect("rt dir");
+            let script = stub(dir.path(), &format!("iso-{value}.sh"), ENV_DUMP_BODY);
+            let env_profile = profile(&[("FOO", value)]);
+            let spawned = spawn_supervise(
+                &script,
+                pkg.path(),
+                &[pkg.path().to_path_buf()],
+                rt.path(),
+                &env_profile,
+                None,
+            )
+            .expect("spawn");
+            (pkg, rt, spawned)
+        };
+
+        let (_p1, _r1, mut s1) = run("alpha");
+        let (_p2, _r2, mut s2) = run("beta");
+        assert!(wait_until(|| s1.output.snapshot().contains("ENVDUMP_DONE")).await);
+        assert!(wait_until(|| s2.output.snapshot().contains("ENVDUMP_DONE")).await);
+        assert!(s1.output.snapshot().contains("FOO=alpha"));
+        assert!(!s1.output.snapshot().contains("FOO=beta"));
+        assert!(s2.output.snapshot().contains("FOO=beta"));
+        assert!(!s2.output.snapshot().contains("FOO=alpha"));
+
+        let _ = reap_with_grace(&mut s1.child, s1.pid, Duration::from_secs(5)).await;
+        let _ = reap_with_grace(&mut s2.child, s2.pid, Duration::from_secs(5)).await;
+    }
+
+    #[tokio::test]
+    async fn reserved_keys_in_profile_are_dropped_including_allow_list_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(dir.path(), "reserved.sh", ENV_DUMP_BODY);
+        // A user profile trying to shadow platform/host vars. All but SAFE are
+        // reserved (FKST_ prefix, RESERVED_ENV_KEYS, or ENGINE_ENV_ALLOWLIST).
+        let env_profile = profile(&[
+            ("SAFE", "ok"),
+            ("HOME", "/tmp/evil-home"),
+            ("PATH", "/tmp/evil-path"),
+            ("GITHUB_TOKEN", "stolen"),
+            ("FKST_HACK", "x"),
+            ("FKST_RUNTIME_ROOT", "/tmp/evil-rt"),
+        ]);
+
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            &env_profile,
+            None,
+        )
+        .expect("spawn");
+        assert!(wait_until(|| spawned.output.snapshot().contains("ENVDUMP_DONE")).await);
+        let snap = spawned.output.snapshot();
+
+        assert!(
+            snap.contains("SAFE=ok"),
+            "non-reserved key applied:\n{snap}"
+        );
+        assert!(
+            snap.contains("GHTOK=UNSET"),
+            "GITHUB_TOKEN dropped:\n{snap}"
+        );
+        assert!(snap.contains("FKST_HACK=UNSET"), "FKST_* dropped:\n{snap}");
+        // The allow-list name HOME is reserved: the real host HOME survives,
+        // the user's "/tmp/evil-home" never reaches the child.
+        assert!(
+            !snap.contains("/tmp/evil-home") && !snap.contains("/tmp/evil-path"),
+            "allow-list names cannot be shadowed:\n{snap}"
+        );
+        // The platform FKST_RUNTIME_ROOT is the real rt dir, not the user value.
+        assert!(
+            snap.contains(&format!("RT={}", rt.path().display())),
+            "platform RT wins over user FKST_RUNTIME_ROOT:\n{snap}"
+        );
+
+        let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
+    }
+
+    #[tokio::test]
+    async fn run_conformance_uses_same_isolated_env_as_supervise() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        // Conformance discards output on success; dump env to stderr then exit
+        // non-zero so the captured stderr surfaces in ConformanceFailed.
+        let script = stub(
+            dir.path(),
+            "conf-env.sh",
+            r#"echo "FOO=${FOO:-UNSET}" >&2
+echo "CANARY=${LEAK_CANARY:-UNSET}" >&2
+echo "HOME_SET=${HOME:+yes}" >&2
+echo "PATH_SET=${PATH:+yes}" >&2
+echo "RT=${FKST_RUNTIME_ROOT:-UNSET}" >&2
+echo "DURABLE=${FKST_DURABLE_ROOT:-UNSET}" >&2
+exit 1"#,
+        );
+        let env_profile = profile(&[("FOO", "confbar")]);
+
+        std::env::set_var("LEAK_CANARY", "leaked");
+        let err = run_conformance(
+            &script,
+            pkg.path(),
+            rt.path(),
+            Duration::from_secs(10),
+            8192,
+            &env_profile,
+        )
+        .await
+        .expect_err("exit 1 must fail");
+        std::env::remove_var("LEAK_CANARY");
+
+        match err {
+            RunnerError::ConformanceFailed { stderr, .. } => {
+                assert!(stderr.contains("FOO=confbar"), "profile applied:\n{stderr}");
+                assert!(stderr.contains("CANARY=UNSET"), "env_clear:\n{stderr}");
+                assert!(stderr.contains("HOME_SET=yes"), "HOME present:\n{stderr}");
+                assert!(stderr.contains("PATH_SET=yes"), "PATH present:\n{stderr}");
+                assert!(
+                    stderr.contains(&format!("RT={}", rt.path().display())),
+                    "conformance sets FKST_RUNTIME_ROOT:\n{stderr}"
+                );
+                // Parity check: conformance keeps the pre-#101 asymmetry — it
+                // does NOT set FKST_DURABLE_ROOT (supervise-only).
+                assert!(
+                    stderr.contains("DURABLE=UNSET"),
+                    "no durable root:\n{stderr}"
+                );
+            }
+            other => panic!("expected ConformanceFailed, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn stdout_tap_delivers_line_framed_raised_lines() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -979,6 +1255,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn raiser");
@@ -1022,6 +1299,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn");
@@ -1073,6 +1351,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn");
@@ -1118,6 +1397,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn");
@@ -1156,6 +1436,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn blaster");
@@ -1193,6 +1474,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect_err("missing binary must fail to spawn");
@@ -1223,6 +1505,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn stdout-ready stub");
@@ -1258,6 +1541,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn stderr-ready stub");
@@ -1292,6 +1576,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn panic stub");
@@ -1332,6 +1617,7 @@ sleep 30"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn half-alive stub");
@@ -1375,6 +1661,7 @@ wait"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn group");
@@ -1425,6 +1712,7 @@ while true; do sleep 1; done"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn ignorer");
@@ -1454,6 +1742,7 @@ while true; do sleep 1; done"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn");
@@ -1494,6 +1783,7 @@ while true; do sleep 1; done"#,
             rt.path(),
             Duration::from_secs(10),
             8192,
+            &empty_env(),
         )
         .await
         .expect("exit 0 must pass");
@@ -1518,6 +1808,7 @@ exit 1"#,
             rt.path(),
             Duration::from_secs(10),
             8192,
+            &empty_env(),
         )
         .await
         .expect_err("exit 1 must fail");
@@ -1549,6 +1840,7 @@ exit 2"#,
             rt.path(),
             Duration::from_secs(10),
             8192,
+            &empty_env(),
         )
         .await
         .expect_err("exit 2 must fail");
@@ -1574,9 +1866,16 @@ while [ $i -lt 200 ]; do echo "noise noise noise noise noise" >&2; i=$((i+1)); d
 exit 1"#,
         );
 
-        let err = run_conformance(&script, pkg.path(), rt.path(), Duration::from_secs(10), 64)
-            .await
-            .expect_err("exit 1 must fail");
+        let err = run_conformance(
+            &script,
+            pkg.path(),
+            rt.path(),
+            Duration::from_secs(10),
+            64,
+            &empty_env(),
+        )
+        .await
+        .expect_err("exit 1 must fail");
         match err {
             RunnerError::ConformanceFailed { stderr, .. } => {
                 assert!(stderr.len() <= 64, "got {} bytes", stderr.len());
@@ -1597,9 +1896,16 @@ exit 1"#,
             &format!("echo $$ > {}\nsleep 60", pid_file.display()),
         );
 
-        let err = run_conformance(&script, pkg.path(), rt.path(), Duration::from_secs(2), 8192)
-            .await
-            .expect_err("hang must time out");
+        let err = run_conformance(
+            &script,
+            pkg.path(),
+            rt.path(),
+            Duration::from_secs(2),
+            8192,
+            &empty_env(),
+        )
+        .await
+        .expect_err("hang must time out");
         match err {
             RunnerError::ConformanceFailed { code, stderr } => {
                 assert_eq!(code, -1, "timeout uses code -1");
@@ -1639,12 +1945,14 @@ exit 1"#,
         // Drop the in-flight future mid-wait (an outer select! racing it),
         // exactly the axum-disconnect shape.
         {
+            let env = empty_env();
             let fut = run_conformance(
                 &script,
                 pkg.path(),
                 rt.path(),
                 Duration::from_secs(60),
                 8192,
+                &env,
             );
             tokio::pin!(fut);
             tokio::select! {
@@ -1682,6 +1990,7 @@ exit 1"#,
             pkg.path(),
             &[pkg.path().to_path_buf()],
             rt.path(),
+            &empty_env(),
             None,
         )
         .expect("spawn");
@@ -1707,6 +2016,7 @@ exit 1"#,
             rt.path(),
             Duration::from_secs(1),
             8192,
+            &empty_env(),
         )
         .await
         .expect_err("missing binary must fail to spawn");
