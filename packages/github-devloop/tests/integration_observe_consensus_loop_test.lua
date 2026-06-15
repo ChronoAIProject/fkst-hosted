@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+require("tests.cache_seed_helpers")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -81,6 +82,16 @@ local mock_issue_view_failure = h.mock_issue_view_failure
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 
+local function seed_cache(key, value, run_opts)
+  return t.run_department("tests/cache_seed_helpers.lua", {
+    queue = "cache_seed",
+    payload = {
+      key = key,
+      value = tostring(value),
+    },
+  }, run_opts)
+end
+
 return {
   test_observe_opt_in_issue_raises_proposal_and_thinking_label = function()
     mock_issue_state({ "fkst-dev:enabled" })
@@ -105,10 +116,23 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_other_authored_unmanaged_issue_raises_fork_request_only = function()
+  test_observe_other_authored_unmanaged_issue_inside_grace_does_not_fork = function()
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human")
 
-    local result = run_observe(issue(), opts("observe-other-author-fork"))
+    local result = run_observe(issue(), opts("observe-other-author-fresh"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+  end,
+
+  test_observe_other_authored_unmanaged_issue_after_grace_raises_fork_request_only = function()
+    local run_opts = opts("observe-other-author-fork")
+    local seeded = seed_cache(core.fork_first_observed_key("owner/repo", 42, "2026-06-03T01:02:03Z"), now() - (3 * 60 * 60) - 1, run_opts)
+    t.eq(seeded.exit_code, 0)
+    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human")
+
+    local result = run_observe(issue(), run_opts)
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     local request = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
