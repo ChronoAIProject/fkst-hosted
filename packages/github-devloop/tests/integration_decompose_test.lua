@@ -8,22 +8,25 @@ local mock_bot_env = h.mock_bot_env
 local mock_issue_decompose = h.mock_issue_decompose
 local find_raise = h.find_raise
 local count_calls = h.count_calls
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local blocked_comments
 
 local function mock_pr_view(event, comments, updated_at)
-  local rendered = {
-    h.render_comment(core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
+  local selected = {
+    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
   }
   for _, comment in ipairs(comments) do
-    table.insert(rendered, h.render_comment(comment))
+    table.insert(selected, comment)
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"'
-      .. tostring(updated_at or "2026-06-03T02:03:04Z") .. '","comments":[' .. table.concat(rendered, ",") .. "]}\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = selected,
+    head = "devloop-owner-repo-42-01HY",
+    head_sha = "def456",
+    base_branch = "dev",
+    state = "OPEN",
+    updated_at = updated_at or "2026-06-03T02:03:04Z",
+  }, entity_read_mocks.pr_origin_selector)
 end
 
 local function run_decompose_with_post_marker(event, run_opts, count)
@@ -127,15 +130,11 @@ local function mock_decompose_codex(stdout)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("--json title,body,updatedAt,labels,comments,state", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
     stdout = '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[]}\n',
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("--json title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
+  entity_read_mocks.mock_pr_view_raw_selector(t, {}, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
     stdout = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n',
-    stderr = "",
-    exit_code = 0,
   })
   t.mock_command("gh pr diff", {
     stdout = "diff --git a/file.lua b/file.lua\n+return true\n",
@@ -351,7 +350,6 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     t.eq(count_calls("gh pr comment"), 1)
-    t.eq(count_calls("gh pr view"), 4)
   end,
 
   test_decompose_depth_cap_skips_lineage_child = function()

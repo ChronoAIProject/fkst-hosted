@@ -96,7 +96,6 @@ return {
     local expected_version = core.next_fix_version(event.version)
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
-    t.eq(count_calls("gh issue view"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
     t.eq(comment_raise.payload.pr_number, 7)
     t.eq(comment_raise.payload.issue_number, nil)

@@ -1,5 +1,6 @@
 local t = fkst.test
 local core = require("core")
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
 
@@ -45,7 +46,6 @@ local function source_ref()
     ref = "owner/repo#issue/42",
   }
 end
-
 local function pr_source_ref()
   return {
     kind = "external",
@@ -73,7 +73,6 @@ local function issue(extra)
   if value.decision == "reject" and value.blocking_gap == nil then value.blocking_gap = "missing regression guard" end
   return value
 end
-
 local function reached(extra)
   local value = {
     schema = "consensus.consensus_reached.v1",
@@ -88,7 +87,6 @@ local function reached(extra)
   end
   return value
 end
-
 local function unresolved(extra)
   local value = {
     schema = "consensus.consensus_converge.v1",
@@ -101,7 +99,6 @@ local function unresolved(extra)
   end
   return value
 end
-
 local function reconcile(extra)
   local value = core.build_devloop_reconcile_payload(unresolved({
     dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
@@ -111,7 +108,6 @@ local function reconcile(extra)
   end
   return value
 end
-
 local function ready(extra)
   local value = {
     schema = "github-devloop.ready.v1",
@@ -124,7 +120,6 @@ local function ready(extra)
   end
   return value
 end
-
 local function reviewing(extra)
   local value = {
     schema = "github-devloop.reviewing.v1",
@@ -312,19 +307,11 @@ end
 local function run_review_reconcile(payload, run_opts)
   local cached = take_pr_phase_comments()
   if cached ~= nil then
-    local rendered_comments = {}
-    table.insert(rendered_comments, render_comment(core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev")))
+    local comments = { core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
     for _, comment in ipairs(cached) do
-      table.insert(rendered_comments, render_comment(comment))
+      table.insert(comments, comment)
     end
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-      stdout = string.format(
-        '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
-        table.concat(rendered_comments, ",")
-      ),
-      stderr = "",
-      exit_code = 0,
-    })
+    entity_read_mocks.mock_default_pr_read(t, comments)
   end
   return t.run_department("departments/reconcile/main.lua", {
     queue = "devloop_review_reconcile",
@@ -335,19 +322,11 @@ end
 local function run_fix_reconcile(payload, run_opts)
   local cached = take_pr_phase_comments()
   if cached ~= nil then
-    local rendered_comments = {}
-    table.insert(rendered_comments, render_comment(core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev")))
+    local comments = { core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
     for _, comment in ipairs(cached) do
-      table.insert(rendered_comments, render_comment(comment))
+      table.insert(comments, comment)
     end
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-      stdout = string.format(
-        '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
-        table.concat(rendered_comments, ",")
-      ),
-      stderr = "",
-      exit_code = 0,
-    })
+    entity_read_mocks.mock_default_pr_read(t, comments)
   end
   return t.run_department("departments/reconcile/main.lua", {
     queue = "devloop_fix_reconcile",
@@ -424,22 +403,15 @@ local function run_fix(payload, run_opts)
     for _, comment in ipairs(cached or {}) do
       table.insert(comments, comment)
     end
-    local rendered_comments = {}
-    for _, comment in ipairs(comments) do
-      table.insert(rendered_comments, render_comment(comment))
-    end
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
-      stdout = string.format(
-        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false}\n',
-        json_string(head),
-        json_string(payload.reviewed_head_sha or pending and pending.head_sha or "def456"),
-        json_string(base_branch),
-        json_string(state),
-        table.concat(rendered_comments, ",")
-      ),
-      stderr = "",
-      exit_code = 0,
-    })
+    entity_read_mocks.mock_pr_read_forms(t, { comments = comments, head = head, head_sha = payload.reviewed_head_sha or pending and pending.head_sha or "def456", state = state, base_branch = base_branch, labels = pending and pending.labels or {} })
+    entity_read_mocks.mock_pr_view_selector(t, {
+      comments = comments,
+      head = head,
+      head_sha = payload.reviewed_head_sha or pending and pending.head_sha or "def456",
+      state = state,
+      base_branch = base_branch,
+      labels = pending and pending.labels or {},
+    }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository")
   end
   return t.run_department("departments/fix/main.lua", {
     queue = "devloop_fixing",
@@ -516,14 +488,10 @@ local function assignees_json(assignees)
 end
 
 local function mock_issue_state(labels, state, comments, assignees, author_login)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:enabled" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
+  local selected_comments = {}
   if comments ~= nil then
     for _, comment in ipairs(comments) do
-      table.insert(rendered_comments, render_comment(comment))
+      table.insert(selected_comments, comment)
     end
   else
     local state_marker = nil
@@ -549,19 +517,12 @@ local function mock_issue_state(labels, state, comments, assignees, author_login
       end
     end
     if state_marker ~= nil then
-      table.insert(rendered_comments, render_comment(state_marker))
+      table.insert(selected_comments, state_marker)
     end
   end
-  t.mock_command("--json title,body,comments,labels,state,updatedAt,assignees", {
-    stdout = string.format('{"title":"Implement decision recorder","body":"","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s],"author":{"login":"%s"}}\n',
-      json_string(state or "OPEN"),
-      table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ","),
-      assignees_json(assignees),
-      json_string(author_login or "fkst-test-bot")),
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:enabled" }, selected_comments, { state = state or "OPEN", assignees = assignees, author_login = author_login })
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:enabled" }, comments = selected_comments, state = state or "OPEN", assignees = assignees, author_login = author_login }, "title,body,comments,labels,state,updatedAt,assignees")
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:enabled" }, comments = selected_comments, state = state or "OPEN", assignees = assignees, author_login = author_login }, "title,body,comments,labels,state,updatedAt,assignees,author")
 end
 
 local function state_from_labels(labels)
@@ -681,71 +642,43 @@ mock_pr_origin_from_cached = function(payload, head_sha)
   for _, comment in ipairs(cached or {}) do
     table.insert(comments, comment)
   end
-  local rendered_comments = {}
-  for _, comment in ipairs(comments) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local rendered_labels = {}; for _, label in ipairs(pending and pending.labels or {}) do table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label))) end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s],"labels":[%s]}\n',
-      json_string(head),
-      json_string(effective_head_sha),
-      json_string(base_branch), json_string(state),
-      table.concat(rendered_comments, ","), table.concat(rendered_labels, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_read_forms(t, { repo = repo, number = pr_number, comments = comments, head = head, head_sha = effective_head_sha, state = state, base_branch = base_branch, labels = pending and pending.labels or {} })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    repo = repo,
+    number = pr_number,
+    comments = comments,
+    head = head,
+    head_sha = effective_head_sha,
+    state = state,
+    base_branch = base_branch,
+    labels = pending and pending.labels or {},
+  }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels")
   return repo, pr_number
 end
 
 local function mock_issue_body(body)
-  t.mock_command("--json body", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "body", {
     stdout = string.format('{"body":"%s"}\n', json_string(body or "Issue body")),
-    stderr = "",
-    exit_code = 0,
   })
 end
 
 local function mock_issue_result(labels, comments, extra)
   set_pr_phase_comments(labels or { "fkst-dev:thinking" }, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:thinking" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+  local fields = {}
+  for key, value in pairs(extra or {}) do
+    fields[key] = value
   end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local fields = extra or {}
-  t.mock_command("--json labels,comments", { stdout = string.format('{"labels":[%s],"comments":[%s],"assignees":[%s]}\n', table.concat(rendered_labels, ","), table.concat(rendered_comments, ","), assignees_json(fields.assignees)), stderr = "", exit_code = 0 })
-  t.mock_command("--json assignees,author", { stdout = string.format('{"assignees":[%s],"author":{"login":"%s"}}\n', assignees_json(fields.assignees), json_string(fields.author_login or "fkst-test-bot")), stderr = "", exit_code = 0 })
+  local selected = with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:thinking" }, selected, fields)
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:thinking" }, comments = selected, assignees = fields.assignees, author_login = fields.author_login }, "labels,comments")
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:thinking" }, comments = selected, assignees = fields.assignees, author_login = fields.author_login }, "assignees,author")
 end
 
 local function mock_issue_loop(labels, comments, extra)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:thinking" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
   local fields = extra or {}
-  t.mock_command("--json title,updatedAt,labels,comments,state", {
-    stdout = string.format(
-      '{"title":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
-      json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
-      json_string(fields.state or "OPEN"),
-      table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ","),
-      assignees_json(fields.assignees)
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  local selected = with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:thinking" }, selected, fields)
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:thinking" }, comments = selected, title = fields.title, updated_at = fields.updated_at, state = fields.state, assignees = fields.assignees }, "title,updatedAt,labels,comments,state")
 end
 
 local function mock_issue_reconcile(labels, comments, extra)
@@ -753,15 +686,12 @@ local function mock_issue_reconcile(labels, comments, extra)
 end
 
 local function mock_issue_commit_subject_title(fields)
-  local subject_cmd = "gh issue view '42' --repo 'owner/repo' --json number,title"
   if fields.commit_title_error ~= nil then
-    t.mock_command(subject_cmd, { stdout = "", stderr = tostring(fields.commit_title_error), exit_code = 1 })
+    entity_read_mocks.mock_issue_view_raw_selector(t, {}, "number,title", { stderr = tostring(fields.commit_title_error), exit_code = 1 })
     return
   end
-  t.mock_command(subject_cmd, {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "number,title", {
     stdout = string.format('{"number":42,"title":"%s"}\n', json_string(fields.commit_title or fields.title or "Implement decision recorder")),
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -780,16 +710,18 @@ local function mock_issue_title_labels_comments(labels, comments, extra, default
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  local stdout = string.format('{"title":"%s","labels":[%s],"comments":[%s]}\n',
-    json_string(fields.title or "Implement decision recorder"), table.concat(rendered_labels, ","), table.concat(rendered_comments, ","))
-  local view_count = include_default_marker and has_value(selected_labels, "fkst-dev:ready") and 2 or 1
-  for _ = 1, view_count do
-    t.mock_command("--json title,labels,comments", {
-      stdout = stdout,
-      stderr = "",
-      exit_code = 0,
-    })
-  end
+  local view_count = include_default_marker and has_value(selected_labels, "fkst-dev:ready") and 5 or 1
+  fields.times = view_count
+  entity_read_mocks.mock_issue_read_with_defaults(t, selected_labels, selected_comments, fields)
+  entity_read_mocks.mock_issue_view_selector(t, {
+    repo = fields.repo,
+    number = fields.number,
+    labels = selected_labels,
+    comments = selected_comments,
+    title = fields.title,
+    assignees = fields.assignees,
+    author_login = fields.author_login,
+  }, "title,labels,comments", view_count)
   mock_issue_commit_subject_title(fields)
 end
 
@@ -802,77 +734,35 @@ local function mock_issue_implement_raw(labels, comments, extra)
 end
 
 local function mock_issue_open_pr(labels, comments, extra)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:implementing" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
   local fields = extra or {}
-  t.mock_command("--json title,body,comments,labels,state,updatedAt,assignees", {
-    stdout = string.format('{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s],"author":{"login":"%s"}}\n',
-      json_string(fields.title or "Implement decision recorder"), json_string(fields.body or ""), json_string(fields.updated_at or "2026-06-03T01:02:03Z"), json_string(fields.state or "OPEN"), table.concat(rendered_labels, ","), table.concat(rendered_comments, ","), assignees_json(fields.assignees), json_string(fields.author_login or "fkst-test-bot")),
-    stderr = "",
-    exit_code = 0,
-  })
+  local selected = with_default_state_marker(labels or { "fkst-dev:implementing" }, comments)
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:implementing" }, selected, fields)
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:implementing" }, comments = selected, title = fields.title, body = fields.body, updated_at = fields.updated_at, state = fields.state, assignees = fields.assignees, author_login = fields.author_login }, "title,body,comments,labels,state,updatedAt,assignees")
 end
 
 local function mock_issue_reviewing(labels, comments, extra)
   set_pr_phase_comments(labels or { "fkst-dev:pr-open" }, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:pr-open" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:pr-open" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
   local fields = extra or {}
-  t.mock_command("--json labels,comments", {
-    stdout = string.format('{"labels":[%s],"comments":[%s],"assignees":[%s]}\n', table.concat(rendered_labels, ","), table.concat(rendered_comments, ","), assignees_json(fields.assignees)),
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("--json assignees,author", { stdout = string.format('{"assignees":[%s],"author":{"login":"%s"}}\n', assignees_json(fields.assignees), json_string(fields.author_login or "fkst-test-bot")), stderr = "", exit_code = 0 })
+  local selected = with_default_state_marker(labels or { "fkst-dev:pr-open" }, comments)
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:pr-open" }, selected, fields)
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:pr-open" }, comments = selected, assignees = fields.assignees, author_login = fields.author_login }, "labels,comments")
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:pr-open" }, comments = selected, assignees = fields.assignees, author_login = fields.author_login }, "assignees,author")
 end
 
 local function mock_issue_review(labels, comments, extra)
   set_pr_phase_comments(labels or { "fkst-dev:reviewing" }, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:reviewing" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:reviewing" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local fields = extra or {}; t.mock_command("--json title,labels,comments,assignees,author", { stdout = string.format('{"title":"%s","labels":[%s],"comments":[%s],"assignees":[%s],"author":{"login":"%s"}}\n', json_string(fields.title or "Implement decision recorder"), table.concat(rendered_labels, ","), table.concat(rendered_comments, ","), assignees_json(fields.assignees), json_string(fields.author_login or "fkst-test-bot")), stderr = "", exit_code = 0 })
+  local fields = extra or {}
+  local selected = with_default_state_marker(labels or { "fkst-dev:reviewing" }, comments)
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:reviewing" }, selected, fields)
+  entity_read_mocks.mock_issue_view_selector(t, { repo = fields.repo, number = fields.number, labels = labels or { "fkst-dev:reviewing" }, comments = selected, title = fields.title, assignees = fields.assignees, author_login = fields.author_login }, "title,labels,comments,assignees,author")
 end
 
 local function mock_issue_decompose(labels, comments, extra)
   set_pr_phase_comments(labels or { "fkst-dev:blocked" }, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:blocked" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:blocked" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
   local fields = extra or {}
-  t.mock_command("--json title,body,labels,comments", {
-    stdout = string.format(
-      '{"title":"%s","body":"%s","labels":[%s],"comments":[%s]}\n',
-      json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.body or "Body from GitHub"),
-      table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  local selected = with_default_state_marker(labels or { "fkst-dev:blocked" }, comments)
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:blocked" }, selected, { title = fields.title, body = fields.body or "Body from GitHub" })
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:blocked" }, comments = selected, title = fields.title, body = fields.body or "Body from GitHub" }, "title,body,labels,comments")
 end
 
 local function mock_issue_fix(labels, comments, extra)
@@ -897,31 +787,10 @@ end
 
 local function mock_issue_merge(labels, comments, extra)
   set_pr_phase_comments(labels or { "fkst-dev:merge-ready" }, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:merge-ready" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(with_default_state_marker(labels or { "fkst-dev:merge-ready" }, comments)) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local rendered_assignees = {}
   local fields = extra or {}
-  for _, assignee in ipairs(fields.assignees or { "fkst-test-bot" }) do
-    table.insert(rendered_assignees, string.format('{"login":"%s"}', json_string(assignee)))
-  end
-  t.mock_command("--json title,labels,comments,state,assignees", {
-    stdout = string.format(
-      '{"title":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s]}\n',
-      json_string(fields.title or "Implement decision recorder"),
-      json_string(fields.state or "OPEN"),
-      table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ","),
-      table.concat(rendered_assignees, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  local selected = with_default_state_marker(labels or { "fkst-dev:merge-ready" }, comments)
+  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:merge-ready" }, selected, { title = fields.title, state = fields.state, assignees = fields.assignees or { "fkst-test-bot" } })
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:merge-ready" }, comments = selected, title = fields.title, state = fields.state, assignees = fields.assignees or { "fkst-test-bot" } }, "title,labels,comments,state,assignees")
 end
 
 return {

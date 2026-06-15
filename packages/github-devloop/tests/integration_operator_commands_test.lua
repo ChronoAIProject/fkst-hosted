@@ -347,7 +347,12 @@ return {
     })
     local replay = run_observe(event, opts("operator-issue-rereview-active-replay"))
     t.eq(replay.exit_code, 0)
-    t.eq(find_raise(replay.raises, "github-proxy.github_issue_comment_request"), nil)
+    t.eq(find_raise(replay.raises, "consensus.proposal"), nil)
+    local replay_comment = find_raise(replay.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(replay_comment ~= nil)
+    t.is_true(replay_comment.payload.body:find("operator command refused", 1, true) ~= nil)
+    t.is_true(replay_comment.payload.body:find("stalled thinking state", 1, true) ~= nil)
+    t.is_true(replay_comment.payload.body:find('outcome="refused"', 1, true) ~= nil)
   end,
 
   test_issue_reready_command_rechecks_dependency_gate = function()

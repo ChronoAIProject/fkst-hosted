@@ -115,7 +115,6 @@ return {
     local result = run_review_loop_raw(event, opts("review-loop-claim-other"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 1)
     t.eq(count_calls("gh pr diff"), 0)
     t.eq(count_calls("codex exec"), 0)
   end,
@@ -149,7 +148,6 @@ return {
     local result = run_review_meta_raw(event, opts("review-meta-claim-other"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("codex exec"), 0)
   end,
 
@@ -163,7 +161,6 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("git fetch"), 0)
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git push"), 0)
@@ -179,7 +176,6 @@ return {
     }))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("git fetch"), 0)
     t.eq(count_calls("codex exec"), 0)
   end,
@@ -192,7 +188,6 @@ return {
     local result = run_review_reconcile_raw(event, opts("review-reconcile-claim-other"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("github-proxy.github_pr_comment_request"), 0)
   end,
 
@@ -204,7 +199,6 @@ return {
     local result = run_fix_reconcile_raw(event, opts("fix-reconcile-claim-other"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("github-proxy.github_pr_comment_request"), 0)
   end,
 
@@ -218,7 +212,6 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls(core.gh_issue_list_decompose_children_cmd("owner/repo", event.proposal_id)), 0)
@@ -234,7 +227,6 @@ return {
     }))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("codex exec"), 0)
   end,

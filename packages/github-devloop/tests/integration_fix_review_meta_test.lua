@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local action_label = h.action_label
 local reason_label = h.reason_label
 local has_value = h.has_value
@@ -457,14 +458,12 @@ return {
       reject_comment,
     }, branch, event.version)
     mock_write_env("1")
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
+    entity_read_mocks.mock_pr_view_raw_selector(t, {}, entity_read_mocks.pr_fix_selector, {
       stdout = string.format(
         '{"headRefName":"%s","headRefOid":"def456","baseRefName":"dev","state":"OPEN","comments":[%s],"isCrossRepository":false}\n',
         json_string(branch),
         render_comment(origin_marker)
       ),
-      stderr = "",
-      exit_code = 0,
     })
 
     local result = run_fix(event, opts("fix-missing-head-repository", { FKST_GITHUB_WRITE = "1" }))

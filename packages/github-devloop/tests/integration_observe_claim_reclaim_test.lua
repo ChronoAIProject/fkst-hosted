@@ -72,7 +72,6 @@ return {
     t.eq(find_raise(result.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay/timeout/thinking/1")
     t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 0)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 1)
   end,
 
   test_timeout_release_reclaims_issue_before_replay = function()
@@ -89,6 +88,5 @@ return {
     t.eq(find_raise(result.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay/timeout/thinking/1")
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 2)
   end,
 }

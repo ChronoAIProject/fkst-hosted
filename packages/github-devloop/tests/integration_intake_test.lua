@@ -4,6 +4,7 @@ local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
 local count_calls = h.count_calls
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function mock_repo_env(repo)
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
@@ -156,24 +157,19 @@ local function issue_list_json(issues)
 end
 
 local function mock_issue_list(issues)
-  t.mock_command(core.gh_issue_list_intake_cmd("owner/repo", 100), {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_intake_cmd("owner/repo", 100), {
     stdout = issue_list_json(issues) .. "\n",
-    stderr = "",
-    exit_code = 0,
   })
 end
 
-local function mock_intake_scan_view(labels, comments, state)
-  t.mock_command("--json title,labels,comments,state,assignees,author", {
-    stdout = string.format(
-      '{"title":"Issue","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
-      json_string(state or "OPEN"),
-      labels_json(labels or {}),
-      comments_json(comments or {})
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+local function mock_intake_scan_view(labels, comments, state, number)
+  entity_read_mocks.mock_issue_view_selector(t, {
+    number = number,
+    title = "Issue",
+    state = state or "OPEN",
+    labels = labels,
+    comments = comments,
+  }, "title,labels,comments,state,assignees,author")
 end
 
 local function mock_intake_judge_view(labels, comments, extra)
@@ -186,14 +182,10 @@ local function mock_intake_judge_view(labels, comments, extra)
     json_string(fields.updated_at or "2026-06-03T01:02:03Z"), json_string(fields.state or "OPEN"),
     labels_json(labels or {}), comments_json(comments or {}), assignees_json,
     json_string(fields.author_login or "fkst-test-bot"))
-  for _ = 1, 2 do
-    t.mock_command("--json title,body,updatedAt,labels,comments,state,assignees,author", {
-      stdout = assignee_stdout,
-      stderr = "",
-      exit_code = 0,
-    })
-  end
-  t.mock_command("--json title,body,updatedAt,labels,comments,state", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state,assignees,author", {
+    stdout = assignee_stdout,
+  }, 2)
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
     stdout = string.format(
       '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
       json_string(fields.title or "Add retry backoff to failed widget sync"),
@@ -203,8 +195,6 @@ local function mock_intake_judge_view(labels, comments, extra)
       labels_json(labels or {}),
       comments_json(comments or {})
     ),
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -226,19 +216,15 @@ local function mock_intake_codex_with_closed_issues(stdout, closed_issues, exit_
     exit_code = 0,
   })
   mock_intake_judge_view({}, {})
-  t.mock_command("--state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, "gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels", {
     stdout = "[]\n",
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_recent_closed_cmd("owner/repo", 30), {
     stdout = issue_list_json(closed_issues or {
       { number = 80, title = "Widget sync retry patch", labels = { "fingerprint:widget-sync" } },
       { number = 81, title = "Widget sync retry overflow fix", labels = { "fingerprint:widget-sync" } },
       { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
     }) .. "\n",
-    stderr = "",
-    exit_code = 0,
   })
   t.mock_command("gh pr list", {
     stdout = "[]\n",
@@ -280,22 +266,18 @@ local function mock_intake_codex(stdout, exit_code, stderr)
 end
 
 local function mock_intake_class_lookup(issues)
-  t.mock_command("--state open --limit 100 --json number,title,body,updatedAt,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_intake_cmd("owner/repo", 100), {
     stdout = issue_list_json(issues or {}) .. "\n",
-    stderr = "",
-    exit_code = 0,
   })
 end
 
 local function mock_recent_closed_class_siblings(issues)
-  t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_recent_closed_cmd("owner/repo", 30), {
     stdout = issue_list_json(issues or {
       { number = 80, title = "Widget sync retry patch", labels = { "fingerprint:widget-sync" } },
       { number = 81, title = "Widget sync retry overflow fix", labels = { "fingerprint:widget-sync" } },
       { number = 82, title = "Widget sync timeout fix", labels = { "fingerprint:widget-sync" } },
     }) .. "\n",
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -361,13 +343,13 @@ return {
       { number = 43, labels = {} },
       { number = 44, labels = {} },
     })
-    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN")
-    mock_intake_scan_view({ "fkst-dev:thinking" }, {}, "OPEN")
-    mock_intake_scan_view({ "fkst-class:expedite" }, {}, "OPEN")
-    mock_intake_scan_view({}, {}, "CLOSED")
+    mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN", 40)
+    mock_intake_scan_view({ "fkst-dev:thinking" }, {}, "OPEN", 41)
+    mock_intake_scan_view({ "fkst-class:expedite" }, {}, "OPEN", 42)
+    mock_intake_scan_view({}, {}, "CLOSED", 43)
     mock_intake_scan_view({}, {
       core.intake_decision_marker("github-devloop/issue/owner/repo/44", "decline", "intake/github-devloop/issue/owner/repo/44/v1", "standard"),
-    }, "OPEN")
+    }, "OPEN", 44)
 
     local result = run_scan(opts("intake-scan-filter"))
     t.eq(result.exit_code, 0)

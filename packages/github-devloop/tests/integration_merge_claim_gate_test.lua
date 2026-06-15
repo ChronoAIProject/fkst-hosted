@@ -12,6 +12,7 @@ local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 local json_string = h.json_string
 local render_comment = h.render_comment
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function branch_for_pr(pr_number)
   return "devloop-owner-repo-" .. tostring(pr_number)
@@ -104,7 +105,7 @@ local function mock_queue_list(pr_numbers)
 end
 
 local function mock_queue_pr(event, created_at, state, state_version, base_sha)
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  entity_read_mocks.mock_pr_view_raw_selector(t, { number = event.pr_number }, entity_read_mocks.pr_merge_selector, {
     stdout = string.format(
       '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
       json_string(branch_for_pr(event.pr_number)),
@@ -113,8 +114,6 @@ local function mock_queue_pr(event, created_at, state, state_version, base_sha)
       json_string(created_at),
       comments_for(event, created_at, state, state_version)
     ),
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -136,15 +135,13 @@ local function mock_merged_pr_view(event)
   for _, comment in ipairs(comments) do
     table.insert(rendered, render_comment(comment))
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  entity_read_mocks.mock_pr_view_raw_selector(t, { number = event.pr_number }, entity_read_mocks.pr_merge_selector, {
     stdout = string.format(
       '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"abc123","state":"MERGED","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"2026-06-03T02:05:04Z","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
       json_string(branch_for_pr(event.pr_number)),
       json_string(event.reviewed_head_sha),
       table.concat(rendered, ",")
     ),
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -237,7 +234,6 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr merge"), 0)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"), 0)
   end,
 
   test_merge_direct_merge_ready_fails_closed_when_claim_read_fails = function()
@@ -285,7 +281,6 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr merge"), 0)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus"), 0)
   end,
 
   test_merge_batch_window_stops_before_other_owned_second_entry = function()
@@ -320,7 +315,6 @@ return {
     t.eq(count_calls("gh pr merge"), 1)
     t.eq(count_calls("gh pr merge '8' --repo 'owner/repo' --merge --match-head-commit 'fed789'"), 0)
     t.eq(count_calls("gh issue close"), 1)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 43)), 1)
     t.eq(count_calls("git fetch 'origin' '" .. branch_for_pr(8) .. "'"), 0)
     t.eq(count_calls("gh pr diff '8' --repo 'owner/repo' --name-only"), 0)
   end,

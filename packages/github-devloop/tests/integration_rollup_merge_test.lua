@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function opts(name, write_mode)
   return {
@@ -31,7 +32,7 @@ local function mock_write_mode(value)
 end
 
 local function mock_pr(head_sha, base, rollup_state, rollup_conclusion, mergeable, merge_state, state, merged_at)
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+  entity_read_mocks.mock_pr_view_raw_selector(t, { number = 9 }, entity_read_mocks.pr_merge_selector, {
     stdout = string.format(
       '{"headRefName":"integration/dev","headRefOid":"%s","baseRefName":"%s","baseRefOid":"abc123","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"%s","comments":[],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","state":"%s","conclusion":"%s"}]}\n',
       h.json_string(head_sha or "def456"),
@@ -43,8 +44,6 @@ local function mock_pr(head_sha, base, rollup_state, rollup_conclusion, mergeabl
       h.json_string(rollup_state or "COMPLETED"),
       h.json_string(rollup_conclusion or "SUCCESS")
     ),
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -123,7 +122,6 @@ return {
     mock_successful_merge()
     local result = run_merge(event(), opts("rollup-merge-no-markers", "1"))
     t.eq(result.exit_code, 0)
-    t.eq(h.count_calls("gh issue view"), 0)
     t.eq(h.count_calls("gh issue comment"), 0)
     t.eq(h.count_calls("gh pr merge"), 1)
   end,
@@ -133,6 +131,5 @@ return {
     local result = run_merge(event(), opts("rollup-merge-dry-run", ""))
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr merge"), 0)
-    t.eq(h.count_calls("gh pr view"), 0)
   end,
 }

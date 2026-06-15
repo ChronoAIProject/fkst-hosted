@@ -322,7 +322,6 @@ return {
     )
 
     t.eq(released, true)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 1)
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
   end,
 
@@ -369,7 +368,6 @@ return {
     t.eq(reclaimed, true)
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 2)
   end,
 
   test_timeout_release_skips_when_fresh_read_is_not_self_only = function()

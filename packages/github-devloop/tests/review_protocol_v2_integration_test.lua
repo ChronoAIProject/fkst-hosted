@@ -16,21 +16,13 @@ local mock_issue_review_meta = h.mock_issue_review_meta
 local mock_bot_env = h.mock_bot_env
 local mock_pr_origin = h.mock_pr_origin
 local find_raise = h.find_raise
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function mock_issue_result_view(labels, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', h.json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(comments or {}) do
-    table.insert(rendered_comments, h.render_comment(comment))
-  end
-  t.mock_command("--json labels,comments", {
-    stdout = string.format('{"labels":[%s],"comments":[%s]}\n', table.concat(rendered_labels, ","), table.concat(rendered_comments, ",")),
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_issue_view_selector(t, {
+    labels = labels,
+    comments = comments,
+  }, "labels,comments")
 end
 
 local function pr_event(updated_at)

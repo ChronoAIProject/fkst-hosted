@@ -1,6 +1,7 @@
 local base = require("tests.devloop_base_helpers")
 local pr = require("tests.devloop_pr_helpers")
 local worktree = require("tests.devloop_worktree_helpers")
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local helpers = {}
 for key, value in pairs(base) do
@@ -28,15 +29,33 @@ local function mock_empty_dependencies()
   })
 end
 
-local function mock_default_issue_claim()
-  helpers.t.mock_command(helpers.core.gh_issue_view_claim_cmd("owner/repo", 42), {
-    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
-    stderr = "",
-    exit_code = 0,
-  })
+local function issue_identity_from_payload(payload)
+  local entity = helpers.core.parse_entity_proposal_id(payload and payload.proposal_id)
+  local source_ref = payload and payload.source_ref and payload.source_ref.ref
+  local source_repo, source_issue = tostring(source_ref or ""):match("^(.+)#issue/(%d+)$")
+  return source_repo or (entity and entity.repo) or "owner/repo",
+    tonumber(source_issue) or (entity and entity.issue_number) or 42
 end
 
-local function mock_context_bundle()
+local function mock_default_issue_claim(repo, number)
+  local selected_repo = repo or "owner/repo"
+  local selected_number = number or 42
+  entity_read_mocks.mock_issue_read_forms(helpers.t, {
+    repo = selected_repo,
+    number = selected_number,
+    assignees = { "fkst-test-bot" },
+    author_login = "fkst-test-bot",
+  })
+  entity_read_mocks.mock_issue_view_selector(helpers.t, {
+    repo = selected_repo,
+    number = selected_number,
+    assignees = { "fkst-test-bot" },
+    author_login = "fkst-test-bot",
+  }, "assignees,author", 30)
+end
+
+local function mock_context_bundle(payload)
+  local repo, issue_number = issue_identity_from_payload(payload)
   local ok = { stdout = "", stderr = "", exit_code = 0 }
   for _ = 1, 8 do
     helpers.t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
@@ -52,45 +71,49 @@ local function mock_context_bundle()
       exit_code = 1,
     })
   end
+  for _ = 1, 3 do
+    helpers.t.mock_command("test -e", {
+      stdout = "",
+      stderr = "",
+      exit_code = 1,
+    })
+  end
   helpers.t.mock_command("install -d -m 0755", ok)
   helpers.t.mock_command("mktemp -d", {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime/context/.bundle-tmp.mocked\n",
     stderr = "",
     exit_code = 0,
   })
-  helpers.t.mock_command("--json title,body,updatedAt,labels,comments,state", {
+  entity_read_mocks.mock_issue_view_raw_selector(helpers.t, { repo = repo, number = issue_number }, "title,body,updatedAt,labels,comments,state", {
     stdout = bundle_json,
-    stderr = "",
-    exit_code = 0,
   })
-  helpers.t.mock_command("--json title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
+  entity_read_mocks.mock_pr_view_raw_selector(helpers.t, {
+    repo = repo,
+    number = payload and payload.pr_number or 7,
+  }, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
     stdout = pr_context_json,
-    stderr = "",
-    exit_code = 0,
   })
   helpers.t.mock_command("gh pr diff", {
     stdout = "diff --git a/file.lua b/file.lua\n+return true\n",
     stderr = "",
     exit_code = 0,
   })
-  helpers.t.mock_command("--state open --limit 100 --json number,title,body,updatedAt,labels", {
-    stdout = "[]\n",
-    stderr = "",
-    exit_code = 0,
-  })
-  helpers.t.mock_command("--state closed --limit 30 --json number,title,closedAt,labels", {
-    stdout = "[]\n",
-    stderr = "",
-    exit_code = 0,
-  })
-  for _ = 1, 5 do
+  entity_read_mocks.mock_issue_list_command(helpers.t, helpers.core.gh_issue_list_intake_cmd(repo, 100), {})
+  entity_read_mocks.mock_issue_list_command(helpers.t, helpers.core.gh_issue_list_recent_closed_cmd(repo, 30), {})
+  for _ = 1, 12 do
+    helpers.t.mock_command("touch ", ok)
+  end
+  for _ = 1, 12 do
+    helpers.t.mock_command("printf %s '", ok)
     helpers.t.mock_command(" > ", ok)
   end
-  helpers.t.mock_command("python3 -c", ok)
-  for _ = 1, 8 do
+  for _ = 1, 3 do
+    helpers.t.mock_command("python3 -c", ok)
+  end
+  for _ = 1, 12 do
     helpers.t.mock_command("test -r", ok)
   end
-  for _ = 1, 8 do
+  for _ = 1, 12 do
     helpers.t.mock_command("wc -c < ", {
       stdout = "1\n",
       stderr = "",
@@ -101,7 +124,8 @@ end
 
 helpers.run_observe = function(...)
   mock_empty_dependencies()
-  mock_context_bundle()
+  local event = ...
+  mock_context_bundle(event)
   return base_run_observe(...)
 end
 
@@ -112,7 +136,8 @@ end
 
 helpers.run_implement = function(...)
   mock_empty_dependencies()
-  mock_context_bundle()
+  local payload = ...
+  mock_context_bundle(payload)
   return base_run_implement(...)
 end
 
@@ -128,8 +153,10 @@ for _, name in ipairs({
 }) do
   local base_run = helpers[name]
   helpers[name] = function(...)
-    mock_context_bundle()
-    mock_default_issue_claim()
+    local payload = ...
+    local repo, issue_number = issue_identity_from_payload(payload)
+    mock_context_bundle(payload)
+    mock_default_issue_claim(repo, issue_number)
     return base_run(...)
   end
 end
@@ -164,4 +191,5 @@ end
 
 helpers.mock_context_bundle = mock_context_bundle
 helpers.mock_default_issue_claim = mock_default_issue_claim
+helpers.issue_identity_from_payload = issue_identity_from_payload
 return helpers

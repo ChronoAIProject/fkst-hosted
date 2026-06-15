@@ -52,6 +52,7 @@ local mock_issue_review_meta = h.mock_issue_review_meta
 local mock_issue_merge = h.mock_issue_merge
 local merge_comments = h.merge_comments
 local mock_pr_origin = h.mock_pr_origin
+local mock_pr_origin_for = h.mock_pr_origin_for
 local mock_pr_merge = h.mock_pr_merge
 local mock_pr_merge_rollup = h.mock_pr_merge_rollup
 local mock_merging_comment = h.mock_merging_comment
@@ -152,7 +153,6 @@ return {
     end
     t.eq(saw_worktree_prefix, true)
     t.eq(saw_prompt, true)
-    t.eq(count_calls("--json title,labels,comments"), 2)
     t.eq(count_calls("git -C"), 8)
     t.eq(count_calls("git worktree add -b"), 1)
     t.eq(count_calls("codex exec"), 1)
@@ -187,7 +187,6 @@ return {
     t.is_true(pr_raise.payload.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
     t.is_true(pr_raise.payload.issue_comment_body_template:find("state=\"pr-open\"", 1, true) ~= nil)
     t.eq(pr_raise.payload.issue_label_add[1], "fkst-dev:pr-open")
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("show-ref --verify --quiet"), 1)
     t.eq(count_calls("rev-parse --verify"), 1)
   end,
@@ -290,7 +289,6 @@ return {
     t.eq(pr_label_raise.payload.target_number, 7)
     t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
     t.is_true(#label_raise.payload.remove_labels >= 10)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
   test_observe_pr_removes_stale_reviewing_label_from_blocked_pr_marker = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -484,7 +482,6 @@ return {
     t.eq(#result.raises, 0)
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
     t.eq(find_label_raise(result.raises, "pr"), nil)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
   test_observe_pr_non_devloop_branch_without_visible_backpointer_uses_pr_native_origin = function()
     mock_pr_origin({}, "feature/unrelated")
@@ -503,7 +500,6 @@ return {
     t.eq(#result.raises, 0)
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
     t.eq(find_label_raise(result.raises, "pr"), nil)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
   test_observe_pr_closed_pr_does_not_advance_issue_to_reviewing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -549,7 +545,6 @@ return {
     t.eq(#result.raises, 0)
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
     t.eq(find_label_raise(result.raises, "pr"), nil)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
   test_review_pr_builds_pr_review_consensus_proposal = function()
     local event = reviewing()
@@ -577,9 +572,7 @@ return {
     t.is_true(proposal.body:find("Reviewed PR head: def456", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.eq(core.validate_proposal(proposal), true)
-    t.eq(count_calls("--json title,labels,comments,assignees,author"), 1)
     t.eq(count_calls("gh pr diff"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 1)
   end,
 
   test_review_pr_gate_reject_reached_routes_to_fixing = function()
@@ -654,7 +647,6 @@ return {
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.is_nil(proposal.content_fetch:find("gh pr", 1, true))
     t.eq(count_calls("gh pr diff"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,comments"), 1)
   end,
 
   test_review_pr_does_not_put_diff_markers_in_payload = function()
@@ -707,9 +699,18 @@ return {
     })
     mock_issue_review({ "fkst-dev:reviewing" }, {
       core.state_marker(issue_proposal_id, "reviewing", version),
+    }, {
+      repo = repo,
     })
-    mock_pr_origin_sequence({
-      { head = "devloop-owner-repo-42-01HY", head_sha = "def456" },
+    mock_pr_origin_for({
+      repo = repo,
+      number = 7,
+      comments = {
+        core.pr_origin_marker(issue_proposal_id, "42", "devloop-owner-repo-42-01HY", version, "dev"),
+        core.state_marker(issue_proposal_id, "reviewing", version),
+      },
+      head = "devloop-owner-repo-42-01HY",
+      head_sha = "def456",
     })
 
     local result = run_review_pr(event, opts("review-pr-long-repo"))

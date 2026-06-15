@@ -5,7 +5,12 @@ local action_label = base.action_label
 local reason_label = base.reason_label
 local json_string = base.json_string
 local render_comment = base.render_comment
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local last_merge_comments = nil
+
+local function json_literal(value)
+  return '"' .. json_string(value) .. '"'
+end
 local function review_result_approve_marker(event)
   return core.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key)
 end
@@ -70,6 +75,48 @@ local function pr_native_comments(event, include_review_result)
   return comments
 end
 
+local function merge_ready_pr_number_from_comments(comments, head)
+  for _, comment in ipairs(comments or {}) do
+    local body = type(comment) == "table" and comment.body or comment
+    for marker in tostring(body or ""):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
+      local pr_number = tonumber(marker:match('pr="(%d+)"'))
+      if pr_number ~= nil then
+        return pr_number
+      end
+    end
+  end
+  local head_pr_number = tostring(head or ""):match("^devloop%-owner%-repo%-(%d+)$")
+  if head_pr_number ~= nil then
+    return tonumber(head_pr_number)
+  end
+  return 7
+end
+
+local function mock_pr_origin_for(fields)
+  local effective = fields or {}
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = effective.repo or "owner/repo",
+    number = effective.number or 7,
+    comments = effective.comments,
+    head = effective.head or "devloop-owner-repo-42-01HY",
+    head_sha = effective.head_sha or "def456",
+    state = effective.state or "OPEN",
+    base_branch = effective.base_branch or "dev",
+    labels = effective.labels or {},
+    times = effective.times or 1,
+  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    repo = effective.repo or "owner/repo",
+    number = effective.number or 7,
+    comments = effective.comments,
+    head = effective.head or "devloop-owner-repo-42-01HY",
+    head_sha = effective.head_sha or "def456",
+    state = effective.state or "OPEN",
+    base_branch = effective.base_branch or "dev",
+    labels = effective.labels or {},
+  }, entity_read_mocks.pr_origin_selector, effective.times or 1)
+end
+
 local function mock_pr_origin(comments, head, head_sha, state, base_branch, times, labels)
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
@@ -118,29 +165,17 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch, time
   if tostring(state or "OPEN") ~= "MERGED" then
     last_merge_comments = input_comments
   end
-  local rendered_comments = {}
-  for _, comment in ipairs(input_comments or {}) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local rendered_labels = {}
-  for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  for _ = 1, times or 1 do
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-      stdout = string.format(
-        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","labels":[%s],"comments":[%s]}\n',
-        json_string(head or "devloop-owner-repo-42-01HY"),
-        json_string(head_sha or "def456"),
-        json_string(base_branch or "dev"),
-        json_string(state or "OPEN"),
-        table.concat(rendered_labels, ","),
-        table.concat(rendered_comments, ",")
-      ),
-      stderr = "",
-      exit_code = 0,
-    })
-  end
+  mock_pr_origin_for({
+    repo = "owner/repo",
+    number = 7,
+    comments = input_comments,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    base_branch = base_branch or "dev",
+    labels = labels or {},
+    times = times or 1,
+  })
 end
 
 local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, is_draft, base_sha)
@@ -172,34 +207,40 @@ local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_r
     input_comments = merged
   end
   input_comments = append_merged_pr_merging_fact(input_comments, state)
-  local rendered_comments = {}
-  for _, comment in ipairs(input_comments or {}) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local cross = "false"
-  if cross_repo == true then
-    cross = "true"
-  end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"%s","detailsUrl":"https://example.invalid/checks/ci","name":"ci","startedAt":"2026-06-03T02:03:04Z","status":"%s","workflowName":"ci"}]}\n',
-      json_string(head or "devloop-owner-repo-42-01HY"),
-      json_string(head_sha or "def456"),
-      json_string(base_sha or "abc123"),
-      json_string(state or "OPEN"),
-      is_draft == true and "true" or "false",
-      json_string(merged_at or ""),
-      table.concat(rendered_comments, ","),
-      json_string(head_repo or "owner/repo"),
-      cross,
-      json_string(mergeable or "MERGEABLE"),
-      json_string(merge_state or "CLEAN"),
-      json_string(rollup_conclusion or "SUCCESS"),
-      json_string(rollup_state or "COMPLETED")
-    ),
-    stderr = "",
-    exit_code = 0,
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = "owner/repo",
+    number = 7,
+    comments = input_comments,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+    merged_at = merged_at,
+    is_draft = is_draft,
+    base_sha = base_sha or "abc123",
+    mergeable = mergeable,
+    merge_state = merge_state,
+    status_check_rollup_json = '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":' .. json_literal(rollup_conclusion or "SUCCESS") .. ',"detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":' .. json_literal(rollup_state or "COMPLETED") .. ',"workflowName":"test"}]',
+    merge_view = true,
+    register_merge_views = false,
   })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    repo = "owner/repo",
+    number = merge_ready_pr_number_from_comments(input_comments, head),
+    comments = input_comments,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+    merged_at = merged_at,
+    is_draft = is_draft,
+    base_sha = base_sha or "abc123",
+    mergeable = mergeable,
+    merge_state = merge_state,
+    status_check_rollup_json = '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":' .. json_literal(rollup_conclusion or "SUCCESS") .. ',"detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":' .. json_literal(rollup_state or "COMPLETED") .. ',"workflowName":"test"}]',
+  }, entity_read_mocks.pr_merge_selector)
   if tostring(state or "OPEN") ~= "MERGED" then
     last_merge_comments = input_comments
   end
@@ -234,33 +275,38 @@ local function mock_pr_merge_rollup(comments, rollup_json, head, head_sha, state
   if tostring(state or "OPEN") ~= "MERGED" then
     last_merge_comments = input_comments
   end
-  local rendered_comments = {}
-  for _, comment in ipairs(input_comments or {}) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local cross = "false"
-  if cross_repo == true then
-    cross = "true"
-  end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
-      json_string(head or "devloop-owner-repo-42-01HY"),
-      json_string(head_sha or "def456"),
-      json_string(base_sha or "abc123"),
-      json_string(state or "OPEN"),
-      is_draft == true and "true" or "false",
-      json_string(merged_at or ""),
-      table.concat(rendered_comments, ","),
-      json_string(head_repo or "owner/repo"),
-      cross,
-      json_string(mergeable or "MERGEABLE"),
-      json_string(merge_state or "CLEAN"),
-      rollup_json or '[{"name":"ci","state":"COMPLETED","conclusion":"SUCCESS"}]'
-    ),
-    stderr = "",
-    exit_code = 0,
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = "owner/repo",
+    number = 7,
+    comments = input_comments,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+    merged_at = merged_at,
+    is_draft = is_draft,
+    base_sha = base_sha or "abc123",
+    mergeable = mergeable,
+    merge_state = merge_state,
+    status_check_rollup_json = rollup_json,
+    merge_view = true,
+    register_merge_views = false,
   })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = input_comments,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+    merged_at = merged_at,
+    is_draft = is_draft,
+    base_sha = base_sha or "abc123",
+    mergeable = mergeable,
+    merge_state = merge_state,
+    status_check_rollup_json = rollup_json,
+  }, "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup")
 end
 
 local function mock_merging_comment(exit_code, stderr)
@@ -273,6 +319,7 @@ end
 
 local function mock_pr_merge_command(exit_code, stderr)
   mock_pr_merge(nil, "devloop-owner-repo-42-01HY", "def456", "OPEN")
+  mock_merging_comment()
   t.mock_command("gh pr merge '7' --repo 'owner/repo' --merge --match-head-commit 'def456'", {
     stdout = "merged\n",
     stderr = stderr or "",
@@ -313,7 +360,6 @@ local function merge_comments_with_merging(event, branch, impl_version)
 end
 
 local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_repo)
-  local rendered_comments = {}
   local cached = base.take_pr_phase_comments()
   local with_origin = {
     core.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, head or "devloop-owner-repo-42-01HY", base.reviewing().version, "dev"),
@@ -328,31 +374,27 @@ local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_rep
   for _, comment in ipairs(cached or {}) do
     table.insert(with_origin, comment)
   end
-  for _, comment in ipairs(with_origin) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local cross = "false"
-  if cross_repo == true then
-    cross = "true"
-  end
-  local stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s}\n',
-      json_string(head or "devloop-owner-repo-42-01HY"),
-      json_string(head_sha or "def456"),
-      json_string(state or "OPEN"),
-      table.concat(rendered_comments, ","),
-      json_string(head_repo or "owner/repo"),
-      cross
-    )
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
-    stdout = stdout,
-    stderr = "",
-    exit_code = 0,
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = "owner/repo",
+    number = 7,
+    comments = with_origin,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
   })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = with_origin,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+  }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository")
 end
 
 local function mock_pr_native_fix(comments, head, head_sha, state, head_repo, cross_repo)
-  local rendered_comments = {}
   local cached = base.take_pr_phase_comments()
   local input_comments = comments
   if input_comments == nil or #input_comments == 0 then
@@ -367,26 +409,24 @@ local function mock_pr_native_fix(comments, head, head_sha, state, head_repo, cr
     end
     input_comments = merged
   end
-  for _, comment in ipairs(input_comments or {}) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  local cross = "false"
-  if cross_repo == true then
-    cross = "true"
-  end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","comments":[%s],"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s}\n',
-      json_string(head or "pr-native-branch"),
-      json_string(head_sha or "def456"),
-      json_string(state or "OPEN"),
-      table.concat(rendered_comments, ","),
-      json_string(head_repo or "owner/repo"),
-      cross
-    ),
-    stderr = "",
-    exit_code = 0,
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = "owner/repo",
+    number = 7,
+    comments = input_comments,
+    head = head or "pr-native-branch",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
   })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = input_comments,
+    head = head or "pr-native-branch",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+  }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository")
 end
 
 local function mock_pr_origin_sequence(entries)
@@ -408,30 +448,34 @@ local function mock_pr_origin_sequence(entries)
       end
       comments = merged
     end
-    local rendered_comments = {}
-    for _, comment in ipairs(comments or {}) do
-      table.insert(rendered_comments, render_comment(comment))
-    end
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-      stdout = string.format(
-        '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s],"labels":[]}\n',
-        json_string(entry.head or "devloop-owner-repo-42-01HY"),
-        json_string(entry.head_sha or "def456"),
-        json_string(entry.state or "OPEN"),
-        table.concat(rendered_comments, ",")
-      ),
-      stderr = "",
-      exit_code = 0,
+    entity_read_mocks.mock_pr_read_forms(t, {
+      repo = "owner/repo",
+      number = 7,
+      comments = comments,
+      head = entry.head or "devloop-owner-repo-42-01HY",
+      head_sha = entry.head_sha or "def456",
+      state = entry.state or "OPEN",
+      base_branch = "dev",
+      labels = {},
+      times = 1,
     })
+    entity_read_mocks.mock_pr_view_selector(t, {
+      comments = comments,
+      head = entry.head or "devloop-owner-repo-42-01HY",
+      head_sha = entry.head_sha or "def456",
+      state = entry.state or "OPEN",
+      base_branch = "dev",
+      labels = {},
+    }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels")
   end
 end
 
 local function mock_pr_head(head, state)
-  t.mock_command("--json headRefName", {
-    stdout = string.format('{"headRefName":"%s","baseRefName":"dev","state":"%s"}\n', json_string(head or "devloop-owner-repo-42-01HY"), json_string(state or "OPEN")),
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    head = head or "devloop-owner-repo-42-01HY",
+    base_branch = "dev",
+    state = state or "OPEN",
+  }, entity_read_mocks.pr_head_selector)
 end
 
 local function mock_pr_diff(diff, exit_code, stderr)
@@ -498,6 +542,7 @@ return {
   pr_native_comments = pr_native_comments,
   review_result_approve_marker = review_result_approve_marker,
   mock_pr_origin = mock_pr_origin,
+  mock_pr_origin_for = mock_pr_origin_for,
   mock_pr_merge = mock_pr_merge,
   mock_pr_merge_rollup = mock_pr_merge_rollup,
   mock_merging_comment = mock_merging_comment,

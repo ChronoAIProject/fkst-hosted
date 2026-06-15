@@ -16,6 +16,7 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function has_value(values, expected)
   for _, value in ipairs(values or {}) do
@@ -35,17 +36,15 @@ local function mock_linked_pr_state(comments, state, exit_code, times)
   if exit_code ~= nil and exit_code ~= 0 then
     stderr = "pr view failed"
   end
-  for _ = 1, times or 1 do
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-      stdout = string.format(
-        '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
-        json_string(state or "OPEN"),
-        table.concat(rendered_comments, ",")
-      ),
-      stderr = stderr,
-      exit_code = exit_code or 0,
-    })
-  end
+  entity_read_mocks.mock_pr_view_raw_selector(t, {}, entity_read_mocks.pr_origin_selector, {
+    stdout = string.format(
+      '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
+      json_string(state or "OPEN"),
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = stderr,
+    exit_code = exit_code or 0,
+  }, times or 1)
 end
 
 local function mock_decompose_child_issue_list(event, indexes)
@@ -124,7 +123,6 @@ return {
     t.eq(second_proposal.dedup_key, core.build_proposal(updated_event).dedup_key .. "/replay")
     t.is_true(second_proposal.dedup_key ~= first_proposal.dedup_key)
     t.is_true(second_proposal.content_fetch ~= first_proposal.content_fetch)
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 3)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -149,7 +147,6 @@ return {
     t.eq(proposal.round, 1)
     t.eq(proposal.convergence_question, "Narrow the question")
     t.eq(proposal.prior_round_digests[1].digest, "needs-narrower-scope")
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -213,7 +210,6 @@ return {
       source_ref = event.source_ref,
     }).dedup_key)
     t.is_nil(ready_raise.payload.ready_hand_off)
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -230,7 +226,6 @@ return {
     local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-issue-ready-self-heal-advanced"))
     t.eq(observed.exit_code, 0)
     t.eq(find_raise(observed.raises, "devloop_ready"), nil)
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
     t.eq(count_calls("--json body"), 0)
 
     mock_issue_implement_raw({ "fkst-dev:implementing" }, {
@@ -263,8 +258,6 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"))
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"), 1)
   end,
 
   test_observe_issue_pr_open_reraises_reviewing_for_poll_self_heal = function()
@@ -383,13 +376,11 @@ return {
     t.eq(#result.raises, 0)
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
-    for _ = 1, 2 do
-      t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-        stdout = "",
-        stderr = "HTTP 404: Not Found\n",
-        exit_code = 1,
-      })
-    end
+    entity_read_mocks.mock_pr_view_raw_selector(t, {}, entity_read_mocks.pr_origin_selector, {
+      stdout = "",
+      stderr = "HTTP 404: Not Found\n",
+      exit_code = 1,
+    }, 2)
 
     local absent = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" }, source = "liveness-scan" }), opts("observe-issue-pr-open-absent-link-known-missing", {
       now = "2026-06-03T03:00:00Z",
@@ -522,8 +513,6 @@ return {
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:reviewing"))
     t.eq(label_raise.payload.source_ref.ref, "owner/repo#issue/42")
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"), 0)
   end,
 
   test_observe_issue_reconciles_issue_terminal_label_over_linked_pr_state = function()
@@ -554,8 +543,6 @@ return {
       version,
     }))
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
-    t.eq(count_calls("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"), 1)
   end,
 
   test_observe_issue_reconciles_merged_terminal_label_from_marker = function()
@@ -572,7 +559,6 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:merged")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-ready"))
     t.eq(label_raise.payload.source_ref.ref, "owner/repo#issue/42")
-    t.eq(count_calls("--json title,body,comments,labels,state,updatedAt,assignees"), 1)
   end,
 
   test_observe_issue_missing_reviewing_label_does_not_change_pr_local_state = function()

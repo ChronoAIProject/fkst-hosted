@@ -3,6 +3,7 @@ local t = h.t
 local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function find_label_raise(raises, target_kind)
   return find_raise(raises, "github-proxy.github_issue_label_request", function(payload)
@@ -11,22 +12,13 @@ local function find_label_raise(raises, target_kind)
 end
 
 local function mock_pr_view_origin(comments, head, head_sha, state, base_branch)
-  local rendered_comments = {}
-  for _, comment in ipairs(comments or {}) do
-    table.insert(rendered_comments, h.render_comment(comment))
-  end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","comments":[%s]}\n',
-      h.json_string(head or "devloop-owner-repo-42-01HY"),
-      h.json_string(head_sha or "def456"),
-      h.json_string(base_branch or "dev"),
-      h.json_string(state or "OPEN"),
-      table.concat(rendered_comments, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = comments,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    base_branch = base_branch or "dev",
+    state = state or "OPEN",
+  }, entity_read_mocks.pr_origin_selector)
 end
 
 local function pr_opened_event(extra)

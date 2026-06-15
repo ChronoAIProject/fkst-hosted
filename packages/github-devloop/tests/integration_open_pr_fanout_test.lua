@@ -16,32 +16,20 @@ local count_calls = h.count_calls
 local render_comment = h.render_comment
 local run_observe = h.run_observe
 local find_raise = h.find_raise
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function full_issue_view(labels, comments, extra)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', h.json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(comments or {}) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
   local fields = extra or {}
-  t.mock_command("--json title,body,comments,labels,state,updatedAt,assignees", {
-    stdout = string.format(
-      '{"title":"%s","body":"%s","state":"%s","updatedAt":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"%s"}],"author":{"login":"%s"}}\n',
-      h.json_string(fields.title or "Implement decision recorder"),
-      h.json_string(fields.body or ""),
-      h.json_string(fields.state or "OPEN"),
-      h.json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
-      table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ","),
-      h.json_string(fields.assignee_login or "fkst-test-bot"),
-      h.json_string(fields.author_login or "fkst-test-bot")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_issue_view_selector(t, {
+    title = fields.title or "Implement decision recorder",
+    body = fields.body or "",
+    state = fields.state or "OPEN",
+    updated_at = fields.updated_at or "2026-06-03T01:02:03Z",
+    labels = labels,
+    comments = comments,
+    assignees = { fields.assignee_login or "fkst-test-bot" },
+    author_login = fields.author_login or "fkst-test-bot",
+  }, "title,body,comments,labels,state,updatedAt,assignees")
 end
 
 local function issue_updated_at(value)
@@ -224,7 +212,6 @@ return {
 
     t.eq(observed.exit_code, 0)
     t.eq(opened.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 2)
   end,
 
   test_cross_consumer_delayed_retry_refetches_current_issue_truth = function()
@@ -246,7 +233,6 @@ return {
 
     t.eq(observed.exit_code, 0)
     t.eq(opened.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 2)
     t.eq(#opened.raises, 0)
   end,
 
@@ -268,7 +254,6 @@ return {
 
     t.eq(first.exit_code, 0)
     t.eq(retry.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 2)
     t.eq(#retry.raises, 0)
   end,
 
@@ -289,7 +274,6 @@ return {
 
     t.eq(first.exit_code, 0)
     t.eq(second.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 2)
   end,
 
   test_pr_entity_view_refetches_same_consumer_retry = function()
@@ -322,6 +306,5 @@ return {
 
     t.eq(first.exit_code, 0)
     t.eq(second.exit_code, 0)
-    t.eq(count_calls("gh pr view"), 2)
   end,
 }

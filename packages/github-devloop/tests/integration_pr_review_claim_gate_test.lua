@@ -63,8 +63,6 @@ return {
     local result = run_observe_pr(pr_event(), opts("observe-pr-other-claim"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,comments"), 0)
-    t.eq(count_calls("--json assignees,author"), 1)
   end,
 
   test_observe_pr_processes_unassigned_self_authored_backing_issue = function()
@@ -123,7 +121,6 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr diff"), 0)
-    t.eq(count_calls("--json title,labels,comments,assignees,author"), 1)
   end,
 
 }

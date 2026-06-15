@@ -10,6 +10,7 @@ local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -127,17 +128,15 @@ local function mock_linked_pr_state(comments, state, exit_code, times)
   if exit_code ~= nil and exit_code ~= 0 then
     stderr = "pr view failed"
   end
-  for _ = 1, times or 1 do
-    t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-      stdout = string.format(
-        '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-04T01:02:03Z","comments":[%s]}\n',
-        json_string(state or "OPEN"),
-        table.concat(rendered, ",")
-      ),
-      stderr = stderr,
-      exit_code = exit_code or 0,
-    })
-  end
+  entity_read_mocks.mock_pr_view_raw_selector(t, { repo = repo, number = 7 }, entity_read_mocks.pr_origin_selector, {
+    stdout = string.format(
+      '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-04T01:02:03Z","comments":[%s]}\n',
+      json_string(state or "OPEN"),
+      table.concat(rendered, ",")
+    ),
+    stderr = stderr,
+    exit_code = exit_code or 0,
+  }, times or 1)
 end
 
 local function assert_no_entity_change(result)

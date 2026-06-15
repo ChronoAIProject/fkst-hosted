@@ -63,8 +63,7 @@ SAGA_RECOVERY_TOKENS = ("fkst:github-devloop:state:v1", "current_entity_state", 
 HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
 BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
-ENCODED_LITERAL_MIN_BYTES = 6
-
+ENCODED_LITERAL_MIN_BYTES = 6; ENTITY_READ_COUNT_RE = re.compile(r"count_calls\s*\([^)\n]*(?:[\"']gh (?:issue|pr) view\b|core\.gh_(?:issue|pr)_view_|[\"']--json (?:headRefName|title|labels,comments|assignees,author))")
 
 @dataclass(frozen=True)
 class LuaStringLiteral:
@@ -908,6 +907,14 @@ def check_cross_package_require(root: Path, violations: list[str]) -> None:
                     f"share via std/ (peer cross-package require is forbidden)",
                 )
 
+def check_entity_read_count_assertions(root: Path, violations: list[str]) -> None:
+    base = packages_root(root) / "github-devloop" / "tests"
+    if not base.exists(): return
+    for path in sorted(base.glob("*.lua")):
+        if path.name.endswith("_helpers.lua") or path.name == "devloop_helpers.lua": continue
+        for index, line in enumerate(read_text(path).splitlines(), start=1):
+            if ENTITY_READ_COUNT_RE.search(line):
+                add(violations, "G11", f"{rel(root, path)}:{index} asserts entity-read command counts; assert outcomes instead")
 
 def is_saga_handler_source(source: str) -> bool:
     return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
@@ -973,6 +980,7 @@ def main() -> int:
     check_ownership_gate_claim_owner(root, violations)
     check_persistence_classes(root, violations)
     check_cross_package_require(root, violations)
+    check_entity_read_count_assertions(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
 
     for warning in warnings:

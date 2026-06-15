@@ -264,7 +264,7 @@ return {
     local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", default_marker_version),
-    })
+    }, { number = 4 })
     mock_existing_devloop_worktree("owner-repo-42")
     mock_fresh_implement_worktree()
     mock_implement_codex()
@@ -537,7 +537,6 @@ return {
     }), opts("implement-foreign"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh issue view"), 0)
   end,
 
   test_implement_retries_until_ready_label_is_visible = function()
@@ -582,7 +581,6 @@ return {
     local result = run_implement(event, opts("implement-ready-hand-off-marker-pending"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh issue view"), 0)
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git -C"), 0)
   end,
@@ -764,7 +762,6 @@ return {
     local result = run_implement(ready(), opts("implement-view-failure"))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json title,labels,comments"), 1)
     t.eq(count_calls("codex exec"), 0)
   end
 }

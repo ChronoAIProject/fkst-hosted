@@ -421,7 +421,6 @@ return {
 
   test_dependency_gate_does_not_cache_waiting_blocker = function()
     local graphql_calls_before = count_calls("gh api graphql")
-    local issue_view_calls_before = count_calls(core.gh_issue_view_observe_cmd(repo, 27))
     mock_blocked_by(42, { { number = 27 } })
     mock_blocked_by(27, {})
     mock_blocker_issue(27, "ready")
@@ -438,7 +437,6 @@ return {
     t.eq(second.kind, "waiting")
     t.eq(second.unmet[1], 27)
     t.eq(count_calls("gh api graphql"), graphql_calls_before + 4)
-    t.eq(count_calls(core.gh_issue_view_observe_cmd(repo, 27)), issue_view_calls_before + 2)
   end,
 
   test_dependency_gate_satisfied_for_pr_stream_merged_blocker = function()

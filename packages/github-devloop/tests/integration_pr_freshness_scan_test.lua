@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local branch = "devloop/issue/owner/repo/42/ready-1234567890"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -99,36 +100,19 @@ local function mock_pr_view(state, comments, extra)
 end
 
 local function mock_issue_view(labels, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  t.mock_command("--json labels,comments", {
-    stdout = string.format(
-      '{"labels":[%s],"comments":[%s]}\n',
-      table.concat(rendered_labels, ","),
-      render_comments(comments or {})
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("--json assignees,author", {
-    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_issue_view_selector(t, {
+    labels = labels,
+    comments = comments,
+  }, "labels,comments")
+  entity_read_mocks.mock_issue_view_selector(t, {}, "assignees,author")
 end
 
 local function mock_issue_view_other_owned()
-  t.mock_command("--json labels,comments", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "labels,comments", {
     stdout = '{"labels":[],"comments":[]}\n',
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("--json assignees,author", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "assignees,author", {
     stdout = '{"assignees":[{"login":"human"}],"author":{"login":"fkst-test-bot"}}\n',
-    stderr = "",
-    exit_code = 0,
   })
 end
 

@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function opts(name)
   return {
@@ -113,12 +114,10 @@ end
 
 local function mock_queue_head(age_minutes, version)
   local proposal_id = "github-devloop/issue/owner/repo/42"
-  t.mock_command("--json title,comments,state,stateReason", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,comments,state,stateReason", {
     stdout = '{"title":"Merge-ready head","state":"OPEN","comments":['
       .. render_comment(core.state_marker(proposal_id, "merge-ready", version or version_minutes_ago(age_minutes or 90)))
       .. "]}\n",
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -142,20 +141,26 @@ local function mock_merge_queue_pr(pr_number, issue_number, age_minutes, head_sh
     core.state_marker(proposal_id, "merge-ready", version),
     core.merge_ready_marker(proposal_id, pr_number, version, review_proposal_id, "consensus:" .. review_proposal_id .. "/review", head_sha or "abcdef123456"),
   }
-  local rendered = {}
+  local shaped_comments = {}
   for _, comment in ipairs(comments) do
-    table.insert(rendered, render_comment(comment, "fkst-test-bot", closed_at_minutes_ago(age_minutes or 90)))
+    table.insert(shaped_comments, {
+      body = comment,
+      author_login = "fkst-test-bot",
+      created_at = closed_at_minutes_ago(age_minutes or 90),
+    })
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
-    stdout = string.format(
-      '{"headRefName":"devloop-owner-repo-%d","headRefOid":"%s","baseRefName":"integration/dev","baseRefOid":"abc123","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
-      pr_number,
-      json_string(head_sha or "abcdef123456"),
-      table.concat(rendered, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    number = pr_number,
+    head = "devloop-owner-repo-" .. tostring(pr_number),
+    head_sha = head_sha or "abcdef123456",
+    base_branch = "integration/dev",
+    base_sha = "abc123",
+    state = "OPEN",
+    updated_at = "2026-06-03T02:03:04Z",
+    comments = shaped_comments,
+    head_repo = "owner/repo",
+    status_check_rollup_json = '[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]',
+  }, entity_read_mocks.pr_merge_selector)
 end
 
 local function recent_closed_item(number, closed_at, labels)
@@ -180,12 +185,10 @@ end
 local function mock_closed_merged_issue(number, closed_minutes_ago, trusted)
   local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(number)
   mock_recent_closed("[" .. recent_closed_item(number, closed_at_minutes_ago(closed_minutes_ago), { core._merged_label }) .. "]\n")
-  t.mock_command("--json title,comments,state,stateReason", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, { number = number }, "title,comments,state,stateReason", {
     stdout = '{"title":"Merged issue","state":"CLOSED","comments":['
       .. render_comment(core.merged_marker(proposal_id, 9, "v1", "abcdef123456"), trusted == false and "mallory" or "fkst-test-bot")
       .. "]}\n",
-    stderr = "",
-    exit_code = 0,
   })
 end
 

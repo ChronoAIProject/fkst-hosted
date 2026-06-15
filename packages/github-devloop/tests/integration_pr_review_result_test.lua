@@ -113,8 +113,6 @@ return {
     local result = run_review_result(event, opts("review-result-other-owned"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 1)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
   test_review_result_accepts_unassigned_self_authored_backing_issue = function()
@@ -144,7 +142,6 @@ return {
     local result = run_review_result(event, opts("review-result-claim-fails"))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
   test_review_result_skips_without_backing_issue_before_raising = function()
@@ -155,8 +152,6 @@ return {
     local result = run_review_result(event, opts("review-result-no-backing-issue"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls(core.gh_issue_view_claim_cmd("owner/repo", 42)), 0)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
   test_review_result_skips_when_pr_head_advanced_since_review = function()
@@ -169,7 +164,6 @@ return {
     local result = run_review_result(event, opts("review-result-head-advanced"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
   test_review_result_closed_pr_does_not_mark_merge_ready = function()
@@ -182,7 +176,6 @@ return {
     local result = run_review_result(event, opts("review-result-closed"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("--json labels,comments"), 0)
   end,
 
   test_review_result_reject_new_fix_round_converges_over_same_review_version_merge_ready = function()

@@ -161,7 +161,6 @@ return {
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr merge"), 0)
     t.eq(count_calls("gh issue close"), 0)
-    t.eq(count_calls("gh issue view"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
   end,
 
@@ -622,9 +621,9 @@ return {
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-ready"))
     t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
-    t.is_true(comment_body:find("rollup-red: ci: COMPLETED/FAILURE", 1, true) ~= nil)
+    t.is_true(comment_body:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
     local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
-    t.is_true(fix_fact.review_reason:find("rollup-red: ci: COMPLETED/FAILURE", 1, true) ~= nil)
+    t.is_true(fix_fact.review_reason:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
   end,
 
   test_merge_write_time_merge_ready_marker_changed_does_not_merge = function()

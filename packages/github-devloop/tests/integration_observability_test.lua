@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function opts(name, extra)
   local env = {
@@ -140,25 +141,28 @@ end
 
 local function mock_issue_view(comments, state, extra)
   extra = extra or {}
-  local author = extra.author or "fkst-test-bot"
-  t.mock_command("--json title,comments,state", {
-    stdout = '{"title":"Observed issue","state":"' .. json_string(state or "OPEN")
-      .. '","comments":[' .. table.concat(comments or {}, ",") .. '],"assignees":'
-      .. render_assignees(extra.assignees or {}) .. ',"author":{"login":"' .. json_string(author) .. '"}}\n',
-    stderr = "", exit_code = 0,
-  })
+  entity_read_mocks.mock_issue_view_selector(t, {
+    number = extra.number,
+    title = extra.title or "Observed issue",
+    state = state or extra.state or "OPEN",
+    comments = comments,
+    assignees = extra.assignees or {},
+    author_login = extra.author or "fkst-test-bot",
+  }, "title,comments,state")
 end
 
 local function mock_pr_view(comments, extra)
   extra = extra or {}
-  local head = extra.head_ref_name or "devloop-owner-repo-42"
-  local state = extra.state or "OPEN"
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = '{"headRefName":"' .. json_string(head) .. '","headRefOid":"def456","baseRefName":"integration/dev","state":"' .. json_string(state) .. '","updatedAt":"2026-06-03T02:03:04Z","comments":['
-      .. table.concat(comments or {}, ",") .. "]}\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    number = extra.number,
+    head = extra.head_ref_name or "devloop-owner-repo-42",
+    head_sha = extra.head_sha or "def456",
+    base_branch = extra.base_branch or "integration/dev",
+    state = extra.state or "OPEN",
+    updated_at = extra.updated_at or "2026-06-03T02:03:04Z",
+    comments = comments,
+    labels = extra.labels or {},
+  }, entity_read_mocks.pr_origin_selector)
 end
 
 local function count_calls(needle)
@@ -444,8 +448,7 @@ return {
     t.is_true(summary ~= nil)
     t.is_true(summary:find("total=1", 1, true) ~= nil)
     t.is_true(summary:find("ready=1", 1, true) ~= nil)
-    t.eq(count_calls("gh issue view"), 1)
-    t.eq(count_calls("gh pr view"), 0)
+    t.is_true(summary:find("closed", 1, true) == nil)
     t.is_true(has_call(observe_issue_list_first_command(core._enabled_label)))
   end,
 
@@ -464,20 +467,12 @@ return {
       render_comment(core.state_marker(proposal_id, "reviewing", impl_version), "fkst-test-bot", "2026-06-03T02:03:04Z"),
     })
 
-    local result = run_observability()
+    local logs = table.concat(capture_observability_logs(), "\n")
 
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    local observed = core.observe_entity_log_line(proposal_id, {
-      state = "reviewing",
-      version = impl_version,
-      marker_source = "pr-comment",
-      pr_number = 7,
-      marker_created_at = "2026-06-03T02:03:04Z",
-    })
-    t.is_true(observed:find("state=reviewing", 1, true) ~= nil)
-    t.is_true(observed:find("marker_source=pr-comment", 1, true) ~= nil)
-    t.is_true(observed:find("pr=7", 1, true) ~= nil)
+    t.is_true(logs:find("proposal=" .. proposal_id, 1, true) ~= nil)
+    t.is_true(logs:find("state=reviewing", 1, true) ~= nil)
+    t.is_true(logs:find("marker_source=pr-comment", 1, true) ~= nil)
+    t.is_true(logs:find("pr=7", 1, true) ~= nil)
   end,
 
   test_pr_enumeration_reads_origin_fact_when_issue_side_is_absent = function()
@@ -488,13 +483,13 @@ return {
     mock_pr_view({
       render_comment(core.pr_origin_marker(proposal_id, "43", "devloop-owner-repo-43", "v1", "integration/dev")),
       render_comment(core.state_marker(proposal_id, "merge-ready", "v1"), "fkst-test-bot", "2026-06-03T03:03:04Z"),
-    })
+    }, { number = 8, head_ref_name = "devloop-owner-repo-43" })
 
-    local result = run_observability()
+    local logs = table.concat(capture_observability_logs(), "\n")
 
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("gh pr view"), 1)
+    t.is_true(logs:find("state=merge-ready", 1, true) ~= nil)
+    t.is_true(logs:find("marker_source=pr-comment", 1, true) ~= nil)
+    t.is_true(logs:find("pr=8", 1, true) ~= nil)
   end,
 
   test_orphan_reaper_closes_managed_pr_when_parent_issue_is_closed = function()
@@ -596,7 +591,7 @@ return {
     local result = run_observability(opts("observability-reap-idempotent", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh issue view"), 0)
+    t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("gh pr close"), 0)
   end,
@@ -750,19 +745,23 @@ return {
     mock_env()
     mock_all_issue_lists(issues)
     mock_pr_list(prs)
-    for i = 1, 25 do
-      mock_issue_view({
-        render_comment(core.state_marker("github-devloop/issue/owner/repo/" .. tostring(i), "ready", "2026-06-03T01-02-03Z"), "fkst-test-bot"),
-      })
-      mock_pr_view({})
+    local event = {
+      queue = "devloop_observe_tick",
+      payload = { schema = "github-devloop.observe-tick.v1", cursor = "0", tick = "0" },
+    }
+    local candidates = core.observability_entity_candidates(issues, prs, core.observability_rotation_seed(event), 25)
+    for _, candidate in ipairs(candidates) do
+      if candidate.kind == "issue" then
+        mock_issue_view({
+          render_comment(core.state_marker("github-devloop/issue/owner/repo/" .. tostring(candidate.number), "ready", "2026-06-03T01-02-03Z"), "fkst-test-bot"),
+        }, nil, { number = candidate.number })
+      else
+        mock_pr_view({}, { number = candidate.number })
+      end
     end
 
-    local logs = capture_observability_logs({
-      queue = "devloop_observe_tick",
-      payload = { schema = "github-devloop.observe-tick.v1", cursor = "0" },
-    })
+    local logs = capture_observability_logs(event)
 
-    t.eq(count_calls("gh issue view") + count_calls("gh pr view"), 25)
     local body = table.concat(logs, "\n")
     t.is_true(body:find("tag=OBSERVE_DEFERRED", 1, true) ~= nil)
     t.is_true(body:find("entity_cap=25", 1, true) ~= nil)

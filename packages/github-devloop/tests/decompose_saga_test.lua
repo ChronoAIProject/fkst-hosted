@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local saga_conformance = require("std.saga_conformance")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local two_issue_json = [[{"issues":[{"title":"Extract retry helper","body":"Smaller scope: implement retry helper.\nNon-goals: no workflow rewrite.\nAcceptance: helper tests pass."},{"title":"Wire retry helper","body":"Smaller scope: wire one caller.\nNon-goals: no unrelated states.\nAcceptance: integration test passes."}]}]]
 local first_delivery_facts = nil
@@ -71,18 +72,19 @@ local function mock_child_issue_list_repeated(event, indexes, times)
 end
 
 local function mock_pr_view(event, comments)
-  local rendered = {
-    h.render_comment(core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
+  local selected = {
+    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
   }
   for _, comment in ipairs(comments) do
-    table.insert(rendered, h.render_comment(comment))
+    table.insert(selected, comment)
   end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":['
-      .. table.concat(rendered, ",") .. "]}\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = selected,
+    head = "devloop-owner-repo-42-01HY",
+    head_sha = "def456",
+    base_branch = "dev",
+    state = "OPEN",
+  }, entity_read_mocks.pr_origin_selector)
 end
 
 local function pr_comment_body_path()
@@ -130,15 +132,11 @@ local function mock_decompose_codex(stdout)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("--json title,body,updatedAt,labels,comments,state", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
     stdout = '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[]}\n',
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("--json title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
+  entity_read_mocks.mock_pr_view_raw_selector(t, {}, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
     stdout = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n',
-    stderr = "",
-    exit_code = 0,
   })
   t.mock_command("gh pr diff", {
     stdout = "diff --git a/file.lua b/file.lua\n+return true\n",

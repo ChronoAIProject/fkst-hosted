@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local opts = h.opts
 local merge_ready = h.merge_ready
 local ready = h.ready
@@ -21,6 +22,11 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
+
+local function json_literal(value)
+  return '"' .. json_string(value) .. '"'
+end
 
 local function branch_for_pr(pr_number)
   return "devloop-owner-repo-" .. tostring(pr_number)
@@ -114,57 +120,46 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
   })
 end
 
-local function comments_for(event, created_at, state, state_version)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
-  local comments = {
-    core.pr_origin_marker(event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
-    core.state_marker(event.proposal_id, "merge-ready", event.version),
-    core.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
-    core.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
-  }
-  if state ~= nil then
-    table.insert(comments, core.state_marker(event.proposal_id, state, state_version or event.version))
-  end
-  local rendered = {}
-  for _, comment in ipairs(comments) do
-    table.insert(rendered, render_comment({
-      body = comment,
-      author_login = "fkst-test-bot",
-      created_at = created_at,
-    }))
-  end
-  return table.concat(rendered, ",")
-end
-
 local function mock_claimed_issue_for_event(event, times)
   local entity = core.parse_entity_proposal_id(event.proposal_id)
   for _ = 1, times or 1 do
-    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", entity.issue_number), {
-      stdout = string.format(
-        '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n'
-      ),
-      stderr = "",
-      exit_code = 0,
-    })
+    entity_read_mocks.mock_issue_view_selector(t, {
+      repo = "owner/repo",
+      number = entity.issue_number,
+      assignees = { "fkst-test-bot" },
+      author_login = "fkst-test-bot",
+    }, "assignees,author")
   end
 end
 
 local function mock_queue_pr(event, created_at, state, state_version, mergeable, merge_state, rollup_state, rollup_conclusion, base_sha)
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","status":"%s","conclusion":"%s"}]}\n',
-      json_string(branch_for_pr(event.pr_number)),
-      json_string(event.reviewed_head_sha),
-      json_string(base_sha or "abc123"),
-      json_string(created_at),
-      comments_for(event, created_at, state, state_version),
-      json_string(mergeable or "MERGEABLE"),
-      json_string(merge_state or "CLEAN"),
-      json_string(rollup_state or "COMPLETED"),
-      json_string(rollup_conclusion or "SUCCESS")
-    ),
-    stderr = "",
-    exit_code = 0,
+  local comments = {}
+  for _, comment in ipairs(merge_comments_for_event(event)) do
+    table.insert(comments, {
+      body = comment,
+      author_login = "fkst-test-bot",
+      created_at = created_at,
+    })
+  end
+  if state ~= nil then
+    table.insert(comments, {
+      body = core.state_marker(event.proposal_id, state, state_version or event.version),
+      author_login = "fkst-test-bot",
+      created_at = created_at,
+    })
+  end
+  entity_read_mocks.mock_pr_merge_view(t, {
+    repo = "owner/repo",
+    number = event.pr_number,
+    comments = comments,
+    head = branch_for_pr(event.pr_number),
+    head_sha = event.reviewed_head_sha,
+    base_sha = base_sha or "abc123",
+    updated_at = created_at,
+    state = "OPEN",
+    mergeable = mergeable or "MERGEABLE",
+    merge_state = merge_state or "CLEAN",
+    status_check_rollup_json = '[{"name":"test","status":' .. json_literal(rollup_state or "COMPLETED") .. ',"conclusion":' .. json_literal(rollup_conclusion or "SUCCESS") .. '}]',
   })
 end
 
@@ -173,21 +168,25 @@ local function mock_queue_pr_red(event, created_at, state, state_version)
 end
 
 local function mock_merge_pr_view(event, state, mergeable, merge_state, rollup_state, rollup_conclusion, base_sha)
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"%s","detailsUrl":"https://example.invalid/checks/ci","name":"ci","startedAt":"2026-06-03T02:03:04Z","status":"%s","workflowName":"ci"}]}\n',
-      json_string(branch_for_pr(event.pr_number)),
-      json_string(event.reviewed_head_sha),
-      json_string(base_sha or "abc123"),
-      json_string(state or "OPEN"),
-      comments_for(event, "2026-06-03T01:00:00Z"),
-      json_string(mergeable or "MERGEABLE"),
-      json_string(merge_state or "CLEAN"),
-      json_string(rollup_conclusion or "SUCCESS"),
-      json_string(rollup_state or "COMPLETED")
-    ),
-    stderr = "",
-    exit_code = 0,
+  local comments = {}
+  for _, comment in ipairs(merge_comments_for_event(event)) do
+    table.insert(comments, {
+      body = comment,
+      author_login = "fkst-test-bot",
+      created_at = "2026-06-03T01:00:00Z",
+    })
+  end
+  entity_read_mocks.mock_pr_merge_view(t, {
+    repo = "owner/repo",
+    number = event.pr_number,
+    comments = comments,
+    head = branch_for_pr(event.pr_number),
+    head_sha = event.reviewed_head_sha,
+    base_sha = base_sha or "abc123",
+    state = state or "OPEN",
+    mergeable = mergeable or "MERGEABLE",
+    merge_state = merge_state or "CLEAN",
+    status_check_rollup_json = '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":' .. json_literal(rollup_conclusion or "SUCCESS") .. ',"detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":' .. json_literal(rollup_state or "COMPLETED") .. ',"workflowName":"test"}]',
   })
 end
 
@@ -201,19 +200,15 @@ local function mock_merged_pr_view(event)
   }
   table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
   table.insert(comments, core.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
-  local rendered = {}
-  for _, comment in ipairs(comments) do
-    table.insert(rendered, render_comment(comment))
-  end
-  t.mock_command("--json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
-    stdout = string.format(
-      '{"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","baseRefOid":"abc123","state":"MERGED","updatedAt":"2026-06-03T02:03:04Z","isDraft":false,"mergedAt":"2026-06-03T02:05:04Z","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
-      json_string(branch_for_pr(event.pr_number)),
-      json_string(event.reviewed_head_sha),
-      table.concat(rendered, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
+  entity_read_mocks.mock_pr_merge_view(t, {
+    repo = "owner/repo",
+    number = event.pr_number,
+    comments = comments,
+    head = branch_for_pr(event.pr_number),
+    head_sha = event.reviewed_head_sha,
+    state = "MERGED",
+    merged_at = "2026-06-03T02:05:04Z",
+    status_check_rollup_json = '[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]',
   })
 end
 
@@ -294,10 +289,8 @@ local function mock_wip_issue_list(numbers)
   for _, number in ipairs(numbers or {}) do
     table.insert(items, string.format('{"number":%d}', number))
   end
-  t.mock_command("--state open --label 'fkst-dev:enabled' --limit 100 --json number", {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_wip_cmd("owner/repo"), {
     stdout = "[" .. table.concat(items, ",") .. "]\n",
-    stderr = "",
-    exit_code = 0,
   })
 end
 
@@ -524,9 +517,9 @@ return {
     mock_branch_config_env(2)
     mock_queue_list({ 9, 7 })
     mock_queue_pr_red(older, "2026-06-03T01:00:00Z")
+    mock_queue_pr(current, "2026-06-03T02:00:00Z")
     mock_merge_pr_view(older, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     mock_claimed_issue_for_event(older, 1)
-    mock_pr_merge(merge_comments_for_event(older), branch_for_pr(9), "aabb11", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     t.mock_command("git fetch origin 'pull/9/merge'", {
       stdout = "",
       stderr = "",
@@ -574,7 +567,9 @@ return {
       FKST_GITHUB_REPO = "owner/repo",
     }))
     t.eq(find_raise(second_poll.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
-    t.is_true(find_raise(second_poll.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+    t.is_true(find_raise(second_poll.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return tostring(payload and payload.body or ""):find("fkst:github-devloop:merged:v1", 1, true) ~= nil
+    end) ~= nil)
   end,
 
   test_speculative_predecessor_set_survives_landed_predecessor = function()

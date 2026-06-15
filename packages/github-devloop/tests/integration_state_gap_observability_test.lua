@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function opts(name)
   return {
@@ -95,21 +96,24 @@ local function mock_pr_list(numbers)
   })
 end
 
-local function mock_issue_view(comments)
-  t.mock_command("--json title,comments,state", {
-    stdout = '{"title":"Observed issue","state":"OPEN","comments":[' .. table.concat(comments or {}, ",") .. "]}\n",
-    stderr = "",
-    exit_code = 0,
-  })
+local function mock_issue_view(comments, number)
+  entity_read_mocks.mock_issue_view_selector(t, {
+    number = number,
+    title = "Observed issue",
+    state = "OPEN",
+    comments = comments,
+  }, "title,comments,state")
 end
 
 local function mock_pr_view(comments)
-  t.mock_command("--json headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = '{"headRefName":"devloop-owner-repo-42","headRefOid":"def456","baseRefName":"integration/dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":['
-      .. table.concat(comments or {}, ",") .. "]}\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    head = "devloop-owner-repo-42",
+    head_sha = "def456",
+    base_branch = "integration/dev",
+    state = "OPEN",
+    updated_at = "2026-06-03T02:03:04Z",
+    comments = comments,
+  }, entity_read_mocks.pr_origin_selector)
 end
 
 local function gap_logs(event)
@@ -206,11 +210,11 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_42, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
       render_comment(core.state_marker(proposal_42, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:50:00Z"),
-    })
+    }, 42)
     mock_issue_view({
       render_comment(core.state_marker(proposal_43, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
       render_comment(core.state_marker(proposal_43, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:10:00Z"),
-    })
+    }, 43)
 
     local logs = table.concat(gap_logs(), "\n")
 
@@ -236,9 +240,8 @@ return {
     })
 
     local logs = table.concat(gap_logs(), "\n")
-
-    t.eq(count_calls("gh pr view"), 1)
     t.is_true(logs:find("gap_edge=pr-open->reviewing", 1, true) ~= nil)
     t.is_true(logs:find("gap_seconds=180", 1, true) ~= nil)
+    t.is_true(logs:find("proposal_id=" .. proposal_id, 1, true) ~= nil)
   end,
 }

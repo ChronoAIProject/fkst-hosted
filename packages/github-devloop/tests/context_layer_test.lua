@@ -3,6 +3,7 @@ local fixtures = require("tests.production_fixture_helpers")
 require("tests.board_digest_probe_helpers")
 local core = h.core
 local t = h.t
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function assert_preamble_slots(prompt)
   t.is_true(prompt:find("Write all output in English; quote code identifiers and cited originals verbatim.", 1, true) ~= nil)
@@ -77,39 +78,29 @@ end
 
 local function mock_board_lists(issue_count, pr_count, repo)
   repo = repo or "owner/repo"
-  t.mock_command("gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, "gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
     stdout = issue_list_json(issue_count),
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_pr_list_raw_command(t, "gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
     stdout = pr_list_json(pr_count),
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("gh issue list --repo '" .. repo .. "' --state closed --limit 30 --json number,title,closedAt,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_recent_closed_cmd(repo, 30), {
     stdout = closed_issue_list_json({
       { number = 80, title = "Closed recurring widget sync retry fix", labels = { "error-class:retry", "fingerprint:widget-sync" } },
       { number = 81, title = "Closed widget sync backoff patch", labels = { "fingerprint:widget-sync" } },
     }),
-    stderr = "",
-    exit_code = 0,
   })
 end
 
 local function mock_board_lists_closed_failure(issue_count, pr_count, repo)
   repo = repo or "owner/repo"
-  t.mock_command("gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, "gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
     stdout = issue_list_json(issue_count),
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_pr_list_raw_command(t, "gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
     stdout = pr_list_json(pr_count),
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("gh issue list --repo '" .. repo .. "' --state closed --limit 30 --json number,title,closedAt,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_recent_closed_cmd(repo, 30), {
     stdout = "",
     stderr = "closed issue query failed",
     exit_code = 1,
@@ -118,20 +109,14 @@ end
 
 local function mock_board_title(title, repo)
   repo = repo or "owner/repo"
-  t.mock_command("gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, "gh issue list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
     stdout = '[{"number":1,"title":"' .. json_string(title) .. '","labels":[{"name":"fkst-dev:thinking"}]}]',
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_pr_list_raw_command(t, "gh pr list --repo '" .. repo .. "' --state open --limit 100 --json number,title,labels", {
     stdout = "[]",
-    stderr = "",
-    exit_code = 0,
   })
-  t.mock_command("gh issue list --repo '" .. repo .. "' --state closed --limit 30 --json number,title,closedAt,labels", {
+  entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_recent_closed_cmd(repo, 30), {
     stdout = "[]",
-    stderr = "",
-    exit_code = 0,
   })
 end
 
