@@ -136,6 +136,25 @@ local function ready_for_implementation_version(ready, version)
   return copy
 end
 
+local function implementing_recovery_ready(ready, state)
+  if type(state) ~= "table" or state.state ~= "implementing" then
+    return nil
+  end
+  local current_version = tostring(state.version or "")
+  if current_version == "" then
+    return nil
+  end
+  local replay_version = core.build_devloop_ready_payload({
+    proposal_id = ready.proposal_id,
+    dedup_key = current_version,
+    source_ref = ready.source_ref,
+  }).dedup_key
+  if tostring(ready.dedup_key or "") ~= replay_version then
+    return nil
+  end
+  return ready_for_implementation_version(ready, current_version)
+end
+
 implemented_branch_head = function(base_head, branch)
   local ahead_result = exec_sync({ cmd = core.git_branch_ahead_count_cmd(base_head, branch), timeout = 30 })
   if ahead_result.exit_code ~= 0 then
@@ -561,6 +580,13 @@ local function process_ready_event(event)
     local branch = core.implement_branch(repo, issue_number, branch_version)
 
     if state.state == "implementing" then
+      local recovery_ready = implementing_recovery_ready(ready, state)
+      if recovery_ready ~= nil then
+        marker_ready = recovery_ready
+        branch_version = core.implementation_base_version(marker_ready.dedup_key)
+        branch = core.implement_branch(repo, issue_number, branch_version)
+        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(liveness-redrive)", "ready event re-drives current implementing marker")
+      end
       if tostring(state.version or "") ~= tostring(marker_ready.dedup_key or "") then
         core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "ready event does not match current implementing version")
         return

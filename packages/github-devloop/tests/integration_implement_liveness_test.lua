@@ -27,6 +27,14 @@ local function implementing_comments(event, extra)
   return comments, branch
 end
 
+local function liveness_redrive_ready(event)
+  return core.build_devloop_ready_payload({
+    proposal_id = event.proposal_id,
+    dedup_key = event.dedup_key,
+    source_ref = event.source_ref,
+  })
+end
+
 local function mock_missing_remote_branch(branch)
   t.mock_command("git fetch 'origin' '" .. tostring(branch) .. "'", {
     stdout = "",
@@ -138,6 +146,39 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:impl-failed")
+  end,
+
+  test_implementing_liveness_redrive_uses_current_marker_version = function()
+    local current = ready()
+    local event = liveness_redrive_ready(current)
+    local comments, branch = implementing_comments(current, {
+      core.implement_attempt_marker(current.proposal_id, current.dedup_key, 2, "1"),
+    })
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
+    mock_missing_remote_branch(branch)
+    t.mock_command("git fetch 'origin' 'dev'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+      stdout = "abc123\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("show-ref --verify --quiet", {
+      stdout = "",
+      stderr = "",
+      exit_code = 1,
+    })
+
+    local result = run_implement(event, opts("implement-liveness-redrive-current-marker"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label.payload.add_labels[1], "fkst-dev:impl-failed")
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment.payload.body:find(core.state_marker(current.proposal_id, "impl-failed", current.dedup_key), 1, true) ~= nil)
   end,
 
   test_implementing_redelivery_recovers_local_branch_before_attempt_budget = function()
