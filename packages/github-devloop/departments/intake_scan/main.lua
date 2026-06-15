@@ -81,7 +81,15 @@ function pipeline(event)
     local issue_number = tostring(issue.number or "")
     if core.issue_ref_round_trips(repo, issue_number) then
       local proposal_id = core.proposal_id(repo, issue_number)
-      local view = core.gh_exec({ cmd = core.gh_issue_view_intake_scan_cmd(repo, issue_number), timeout = 30 })
+      -- Stale-tolerant scan read: intake_scan only screens candidates and
+      -- re-checks every poll, so a bounded-stale view is safe; the downstream
+      -- intake_judge re-reads fresh before any CAS decision. Cache collapses the
+      -- per-poll re-read of the same issue (a dominant GraphQL drain).
+      local view = core.gh_exec_cached(
+        core.gh_issue_view_intake_scan_cmd(repo, issue_number),
+        core.gh_read_cache_key("intake-scan", repo, issue_number),
+        90
+      )
       if view.exit_code ~= 0 then
         error("github-devloop: gh issue intake scan view failed: " .. tostring(view.stderr))
       end
@@ -93,6 +101,11 @@ function pipeline(event)
         and not core.should_skip_known_intake_issue(current.labels)
         and not core.has_intake_decision_marker(current.comments, proposal_id)
         and core.claim_issue_for_management("intake_scan", repo, issue_number, current, proposal_id) then
+        -- We just wrote the assignee claim; drop the scan-cache slot so the next
+        -- poll re-reads the fresh post-claim view (now self-assigned -> held, no
+        -- redundant re-claim write) instead of re-screening the stale pre-claim
+        -- view for up to the TTL.
+        cache_set(core.gh_read_cache_key("intake-scan", repo, issue_number), "")
         local payload = core.build_intake_scan_candidate(repo, issue, nil, now())
         core.log_apply("intake_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
           "devloop_intake_candidate",

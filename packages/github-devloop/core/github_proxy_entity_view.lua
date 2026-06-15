@@ -580,6 +580,43 @@ function M.fetch_pr_view_origin(repo, pr_number, updated_at, opts)
   return M.fetch_marker_pr_view(repo, pr_number, updated_at, options)
 end
 
+-- Opt-in cross-process stale-tolerant read cache (manual TTL). For OBSERVATION
+-- /scan reads ONLY: a bounded-stale view is acceptable because the read does
+-- not gate an irreversible action and is re-checked on the next poll. Authority
+-- reads (merge gate CI/mergeability, version-CAS write gates, claim/head
+-- verification, review/fix/implement decisions) MUST NOT use this -- they call
+-- M.gh_exec directly so they always see current truth. The cache value is
+-- "<expiry_epoch>\n<stdout>"; only exit_code==0 results are cached. The key must
+-- encode the read VARIANT (field-set) so two reads with different fields never
+-- share a slot. This collapses the dominant GraphQL drain: the same entity
+-- re-read every poll by the same scan dept (measured ~10x duplication on hot
+-- issues).
+function M.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
+  local cached = cache_get(cache_key)
+  if type(cached) == "string" and cached ~= "" then
+    local sep = cached:find("\n", 1, true)
+    local expiry = sep and tonumber(cached:sub(1, sep - 1)) or nil
+    if expiry ~= nil and expiry > now() then
+      return { stdout = cached:sub(sep + 1), exit_code = 0, cached = true }
+    end
+  end
+  local result = M.gh_exec(cmd, nil, exec)
+  if type(result) == "table" and tonumber(result.exit_code) == 0 then
+    cache_set(cache_key, tostring(now() + (ttl_seconds or 60)) .. "\n" .. tostring(result.stdout or ""))
+  end
+  return result
+end
+
+-- Readable cache key for an opt-in scan read: github-devloop/ghread/<variant>/<repo>/<number>.
+function M.gh_read_cache_key(variant, repo, number)
+  return "github-devloop/ghread/"
+    .. sanitize_cache_segment(variant, false)
+    .. "/"
+    .. sanitize_cache_segment(repo, true)
+    .. "/"
+    .. sanitize_cache_segment(number, false)
+end
+
 end
 
 return S
