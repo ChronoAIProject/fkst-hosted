@@ -98,3 +98,10 @@ export function isHealthResponse(body: unknown): body is HealthResponse {
     typeof candidate.version === 'string'
   );
 }
+
+export interface AccountView {
+  connection_id: string;
+  login: string;
+  primary: boolean;
+}
+

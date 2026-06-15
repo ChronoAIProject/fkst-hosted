@@ -9,6 +9,7 @@ import { countOrUnknown, isTerminal, STAGE_BY_STATE, GoalState, isSessionTermina
 import { SessionRegistryProvider, useSessionRegistry } from '../../hooks/session-registry';
 import { useHealth } from '../../hooks/useHealth';
 import { useSession, useCreateSession } from '../../hooks/useSessions';
+import { useGitHubAccounts } from '../../hooks/useGitHubAccounts';
 import { ApiError } from '../client';
 import { isApiErrorBody } from '../types';
 
@@ -215,6 +216,51 @@ describe('W1.E Backend Client & Hooks Tests', () => {
       await waitFor(() => expect(result.current.healthStatus).toBe('unknown'));
       expect(result.current.mongo).toBeUndefined();
       expect(result.current.version).toBeUndefined();
+    });
+  });
+
+  describe('useGitHubAccounts Hook', () => {
+    it('surfaces linked accounts array for 200 response', async () => {
+      const mockAccounts = [
+        { connection_id: 'c1', login: 'octocat', primary: true },
+        { connection_id: 'c2', login: 'octocat-dev', primary: false },
+      ];
+      server.use(
+        http.get('*/api/v1/github/accounts', () => {
+          return HttpResponse.json(mockAccounts);
+        })
+      );
+
+      const { result } = renderHook(() => useGitHubAccounts(), { wrapper: createTestWrapper() });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data).toEqual(mockAccounts);
+    });
+
+    it('surfaces empty array for 200 response with zero accounts', async () => {
+      server.use(
+        http.get('*/api/v1/github/accounts', () => {
+          return HttpResponse.json([]);
+        })
+      );
+
+      const { result } = renderHook(() => useGitHubAccounts(), { wrapper: createTestWrapper() });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data).toEqual([]);
+    });
+
+    it('surfaces error for 503 response (credential proxy down)', async () => {
+      server.use(
+        http.get('*/api/v1/github/accounts', () => {
+          return new HttpResponse(null, { status: 503 });
+        })
+      );
+
+      const { result } = renderHook(() => useGitHubAccounts(), { wrapper: createTestWrapper() });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error).toBeDefined();
     });
   });
 

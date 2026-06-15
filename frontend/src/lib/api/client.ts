@@ -10,6 +10,7 @@ import {
   ApiErrorBody,
   isApiErrorBody,
   isHealthResponse,
+  AccountView,
 } from './types';
 
 /**
@@ -191,3 +192,11 @@ export async function stopSession(id: string): Promise<StopResponse> {
     method: 'POST',
   });
 }
+
+/**
+ * GET /api/v1/github/accounts
+ */
+export async function getGitHubAccounts(): Promise<AccountView[]> {
+  return request<AccountView[]>('/api/v1/github/accounts');
+}
+

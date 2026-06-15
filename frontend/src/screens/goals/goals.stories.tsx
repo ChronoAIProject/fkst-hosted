@@ -1,14 +1,29 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NyxIDProvider } from '../../lib/auth';
 import { Goals } from './goals';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const meta: Meta<typeof Goals> = {
   title: 'Screens/Goals',
   component: Goals,
   decorators: [
     (Story) => (
-      <div className="bg-bg text-fg p-6 min-h-screen">
-        <Story />
-      </div>
+      <QueryClientProvider client={queryClient}>
+        <NyxIDProvider baseUrl="" clientId="" redirectUri="">
+          <div className="bg-bg text-fg p-6 min-h-screen">
+            <Story />
+          </div>
+        </NyxIDProvider>
+      </QueryClientProvider>
     ),
   ],
 };

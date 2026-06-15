@@ -1,6 +1,26 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Goals } from './goals';
+
+vi.mock('@/lib/auth', () => ({
+  authRequired: () => true,
+  useAuthSession: () => ({
+    isAuthenticated: false,
+    accessToken: null,
+    login: async () => {},
+    logout: () => {},
+    handleRedirectCallback: async () => ({ accessToken: '', idToken: '', refreshToken: '', tokenType: '', expiresIn: 0 }),
+    getUserInfo: async () => ({ sub: '', name: '', email: '' }),
+  }),
+}));
+
+vi.mock('@/lib/hooks/useGitHubAccounts', () => ({
+  useGitHubAccounts: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+}));
 
 describe('Goals Screen Unit Tests', () => {
   it('renders counts as — or unknown, never 0, in default empty state', () => {
@@ -88,4 +108,41 @@ describe('Goals Screen Unit Tests', () => {
     expect(screen.getByText('90%')).toBeInTheDocument();
     expect(screen.getByText('State label set-exclusive')).toBeInTheDocument();
   });
+
+  describe('Goals Screen Empty States', () => {
+    it('renders state (a) when auth required and no session exists', () => {
+      render(
+        <Goals
+          authSessionOverride={{ isAuthenticated: false }}
+        />
+      );
+      expect(screen.getByText(/no GitHub plane connected — sign-in pending/i)).toBeInTheDocument();
+    });
+
+    it('renders state (b) Connect GitHub CTA when signed in but ZERO linked GitHub accounts', () => {
+      render(
+        <Goals
+          authSessionOverride={{ isAuthenticated: true }}
+          accountsOverride={[]}
+        />
+      );
+      expect(screen.getByText(/no GitHub accounts connected/i)).toBeInTheDocument();
+      
+      const ctaLink = screen.getByRole('link', { name: /Connect GitHub/i });
+      expect(ctaLink).toBeInTheDocument();
+      expect(ctaLink.getAttribute('href')).toBeTruthy();
+    });
+
+    it('renders state (c) empty goals list when signed in and >=1 accounts linked, but goals is empty', () => {
+      render(
+        <Goals
+          authSessionOverride={{ isAuthenticated: true }}
+          accountsOverride={[{ connection_id: 'c1', login: 'octocat', primary: true }]}
+        />
+      );
+      expect(screen.getByText(/no goals found/i)).toBeInTheDocument();
+      expect(screen.queryByText(/no GitHub accounts connected/i)).not.toBeInTheDocument();
+    });
+  });
 });
+
