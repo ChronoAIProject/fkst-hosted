@@ -133,6 +133,10 @@ local function reap_orphan_pr(repo, entity)
   end
 
   local parent = entity.parent_issue or common.fetch_issue(core, repo, origin.issue_number, entity.observability_limits, entity.observability_deadline)
+  if parent == nil then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "deferred", "deadline-parent-fetch"))
+    return
+  end
   local parent_state = core.current_state(parent.comments, proposal_id)
   local reason = terminal_parent_reason(parent, entity)
   if reason == nil then
@@ -158,9 +162,14 @@ local function reap_orphan_pr(repo, entity)
     return
   end
 
-  core.observability_run_cmd(core.gh_pr_close_cmd(repo, pr_number), entity.observability_limits, entity.observability_deadline, "gh orphan PR close")
+  local closed = core.observability_run_cmd(core.gh_pr_close_cmd(repo, pr_number), entity.observability_limits, entity.observability_deadline, "gh orphan PR close")
+  if core.observability_result_deferred(closed) then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "deferred", "deadline"))
+    return
+  end
   core.invalidate_entity_after_write(repo, "pr", pr_number)
   local path = reaper_body_path(repo, pr_number, proposal_id)
+<<<<<<< HEAD
   local body = core.with_github_debug_stamp(reaper_comment_body(proposal_id, pr_number, reason), {
     emitter = "github-devloop.observability.reaper",
     target = "pr:" .. tostring(repo) .. "#" .. tostring(pr_number),
@@ -169,6 +178,14 @@ local function reap_orphan_pr(repo, entity)
   })
   file.write(path, body)
   core.observability_run_cmd(core.gh_pr_comment_cmd(repo, pr_number, path), entity.observability_limits, entity.observability_deadline, "gh orphan PR reaper comment")
+=======
+  file.write(path, reaper_comment_body(proposal_id, pr_number, reason))
+  local commented = core.observability_run_cmd(core.gh_pr_comment_cmd(repo, pr_number, path), entity.observability_limits, entity.observability_deadline, "gh orphan PR reaper comment")
+  if core.observability_result_deferred(commented) then
+    log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "deferred", "deadline-after-close"))
+    return
+  end
+>>>>>>> de677e72fc19497d8451a30326be8ed2378b3b7b
   core.invalidate_entity_after_write(repo, "pr", pr_number)
   log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "closed", reason.code))
 end

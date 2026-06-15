@@ -17,6 +17,7 @@ end
 local function ensure_dashboard_label(repo, limits, deadline)
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local existing = core.observability_exec(core.gh_dashboard_label_get_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label get")
+  if core.observability_result_deferred(existing) then return "deferred" end
   if existing.exit_code == 0 then
     return "exists"
   end
@@ -26,6 +27,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
 
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local created = core.observability_exec(core.gh_dashboard_label_create_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label create")
+  if core.observability_result_deferred(created) then return "deferred" end
   if created.exit_code == 0 then
     log.info("github-devloop dept=observability tag=DASHBOARD_LABEL_CREATED label=" .. dashboard_label)
     return "created"
@@ -303,6 +305,9 @@ end
 
 local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
   local listed = core.observability_exec(core.gh_dashboard_issue_list_cmd(repo, dashboard_label), limits, deadline, "gh dashboard issue list")
+  if core.observability_result_deferred(listed) then
+    return "deferred"
+  end
   if listed.exit_code ~= 0 then
     log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED"
       .. " locator=label-list"
@@ -327,6 +332,9 @@ end
 
 local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login, limits, deadline)
   local view = core.observability_run_cmd(core.gh_dashboard_issue_get_cmd(repo, issue_number), limits, deadline, "gh dashboard issue get")
+  if core.observability_result_deferred(view) then
+    return "deferred"
+  end
   local issue = parse_dashboard_issue_get(view.stdout)
   if issue.number == tonumber(issue_number)
     and issue.author_login == bot_login
@@ -354,9 +362,10 @@ end
 
 local function publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
   if core.read_env("FKST_GITHUB_WRITE") ~= "1" then
+    local deferred = dashboard_deferred_if_deadline(deadline)
     log.info("github-devloop dept=observability tag=DASHBOARD_DRY_RUN hash=" .. tostring(dashboard.hash))
     log.info(dashboard.body)
-    return "dry-run"
+    return deferred or "dry-run"
   end
 
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
@@ -364,6 +373,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   deferred = ensure_dashboard_label(repo, limits, deadline); if deferred == "deferred" then return deferred end
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local current = trusted_dashboard_issue(repo, bot_login, limits, deadline)
+  if current == "deferred" then return "deferred" end
   local current_version = current ~= nil and dashboard_version_from_body(current.body) or nil
   local current_hash = current ~= nil and dashboard_hash_from_body(current.body) or nil
   if current ~= nil and current_hash == dashboard.hash then
@@ -375,7 +385,8 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   if current == nil then
     deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
     local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-    core.observability_run_cmd(core.gh_dashboard_issue_create_cmd(repo, path), limits, deadline, "gh dashboard issue create")
+    local created = core.observability_run_cmd(core.gh_dashboard_issue_create_cmd(repo, path), limits, deadline, "gh dashboard issue create")
+    if core.observability_result_deferred(created) then return "deferred" end
     log.info("github-devloop dept=observability tag=DASHBOARD_CREATED hash=" .. tostring(dashboard.hash))
     return "created"
   end
@@ -390,6 +401,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
 
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local refreshed = trusted_dashboard_issue_by_number(repo, current.number, bot_login, limits, deadline)
+  if refreshed == "deferred" then return "deferred" end
   local refreshed_version = refreshed ~= nil and dashboard_version_from_body(refreshed.body) or nil
   local refreshed_hash = refreshed ~= nil and dashboard_hash_from_body(refreshed.body) or nil
   if refreshed ~= nil and tonumber(refreshed.number) == tonumber(current.number)
@@ -416,6 +428,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local updated = core.observability_exec(core.gh_dashboard_issue_update_cmd(repo, current.number, path), limits, deadline, "gh dashboard issue update")
+  if core.observability_result_deferred(updated) then return "deferred" end
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")
     if stderr:find("412", 1, true) ~= nil or stderr:find("Precondition Failed", 1, true) ~= nil then

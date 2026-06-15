@@ -134,6 +134,9 @@ function M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
     deadline,
     "gh recent closed merged issue list"
   )
+  if M.observability_result_deferred(listed) then
+    return nil, nil, "deadline"
+  end
   local issues = M.parse_issue_list_recent_closed(listed.stdout)
   local merged = {}
   for _, issue in ipairs(issues) do
@@ -145,6 +148,9 @@ function M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
         deadline,
         "gh recent closed merged issue view"
       )
+      if M.observability_result_deferred(view) then
+        return nil, nil, "deadline"
+      end
       local current = M.parse_issue_view_observe(view.stdout)
       current.closed_at = issue.closed_at
       current.number = issue.number
@@ -396,13 +402,13 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
     return { action = "no-op", reason = "no-stale-merge-ready" }
   end
 
-  local ok, recent_closed, merged = pcall(function()
-    local issues, merged_issues = M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
-    return issues, merged_issues
+  local ok, recent_closed, merged, source_status = pcall(function()
+    return M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
   end)
-  if not ok then
-    log.warn("github-devloop dept=observability tag=QUEUE_STARVATION action=no-op reason=recent-merge-source-failed")
-    return { action = "no-op", reason = "recent-merge-source-failed" }
+  if not ok or recent_closed == nil then
+    local reason = source_status == "deadline" and "recent-merge-source-deferred" or "recent-merge-source-failed"
+    log.warn("github-devloop dept=observability tag=QUEUE_STARVATION action=no-op reason=" .. reason)
+    return { action = "no-op", reason = reason }
   end
 
   local current_seconds = tonumber(now_seconds) or now()
