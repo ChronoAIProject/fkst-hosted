@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+require("tests.cache_seed_helpers")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -42,6 +43,34 @@ end
 
 local function shared_opts(name)
   return opts("entity-view-cache-" .. name)
+end
+
+local function json_string(value)
+  return tostring(value or "")
+    :gsub("\\", "\\\\")
+    :gsub('"', '\\"')
+    :gsub("\b", "\\b")
+    :gsub("\f", "\\f")
+    :gsub("\n", "\\n")
+    :gsub("\r", "\\r")
+    :gsub("\t", "\\t")
+end
+
+local function seed_cached_issue_view(repo, issue_number, stdout, updated_at, producer)
+  return {
+    key = core.entity_view_cache_key(repo, "issue", issue_number),
+    value = '{"updated_at":"' .. json_string(updated_at)
+    .. '","producer":"' .. json_string(producer or "seed")
+    .. '","stdout":"' .. json_string(stdout)
+    .. '"}',
+  }
+end
+
+local function seed_cache(entry, run_opts)
+  return t.run_department("tests/cache_seed_helpers.lua", {
+    queue = "cache_seed",
+    payload = entry,
+  }, run_opts)
 end
 
 local function assert_clean_open_pr_skip(result)
@@ -197,7 +226,117 @@ return {
     t.eq(count_calls("rev-parse --verify"), 0)
   end,
 
-  test_marker_bearing_issue_view_is_fresh_across_event_driven_departments = function()
+  test_observe_claim_acquire_read_bypasses_same_validator_cache = function()
+    local run_opts = shared_opts("observe-claim-force-fresh")
+    local updated_at = "2026-06-03T01:02:03Z"
+    local view_command = core.gh_issue_view_entity_cmd("owner/repo", 42)
+    seed_cache(seed_cached_issue_view("owner/repo", 42, entity_read_mocks.issue_view_stdout({
+      repo = "owner/repo",
+      number = 42,
+      labels = { "fkst-dev:enabled" },
+      updated_at = updated_at,
+      assignees = { "other-bot" },
+      author_login = "fkst-test-bot",
+    }), updated_at, "stale-claim"), run_opts)
+    entity_read_mocks.mock_issue_read_forms(t, {
+      repo = "owner/repo",
+      number = 42,
+      labels = { "fkst-dev:enabled" },
+      comments = {},
+      updated_at = updated_at,
+      assignees = {},
+      author_login = "fkst-test-bot",
+      register_all_views = true,
+      times = 1,
+    })
+
+    local result = run_observe(issue({
+      labels = { "fkst-dev:enabled" },
+      updated_at = updated_at,
+    }), run_opts)
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(view_command), 1)
+  end,
+
+  test_observe_marker_idempotency_read_bypasses_same_validator_cache = function()
+    local run_opts = shared_opts("observe-marker-force-fresh")
+    local updated_at = "2026-06-03T01:02:03Z"
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local view_command = core.gh_issue_view_entity_cmd("owner/repo", 42)
+    seed_cache(seed_cached_issue_view("owner/repo", 42, entity_read_mocks.issue_view_stdout({
+      repo = "owner/repo",
+      number = 42,
+      labels = { "fkst-dev:enabled" },
+      comments = {},
+      updated_at = updated_at,
+      assignees = { "fkst-test-bot" },
+      author_login = "fkst-test-bot",
+    }), updated_at, "stale-marker"), run_opts)
+    entity_read_mocks.mock_issue_read_forms(t, {
+      repo = "owner/repo",
+      number = 42,
+      labels = { "fkst-dev:thinking" },
+      comments = {
+        core.state_marker(proposal_id, "thinking", "owner/repo#issue#42@2026-06-03T01:02:03Z"),
+      },
+      updated_at = updated_at,
+      assignees = { "fkst-test-bot" },
+      author_login = "fkst-test-bot",
+      register_all_views = true,
+      times = 1,
+    })
+
+    local result = run_observe(issue({
+      labels = { "fkst-dev:enabled" },
+      updated_at = updated_at,
+    }), run_opts)
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(view_command), 1)
+  end,
+
+  test_open_pr_write_gate_claim_read_bypasses_same_validator_cache = function()
+    local run_opts = opts("entity-view-cache-open-pr-gate-force-fresh", {
+      FKST_GITHUB_WRITE = "1",
+    })
+    local updated_at = "2026-06-03T01:02:03Z"
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local view_command = core.gh_issue_view_entity_cmd("owner/repo", 42)
+    seed_cache(seed_cached_issue_view("owner/repo", 42, entity_read_mocks.issue_view_stdout({
+      repo = "owner/repo",
+      number = 42,
+      labels = { "fkst-dev:implementing" },
+      comments = {
+        core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+        core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
+      },
+      updated_at = updated_at,
+      assignees = { "other-bot" },
+      author_login = "fkst-test-bot",
+    }), updated_at, "stale-open-pr"), run_opts)
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
+    }, {
+      updated_at = updated_at,
+      assignees = { "fkst-test-bot" },
+      author_login = "fkst-test-bot",
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
+    mock_bot_env()
+    mock_write_env("1")
+
+    local result = run_open_pr(issue({
+      labels = { "fkst-dev:implementing" },
+      updated_at = updated_at,
+    }), run_opts)
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(view_command), 1)
+  end,
+
+  test_validated_issue_view_is_fresh_across_event_driven_departments = function()
     full_issue_view({ "fkst-dev:ready" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "ready", "ready/version"),
     })

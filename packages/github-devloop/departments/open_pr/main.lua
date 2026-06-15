@@ -61,7 +61,9 @@ function pipeline(event)
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()
 
-    local view = core.fetch_issue_view_open_pr(input.repo, input.issue_number, raw.updated_at)
+    local view = core.fetch_issue_view_open_pr(input.repo, input.issue_number, raw.updated_at, {
+      force_fresh = true,
+    })
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue open-pr view failed: " .. tostring(view.stderr))
     end

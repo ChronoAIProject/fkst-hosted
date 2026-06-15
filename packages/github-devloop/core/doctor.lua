@@ -175,7 +175,6 @@ end
 local function fetch_issue_entity(repo, issue)
   local view = M.fetch_issue_view_state(repo, issue.number, issue.updated_at, {
     consumer = "saga_doctor",
-    fresh = true,
   })
   if view.exit_code ~= 0 then
     error("github-devloop: saga-doctor-issue-view-failed: " .. tostring(view.stderr))
@@ -197,7 +196,6 @@ end
 local function fetch_pr_entity(repo, pr)
   local view = M.fetch_pr_view_origin(repo, pr.number, pr.updated_at, {
     consumer = "saga_doctor",
-    fresh = true,
   })
   if view.exit_code ~= 0 then
     error("github-devloop: saga-doctor-pr-view-failed: " .. tostring(view.stderr))

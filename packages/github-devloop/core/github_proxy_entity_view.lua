@@ -29,33 +29,13 @@ local function sanitize_cache_segment(value, allow_slash)
   return safe
 end
 
-local function entity_view_cache_key(repo, kind, number, updated_at)
+local function entity_view_cache_key(repo, kind, number)
   return "github-proxy/view/"
     .. sanitize_cache_segment(repo, true)
     .. "/"
     .. sanitize_cache_segment(kind, false)
     .. "/"
     .. sanitize_cache_segment(number, false)
-    .. "/"
-    .. sanitize_cache_segment(updated_at, false)
-end
-
-local function entity_view_generation_key(repo, kind, number)
-  return "github-proxy/view-generation/"
-    .. sanitize_cache_segment(repo, true)
-    .. "/"
-    .. sanitize_cache_segment(kind, false)
-    .. "/"
-    .. sanitize_cache_segment(number, false)
-end
-
-local function entity_view_storage_cache_key(repo, kind, number, updated_at)
-  local base_key = entity_view_cache_key(repo, kind, number, updated_at)
-  local generation = cache_get(entity_view_generation_key(repo, kind, number))
-  if generation == nil or generation == "" then
-    return base_key
-  end
-  return base_key .. "-g-" .. sanitize_cache_segment(generation, false)
 end
 
 local function issue_view_cmd(repo, issue_number)
@@ -113,6 +93,10 @@ local function decode_cached_view(encoded)
   if type(decoded.stdout) ~= "string" then
     return nil
   end
+  if decoded.updated_at == nil or tostring(decoded.updated_at) == "" then
+    return nil
+  end
+  decoded.updated_at = tostring(decoded.updated_at)
   return decoded
 end
 
@@ -128,10 +112,26 @@ local function json_string(value)
   return '"' .. text .. '"'
 end
 
-local function encode_cached_view(stdout, producer)
-  return '{"producer":' .. json_string(producer)
+local function encode_cached_view(stdout, updated_at, producer)
+  return '{"updated_at":' .. json_string(updated_at)
+    .. ',"producer":' .. json_string(producer)
     .. ',"stdout":' .. json_string(stdout or "")
     .. "}"
+end
+
+local function success_from_cache(cached)
+  return {
+    stdout = cached.stdout,
+    stderr = "",
+    exit_code = 0,
+  }
+end
+
+local function cache_successful_view(key, result, producer)
+  local view_updated_at = parse_view_updated_at(result and result.stdout)
+  if type(result) == "table" and result.exit_code == 0 and view_updated_at ~= nil then
+    cache_set(key, encode_cached_view(result.stdout or "", view_updated_at, producer))
+  end
 end
 
 local function fetch_entity_view(repo, kind, number, updated_at, opts)
@@ -141,45 +141,47 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   end
 
   local cmd = entity_view_cmd(repo, selected_kind, number)
-  local freshness = tostring(updated_at or "")
+  local validator = tostring(updated_at or "")
   local options = opts or {}
   local consumer = tostring(options.consumer or "")
   local timeout = tonumber(options.timeout) or 30
-  if options.fresh == true or options.marker_bearing == true or freshness == "" then
-    return M.gh_exec(cmd, timeout)
+  local key = entity_view_cache_key(repo, selected_kind, number)
+  if options.force_fresh == true then
+    local result = M.gh_exec(cmd, timeout)
+    cache_successful_view(key, result, consumer)
+    return result
   end
 
-  local key = entity_view_storage_cache_key(repo, selected_kind, number, freshness)
   local cached = decode_cached_view(cache_get(key))
-  if cached ~= nil and cached.producer ~= consumer then
+  if validator ~= "" then
+    -- GitHub updatedAt is second-granular, so this validator is freshness-best-effort only.
+    -- It is safe for stale-tolerant observe reads; authority and write-gate reads must force_fresh.
+    if cached ~= nil and cached.updated_at == validator then
+      return success_from_cache(cached)
+    end
+    local result = M.gh_exec(cmd, timeout)
+    cache_successful_view(key, result, consumer)
+    return result
+  end
+
+  if cached ~= nil then
     local current = M.gh_exec(entity_updated_at_cmd(repo, selected_kind, number), timeout)
     if current.exit_code ~= 0 then
       return current
     end
-    if parse_view_updated_at(cached.stdout) == freshness and parse_updated_at_stdout(current.stdout) == freshness then
-      cache_set(key, "")
-      return {
-        stdout = cached.stdout,
-        stderr = "",
-        exit_code = 0,
-      }
+    if parse_updated_at_stdout(current.stdout) == cached.updated_at then
+      return success_from_cache(cached)
     end
     cache_set(key, "")
   end
 
   local result = M.gh_exec(cmd, timeout)
-  if type(result) == "table" and result.exit_code == 0 and parse_view_updated_at(result.stdout) == freshness then
-    cache_set(key, encode_cached_view(result.stdout or "", consumer))
-  end
+  cache_successful_view(key, result, consumer)
   return result
 end
 
-function M.entity_view_cache_key(repo, kind, number, updated_at)
-  return entity_view_cache_key(repo, kind, number, updated_at)
-end
-
-function M.entity_view_generation_key(repo, kind, number)
-  return entity_view_generation_key(repo, kind, number)
+function M.entity_view_cache_key(repo, kind, number)
+  return entity_view_cache_key(repo, kind, number)
 end
 
 function M.entity_cache_key(repo, entity_type, number)
@@ -192,11 +194,10 @@ function M.invalidate_entity_after_write(repo, kind, number)
     error("github-devloop: invalid post-write invalidation kind")
   end
   local entity_key = M.entity_cache_key(repo, selected_kind, number)
-  local generation_key = entity_view_generation_key(repo, selected_kind, number)
+  local view_key = entity_view_cache_key(repo, selected_kind, number)
   with_lock(entity_key, function()
     cache_set(entity_key, "")
-    local next_generation = (tonumber(cache_get(generation_key) or "0") or 0) + 1
-    cache_set(generation_key, tostring(next_generation))
+    cache_set(view_key, "")
   end)
 end
 
@@ -231,14 +232,12 @@ end
 function M.fetch_marker_issue_view(repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "marker-reader"
-  options.marker_bearing = true
   return M.fetch_issue_view(repo, issue_number, updated_at, options)
 end
 
 function M.fetch_marker_pr_view(repo, pr_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "marker-reader"
-  options.marker_bearing = true
   return M.fetch_pr_view(repo, pr_number, updated_at, options)
 end
 
