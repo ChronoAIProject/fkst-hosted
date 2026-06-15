@@ -87,6 +87,17 @@ local function find_label_raise(raises, target_kind)
     return tostring(payload.target_kind or "issue") == tostring(target_kind or "issue")
   end)
 end
+local function count_label_raises(raises, target_kind)
+  local count = 0
+  for _, raised in ipairs(raises or {}) do
+    local payload = raised.payload or {}
+    if raised.queue == "github-proxy.github_issue_label_request"
+      and tostring(payload.target_kind or "issue") == tostring(target_kind or "issue") then
+      count = count + 1
+    end
+  end
+  return count
+end
 local function find_comment_with(raises, text)
   return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
     return tostring(payload.body or ""):find(text, 1, true) ~= nil
@@ -229,7 +240,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
-    })
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev", nil, { "fkst-dev:thinking" })
     mock_issue_reviewing({ "fkst-dev:pr-open" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
     })
@@ -245,13 +256,12 @@ return {
       },
     }, opts("observe-pr-reviewing"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
+    t.eq(#result.raises, 3)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local label_raise = find_label_raise(result.raises, "issue")
     local pr_label_raise = find_label_raise(result.raises, "pr")
     local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
     t.is_true(comment_raise.payload.body:find("state=\"reviewing\"", 1, true) ~= nil)
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(find_label_raise(result.raises, "issue"), nil)
     t.eq(pr_label_raise.payload.target_kind, "pr")
     t.eq(pr_label_raise.payload.target_number, 7)
     t.eq(pr_label_raise.payload.expected_state, "reviewing")
@@ -265,7 +275,7 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
-    })
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev", nil, { "fkst-dev:thinking" })
     mock_issue_reviewing({ "fkst-dev:pr-open" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
     })
@@ -281,14 +291,45 @@ return {
       },
     }, opts("observe-pr-reconcile-reviewing"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    local label_raise = find_label_raise(result.raises, "issue")
+    t.eq(#result.raises, 2)
     local pr_label_raise = find_label_raise(result.raises, "pr")
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(find_label_raise(result.raises, "issue"), nil)
     t.eq(pr_label_raise.payload.add_labels[1], "fkst-dev:reviewing")
     t.eq(pr_label_raise.payload.target_number, 7)
-    t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
-    t.is_true(#label_raise.payload.remove_labels >= 10)
+    t.eq(pr_label_raise.payload.expected_state, "reviewing")
+  end,
+  test_observe_pr_does_not_reconcile_issue_label_from_pr_fixing_state = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local fix_version = core.next_fix_version(impl_version)
+    mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev", nil, { "fkst-dev:pr-open" })
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
+    })
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#pr/7",
+      },
+    }, opts("observe-pr-no-issue-label-from-pr-fixing"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_label_raises(result.raises, "issue"), 0)
+    local pr_label_raise = find_label_raise(result.raises, "pr")
+    if pr_label_raise ~= nil then
+      t.eq(pr_label_raise.payload.target_kind, "pr")
+      t.eq(pr_label_raise.payload.target_number, 7)
+      t.eq(pr_label_raise.payload.expected_state, "fixing")
+      t.eq(pr_label_raise.payload.add_labels[1], "fkst-dev:fixing")
+    end
   end,
   test_observe_pr_removes_stale_reviewing_label_from_blocked_pr_marker = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -336,7 +377,7 @@ return {
       },
     }, opts("observe-pr-merge-ready-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local merge_raise = find_raise(result.raises, "devloop_merge_ready")
     t.eq(find_label_raise(result.raises, "pr").payload.add_labels[1], "fkst-dev:merge-ready")
     t.eq(merge_raise.payload.schema, "github-devloop.merge-ready.v1")
@@ -365,7 +406,7 @@ return {
       },
     }, opts("observe-pr-merging-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local merge_raise = find_raise(result.raises, "devloop_merge_ready")
     t.eq(find_label_raise(result.raises, "pr").payload.add_labels[1], "fkst-dev:merging")
     t.eq(merge_raise.payload.schema, "github-devloop.merge-ready.v1")
@@ -395,7 +436,7 @@ return {
       },
     }, opts("observe-pr-reviewing-self-heal"))
     t.eq(first.exit_code, 0)
-    t.eq(#first.raises, 3)
+    t.eq(#first.raises, 2)
     local reviewing_raise = find_raise(first.raises, "devloop_reviewing")
     t.eq(find_label_raise(first.raises, "pr").payload.add_labels[1], "fkst-dev:reviewing")
     t.eq(reviewing_raise.payload.version, impl_version)
@@ -419,7 +460,8 @@ return {
       },
     }, opts("observe-pr-reviewing-reviewed"))
     t.eq(reviewed.exit_code, 0)
-    t.eq(#reviewed.raises, 2)
+    t.eq(#reviewed.raises, 1)
+    t.eq(find_label_raise(reviewed.raises, "issue"), nil)
     t.eq(find_label_raise(reviewed.raises, "pr").payload.add_labels[1], "fkst-dev:reviewing")
   end,
 
@@ -444,7 +486,7 @@ return {
       },
     }, opts("observe-pr-reviewing-fix-round-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
     t.eq(find_label_raise(result.raises, "pr").payload.expected_version, fix_round_version)
     t.eq(reviewing_raise.payload.version, fix_round_version)

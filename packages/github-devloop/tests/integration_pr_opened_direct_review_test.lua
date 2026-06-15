@@ -76,7 +76,7 @@ return {
     }, opts("pr-opened-direct-reviewing"))
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
+    t.eq(#result.raises, 3)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local pr_label_raise = find_label_raise(result.raises, "pr")
     local reviewing_raise = find_raise(result.raises, "devloop_reviewing")

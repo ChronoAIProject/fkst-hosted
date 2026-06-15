@@ -89,27 +89,6 @@ local function origin_base_matches_integration(origin, branches)
     and tostring(origin.base_branch or "") == tostring(branches.integration)
 end
 
-local function maybe_issue_label_hint(origin, state, source_ref, current_issue)
-  if origin.issue_number == nil or state.state == nil then
-    return
-  end
-  local current_labels = current_issue and current_issue.labels or nil
-  local add_labels, remove_labels
-  if current_labels ~= nil then
-    add_labels, remove_labels = core.state_label_reconcile_changes(current_labels, state.state)
-    if #add_labels == 0 and #remove_labels == 0 then
-      return
-    end
-  else
-    add_labels, remove_labels = core.state_label_changes(state.state)
-  end
-  local label_request = core.build_reconcile_state_label_request(origin.repo, origin.issue_number, origin.proposal_id, state.state, state.version, source_ref, current_labels)
-  core.log_apply("observe_pr", origin.proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
-    "github-proxy.github_issue_label_request",
-  })
-  core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
-end
-
 local function maybe_pr_label_hint(origin, pr_number, current_pr, state, source_ref)
   if state.state == nil then
     return
@@ -125,9 +104,7 @@ local function maybe_pr_label_hint(origin, pr_number, current_pr, state, source_
   core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
-local function maybe_label_hints(origin, pr_number, current_pr, state, pr_source_ref_value, current_issue)
-  local issue_source_ref_value = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or nil
-  maybe_issue_label_hint(origin, state, issue_source_ref_value, current_issue)
+local function maybe_label_hints(origin, pr_number, current_pr, state, pr_source_ref_value)
   maybe_pr_label_hint(origin, pr_number, current_pr, state, pr_source_ref_value)
 end
 
@@ -340,7 +317,7 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
     end
     if state.state == "blocked" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "skip-idempotent(already at to_state)", "blocked marker visible on PR")
-      maybe_label_hints(origin, pr.number, current_pr, state, source_ref, issue_current)
+      maybe_label_hints(origin, pr.number, current_pr, state, source_ref)
       return
     end
     if state.state ~= "pr-open" then
@@ -363,14 +340,11 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
       proposal_id = origin.proposal_id,
     }
     local comment_request = core.build_pr_base_unmanaged_comment_request(origin.repo, pr.number, origin, branches.integration, source_ref)
-    local label_request = core.build_pr_base_unmanaged_label_request(origin.repo, origin.issue_number, origin, pr.number, branches.integration, core.issue_source_ref(origin.repo, origin.issue_number))
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "applied(pr-base-unmanaged)", "self-claimed PR base is not managed by this instance")
     core.log_apply("observe_pr", origin.proposal_id, "blocked", blocked_version, { add = { "fkst-dev:blocked" }, remove = {} }, {
       "github-proxy.github_pr_comment_request",
-      "github-proxy.github_issue_label_request",
     })
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
     maybe_pr_label_hint(origin, pr.number, current_pr, blocked_state, source_ref)
   end)
   return true
@@ -439,7 +413,7 @@ function pipeline(event)
       if issue_state.state == "fixing" then
         core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
         if raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, { comments = issue_comments }) then
-          maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref, issue_current)
+          maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref)
         end
         return
       end
@@ -452,7 +426,7 @@ function pipeline(event)
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
       local raised_current_state = raise_current_state(origin, pr.number, current_pr, replay_state, source_ref, issue_current)
       if raised_current_state then
-        maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref, issue_current)
+        maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref)
       elseif replay_state.state == "blocked" or replay_state.state == "merged" then
         maybe_pr_label_hint(origin, pr.number, current_pr, replay_state, source_ref)
       end

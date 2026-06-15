@@ -166,8 +166,15 @@ return {
     t.is_true(comment.payload.body:find('pr_base="integration"', 1, true) ~= nil)
     t.is_true(comment.payload.body:find('integration_branch="dev"', 1, true) ~= nil)
 
-    local label = h.find_raise(result.raises, "github-proxy.github_issue_label_request")
+    local issue_label = h.find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
+      return tostring(payload.target_kind or "issue") == "issue"
+    end)
+    t.eq(issue_label, nil)
+    local label = h.find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
+      return tostring(payload.target_kind or "issue") == "pr"
+    end)
     t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(label.payload.target_number, 7)
     t.eq(h.find_raise(result.raises, "devloop_reviewing"), nil)
   end,
 
