@@ -30,6 +30,10 @@ The **[HTTP API Reference](docs/api-reference.md)** documents everything you nee
 to build against fkst-hosted: every endpoint, how to authenticate, the
 permissions each call requires, request/response formats, and worked examples.
 
+## Local Development & Auth
+
+For instructions on setting up authentication, service accounts, and GitHub integrations using local vs production profiles, see the **[Authentication & GitHub Integration Guide](docs/auth-integration.md)**.
+
 ---
 
 <sub>Running or contributing to fkst-hosted? See
