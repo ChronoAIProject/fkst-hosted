@@ -315,4 +315,125 @@ describe('AddPackageModal (F2) Tests', () => {
       });
     });
   });
+
+  describe('ZIP Upload and AI Generation Modes', () => {
+    it('supports switching to ZIP tab, uploading a file, and triggers useArchiveCreate', async () => {
+      let uploadCalled = false;
+      server.use(
+        http.post('*/api/v1/packages/my-zip-pkg/archive', async ({ request }) => {
+          const contentType = request.headers.get('content-type');
+          expect(contentType).toBe('application/zip');
+          const bodyBytes = await request.arrayBuffer();
+          expect(bodyBytes.byteLength).toBeGreaterThan(0);
+          uploadCalled = true;
+          return HttpResponse.json({ name: 'my-zip-pkg' }, { status: 201 });
+        })
+      );
+
+      const toastSpy = vi.spyOn(toaster, 'toast');
+      render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
+        wrapper: createTestWrapper(),
+      });
+
+      // Switch to Upload .zip tab
+      const zipTabButton = screen.getByRole('tab', { name: /Upload \.zip/i });
+      await userEvent.click(zipTabButton);
+
+      // Fill Name and select File
+      const nameInput = screen.getByLabelText(/Name · unique on upload/i);
+      await userEvent.type(nameInput, 'my-zip-pkg');
+
+      const fileInput = screen.getByLabelText(/ZIP File · raw application\/zip/i);
+      const testFile = new File(['mock zip content'], 'test.zip', { type: 'application/zip' });
+      await userEvent.upload(fileInput, testFile);
+
+      const submitBtn = screen.getByRole('button', { name: /Upload archive/i });
+      await userEvent.click(submitBtn);
+
+      await waitFor(() => expect(uploadCalled).toBe(true));
+      expect(toastSpy).toHaveBeenCalledWith({
+        title: 'Uploaded',
+        description: 'Uploaded — composes on next session start',
+      });
+    });
+
+    it('supports switching to Generate with AI tab, submitting description, and triggers useGeneratePackage', async () => {
+      let generateCalled = false;
+      server.use(
+        http.post('*/api/v1/packages/generate', async ({ request }) => {
+          const body = await request.json() as { description: string; name?: string; save?: boolean };
+          expect(body.description).toBe('create a department called delivery');
+          expect(body.name).toBe('my-ai-pkg');
+          expect(body.save).toBe(true);
+          generateCalled = true;
+          return HttpResponse.json({
+            package: {
+              name: 'my-ai-pkg',
+              files: [{ path: 'departments/delivery/main.lua', content: '-- lua code' }],
+              composed_deps: []
+            },
+            validation: { ok: true, errors: [] },
+            conformance: { status: 'ok', errors: [], skipped_reason: null },
+            saved: true,
+            save_error: null,
+            attempts: 1
+          }, { status: 200 });
+        })
+      );
+
+      const toastSpy = vi.spyOn(toaster, 'toast');
+      render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
+        wrapper: createTestWrapper(),
+      });
+
+      // Switch to AI tab
+      const aiTabButton = screen.getByRole('tab', { name: /Generate with AI/i });
+      await userEvent.click(aiTabButton);
+
+      const nameInput = screen.getByLabelText(/Package Name · optional/i);
+      await userEvent.type(nameInput, 'my-ai-pkg');
+
+      const descInput = screen.getByLabelText(/AI Prompt \/ Description/i);
+      await userEvent.type(descInput, 'create a department called delivery');
+
+      const submitBtn = screen.getByRole('button', { name: /Generate package/i });
+      await userEvent.click(submitBtn);
+
+      await waitFor(() => expect(generateCalled).toBe(true));
+      expect(toastSpy).toHaveBeenCalledWith({
+        title: 'Generated',
+        description: 'AI Generated and saved to store — composes on next session start',
+      });
+    });
+
+    it('handles AI Generation 503 error honestly', async () => {
+      server.use(
+        http.post('*/api/v1/packages/generate', () => {
+          return HttpResponse.json(
+            { error: 'service_unavailable', message: 'LLM gateway is not configured (503)' },
+            { status: 503 }
+          );
+        })
+      );
+
+      render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
+        wrapper: createTestWrapper(),
+      });
+
+      // Switch to AI tab
+      const aiTabButton = screen.getByRole('tab', { name: /Generate with AI/i });
+      await userEvent.click(aiTabButton);
+
+      const descInput = screen.getByLabelText(/AI Prompt \/ Description/i);
+      await userEvent.type(descInput, 'create a department');
+
+      const submitBtn = screen.getByRole('button', { name: /Generate package/i });
+      await userEvent.click(submitBtn);
+
+      expect(
+        await screen.findByText(/AI Generation failed: LLM gateway is not configured \(503\)/i)
+      ).toBeInTheDocument();
+    });
+  });
 });
+

@@ -1,10 +1,12 @@
 import React from 'react';
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { PackagesView, default as PackagesScreen, deriveTopology } from './packages-screen';
+import * as toaster from '../../components/primitives/toaster';
 import { SessionRegistryProvider, useSessionRegistry } from '../../lib/hooks/session-registry';
 
 // MSW Server Setup
@@ -595,5 +597,200 @@ function RegistryInitializer({
         expect(applyBtn).not.toBeDisabled();
       });
     });
+
+    describe('Update, Delete and Sharing Mutations', () => {
+      it('supports updating package files and dependencies', async () => {
+        let updateCalled = false;
+        server.use(
+          http.get('*/api/v1/packages', () => {
+            return HttpResponse.json(['pkg-a']);
+          }),
+          http.get('*/api/v1/packages/pkg-a', () => {
+            return HttpResponse.json({
+              name: 'pkg-a',
+              files: [{ path: 'departments/dept-a/main.lua', content: 'print(1)' }],
+              composed_deps: [],
+              created_at: '',
+              updated_at: '',
+            });
+          }),
+          http.put('*/api/v1/packages/pkg-a', async ({ request }) => {
+            const body = await request.json() as { files: { path: string; content: string }[]; composed_deps?: string[] };
+            expect(body.files[0].content).toBe('print(2)');
+            updateCalled = true;
+            return HttpResponse.json({
+              name: 'pkg-a',
+              files: body.files,
+              composed_deps: body.composed_deps || [],
+              created_at: '',
+              updated_at: '',
+            }, { status: 200 });
+          })
+        );
+
+        const toastSpy = vi.spyOn(toaster, 'toast');
+        render(<PackagesScreen />, { wrapper: createTestWrapper() });
+
+        // Wait for package detail to resolve
+        await screen.findByText('pkg-a');
+
+        // Click Update button on the row
+        const updateBtn = screen.getByRole('button', { name: /^Update$/i });
+        await userEvent.click(updateBtn);
+
+        // Verify Modal opens with name disabled
+        const nameInput = screen.getByLabelText(/Name · unique on create/i);
+        expect(nameInput).toBeDisabled();
+
+        // Verify files pre-filled
+        const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
+        expect(filesTextarea.value).toContain('print(1)');
+
+        // Change files content and submit
+        fireEvent.change(filesTextarea, { target: { value: '--- path: departments/dept-a/main.lua\nprint(2)' } });
+        const submitBtn = screen.getByRole('button', { name: /Update package/i });
+        await userEvent.click(submitBtn);
+
+        await waitFor(() => expect(updateCalled).toBe(true));
+        expect(toastSpy).toHaveBeenCalledWith({
+          title: 'Updated',
+          description: 'Updated — composes on next session start',
+        });
+      });
+
+      it('supports deleting package after confirmation', async () => {
+        let deleteCalled = false;
+        server.use(
+          http.get('*/api/v1/packages', () => {
+            return HttpResponse.json(['pkg-a']);
+          }),
+          http.get('*/api/v1/packages/pkg-a', () => {
+            return HttpResponse.json({
+              name: 'pkg-a',
+              files: [],
+              composed_deps: [],
+              created_at: '',
+              updated_at: '',
+            });
+          }),
+          http.delete('*/api/v1/packages/pkg-a', () => {
+            deleteCalled = true;
+            return new HttpResponse(null, { status: 200 });
+          })
+        );
+
+        const toastSpy = vi.spyOn(toaster, 'toast');
+        render(<PackagesScreen />, { wrapper: createTestWrapper() });
+
+        // Wait for package to load
+        await screen.findByText('pkg-a');
+
+        // Click Delete button on the row
+        const deleteBtn = screen.getByRole('button', { name: /^Delete$/i });
+        await userEvent.click(deleteBtn);
+
+        // Verify Confirm modal opens
+        expect(screen.getByRole('heading', { name: /^Delete package$/i })).toBeInTheDocument();
+        expect(screen.getByText(/Are you sure you want to permanently delete the package/i)).toBeInTheDocument();
+
+        // Click Confirm delete
+        const confirmDeleteBtn = screen.getByRole('button', { name: /^Delete package$/i });
+        await userEvent.click(confirmDeleteBtn);
+
+        await waitFor(() => expect(deleteCalled).toBe(true));
+        expect(toastSpy).toHaveBeenCalledWith({
+          title: 'Deleted',
+          description: 'Successfully deleted package pkg-a',
+        });
+      });
+
+      it('supports listing, granting and revoking package shares', async () => {
+        let createShareCalled = false;
+        let deleteShareCalled = false;
+
+        server.use(
+          http.get('*/api/v1/packages', () => {
+            return HttpResponse.json(['pkg-a']);
+          }),
+          http.get('*/api/v1/packages/pkg-a', () => {
+            return HttpResponse.json({
+              name: 'pkg-a',
+              files: [{ path: 'departments/dept-a/main.lua', content: '' }],
+              composed_deps: [],
+              created_at: '',
+              updated_at: '',
+            });
+          }),
+          http.get('*/api/v1/packages/pkg-a/shares', () => {
+            return HttpResponse.json([
+              {
+                id: 'share-1',
+                package_name: 'pkg-a',
+                grantee_kind: 'user',
+                grantee_id: 'user-bob',
+                level: 'read',
+                granted_by: 'owner',
+                created_at: '',
+              }
+            ]);
+          }),
+          http.post('*/api/v1/packages/pkg-a/shares', async ({ request }) => {
+            const body = await request.json() as { grantee_id: string; grantee_kind: string; level: string };
+            expect(body.grantee_id).toBe('user-alice');
+            expect(body.grantee_kind).toBe('user');
+            expect(body.level).toBe('use');
+            createShareCalled = true;
+            return HttpResponse.json({
+              id: 'share-2',
+              package_name: 'pkg-a',
+              grantee_kind: 'user',
+              grantee_id: 'user-alice',
+              level: 'use',
+              granted_by: 'owner',
+              created_at: '',
+            }, { status: 201 });
+          }),
+          http.delete('*/api/v1/packages/pkg-a/shares/share-1', () => {
+            deleteShareCalled = true;
+            return new HttpResponse(null, { status: 200 });
+          })
+        );
+
+        const toastSpy = vi.spyOn(toaster, 'toast');
+        render(<PackagesScreen />, { wrapper: createTestWrapper() });
+
+        // Wait for package to load
+        await screen.findByText('pkg-a');
+
+        // Verify bob's share is listed
+        expect(await screen.findByText('user-bob')).toBeInTheDocument();
+
+        // Revoke bob's share
+        const revokeBtn = screen.getByRole('button', { name: /Revoke/i });
+        await userEvent.click(revokeBtn);
+        await waitFor(() => expect(deleteShareCalled).toBe(true));
+        expect(toastSpy).toHaveBeenCalledWith({
+          title: 'Share revoked',
+          description: 'Successfully revoked share for user-bob',
+        });
+
+        // Grant share to alice
+        const granteeInput = screen.getByLabelText(/Grantee ID/i);
+        await userEvent.type(granteeInput, 'user-alice');
+
+        const levelSelect = screen.getByLabelText(/Level/i);
+        fireEvent.change(levelSelect, { target: { value: 'use' } });
+
+        const grantBtn = screen.getByRole('button', { name: /Grant/i });
+        await userEvent.click(grantBtn);
+
+        await waitFor(() => expect(createShareCalled).toBe(true));
+        expect(toastSpy).toHaveBeenCalledWith({
+          title: 'Share granted',
+          description: 'Successfully shared pkg-a with user-alice',
+        });
+      });
+    });
   });
 });
+
