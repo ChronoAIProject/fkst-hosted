@@ -1,4 +1,5 @@
 local M = {}
+local core = require("core")
 
 local function json_string(value)
   return tostring(value or "")
@@ -363,6 +364,22 @@ end
 
 function M.mock_pr_list_raw_command(t, command, result, times)
   register_command_result(t, command, result or {}, times or 1)
+end
+
+function M.mock_issue_board_digest_list_raw(t, repo, result, times)
+  M.mock_issue_list_raw_command(t, core.gh_issue_list_board_digest_cmd(repo), result, times)
+end
+
+function M.mock_pr_board_digest_list_raw(t, repo, result, times)
+  M.mock_pr_list_raw_command(t, core.gh_pr_list_board_digest_cmd(repo), result, times)
+end
+
+function M.mock_issue_board_digest_list(t, repo, issues, times)
+  M.mock_issue_list_command(t, core.gh_issue_list_board_digest_cmd(repo), issues, times)
+end
+
+function M.mock_pr_board_digest_list(t, repo, prs, times)
+  M.mock_pr_list_command(t, core.gh_pr_list_board_digest_cmd(repo), prs, times)
 end
 
 function M.mock_issue_view_selector(t, fields, selector, times)

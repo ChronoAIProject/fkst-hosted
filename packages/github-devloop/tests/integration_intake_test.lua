@@ -216,7 +216,7 @@ local function mock_intake_codex_with_closed_issues(stdout, closed_issues, exit_
     exit_code = 0,
   })
   mock_intake_judge_view({}, {})
-  entity_read_mocks.mock_issue_list_raw_command(t, "gh issue list --repo 'owner/repo' --state open --limit 100 --json number,title,labels", {
+  entity_read_mocks.mock_issue_board_digest_list_raw(t, "owner/repo", {
     stdout = "[]\n",
   })
   entity_read_mocks.mock_issue_list_raw_command(t, core.gh_issue_list_recent_closed_cmd("owner/repo", 30), {

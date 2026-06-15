@@ -59,6 +59,22 @@ function M.gh_issue_list_recent_closed_cmd(repo, limit)
     .. " --json number,title,closedAt,labels"
 end
 
+function M.gh_issue_list_board_digest_cmd(repo)
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
+function M.gh_pr_list_board_digest_cmd(repo)
+  return "gh pr list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
 local function bounded_page_number(page)
   if page == nil then
     return nil
@@ -68,6 +84,49 @@ local function bounded_page_number(page)
     error("github-devloop: invalid list page number")
   end
   return n
+end
+
+local function observe_list_page_key(page)
+  local selected_page = bounded_page_number(page)
+  if selected_page == nil then
+    return "paginate"
+  end
+  return tostring(selected_page)
+end
+
+local observe_list_timeout = 10
+
+local function read_coalesce_key_segment(value, fallback)
+  local text = tostring(value or "")
+  if text == "" then
+    return fallback or "all"
+  end
+  local segment = text:gsub("[^A-Za-z0-9%.%-]", function(char)
+    return string.format("_%02X", string.byte(char))
+  end)
+  return "v-" .. segment
+end
+
+local function observe_list_repo_key(repo)
+  local owner, name = tostring(repo or ""):match("^([^/]+)/([^/]+)$")
+  if owner ~= nil and name ~= nil then
+    return read_coalesce_key_segment(owner, "owner") .. "/" .. read_coalesce_key_segment(name, "repo")
+  end
+  return read_coalesce_key_segment(repo, "repo")
+end
+
+local function observe_list_label_key(label)
+  if label == nil or tostring(label) == "" then
+    return "all"
+  end
+  return read_coalesce_key_segment(label, "label")
+end
+
+local function observe_list_read_coalesce(key)
+  return {
+    key = key,
+    ttl_seconds = 30,
+  }
 end
 
 function M.gh_issue_list_observe_cmd(repo, label, page, include_headers)
@@ -86,6 +145,27 @@ function M.gh_issue_list_observe_cmd(repo, label, page, include_headers)
   local selected_label = label
   return "gh api " .. include .. paginate
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&labels=" .. tostring(selected_label):gsub(":", "%%3A") .. "&per_page=100" .. page_query)
+end
+
+function M.gh_issue_list_observe_read_coalesce(repo, label, page)
+  return observe_list_read_coalesce(table.concat({
+    "github-devloop",
+    "observe-list",
+    observe_list_repo_key(repo),
+    "issues",
+    "label",
+    observe_list_label_key(label),
+    "page",
+    observe_list_page_key(page),
+  }, "/"))
+end
+
+function M.gh_issue_list_observe_opts(repo, label, page, include_headers)
+  return {
+    cmd = M.gh_issue_list_observe_cmd(repo, label, page, include_headers),
+    timeout = observe_list_timeout,
+    read_coalesce = M.gh_issue_list_observe_read_coalesce(repo, label, page),
+  }
 end
 
 function M.gh_issue_list_wip_cmd(repo)
@@ -206,6 +286,25 @@ function M.gh_pr_list_observe_cmd(repo, page, include_headers)
   end
   return "gh api " .. include .. paginate
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100" .. page_query)
+end
+
+function M.gh_pr_list_observe_read_coalesce(repo, page)
+  return observe_list_read_coalesce(table.concat({
+    "github-devloop",
+    "observe-list",
+    observe_list_repo_key(repo),
+    "prs",
+    "page",
+    observe_list_page_key(page),
+  }, "/"))
+end
+
+function M.gh_pr_list_observe_opts(repo, page, include_headers)
+  return {
+    cmd = M.gh_pr_list_observe_cmd(repo, page, include_headers),
+    timeout = observe_list_timeout,
+    read_coalesce = M.gh_pr_list_observe_read_coalesce(repo, page),
+  }
 end
 
 function M.gh_pr_list_freshness_cmd(repo)
@@ -644,6 +743,20 @@ function M.git_worktree_remove_if_present_cmd(worktree)
     error("github-devloop: invalid worktree path")
   end
   return "if [ -d " .. M._shell_single_quote(value) .. " ]; then git worktree remove --force " .. M._shell_single_quote(value) .. "; fi"
+end
+
+function M.git_worktree_force_clean_cmd(worktree)
+  local value = tostring(worktree or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid worktree path")
+  end
+  local w = M._shell_single_quote(value)
+  -- Idempotently clear the target worktree path before `git worktree add`. Robust
+  -- to an orphan dir (present on disk but with no registration, left by a codex
+  -- killed mid-implement on restart) as well as a registered worktree. Always
+  -- exits 0 so a missing path is a clean no-op. The target is clearable scratch
+  -- under FKST_RUNTIME_ROOT.
+  return "git worktree remove --force " .. w .. " 2>/dev/null; rm -rf " .. w .. "; git worktree prune"
 end
 
 function M.git_worktree_add_new_branch_cmd(worktree, branch, base)

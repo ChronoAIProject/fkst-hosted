@@ -1,7 +1,6 @@
 local S = {}
 
 function S.install(M)
-local poll_bucket_seconds = 300
 
 local function json_string(value)
   local text = tostring(value or "")
@@ -21,13 +20,9 @@ end
 local function normalize_poll_key(value)
   local text = tostring(value or "")
   if text ~= "" then
-    local seconds = M.iso_timestamp_epoch_seconds(text)
-    if seconds ~= nil then
-      return "bucket-" .. tostring(math.floor(seconds / poll_bucket_seconds))
-    end
-    return M.sanitize_key(text, 80):gsub("/", "-")
+    return "poll-" .. M.sanitize_key(text, 120):gsub("/", "-")
   end
-  return "bucket-" .. tostring(math.floor(now() / poll_bucket_seconds))
+  return nil
 end
 
 local function list_cache_key(repo, kind, scope, poll_key)
@@ -35,13 +30,17 @@ local function list_cache_key(repo, kind, scope, poll_key)
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
     error("github-devloop: invalid entity list kind")
   end
+  local normalized_poll_key = normalize_poll_key(poll_key)
+  if normalized_poll_key == nil then
+    return nil
+  end
   return table.concat({
     "github-devloop",
     "entity-list",
     M.safe_repo(repo),
     selected_kind,
     M.sanitize_key(scope or "open", 80):gsub("/", "-"),
-    normalize_poll_key(poll_key),
+    normalized_poll_key,
   }, "/")
 end
 
@@ -63,6 +62,9 @@ end
 
 local function fetch_shared_list(repo, kind, scope, poll_key, exec_spec)
   local key = list_cache_key(repo, kind, scope, poll_key)
+  if key == nil then
+    return exec_spec()
+  end
   local cached = decode_cached_list(cache_get(key))
   if cached ~= nil then
     return cached
@@ -98,17 +100,19 @@ end
 
 function M.fetch_shared_issue_observe_list(repo, opts)
   local options = opts or {}
-  local cmd = M.gh_issue_list_observe_cmd(repo)
+  local exec_opts = M.gh_issue_list_observe_opts(repo)
+  exec_opts.timeout = options.timeout or exec_opts.timeout
   return fetch_shared_list(repo, "issue", "open", options.poll_key, function()
-    return M.gh_exec({ cmd = cmd, timeout = options.timeout or 60 }, nil, options.exec)
+    return M.gh_exec(exec_opts, nil, options.exec)
   end)
 end
 
 function M.fetch_shared_pr_observe_list(repo, opts)
   local options = opts or {}
-  local cmd = M.gh_pr_list_observe_cmd(repo)
+  local exec_opts = M.gh_pr_list_observe_opts(repo)
+  exec_opts.timeout = options.timeout or exec_opts.timeout
   return fetch_shared_list(repo, "pr", "open", options.poll_key, function()
-    return M.gh_exec({ cmd = cmd, timeout = options.timeout or 60 }, nil, options.exec)
+    return M.gh_exec(exec_opts, nil, options.exec)
   end)
 end
 
