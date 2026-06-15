@@ -339,6 +339,24 @@ local function count_calls(needle)
 end
 
 return {
+  test_dependency_graphql_contract_is_named = function()
+    local operations = core.github_graphql_queries
+
+    t.eq(type(operations), "table")
+    t.eq(core.github_graphql_command_templates.graphql_query, "gh api graphql -f query=")
+    t.eq(type(operations.dependency_blocked_by), "string")
+    t.eq(operations.dependency_blocked_by:find("blockedBy(first:50)", 1, true) ~= nil, true)
+    t.eq(operations.dependency_blocked_by:find("nodes{number state stateReason repository{nameWithOwner}}", 1, true) ~= nil, true)
+    t.eq(
+      core.render_github_graphql_query("dependency_blocked_by", {
+        owner = "owner",
+        name = "repo",
+        issue_number = 42,
+      }),
+      '{repository(owner:"owner",name:"repo"){issue(number:42){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number state stateReason repository{nameWithOwner}}}}}}'
+    )
+  end,
+
   test_dependency_gate_satisfied_without_blockers = function()
     mock_blocked_by(42, {})
     local gate = core.dependency_gate(repo, 42)
