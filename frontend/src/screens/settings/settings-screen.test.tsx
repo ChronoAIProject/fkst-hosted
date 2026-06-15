@@ -18,6 +18,16 @@ vi.mock('@/lib/hooks/usePackages');
 vi.mock('@/lib/hooks/useSessions');
 vi.mock('@/lib/hooks/useGitHubAccounts');
 
+// Hermetic auth posture: every SettingsScreen test here asserts the v1
+// NyxID-pending gap state (all gap controls disabled), so force
+// authRequired() = false regardless of the ambient .env. The main checkout
+// sets VITE_AUTH_REQUIRED=true, which would otherwise render the
+// "Sign in" branch instead of the disabled "Sign out" gap control.
+vi.mock('@/lib/auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/auth')>();
+  return { ...actual, authRequired: () => false };
+});
+
 function renderWithProviders(ui: React.ReactNode, { sessionIdToRegister }: { sessionIdToRegister?: string } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
