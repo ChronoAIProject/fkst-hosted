@@ -1,7 +1,6 @@
 packages/github-devloop/core/base.lua:
   - gh
 packages/github-devloop/core/branches.lua:
-  - git base
   - git command
   - git commit
   - git diff
@@ -34,10 +33,6 @@ packages/github-devloop/core/commands.lua:
   - git worktree
 packages/github-devloop/core/config.lua:
   - git rev-parse
-packages/github-devloop/core/ensure_repo.lua:
-  - gh dashboard
-  - gh label
-  - git integration
 packages/github-devloop/core/error_facts.lua:
   - gh
   - git
@@ -56,12 +51,8 @@ packages/github-devloop/core/queue_starvation.lua:
 packages/github-devloop/core/release_notes.lua:
   - gh pr
 packages/github-devloop/core/substrate_ref.lua:
-  - gh substrate-ref
   - git diff
-  - git ls-remote
   - git show
-  - git stale
-  - git substrate-ref
 packages/github-devloop/departments/merge/main.lua:
   - gh pr
 packages/github-devloop/departments/observability/common.lua:
@@ -70,25 +61,6 @@ packages/github-devloop/departments/observability/dashboard.lua:
   - gh dashboard
 packages/github-devloop/departments/observability/reaper.lua:
   - gh orphan
-packages/github-devloop/departments/pr_freshness_scan/main.lua:
-  - gh PR
-  - git PR
-packages/github-devloop/departments/rollup_scan/main.lua:
-  - gh rollup
-  - git rollup
-packages/github-devloop/departments/sync_conflict/main.lua:
-  - git add
-  - git branch
-  - git cached
-  - git diff
-  - git remote
-  - git resolved
-  - git sync
-  - git unmerged
-packages/github-devloop/departments/sync_scan/main.lua:
-  - git branch
-  - git remote
-  - git sync
 packages/github-proxy/core.lua:
   - gh api
   - gh issue
@@ -97,13 +69,6 @@ packages/github-proxy/core.lua:
   - git merge-base
   - git push
   - git show-ref
-packages/github-proxy/core/blocked_by.lua:
-  - gh addBlockedBy
-  - gh blocked
-  - gh blocked-by
-  - gh blockedBy
-  - gh blocking
-  - gh issue
 packages/github-proxy/core/claims.lua:
   - gh issue
 packages/github-proxy/core/comment.lua:
@@ -120,21 +85,14 @@ packages/github-proxy/core/github_graphql.lua:
   - gh api
 packages/github-proxy/core/issue_create.lua:
   - gh issue
-  - gh parent
 packages/github-proxy/core/rest_view.lua:
-  - gh PR
   - gh api
-  - gh issue
 packages/github-proxy/departments/github_comment/main.lua:
   - gh issue
 packages/github-proxy/departments/github_poll/main.lua:
   - gh
 packages/github-proxy/departments/github_pr_comment/main.lua:
   - gh PR
-  - gh pr
-packages/github-proxy/departments/github_pr_open/main.lua:
-  - gh PR
-  - gh issue
   - gh pr
 std/github_debug_stamp.lua:
   - git rev-parse

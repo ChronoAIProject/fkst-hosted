@@ -602,6 +602,67 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
 
         self.assertEqual(messages, [])
 
+    def test_exec_wrapper_context_labels_are_excluded(self) -> None:
+        source = (
+            "run_cmd(core.git_fetch_branch_cmd('origin', b), 60, 'git rollup fetch')\n"
+            "gh_exec(M.gh_issue_blocked_by_cmd(r,n), 30, 'gh blockedBy view')\n"
+        )
+
+        self.assertEqual(check_repo.gh_git_adapter.command_heads(source), set())
+
+    def test_literal_commands_remain_flagged(self) -> None:
+        source = (
+            "function M.gh_issue_list_cmd(r)\n"
+            "  return 'gh issue list --repo ' .. r\n"
+            "end\n"
+            "local cmd = 'git push origin ' .. ref\n"
+            "gh_exec('gh api graphql', 30, 'gh label context')\n"
+        )
+
+        self.assertEqual(check_repo.gh_git_adapter.command_heads(source), {"gh issue", "git push", "gh api"})
+
+    def test_dotted_receiver_and_multiline_wrapper_calls(self) -> None:
+        # Stable synthetic fixture (no real-file dependency) pinning the parser across
+        # dotted-receiver wrappers (M./core. prefixes) and multiline call syntax: a label
+        # argument is excluded, while an arg-0 inline command stays flagged in both shapes.
+        source = (
+            "core.gh_exec(M.gh_issue_blocked_by_cmd(r, n), 30, 'gh blockedBy view')\n"
+            "M.gh_exec('gh pr merge --admin', 30, 'merge context')\n"
+            "run_git(\n"
+            "  core.git_push_cmd(worktree, branch),\n"
+            "  120,\n"
+            "  'git resolved branch sync push'\n"
+            ")\n"
+            "run_cmd(\n"
+            "  'git fetch origin ' .. branch,\n"
+            "  60,\n"
+            "  'git fetch context'\n"
+            ")\n"
+        )
+
+        self.assertEqual(check_repo.gh_git_adapter.command_heads(source), {"gh pr", "git fetch"})
+
+    def test_cited_context_label_files_no_longer_report_label_only_heads(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        sources = {
+            rel: (root / rel).read_text(encoding="utf-8")
+            for rel in (
+                "packages/github-devloop/departments/rollup_scan/main.lua",
+                "packages/github-proxy/core/blocked_by.lua",
+                "packages/github-devloop/core/ensure_repo.lua",
+                "packages/github-devloop/core/substrate_ref.lua",
+            )
+        }
+        heads_by_file = check_repo.gh_git_adapter.command_heads_by_file(sources)
+
+        self.assertNotIn("git rollup", heads_by_file.get("packages/github-devloop/departments/rollup_scan/main.lua", set()))
+        self.assertNotIn("gh rollup", heads_by_file.get("packages/github-devloop/departments/rollup_scan/main.lua", set()))
+        self.assertNotIn("gh blockedBy", heads_by_file.get("packages/github-proxy/core/blocked_by.lua", set()))
+        self.assertNotIn("git integration", heads_by_file.get("packages/github-devloop/core/ensure_repo.lua", set()))
+        self.assertNotIn("gh substrate-ref", heads_by_file.get("packages/github-devloop/core/substrate_ref.lua", set()))
+        self.assertNotIn("git substrate-ref", heads_by_file.get("packages/github-devloop/core/substrate_ref.lua", set()))
+        self.assertNotIn("git stale", heads_by_file.get("packages/github-devloop/core/substrate_ref.lua", set()))
+
     def test_env_cd_absolute_path_shell_c_and_concat_are_normalized(self) -> None:
         source = (
             'local a = "FOO=1 cd /tmp && /usr/local/bin/git" .. " -C /repo status --short"\n'

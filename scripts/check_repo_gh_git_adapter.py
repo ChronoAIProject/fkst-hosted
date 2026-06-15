@@ -22,6 +22,7 @@ CALL_NAME_RE = re.compile(
 )
 MESSAGE_CALLS = {"log", "raise", "error", "assert", "print"}
 MESSAGE_METHODS = {"info", "warn", "warning", "debug", "error"}
+EXEC_WRAPPER_NAMES = {"gh_exec", "run_cmd", "run_exec", "run_gh", "run_git", "run_gh_cmd"}
 OPTION_ARG_FLAGS = {
     "-C",
     "-c",
@@ -41,6 +42,15 @@ class LuaStringLiteral:
     start: int
     end: int
     content: str
+
+
+@dataclass(frozen=True)
+class CallContext:
+    name: str | None
+    open_paren: int
+    start: int
+    end: int
+    arg_starts: tuple[int, ...]
 
 
 def is_adapter_path(relpath: str) -> bool:
@@ -339,27 +349,70 @@ def normalized_command_head(command: str | None) -> str | None:
     return command_head(command)
 
 
-def nearest_call_name(mask: str, literal_start: int) -> str | None:
-    cursor = literal_start - 1
+def call_name_before(mask: str, open_paren: int) -> str | None:
+    cursor = open_paren - 1
     while cursor >= 0 and mask[cursor].isspace():
         cursor -= 1
-    depth = 0
-    while cursor >= 0:
-        char = mask[cursor]
-        if char == ")":
-            depth += 1
-        elif char == "(":
-            if depth == 0:
-                prefix = mask[:cursor].rstrip()
-                match = CALL_NAME_RE.search(prefix)
-                if match is None:
-                    return None
-                return re.sub(r"\s+", "", match.group("name"))
-            depth -= 1
-        elif depth == 0 and char in "\n;{}":
-            return None
+    end = cursor + 1
+    while cursor >= 0 and (mask[cursor].isalnum() or mask[cursor] in "_.:"):
         cursor -= 1
-    return None
+    name = mask[cursor + 1 : end]
+    if not name or name[0].isdigit():
+        return None
+    parts = name.replace(":", ".").split(".")
+    if any(part == "" or part[0].isdigit() for part in parts):
+        return None
+    return name
+
+
+def lua_call_contexts(mask: str) -> list[CallContext]:
+    contexts: list[CallContext] = []
+    stack: list[dict[str, int | str | list[int] | None]] = []
+    cursor = 0
+    while cursor < len(mask):
+        char = mask[cursor]
+        if char == "(":
+            stack.append({
+                "kind": char,
+                "name": call_name_before(mask, cursor),
+                "open": cursor,
+                "arg_starts": [cursor + 1],
+            })
+        elif char in "[{":
+            stack.append({"kind": char, "name": None, "open": cursor, "arg_starts": []})
+        elif char in ")]}":
+            if stack:
+                entry = stack.pop()
+                if entry["kind"] == "(":
+                    contexts.append(CallContext(
+                        name=None if entry["name"] is None else str(entry["name"]),
+                        open_paren=int(entry["open"]),
+                        start=int(entry["open"]) + 1,
+                        end=cursor,
+                        arg_starts=tuple(int(start) for start in entry["arg_starts"]),
+                    ))
+        elif char == "," and stack:
+            entry = stack[-1]
+            if entry["kind"] == "(":
+                arg_starts = entry["arg_starts"]
+                assert isinstance(arg_starts, list)
+                arg_starts.append(cursor + 1)
+        cursor += 1
+    return contexts
+
+
+def nearest_call(contexts: list[CallContext], literal_start: int) -> CallContext | None:
+    best: CallContext | None = None
+    for context in contexts:
+        if context.name is not None and context.start <= literal_start <= context.end:
+            if best is None or context.start > best.start:
+                best = context
+    return best
+
+
+def nearest_call_name(contexts: list[CallContext], literal_start: int) -> str | None:
+    call = nearest_call(contexts, literal_start)
+    return None if call is None else call.name
 
 
 def is_message_call_name(name: str | None) -> bool:
@@ -375,12 +428,42 @@ def is_message_call_name(name: str | None) -> bool:
     return receiver == "core" and method.startswith("log")
 
 
-def is_message_literal(mask: str, literal_start: int) -> bool:
-    return is_message_call_name(nearest_call_name(mask, literal_start))
+def is_message_literal(contexts: list[CallContext], literal_start: int) -> bool:
+    return is_message_call_name(nearest_call_name(contexts, literal_start))
+
+
+def is_exec_wrapper_call_name(name: str | None) -> bool:
+    if name is None:
+        return False
+    parts = name.replace(":", ".").split(".")
+    return parts[-1] in EXEC_WRAPPER_NAMES
+
+
+def argument_index_at(context: CallContext, cursor: int) -> int:
+    index = 0
+    for start in context.arg_starts:
+        if start <= cursor:
+            index += 1
+    return max(0, index - 1)
+
+
+def is_exec_wrapper_context_literal(contexts: list[CallContext], literal_start: int) -> bool:
+    call = nearest_call(contexts, literal_start)
+    if call is None:
+        return False
+    return is_exec_wrapper_call_name(call.name) and argument_index_at(call, literal_start) > 0
+
+
+def is_excluded_literal(contexts: list[CallContext], literal_start: int) -> bool:
+    return (
+        is_message_literal(contexts, literal_start)
+        or is_exec_wrapper_context_literal(contexts, literal_start)
+    )
 
 
 def command_heads(source: str) -> set[str]:
     mask = lua_code_mask(source)
+    contexts = lua_call_contexts(mask)
     literals = lua_string_literals(source)
     literals_by_start = {literal.start: literal for literal in literals}
     heads: set[str] = set()
@@ -393,7 +476,7 @@ def command_heads(source: str) -> set[str]:
             command_prefix_for_literal(source, mask, literal, literals_by_start)
         )
         if head is not None:
-            if not is_message_literal(mask, literal.start):
+            if not is_excluded_literal(contexts, literal.start):
                 heads.add(head)
         previous_literals.append(literal)
     return heads
