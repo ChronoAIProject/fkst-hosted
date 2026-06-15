@@ -22,6 +22,10 @@ local function is_bounded_marker_value(value, limit)
     and tostring(value):find('[<>"\r\n]') == nil
 end
 
+local function optional_bounded_marker_value(value, limit)
+  return value == nil or is_bounded_marker_value(value, limit)
+end
+
 local function is_positive_integer(value)
   local n = tonumber(value)
   return n ~= nil and n >= 1 and n % 1 == 0 and n <= 2147483647
@@ -339,9 +343,15 @@ function M.validate_issue_create_payload(payload)
     local post = payload.post_create_blocked_by
     if type(post) ~= "table"
       or not is_positive_integer(post.blocked_issue_number)
-      or not is_bounded_marker_value(post.dedup_key, max_dedup_len) then
+      or not is_bounded_marker_value(post.dedup_key, max_dedup_len)
+      or not optional_bounded_marker_value(post.external_effect_saga, max_dedup_len)
+      or not optional_bounded_marker_value(post.external_effect_step, max_dedup_len) then
       return false
     end
+  end
+  if not optional_bounded_marker_value(payload.external_effect_saga, max_dedup_len)
+    or not optional_bounded_marker_value(payload.external_effect_step, max_dedup_len) then
+    return false
   end
   local parent = normalize_parent_comment_target(payload.parent_comment_target)
   if parent == false then
@@ -364,6 +374,8 @@ local function maybe_raise_post_create_blocked_by(payload, issue_number)
     blocked_issue_number = tonumber(post.blocked_issue_number),
     blocking_issue_number = tonumber(issue_number),
     dedup_key = tostring(post.dedup_key),
+    external_effect_saga = post.external_effect_saga or payload.external_effect_saga,
+    external_effect_step = post.external_effect_step,
     source_ref = payload.source_ref,
   })
 end

@@ -9,6 +9,7 @@ end
 require("core.issue_create").install(M)
 require("core.github_graphql").install(M)
 require("core.blocked_by").install(M)
+require("core.external_effect_sagas").install(M)
 require("core.rest_view").install(M)
 require("core.entity_view").install(M)
 require("core.gh_rate").install(M)
