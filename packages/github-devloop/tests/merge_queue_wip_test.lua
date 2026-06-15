@@ -351,6 +351,19 @@ return {
     t.eq(head.proposal_id, newer.proposal_id)
   end,
 
+  test_merge_queue_head_treats_missing_marker_time_as_unknown_not_oldest = function()
+    local dated = event_for_pr(9, 44, "2026-06-03T00-00-00Z", "aaa111")
+    local undated = event_for_pr(7, 42, "2026-06-03T01-02-03Z", "def456")
+    mock_bot_env()
+    mock_queue_list({ 7, 9 })
+    mock_queue_pr(undated, "")
+    mock_queue_pr(dated, "2026-06-03T01:00:00Z")
+
+    local head = core.merge_queue_head("owner/repo", "dev")
+    t.eq(head.pr_number, 9)
+    t.eq(head.proposal_id, dated.proposal_id)
+  end,
+
   test_merge_non_head_holds_without_merge_side_effects = function()
     local current = merge_ready()
     local older = event_for_pr(9, 44, "2026-06-03T00-00-00Z", "aaa111")
