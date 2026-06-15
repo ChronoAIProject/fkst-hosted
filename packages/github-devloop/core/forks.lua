@@ -126,6 +126,8 @@ function M.build_fork_issue_create_request(repo, issue_number, current, source_r
     body = M.fork_issue_body(repo, issue_number, author_login, normalized),
     assignees = { M.claim_owner() },
     dedup_key = dedup_key,
+    external_effect_saga = "fork-and-block",
+    external_effect_step = "create-fork",
     parent_comment_target = {
       repo = tostring(repo),
       issue_number = tonumber(issue_number),
@@ -133,6 +135,8 @@ function M.build_fork_issue_create_request(repo, issue_number, current, source_r
     post_create_blocked_by = {
       blocked_issue_number = tonumber(issue_number),
       dedup_key = dedup_key .. "/blocked-by",
+      external_effect_saga = "fork-and-block",
+      external_effect_step = "block-original",
     },
     source_ref = normalized,
   }, nil
