@@ -59,6 +59,22 @@ function M.gh_issue_list_recent_closed_cmd(repo, limit)
     .. " --json number,title,closedAt,labels"
 end
 
+function M.gh_issue_list_board_digest_cmd(repo)
+  return "gh issue list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
+function M.gh_pr_list_board_digest_cmd(repo)
+  return "gh pr list"
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --state open"
+    .. " --limit 100"
+    .. " --json number,title,labels"
+end
+
 local function bounded_page_number(page)
   if page == nil then
     return nil
