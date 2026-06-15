@@ -5,7 +5,6 @@ local M = {}
 M.spec = {
   consumes = { "devloop_open_pr", "github-proxy.github_entity_changed" },
   produces = {
-    "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_open_request",
   },
   stall_window = "2m",
@@ -75,25 +74,6 @@ function pipeline(event)
     core.log_forged_markers("open_pr", proposal_id, current_issue.comments)
     local state = core.current_state(current_issue.comments, proposal_id)
     if state.state == "pr-open" then
-      if not core.state_label_hint_matches(current_issue.labels, "pr-open") then
-        local label_request = core.build_state_label_request(
-          input.repo,
-          input.issue_number,
-          "pr-open",
-          core._dedup_key({
-            "open-pr",
-            "label",
-            tostring(proposal_id),
-            tostring(state.version or "unversioned"),
-          }),
-          input.source_ref
-        )
-        local add_labels, remove_labels = core.state_label_changes("pr-open")
-        core.log_apply("open_pr", proposal_id, "pr-open", state.version, { add = add_labels, remove = remove_labels }, {
-          "github-proxy.github_issue_label_request",
-        })
-        core.log_raise("open_pr", proposal_id, "github-proxy.github_issue_label_request", label_request)
-      end
       core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-idempotent(already at to_state)", "PR state marker already visible")
       return
     end

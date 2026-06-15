@@ -515,7 +515,6 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
   end
   local body = "github-devloop implementation PR for issue #" .. tostring(issue_number)
     .. "\n\n" .. M.pr_origin_marker(proposal_id, issue_number, branch, current.version, base_branch)
-  local add_labels, remove_labels = M.state_label_changes("pr-open")
   return M.attach_issue_claim({
     schema = "github-proxy.pr-open.v1",
     repo = repo,
@@ -532,8 +531,8 @@ function M.build_pr_open_request(repo, issue_number, proposal_id, current, title
     issue_comment_body_template = M.comment_string("pr_opened_prefix") .. "{{pr_number}}"
       .. "\n\n" .. M.state_marker(proposal_id, "pr-open", current.version)
       .. "\n" .. M.pr_link_marker_template(proposal_id, branch, current.version, base_branch),
-    issue_label_add = add_labels,
-    issue_label_remove = remove_labels,
+    issue_label_add = {},
+    issue_label_remove = {},
     dedup_key = M._dedup_key({
       "open-pr",
       tostring(proposal_id),
@@ -568,20 +567,6 @@ function M.build_pr_open_comment_request(repo, issue_number, proposal_id, curren
   }, source_ref)
 end
 
-function M.build_pr_open_label_request(repo, issue_number, proposal_id, current, source_ref)
-  return M.build_state_label_request(
-    repo,
-    issue_number,
-    "pr-open",
-    M._dedup_key({
-      "open-pr",
-      "label",
-      tostring(proposal_id),
-      tostring(current.version),
-    }),
-    source_ref
-  )
-end
 function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number, source_ref)
   local state_marker = M.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
   local request = M.build_entity_comment_request({
