@@ -21,6 +21,27 @@ local function read_source(path)
   return body
 end
 
+local function department_main_paths()
+  local root = package_root()
+  local paths = {}
+  local find = assert(io.popen("find " .. root .. "/departments -mindepth 2 -maxdepth 2 -name main.lua | sort"))
+  for path in find:lines() do
+    table.insert(paths, path:sub(#root + 2))
+  end
+  local ok = find:close()
+  if ok == false then
+    error("github-devloop: department discovery failed")
+  end
+  return paths
+end
+
+local function writes_direct_pr_open_issue_label(body)
+  return body:find('build_state_label_request%([^%)]-"pr%-open"', 1, false) ~= nil
+    or body:find('build_reconcile_state_label_request%([^%)]-"pr%-open"', 1, false) ~= nil
+    or body:find('state_label_changes%("pr%-open"%)', 1, false) ~= nil
+    or body:find('state_label_reconcile_changes%([^%)]-"pr%-open"', 1, false) ~= nil
+end
+
 return {
   test_observe_issue_reconciles_pr_open_label_when_backing_pr_exists = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -47,16 +68,23 @@ return {
   end,
 
   test_pr_open_issue_state_label_authority_stays_in_observe_issue = function()
-    local open_pr_body = read_source("departments/open_pr/main.lua")
-    t.eq(open_pr_body:find("github-proxy.github_issue_label_request", 1, true), nil)
-    t.eq(open_pr_body:find("build_state_label_request", 1, true), nil)
-
     local requests_body = read_source("core/requests.lua")
     t.eq(requests_body:find("build_pr_open_label_request", 1, true), nil)
     t.eq(requests_body:find("issue_label_add = add_labels", 1, true), nil)
     t.eq(requests_body:find("issue_label_remove = remove_labels", 1, true), nil)
 
+    for _, path in ipairs(department_main_paths()) do
+      local body = read_source(path)
+      if path ~= "departments/observe_issue/main.lua" then
+        t.eq(writes_direct_pr_open_issue_label(body), false)
+      end
+    end
+
     local observe_body = read_source("departments/observe_issue/main.lua")
+    t.is_true(observe_body:find("linked_entity_snapshot", 1, true) ~= nil)
+    t.is_true(observe_body:find("issue_label_projection_state(state, issue_state, link, snapshot)", 1, true) ~= nil)
+    t.is_true(observe_body:find('issue_state.state == "pr-open"', 1, true) ~= nil)
+    t.is_true(observe_body:find("linked_open_pr(snapshot, link.pr_number)", 1, true) ~= nil)
     t.is_true(observe_body:find("state_label_reconcile_changes", 1, true) ~= nil)
     t.is_true(observe_body:find("github-proxy.github_issue_label_request", 1, true) ~= nil)
   end,

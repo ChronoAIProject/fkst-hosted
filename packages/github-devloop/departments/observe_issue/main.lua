@@ -43,6 +43,31 @@ local function issue_label_state(snapshot_state, issue_state)
   return snapshot_state
 end
 
+local function linked_open_pr(snapshot, pr_number)
+  for _, item in ipairs(snapshot and snapshot.prs or {}) do
+    if tostring(item.number or "") == tostring(pr_number or "") then
+      local current = item.current or {}
+      if tostring(current.state or ""):lower() == "open" then
+        return current
+      end
+    end
+  end
+  return nil
+end
+
+local function issue_label_projection_state(snapshot_state, issue_state, link, snapshot)
+  if issue_state ~= nil
+    and issue_state.state == "pr-open"
+    and snapshot_state ~= nil
+    and snapshot_state.state == "pr-open"
+    and link ~= nil
+    and tostring(link.impl_version or "") == tostring(issue_state.version or "")
+    and linked_open_pr(snapshot, link.pr_number) ~= nil then
+    return issue_state
+  end
+  return issue_label_state(snapshot_state, issue_state)
+end
+
 local function thinking_state_budget_exceeded(state)
   local threshold = core.stall_suspect_threshold_minutes("thinking")
   local marker_seconds = core.iso_timestamp_epoch_seconds(state and state.marker_created_at)
@@ -418,7 +443,7 @@ function pipeline(event)
       if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state) then
         return
       end
-      local label_state = issue_label_state(state, issue_state)
+      local label_state = issue_label_projection_state(state, issue_state, link, snapshot)
       local add_labels, remove_labels = core.state_label_reconcile_changes(current.labels, label_state.state)
       if #add_labels > 0 or #remove_labels > 0 then
         local label_request = core.build_label_request(
