@@ -59,6 +59,16 @@ local function mock_fresh_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree prune", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git worktree add -b", {
     stdout = "",
     stderr = "",
@@ -99,6 +109,16 @@ local function mock_existing_empty_implement_worktree(path)
     exit_code = 0,
   })
   t.mock_command("git worktree list --porcelain", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree prune", {
     stdout = "",
     stderr = "",
     exit_code = 0,
@@ -205,6 +225,16 @@ local function mock_outside_runtime_implement_worktree_rebuild(runtime_root, bra
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree prune", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git worktree add", {
     stdout = "",
     stderr = "",
@@ -266,6 +296,16 @@ local function mock_multiple_outside_runtime_implement_worktrees_rebuild(runtime
       exit_code = 0,
     })
   end
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree prune", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git worktree add", {
     stdout = "",
     stderr = "",

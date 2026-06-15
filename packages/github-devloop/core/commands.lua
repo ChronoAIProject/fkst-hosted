@@ -646,6 +646,20 @@ function M.git_worktree_remove_if_present_cmd(worktree)
   return "if [ -d " .. M._shell_single_quote(value) .. " ]; then git worktree remove --force " .. M._shell_single_quote(value) .. "; fi"
 end
 
+function M.git_worktree_force_clean_cmd(worktree)
+  local value = tostring(worktree or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid worktree path")
+  end
+  local w = M._shell_single_quote(value)
+  -- Idempotently clear the target worktree path before `git worktree add`. Robust
+  -- to an orphan dir (present on disk but with no registration, left by a codex
+  -- killed mid-implement on restart) as well as a registered worktree. Always
+  -- exits 0 so a missing path is a clean no-op. The target is clearable scratch
+  -- under FKST_RUNTIME_ROOT.
+  return "git worktree remove --force " .. w .. " 2>/dev/null; rm -rf " .. w .. "; git worktree prune"
+end
+
 function M.git_worktree_add_new_branch_cmd(worktree, branch, base)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
