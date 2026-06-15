@@ -378,6 +378,28 @@ async fn main() -> ExitCode {
     //         The VaultService is Clone (it joins AppState below too).
     sessions.enable_vault(vault.clone());
 
+    // 5a-ter-ter. Wire per-session NyxID token provisioning into the driver
+    //         (issue #111): every session mints a per-session agent key on the
+    //         triggering user's behalf and injects NYXID_ACCESS_TOKEN +
+    //         NYXID_URL into the engine env, then revokes it at teardown. The
+    //         origin is the NyxID issuer base URL (the SAME host that issues the
+    //         inbound user JWTs we mint against). Requires the NyxID service
+    //         client (built above) AND an enabled auth mode (which carries the
+    //         base URL); when either is absent, provisioning stays disabled and
+    //         the driver behaves exactly as pre-#111.
+    match (&nyxid_client, &auth_mode) {
+        (Some(client), fkst_hosted_api::auth::AuthMode::Enabled(settings)) => {
+            sessions.enable_nyxid_token(client.clone(), settings.base_url.clone());
+            tracing::info!("per-session nyxid token provisioning enabled");
+        }
+        _ => {
+            tracing::info!(
+                "per-session nyxid token provisioning disabled \
+                 (requires auth enabled with NYXID_CLIENT_ID/SECRET)"
+            );
+        }
+    }
+
     // 5a-bis. Enable goal support in the session service: goal-status sync
     //         writes + token refresh. Requires both the goals repo and the
     //         GitHub App tokens service.

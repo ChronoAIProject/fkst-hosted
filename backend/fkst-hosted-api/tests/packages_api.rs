@@ -812,6 +812,8 @@ async fn delete_with_running_session_is_409() {
         repo: None,
         env_scope: None,
         triggered_by: None,
+        nyxid_key_id: None,
+        nyxid_key_prefix: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,

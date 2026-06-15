@@ -507,6 +507,14 @@ pending → validating → running → stopping → stopped
 > Platform-reserved keys (`FKST_*`, `GITHUB_TOKEN`, the host allow-list) are
 > always dropped. There is no new endpoint — this is automatic.
 
+> **NyxID session identity.** When NyxID is configured, the engine run also
+> receives a per-session NyxID identity: at start, fkst-hosted mints one
+> non-expiring NyxID agent key on the triggering user's behalf and injects it
+> as `NYXID_ACCESS_TOKEN` (plus the `NYXID_URL` origin), so the run acts as that
+> user against NyxID. The key is revoked when the session ends; only its
+> non-secret id/prefix are persisted (never the full key). This too is automatic
+> — there is no new endpoint, and you keep using your normal bearer token.
+
 **Data shape**
 
 ```jsonc

@@ -180,6 +180,9 @@ async fn create(
                 owner_user_id: ctx.user_id.clone(),
                 org_id: package.org_id.clone(),
             },
+            // The user's first-party token is forwarded transiently so the
+            // driver can mint the per-session NyxID key (#111). Never persisted.
+            ctx.raw_token.clone(),
         )
         .await?;
     let id = session.id.to_string();
@@ -348,6 +351,8 @@ mod tests {
             repo: None,
             env_scope: None,
             triggered_by: None,
+            nyxid_key_id: None,
+            nyxid_key_prefix: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: None,
             stopped_at: None,

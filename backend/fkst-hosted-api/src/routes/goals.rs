@@ -881,7 +881,7 @@ async fn trigger(
 
     let result = state
         .sessions
-        .create_for_goal(&state.goals, trigger_info)
+        .create_for_goal(&state.goals, trigger_info, ctx.raw_token.clone())
         .await?;
 
     tracing::info!(

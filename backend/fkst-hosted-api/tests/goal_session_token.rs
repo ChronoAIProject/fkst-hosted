@@ -294,6 +294,7 @@ async fn goal_session_mints_github_token_at_startup() {
                 org_id: None,
                 prior_status: GoalStatus::NotStarted,
             },
+            SecretString::from("test-raw-token".to_string()),
         )
         .await
         .expect("create_for_goal");
@@ -348,6 +349,7 @@ async fn package_session_does_not_mint_github_token() {
                 owner_user_id: "owner-1".to_string(),
                 org_id: None,
             },
+            SecretString::from("test-raw-token".to_string()),
         )
         .await
         .expect("create package session");

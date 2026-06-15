@@ -162,6 +162,8 @@ fn session_doc(package_name: &str, status: SessionStatus) -> SessionDoc {
         repo: None,
         env_scope: None,
         triggered_by: None,
+        nyxid_key_id: None,
+        nyxid_key_prefix: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,
