@@ -38,3 +38,13 @@ Verified on a clean store (**17/18**, `.verify/ui_verify_v3.cjs`): scoped `data-
 - The frontend hasn't been pushed, so `frontend-ci.yml` has not run on a remote — it is correct by construction + green local gates (`npm ci → lint → typecheck → build → vitest → build-storybook`, + Playwright e2e).
 - The `VITE_E2E` seam is strictly flag-gated. **Never build/deploy production with `VITE_E2E=1`.**
 - Docker Desktop would not launch on the verification host (`-1712`); the stack was stood up natively (built engine + brew mongod). Not an FE concern.
+
+## 7. Housekeeping / decisions awaiting the maintainer
+- **Branch + worktree cleanup**: ~20 superseded per-task branches exist (`fe-w0-*` … `fe-w3-*`, `fe-w2-f34-topology`, `fe-w2-x-integration`, `fe-e2e-hardening`, `fe-e2e-hardening-pm`, `fe-qa-testplan`) plus their heca worktrees — all merged into local `develop` and folded into `feat/frontend-init`. Safe to prune the merged branches + archive the worktrees, leaving `main`, `develop`, `feat/frontend-init`. Not yet done.
+- **Local `develop` vs the feature branch**: the FE landed by merging the per-task branches directly into local `develop` (local-only mode). `feat/frontend-init` is the conventional branch carrying the same state for the eventual PR. If strict `CLAUDE.md` flow matters, `develop` should be reset to `origin/develop` and the work flow only through `feat/frontend-init` → PR. Not done (no impact while local-only).
+- **Verify stack**: leave running (FE preview :4180, API :8080, mongod :27017) for exploration, or tear down per §5 — awaiting your call.
+- **PR trigger**: open the PR the moment write access is granted (§1).
+
+## 8. Task tracker (this engagement)
+- Done: Waves 0–3 (build+review+merge), hosted-flow verification, codex+AGY reconcile, FE-init branch + this doc.
+- Open: **UI-E2E hardening final pass** (§2 — report-wording corrections + the two unverified harness strengthenings) — the only substantive work item left; deferred pending your go.
