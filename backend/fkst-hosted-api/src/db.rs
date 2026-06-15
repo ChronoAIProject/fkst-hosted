@@ -15,6 +15,8 @@ use crate::models::{LeaseDoc, SessionDoc};
 /// is owned by `crate::packages::PACKAGES_COLLECTION`.
 pub const SESSIONS: &str = "sessions";
 pub const LEASES: &str = "leases";
+/// The per-session secret/variable vault collection (issue #100).
+pub const VAULT_ENTRIES: &str = "vault_entries";
 
 /// Stable index names (deterministic idempotency; asserted by integration
 /// tests). No index is declared for `leases._id` — the implicit `_id` index
@@ -27,6 +29,9 @@ pub const IDX_SESSIONS_OWNER_USER_ID: &str = "sessions_owner_user_id";
 pub const IDX_SESSIONS_ORG_ID: &str = "sessions_org_id";
 pub const IDX_SESSIONS_GOAL_ID: &str = "sessions_goal_id";
 pub const IDX_LEASES_EXPIRES_AT: &str = "leases_expires_at";
+/// Unique vault index over `(owner_user_id, scope_key, key)` — one entry per
+/// key within an owner's scope (issue #100). Owned by `crate::vault::VaultRepo`.
+pub const IDX_VAULT_OWNER_SCOPE_KEY: &str = "vault_owner_scope_key_unique";
 
 /// Cheap-to-clone handle to the Mongo database (`mongodb::Database` is
 /// `Arc`-backed internally).
@@ -58,6 +63,22 @@ fn index_model(keys: bson::Document, name: &str) -> IndexModel {
     IndexModel::builder()
         .keys(keys)
         .options(IndexOptions::builder().name(name.to_string()).build())
+        .build()
+}
+
+/// Build a UNIQUE ascending index with a stable name. The existing
+/// [`index_model`] builds non-unique indexes; the vault needs uniqueness on
+/// `(owner_user_id, scope_key, key)` to enforce one entry per key per scope
+/// (issue #100), so this is its own helper rather than a flag on the other.
+pub fn unique_index_model(keys: bson::Document, name: &str) -> IndexModel {
+    IndexModel::builder()
+        .keys(keys)
+        .options(
+            IndexOptions::builder()
+                .name(name.to_string())
+                .unique(true)
+                .build(),
+        )
         .build()
 }
 
@@ -106,6 +127,15 @@ impl Db {
     /// The `leases` collection.
     pub fn leases(&self) -> Collection<LeaseDoc> {
         self.collection(LEASES)
+    }
+
+    /// The `vault_entries` collection (issue #100). The typed
+    /// `Collection<VaultEntry>` accessor lives on `crate::vault::VaultRepo`;
+    /// this raw-document accessor exists so the collection name has a single
+    /// home alongside the other collections and integration tests can inspect
+    /// the stored BSON shape.
+    pub fn vault_entries(&self) -> Collection<bson::Document> {
+        self.collection(VAULT_ENTRIES)
     }
 
     /// Idempotently create all secondary indexes (stable names). Safe across
