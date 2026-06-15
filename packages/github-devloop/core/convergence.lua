@@ -502,6 +502,21 @@ function M.review_converge_round_facts(comments, review_proposal_id, issue_propo
   return converge_record_map(M, comments, "review%-converge%-round", matches)
 end
 
+function M.converge_budget_round(comments, proposal_id)
+  local matches = function(marker)
+    return attr(marker, "proposal") == tostring(proposal_id)
+  end
+  return M.max_converge_round(converge_record_map(M, comments, "converge%-round", matches))
+end
+
+function M.review_converge_budget_round(comments, review_proposal_id, issue_proposal_id)
+  local matches = function(marker)
+    return attr(marker, "proposal") == tostring(review_proposal_id)
+      and attr(marker, "issue_proposal") == tostring(issue_proposal_id)
+  end
+  return M.max_converge_round(converge_record_map(M, comments, "review%-converge%-round", matches))
+end
+
 function M.max_converge_round(facts)
   local max_seen = 0
   if type(facts) ~= "table" then

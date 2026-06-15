@@ -178,6 +178,20 @@ return {
     t.eq(facts[1].question, core.converge_question_digest(last_question))
   end,
 
+  test_converge_budget_round_counts_proposal_across_drift = function()
+    local source_a = core.source_ref_digest(source_ref)
+    local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
+    local drift_version = base_version .. "/drifted"
+    local comments = {
+      trusted(core.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", "Question 6", angles())),
+      trusted(core.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Question 8", angles())),
+      trusted(core.converge_round_marker("github-devloop/issue/owner/repo/99", drift_version, source_b, 13, drift_version .. "/loop/13", "Other", angles())),
+    }
+    local filtered = core.converge_round_facts(comments, proposal_id, base_version, source_a)
+    t.eq(core.max_converge_round(filtered), 6)
+    t.eq(core.converge_budget_round(comments, proposal_id), 8)
+  end,
+
   test_review_converge_facts_are_bound_to_issue_version_and_head = function()
     local source_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
     local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
@@ -225,5 +239,23 @@ return {
     t.eq(#matched, 1)
     t.eq(matched[1].round, 2)
     t.eq(core.has_review_converge_round_marker({ trusted(marker) }, review_proposal_id, proposal_id, issue_version, head_sha, source_digest, 2), true)
+  end,
+
+  test_review_converge_budget_round_counts_review_saga_across_drift = function()
+    local source_a = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
+    local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?loop=8" })
+    local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
+    local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/v1"
+    local drift_version = issue_version .. "/drifted"
+    local head_sha = "abcdef1234567890"
+    local drift_head = "fedcba0987654321"
+    local comments = {
+      trusted(core.review_converge_round_marker(review_proposal_id, proposal_id, issue_version, head_sha, source_a, 6, "review/loop/6", "Review 6", angles())),
+      trusted(core.review_converge_round_marker(review_proposal_id, proposal_id, drift_version, drift_head, source_b, 8, "review/loop/8", "Review 8", angles())),
+      trusted(core.review_converge_round_marker(review_proposal_id, "github-devloop/issue/owner/repo/99", drift_version, drift_head, source_b, 13, "review/loop/13", "Other", angles())),
+    }
+    local filtered = core.review_converge_round_facts(comments, review_proposal_id, proposal_id, issue_version, head_sha, source_a)
+    t.eq(core.max_converge_round(filtered), 6)
+    t.eq(core.review_converge_budget_round(comments, review_proposal_id, proposal_id), 8)
   end,
 }

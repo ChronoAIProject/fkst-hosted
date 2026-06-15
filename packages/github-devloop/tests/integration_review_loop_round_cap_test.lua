@@ -88,4 +88,42 @@ return {
     t.eq(reconcile_raise.round, cap)
     t.eq(reconcile_raise.dedup_key, "review-reconcile:" .. review_version .. "/review-loop/" .. tostring(cap))
   end,
+
+  test_review_loop_round_cap_uses_review_budget_when_version_head_and_source_ref_drift = function()
+    local cap = core.max_converge_rounds()
+    local event = review_unresolved({
+      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/6",
+      round = 6,
+      narrowed_question = "Review question 6 current lineage",
+      angle_digests = {
+        { angle = "minimal", verdict = "abstain", digest = "review-digest-6" },
+      },
+    })
+    local impl_version = reviewing().version
+    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
+    local drift_version = review_version .. "-drift"
+    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local current_digest = core.source_ref_digest(event.source_ref)
+    local drift_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?drift=1" })
+    mock_bot_env()
+    mock_pr_origin({
+      origin_marker,
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", drift_version, "feedface", drift_digest, cap, "review/loop/" .. tostring(cap), "Review question " .. tostring(cap) .. " drifted", {
+        { angle = "minimal", verdict = "abstain", digest = "review-digest-" .. tostring(cap) },
+      }),
+    }, "devloop-owner-repo-42-01HY", "def456")
+
+    local result = run_review_loop(event, opts("review-loop-budget-drift-cap"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
+    t.is_true(result.raises[1].payload.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('round="6"', 1, true) ~= nil)
+    t.eq(result.raises[2].queue, "devloop_review_reconcile")
+    local reconcile_raise = find_raise(result.raises, "devloop_review_reconcile").payload
+    t.eq(reconcile_raise.round, 6)
+    t.eq(reconcile_raise.dedup_key, "review-reconcile:" .. review_version .. "/review-loop/6")
+  end,
 }

@@ -457,17 +457,9 @@ def check_line_limit(root: Path, violations: list[str], warnings: list[str]) -> 
                 continue
             count = line_count(path)
             if count > LINE_LIMIT:
-                add(
-                    violations,
-                    "G1",
-                    f"{rel(root, path)} has {count} lines; limit is {LINE_LIMIT}",
-                )
+                add(violations, "G1", f"{rel(root, path)} has {count} lines; limit is {LINE_LIMIT}")
             elif count >= warning_threshold:
-                add(
-                    warnings,
-                    "G1",
-                    f"{rel(root, path)} has {count} lines; warning threshold is {warning_threshold}; hard limit is {LINE_LIMIT}",
-                )
+                add(warnings, "G1", f"{rel(root, path)} has {count} lines; warning threshold is {warning_threshold}; hard limit is {LINE_LIMIT}")
 
 
 def package_dirs(root: Path) -> list[Path]:
@@ -903,8 +895,7 @@ def check_cross_package_require(root: Path, violations: list[str]) -> None:
                 add(
                     violations,
                     "G9",
-                    f"{rel(root, path)} peer cross-package require of {name!r}; "
-                    f"share via std/ (peer cross-package require is forbidden)",
+                    f"{rel(root, path)} peer cross-package require of {name!r}; share via std/ (peer cross-package require is forbidden)",
                 )
 
 def check_entity_read_count_assertions(root: Path, violations: list[str]) -> None:
@@ -915,6 +906,15 @@ def check_entity_read_count_assertions(root: Path, violations: list[str]) -> Non
         for index, line in enumerate(read_text(path).splitlines(), start=1):
             if ENTITY_READ_COUNT_RE.search(line):
                 add(violations, "G11", f"{rel(root, path)}:{index} asserts entity-read command counts; assert outcomes instead")
+
+def check_convergence_budget_caps(root: Path, violations: list[str]) -> None:
+    for rel_path, helper in (
+        ("github-devloop/departments/loop/main.lua", "converge_budget_round"), ("github-devloop/departments/review_loop/main.lua", "review_converge_budget_round")):
+        path = packages_root(root) / rel_path
+        if not path.exists(): continue
+        source = strip_lua_comments_and_strings(read_text(path))
+        if "hit_round_cap" in source and "core.max_converge_rounds()" in source and f"core.{helper}(" not in source:
+            add(violations, "G12", f"{rel(root, path)} convergence cap must use proposal-keyed core.{helper}() budget")
 
 def is_saga_handler_source(source: str) -> bool:
     return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
@@ -981,11 +981,11 @@ def main() -> int:
     check_persistence_classes(root, violations)
     check_cross_package_require(root, violations)
     check_entity_read_count_assertions(root, violations)
+    check_convergence_budget_caps(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
-
     if violations:
         print("repository check failed:", file=sys.stderr)
         for violation in violations:
