@@ -18,6 +18,7 @@ local base_mock_bot_env = helpers.mock_bot_env
 local base_mock_issue_view_failure = helpers.mock_issue_view_failure
 local base_run_observe = helpers.run_observe
 local base_run_result = helpers.run_result
+local base_run_result_expecting_failure = helpers.run_result_expecting_failure
 local base_run_implement = helpers.run_implement
 local bundle_json = '{"title":"Implement decision recorder","body":"Full issue body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[]}\n'
 local pr_context_json = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n'
@@ -133,6 +134,11 @@ end
 helpers.run_result = function(...)
   mock_empty_dependencies()
   return base_run_result(...)
+end
+
+helpers.run_result_expecting_failure = function(...)
+  mock_empty_dependencies()
+  return base_run_result_expecting_failure(...)
 end
 
 helpers.run_implement = function(...)

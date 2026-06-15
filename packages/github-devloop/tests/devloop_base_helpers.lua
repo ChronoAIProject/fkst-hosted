@@ -1,7 +1,9 @@
 local t = fkst.test
 local core = require("core")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local run_fake = require("std.testing").run_fake
+local testing = require("std.testing")
+local run_fake = testing.run_fake
+local run_fake_expecting_failure = testing.run_fake_expecting_failure
 local gh_fake = require("std.github_fake")
 local git_fake = require("std.git_fake")
 local action_label = "⟦FKST:ACTION⟧"
@@ -289,15 +291,7 @@ local function run_observe(payload, run_opts)
   }, run_opts)
 end
 
-local function run_result(payload, run_opts)
-  if pending_result_read_failure ~= nil then
-    pending_result_read_failure = nil
-    return t.run_department("departments/consensus_result/main.lua", {
-      queue = "consensus.consensus_reached",
-      payload = payload,
-    }, run_opts)
-  end
-
+local function build_result_dept()
   local result_dept = require("departments.consensus_result.main")
   local model = gh_fake.model({
     issues = {
@@ -309,11 +303,40 @@ local function run_result(payload, run_opts)
     git = git_fake.new(git_fake.model({})),
   })
   dept.model = model
+  return dept, model
+end
+
+local function run_result(payload, run_opts)
+  if pending_result_read_failure ~= nil then
+    pending_result_read_failure = nil
+    return t.run_department("departments/consensus_result/main.lua", {
+      queue = "consensus.consensus_reached",
+      payload = payload,
+    }, run_opts)
+  end
+
+  local dept, model = build_result_dept()
   local result = run_fake(dept, {
     queue = "consensus.consensus_reached",
     payload = payload,
   })
-  result.exit_code = result.failure and 1 or 0
+  -- run_fake re-raises on pipeline error, so a successful run never carries a
+  -- failure here; expected-failure (retry) cases use run_result_expecting_failure.
+  result.exit_code = 0
+  result.model = model
+  return result
+end
+
+-- For consensus_result tests that assert the dept errors to drive durable retry
+-- (e.g. "thinking state marker not yet visible") — the expected failure is made
+-- explicit (#710 Finding 2) instead of relying on a swallowed run_fake error.
+local function run_result_expecting_failure(payload, _run_opts)
+  local dept, model = build_result_dept()
+  local result = run_fake_expecting_failure(dept, {
+    queue = "consensus.consensus_reached",
+    payload = payload,
+  })
+  result.exit_code = 1
   result.model = model
   return result
 end
@@ -897,6 +920,7 @@ return {
   merge_ready = merge_ready,
   run_observe = run_observe,
   run_result = run_result,
+  run_result_expecting_failure = run_result_expecting_failure,
   mark_result_read_failure = mark_result_read_failure,
   run_loop = run_loop,
   run_reconcile = run_reconcile,

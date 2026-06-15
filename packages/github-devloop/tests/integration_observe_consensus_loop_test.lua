@@ -21,6 +21,7 @@ local review_meta_event = h.review_meta_event
 local merge_ready = h.merge_ready
 local run_observe = h.run_observe
 local run_result = h.run_result
+local run_result_expecting_failure = h.run_result_expecting_failure
 local run_loop = h.run_loop
 local run_reconcile = h.run_reconcile
 local run_implement = h.run_implement
@@ -649,7 +650,7 @@ return {
   test_consensus_result_retries_when_thinking_label_is_pending = function()
     mock_issue_result({ "fkst-dev:enabled" })
 
-	    local result = run_result(reached(), opts("result-thinking-pending"))
+	    local result = run_result_expecting_failure(reached(), opts("result-thinking-pending"))
 	    t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
   end,
@@ -716,7 +717,7 @@ return {
       },
     })
 
-    local result = run_result(current, opts("result-ignore-forged-marker"))
+    local result = run_result_expecting_failure(current, opts("result-ignore-forged-marker"))
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
   end,
