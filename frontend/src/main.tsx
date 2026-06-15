@@ -12,7 +12,7 @@ const origin = typeof window !== 'undefined' ? window.location.origin : 'http://
 const redirectUri = import.meta.env.VITE_NYXID_REDIRECT_URI || `${origin}/auth/callback`;
 const scope = 'openid profile email';
 
-const hasConfigError = authRequired() && (!baseUrl || !clientId);
+const hasConfigError = authRequired() === true && (!baseUrl || !clientId);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

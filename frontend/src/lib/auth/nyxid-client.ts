@@ -91,13 +91,10 @@ function base64UrlEncode(input: Uint8Array): string {
 function randomUrlSafeString(bytes = 32): string {
   const data = new Uint8Array(bytes);
   const cryptoObj = typeof crypto !== "undefined" ? crypto : (typeof globalThis !== "undefined" ? (globalThis as unknown as { crypto?: Crypto }).crypto : null);
-  if (cryptoObj && cryptoObj.getRandomValues) {
-    cryptoObj.getRandomValues(data);
-  } else {
-    for (let i = 0; i < bytes; i++) {
-      data[i] = Math.floor(Math.random() * 256);
-    }
+  if (!cryptoObj || !cryptoObj.getRandomValues) {
+    throw new Error("crypto.getRandomValues is not supported in this environment");
   }
+  cryptoObj.getRandomValues(data);
   return base64UrlEncode(data);
 }
 
@@ -178,6 +175,7 @@ export class NyxIDClient {
     const callback = new URL(currentUrl);
     const oauthError = callback.searchParams.get("error");
     if (oauthError) {
+      this.storage.removeItem(this.pendingKey);
       throw new Error(
         callback.searchParams.get("error_description") ?? `OAuth error: ${oauthError}`,
       );
@@ -186,6 +184,7 @@ export class NyxIDClient {
     const code = callback.searchParams.get("code");
     const state = callback.searchParams.get("state");
     if (!code || !state) {
+      this.storage.removeItem(this.pendingKey);
       throw new Error("Missing authorization code or state");
     }
 
@@ -198,10 +197,12 @@ export class NyxIDClient {
     try {
       pending = JSON.parse(rawPending) as PendingAuthState;
     } catch {
+      this.storage.removeItem(this.pendingKey);
       throw new Error("Invalid PKCE state");
     }
 
     if (pending.state !== state) {
+      this.storage.removeItem(this.pendingKey);
       throw new Error("State mismatch");
     }
 
@@ -212,34 +213,39 @@ export class NyxIDClient {
     form.set("client_id", this.clientId);
     form.set("code_verifier", pending.codeVerifier);
 
-    const response = await this.fetchFn(`${this.baseUrl}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form.toString(),
-    });
+    try {
+      const response = await this.fetchFn(`${this.baseUrl}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+      });
 
-    if (!response.ok) {
+      if (!response.ok) {
+        this.storage.removeItem(this.pendingKey);
+        const errBody = await response.json().catch(() => null) as {
+          error?: string;
+          error_description?: string;
+        } | null;
+        const detail = errBody?.error_description ?? errBody?.error ?? response.statusText;
+        throw new Error(`Token exchange failed: ${detail}`);
+      }
+
+      const body = (await response.json()) as TokenResponse;
+      const tokens: NyxIDTokenSet = {
+        accessToken: body.access_token,
+        tokenType: body.token_type,
+        expiresIn: body.expires_in,
+        refreshToken: body.refresh_token,
+        idToken: body.id_token,
+        scope: body.scope,
+      };
+      this.storage.setItem(this.tokensKey, JSON.stringify(tokens));
       this.storage.removeItem(this.pendingKey);
-      const errBody = await response.json().catch(() => null) as {
-        error?: string;
-        error_description?: string;
-      } | null;
-      const detail = errBody?.error_description ?? errBody?.error ?? response.statusText;
-      throw new Error(`Token exchange failed: ${detail}`);
+      return tokens;
+    } catch (err) {
+      this.storage.removeItem(this.pendingKey);
+      throw err;
     }
-
-    const body = (await response.json()) as TokenResponse;
-    const tokens: NyxIDTokenSet = {
-      accessToken: body.access_token,
-      tokenType: body.token_type,
-      expiresIn: body.expires_in,
-      refreshToken: body.refresh_token,
-      idToken: body.id_token,
-      scope: body.scope,
-    };
-    this.storage.setItem(this.tokensKey, JSON.stringify(tokens));
-    this.storage.removeItem(this.pendingKey);
-    return tokens;
   }
 
   getStoredTokens(): NyxIDTokenSet | null {

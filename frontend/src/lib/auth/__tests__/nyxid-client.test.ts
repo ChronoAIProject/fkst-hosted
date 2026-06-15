@@ -47,6 +47,35 @@ describe('NyxIDClient PKCE Flow', () => {
     expect(pending.codeVerifier).toBeTruthy();
   });
 
+  it('asserts code_challenge === base64url(SHA-256(code_verifier)) for a known verifier', async () => {
+    const storage = new MockStorage();
+    const client = new NyxIDClient({ ...config, storage });
+
+    // Mock getRandomValues to return 0, 1, 2, ..., 47
+    const originalGetRandomValues = globalThis.crypto.getRandomValues;
+    globalThis.crypto.getRandomValues = vi.fn().mockImplementation((array: Uint8Array) => {
+      for (let i = 0; i < array.length; i++) {
+        array[i] = i;
+      }
+      return array;
+    });
+
+    try {
+      const authorizeUrlStr = await client.buildAuthorizeUrl({ state: 'fixed-state' });
+      const authorizeUrl = new URL(authorizeUrlStr);
+
+      const challenge = authorizeUrl.searchParams.get('code_challenge');
+      expect(challenge).toBe('kLfxiTSrox_ke7yPyjvQYBZ97Vxt2KfwU9deyoPONcI');
+
+      const rawPending = storage.getItem('nyxid:pending:test-client');
+      expect(rawPending).toBeTruthy();
+      const pending = JSON.parse(rawPending!);
+      expect(pending.codeVerifier).toBe('AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v');
+    } finally {
+      globalThis.crypto.getRandomValues = originalGetRandomValues;
+    }
+  });
+
   it('rejects the callback if state is mismatched', async () => {
     const storage = new MockStorage();
     const client = new NyxIDClient({ ...config, storage });
@@ -56,7 +85,7 @@ describe('NyxIDClient PKCE Flow', () => {
 
     // Call redirect with mismatched state
     const callbackUrl = 'https://app.example.com/auth/callback?code=123&state=mismatched-state';
-    
+
     await expect(client.handleRedirectCallback(callbackUrl)).rejects.toThrow('State mismatch');
   });
 
@@ -65,7 +94,7 @@ describe('NyxIDClient PKCE Flow', () => {
     const client = new NyxIDClient({ ...config, storage });
 
     const callbackUrl = 'https://app.example.com/auth/callback?code=123&state=some-state';
-    
+
     await expect(client.handleRedirectCallback(callbackUrl)).rejects.toThrow('Missing PKCE state in storage');
   });
 

@@ -16,6 +16,28 @@ export function AuthCallback() {
         }
       })
       .catch((err) => {
+        // Scrub URL: remove code, state, error, error_description
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('code');
+          url.searchParams.delete('state');
+          url.searchParams.delete('error');
+          url.searchParams.delete('error_description');
+          window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+        } catch (e) {
+          console.error('Failed to scrub URL:', e);
+        }
+
+        // Clear pending PKCE storage key
+        try {
+          const clientId = import.meta.env.VITE_NYXID_CLIENT_ID || '';
+          if (clientId) {
+            localStorage.removeItem(`nyxid:pending:${clientId}`);
+          }
+        } catch (e) {
+          console.error('Failed to clear PKCE state:', e);
+        }
+
         if (active) {
           setError(err instanceof Error ? err.message : String(err));
         }
