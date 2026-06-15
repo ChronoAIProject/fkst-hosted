@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { usePackagesList } from '../../lib/hooks/usePackages';
 import { useQueries } from '@tanstack/react-query';
-import { getPackage } from '../../lib/api/client';
+import { getPackage, ApiError } from '../../lib/api/client';
 import { LevelsGrid, LevelsGridCell } from '../../components/layout/levels-grid';
 import { SectionHeading } from '../../components/layout/section-heading';
 import { HairlineList, HairlineRow } from '../../components/layout/hairline-list';
@@ -19,6 +19,52 @@ import { Switch } from '../../components/primitives/switch';
 import { useSessionRegistry } from '../../lib/hooks/session-registry';
 import { useCreateSession, useSession, useStopSession } from '../../lib/hooks/useSessions';
 import { isSessionTerminal } from '../../lib/api/truth';
+import {
+  useDeletePackage,
+  useShares,
+  useCreateShare,
+  useDeleteShare,
+} from '../../lib/hooks/usePackageMutations';
+import { toast } from '../../components/primitives/toaster';
+import {
+  Dialog,
+  DialogContent,
+  DialogClose,
+} from '../../components/primitives/dialog';
+import { ModalSheet } from '../../components/layout/modal-sheet';
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return 'Action forbidden: you do not have permission (403)';
+    }
+    if (err.status === 404) {
+      return 'Action failed: package not found (404)';
+    }
+    if (err.status === 409) {
+      return 'Action failed: package is in use or has active sessions (409)';
+    }
+    return err.message || `Request failed with status ${err.status}`;
+  }
+  const status = err && typeof err === 'object' && ('status' in err || 'statusCode' in err)
+    ? (err as { status?: number; statusCode?: number }).status || (err as { status?: number; statusCode?: number }).statusCode
+    : undefined;
+  const message = err && typeof err === 'object' && 'message' in err
+    ? (err as { message?: string }).message
+    : undefined;
+
+  if (status === 403) {
+    return 'Action forbidden: you do not have permission (403)';
+  }
+  if (status === 404) {
+    return 'Action failed: package not found (404)';
+  }
+  if (status === 409) {
+    return 'Action failed: package is in use or has active sessions (409)';
+  }
+  return message || (err instanceof Error ? err.message : 'An unexpected error occurred');
+}
+
 
 export interface DerivedTopology {
   departments: string[];
@@ -76,6 +122,9 @@ export interface PackagesViewProps {
   onApplyClick?: () => void;
   cycleState?: 'idle' | 'stopping' | 'polling' | 'creating' | 'error';
   onCancelClick?: () => void;
+  onUpdateClick?: (name: string) => void;
+  onDeleteClick?: (name: string) => void;
+  sharesPanelSlot?: React.ReactNode;
 }
 
 export function PackagesView({
@@ -91,6 +140,9 @@ export function PackagesView({
   onApplyClick,
   cycleState = 'idle',
   onCancelClick,
+  onUpdateClick,
+  onDeleteClick,
+  sharesPanelSlot,
 }: PackagesViewProps) {
   // Compute flat vs composed counts only if ALL details are resolved
   const allResolved =
@@ -212,7 +264,7 @@ export function PackagesView({
           </button>
           <div className="min-[601px]:ml-auto flex items-center gap-2 flex-wrap max-[600px]:w-full">
             <span className="font-mono text-[11px] text-ghost leading-normal max-[600px]:w-full">
-              manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its composed_deps) — changing the set = create a new package revision (update/delete available via API; UI coming soon), then cycle the session; per-package enable switches are a target-state UI over that flow
+              manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its composed_deps) — changing the set = create a new package revision, update files, or delete roots via the UI controls below, then cycle the session; per-package enable switches are a target-state UI over that flow
             </span>
             {sessionStatusCopy && (
               <span
@@ -278,6 +330,8 @@ export function PackagesView({
                   pkg={detail.pkg}
                   isLoading={detail.isLoading}
                   error={detail.error}
+                  onUpdateClick={onUpdateClick ? () => onUpdateClick(name) : undefined}
+                  onDeleteClick={onDeleteClick ? () => onDeleteClick(name) : undefined}
                 />
               );
             })}
@@ -429,6 +483,8 @@ export function PackagesView({
         </div>
       </div>
 
+      {sharesPanelSlot}
+
       {/* READ / WRITE BOUNDARY SECTION */}
       <div>
         <SectionHeading count="the non-negotiable — what is read-only, what the FE manages, where writes land">
@@ -523,9 +579,11 @@ export interface PackageRowProps {
   pkg?: PackageResponse;
   isLoading?: boolean;
   error?: unknown;
+  onUpdateClick?: () => void;
+  onDeleteClick?: () => void;
 }
 
-export function PackageRow({ name, pkg, isLoading, error }: PackageRowProps) {
+export function PackageRow({ name, pkg, isLoading, error, onUpdateClick, onDeleteClick }: PackageRowProps) {
   const [isEnabled, setIsEnabled] = useState(true);
 
   if (isLoading) {
@@ -623,7 +681,25 @@ export function PackageRow({ name, pkg, isLoading, error }: PackageRowProps) {
           <span className="text-[10px] text-gold font-mono max-w-[150px] text-right leading-tight">
             target state — applies via session restart; no enable endpoint in v1
           </span>
-          <div className="flex items-center gap-[11px]">
+          <div className="flex items-center gap-[11px] mt-1">
+            {onUpdateClick && (
+              <button
+                onClick={onUpdateClick}
+                className="text-[12px] text-amber hover:text-amber/80 font-semibold cursor-pointer transition-colors"
+              >
+                Update
+              </button>
+            )}
+            {onUpdateClick && onDeleteClick && <span className="text-ghost">·</span>}
+            {onDeleteClick && (
+              <button
+                onClick={onDeleteClick}
+                className="text-[12px] text-red hover:text-red/80 font-semibold cursor-pointer transition-colors"
+              >
+                Delete
+              </button>
+            )}
+            {(onUpdateClick || onDeleteClick) && <span className="text-ghost">·</span>}
             <span className="text-[12px] text-ghost/40 cursor-not-allowed select-none">
               View source ↗ <span className="text-[11px] font-sans font-normal">(source viewer not exposed in v1)</span>
             </span>
@@ -662,9 +738,259 @@ export function PackageRowSkeleton({ name }: { name?: string }) {
   );
 }
 
+export interface DeletePackageModalProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  packageName: string;
+  onConfirm: () => Promise<void>;
+  isDeleting: boolean;
+  error: string | null;
+}
+
+export function DeletePackageModal({
+  isOpen,
+  onOpenChange,
+  packageName,
+  onConfirm,
+  isDeleting,
+  error,
+}: DeletePackageModalProps) {
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="p-0" showClose={false}>
+        <ModalSheet
+          title="Delete package"
+          meta={
+            <span>
+              permanently remove from store — <span className="font-mono text-[11.5px] text-ghost">DELETE /api/v1/packages/{packageName}</span>
+            </span>
+          }
+          closeButtonSlot={
+            <DialogClose
+              aria-label="Close"
+              className="w-[30px] h-[30px] rounded-control border border-line bg-raise-2 text-faint hover:text-fg hover:border-faint flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
+            >
+              <span className="text-[17px] leading-none" aria-hidden="true">✕</span>
+            </DialogClose>
+          }
+          actionButtonsSlot={
+            <>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="text-[12.5px] font-medium border border-line-2 bg-raise-2 text-dim rounded-control px-3.5 py-2 cursor-pointer hover:border-faint hover:text-fg transition-colors select-none"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={isDeleting}
+                className="text-[12.5px] font-semibold text-red bg-red/10 border border-red/30 rounded-control px-4 py-2 cursor-pointer hover:bg-red/20 transition-all disabled:opacity-50 select-none"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete package'}
+              </button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-4">
+            {error && (
+              <div className="bg-red/10 border border-red/30 rounded-control p-3 text-red text-[13px] font-mono select-text" role="alert">
+                {error}
+              </div>
+            )}
+            <p className="text-[13.5px] leading-normal text-dim">
+              Are you sure you want to permanently delete the package <b className="text-fg font-medium font-mono">{packageName}</b>? This action cannot be undone.
+            </p>
+          </div>
+        </ModalSheet>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function PackageSharesPanel({ packageName }: { packageName: string }) {
+  const { data: shares, isLoading, error } = useShares(packageName);
+  const createShareMutation = useCreateShare();
+  const deleteShareMutation = useDeleteShare();
+
+  const [granteeId, setGranteeId] = useState('');
+  const [granteeKind, setGranteeKind] = useState<'user' | 'org'>('user');
+  const [level, setLevel] = useState<'read' | 'use'>('read');
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Reset local state when package changes
+  useEffect(() => {
+    setGranteeId('');
+    setActionError(null);
+  }, [packageName]);
+
+  const handleCreateShare = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!granteeId.trim()) return;
+    setActionError(null);
+    try {
+      await createShareMutation.mutateAsync({
+        name: packageName,
+        share: {
+          grantee_id: granteeId.trim(),
+          grantee_kind: granteeKind,
+          level,
+        },
+      });
+      setGranteeId('');
+      toast({
+        title: 'Share granted',
+        description: `Successfully shared ${packageName} with ${granteeId}`,
+      });
+    } catch (err) {
+      setActionError(getErrorMessage(err));
+    }
+  };
+
+  const handleDeleteShare = async (shareId: string, granteeId: string) => {
+    setActionError(null);
+    try {
+      await deleteShareMutation.mutateAsync({
+        name: packageName,
+        shareId,
+      });
+      toast({
+        title: 'Share revoked',
+        description: `Successfully revoked share for ${granteeId}`,
+      });
+    } catch (err) {
+      setActionError(getErrorMessage(err));
+    }
+  };
+
+  return (
+    <div className="mt-8 border border-line rounded-panel overflow-hidden bg-raise">
+      <div className="p-[13px_20px] border-b border-line font-mono text-[11.5px] text-ghost flex items-center justify-between">
+        <span>Package Shares · {packageName}</span>
+        <span className="italic">manage read/use permissions for users & orgs</span>
+      </div>
+
+      <div className="p-5 flex flex-col gap-4">
+        {actionError && (
+          <div className="bg-red/10 border border-red/30 rounded-control p-3 text-red text-[13px] font-mono select-text" role="alert">
+            {actionError}
+          </div>
+        )}
+
+        {/* Existing Shares List */}
+        <div>
+          <div className="font-mono font-semibold text-[10px] tracking-[0.13em] uppercase text-ghost mb-2">
+            Active Grants
+          </div>
+          {isLoading ? (
+            <div className="text-[12.5px] text-ghost font-mono">Loading shares...</div>
+          ) : error ? (
+            <div className="text-[12.5px] text-red font-mono">Failed to load shares</div>
+          ) : !shares || shares.length === 0 ? (
+            <div className="text-[12.5px] text-dim font-mono italic">No shares granted yet.</div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {shares.map((share) => (
+                <div
+                  key={share.id}
+                  className="flex items-center justify-between border border-line rounded-card p-3 bg-raise-2"
+                >
+                  <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+                    <span className="font-mono text-[12.5px] text-fg break-all font-medium">
+                      {share.grantee_id}
+                    </span>
+                    <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded border border-line-2 bg-raise text-dim">
+                      {share.grantee_kind}
+                    </span>
+                    <span className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded border border-amber/30 bg-raise text-amber font-semibold">
+                      {share.level}
+                    </span>
+                    <span className="text-[11px] text-ghost">
+                      by {share.granted_by}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteShare(share.id, share.grantee_id)}
+                    className="text-[12px] text-red hover:text-red-ink font-semibold cursor-pointer transition-colors ml-4"
+                  >
+                    Revoke
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Grant Share Form */}
+        <form onSubmit={handleCreateShare} className="border-t border-line/60 pt-4 mt-2">
+          <div className="font-mono font-semibold text-[10px] tracking-[0.13em] uppercase text-ghost mb-3">
+            Grant New Share
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-3 items-end">
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <label htmlFor="grantee-id-input" className="text-[10px] font-mono text-ghost select-none">
+                Grantee ID (User or Org Name)
+              </label>
+              <input
+                id="grantee-id-input"
+                type="text"
+                value={granteeId}
+                onChange={(e) => setGranteeId(e.target.value)}
+                placeholder="e.g. user123 or org-name"
+                className="bg-raise-2 border border-line-2 rounded-control text-fg text-[13px] px-3 py-2 outline-none w-full focus:border-faint transition-colors"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5 flex-none">
+              <label htmlFor="grantee-kind-select" className="text-[10px] font-mono text-ghost select-none">
+                Kind
+              </label>
+              <select
+                id="grantee-kind-select"
+                value={granteeKind}
+                onChange={(e) => setGranteeKind(e.target.value as 'user' | 'org')}
+                className="bg-raise-2 border border-line-2 rounded-control text-fg text-[13px] px-3 py-2 outline-none focus:border-faint transition-colors"
+              >
+                <option value="user">User</option>
+                <option value="org">Organization</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5 flex-none">
+              <label htmlFor="share-level-select" className="text-[10px] font-mono text-ghost select-none">
+                Level
+              </label>
+              <select
+                id="share-level-select"
+                value={level}
+                onChange={(e) => setLevel(e.target.value as 'read' | 'use')}
+                className="bg-raise-2 border border-line-2 rounded-control text-fg text-[13px] px-3 py-2 outline-none focus:border-faint transition-colors"
+              >
+                <option value="read">Read</option>
+                <option value="use">Use</option>
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              disabled={!granteeId.trim() || createShareMutation.isPending}
+              className="text-[12.5px] font-semibold text-amber-ink bg-amber border-0 rounded-control px-4 py-2 cursor-pointer hover:brightness-[106%] transition-all disabled:opacity-50 flex-none h-[38px]"
+            >
+              Grant
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function PackagesScreen() {
   const { data: names, isLoading: isLoadingList, error: listError } = usePackagesList();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [pkgToUpdate, setPkgToUpdate] = useState<PackageResponse | null>(null);
+  const [pkgToDeleteName, setPkgToDeleteName] = useState<string | null>(null);
 
   // Lift per-row details fetching here via useQueries
   const packagesQueries = useQueries({
@@ -794,6 +1120,24 @@ export default function PackagesScreen() {
     !sessionId ||
     (cycleState !== 'idle' && cycleState !== 'error');
 
+  const deleteMutation = useDeletePackage();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteConfirm = async () => {
+    if (!pkgToDeleteName) return;
+    setDeleteError(null);
+    try {
+      await deleteMutation.mutateAsync(pkgToDeleteName);
+      toast({
+        title: 'Deleted',
+        description: `Successfully deleted package ${pkgToDeleteName}`,
+      });
+      setPkgToDeleteName(null);
+    } catch (err) {
+      setDeleteError(getErrorMessage(err));
+    }
+  };
+
   return (
     <>
       <PackagesView
@@ -801,7 +1145,10 @@ export default function PackagesScreen() {
         listError={listError ? listError.message : null}
         packageNames={names}
         packagesData={packagesData}
-        onAddPackageClick={() => setIsAddModalOpen(true)}
+        onAddPackageClick={() => {
+          setPkgToUpdate(null);
+          setIsAddModalOpen(true);
+        }}
         selectedPkgName={selectedPkgName}
         onSelectedPkgChange={setSelectedPkgName}
         sessionStatusCopy={sessionStatusCopy}
@@ -812,8 +1159,43 @@ export default function PackagesScreen() {
           setCycleState('idle');
           setCycleError(null);
         }}
+        onUpdateClick={(name) => {
+          const pkg = packagesData[name]?.pkg;
+          if (pkg) {
+            setPkgToUpdate(pkg);
+          }
+        }}
+        onDeleteClick={(name) => {
+          setPkgToDeleteName(name);
+        }}
+        sharesPanelSlot={selectedPkgName ? <PackageSharesPanel packageName={selectedPkgName} /> : null}
       />
-      <AddPackageModal isOpen={isAddModalOpen} onOpenChange={setIsAddModalOpen} />
+      <AddPackageModal
+        isOpen={isAddModalOpen || !!pkgToUpdate}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsAddModalOpen(false);
+            setPkgToUpdate(null);
+          }
+        }}
+        mode={pkgToUpdate ? 'update' : 'create'}
+        packageName={pkgToUpdate?.name}
+        initialFiles={pkgToUpdate?.files}
+        initialComposedDeps={pkgToUpdate?.composed_deps}
+      />
+      <DeletePackageModal
+        isOpen={!!pkgToDeleteName}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPkgToDeleteName(null);
+            setDeleteError(null);
+          }
+        }}
+        packageName={pkgToDeleteName || ''}
+        onConfirm={handleDeleteConfirm}
+        isDeleting={deleteMutation.isPending}
+        error={deleteError}
+      />
     </>
   );
 }
