@@ -6,8 +6,6 @@ import { StateBadge, StateBadgeState } from '@/components/status/state-badge';
 import { useAuthSession, authRequired } from '@/lib/auth';
 import { useGitHubAccounts } from '@/lib/hooks/useGitHubAccounts';
 import { AccountView } from '@/lib/api/types';
-import { GoalView } from '@/lib/api/goals';
-import { goalStatusPresentation } from '@/lib/api/goal-status';
 
 export interface GoalsGoal {
   id: string;
@@ -36,8 +34,7 @@ export interface GoalsRun {
 
 export interface GoalsProps {
   view?: 'issues' | 'activity';
-  goals?: (GoalsGoal | GoalView)[];
-  statusPresentation?: typeof goalStatusPresentation;
+  goals?: GoalsGoal[];
   runs?: GoalsRun[];
   vitals?: {
     runsDispatched?: string | 'unknown';
@@ -286,23 +283,7 @@ export function Goals({
                 </div>
               ) : goals.length > 0 ? (
                 <div className="flex flex-col">
-                  {goals.map((goal) => {
-                    let g: GoalsGoal;
-                    if ('status' in goal && !('stage' in goal)) {
-                      g = {
-                        id: goal.id,
-                        title: goal.title,
-                        stage: '—' as unknown as GoalsGoal['stage'],
-                        repo: goal.repo ? `${goal.repo.owner}/${goal.repo.name}` : '—',
-                        pr: '—',
-                        ci: 'unknown',
-                        age: '—',
-                        state: goal.status as StateBadgeState,
-                        gated: false,
-                      };
-                    } else {
-                      g = goal as GoalsGoal;
-                    }
+                  {goals.map((g) => {
                     const isReview = g.stage === 'Review';
                     const isShip = g.stage === 'Ship';
                     const isMerged = g.stage === 'Merged';

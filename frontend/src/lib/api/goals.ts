@@ -162,4 +162,3 @@ export function mapRepoTargetError(err: unknown, context: 'trigger' | 'issues'):
   }
   return err instanceof Error ? err.message : 'An unexpected error occurred';
 }
-

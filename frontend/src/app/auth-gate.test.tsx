@@ -49,12 +49,7 @@ const mockFetch: typeof fetch = (input: RequestInfo | URL) => {
       )
     );
   }
-  return Promise.resolve(
-    new Response(
-      JSON.stringify([]),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    )
-  );
+  return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
 };
 
 describe('Env-driven NyxID Auth Gate', () => {
