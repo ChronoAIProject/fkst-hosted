@@ -33,11 +33,6 @@ function M.claim_owner()
   return M.assert_trusted_bot_configured() or M.trusted_bot_login()
 end
 
-function M.issue_assigned_to_self_only(assignees, owner)
-  local logins = M.assignee_logins(assignees)
-  return #logins == 1 and logins[1] == tostring(owner or "")
-end
-
 function M.issue_claim_state(assignees, owner)
   local logins = M.assignee_logins(assignees)
   if #logins == 0 then
@@ -260,45 +255,6 @@ function M.attach_issue_claim(payload, source_ref)
   end
   payload.claim = M.claim_required_payload(source_ref or payload.source_ref)
   return payload
-end
-
-function M.claim_timeout_due(state)
-  if type(state) ~= "table" or state.state == nil then
-    return false
-  end
-  local row = M.restart_transition_row(state.state)
-  if row ~= nil and row.terminal == true then
-    return false
-  end
-  local threshold = M.liveness_budget_minutes(state.state) or M.stall_suspect_threshold_minutes(state.state)
-  local age = M.liveness_state_age_minutes(state, now())
-  return threshold ~= nil and age ~= nil and age >= threshold
-end
-
-function M.maybe_release_stale_self_claim(dept, repo, issue_number, current, proposal_id, state)
-  if not M.claim_timeout_due(state) then
-    return false
-  end
-  local owner = M.claim_owner()
-  if not M.issue_assigned_to_self_only(current and current.assignees, owner) then
-    return false
-  end
-  if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
-    log_claim(dept, proposal_id, "dry-run-timeout-release", "stale self claim would be released")
-    return false
-  end
-  local fresh = M.read_current_issue_assignees(repo, issue_number)
-  if not M.issue_assigned_to_self_only(fresh, owner) then
-    log_claim(dept, proposal_id, "skip-timeout-release", "fresh assignee read is not self-only")
-    return false
-  end
-  local unassigned = M.gh_exec({ cmd = M.gh_issue_unassign_cmd(repo, issue_number, owner), timeout = 30 })
-  if unassigned.exit_code ~= 0 then
-    error("github-devloop: gh issue edit unassign failed: " .. tostring(unassigned.stderr))
-  end
-  M.invalidate_entity_after_write(repo, "issue", issue_number)
-  log_claim(dept, proposal_id, "timeout-release", "stale self claim released after fresh self-only verification")
-  return true
 end
 
 end

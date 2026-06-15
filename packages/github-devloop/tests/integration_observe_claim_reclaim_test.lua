@@ -74,19 +74,15 @@ return {
     t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 0)
   end,
 
-  test_timeout_release_reclaims_issue_before_replay = function()
+  test_stalled_self_claimed_issue_is_held_without_assignee_writes = function()
     mock_claim_env()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", nil, { "fkst-test-bot" })
-    mock_claim_view({ "fkst-test-bot" })
-    mock_remove_self()
-    mock_add_self()
-    mock_claim_view({ "fkst-test-bot" })
 
-    local result = run_observe(issue(), opts("observe-timeout-release-reclaim", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_observe(issue(), opts("observe-stalled-self-claim-held", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "consensus.proposal").payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/replay/timeout/thinking/1")
-    t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
-    t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
+    t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 0)
+    t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 0)
   end,
 }

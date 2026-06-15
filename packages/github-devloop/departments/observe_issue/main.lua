@@ -133,16 +133,6 @@ local function ensure_managed_issue_claim(issue, proposal_id, current, state)
     core.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
     return false
   end
-  if core.maybe_release_stale_self_claim("observe_issue", issue.repo, issue.number, current, proposal_id, state) then
-    local released_current = {
-      assignees = {},
-      author_login = current.author_login,
-      title = current.title,
-      state = current.state,
-      comments = current.comments,
-    }
-    return core.claim_issue_for_management("observe_issue", issue.repo, issue.number, released_current, proposal_id)
-  end
   if claim_state == "self" then
     return true
   end
