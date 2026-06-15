@@ -59,6 +59,8 @@ local merge_queue_lane_states = {
   merging = true,
 }
 
+M._merge_ready_starvation_threshold_minutes = 60
+
 local function has_merge_ready_created_at(entry)
   local created = tostring(entry and entry.merge_ready_created_at or "")
   return created ~= ""

@@ -3,7 +3,6 @@ local S = {}
 function S.install(M)
 local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
-local merge_ready_stale_threshold_minutes = 60
 local recent_closed_limit = 30
 
 local function format_timestamp(seconds)
@@ -202,7 +201,7 @@ local function merge_ready_queue_head(entities, now_seconds)
     local age = M.stall_suspect_age_minutes(entity.state and entity.state.version or nil, now_seconds)
     if state == "merge-ready"
       and tonumber(age) ~= nil
-      and tonumber(age) > merge_ready_stale_threshold_minutes
+      and tonumber(age) > M._merge_ready_starvation_threshold_minutes
       and (selected == nil
         or tonumber(age) > tonumber(selected.age_minutes)
         or (tonumber(age) == tonumber(selected.age_minutes)
@@ -211,7 +210,7 @@ local function merge_ready_queue_head(entities, now_seconds)
         entity = entity,
         state = state,
         age_minutes = age,
-        threshold_minutes = merge_ready_stale_threshold_minutes,
+        threshold_minutes = M._merge_ready_starvation_threshold_minutes,
       }
     end
   end
@@ -221,7 +220,7 @@ end
 local function merge_queue_head_entity(repo, now_seconds)
   local branches = M.branch_config()
   local _, entries = M.merge_queue_head(repo, branches.integration)
-  local head, age = M.merge_queue_starvation_candidate(entries, merge_ready_stale_threshold_minutes, now_seconds)
+  local head, age = M.merge_queue_starvation_candidate(entries, M._merge_ready_starvation_threshold_minutes, now_seconds)
   if head == nil then
     return nil
   end
@@ -244,7 +243,7 @@ local function merge_queue_head_entity(repo, now_seconds)
     },
     state = "merge-ready",
     age_minutes = age,
-    threshold_minutes = merge_ready_stale_threshold_minutes,
+    threshold_minutes = M._merge_ready_starvation_threshold_minutes,
   }
 end
 
@@ -415,7 +414,7 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
     window_key = M.queue_starvation_window_key(current_seconds),
     queue_head = queue_head.entity,
     queue_head_age_minutes = queue_head.age_minutes,
-    threshold_minutes = merge_ready_stale_threshold_minutes,
+    threshold_minutes = M._merge_ready_starvation_threshold_minutes,
     last_merge_age_minutes = newest and newest.age_minutes or nil,
     recent_closed = recent_closed,
   }
@@ -443,7 +442,7 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
     .. " action=raise"
     .. " queue_head=" .. tostring(queue_head.entity and queue_head.entity.proposal_id or "")
     .. " age_minutes=" .. tostring(queue_head.age_minutes)
-    .. " threshold_minutes=" .. tostring(merge_ready_stale_threshold_minutes)
+    .. " threshold_minutes=" .. tostring(M._merge_ready_starvation_threshold_minutes)
     .. " last_merge_age_minutes=" .. tostring(evidence.last_merge_age_minutes or "none")
     .. " snapshot_path=" .. tostring(snapshot)
     .. " dedup_key=" .. tostring(request.dedup_key))
