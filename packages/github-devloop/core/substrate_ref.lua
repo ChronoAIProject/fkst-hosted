@@ -121,6 +121,11 @@ local function write_pr_body(repo, current_pin, target_sha)
     "",
     "⟦AI:FKST⟧",
   }, "\n")
+  body = M.with_github_debug_stamp(body, {
+    emitter = "github-devloop.substrate-ref.pr-create",
+    target = "pr:" .. tostring(repo) .. "#new",
+    dedup_key = tostring(current_pin) .. "->" .. tostring(target_sha),
+  })
   file.write(path, body .. "\n")
   return path
 end

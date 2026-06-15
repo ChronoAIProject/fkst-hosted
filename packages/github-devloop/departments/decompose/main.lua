@@ -214,7 +214,13 @@ end
 
 local function write_decomposed_marker(repo, decompose, count)
   local path = marker_body_file(repo, decompose.pr_number)
-  file.write(path, core.decomposed_comment_body(decompose, count))
+  local body = core.with_github_debug_stamp(core.decomposed_comment_body(decompose, count), {
+    emitter = "github-devloop.decompose",
+    target = "pr:" .. tostring(repo) .. "#" .. tostring(decompose.pr_number),
+    dedup_key = decompose.dedup_key,
+    context = decompose.proposal_id,
+  })
+  file.write(path, body)
   local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, decompose.pr_number, path), timeout = 30 })
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr decomposed marker comment failed: " .. tostring(result.stderr))

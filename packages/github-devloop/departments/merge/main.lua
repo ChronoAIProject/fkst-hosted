@@ -341,7 +341,13 @@ local function write_merging_marker(repo, merge_ready, comments)
     return
   end
   local path = runtime_files.temp_body_file(repo, merge_ready.pr_number)
-  file.write(path, build_merging_body(merge_ready))
+  local body = core.with_github_debug_stamp(build_merging_body(merge_ready), {
+    emitter = "github-devloop.merge.merging",
+    target = "pr:" .. tostring(repo) .. "#" .. tostring(merge_ready.pr_number),
+    dedup_key = merge_ready.dedup_key,
+    context = merge_ready.reviewed_head_sha,
+  })
+  file.write(path, body)
   local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, merge_ready.pr_number, path), timeout = 30 })
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr merging marker comment failed: " .. tostring(result.stderr))

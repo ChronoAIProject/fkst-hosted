@@ -169,7 +169,13 @@ local function reap_orphan_pr(repo, entity)
   end
   core.invalidate_entity_after_write(repo, "pr", pr_number)
   local path = reaper_body_path(repo, pr_number, proposal_id)
-  file.write(path, reaper_comment_body(proposal_id, pr_number, reason))
+  local body = core.with_github_debug_stamp(reaper_comment_body(proposal_id, pr_number, reason), {
+    emitter = "github-devloop.observability.reaper",
+    target = "pr:" .. tostring(repo) .. "#" .. tostring(pr_number),
+    dedup_key = proposal_id,
+    context = reason and reason.code,
+  })
+  file.write(path, body)
   local commented = core.observability_run_cmd(core.gh_pr_comment_cmd(repo, pr_number, path), entity.observability_limits, entity.observability_deadline, "gh orphan PR reaper comment")
   if core.observability_result_deferred(commented) then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "deferred", "deadline-after-close"))
