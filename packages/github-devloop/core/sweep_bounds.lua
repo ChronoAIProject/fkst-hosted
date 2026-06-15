@@ -57,12 +57,22 @@ function M.sweep_result_deferred(result)
   return type(result) == "table" and result.deferred == true
 end
 
-function M.sweep_exec(cmd, limits, deadline, error_class, exec)
+function M.sweep_exec(cmd_or_opts, limits, deadline, error_class, exec)
   local timeout = M.sweep_call_timeout(limits, deadline)
   if timeout <= 0 then
     return M.sweep_deadline_deferred_result(error_class)
   end
-  return M.gh_exec({ cmd = cmd, timeout = timeout }, nil, exec)
+  local opts
+  if type(cmd_or_opts) == "table" then
+    opts = {}
+    for key, value in pairs(cmd_or_opts) do
+      opts[key] = value
+    end
+    opts.timeout = opts.timeout or timeout
+  else
+    opts = { cmd = cmd_or_opts, timeout = timeout }
+  end
+  return M.gh_exec(opts, nil, exec)
 end
 
 function M.sweep_run_cmd(cmd, limits, deadline, error_class, exec)

@@ -43,17 +43,17 @@ function M.observability_result_deferred(result)
   return M.sweep_result_deferred(result)
 end
 
-function M.observability_exec(cmd, limits, deadline, error_class, exec)
-  local result = M.sweep_exec(cmd, limits, deadline, error_class or "gh observability command", exec)
+function M.observability_exec(cmd_or_opts, limits, deadline, error_class, exec)
+  local result = M.sweep_exec(cmd_or_opts, limits, deadline, error_class or "gh observability command", exec)
   if M.sweep_result_deferred(result) then
     result.stderr = "observability deadline exhausted"
   end
   return result
 end
 
-function M.observability_run_cmd(cmd, limits, deadline, error_class, exec)
+function M.observability_run_cmd(cmd_or_opts, limits, deadline, error_class, exec)
   local label = error_class or "gh observability command"
-  local result = M.observability_exec(cmd, limits, deadline, label, exec)
+  local result = M.observability_exec(cmd_or_opts, limits, deadline, label, exec)
   if M.observability_result_deferred(result) then
     return result
   end
@@ -222,9 +222,9 @@ function M.observability_list_issue_candidates(repo, labels, limits, deadline, s
   local deferred_pages = 0
   for _, label in ipairs(labels or {}) do
     local listed, deferred = list_rotating_pages(
-      M.gh_issue_list_observe_cmd(repo, label, 1, true),
+      M.gh_issue_list_observe_opts(repo, label, 1, true),
       function(page)
-        return M.gh_issue_list_observe_cmd(repo, label, page)
+        return M.gh_issue_list_observe_opts(repo, label, page)
       end,
       M.parse_issue_list_observe,
       limits,
@@ -243,9 +243,9 @@ end
 
 function M.observability_list_pr_candidates(repo, limits, deadline, seed, exec)
   return list_rotating_pages(
-    M.gh_pr_list_observe_cmd(repo, 1, true),
+    M.gh_pr_list_observe_opts(repo, 1, true),
     function(page)
-      return M.gh_pr_list_observe_cmd(repo, page)
+      return M.gh_pr_list_observe_opts(repo, page)
     end,
     M.parse_pr_list_observe,
     limits,

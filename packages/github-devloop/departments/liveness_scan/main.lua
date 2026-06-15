@@ -163,16 +163,18 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   return should_reinject_state(proposal_id, core.current_entity_state(current.comments, origin.proposal_id))
 end
 
-local function list_open_issues(repo, timeout)
-  local list = core.gh_exec({ cmd = core.gh_issue_list_observe_cmd(repo), timeout = timeout or 60 })
+local function list_open_issues(repo)
+  local opts = core.gh_issue_list_observe_opts(repo)
+  local list = core.gh_exec(opts)
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-issue-list-failed: " .. tostring(list.stderr))
   end
   return core.parse_issue_list_observe(list.stdout)
 end
 
-local function list_open_prs(repo, timeout)
-  local list = core.gh_exec({ cmd = core.gh_pr_list_observe_cmd(repo), timeout = timeout or 60 })
+local function list_open_prs(repo)
+  local opts = core.gh_pr_list_observe_opts(repo)
+  local list = core.gh_exec(opts)
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-pr-list-failed: " .. tostring(list.stderr))
   end
@@ -237,7 +239,7 @@ function pipeline(event)
     log_deferred("deadline", { entity_cap = limits.entity_cap })
     return
   end
-  local issues = list_open_issues(repo, issue_timeout)
+  local issues = list_open_issues(repo)
   local pr_timeout = core.sweep_call_timeout(limits, deadline)
   if pr_timeout <= 0 then
     log_deferred("deadline", {
@@ -247,7 +249,7 @@ function pipeline(event)
     })
     return
   end
-  local prs = list_open_prs(repo, pr_timeout)
+  local prs = list_open_prs(repo)
   local activations, deferred_by_cap, cursor_key, cursor, total = activation_slice(repo, issues, prs)
   local processed = 0
   local attempted = 0

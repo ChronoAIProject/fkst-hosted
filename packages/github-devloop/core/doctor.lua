@@ -216,7 +216,8 @@ local function fetch_pr_entity(repo, pr)
 end
 
 local function list_open_issues(repo)
-  local result = M.gh_exec({ cmd = M.gh_issue_list_observe_cmd(repo), timeout = 60 })
+  local opts = M.gh_issue_list_observe_opts(repo)
+  local result = M.gh_exec(opts)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-issue-list-failed: " .. tostring(result.stderr))
   end
@@ -224,7 +225,8 @@ local function list_open_issues(repo)
 end
 
 local function list_open_prs(repo)
-  local result = M.gh_exec({ cmd = M.gh_pr_list_observe_cmd(repo), timeout = 60 })
+  local opts = M.gh_pr_list_observe_opts(repo)
+  local result = M.gh_exec(opts)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-pr-list-failed: " .. tostring(result.stderr))
   end
