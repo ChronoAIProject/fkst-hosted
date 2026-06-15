@@ -7,6 +7,7 @@ function M.persistence_class()
 end
 
 require("core.issue_create").install(M)
+require("core.github_graphql").install(M)
 require("core.blocked_by").install(M)
 require("core.rest_view").install(M)
 require("core.entity_view").install(M)

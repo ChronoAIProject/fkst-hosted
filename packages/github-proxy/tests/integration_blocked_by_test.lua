@@ -181,15 +181,36 @@ return {
     t.eq(count_calls("addBlockedBy"), 0)
   end,
 
+  test_blocked_by_graphql_contracts_are_named = function()
+    local operations = core.github_graphql_queries
+
+    t.eq(type(operations), "table")
+    t.eq(core.github_graphql_command_templates.graphql_query, "gh api graphql -f query=")
+    t.eq(type(operations.blocked_by), "string")
+    t.eq(type(operations.add_blocked_by), "string")
+    t.eq(operations.blocked_by:find("blockedBy(first:50)", 1, true) ~= nil, true)
+    t.eq(operations.blocked_by:find("nodes{number repository{nameWithOwner}}", 1, true) ~= nil, true)
+    t.eq(
+      core.render_github_graphql_query("blocked_by", {
+        owner = "owner",
+        name = "x",
+        issue_number = 42,
+      }),
+      '{repository(owner:"owner",name:"x"){issue(number:42){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number repository{nameWithOwner}}}}}}'
+    )
+  end,
+
   -- Contract test pinned to GitHub's real AddBlockedByInput schema (issueId +
   -- blockingIssueId). The behavior tests above mock the command via
   -- gh_add_blocked_by_cmd itself, so they cannot catch a wrong GraphQL field
   -- name -- the mock always matches whatever the code emits. This asserts the
-  -- literal mutation, which is what actually failed in production: the input
-  -- used 'blockedIssueId' (rejected by GitHub), so every block silently failed.
+  -- named mutation contract, which is what actually failed in production: the
+  -- input used 'blockedIssueId' (rejected by GitHub), so every block silently
+  -- failed.
   test_add_blocked_by_mutation_uses_valid_schema_fields = function()
-    local cmd = core.gh_add_blocked_by_cmd("I_blocked", "I_blocking")
-    t.eq(cmd:find("addBlockedBy(input:{issueId:$b,blockingIssueId:$g})", 1, true) ~= nil, true)
-    t.eq(cmd:find("blockedIssueId", 1, true), nil)
+    local query = core.github_graphql_queries.add_blocked_by
+
+    t.eq(query:find("addBlockedBy(input:{issueId:$b,blockingIssueId:$g})", 1, true) ~= nil, true)
+    t.eq(query:find("blockedIssueId", 1, true), nil)
   end,
 }
