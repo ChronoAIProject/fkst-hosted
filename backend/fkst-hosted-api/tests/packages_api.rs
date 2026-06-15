@@ -810,6 +810,7 @@ async fn delete_with_running_session_is_409() {
         package_names: vec![],
         goal_id: None,
         repo: None,
+        env_scope: None,
         triggered_by: None,
         created_at: bson::DateTime::now(),
         started_at: None,

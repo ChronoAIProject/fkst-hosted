@@ -28,18 +28,21 @@
 //!   resolved AFTER start returns, via the `validating -> running` CAS).
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use bson::{doc, Document};
+use secrecy::SecretString;
 use tokio::sync::watch;
 
 use crate::distribution::{Distributor, DriverHost, PlacementError};
+use crate::engine::config::is_reserved_env_key;
 use crate::engine::{
     EngineConfig, LiveStatus, PreparedPackage, RunnerError, RunningSession, SessionRunner,
+    StartSpec,
 };
 use crate::error::AppError;
 use crate::github_app::GithubAppTokens;
@@ -55,6 +58,7 @@ use crate::leases::RenewOutcome;
 use crate::models::{SessionDoc, SessionStatus};
 use crate::packages::{is_valid_name, PackageRepository};
 use crate::sessions::repo::{status_bson, SessionRepo};
+use crate::vault::{EnvScopeRef, VaultService};
 
 /// Maximum stored byte length of a `package_name` (matches the packages
 /// domain bound).
@@ -145,6 +149,11 @@ struct Inner {
     /// [`SessionService::enable_goal_support`]. Set before any session is
     /// created; a second call is a logged no-op.
     goal_support: OnceLock<GoalSupport>,
+    /// Per-session env vault (issue #102), enabled once at startup via
+    /// [`SessionService::enable_vault`]. Unset => the driver resolves an EMPTY
+    /// env profile (legacy tests / minimal runs behave exactly as pre-#102);
+    /// production always enables it. A second call is a logged no-op.
+    vault: OnceLock<VaultService>,
 }
 
 /// Journaling wiring shared by every driver this service spawns.
@@ -211,6 +220,7 @@ impl SessionService {
                 distribution,
                 journal: OnceLock::new(),
                 goal_support: OnceLock::new(),
+                vault: OnceLock::new(),
             }),
         }
     }
@@ -247,6 +257,19 @@ impl SessionService {
             return;
         }
         tracing::info!("goal support enabled (goal-status sync + token refresh)");
+    }
+
+    /// Enable per-session env injection (issue #102): the driver resolves each
+    /// session's vault scope into an `env_profile` and injects it into the
+    /// engine run. Call once at startup, before any session is created; a
+    /// second call is a logged no-op. When never called the driver resolves an
+    /// empty profile (legacy behaviour).
+    pub fn enable_vault(&self, vault: VaultService) {
+        if self.inner.vault.set(vault).is_err() {
+            tracing::warn!("vault already enabled; ignoring the second call");
+            return;
+        }
+        tracing::info!("session env injection enabled (vault wired into the driver)");
     }
 
     /// The repository handle (startup hooks: orphan sweep).
@@ -301,6 +324,10 @@ impl SessionService {
             package_names: vec![],
             goal_id: None,
             repo: None,
+            // Package sessions have no repo, so their env resolves from the
+            // owner-wide (global) vault scope (#102). The non-secret pointer is
+            // persisted so a failover rebuild re-resolves the same scope.
+            env_scope: Some(EnvScopeRef::global()),
             triggered_by: None,
             created_at: bson::DateTime::now(),
             started_at: None,
@@ -437,6 +464,10 @@ impl SessionService {
             package_names: trigger.package_names.clone(),
             goal_id: Some(trigger.goal_id),
             repo: Some(trigger.repo.clone()),
+            // Goal sessions resolve their env from the target repo's vault
+            // scope (which overlays the owner-wide global scope, repo winning
+            // on a key collision — see VaultService::list_for_scope). #102.
+            env_scope: Some(EnvScopeRef::repo(&trigger.repo.owner, &trigger.repo.name)),
             triggered_by: Some("goal-trigger".to_string()),
             created_at: now,
             started_at: None,
@@ -924,9 +955,69 @@ async fn drive_inner(
 
     let prepared = PreparedPackage::from(package);
 
+    // (B3) Resolve the per-session env profile from the vault BEFORE the engine
+    // starts (#102). The full SessionDoc carries the owner/org/scope needed to
+    // resolve; a resolve error (e.g. a decrypt failure) FAILS the start — a run
+    // must never proceed missing its secrets. Re-fetched (not threaded from
+    // spawn) so a failover rebuild re-resolves with any rotated secret.
+    let session_doc = match inner.repo.get(id).await {
+        Ok(Some(session_doc)) => session_doc,
+        Ok(None) => {
+            // The document vanished between the claim and here (a concurrent
+            // delete). Nothing to fail; just exit (the lease is still released).
+            tracing::warn!(session_id = %id, "session document vanished before env resolution");
+            return true;
+        }
+        Err(error) => {
+            tracing::error!(session_id = %id, error = %error, "driver failed to load session for env resolution");
+            fail_session(inner, id, &fence, "failed to load session", goal_info).await;
+            return true;
+        }
+    };
+    let env_profile = match resolve_env_profile(inner, &session_doc).await {
+        Ok(profile) => profile,
+        Err(error) => {
+            // Host-side detail (decrypt internals) stays in the logs; the
+            // served `error` field is generic. The secret value is never
+            // logged — only the failure is.
+            tracing::error!(session_id = %id, error = %error, "failed to resolve session secrets");
+            fail_session(
+                inner,
+                id,
+                &fence,
+                "failed to resolve session secrets",
+                goal_info,
+            )
+            .await;
+            return true;
+        }
+    };
+    if !env_profile.is_empty() {
+        // Keys are non-secret env-var NAMES, safe to log; VALUES are never
+        // logged (they are `SecretString`). Counts + names aid debugging which
+        // env a run received without ever exposing the secret material.
+        tracing::info!(
+            session_id = %id,
+            count = env_profile.len(),
+            keys = %env_profile.keys().cloned().collect::<Vec<_>>().join(","),
+            "injected session env"
+        );
+    }
+
     // (C) Start the engine. This await runs to completion (never
     // select-cancelled); a stop that raced in is honored right after.
-    let mut session = match inner.runner.start(&prepared).await {
+    // `goal: None` STAYS here — the goal-session GitHub-App goal arm is #106's
+    // job; #102 owns only the start() -> start_with_spec() migration and the
+    // env_profile threading.
+    let mut session = match inner
+        .runner
+        .start_with_spec(&StartSpec {
+            packages: vec![prepared],
+            goal: None,
+            env_profile,
+        })
+        .await
+    {
         Ok(session) => session,
         Err(error) => {
             tracing::warn!(session_id = %id, error = %error, "engine start failed");
@@ -1304,6 +1395,75 @@ async fn drive_inner(
             }
         }
     }
+}
+
+/// Resolve the per-session env profile from the vault (#102). Returns an empty
+/// map when no vault is wired (legacy tests / minimal runs behave exactly as
+/// pre-#102). Otherwise it derives the scope — the persisted `env_scope` when
+/// present, else a fallback derived from `repo` so legacy documents without
+/// `env_scope` still resolve — and asks the vault for that scope's resolved
+/// entries (secrets already decrypted into `SecretString`). Any key the
+/// platform reserves (`is_reserved_env_key`) is dropped as defense in depth
+/// (the vault write-validator already rejects them at write time). A decrypt
+/// error propagates as `Err` so the caller fails the start rather than running
+/// a session missing its secrets.
+async fn resolve_env_profile(
+    inner: &Arc<Inner>,
+    session: &SessionDoc,
+) -> Result<BTreeMap<String, SecretString>, AppError> {
+    let Some(vault) = inner.vault.get() else {
+        return Ok(BTreeMap::new());
+    };
+
+    let scope = scope_for_session(session);
+    // The owner anchors the lookup; a pre-auth document with no owner resolves
+    // to no entries (the empty owner can hold none), which is the safe answer.
+    let owner_user_id = session.owner_user_id.as_deref().unwrap_or_default();
+    let resolved = vault
+        .list_for_scope(owner_user_id, session.org_id.as_deref(), &scope)
+        .await?;
+    Ok(profile_from_resolved(session.id, resolved))
+}
+
+/// Derive the vault scope to resolve for a session: the persisted non-secret
+/// `env_scope` pointer wins; otherwise fall back to deriving it from `repo`
+/// (repo-scope) or `global`, so a pre-#102 document without `env_scope` still
+/// resolves the correct scope on a redrive.
+fn scope_for_session(session: &SessionDoc) -> EnvScopeRef {
+    session
+        .env_scope
+        .clone()
+        .unwrap_or_else(|| match &session.repo {
+            Some(repo) => EnvScopeRef::repo(&repo.owner, &repo.name),
+            None => EnvScopeRef::global(),
+        })
+}
+
+/// Build the engine `env_profile` from the vault's resolved entries, dropping
+/// any platform-reserved key (`is_reserved_env_key`) as defense in depth — the
+/// vault write-validator already rejects them, so a present reserved key is an
+/// anomaly worth a warn. Keys (non-secret names) are logged; values never are.
+fn profile_from_resolved(
+    session_id: bson::Uuid,
+    resolved: Vec<crate::vault::ResolvedEntry>,
+) -> BTreeMap<String, SecretString> {
+    let mut profile = BTreeMap::new();
+    let mut dropped_reserved = 0usize;
+    for entry in resolved {
+        if is_reserved_env_key(&entry.key) {
+            dropped_reserved += 1;
+            continue;
+        }
+        profile.insert(entry.key, entry.value);
+    }
+    if dropped_reserved > 0 {
+        tracing::warn!(
+            session_id = %session_id,
+            dropped_reserved,
+            "dropped reserved env keys from the resolved session profile"
+        );
+    }
+    profile
 }
 
 /// Converge a pre-`running` failure: CAS `validating|stopping -> failed`
@@ -1723,5 +1883,143 @@ mod tests {
         assert!(truncated.ends_with(" [truncated]"));
         assert!(truncated.len() <= MAX_ERROR_BYTES + " [truncated]".len());
         // Still valid UTF-8 by construction (String), no panic on slicing.
+    }
+
+    // ---- per-session env injection (issue #102) -------------------------------
+
+    use crate::models::RepoRef as ModelRepoRef;
+    use crate::vault::ResolvedEntry;
+    use secrecy::ExposeSecret;
+
+    /// A minimal `SessionDoc` for the env-resolution helper tests. Only the
+    /// fields the helpers read (`id`, `owner_user_id`, `org_id`, `repo`,
+    /// `env_scope`) matter; the rest are inert defaults.
+    fn env_test_session() -> SessionDoc {
+        SessionDoc {
+            id: bson::Uuid::new(),
+            package_name: "demo".to_string(),
+            status: SessionStatus::Pending,
+            pod_id: None,
+            fencing_token: None,
+            pid: None,
+            runtime_dir: None,
+            error: None,
+            run_key: None,
+            owner_user_id: Some("user-1".to_string()),
+            org_id: None,
+            package_names: vec![],
+            goal_id: None,
+            repo: None,
+            env_scope: None,
+            triggered_by: None,
+            created_at: bson::DateTime::now(),
+            started_at: None,
+            stopped_at: None,
+        }
+    }
+
+    #[test]
+    fn scope_for_session_prefers_the_persisted_env_scope() {
+        let mut session = env_test_session();
+        // A repo is set but the persisted env_scope must win regardless.
+        session.repo = Some(ModelRepoRef {
+            owner: "acme".to_string(),
+            name: "other".to_string(),
+        });
+        session.env_scope = Some(EnvScopeRef::repo("acme", "site"));
+        assert_eq!(scope_for_session(&session).scope_key(), "repo:acme/site");
+    }
+
+    #[test]
+    fn scope_for_session_falls_back_to_repo_when_env_scope_absent() {
+        // Legacy doc (no env_scope) with a repo resolves to that repo's scope.
+        let mut session = env_test_session();
+        session.repo = Some(ModelRepoRef {
+            owner: "acme".to_string(),
+            name: "billing".to_string(),
+        });
+        assert_eq!(scope_for_session(&session).scope_key(), "repo:acme/billing");
+    }
+
+    #[test]
+    fn scope_for_session_falls_back_to_global_when_neither_present() {
+        // Legacy doc with neither env_scope nor repo resolves owner-wide.
+        let session = env_test_session();
+        assert_eq!(scope_for_session(&session).scope_key(), "global");
+    }
+
+    #[test]
+    fn profile_from_resolved_keeps_ordinary_keys_and_drops_reserved() {
+        let id = bson::Uuid::new();
+        let resolved = vec![
+            ResolvedEntry {
+                key: "OPENAI_API_KEY".to_string(),
+                value: SecretString::from("sk-secret".to_string()),
+            },
+            ResolvedEntry {
+                key: "FOO".to_string(),
+                value: SecretString::from("bar".to_string()),
+            },
+            // Reserved keys must be dropped (defense in depth): a platform
+            // prefix, an explicit reserved name, and an allow-listed host var.
+            ResolvedEntry {
+                key: "FKST_DURABLE_ROOT".to_string(),
+                value: SecretString::from("x".to_string()),
+            },
+            ResolvedEntry {
+                key: "GITHUB_TOKEN".to_string(),
+                value: SecretString::from("y".to_string()),
+            },
+            ResolvedEntry {
+                key: "PATH".to_string(),
+                value: SecretString::from("z".to_string()),
+            },
+        ];
+        let profile = profile_from_resolved(id, resolved);
+        assert_eq!(
+            profile.keys().cloned().collect::<Vec<_>>(),
+            vec!["FOO".to_string(), "OPENAI_API_KEY".to_string()],
+            "only the non-reserved keys survive, key-sorted"
+        );
+        assert_eq!(
+            profile.get("OPENAI_API_KEY").map(|v| v.expose_secret()),
+            Some("sk-secret")
+        );
+        assert!(!profile.contains_key("FKST_DURABLE_ROOT"));
+        assert!(!profile.contains_key("GITHUB_TOKEN"));
+        assert!(!profile.contains_key("PATH"));
+    }
+
+    #[test]
+    fn profile_from_resolved_is_empty_for_no_entries() {
+        let profile = profile_from_resolved(bson::Uuid::new(), Vec::new());
+        assert!(profile.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_env_profile_is_empty_when_no_vault_wired() {
+        // A service that never had `enable_vault` called resolves an EMPTY
+        // profile — the pre-#102 behaviour for tests / minimal runs. The Db
+        // handle is built lazily and never touched (no vault => early return),
+        // so this needs no live Mongo.
+        let db = crate::db::Db {
+            database: mongodb::Client::with_uri_str("mongodb://localhost:27017")
+                .await
+                .expect("client")
+                .database("sessions_unit_test"),
+        };
+        let service = SessionService::new(
+            SessionRepo::new(&db),
+            PackageRepository::new(&db.database),
+            EngineConfig::default(),
+        );
+        let session = env_test_session();
+        let profile = resolve_env_profile(&service.inner, &session)
+            .await
+            .expect("empty profile, no error");
+        assert!(
+            profile.is_empty(),
+            "no vault wired => empty env profile (legacy behaviour)"
+        );
     }
 }

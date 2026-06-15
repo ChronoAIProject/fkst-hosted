@@ -496,6 +496,17 @@ pending → validating → running → stopping → stopped
                                          ↘ failed
 ```
 
+> **Injected environment.** When a session starts, the engine run receives the
+> caller's resolved [vault](#vault-env-variables--secrets) environment for the
+> session's scope — owner-wide (`global`) entries for a package session, plus
+> the target repo's entries (repo overrides global on a key collision) for a
+> goal-triggered one. Secret values are injected in memory only: the session
+> document persists just a non-secret scope pointer, so a pod failover
+> re-resolves the same profile from the vault (picking up any rotated secret),
+> and a decrypt failure fails the start rather than running without the secret.
+> Platform-reserved keys (`FKST_*`, `GITHUB_TOKEN`, the host allow-list) are
+> always dropped. There is no new endpoint — this is automatic.
+
 **Data shape**
 
 ```jsonc

@@ -82,6 +82,7 @@ fn session(status: SessionStatus, runtime_dir: Option<&Path>) -> SessionDoc {
         package_names: vec![],
         goal_id: None,
         repo: None,
+        env_scope: None,
         triggered_by: None,
         created_at: bson::DateTime::now(),
         started_at: Some(bson::DateTime::now()),

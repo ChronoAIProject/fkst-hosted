@@ -74,6 +74,15 @@ pub struct SessionDoc {
     /// Target GitHub repo, inherited from the goal when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<RepoRef>,
+    /// Non-secret pointer to the vault scope this session resolves its env
+    /// from (issue #102): `global` for package sessions, the target repo for
+    /// goal-triggered ones. Only this REFERENCE is persisted — the resolved
+    /// secret values are NEVER written here; the driver re-resolves them from
+    /// the vault on every (re)start, so a rotated secret is picked up on
+    /// failover. Omitted on legacy docs (the driver then derives the scope
+    /// from `repo`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_scope: Option<crate::vault::EnvScopeRef>,
     /// Event that triggered this session (e.g. `"goal-trigger"`, `"manual"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triggered_by: Option<String>,
@@ -143,6 +152,7 @@ mod tests {
             package_names: vec![],
             goal_id: None,
             repo: None,
+            env_scope: None,
             triggered_by: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
@@ -364,6 +374,47 @@ mod tests {
         assert_eq!(back.goal_id, None);
         assert_eq!(back.repo, None);
         assert_eq!(back.triggered_by, None);
+    }
+
+    // ---- env_scope (vault injection pointer, issue #102) serde tests ----
+
+    #[test]
+    fn env_scope_is_omitted_when_absent() {
+        let raw = bson::to_document(&sample_session()).expect("serialize");
+        assert!(
+            !raw.contains_key("env_scope"),
+            "env_scope must be omitted when None"
+        );
+    }
+
+    #[test]
+    fn env_scope_round_trips_when_set() {
+        let mut doc = sample_session();
+        doc.env_scope = Some(crate::vault::EnvScopeRef::repo("acme", "site"));
+        let raw = bson::to_document(&doc).expect("serialize");
+        match raw.get("env_scope").expect("env_scope present") {
+            Bson::Document(_) => {}
+            other => panic!("expected Bson::Document for env_scope, got {other:?}"),
+        }
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn env_scope_holds_only_a_non_secret_scope_reference() {
+        // The persisted pointer must never carry secret material — it is the
+        // scope (global / repo) only; the driver re-resolves values per start.
+        let mut doc = sample_session();
+        doc.env_scope = Some(crate::vault::EnvScopeRef::global());
+        let raw = bson::to_document(&doc).expect("serialize");
+        let scope = raw.get_document("env_scope").expect("env_scope document");
+        assert!(scope.get_bool("global").expect("global flag"));
+        assert!(
+            !scope.contains_key("value")
+                && !scope.contains_key("value_plain")
+                && !scope.contains_key("value_enc"),
+            "env_scope must not carry any value-bearing field"
+        );
     }
 
     #[test]
