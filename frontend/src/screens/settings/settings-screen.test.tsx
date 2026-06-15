@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -10,11 +10,13 @@ import { useSession, useStopSession } from '@/lib/hooks/useSessions';
 import { useSessionRegistry, SessionRegistryProvider } from '@/lib/hooks/session-registry';
 import { ApiError } from '@/lib/api/client';
 import { NyxIDProvider } from '@/lib/auth';
+import { useGitHubAccounts } from '@/lib/hooks/useGitHubAccounts';
 
 // Mock the hooks
 vi.mock('@/lib/hooks/useHealth');
 vi.mock('@/lib/hooks/usePackages');
 vi.mock('@/lib/hooks/useSessions');
+vi.mock('@/lib/hooks/useGitHubAccounts');
 
 function renderWithProviders(ui: React.ReactNode, { sessionIdToRegister }: { sessionIdToRegister?: string } = {}) {
   const queryClient = new QueryClient({
@@ -69,6 +71,15 @@ function RegistryInit({
 }
 
 describe('SettingsScreen', () => {
+  beforeEach(() => {
+    vi.mocked(useGitHubAccounts).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGitHubAccounts>);
+  });
+
   it('posture never asserts and write posture controls are disabled', () => {
     vi.mocked(useHealth).mockReturnValue({
       healthStatus: 'ok',
@@ -262,7 +273,9 @@ describe('SettingsScreen', () => {
 
     // Verify buttons are disabled
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Connect a repository' })).toBeDisabled();
+    const connectBtns = screen.getAllByRole('button', { name: 'Connect GitHub' });
+    expect(connectBtns.length).toBeGreaterThan(0);
+    connectBtns.forEach(btn => expect(btn).toBeDisabled());
     expect(screen.getByRole('button', { name: 'Delete account' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Enable REAL writes' })).toBeDisabled();
 
@@ -422,5 +435,186 @@ describe('SettingsScreen', () => {
 
     // Verify stale copy is shown
     expect(await screen.findByText(/session no longer found — stale registry entry from this tab/i)).toBeInTheDocument();
+  });
+
+  it('renders loading state for github accounts', () => {
+    vi.mocked(useHealth).mockReturnValue({
+      healthStatus: 'ok',
+      mongo: 'up',
+      version: '1.0.0',
+      isSuccess: true,
+      refetch: vi.fn(),
+    } as unknown as UseHealthResult);
+    vi.mocked(usePackagesList).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usePackagesList>);
+    vi.mocked(useGitHubAccounts).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGitHubAccounts>);
+
+    renderWithProviders(<SettingsScreen />);
+    expect(screen.getByText('Loading connected accounts...')).toBeInTheDocument();
+  });
+
+  it('renders error state for github accounts', () => {
+    vi.mocked(useHealth).mockReturnValue({
+      healthStatus: 'ok',
+      mongo: 'up',
+      version: '1.0.0',
+      isSuccess: true,
+      refetch: vi.fn(),
+    } as unknown as UseHealthResult);
+    vi.mocked(usePackagesList).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usePackagesList>);
+    vi.mocked(useGitHubAccounts).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGitHubAccounts>);
+
+    renderWithProviders(<SettingsScreen />);
+    expect(screen.getByText("couldn't reach the connection service — unknown")).toBeInTheDocument();
+  });
+
+  it('renders empty state for github accounts', () => {
+    vi.mocked(useHealth).mockReturnValue({
+      healthStatus: 'ok',
+      mongo: 'up',
+      version: '1.0.0',
+      isSuccess: true,
+      refetch: vi.fn(),
+    } as unknown as UseHealthResult);
+    vi.mocked(usePackagesList).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usePackagesList>);
+    vi.mocked(useGitHubAccounts).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGitHubAccounts>);
+
+    renderWithProviders(<SettingsScreen />);
+    expect(screen.getByText('no GitHub accounts connected')).toBeInTheDocument();
+    // Connect GitHub CTA is rendered (disabled here since VITE_NYXID_CONNECT_GITHUB_URL is not set by default in tests)
+    expect(screen.getAllByRole('button', { name: 'Connect GitHub' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('GitHub connection URL is not configured').length).toBeGreaterThan(0);
+  });
+
+  it('renders populated list of github accounts', () => {
+    vi.mocked(useHealth).mockReturnValue({
+      healthStatus: 'ok',
+      mongo: 'up',
+      version: '1.0.0',
+      isSuccess: true,
+      refetch: vi.fn(),
+    } as unknown as UseHealthResult);
+    vi.mocked(usePackagesList).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usePackagesList>);
+    vi.mocked(useGitHubAccounts).mockReturnValue({
+      data: [
+        { connection_id: 'conn-1', login: 'user-primary', primary: true },
+        { connection_id: 'conn-2', login: 'user-secondary', primary: false },
+      ],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGitHubAccounts>);
+
+    renderWithProviders(<SettingsScreen />);
+
+    // Verifies details rendered
+    expect(screen.getByText('user-primary')).toBeInTheDocument();
+    expect(screen.getByText('user-secondary')).toBeInTheDocument();
+    expect(screen.getByText('primary')).toBeInTheDocument(); // Primary badge
+    expect(screen.getByText('connection_id: conn-1')).toBeInTheDocument();
+    expect(screen.getByText('connection_id: conn-2')).toBeInTheDocument();
+  });
+
+  it('refetches accounts query on mount and window focus', () => {
+    const refetchMock = vi.fn();
+    vi.mocked(useHealth).mockReturnValue({
+      healthStatus: 'ok',
+      mongo: 'up',
+      version: '1.0.0',
+      isSuccess: true,
+      refetch: vi.fn(),
+    } as unknown as UseHealthResult);
+    vi.mocked(usePackagesList).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usePackagesList>);
+    vi.mocked(useGitHubAccounts).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: refetchMock,
+    } as unknown as ReturnType<typeof useGitHubAccounts>);
+
+    renderWithProviders(<SettingsScreen />);
+
+    // Called on mount
+    expect(refetchMock).toHaveBeenCalled();
+
+    // Trigger window focus
+    fireEvent.focus(window);
+    expect(refetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders ConnectGitHub CTA as enabled link when VITE_NYXID_CONNECT_GITHUB_URL is set', () => {
+    vi.mocked(useHealth).mockReturnValue({
+      healthStatus: 'ok',
+      mongo: 'up',
+      version: '1.0.0',
+      isSuccess: true,
+      refetch: vi.fn(),
+    } as unknown as UseHealthResult);
+    vi.mocked(usePackagesList).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usePackagesList>);
+    vi.mocked(useGitHubAccounts).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGitHubAccounts>);
+
+    const originalUrl = import.meta.env.VITE_NYXID_CONNECT_GITHUB_URL;
+    (import.meta.env as unknown as Record<string, string | undefined>).VITE_NYXID_CONNECT_GITHUB_URL = 'https://nyx.chrono-ai.fun/api/v1/github/connect';
+
+    try {
+      renderWithProviders(<SettingsScreen />);
+      
+      const connectLinks = screen.getAllByRole('link', { name: 'Connect GitHub' });
+      expect(connectLinks.length).toBeGreaterThan(0);
+      connectLinks.forEach(link => {
+        expect(link).toHaveAttribute('href', 'https://nyx.chrono-ai.fun/api/v1/github/connect');
+      });
+    } finally {
+      (import.meta.env as unknown as Record<string, string | undefined>).VITE_NYXID_CONNECT_GITHUB_URL = originalUrl;
+    }
   });
 });

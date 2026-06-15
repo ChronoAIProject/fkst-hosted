@@ -12,6 +12,8 @@ import { HairlineList } from '@/components/layout/hairline-list';
 import { SessionStateBadge } from './session-state-badge';
 import { cn } from '@/lib/utils';
 import { useAuthSession, authRequired, OAuthUserInfo } from '@/lib/auth';
+import { useGitHubAccounts } from '@/lib/hooks/useGitHubAccounts';
+import { ConnectGitHub } from '@/components/auth/connect-github';
 
 interface SessionDetailsProps {
   packageName: string;
@@ -144,6 +146,28 @@ export function SettingsScreen() {
   const { data: packages, isLoading: isPackagesLoading, isError: isPackagesError } = usePackagesList();
   const { getSessionId } = useSessionRegistry();
   const [stalePackages, setStalePackages] = React.useState<Set<string>>(new Set());
+
+  const {
+    data: accounts,
+    isLoading: isAccountsLoading,
+    isError: isAccountsError,
+    refetch: refetchAccounts,
+  } = useGitHubAccounts();
+
+  React.useEffect(() => {
+    if (typeof refetchAccounts === 'function') {
+      refetchAccounts();
+    }
+    const handleFocus = () => {
+      if (typeof refetchAccounts === 'function') {
+        refetchAccounts();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [refetchAccounts]);
 
   const isAuthRequired = authRequired();
   const { isAuthenticated, login, logout, getUserInfo } = useAuthSession();
@@ -350,32 +374,64 @@ export function SettingsScreen() {
         </h2>
 
         <HairlineList>
-          <div className="bg-raise py-3 px-5 flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-4">
-              <span className="w-2 h-2 rounded-full flex-shrink-0 bg-ghost" />
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-mono text-[13px] text-ghost">
-                  No repositories connected
-                </span>
-                <span className="font-mono text-[11px] text-ghost">
-                  NyxID integration pending
-                </span>
-              </div>
+          {isAccountsLoading ? (
+            <div className="bg-raise py-3 px-5 flex items-center gap-4">
+              <span className="w-2 h-2 rounded-full flex-shrink-0 bg-gold" />
+              <span className="font-mono text-[13px] text-fg">Loading connected accounts...</span>
             </div>
-          </div>
+          ) : isAccountsError ? (
+            <div className="bg-raise py-3 px-5 flex items-center gap-4">
+              <span className="w-2 h-2 rounded-full flex-shrink-0 bg-red" />
+              <span className="font-mono text-[13px] text-red">
+                couldn't reach the connection service — unknown
+              </span>
+            </div>
+          ) : !accounts || accounts.length === 0 ? (
+            <div className="bg-raise py-3 px-5 flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-4">
+                <span className="w-2 h-2 rounded-full flex-shrink-0 bg-ghost" />
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="font-mono text-[13px] text-ghost">
+                    no GitHub accounts connected
+                  </span>
+                </div>
+              </div>
+              <ConnectGitHub />
+            </div>
+          ) : (
+            accounts.map((account) => (
+              <div
+                key={account.connection_id}
+                className="bg-raise py-3 px-5 flex items-center justify-between gap-4 flex-wrap"
+                data-testid={`account-${account.login}`}
+              >
+                <div className="flex items-center gap-4">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green" />
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[13px] text-fg font-medium">
+                        {account.login}
+                      </span>
+                      {account.primary && (
+                        <span className="inline-block font-mono text-[10px] font-semibold tracking-[0.02em] px-1.5 py-[2px] rounded-chip bg-amber/20 text-amber-ink border border-amber/30">
+                          primary
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono text-[11px] text-ghost">
+                      connection_id: {account.connection_id}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
 
           <div className="flex items-center gap-3.5 py-3.5 px-5 bg-[color-mix(in_oklab,var(--raise)_40%,transparent)] flex-wrap">
             <span className="font-mono text-[11px] text-ghost flex-1">
               authorize a repo via <b className="text-faint font-medium">GitHub → NyxID</b> to stand up a new deployment · only its <b className="text-faint font-medium">fkst-dev:enabled</b> issues become goals
             </span>
-            <button
-              disabled
-              aria-describedby="repos-disabled-note"
-              className="text-dim bg-raise border border-line-2 rounded-control px-[13px] py-1.5 text-[12px] font-medium cursor-not-allowed opacity-[0.5] transition-colors"
-            >
-              Connect a repository
-            </button>
-            <span id="repos-disabled-note" className="sr-only">NyxID integration pending</span>
+            <ConnectGitHub />
           </div>
         </HairlineList>
       </section>
