@@ -180,4 +180,16 @@ return {
     t.eq(result.exit_code, 1)
     t.eq(count_calls("addBlockedBy"), 0)
   end,
+
+  -- Contract test pinned to GitHub's real AddBlockedByInput schema (issueId +
+  -- blockingIssueId). The behavior tests above mock the command via
+  -- gh_add_blocked_by_cmd itself, so they cannot catch a wrong GraphQL field
+  -- name -- the mock always matches whatever the code emits. This asserts the
+  -- literal mutation, which is what actually failed in production: the input
+  -- used 'blockedIssueId' (rejected by GitHub), so every block silently failed.
+  test_add_blocked_by_mutation_uses_valid_schema_fields = function()
+    local cmd = core.gh_add_blocked_by_cmd("I_blocked", "I_blocking")
+    t.eq(cmd:find("addBlockedBy(input:{issueId:$b,blockingIssueId:$g})", 1, true) ~= nil, true)
+    t.eq(cmd:find("blockedIssueId", 1, true), nil)
+  end,
 }
