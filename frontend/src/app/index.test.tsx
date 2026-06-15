@@ -16,6 +16,26 @@ function renderApp() {
   );
 }
 
+vi.mock('@/lib/auth', () => ({
+  authRequired: () => true,
+  useAuthSession: () => ({
+    isAuthenticated: false,
+    accessToken: null,
+    login: async () => {},
+    logout: () => {},
+    handleRedirectCallback: async () => ({ accessToken: '', idToken: '', refreshToken: '', tokenType: '', expiresIn: 0 }),
+    getUserInfo: async () => ({ sub: '', name: '', email: '' }),
+  }),
+}));
+
+vi.mock('@/lib/hooks/useGitHubAccounts', () => ({
+  useGitHubAccounts: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 const mockFetch: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   void init;

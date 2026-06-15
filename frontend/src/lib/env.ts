@@ -5,6 +5,7 @@ declare global {
     readonly VITE_NYXID_CLIENT_ID?: string;
     readonly VITE_NYXID_REDIRECT_URI?: string;
     readonly VITE_AUTH_REQUIRED?: string | boolean;
+    readonly VITE_NYXID_CONNECT_GITHUB_URL?: string;
     readonly MODE?: string;
   }
 

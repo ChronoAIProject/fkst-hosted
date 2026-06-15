@@ -1,14 +1,29 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NyxIDProvider } from '../../lib/auth';
 import { Goals } from './goals';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const meta: Meta<typeof Goals> = {
   title: 'Screens/Goals',
   component: Goals,
   decorators: [
     (Story) => (
-      <div className="bg-bg text-fg p-6 min-h-screen">
-        <Story />
-      </div>
+      <QueryClientProvider client={queryClient}>
+        <NyxIDProvider baseUrl="" clientId="" redirectUri="">
+          <div className="bg-bg text-fg p-6 min-h-screen">
+            <Story />
+          </div>
+        </NyxIDProvider>
+      </QueryClientProvider>
     ),
   ],
 };
@@ -34,6 +49,8 @@ export const DefaultActivity: Story = {
 export const PopulatedIssues: Story = {
   args: {
     view: 'issues',
+    authSessionOverride: { isAuthenticated: true },
+    accountsOverride: [{ connection_id: 'c1', login: 'octocat', primary: true }],
     goals: [
       { id: '214', title: 'Tighten consensus parser to handle nested quorum refs', stage: 'Design', state: 'thinking', age: '4m', repo: 'fkst-substrate', pr: '', ci: 'unknown' },
       { id: '231', title: 'Document DLQ retention & replay semantics for the delivery ledger', stage: 'Design', state: 'ready', age: '11m', repo: 'fkst-packages', pr: '', ci: 'unknown', gated: true },

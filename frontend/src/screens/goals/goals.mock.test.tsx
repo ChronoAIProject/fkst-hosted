@@ -1,8 +1,28 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Goals } from './goals';
 import type { GoalsGoal, GoalsRun } from './goals';
 import { mockGoals, mockRuns, mockVitals } from '../../fixtures/goals';
+
+vi.mock('@/lib/auth', () => ({
+  authRequired: () => true,
+  useAuthSession: () => ({
+    isAuthenticated: false,
+    accessToken: null,
+    login: async () => {},
+    logout: () => {},
+    handleRedirectCallback: async () => ({ accessToken: '', idToken: '', refreshToken: '', tokenType: '', expiresIn: 0 }),
+    getUserInfo: async () => ({ sub: '', name: '', email: '' }),
+  }),
+}));
+
+vi.mock('@/lib/hooks/useGitHubAccounts', () => ({
+  useGitHubAccounts: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+}));
 
 describe('Goals Mock Fixtures Tests', () => {
   it('asserts fixtures satisfy GoalsGoal and GoalsRun export types', () => {
@@ -15,7 +35,14 @@ describe('Goals Mock Fixtures Tests', () => {
   });
 
   it('renders issues list correctly in Issues view', () => {
-    render(<Goals view="issues" goals={mockGoals} />);
+    render(
+      <Goals
+        view="issues"
+        goals={mockGoals}
+        authSessionOverride={{ isAuthenticated: true }}
+        accountsOverride={[{ connection_id: 'c1', login: 'octocat', primary: true }]}
+      />
+    );
 
     // Verify goals are rendered in list
     expect(screen.getByText('Tighten consensus parser to handle nested quorum refs')).toBeInTheDocument();

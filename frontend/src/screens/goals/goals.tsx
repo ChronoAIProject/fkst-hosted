@@ -3,6 +3,9 @@ import { cn } from '@/lib/utils';
 import { WindowControl } from '@/components/layout/window-control';
 import { CiGlyph } from '@/components/status/ci-glyph';
 import { StateBadge, StateBadgeState } from '@/components/status/state-badge';
+import { useAuthSession, authRequired } from '@/lib/auth';
+import { useGitHubAccounts } from '@/lib/hooks/useGitHubAccounts';
+import { AccountView } from '@/lib/api/types';
 
 export interface GoalsGoal {
   id: string;
@@ -41,6 +44,12 @@ export interface GoalsProps {
   };
   onNewGoal?: () => void;
   onViewChange?: (view: 'issues' | 'activity') => void;
+  authSessionOverride?: {
+    isAuthenticated: boolean;
+  };
+  accountsOverride?: AccountView[];
+  accountsErrorOverride?: unknown;
+  accountsLoadingOverride?: boolean;
 }
 
 export function Goals({
@@ -50,10 +59,32 @@ export function Goals({
   vitals,
   onNewGoal,
   onViewChange,
+  authSessionOverride,
+  accountsOverride,
+  accountsErrorOverride,
+  accountsLoadingOverride,
 }: GoalsProps) {
   const [prevView, setPrevView] = useState(view);
   const [currentView, setCurrentView] = useState<'issues' | 'activity'>(view);
   const [timeWindow, setTimeWindow] = useState<string>('24h');
+
+  // Resolve auth session state
+  const realAuth = useAuthSession();
+  const auth = authSessionOverride !== undefined ? authSessionOverride : realAuth;
+  const isAuthRequired = authRequired();
+  const isUserAuthenticated = auth ? auth.isAuthenticated : false;
+  const isSigned = !isAuthRequired || isUserAuthenticated;
+
+  // Resolve GitHub accounts state
+  const { data: realAccounts, isLoading: realAccountsLoading, isError: realAccountsError } = useGitHubAccounts({
+    enabled: isSigned && accountsOverride === undefined,
+  });
+
+  const accounts = accountsOverride !== undefined ? accountsOverride : realAccounts;
+  const isAccountsLoading = accountsLoadingOverride !== undefined ? accountsLoadingOverride : realAccountsLoading;
+  const isAccountsError = accountsErrorOverride !== undefined ? accountsErrorOverride : realAccountsError;
+
+  const isAuthPending = isAuthRequired && !isUserAuthenticated;
 
   const handleViewChange = (v: 'issues' | 'activity') => {
     setCurrentView(v);
@@ -65,7 +96,8 @@ export function Goals({
     setPrevView(view);
   }
 
-  const showData = goals.length > 0;
+  const isGatePassed = !isAuthPending && !isAccountsLoading && !isAccountsError && accounts !== undefined && accounts.length > 0;
+  const showData = isGatePassed && goals.length > 0;
   const showRuns = runs.length > 0;
 
   return (
@@ -211,7 +243,45 @@ export function Goals({
               </div>
 
               {/* Rows / Empty State */}
-              {showData ? (
+              {isAuthPending ? (
+                <div className="flex items-center justify-center py-16 text-ghost font-mono text-[12px]">
+                  no GitHub plane connected — sign-in pending
+                </div>
+              ) : isAccountsLoading ? (
+                <div className="flex items-center justify-center py-16 text-ghost font-mono text-[12px]">
+                  loading GitHub accounts...
+                </div>
+              ) : isAccountsError || accounts === undefined ? (
+                <div className="flex items-center justify-center py-16 text-ghost font-mono text-[12px]">
+                  GitHub status unknown — couldn't reach the connection service
+                </div>
+              ) : accounts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <span className="text-ghost font-mono text-[12px]">
+                    no GitHub accounts connected
+                  </span>
+                  {import.meta.env.VITE_NYXID_CONNECT_GITHUB_URL ? (
+                    <a
+                      href={import.meta.env.VITE_NYXID_CONNECT_GITHUB_URL}
+                      className="font-ui font-semibold text-[12.5px] rounded-control px-3.5 py-[7px] bg-amber text-amber-ink hover:brightness-[1.06] cursor-pointer transition-colors no-underline inline-block"
+                    >
+                      Connect GitHub
+                    </a>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <button
+                        disabled
+                        className="font-ui font-semibold text-[12.5px] rounded-control px-3.5 py-[7px] bg-amber/50 text-amber-ink/50 cursor-not-allowed opacity-50 select-none"
+                      >
+                        Connect GitHub
+                      </button>
+                      <span className="text-[11px] text-ghost font-mono">
+                        GitHub connection URL is not configured
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : goals.length > 0 ? (
                 <div className="flex flex-col">
                   {goals.map((g) => {
                     const isReview = g.stage === 'Review';
@@ -268,7 +338,7 @@ export function Goals({
                 </div>
               ) : (
                 <div className="flex items-center justify-center py-16 text-ghost font-mono text-[12px]">
-                  no GitHub plane connected — sign-in pending
+                  no goals found
                 </div>
               )}
             </div>
