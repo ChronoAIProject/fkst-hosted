@@ -17,6 +17,8 @@ DEFAULT_TTL_SECONDS = 60
 DEFAULT_STALL_SECONDS = 30 * 60
 MAX_ENTITIES = 40
 MAX_QUEUES = 40
+ANOMALY_LIMIT = 40
+EXPECTED_TRANSIENT_LIMIT = 20
 
 
 def env_int(name: str, default: int) -> int:
@@ -43,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refresh", action="store_true", help="Bypass the TTL cache and re-read observe data.")
     parser.add_argument("--ttl", type=int, default=env_int("FKST_BOARD_CACHE_TTL_SECONDS", DEFAULT_TTL_SECONDS))
     parser.add_argument("--stall", type=int, default=env_int("FKST_BOARD_STALL_SECONDS", DEFAULT_STALL_SECONDS))
+    parser.add_argument("--health", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--now", help=argparse.SUPPRESS)
     return parser.parse_args()
 
@@ -119,6 +122,21 @@ def list_from_any(value: Any) -> list[Any]:
     return []
 
 
+def bool_value(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
+
+
+def int_value(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def event_timestamp(event: dict[str, Any] | None) -> datetime | None:
     if not isinstance(event, dict):
         return None
@@ -150,20 +168,20 @@ def event_name(event: dict[str, Any] | None) -> str:
     return "-"
 
 
-def entity_records(data: Any, now: datetime) -> list[dict[str, Any]]:
+def raw_entity_records(data: Any) -> list[Any]:
     if isinstance(data, list):
-        raw_entities = data
+        return data
     elif isinstance(data, dict):
-        raw_entities = []
         for key in ("entities", "entity_timeline", "entity_timelines", "timelines"):
             raw_entities = list_from_any(data.get(key))
             if raw_entities:
-                break
-    else:
-        raw_entities = []
+                return raw_entities
+    return []
 
+
+def latest_entity_events(data: Any, now: datetime) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    for raw in raw_entities:
+    for raw in raw_entity_records(data):
         if not isinstance(raw, dict):
             continue
         events = list_from_any(raw.get("events") or raw.get("timeline") or raw.get("event_timeline"))
@@ -182,10 +200,58 @@ def entity_records(data: Any, now: datetime) -> list[dict[str, Any]]:
                 "latest_at": iso(event_time) if event_time else "-",
                 "dwell_seconds": dwell_seconds,
                 "dwell": human_duration(dwell_seconds),
+                "event": latest_event,
+                "entity_terminal": bool_value(raw.get("terminal")),
             }
         )
 
     records.sort(key=lambda row: (row["dwell_seconds"] is None, -(row["dwell_seconds"] or 0), row["entity"]))
+    return records
+
+
+def all_entity_events(data: Any, now: datetime) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for raw in raw_entity_records(data):
+        if not isinstance(raw, dict):
+            continue
+        entity = first_string(raw, ("entity", "entity_id", "id", "source_ref", "ref", "key", "proposal"))
+        events = list_from_any(raw.get("events") or raw.get("timeline") or raw.get("event_timeline"))
+        if not events:
+            latest_event = raw.get("latest_event") if isinstance(raw.get("latest_event"), dict) else raw
+            events = [latest_event]
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_time = event_timestamp(event)
+            dwell_seconds = None if event_time is None else (now - event_time).total_seconds()
+            records.append(
+                {
+                    "entity": entity,
+                    "latest": event_name(event),
+                    "latest_at": iso(event_time) if event_time else "-",
+                    "dwell_seconds": dwell_seconds,
+                    "dwell": human_duration(dwell_seconds),
+                    "event": event,
+                    "entity_terminal": bool_value(raw.get("terminal")),
+                }
+            )
+    records.sort(key=lambda row: (row["dwell_seconds"] is None, -(row["dwell_seconds"] or 0), row["entity"]))
+    return records
+
+
+def entity_records(data: Any, now: datetime) -> list[dict[str, Any]]:
+    records = []
+    for row in latest_entity_events(data, now):
+        records.append(
+            {
+                "entity": row["entity"],
+                "latest": row["latest"],
+                "latest_at": row["latest_at"],
+                "dwell_seconds": row["dwell_seconds"],
+                "dwell": row["dwell"],
+                "entity_terminal": row["entity_terminal"],
+            }
+        )
     return records
 
 
@@ -239,18 +305,236 @@ def dlq_count(data: Any) -> int | None:
     return None
 
 
-def render(data: Any, *, source: str, cached_at: datetime, now: datetime, durable_root: str, stall_seconds: int) -> str:
+def summary_fields(event: dict[str, Any]) -> str:
+    parts = []
+    for key in ("outcome", "disposition", "terminal", "error_class", "fingerprint", "tag"):
+        if key in event and event.get(key) is not None:
+            parts.append(f"{key}={event.get(key)}")
+    source_ref = first_string(event, ("source_ref",), "")
+    if source_ref:
+        parts.append(f"source_ref={source_ref}")
+    return " ".join(parts)
+
+
+def expected_transient(row: dict[str, Any]) -> bool:
+    event = row.get("event")
+    if not isinstance(event, dict):
+        return False
+    return (
+        event.get("disposition") == "expected-transient"
+        or event.get("outcome") == "retry-pending"
+        or event.get("outcome") == "skip-foreign"
+        or event.get("outcome") == "deadline-defer"
+        or event.get("error_class") == "retry-pending"
+        or event.get("error_class") == "marker-lag"
+    )
+
+
+def failure_fact_records(data: Any) -> list[dict[str, Any]]:
+    if not isinstance(data, dict):
+        return []
+    for key in ("failure_facts", "failures", "error_facts"):
+        facts = list_from_any(data.get(key))
+        if facts:
+            return [fact for fact in facts if isinstance(fact, dict)]
+    return []
+
+
+def failure_fact_anomalies(data: Any) -> list[dict[str, Any]]:
+    rows = []
+    for fact in failure_fact_records(data):
+        if not (bool_value(fact.get("terminal")) or fact.get("disposition") == "terminal"):
+            continue
+        rows.append(
+            {
+                "type": "terminal-failure",
+                "queue": first_string(fact, ("origin_queue", "queue", "event_queue")),
+                "details": summary_fields(fact),
+                "count": 1,
+            }
+        )
+    return rows
+
+
+def failure_fact_expected_transients(data: Any) -> list[dict[str, Any]]:
+    rows = []
+    for fact in failure_fact_records(data):
+        if bool_value(fact.get("terminal")) or fact.get("disposition") == "terminal":
+            continue
+        if not expected_transient({"event": fact}):
+            continue
+        details = summary_fields({**fact, "disposition": "expected-transient"})
+        rows.append(
+            {
+                "entity": first_string(fact, ("origin_dept", "origin_queue", "queue")),
+                "latest": first_string(fact, ("origin_queue", "queue", "event_queue")),
+                "latest_at": "-",
+                "dwell": "unknown",
+                "details": details,
+            }
+        )
+    return rows
+
+
+def dead_letter_anomalies(data: Any) -> list[dict[str, Any]]:
+    if not isinstance(data, dict):
+        return []
+    for key in ("dlq", "dead_letters", "dead_letter"):
+        if key not in data:
+            continue
+        value = data.get(key)
+        if isinstance(value, int):
+            return [{"type": "queue-dlq", "queue": "-", "details": f"count={value}", "count": value}]
+        rows = []
+        for raw in list_from_any(value):
+            if isinstance(raw, dict):
+                rows.append(
+                    {
+                        "type": "queue-dlq",
+                        "queue": first_string(raw, ("queue", "event_queue", "name")),
+                        "details": summary_fields(raw),
+                        "count": 1,
+                    }
+                )
+        return rows
+
+    rows = []
+    for queue in queue_records(data):
+        count = int_value(queue.get("dlq"))
+        if count > 0:
+            rows.append({"type": "queue-dlq", "queue": queue["queue"], "details": f"count={count}", "count": count})
+    return rows
+
+
+def anomaly_records(data: Any, now: datetime, stall_seconds: int) -> list[dict[str, Any]]:
+    anomalies: list[dict[str, Any]] = []
+    for row in latest_entity_events(data, now):
+        event = row.get("event")
+        if not isinstance(event, dict):
+            continue
+        common = {
+            "entity": row["entity"],
+            "latest": row["latest"],
+            "latest_at": row["latest_at"],
+            "dwell": row["dwell"],
+            "details": summary_fields(event),
+            "count": 1,
+        }
+        if bool_value(event.get("safety_violation")) or event.get("disposition") == "safety-violation":
+            anomalies.append({"type": "safety-violation", **common})
+            continue
+        if bool_value(event.get("terminal")) or event.get("disposition") == "terminal" or event.get("tag") == "DEAD_LETTER":
+            anomalies.append({"type": "terminal-failure", **common})
+            continue
+        if expected_transient(row):
+            continue
+        if row["entity_terminal"] is not True and row["dwell_seconds"] is not None and row["dwell_seconds"] > stall_seconds:
+            anomalies.append({"type": "stalled-entity", **common})
+
+    anomalies.extend(failure_fact_anomalies(data))
+    anomalies.extend(dead_letter_anomalies(data))
+    return anomalies
+
+
+def expected_transient_records(data: Any, now: datetime) -> list[dict[str, Any]]:
+    rows = []
+    for row in all_entity_events(data, now):
+        if expected_transient(row):
+            event = row["event"]
+            rows.append(
+                {
+                    "entity": row["entity"],
+                    "latest": row["latest"],
+                    "latest_at": row["latest_at"],
+                    "dwell": row["dwell"],
+                    "details": summary_fields(event),
+                }
+            )
+    rows.extend(failure_fact_expected_transients(data))
+    return rows
+
+
+def anomaly_count(anomalies: list[dict[str, Any]]) -> int:
+    return sum(max(1, int_value(row.get("count"))) for row in anomalies)
+
+
+def health_line(anomalies: list[dict[str, Any]]) -> str:
+    count = anomaly_count(anomalies)
+    if count == 0:
+        return "HEALTHY"
+    return f"{count} ANOMALIES NEEDING ATTENTION"
+
+
+def render_anomaly(row: dict[str, Any]) -> str:
+    if row["type"] == "queue-dlq":
+        details = f" {row['details']}" if row.get("details") else ""
+        return f"- type=queue-dlq queue={row.get('queue', '-')}{details}"
+    if "entity" not in row:
+        details = f" {row['details']}" if row.get("details") else ""
+        return f"- type={row['type']} queue={row.get('queue', '-')}{details}"
+    details = f" {row['details']}" if row.get("details") else ""
+    return (
+        f"- type={row['type']} entity={row['entity']} latest={row['latest']} "
+        f"at={row['latest_at']} dwell={row['dwell']}{details}"
+    )
+
+
+def render(
+    data: Any,
+    *,
+    source: str,
+    cached_at: datetime,
+    now: datetime,
+    durable_root: str,
+    stall_seconds: int,
+    health_only: bool = False,
+) -> str:
+    entity_events = latest_entity_events(data, now)
     entities = entity_records(data, now)
     queues = queue_records(data)
-    stalls = [row for row in entities if row["dwell_seconds"] is not None and row["dwell_seconds"] > stall_seconds]
+    stalls = [
+        row
+        for row in entity_events
+        if row["entity_terminal"] is not True
+        and row["dwell_seconds"] is not None
+        and row["dwell_seconds"] > stall_seconds
+        and not expected_transient(row)
+    ]
     dead = dlq_count(data)
+    anomalies = anomaly_records(data, now, stall_seconds)
+    transients = expected_transient_records(data, now)
+    if health_only:
+        return health_line(anomalies) + "\n"
 
     lines = [
+        health_line(anomalies),
         "fkst-dev local board",
         f"source={source} cached_at={iso(cached_at)} durable_root={durable_root}",
         "",
-        "Entities",
+        "Anomalies needing attention",
     ]
+    if anomalies:
+        for row in anomalies[:ANOMALY_LIMIT]:
+            lines.append(render_anomaly(row))
+        if len(anomalies) > ANOMALY_LIMIT:
+            lines.append(f"- ... {len(anomalies) - ANOMALY_LIMIT} more")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "Expected transients"])
+    if transients:
+        for row in transients[:EXPECTED_TRANSIENT_LIMIT]:
+            details = f" {row['details']}" if row["details"] else ""
+            lines.append(f"- {row['entity']} latest={row['latest']} at={row['latest_at']} dwell={row['dwell']}{details}")
+        if len(transients) > EXPECTED_TRANSIENT_LIMIT:
+            lines.append(f"- ... {len(transients) - EXPECTED_TRANSIENT_LIMIT} more")
+    else:
+        lines.append("- none")
+
+    lines.extend([
+        "",
+        "Entities",
+    ])
     if entities:
         for row in entities[:MAX_ENTITIES]:
             lines.append(f"- {row['entity']} latest={row['latest']} at={row['latest_at']} dwell={row['dwell']}")
@@ -349,7 +633,18 @@ def main() -> int:
     cached = None if args.refresh else read_cache(cache_path, now, args.ttl)
     if cached is not None:
         data, cached_at = cached
-        print(render(data, source="cache", cached_at=cached_at, now=now, durable_root=args.durable_root, stall_seconds=args.stall), end="")
+        print(
+            render(
+                data,
+                source="cache",
+                cached_at=cached_at,
+                now=now,
+                durable_root=args.durable_root,
+                stall_seconds=args.stall,
+                health_only=args.health,
+            ),
+            end="",
+        )
         return 0
 
     try:
@@ -360,7 +655,18 @@ def main() -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    print(render(data, source="observe", cached_at=cached_at, now=now, durable_root=args.durable_root, stall_seconds=args.stall), end="")
+    print(
+        render(
+            data,
+            source="observe",
+            cached_at=cached_at,
+            now=now,
+            durable_root=args.durable_root,
+            stall_seconds=args.stall,
+            health_only=args.health,
+        ),
+        end="",
+    )
     return 0
 
 
