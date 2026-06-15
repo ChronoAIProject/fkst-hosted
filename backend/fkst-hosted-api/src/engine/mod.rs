@@ -21,5 +21,5 @@ pub mod runner;
 pub use config::EngineConfig;
 pub use error::RunnerError;
 pub use materialize::PreparedPackage;
-pub use process::is_pid_alive;
-pub use runner::{LiveStatus, RunningSession, SessionRunner};
+pub use process::{is_pid_alive, GoalEnv};
+pub use runner::{GoalContext, LiveStatus, RunningSession, SessionRunner, StartSpec};

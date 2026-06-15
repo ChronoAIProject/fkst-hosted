@@ -1,6 +1,7 @@
 //! MongoDB-backed repository for the `packages` collection.
 
 use bson::doc;
+use mongodb::options::ReturnDocument;
 use mongodb::Collection;
 use serde::Deserialize;
 
@@ -49,6 +50,33 @@ impl PackageRepository {
     /// and MUST NOT attempt to recreate `_id_` — Mongo forbids declaring an
     /// explicit `_id` index and would error.
     pub async fn ensure_indexes(&self) -> Result<(), PackageError> {
+        use mongodb::{options::IndexOptions, IndexModel};
+
+        let indexes: Vec<IndexModel> = vec![
+            IndexModel::builder()
+                .keys(doc! { "owner_user_id": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .name("packages_owner_user_id".to_string())
+                        .build(),
+                )
+                .build(),
+            IndexModel::builder()
+                .keys(doc! { "org_id": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .name("packages_org_id".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+        self.collection
+            .create_indexes(indexes)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "failed to create packages indexes");
+                PackageError::Db(error)
+            })?;
         tracing::info!(collection = PACKAGES_COLLECTION, "packages indexes ensured");
         Ok(())
     }
@@ -59,7 +87,16 @@ impl PackageRepository {
     /// NOT an upsert: an existing name yields `PackageError::Duplicate`
     /// (conceptually 409). Concurrency is arbitrated solely by the Mongo
     /// `_id` uniqueness constraint — no read-then-write pre-check (TOCTOU).
-    pub async fn create(&self, new_package: NewPackage) -> Result<Package, PackageError> {
+    ///
+    /// `owner_user_id` stamps ownership; `org_id` optionally attaches the
+    /// package to an organization. Both follow the omit-when-absent serde
+    /// convention so pre-existing documents stay byte-identical.
+    pub async fn create(
+        &self,
+        new_package: NewPackage,
+        owner_user_id: &str,
+        org_id: Option<&str>,
+    ) -> Result<Package, PackageError> {
         if let Err(reason) = new_package.validate() {
             // Reasons carry paths, sizes, and counts only — never content.
             // The name is NOT yet validated here: log it debug-escaped (`?`)
@@ -73,6 +110,8 @@ impl PackageRepository {
             name: new_package.name,
             files: new_package.files,
             composed_deps: new_package.composed_deps,
+            owner_user_id: Some(owner_user_id.to_string()),
+            org_id: org_id.map(|s| s.to_string()),
             created_at: now,
             updated_at: now,
         };
@@ -146,5 +185,128 @@ impl PackageRepository {
             .map_err(|error| log_db_error("exists", error))?;
         tracing::debug!(name, exists = count > 0, "package exists check");
         Ok(count > 0)
+    }
+
+    /// List package names visible to `owner_user_id` given their org
+    /// memberships (`org_ids`). Visible = owned by caller OR in one of
+    /// the caller's orgs OR legacy (no owner field). Sorted ascending.
+    ///
+    /// Note: `{owner_user_id: {$exists: false}}` is a collection scan,
+    /// acceptable at current scale (list already scanned). Document for
+    /// future optimization if needed.
+    pub async fn list_visible(
+        &self,
+        owner_user_id: &str,
+        org_ids: &[String],
+    ) -> Result<Vec<String>, PackageError> {
+        let mut or_branches = vec![
+            doc! { "owner_user_id": owner_user_id },
+            doc! { "owner_user_id": { "$exists": false } },
+        ];
+        if !org_ids.is_empty() {
+            or_branches.push(doc! { "org_id": { "$in": org_ids } });
+        }
+        let filter = doc! { "$or": or_branches };
+
+        let mut cursor = self
+            .collection
+            .clone_with_type::<IdOnly>()
+            .find(filter)
+            .projection(doc! { "_id": 1 })
+            .sort(doc! { "_id": 1 })
+            .await
+            .map_err(|error| log_db_error("list_visible", error))?;
+
+        let mut names = Vec::new();
+        while cursor
+            .advance()
+            .await
+            .map_err(|error| log_db_error("list_visible", error))?
+        {
+            names.push(
+                cursor
+                    .deserialize_current()
+                    .map_err(|error| log_db_error("list_visible", error))?
+                    .name,
+            );
+        }
+        tracing::debug!(
+            owner = owner_user_id,
+            orgs = org_ids.len(),
+            count = names.len(),
+            "visible packages listed"
+        );
+        Ok(names)
+    }
+
+    /// Atomically replace the mutable fields of an existing package.
+    ///
+    /// `$set`s `files`, `composed_deps`, and `updated_at` via
+    /// `find_one_and_update` with `ReturnDocument::After`. Ownership fields
+    /// (`owner_user_id`, `org_id`) and `created_at` are intentionally
+    /// untouched. Returns `PackageError::NotFound` when no document matches.
+    pub async fn replace(&self, new_package: NewPackage) -> Result<Package, PackageError> {
+        if let Err(reason) = new_package.validate() {
+            tracing::warn!(name = ?new_package.name, reason = %reason, "package validation rejected");
+            return Err(PackageError::Validation(reason));
+        }
+
+        let now = bson::DateTime::now();
+        let update = doc! {
+            "$set": {
+                "files": bson::to_bson(&new_package.files).map_err(|e| {
+                    tracing::error!(error = %e, "bson serialization of files failed");
+                    PackageError::Validation("failed to serialize files".to_string())
+                })?,
+                "composed_deps": bson::to_bson(&new_package.composed_deps).map_err(|e| {
+                    tracing::error!(error = %e, "bson serialization of composed_deps failed");
+                    PackageError::Validation("failed to serialize composed_deps".to_string())
+                })?,
+                "updated_at": now,
+            }
+        };
+
+        let updated = self
+            .collection
+            .find_one_and_update(doc! { "_id": &new_package.name }, update)
+            .return_document(ReturnDocument::After)
+            .await
+            .map_err(|error| log_db_error("replace", error))?;
+
+        match updated {
+            Some(package) => {
+                let total_content_bytes: usize =
+                    package.files.iter().map(|file| file.content.len()).sum();
+                tracing::info!(
+                    name = %package.name,
+                    files = package.files.len(),
+                    total_content_bytes,
+                    "package replaced"
+                );
+                Ok(package)
+            }
+            None => {
+                tracing::warn!(name = %new_package.name, "package not found for replace");
+                Err(PackageError::NotFound(new_package.name))
+            }
+        }
+    }
+
+    /// Delete a package by name. Returns `Ok(true)` when a document was
+    /// deleted, `Ok(false)` when absent.
+    pub async fn delete(&self, name: &str) -> Result<bool, PackageError> {
+        let result = self
+            .collection
+            .delete_one(doc! { "_id": name })
+            .await
+            .map_err(|error| log_db_error("delete", error))?;
+
+        let deleted = result.deleted_count > 0;
+        if deleted {
+            tracing::info!(name = %name, "package deleted");
+        } else {
+            tracing::debug!(name = %name, "package not found for delete");
+        }
+        Ok(deleted)
     }
 }

@@ -23,10 +23,10 @@ use tokio::process::Child;
 use crate::engine::config::EngineConfig;
 use crate::engine::error::RunnerError;
 use crate::engine::logs::tail_child_logs;
-use crate::engine::materialize::{materialize_package, write_fkst_env, PreparedPackage};
+use crate::engine::materialize::{materialize_packages, write_fkst_env, PreparedPackage};
 use crate::engine::process::{
     is_panicked, is_pid_alive, is_ready, kill_group_quiet, reap_with_grace, run_conformance,
-    spawn_supervise, ChildGroupGuard, OutputBuffer, SpawnedChild,
+    spawn_supervise, ChildGroupGuard, GoalEnv, OutputBuffer, SpawnedChild,
 };
 
 /// Poll interval of the post-spawn ready-wait loop.
@@ -47,8 +47,33 @@ pub enum LiveStatus {
     },
 }
 
+/// Goal context for a session started from a goal. Carries the goal identity
+/// and the GitHub token needed by the engine's GitHub integration. The token
+/// is `secrecy::SecretString` so callers cannot accidentally log it; the
+/// process layer receives it as a bare `String` (its `GoalEnv` struct) because
+/// the child environment is low-level by nature.
+#[derive(Debug, Clone)]
+pub struct GoalContext {
+    pub goal_id: bson::Uuid,
+    pub title: String,
+    pub description: String,
+    pub repo: crate::models::RepoRef,
+    pub github_token: secrecy::SecretString,
+}
+
+/// Specification for starting a session with one or more packages and an
+/// optional goal context. Single-package, no-goal specs produce behavior that
+/// is byte-identical to the existing [`SessionRunner::start`] path.
+#[derive(Debug)]
+pub struct StartSpec {
+    /// Ordered list of prepared packages (at least one).
+    pub packages: Vec<PreparedPackage>,
+    /// Goal context; `None` for classic (non-goal) sessions.
+    pub goal: Option<GoalContext>,
+}
+
 /// Live handle for one engine process, held by the caller for the session's
-/// lifetime. Owns the spawned [`Child`] and the two temp-dir guards; dropping
+/// lifetime. Owns the spawned [`Child`] and the temp-dir guards; dropping
 /// the handle removes the dirs but NEVER kills a live engine
 /// (`kill_on_drop(false)` — lifecycle is explicit via [`Self::stop`]).
 #[derive(Debug)]
@@ -57,10 +82,16 @@ pub struct RunningSession {
     pub pid: i32,
     /// Absolute `FKST_RUNTIME_ROOT` for this run.
     pub runtime_dir: PathBuf,
-    /// Absolute materialized package root for this run.
+    /// Absolute materialized package root for this run (the FIRST / primary
+    /// package root). Always equal to `package_dirs[0]`.
     pub package_dir: PathBuf,
+    /// ALL materialized package root paths (one per package in the spec).
+    /// For single-package sessions this is `[package_dir]`.
+    pub package_dirs: Vec<PathBuf>,
     child: Child,
-    package_guard: Option<TempDir>,
+    /// Temp-dir guards for ALL materialized packages (one per package).
+    /// Dropped during cleanup to remove the on-disk trees.
+    package_guards: Vec<TempDir>,
     runtime_guard: Option<TempDir>,
     /// Merged stdout+stderr ring buffer fed by the spawn drains (issue #50):
     /// ready markers come from stdout, panics/exit reasons from stderr.
@@ -164,8 +195,10 @@ impl RunningSession {
     /// package and runtime dirs.
     fn cleanup(&mut self) {
         let mut dirs_removed = 0;
-        if self.package_guard.take().is_some() {
-            dirs_removed += 1;
+        let pkg_count = self.package_guards.len();
+        if pkg_count > 0 {
+            self.package_guards.clear();
+            dirs_removed += pkg_count;
         }
         if self.runtime_guard.take().is_some() {
             dirs_removed += 1;
@@ -232,29 +265,48 @@ impl SessionRunner {
             .await
     }
 
-    /// Start a session: validate -> materialize (`fkst-pkg-*`) -> `fkst.env`
-    /// -> runtime root (`fkst-rt-*`, plus `durable/`) -> `conformance`
-    /// pre-flight -> spawn `supervise` (own process group) -> bounded
-    /// ready-wait.
-    ///
-    /// Readiness requires BOTH stderr markers (`event runtime running
-    /// handles=` and at least one `consumer started dept=`); child-exit,
-    /// a `panicked at` line, or the ready timeout fail startup with the
-    /// stderr tail, after group-killing and reaping the child. EXCEPTION:
-    /// an engine that emitted both ready markers and then exited within
-    /// one poll tick starts successfully (`status()` reports the exit).
-    /// On EVERY failure path both temp dirs are cleaned before returning.
+    /// Start a single-package session (classic / pre-goal path).
+    /// Delegates to [`Self::start_with_spec`] with a single-package, no-goal
+    /// spec. The behavior is byte-identical to the pre-`start_with_spec`
+    /// implementation.
     pub async fn start(&self, pkg: &PreparedPackage) -> Result<RunningSession, RunnerError> {
-        // 1. Pure validation — no temp dir is created on the reject path.
-        pkg.validate()?;
+        let spec = StartSpec {
+            packages: vec![pkg.clone()],
+            goal: None,
+        };
+        self.start_with_spec(&spec).await
+    }
 
-        // 2. Materialize the package tree (fails => RAII-cleaned).
-        let package_guard = materialize_package(pkg, &self.config.temp_root)?;
-        write_fkst_env(
-            package_guard.path(),
-            &self.config.candidate_prefix,
-            &self.config.candidate_from_sep,
-        )?;
+    /// Start a session from a [`StartSpec`]: validate all packages ->
+    /// materialize each into its own `fkst-pkg-<name>-*` dir + `fkst.env` ->
+    /// create runtime dir + `durable/` -> write goal files if present ->
+    /// conformance pre-flight per root -> spawn `supervise` with multi-root
+    /// and optional goal env -> bounded ready-wait.
+    ///
+    /// For a single-package spec without a goal, the behavior is byte-identical
+    /// to the classic [`Self::start`] path (CANON: existing tests stay green).
+    ///
+    /// Every failure path cleans all temp dirs before returning.
+    pub async fn start_with_spec(&self, spec: &StartSpec) -> Result<RunningSession, RunnerError> {
+        // 1. Validate all packages — no temp dir is created on the reject path.
+        if spec.packages.is_empty() {
+            return Err(RunnerError::InvalidPackage(
+                "spec must contain at least one package".to_string(),
+            ));
+        }
+        for pkg in &spec.packages {
+            pkg.validate()?;
+        }
+
+        // 2. Materialize each package into its own temp dir.
+        let package_guards = materialize_packages(&spec.packages, &self.config.temp_root)?;
+        for guard in &package_guards {
+            write_fkst_env(
+                guard.path(),
+                &self.config.candidate_prefix,
+                &self.config.candidate_from_sep,
+            )?;
+        }
 
         // 3. Fresh runtime root with a fresh durable root per attempt.
         let runtime_guard = tempfile::Builder::new()
@@ -263,31 +315,80 @@ impl SessionRunner {
             .map_err(RunnerError::Io)?;
         std::fs::create_dir(runtime_guard.path().join("durable")).map_err(RunnerError::Io)?;
 
-        let package_dir = package_guard
-            .path()
-            .canonicalize()
-            .map_err(RunnerError::Io)?;
+        // Canonicalize all package dirs.
+        let mut package_dirs: Vec<PathBuf> = Vec::with_capacity(package_guards.len());
+        for guard in &package_guards {
+            package_dirs.push(guard.path().canonicalize().map_err(RunnerError::Io)?);
+        }
         let runtime_dir = runtime_guard
             .path()
             .canonicalize()
             .map_err(RunnerError::Io)?;
 
-        // 4. Conformance pre-flight (mandatory: supervise is NOT a validator
-        //    — it idles on an empty package, spike case 3d).
-        run_conformance(
+        // 4. Write goal files if a goal context is present.
+        let goal_env = if let Some(goal) = &spec.goal {
+            let goal_json_path = runtime_dir.join("goal.json");
+            let goal_json = serde_json::json!({
+                "goal_id": goal.goal_id.to_string(),
+                "title": goal.title,
+                "description": goal.description,
+                "repo": goal.repo,
+            });
+            std::fs::write(&goal_json_path, goal_json.to_string()).map_err(RunnerError::Io)?;
+            tracing::debug!(
+                goal_id = %goal.goal_id,
+                path = %goal_json_path.display(),
+                bytes = goal_json.to_string().len(),
+                "session.prepare.goal_json"
+            );
+
+            let token_path = runtime_dir.join("github-token");
+            let token_str = secrecy::ExposeSecret::expose_secret(&goal.github_token);
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::write(&token_path, token_str.as_bytes()).map_err(RunnerError::Io)?;
+                std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))
+                    .map_err(RunnerError::Io)?;
+            }
+            tracing::debug!(
+                path = %token_path.display(),
+                "session.prepare.github_token"
+            );
+
+            Some(GoalEnv {
+                github_token: token_str.to_string(),
+                github_token_file: token_path,
+                goal_file: goal_json_path,
+            })
+        } else {
+            None
+        };
+
+        // 5. Conformance pre-flight: run once per package root, sequential,
+        //    first failure aborts. The first root is the project root.
+        let project_root = &package_dirs[0];
+        for pkg_dir in &package_dirs {
+            run_conformance(
+                &self.config.framework_bin,
+                pkg_dir,
+                &runtime_dir,
+                Duration::from_secs(self.config.conformance_timeout_secs),
+                self.config.error_capture_bytes,
+            )
+            .await?;
+        }
+
+        // 6. Spawn supervise in its own process group.
+        let spawned = spawn_supervise(
             &self.config.framework_bin,
-            &package_dir,
+            project_root,
+            &package_dirs,
             &runtime_dir,
-            Duration::from_secs(self.config.conformance_timeout_secs),
-            self.config.error_capture_bytes,
-        )
-        .await?;
+            goal_env.as_ref(),
+        )?;
 
-        // 5. Spawn supervise in its own process group.
-        let spawned = spawn_supervise(&self.config.framework_bin, &package_dir, &runtime_dir)?;
-
-        // 6. Bounded ready-wait. Every failure path group-kills, reaps, and
-        //    (by dropping the guards still held here) cleans both dirs.
+        // 7. Bounded ready-wait. Every failure path group-kills, reaps, and
+        //    (by dropping the guards still held here) cleans all dirs.
         //    Cancellation safety: the armed ChildGroupGuard ensures that
         //    dropping THIS future mid-ready-wait (client disconnect, outer
         //    select!/timeout) also group-kills and reaps the spawned engine;
@@ -375,10 +476,13 @@ impl SessionRunner {
             tokio::time::sleep(READY_POLL_INTERVAL).await;
         }
 
+        let package_dir = package_dirs[0].clone();
         tracing::info!(
-            package_name = %pkg.package_name,
+            package_count = spec.packages.len(),
+            package_name = %spec.packages[0].package_name,
             pid,
             runtime_dir = %runtime_dir.display(),
+            has_goal = spec.goal.is_some(),
             ready_in_ms = started.elapsed().as_millis() as u64,
             "session.ready"
         );
@@ -387,8 +491,9 @@ impl SessionRunner {
             pid,
             runtime_dir,
             package_dir,
+            package_dirs,
             child: guard.defuse(),
-            package_guard: Some(package_guard),
+            package_guards,
             runtime_guard: Some(runtime_guard),
             output,
             stdout_lines: Some(stdout_lines),
@@ -512,6 +617,7 @@ esac
             ready_timeout_secs: 30,
             error_capture_bytes: 8192,
             log_tail_lines: 200,
+            github_token_refresh_secs: 2400,
         }
     }
 
@@ -1235,6 +1341,303 @@ esac
             })
             .unwrap(),
             serde_json::json!({ "state": "failed", "code": 2, "signal": null })
+        );
+    }
+
+    // ---- start_with_spec: single package, no goal (byte-identical to start) --
+
+    #[tokio::test]
+    async fn start_with_spec_single_package_no_goal_matches_start() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        let bin = engine_stub(stub_dir.path(), READY_SUPERVISE);
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+        let pkg = minimal_package();
+
+        let spec = StartSpec {
+            packages: vec![pkg.clone()],
+            goal: None,
+        };
+        let mut session = runner
+            .start_with_spec(&spec)
+            .await
+            .expect("start_with_spec");
+
+        // Same checks as the classic start test.
+        assert_eq!(session.package_dirs.len(), 1);
+        assert_eq!(session.package_dir, session.package_dirs[0]);
+        assert!(session
+            .package_dir
+            .join("departments/hello/main.lua")
+            .is_file());
+        assert!(session.runtime_dir.join("durable").is_dir());
+        assert_eq!(runner.status(&mut session), LiveStatus::Running);
+
+        let pid = session.pid;
+        runner.stop(&mut session).await.expect("stop");
+        assert!(!session.package_dir.exists());
+        assert!(!session.runtime_dir.exists());
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+        assert_eq!(signal_group(pid, Signal::SIGTERM), Err(nix::Error::ESRCH));
+    }
+
+    // ---- start_with_spec: multi-package ----------------------------------
+
+    fn second_package() -> PreparedPackage {
+        PreparedPackage {
+            package_name: "second".to_string(),
+            files: vec![
+                PackageFile {
+                    path: "departments/world/main.lua".to_string(),
+                    content: "local M = {}\nM.spec = { consumes = { \"tock\" } }\n\
+                              function pipeline(event) end\nreturn M\n"
+                        .to_string(),
+                },
+                PackageFile {
+                    path: "raisers/tock.lua".to_string(),
+                    content: "return { type = \"cron\", interval = \"1s\", produces = \"tock\" }\n"
+                        .to_string(),
+                },
+            ],
+            composed_deps: Vec::new(),
+        }
+    }
+
+    /// Multi-package stub that accepts multiple --package-root flags.
+    /// The conformance branch echoes the flags it received so we can verify
+    /// multi-root wiring; the supervise branch emits ready markers.
+    fn multi_root_engine_stub(dir: &Path) -> PathBuf {
+        let path = dir.join("stub-multi-root.sh");
+        let script = r#"#!/bin/sh
+case "$1" in
+  conformance)
+    echo "PASS graph-scan"
+    exit 0
+    ;;
+  supervise)
+    # Echo all args to stdout so the test can verify the multi-root wiring.
+    echo "argv: $*"
+    echo "GITHUB_TOKEN=${GITHUB_TOKEN:-UNSET}"
+    echo "FKST_GOAL_FILE=${FKST_GOAL_FILE:-UNSET}"
+    echo "FKST_GITHUB_TOKEN_FILE=${FKST_GITHUB_TOKEN_FILE:-UNSET}"
+    echo "event runtime running handles=3"
+    echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]"
+    sleep 30
+    ;;
+esac
+"#;
+        fs::write(&path, script).expect("write stub");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod stub");
+        path
+    }
+
+    #[tokio::test]
+    async fn start_with_spec_multi_package_materializes_all_roots() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        let bin = multi_root_engine_stub(stub_dir.path());
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let spec = StartSpec {
+            packages: vec![minimal_package(), second_package()],
+            goal: None,
+        };
+        let mut session = runner.start_with_spec(&spec).await.expect("start multi");
+
+        assert_eq!(session.package_dirs.len(), 2);
+        assert!(session.package_dirs[0]
+            .join("departments/hello/main.lua")
+            .is_file());
+        assert!(session.package_dirs[1]
+            .join("departments/world/main.lua")
+            .is_file());
+        assert_eq!(session.package_dir, session.package_dirs[0]);
+
+        // The stub echoes its argv to stdout; verify multi-root flags.
+        let mut stdout = session.take_stdout().expect("stdout");
+        let first_line = tokio::time::timeout(Duration::from_secs(20), stdout.recv())
+            .await
+            .expect("argv line within 20s")
+            .expect("channel open");
+        let argv = String::from_utf8(first_line).expect("utf8");
+        // Must contain --package-root for both roots.
+        assert!(argv.contains("--package-root"), "argv: {argv}");
+        // Count --package-root occurrences (should be 2 for 2 packages).
+        let count = argv.matches("--package-root").count();
+        assert_eq!(count, 2, "expected 2 --package-root flags, got: {argv}");
+
+        // No goal env set.
+        let token_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
+            .await
+            .expect("token line")
+            .expect("channel open");
+        assert_eq!(token_line, b"GITHUB_TOKEN=UNSET");
+
+        let pid = session.pid;
+        runner.stop(&mut session).await.expect("stop");
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+        assert_eq!(signal_group(pid, Signal::SIGTERM), Err(nix::Error::ESRCH));
+    }
+
+    #[tokio::test]
+    async fn start_with_spec_multi_package_cleans_all_dirs_on_conformance_fail() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        // Conformance always fails; we never reach supervise.
+        let bin = conformance_stub(
+            stub_dir.path(),
+            r#"    echo "FAIL broken" >&2
+    exit 1"#,
+        );
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let spec = StartSpec {
+            packages: vec![minimal_package(), second_package()],
+            goal: None,
+        };
+        let err = runner.start_with_spec(&spec).await.expect_err("must fail");
+        assert!(matches!(
+            err,
+            RunnerError::ConformanceFailed { code: 1, .. }
+        ));
+        assert_eq!(fkst_entries(temp_root.path()), 0, "all dirs cleaned");
+    }
+
+    // ---- start_with_spec: goal context ------------------------------------
+
+    fn goal_context() -> GoalContext {
+        GoalContext {
+            goal_id: bson::Uuid::parse_str("a1b2c3d4-e5f6-7890-abcd-ef1234567890").unwrap(),
+            title: "Test goal".to_string(),
+            description: "A test goal description.".to_string(),
+            repo: crate::models::RepoRef {
+                owner: "acme".to_string(),
+                name: "test-repo".to_string(),
+            },
+            github_token: secrecy::SecretString::new("ghp_test_token_12345".to_string().into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn start_with_spec_goal_session_writes_goal_files_and_sets_env() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        let bin = multi_root_engine_stub(stub_dir.path());
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let goal = goal_context();
+        let spec = StartSpec {
+            packages: vec![minimal_package()],
+            goal: Some(goal),
+        };
+        let mut session = runner
+            .start_with_spec(&spec)
+            .await
+            .expect("start goal session");
+
+        // goal.json written to runtime dir.
+        let goal_json_path = session.runtime_dir.join("goal.json");
+        assert!(goal_json_path.is_file(), "goal.json must exist");
+        let goal_content = fs::read_to_string(&goal_json_path).expect("read goal.json");
+        let parsed: serde_json::Value = serde_json::from_str(&goal_content).expect("parse json");
+        assert_eq!(parsed["goal_id"], "a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        assert_eq!(parsed["title"], "Test goal");
+        assert_eq!(parsed["description"], "A test goal description.");
+        assert_eq!(parsed["repo"]["owner"], "acme");
+        assert_eq!(parsed["repo"]["name"], "test-repo");
+
+        // github-token written with mode 0600.
+        let token_path = session.runtime_dir.join("github-token");
+        assert!(token_path.is_file(), "github-token must exist");
+        let token_content = fs::read_to_string(&token_path).expect("read token");
+        assert_eq!(token_content, "ghp_test_token_12345");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&token_path)
+                .expect("metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "token file must be mode 0600");
+        }
+
+        // The stub echoes env vars; verify goal env is set.
+        let mut stdout = session.take_stdout().expect("stdout");
+        let _argv_line = tokio::time::timeout(Duration::from_secs(20), stdout.recv())
+            .await
+            .expect("argv line")
+            .expect("channel open");
+        let token_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
+            .await
+            .expect("token line")
+            .expect("channel open");
+        let token_str = String::from_utf8(token_line).expect("utf8");
+        assert_eq!(token_str, "GITHUB_TOKEN=ghp_test_token_12345");
+
+        let goal_file_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
+            .await
+            .expect("goal file line")
+            .expect("channel open");
+        let goal_file_str = String::from_utf8(goal_file_line).expect("utf8");
+        assert!(
+            goal_file_str.starts_with("FKST_GOAL_FILE="),
+            "got: {goal_file_str}"
+        );
+        assert!(goal_file_str.contains("goal.json"));
+
+        let token_file_line = tokio::time::timeout(Duration::from_secs(5), stdout.recv())
+            .await
+            .expect("token file line")
+            .expect("channel open");
+        let token_file_str = String::from_utf8(token_file_line).expect("utf8");
+        assert!(
+            token_file_str.starts_with("FKST_GITHUB_TOKEN_FILE="),
+            "got: {token_file_str}"
+        );
+        assert!(token_file_str.contains("github-token"));
+
+        let pid = session.pid;
+        runner.stop(&mut session).await.expect("stop");
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+        assert_eq!(signal_group(pid, Signal::SIGTERM), Err(nix::Error::ESRCH));
+    }
+
+    #[tokio::test]
+    async fn start_with_spec_empty_packages_is_rejected() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        let bin = engine_stub(stub_dir.path(), READY_SUPERVISE);
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let spec = StartSpec {
+            packages: vec![],
+            goal: None,
+        };
+        let err = runner.start_with_spec(&spec).await.expect_err("must fail");
+        assert!(matches!(err, RunnerError::InvalidPackage(_)));
+        assert_eq!(fkst_entries(temp_root.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn start_with_spec_invalid_second_package_is_rejected_before_dirs() {
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let temp_root = tempfile::tempdir().expect("temp root");
+        let bin = engine_stub(stub_dir.path(), READY_SUPERVISE);
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let mut bad_second = second_package();
+        bad_second.files.clear(); // invalid
+
+        let spec = StartSpec {
+            packages: vec![minimal_package(), bad_second],
+            goal: None,
+        };
+        let err = runner.start_with_spec(&spec).await.expect_err("must fail");
+        assert!(matches!(err, RunnerError::InvalidPackage(_)));
+        assert_eq!(
+            fkst_entries(temp_root.path()),
+            0,
+            "no dirs on validation fail"
         );
     }
 }
