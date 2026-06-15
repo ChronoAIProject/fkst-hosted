@@ -144,14 +144,15 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   local freshness = tostring(updated_at or "")
   local options = opts or {}
   local consumer = tostring(options.consumer or "")
+  local timeout = tonumber(options.timeout) or 30
   if options.fresh == true or options.marker_bearing == true or freshness == "" then
-    return M.gh_exec(cmd, 30)
+    return M.gh_exec(cmd, timeout)
   end
 
   local key = entity_view_storage_cache_key(repo, selected_kind, number, freshness)
   local cached = decode_cached_view(cache_get(key))
   if cached ~= nil and cached.producer ~= consumer then
-    local current = M.gh_exec(entity_updated_at_cmd(repo, selected_kind, number), 30)
+    local current = M.gh_exec(entity_updated_at_cmd(repo, selected_kind, number), timeout)
     if current.exit_code ~= 0 then
       return current
     end
@@ -166,7 +167,7 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
     cache_set(key, "")
   end
 
-  local result = M.gh_exec(cmd, 30)
+  local result = M.gh_exec(cmd, timeout)
   if type(result) == "table" and result.exit_code == 0 and parse_view_updated_at(result.stdout) == freshness then
     cache_set(key, encode_cached_view(result.stdout or "", consumer))
   end
