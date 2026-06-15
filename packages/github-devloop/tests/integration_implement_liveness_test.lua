@@ -191,6 +191,11 @@ return {
     }
     mock_issue_implement({ "fkst-dev:implementing" }, comments)
     mock_missing_remote_branch(branch)
+    t.mock_command("show-ref --verify --quiet", {
+      stdout = "",
+      stderr = "",
+      exit_code = 1,
+    })
     mock_fresh_implement_worktree()
     mock_implement_codex(0, "implemented after orphan takeover")
     mock_git_status(" M packages/github-devloop/core.lua\n")
@@ -202,7 +207,7 @@ return {
     t.eq(count_calls("codex exec"), 1)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
     t.eq(core.implement_attempt_count({ comment }, current.proposal_id, current.dedup_key), 1)
-    t.eq(find_raise(result.raises, "devloop_open_pr").payload.head_sha, "def456")
+    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
   end,
 
   test_implementing_liveness_redrive_skips_live_attempt = function()
