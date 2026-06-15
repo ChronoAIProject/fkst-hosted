@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, ComponentType } from 'react';
+import { userEvent, within, expect } from 'storybook/test';
 
 import { MemoryRouter } from 'react-router-dom';
 import { NewGoalModal } from './new-goal-modal';
@@ -229,34 +230,25 @@ export const FormFilled: Story = {
   },
   decorators: [createQueryDecorator(mockSuccessFetch)],
   play: async ({ canvasElement }) => {
-    // Fill title
-    const titleInput = canvasElement.querySelector('[data-testid="title-input"]') as HTMLInputElement;
-    if (titleInput) {
-      titleInput.value = 'Database Caching Integration';
-      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    // Fill description
-    const descInput = canvasElement.querySelector('[data-testid="description-textarea"]') as HTMLTextAreaElement;
-    if (descInput) {
-      descInput.value = 'Add Redis caching layer to speed up user profile queries by 200%.';
-      descInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    // Fill repository
-    const repoInput = canvasElement.querySelector('[data-testid="repo-input"]') as HTMLInputElement;
-    if (repoInput) {
-      repoInput.value = 'ChronoAIProject/fkst-substrate';
-      repoInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    // Toggle first package
-    const checkbox = canvasElement.querySelector('[data-testid="package-checkbox-github-devloop"]') as HTMLInputElement;
-    if (checkbox) {
-      checkbox.click();
-    }
-    // Enable triggerOnCreate
-    const switchEl = canvasElement.querySelector('[data-testid="trigger-on-create-switch"]') as HTMLButtonElement;
-    if (switchEl) {
-      switchEl.click();
-    }
+    const body = within(canvasElement.ownerDocument.body);
+    
+    const titleInput = await body.findByTestId('title-input');
+    const descInput = await body.findByTestId('description-textarea');
+    const repoInput = await body.findByTestId('repo-input');
+    const checkbox = await body.findByTestId('package-checkbox-github-devloop');
+    const switchEl = await body.findByTestId('trigger-on-create-switch');
+
+    await userEvent.type(titleInput, 'Database Caching Integration');
+    await userEvent.type(descInput, 'Add Redis caching layer to speed up user profile queries by 200%.');
+    await userEvent.type(repoInput, 'ChronoAIProject/fkst-substrate');
+    await userEvent.click(checkbox);
+    await userEvent.click(switchEl);
+
+    expect(titleInput).toHaveValue('Database Caching Integration');
+    expect(descInput).toHaveValue('Add Redis caching layer to speed up user profile queries by 200%.');
+    expect(repoInput).toHaveValue('ChronoAIProject/fkst-substrate');
+    expect(checkbox).toBeChecked();
+    expect(switchEl).toHaveAttribute('aria-checked', 'true');
   },
 };
 
@@ -267,10 +259,17 @@ export const ValidationErrors: Story = {
   },
   decorators: [createQueryDecorator(mockSuccessFetch)],
   play: async ({ canvasElement }) => {
-    const submitButton = canvasElement.querySelector('[data-testid="submit-button"]') as HTMLButtonElement;
-    if (submitButton) {
-      submitButton.click();
-    }
+    const body = within(canvasElement.ownerDocument.body);
+    const submitButton = await body.findByTestId('submit-button');
+    await userEvent.click(submitButton);
+
+    const titleError = await body.findByTestId('title-validation-error');
+    const descError = await body.findByTestId('description-validation-error');
+    const packageError = await body.findByTestId('package-selection-error');
+
+    expect(titleError).toHaveTextContent('Title is required');
+    expect(descError).toHaveTextContent('Description is required');
+    expect(packageError).toHaveTextContent('At least one package must be selected');
   },
 };
 
@@ -281,24 +280,20 @@ export const ApiConflictError: Story = {
   },
   decorators: [createQueryDecorator(mockConflictFetch)],
   play: async ({ canvasElement }) => {
-    const titleInput = canvasElement.querySelector('[data-testid="title-input"]') as HTMLInputElement;
-    if (titleInput) {
-      titleInput.value = 'Duplicate Goal Title';
-      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    const descInput = canvasElement.querySelector('[data-testid="description-textarea"]') as HTMLTextAreaElement;
-    if (descInput) {
-      descInput.value = 'This is a description for a duplicate goal.';
-      descInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    const checkbox = canvasElement.querySelector('[data-testid="package-checkbox-github-devloop"]') as HTMLInputElement;
-    if (checkbox) {
-      checkbox.click();
-    }
-    const submitButton = canvasElement.querySelector('[data-testid="submit-button"]') as HTMLButtonElement;
-    if (submitButton) {
-      submitButton.click();
-    }
+    const body = within(canvasElement.ownerDocument.body);
+    
+    const titleInput = await body.findByTestId('title-input');
+    const descInput = await body.findByTestId('description-textarea');
+    const checkbox = await body.findByTestId('package-checkbox-github-devloop');
+    const submitButton = await body.findByTestId('submit-button');
+
+    await userEvent.type(titleInput, 'Duplicate Goal Title');
+    await userEvent.type(descInput, 'This is a description for a duplicate goal.');
+    await userEvent.click(checkbox);
+    await userEvent.click(submitButton);
+
+    const submitError = await body.findByTestId('submit-error');
+    expect(submitError).toHaveTextContent('Goal with this title already exists');
   },
 };
 
@@ -309,32 +304,24 @@ export const ApiTriggerError: Story = {
   },
   decorators: [createQueryDecorator(mockTriggerErrorFetch)],
   play: async ({ canvasElement }) => {
-    const titleInput = canvasElement.querySelector('[data-testid="title-input"]') as HTMLInputElement;
-    if (titleInput) {
-      titleInput.value = 'Trigger Failure Goal';
-      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    const descInput = canvasElement.querySelector('[data-testid="description-textarea"]') as HTMLTextAreaElement;
-    if (descInput) {
-      descInput.value = 'This goal is created successfully but trigger fails.';
-      descInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    const repoInput = canvasElement.querySelector('[data-testid="repo-input"]') as HTMLInputElement;
-    if (repoInput) {
-      repoInput.value = 'ChronoAIProject/fkst-substrate';
-      repoInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    const checkbox = canvasElement.querySelector('[data-testid="package-checkbox-github-devloop"]') as HTMLInputElement;
-    if (checkbox) {
-      checkbox.click();
-    }
-    const switchEl = canvasElement.querySelector('[data-testid="trigger-on-create-switch"]') as HTMLButtonElement;
-    if (switchEl) {
-      switchEl.click();
-    }
-    const submitButton = canvasElement.querySelector('[data-testid="submit-button"]') as HTMLButtonElement;
-    if (submitButton) {
-      submitButton.click();
-    }
+    const body = within(canvasElement.ownerDocument.body);
+    
+    const titleInput = await body.findByTestId('title-input');
+    const descInput = await body.findByTestId('description-textarea');
+    const repoInput = await body.findByTestId('repo-input');
+    const checkbox = await body.findByTestId('package-checkbox-github-devloop');
+    const switchEl = await body.findByTestId('trigger-on-create-switch');
+    const submitButton = await body.findByTestId('submit-button');
+
+    await userEvent.type(titleInput, 'Trigger Failure Goal');
+    await userEvent.type(descInput, 'This goal is created successfully but trigger fails.');
+    await userEvent.type(repoInput, 'ChronoAIProject/fkst-substrate');
+    await userEvent.click(checkbox);
+    await userEvent.click(switchEl);
+    await userEvent.click(submitButton);
+
+    const submitError = await body.findByTestId('submit-error');
+    expect(submitError).toHaveTextContent('GitHub App not installed on ChronoAIProject/fkst-substrate');
   },
 };
+

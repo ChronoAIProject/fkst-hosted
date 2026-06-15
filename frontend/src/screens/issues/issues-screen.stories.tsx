@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { userEvent, within, expect } from 'storybook/test';
 import { MemoryRouter } from 'react-router-dom';
 import IssuesScreen from './issues-screen';
 import {
@@ -162,11 +163,24 @@ export const IssueDetailDrawer: Story = {
     }),
   ],
   play: async ({ canvasElement }) => {
-    // Find the issue card with text containing "#214" and click it
-    const cards = Array.from(canvasElement.querySelectorAll('[role="button"]'));
-    const targetCard = cards.find((c) => c.textContent?.includes('#214')) as HTMLDivElement | undefined;
-    if (targetCard) {
-      targetCard.click();
+    const canvas = within(canvasElement);
+    
+    // Wait for the issue card containing #214 to appear in the list
+    const hashEl = await canvas.findByText(/#214/);
+    const targetCard = hashEl.closest('[role="button"]') as HTMLElement | null;
+    if (!targetCard) {
+      throw new Error('Could not find issue card container with role="button" for issue #214');
     }
+
+    // Click the card using userEvent
+    await userEvent.click(targetCard);
+
+    // Assert that the dialog/drawer is open by querying the portaled body
+    const body = within(canvasElement.ownerDocument.body);
+    const dialogTitle = await body.findByText('Tighten consensus parser to handle nested quorum refs');
+    expect(dialogTitle).toBeInTheDocument();
+
+    const commentBody = await body.findByText(/I have started looking into the consensus parser issue/);
+    expect(commentBody).toBeInTheDocument();
   },
 };

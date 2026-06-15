@@ -129,4 +129,3 @@ export const HostedStatusCounts: Story = {
     onNewGoal: () => alert('New Goal Clicked'),
   },
 };
-
