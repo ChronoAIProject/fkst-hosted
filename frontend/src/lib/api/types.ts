@@ -3,12 +3,19 @@ export interface PackageFile {
   content: string;
 }
 
+export interface RepoRef {
+  owner: string;
+  name: string;
+}
+
 export interface PackageResponse {
   name: string;
   files: PackageFile[];
   composed_deps: string[];
   created_at: string;
   updated_at: string;
+  owner_user_id?: string | null;
+  org_id?: string | null;
 }
 
 /**
@@ -43,6 +50,12 @@ export interface SessionView {
   created_at: string;
   started_at: string | null;
   stopped_at: string | null;
+  goal_id?: string | null;
+  repo?: RepoRef | null;
+  triggered_by?: string | null;
+  package_names?: string[];
+  owner_user_id?: string;
+  org_id?: string | null;
 }
 
 export interface CreateSessionResponse {
