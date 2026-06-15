@@ -3,6 +3,57 @@ local t = h.t
 local core = h.core
 
 return {
+  test_observability_list_deadline_exhaustion_returns_empty_deferred_page = function()
+    local calls = 0
+    local listed, deferred = core.observability_list_pr_candidates(
+      "owner/repo",
+      core.observability_limits(),
+      now() - 1,
+      "seed-1",
+      function()
+        calls = calls + 1
+        return { stdout = "[]", stderr = "", exit_code = 0 }
+      end
+    )
+
+    t.eq(#listed, 0)
+    t.eq(deferred, 1)
+    t.eq(calls, 0)
+  end,
+
+  test_observability_run_cmd_still_fails_closed_on_command_error = function()
+    local ok, err = pcall(function()
+      core.observability_run_cmd("gh issue list", core.observability_limits(), now() + 90, "gh observability issue list", function()
+        return { stdout = "", stderr = "timed out", exit_code = 124 }
+      end)
+    end)
+
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh observability issue list failed: timed out", 1, true) ~= nil)
+  end,
+
+  test_observability_fetch_issue_returns_nil_when_deadline_exhausted = function()
+    local old_gh_issue_view_observe_cmd = core.gh_issue_view_observe_cmd
+    core.gh_issue_view_observe_cmd = function()
+      return "gh issue view"
+    end
+
+    local issue = nil
+    local ok, err = pcall(function()
+      issue = require("departments.observability.common").fetch_issue(
+        core,
+        "owner/repo",
+        42,
+        core.observability_limits(),
+        now() - 1
+      )
+    end)
+    core.gh_issue_view_observe_cmd = old_gh_issue_view_observe_cmd
+
+    t.eq(ok, true, tostring(err))
+    t.eq(issue, nil)
+  end,
+
   test_observability_entity_rotation_ignores_stable_payload_cursor = function()
     local first = core.observability_entity_candidates({ 1, 2, 3, 4 }, {}, "100", 2)
     local second = core.observability_entity_candidates({ 1, 2, 3, 4 }, {}, "101", 2)
