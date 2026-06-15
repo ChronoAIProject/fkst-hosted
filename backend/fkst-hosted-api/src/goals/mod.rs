@@ -13,6 +13,7 @@
 pub mod model;
 pub mod repo;
 pub mod repo_create;
+mod repo_create_classify;
 
 pub use model::{
     validate_goal_fields, GoalDoc, GoalStatus, RepoRef, GOALS_COLLECTION,

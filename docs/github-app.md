@@ -67,6 +67,24 @@ The same `GoalContext` path is used identically by the initial start and by the 
 
 > Earlier (pre-#106) the driver started the engine with `goal: None` and the token only reached the runtime dir via the periodic refresh, which was suppressed for the first ~55 minutes — so the engine ran with no credential at startup. That regression is fixed: the token is present from t=0.
 
+### Repository creation requires `repo` scope (NyxID-side config)
+
+User-attributed repository creation (`create_repo`, reachable via `POST /api/v1/goals/{id}/trigger` with `repo_mode=create_new`) runs on the **NyxID credential-injection proxy path** — fkst-hosted never sees the user's GitHub token. Creating a repository requires the GitHub **`repo`** OAuth scope (or `public_repo` for public-only). The seeded NyxID `github` provider requests only `read:user` and `user:email` by default, so a connection made with those defaults will be rejected by GitHub with a 403.
+
+**The scope grant is NyxID/deployment configuration, not fkst-hosted code.** There are two ways to obtain a repo-capable connection:
+
+- **Expand the `github` provider's `default_scopes`** to include `repo` (NyxID admin `PUT /api/v1/providers/{id}`, or pass `additional_scopes` at connect time) and have the user (re-)connect GitHub granting repo access, **or**
+- **Use the seeded `github-pat` provider** with a `repo`-scoped Personal Access Token.
+
+When the linked connection lacks the scope, fkst-hosted does not fail opaquely: it returns **422 Unprocessable** with an actionable hint telling the user to reconnect GitHub with repo access (rather than a generic auth failure).
+
+**Org-repo creation** (`POST /orgs/{org}/repos`) has extra user-token failure modes, each surfaced as an actionable 422:
+
+- **SAML SSO not authorized** — if the org enforces SAML SSO and the proxied OAuth token is not SSO-authorized for it, GitHub returns a 403 with an `X-GitHub-SSO` header carrying a (~1h) authorization URL. fkst-hosted forwards that URL in the error so the user can authorize their token for the org. (GitHub App *installation* tokens are auto-SSO-authorized, so this affects only the user-token repo-creation path, not substrate session work.)
+- **OAuth app not org-approved / org policy** — the org may forbid members from creating repos, require app approval, or restrict visibility (a non-owner requesting `private` gets a 422). These are surfaced as an org-policy error distinct from the missing-scope case.
+
+> Re-consent / SSO-authorize UI is frontend + NyxID scope; fkst-hosted only surfaces the backend error semantics and the authorization URL.
+
 ---
 
 ## Operations Runbook
@@ -135,6 +153,9 @@ GitHub allows two active private keys simultaneously. Use this for zero-downtime
 | 422 `github app not installed on owner/repo` without install URL | App slug not configured | Set `FKST_GITHUB_APP_SLUG` to get actionable install URLs in error messages. |
 | 503 `github rate limited` | API rate limit exhausted | Wait for the reset period (indicated in the error). Per-installation rate limits apply. |
 | 422 `github token request rejected` | Permission subset exceeds App's granted permissions | Verify the v1 permissions (Contents R&W, Metadata R, Issues R&W) are granted on the installation. |
+| 422 "missing the `repo` permission needed to create repositories" | Linked GitHub connection lacks the `repo` OAuth scope | Reconnect GitHub granting repo access, expand the NyxID `github` provider's `default_scopes` to include `repo`, or use the `github-pat` provider with a `repo`-scoped token (see "Repository creation requires `repo` scope" above). |
+| 422 "not SSO-authorized for the `<org>` organization" | Org enforces SAML SSO; the proxied token is not authorized for it | Authorize your GitHub token for the org via the URL surfaced in the error (expires ~1h), then retry. |
+| 422 "organization's policy prevents creating this repository" | Org forbids member repo creation, the OAuth app is not org-approved, or the requested visibility is disallowed | Have an org owner allow repo creation / approve the OAuth app, or request a permitted visibility. |
 | Module disabled at startup (`github app disabled`) | `FKST_GITHUB_APP_ID` unset | This is normal if the App is not yet configured. Set the env var to enable. |
 
 ### 6. Environment Variables Reference

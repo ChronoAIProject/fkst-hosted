@@ -87,11 +87,20 @@ impl From<crate::packages::PackageError> for AppError {
 /// Map repo-creation-domain errors onto the unified type:
 /// - NameTaken -> 409 Conflict
 /// - AuthFailed -> 403 Forbidden
+/// - InsufficientScope -> 422 Unprocessable (actionable reconnect hint)
+/// - SsoUnauthorized -> 422 Unprocessable (authorize-for-org hint + auth URL)
+/// - OrgPolicy -> 422 Unprocessable (org-policy hint)
 /// - RateLimited -> 503 Unavailable
 /// - NyxIdUnavailable -> 503 Unavailable
 /// - ExchangeRejected -> 401 Unauthorized
 /// - Upstream -> 502 Bad Gateway (mapped as 503 Unavailable)
 /// - Malformed -> 500 Internal
+///
+/// The scope/SSO/org-policy variants mirror the GitHub-App `NotInstalled`
+/// 422+hint rendering below: a connection-configuration problem the user can
+/// fix, surfaced as an actionable message. The raw GitHub body and the token
+/// are never echoed — only the safe, fixed hint plus (for SSO) the
+/// GitHub-issued authorization URL.
 impl From<crate::goals::CreateRepoError> for AppError {
     fn from(err: crate::goals::CreateRepoError) -> Self {
         use crate::goals::CreateRepoError;
@@ -104,6 +113,29 @@ impl From<crate::goals::CreateRepoError> for AppError {
                 AppError::Forbidden(
                     "github authorization failed: cannot create repository".to_string(),
                 )
+            }
+            CreateRepoError::InsufficientScope => {
+                tracing::warn!("linked github connection missing repo scope for repo creation");
+                AppError::Unprocessable(
+                    "Your linked GitHub account is missing the `repo` permission needed to \
+                     create repositories. Reconnect GitHub granting repo access (or connect \
+                     a `repo`-scoped token)."
+                        .to_string(),
+                )
+            }
+            CreateRepoError::SsoUnauthorized { org, auth_url } => {
+                tracing::warn!(org = %org, has_auth_url = auth_url.is_some(), "github org SSO authorization required for repo creation");
+                let hint = auth_url
+                    .map(|url| format!(" Authorize it here: {url}"))
+                    .unwrap_or_default();
+                AppError::Unprocessable(format!(
+                    "Your GitHub token is not SSO-authorized for the `{org}` organization. \
+                     Authorize your GitHub token for `{org}`, then retry.{hint}"
+                ))
+            }
+            CreateRepoError::OrgPolicy(message) => {
+                tracing::warn!(message = %message, "org policy blocked repo creation");
+                AppError::Unprocessable(message)
             }
             CreateRepoError::RateLimited => {
                 AppError::Unavailable("github rate limited; retry later".to_string())
