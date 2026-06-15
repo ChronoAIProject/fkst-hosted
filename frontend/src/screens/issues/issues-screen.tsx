@@ -76,7 +76,7 @@ function IssueDetailView({ owner, repo, number, account, onClose }: IssueDetailV
           setCommentText('');
         },
         onError: (err) => {
-          setCommentError(err instanceof Error ? err.message : 'Failed to post comment');
+          setCommentError(mapRepoTargetError(err, 'issues'));
         },
       }
     );
@@ -99,7 +99,7 @@ function IssueDetailView({ owner, repo, number, account, onClose }: IssueDetailV
       },
       {
         onError: (err) => {
-          setStateError(err instanceof Error ? err.message : `Failed to ${newState} issue`);
+          setStateError(mapRepoTargetError(err, 'issues'));
         },
       }
     );
@@ -318,23 +318,22 @@ export default function IssuesScreen() {
               : selectedAccount,
           state: stateFilter,
         }
-      : undefined
+      : undefined,
+    {
+      enabled: !!accounts && accounts.length > 0,
+    }
   );
 
   const handleCreateIssueSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
 
-    if (!createRepo.includes('/')) {
+    const repoParts = createRepo.trim().split('/');
+    if (repoParts.length !== 2 || !repoParts[0] || !repoParts[1]) {
       setCreateError("Invalid repository format. Please use 'owner/repo'");
       return;
     }
-
-    const [owner, repo] = createRepo.trim().split('/');
-    if (!owner || !repo) {
-      setCreateError("Invalid repository format. Please use 'owner/repo'");
-      return;
-    }
+    const [owner, repo] = repoParts;
 
     createIssueMutation.mutate(
       {

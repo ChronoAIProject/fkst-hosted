@@ -15,19 +15,23 @@ import {
  * - staleTime (30000ms): GitHub issues are read-heavy and cached for 30s to keep UI snappy.
  * - retry (false): Fail fast. If the proxy or GitHub returns an error (403, 404, 429), surface it immediately.
  */
-export function useGitHubIssues(params?: {
-  accounts?: string;
-  filter?: string;
-  state?: string;
-  labels?: string;
-  page?: number;
-  per_page?: number;
-}) {
+export function useGitHubIssues(
+  params?: {
+    accounts?: string;
+    filter?: string;
+    state?: string;
+    labels?: string;
+    page?: number;
+    per_page?: number;
+  },
+  options?: { enabled?: boolean }
+) {
   return useQuery({
     queryKey: ['github-issues', params],
     queryFn: () => getIssuesAggregate(params),
     staleTime: 30000,
     retry: false,
+    enabled: options?.enabled,
   });
 }
 
