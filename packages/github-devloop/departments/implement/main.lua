@@ -491,6 +491,15 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   return true
 end
 
+local function backing_original_closed(current)
+  local origin = core.fork_origin_fact(current)
+  if origin == nil then
+    return false
+  end
+  local open = core.rederive_issue_is_open(origin.repo, origin.issue_number)
+  return not open, origin
+end
+
 local function process_ready_event(event)
   local ready = event.payload or {}
   if not core.is_supported_ready(ready) then
@@ -522,7 +531,18 @@ local function process_ready_event(event)
     end
 
     local current = core.parse_issue_view_implement(view.stdout)
+    current.repo = repo
+    current.number = issue_number
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
+    if tostring(current.state or ""):upper() ~= "OPEN" then
+      core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")
+      return
+    end
+    local original_closed, origin = backing_original_closed(current)
+    if original_closed then
+      core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "fork backing issue is closed: " .. tostring(origin.repo) .. "#" .. tostring(origin.issue_number))
+      return
+    end
     local state = core.current_state(current.comments, ready.proposal_id)
     local gate = core.dependency_gate(repo, issue_number, {
       proposal_id = ready.proposal_id,

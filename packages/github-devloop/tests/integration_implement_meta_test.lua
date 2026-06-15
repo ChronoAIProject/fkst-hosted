@@ -136,6 +136,40 @@ return {
     t.eq(count_calls("git -C"), 0)
   end,
 
+  test_implement_fork_ready_rechecks_closed_origin_before_work = function()
+    local event = ready()
+    mock_issue_implement({ "fkst-dev:ready" }, {
+      core.state_marker(event.proposal_id, "ready", event.dedup_key),
+      core.fork_origin_marker("owner/repo", 618, "human", core.issue_source_ref("owner/repo", 618)),
+    })
+    t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 618), {
+      stdout = '{"title":"Original","state":"CLOSED","labels":[{"name":"fkst-dev:merged"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-fork-origin-closed"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git worktree list"), 0)
+    t.eq(count_calls("git -C"), 0)
+  end,
+
+  test_implement_closed_current_issue_skips_before_work = function()
+    local event = ready()
+    mock_issue_implement({ "fkst-dev:ready" }, {
+      core.state_marker(event.proposal_id, "ready", event.dedup_key),
+    }, { state = "CLOSED" })
+
+    local result = run_implement(event, opts("implement-current-closed"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git worktree list"), 0)
+    t.eq(count_calls("git -C"), 0)
+  end,
+
   test_implement_codex_nonzero_marks_impl_failed_with_failure_marker = function()
     local event = ready()
     mock_issue_implement({ "fkst-dev:ready" }, {
@@ -761,7 +795,7 @@ return {
   end,
 
   test_implement_issue_view_failure_errors_for_retry = function()
-    mock_issue_view_failure("--json title,labels,comments", "forced implement failure")
+    mock_issue_view_failure("--json title,body,labels,comments,state,author", "forced implement failure")
 
     local result = run_implement(ready(), opts("implement-view-failure"))
     t.eq(result.exit_code, 1)
