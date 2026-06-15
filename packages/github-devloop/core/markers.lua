@@ -932,6 +932,21 @@ function M.orphan_reaped_marker(proposal_id, pr_number, reason)
     .. '" -->'
 end
 
+function M.pr_base_unmanaged_marker(proposal_id, pr_number, pr_base, integration_branch)
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid unmanaged-base pr number")
+  end
+  if not M._is_git_ref_safe(pr_base) or not M._is_git_ref_safe(integration_branch) then
+    error("github-devloop: invalid unmanaged-base branch")
+  end
+  return '<!-- fkst:github-devloop:pr-base-unmanaged:v1 proposal="' .. tostring(proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" reason="pr-base-unmanaged'
+    .. '" pr_base="' .. tostring(pr_base)
+    .. '" integration_branch="' .. tostring(integration_branch)
+    .. '" -->'
+end
+
 function M.has_orphan_reaped_marker(comments, proposal_id, pr_number)
   if type(comments) ~= "table" then
     return false
