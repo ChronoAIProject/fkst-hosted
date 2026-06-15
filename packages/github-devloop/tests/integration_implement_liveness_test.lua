@@ -314,7 +314,12 @@ return {
     t.eq(result.exit_code, 0)
     local raised = find_raise(result.raises, "devloop_ready")
     t.eq(raised.payload.proposal_id, event.proposal_id)
-    t.eq(raised.payload.dedup_key, "ready/" .. event.dedup_key)
+    -- The re-raised ready reproduces the frozen implementing marker version
+    -- EXACTLY (build_devloop_ready_payload re-wraps the inner version), so the
+    -- implement receiver's recomputed marker version matches and the re-drive is
+    -- accepted -- not double-wrapped to "ready/ready/..." which skip-staled
+    -- forever (#718).
+    t.eq(raised.payload.dedup_key, event.dedup_key)
   end,
 
   test_observe_skips_live_implement_attempt = function()
@@ -345,7 +350,52 @@ return {
     t.eq(result.exit_code, 0)
     local raised = find_raise(result.raises, "devloop_ready")
     t.eq(raised.payload.proposal_id, event.proposal_id)
-    t.eq(raised.payload.dedup_key, "ready/" .. event.dedup_key)
+    -- The re-raised ready reproduces the frozen implementing marker version
+    -- EXACTLY (build_devloop_ready_payload re-wraps the inner version), so the
+    -- implement receiver's recomputed marker version matches and the re-drive is
+    -- accepted -- not double-wrapped to "ready/ready/..." which skip-staled
+    -- forever (#718).
+    t.eq(raised.payload.dedup_key, event.dedup_key)
+  end,
+
+  -- Production-shaped round-trip (#718): the payload observe's liveness re-drive
+  -- actually delivers must be ACCEPTED by the implement receiver, not skip-staled
+  -- forever. The other tests feed a hand-built ready() straight into
+  -- run_implement and never exercise the observe->implement chain production runs,
+  -- so the double-wrap defect was invisible (the #550/#551 harness lesson).
+  test_observe_reraised_ready_round_trips_into_implement_without_skip_stale = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    local stuck = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 7201)),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
+    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-718-roundtrip"))
+    t.eq(observed.exit_code, 0)
+    local reraised = find_raise(observed.raises, "devloop_ready")
+    t.eq(reraised ~= nil, true)
+
+    -- Feed the EXACT re-raised payload back into implement on the same stuck
+    -- implementing marker. With the fix it advances (re-runs codex, opens a PR);
+    -- before the fix it skip-staled (codex never runs, zero progress, forever).
+    local rerun = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, "1"),
+    }
+    mock_issue_implement({ "fkst-dev:implementing" }, rerun)
+    mock_missing_remote_branch(branch)
+    t.mock_command("show-ref --verify --quiet", { stdout = "", stderr = "", exit_code = 1 })
+    mock_fresh_implement_worktree()
+    mock_implement_codex(0, "implemented after liveness re-drive")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+    mock_issue_implement({ "fkst-dev:implementing" }, rerun)
+
+    local result = run_implement(reraised.payload, opts("implement-718-roundtrip"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1, "re-raised ready must re-run implement, not skip-stale forever")
+    t.eq(find_raise(result.raises, "devloop_open_pr") ~= nil, true)
   end,
 
   test_observe_skips_implementing_state_marker_without_progress_facts = function()

@@ -89,6 +89,25 @@ function M.implementation_base_version(version)
   return tostring(version or ""):gsub("/reimplement/%d+$", "")
 end
 
+-- The `implementing` marker version is the ALREADY-wrapped ready dedup_key
+-- ("ready/<inner>"), because build_devloop_ready_payload applies the
+-- _dedup_key({"ready", ...}) wrapper when the ready event is first raised. A
+-- liveness re-drive that re-raises devloop_ready must therefore pass the INNER
+-- (unwrapped) version, so build_devloop_ready_payload reproduces exactly the
+-- frozen marker version on re-wrap. Passing the wrapped version double-wraps it
+-- ("ready/ready/<inner>") and the implement receiver rejects it as
+-- skip-stale(version-mismatch) forever (issue #718 / #373). Fail closed if the
+-- expected prefix is absent, so a malformed marker surfaces rather than
+-- silently re-introducing a mismatch.
+function M.ready_payload_inner_version(version)
+  local text = tostring(version or "")
+  local inner, replaced = text:gsub("^ready/", "", 1)
+  if replaced == 0 then
+    error("github-devloop: implementing marker version lacks the expected 'ready/' prefix: " .. text)
+  end
+  return inner
+end
+
 function M.implementation_attempt_version(version, attempt)
   local base = M.implementation_base_version(version)
   local n = tonumber(attempt)
