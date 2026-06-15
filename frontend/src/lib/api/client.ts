@@ -52,7 +52,7 @@ function buildOptions(options?: RequestInit): RequestInit {
  * Helper to perform typed requests expecting a JSON response body.
  * Throws ApiError if response is not ok or is not JSON.
  */
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${apiBase()}${path}`;
   let response: Response;
 
