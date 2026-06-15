@@ -9,8 +9,15 @@ import { countOrUnknown, isTerminal, STAGE_BY_STATE, GoalState, isSessionTermina
 import { SessionRegistryProvider, useSessionRegistry } from '../../hooks/session-registry';
 import { useHealth } from '../../hooks/useHealth';
 import { useSession, useCreateSession } from '../../hooks/useSessions';
-import { ApiError } from '../client';
+import { ApiError, getHealth } from '../client';
 import { isApiErrorBody } from '../types';
+import { getAccessToken, handleUnauthorized } from '../../auth/token';
+
+vi.mock('../../auth/token', () => ({
+  authRequired: vi.fn(() => false),
+  getAccessToken: vi.fn(() => null),
+  handleUnauthorized: vi.fn(),
+}));
 
 // MSW test server setup
 const healthMockHandler = http.get('*/api/v1/health', () => {
@@ -382,6 +389,58 @@ describe('W1.E Backend Client & Hooks Tests', () => {
       });
 
       expect(sessionFetchCount).toBe(1); // remains 1, no more fetches occurred
+    });
+  });
+
+  describe('NyxID Bearer Auth Integration', () => {
+    const getAccessTokenMock = vi.mocked(getAccessToken);
+    const handleUnauthorizedMock = vi.mocked(handleUnauthorized);
+
+    beforeEach(() => {
+      getAccessTokenMock.mockReset();
+      getAccessTokenMock.mockReturnValue(null);
+      handleUnauthorizedMock.mockReset();
+    });
+
+    it('attaches Bearer token when authenticated', async () => {
+      getAccessTokenMock.mockReturnValue('mock-jwt-token-123');
+      let capturedAuthHeader: string | null = null;
+
+      server.use(
+        http.get('*/api/v1/health', ({ request }) => {
+          capturedAuthHeader = request.headers.get('Authorization');
+          return HttpResponse.json({ status: 'ok', mongo: 'up', version: '1.0.0' });
+        })
+      );
+
+      await getHealth();
+      expect(capturedAuthHeader).toBe('Bearer mock-jwt-token-123');
+    });
+
+    it('does not attach Bearer token when not authenticated', async () => {
+      getAccessTokenMock.mockReturnValue(null);
+      let capturedAuthHeader: string | null = null;
+
+      server.use(
+        http.get('*/api/v1/health', ({ request }) => {
+          capturedAuthHeader = request.headers.get('Authorization');
+          return HttpResponse.json({ status: 'ok', mongo: 'up', version: '1.0.0' });
+        })
+      );
+
+      await getHealth();
+      expect(capturedAuthHeader).toBeNull();
+    });
+
+    it('triggers handleUnauthorized on 401 response', async () => {
+      server.use(
+        http.get('*/api/v1/health', () => {
+          return HttpResponse.json({ error: 'unauthorized' }, { status: 401 });
+        })
+      );
+
+      await expect(getHealth()).rejects.toThrow();
+      expect(handleUnauthorizedMock).toHaveBeenCalledTimes(1);
     });
   });
 });
