@@ -71,6 +71,47 @@ RUN awk -F'"' '/^\[/ { table = $0 } table == "[workspace.package]" && /^version[
     || (echo "ERROR: engine version '$(cat /engine-dist/ENGINE_VERSION)' is not semver-shaped" && exit 1); \
     echo "INFO: engine version $(cat /engine-dist/ENGINE_VERSION)"
 
+# ---- nyxid CLI build stage: compile the nyxid CLI at a pinned tag ----
+# A fkst-package's business logic may shell out to `nyxid ...` to reach a
+# NyxID-brokered service AS the session user (#103). The per-session
+# NYXID_ACCESS_TOKEN + NYXID_URL it authenticates with are provisioned by #111;
+# this stage only puts the binary on PATH and proves it launches. Pinned to
+# v0.7.0 — the CLI auth contract is version-specific.
+ARG NYXID_CLI_REF=v0.7.0
+FROM rust:${RUST_VERSION}-bookworm AS cli-builder
+ARG NYXID_CLI_REF
+ARG NYXID_REPO=https://github.com/ChronoAIProject/NyxID.git
+# git+ca-certificates for the clone; libdbus-1-dev + pkg-config because the CLI
+# pulls libdbus-sys (its OS-keyring credential store), whose build.rs links the
+# system libdbus via pkg-config. The runtime stage carries the matching
+# libdbus-1-3 so the binary loads (the pod uses NYXID_ACCESS_TOKEN, not the
+# keyring, but the binary still dynamically links libdbus).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git ca-certificates libdbus-1-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /nyxid
+# Same uniform shallow-by-ref fetch with a depth-50 fallback as engine-builder.
+# The crate is the workspace member `cli` (crate `nyxid-cli`, bin `nyxid`).
+RUN git init -q \
+    && git remote add origin "$NYXID_REPO" \
+    && ((git -c protocol.version=2 fetch --depth 1 origin "$NYXID_CLI_REF" \
+         && git checkout -q FETCH_HEAD) \
+        || (echo "INFO: shallow ref fetch failed; falling back to depth-50 fetch" \
+            && git fetch --depth 50 origin \
+            && git checkout -q "$NYXID_CLI_REF"))
+# Distinct cache-mount ids: the engine-builder also mounts a cache at
+# /usr/local/cargo/registry (default id = the path), and BuildKit builds the
+# two stages in PARALLEL — sharing that registry cache races on .cargo-ok
+# (`File exists (os error 17)`). Isolating the ids gives this stage its own
+# registry/target caches.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=nyxid-cli-cargo-registry \
+    --mount=type=cache,target=/nyxid/target,id=nyxid-cli-cargo-target \
+    cargo build --release --locked -p nyxid-cli \
+    && mkdir -p /cli-dist \
+    && cp target/release/nyxid /cli-dist/nyxid
+RUN test -x /cli-dist/nyxid \
+    || (echo "ERROR: nyxid binary not produced by the CLI build" && exit 1)
+
 # ---- server build stage ----
 FROM rust:${RUST_VERSION}-bookworm AS server-builder
 WORKDIR /app
@@ -98,7 +139,11 @@ ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
 ARG PRODUCT_VERSION=0.0.0
 # Engine runtime prerequisites: git + bash (spawned engine sessions use them),
 # ca-certificates for outbound TLS.
-RUN apt-get update && apt-get install -y --no-install-recommends git bash ca-certificates \
+# git + bash for spawned engine sessions, ca-certificates for outbound TLS, and
+# libdbus-1-3 so the bundled nyxid CLI (which links libdbus via its keyring
+# store) loads in the slim runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git bash ca-certificates libdbus-1-3 \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 10001 fkst && useradd -m -u 10001 -g 10001 -s /usr/sbin/nologin fkst
 # Engine binaries: directory copy is the tolerant mechanism — fkst-framework is
@@ -108,6 +153,11 @@ COPY --from=engine-builder /engine-dist/bin/ /usr/local/bin/
 COPY --from=engine-builder /engine-dist/ENGINE_SHA /etc/fkst-engine-sha
 COPY --from=engine-builder /engine-dist/ENGINE_VERSION /etc/fkst-engine-version
 COPY --from=server-builder /app/target/release/fkst-hosted-api /usr/local/bin/fkst-hosted-api
+# nyxid CLI for in-session NyxID-brokered business calls (#103). Assert it
+# launches in the slim runtime (catches a missing shared lib) and reports the
+# pinned v0.7.0.
+COPY --from=cli-builder /cli-dist/nyxid /usr/local/bin/nyxid
+RUN nyxid --version && nyxid --version | grep -q "0.7.0"
 ENV FKST_RUNTIME_ROOT=/var/lib/fkst/runtime \
     PATH=/usr/local/bin:$PATH \
     FKST_HOSTED_PORT=8080 \
