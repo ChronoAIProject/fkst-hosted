@@ -346,6 +346,7 @@ mod tests {
             package_names: vec![],
             goal_id: None,
             repo: None,
+            env_scope: None,
             triggered_by: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: None,

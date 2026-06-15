@@ -372,6 +372,12 @@ async fn main() -> ExitCode {
     }
     tracing::info!("vault enabled");
 
+    // 5a-ter-bis. Wire the vault into the session driver (issue #102): every
+    //         driver this service spawns now resolves the session's vault
+    //         scope into an `env_profile` and injects it into the engine run.
+    //         The VaultService is Clone (it joins AppState below too).
+    sessions.enable_vault(vault.clone());
+
     // 5a-bis. Enable goal support in the session service: goal-status sync
     //         writes + token refresh. Requires both the goals repo and the
     //         GitHub App tokens service.

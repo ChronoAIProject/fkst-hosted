@@ -689,6 +689,7 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         package_names: vec![],
         goal_id: None,
         repo: None,
+        env_scope: None,
         triggered_by: None,
         created_at: bson::DateTime::now(),
         started_at: None,
@@ -769,4 +770,100 @@ async fn graceful_shutdown_records_running_sessions_as_stopped() {
     );
     assert!(body["stopped_at"].as_str().is_some(), "stopped_at set");
     assert!(body["error"].is_null(), "clean shutdown carries no error");
+}
+
+// ---- (10) per-session env injection (issue #102) -----------------------------
+
+/// Seed one vault entry over the HTTP vault API (under disabled auth the owner
+/// is `dev-local`, the same principal that creates the session below).
+async fn seed_vault_global(router: &axum::Router, key: &str, kind: &str, value: &str) {
+    let body = json!({
+        "scope": { "global": true },
+        "key": key,
+        "kind": kind,
+        "value": value,
+    });
+    let (status, _headers, resp) = put_json(router, "/api/v1/vault/entries", &body).await;
+    assert!(
+        status == StatusCode::OK || status == StatusCode::CREATED,
+        "seed vault {key}: {status} {resp}"
+    );
+}
+
+/// PUT JSON helper (the vault upsert route is a PUT).
+async fn put_json(
+    router: &axum::Router,
+    path: &str,
+    body: &Value,
+) -> (StatusCode, HeaderMap, Value) {
+    let request = Request::builder()
+        .method("PUT")
+        .uri(path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(body).expect("serialize")))
+        .expect("request");
+    drain(router.clone().oneshot(request).await.expect("oneshot")).await
+}
+
+/// A session whose owner's vault scope holds secrets+variables must start with
+/// them injected (a decrypt failure would fail the start, so reaching `running`
+/// proves a clean resolve), and its PERSISTED document must carry ONLY the
+/// non-secret `env_scope` pointer — never any decrypted secret material. This
+/// is the failover-safety invariant: a rebuild re-resolves from the vault.
+#[tokio::test]
+async fn session_with_vault_scope_injects_env_and_persists_only_the_scope_pointer() {
+    if !docker_available() {
+        eprintln!("skipped: docker unavailable");
+        return;
+    }
+    let app = app(PASS_CONFORMANCE, READY_SUPERVISE).await;
+    // Wire the SAME vault (same db + KEK) into the driver BEFORE any session is
+    // created, so the driver resolves and injects the seeded profile.
+    app.sessions.enable_vault(support::test_vault(&app.db));
+
+    // Seed the caller's global scope: a non-secret variable and a secret.
+    seed_vault_global(&app.router, "FOO", "variable", "bar").await;
+    seed_vault_global(&app.router, "OPENAI_API_KEY", "secret", "sk-injected").await;
+
+    seed_package(&app.router, "demo").await;
+    let id = create_session(&app.router, "demo").await;
+    // Reaching `running` proves the engine started with the resolved profile
+    // (a decrypt error would have failed the start before `running`).
+    poll_until(&app.router, &id, "running").await;
+
+    // The persisted document carries the non-secret scope pointer ...
+    let uuid = bson::Uuid::parse_str(&id).expect("uuid");
+    let raw = app
+        .db
+        .sessions()
+        .clone_with_type::<bson::Document>()
+        .find_one(doc! { "_id": uuid })
+        .await
+        .expect("find")
+        .expect("session present");
+    let env_scope = raw
+        .get_document("env_scope")
+        .expect("env_scope persisted on the document");
+    assert!(
+        env_scope.get_bool("global").expect("global flag"),
+        "package session resolves the global scope"
+    );
+
+    // ... and NO secret/variable VALUE material anywhere in the document.
+    let serialized = format!("{raw:?}");
+    assert!(
+        !serialized.contains("sk-injected"),
+        "secret value must never be persisted on SessionDoc: {serialized}"
+    );
+    assert!(
+        !serialized.contains("\"bar\"") && !serialized.contains("String(\"bar\")"),
+        "variable value must never be persisted on SessionDoc: {serialized}"
+    );
+    // Defensive: the value-bearing vault field names must not appear either.
+    assert!(!serialized.contains("value_enc"));
+    assert!(!serialized.contains("value_plain"));
+
+    // Stop cleanly.
+    let _ = post_empty(&app.router, &format!("/api/v1/sessions/{id}/stop")).await;
+    poll_until_terminal(&app.router, &id).await;
 }
