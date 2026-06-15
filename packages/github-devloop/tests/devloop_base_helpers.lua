@@ -1,6 +1,9 @@
 local t = fkst.test
 local core = require("core")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local run_fake = require("std.testing").run_fake
+local gh_fake = require("std.github_fake")
+local git_fake = require("std.git_fake")
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
 
@@ -39,6 +42,9 @@ end
 local render_comment, take_pr_phase_comments
 local json_string, take_pending_pr_origin
 local mock_pr_origin_from_cached
+local mock_result_issue_value
+local pending_result_issue = nil
+local pending_result_read_failure = nil
 
 local function source_ref()
   return {
@@ -284,10 +290,36 @@ local function run_observe(payload, run_opts)
 end
 
 local function run_result(payload, run_opts)
-  return t.run_department("departments/consensus_result/main.lua", {
+  if pending_result_read_failure ~= nil then
+    pending_result_read_failure = nil
+    return t.run_department("departments/consensus_result/main.lua", {
+      queue = "consensus.consensus_reached",
+      payload = payload,
+    }, run_opts)
+  end
+
+  local result_dept = require("departments.consensus_result.main")
+  local model = gh_fake.model({
+    issues = {
+      ["owner/repo#issue/42"] = pending_result_issue or mock_result_issue_value(),
+    },
+  })
+  local dept = result_dept.make_department({
+    github = gh_fake.new(model),
+    git = git_fake.new(git_fake.model({})),
+  })
+  dept.model = model
+  local result = run_fake(dept, {
     queue = "consensus.consensus_reached",
     payload = payload,
-  }, run_opts)
+  })
+  result.exit_code = result.failure and 1 or 0
+  result.model = model
+  return result
+end
+
+local function mark_result_read_failure()
+  pending_result_read_failure = true
 end
 
 local function run_loop(payload, run_opts)
@@ -663,6 +695,42 @@ mock_pr_origin_from_cached = function(payload, head_sha)
   return repo, pr_number
 end
 
+mock_result_issue_value = function(labels, comments, extra)
+  local fields = extra or {}
+  local gh_labels = {}
+  for _, label in ipairs(labels or { "fkst-dev:thinking" }) do
+    table.insert(gh_labels, { name = label })
+  end
+  local gh_comments = {}
+  for _, comment in ipairs(comments or with_default_state_marker(labels or { "fkst-dev:thinking" })) do
+    if type(comment) == "table" then
+      table.insert(gh_comments, comment)
+    else
+      table.insert(gh_comments, {
+        body = tostring(comment),
+        author = { login = fields.comment_author_login or fields.author_login or "fkst-test-bot" },
+        createdAt = "2026-06-03T01:00:00Z",
+      })
+    end
+  end
+  local gh_assignees = {}
+  for _, assignee in ipairs(fields.assignees or {}) do
+    table.insert(gh_assignees, { login = assignee })
+  end
+  return {
+    number = fields.number or 42,
+    title = fields.title or "Implement decision recorder",
+    body = fields.body or "",
+    url = fields.url or "https://github.example/owner/repo/issues/42",
+    updatedAt = fields.updated_at or "2026-06-03T01:02:03Z",
+    state = fields.state or "OPEN",
+    labels = gh_labels,
+    comments = gh_comments,
+    assignees = gh_assignees,
+    author = { login = fields.author_login or "fkst-test-bot" },
+  }
+end
+
 local function mock_issue_body(body)
   entity_read_mocks.mock_issue_view_raw_selector(t, {}, "body", {
     stdout = string.format('{"body":"%s"}\n', json_string(body or "Issue body")),
@@ -676,6 +744,7 @@ local function mock_issue_result(labels, comments, extra)
     fields[key] = value
   end
   local selected = with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)
+  pending_result_issue = mock_result_issue_value(labels or { "fkst-dev:thinking" }, selected, fields)
   entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:thinking" }, selected, fields)
   entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:thinking" }, comments = selected, assignees = fields.assignees, author_login = fields.author_login }, "labels,comments")
   entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:thinking" }, comments = selected, assignees = fields.assignees, author_login = fields.author_login }, "assignees,author")
@@ -828,6 +897,7 @@ return {
   merge_ready = merge_ready,
   run_observe = run_observe,
   run_result = run_result,
+  mark_result_read_failure = mark_result_read_failure,
   run_loop = run_loop,
   run_reconcile = run_reconcile,
   run_review_reconcile = run_review_reconcile,

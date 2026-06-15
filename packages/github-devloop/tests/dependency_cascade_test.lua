@@ -189,12 +189,10 @@ local function mock_blocker_pr_failure(pr_number)
 end
 
 local function mock_result_issue(labels, comments)
-  t.mock_command(core.gh_issue_view_result_cmd(repo, 42), {
-    stdout = issue_view_json(labels or { "fkst-dev:thinking" }, comments or {
-      core.state_marker(proposal_id, "thinking", "2026-06-02T00-00-00Z"),
-    }),
-    stderr = "",
-    exit_code = 0,
+  h.mock_issue_result(labels or { "fkst-dev:thinking" }, comments or {
+    core.state_marker(proposal_id, "thinking", "2026-06-02T00-00-00Z"),
+  }, {
+    title = "Implement dependency cascade",
   })
 end
 
@@ -281,10 +279,7 @@ local function reached()
 end
 
 local function run_result()
-  return t.run_department("departments/consensus_result/main.lua", {
-    queue = "consensus.consensus_reached",
-    payload = reached(),
-  }, h.opts("dependency-result"))
+  return h.run_result(reached(), h.opts("dependency-result"))
 end
 
 local function run_observe()

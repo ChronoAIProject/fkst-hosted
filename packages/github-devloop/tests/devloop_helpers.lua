@@ -15,6 +15,7 @@ for key, value in pairs(worktree) do
 end
 
 local base_mock_bot_env = helpers.mock_bot_env
+local base_mock_issue_view_failure = helpers.mock_issue_view_failure
 local base_run_observe = helpers.run_observe
 local base_run_result = helpers.run_result
 local base_run_implement = helpers.run_implement
@@ -139,6 +140,14 @@ helpers.run_implement = function(...)
   local payload = ...
   mock_context_bundle(payload)
   return base_run_implement(...)
+end
+
+helpers.mock_issue_view_failure = function(json_selector, ...)
+  if json_selector == "--json labels,comments" and type(helpers.mark_result_read_failure) == "function" then
+    helpers.mark_result_read_failure()
+    return base_mock_issue_view_failure("number,title,body,url,updatedAt,state,labels,comments,assignees,author", ...)
+  end
+  return base_mock_issue_view_failure(json_selector, ...)
 end
 
 for _, name in ipairs({
