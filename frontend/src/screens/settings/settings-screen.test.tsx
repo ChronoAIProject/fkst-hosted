@@ -603,7 +603,7 @@ describe('SettingsScreen', () => {
     } as unknown as ReturnType<typeof useGitHubAccounts>);
 
     const originalUrl = import.meta.env.VITE_NYXID_CONNECT_GITHUB_URL;
-    import.meta.env.VITE_NYXID_CONNECT_GITHUB_URL = 'https://nyx.chrono-ai.fun/api/v1/github/connect';
+    (import.meta.env as unknown as Record<string, string | undefined>).VITE_NYXID_CONNECT_GITHUB_URL = 'https://nyx.chrono-ai.fun/api/v1/github/connect';
 
     try {
       renderWithProviders(<SettingsScreen />);
@@ -614,7 +614,7 @@ describe('SettingsScreen', () => {
         expect(link).toHaveAttribute('href', 'https://nyx.chrono-ai.fun/api/v1/github/connect');
       });
     } finally {
-      import.meta.env.VITE_NYXID_CONNECT_GITHUB_URL = originalUrl;
+      (import.meta.env as unknown as Record<string, string | undefined>).VITE_NYXID_CONNECT_GITHUB_URL = originalUrl;
     }
   });
 });
