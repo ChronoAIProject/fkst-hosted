@@ -768,7 +768,11 @@ export function Goal({
 
       {/* Footer */}
       <div className="foot flex gap-6 font-mono text-[11px] text-ghost flex-wrap mt-6 pt-[14px] border-t border-line">
-        <span>state as of <b>unknown</b> · merge gate from redb <b>unknown</b> · poll-derived</span>
+        {isHosted ? (
+          <span>state as of <b>unknown</b> · merge gate not exposed by the v1 API</span>
+        ) : (
+          <span>state as of <b>unknown</b> · merge gate from redb <b>unknown</b> · poll-derived</span>
+        )}
         {isHosted ? (
           <span>hosted goal record; not GitHub-derived</span>
         ) : (

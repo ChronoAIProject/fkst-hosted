@@ -570,10 +570,19 @@ export function Overview({
 
       {/* Footer */}
       <div className="foot flex gap-6 font-mono text-[11px] text-ghost flex-wrap mt-6 pt-[14px] border-t border-line">
-        <span>counts &amp; rates scoped to <b>{timeWindow}</b></span>
-        <span>merges → <b>integration branch</b> · a rollup PR carries integration → dev</span>
-        <span>state re-derived from GitHub each poll · <b>labels are hints, markers are fact</b></span>
-        <span>state as of <b>unknown</b> · poll-derived</span>
+        {isHostedMode ? (
+          <>
+            <span>hosted goal records</span>
+            <span>counts are as-of the last fetch; not GitHub-derived</span>
+          </>
+        ) : (
+          <>
+            <span>counts &amp; rates scoped to <b>{timeWindow}</b></span>
+            <span>merges → <b>integration branch</b> · a rollup PR carries integration → dev</span>
+            <span>state re-derived from GitHub each poll · <b>labels are hints, markers are fact</b></span>
+            <span>state as of <b>unknown</b> · poll-derived</span>
+          </>
+        )}
       </div>
     </div>
   );

@@ -480,7 +480,9 @@ export function Goals({
               <span>a goal is a <b>GitHub issue</b> labeled <b>fkst-dev:enabled</b></span>
             )}
             <span>rows scoped to the <b>{timeWindow}</b> window · open rows drill into the goal page</span>
-            <span className="text-gold">fkst-packages CI unknown shown as — , never a pass</span>
+            {!isHostedMode && (
+              <span className="text-gold">fkst-packages CI unknown shown as — , never a pass</span>
+            )}
             <span>state as of <b>unknown</b> · poll-derived (~5-min ticks), not live</span>
           </div>
         </div>
