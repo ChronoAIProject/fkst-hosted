@@ -32,6 +32,18 @@ return {
     t.eq(find_step(saga_def, "block-original").request_queue, "github_issue_blocked_by_request")
   end,
 
+  test_fork_and_block_create_step_requires_parent_created_marker = function()
+    local saga_def = core.external_effect_saga("fork-and-block")
+    local create = find_step(saga_def, "create-fork")
+    local condition = find_post_condition(create, "fork-created-parent-ledger")
+
+    conformance.assert_external_effect_post_condition(condition, {
+      body = core.issue_created_marker("fork-dedup-key", "43"),
+      dedup_key = "fork-dedup-key",
+      issue_number = "43",
+    })
+  end,
+
   test_fork_and_block_block_step_requires_valid_add_blocked_by_mutation = function()
     local saga_def = core.external_effect_saga("fork-and-block")
     local block = find_step(saga_def, "block-original")
@@ -51,6 +63,17 @@ return {
 
     t.eq(ok, false)
     t.eq(tostring(err):find("requires GraphQL field issueId", 1, true) ~= nil, true)
+  end,
+
+  test_fork_and_block_block_step_requires_blocked_by_marker = function()
+    local saga_def = core.external_effect_saga("fork-and-block")
+    local block = find_step(saga_def, "block-original")
+    local condition = find_post_condition(block, "blocked-by-marker-visible")
+
+    conformance.assert_external_effect_post_condition(condition, {
+      body = core.blocked_by_marker("fork-dedup-key/blocked-by", 42, 43),
+      dedup_key = "fork-dedup-key/blocked-by",
+    })
   end,
 
   test_issue_create_parent_ledger_saga_declares_marker_post_conditions = function()

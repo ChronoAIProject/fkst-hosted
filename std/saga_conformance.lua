@@ -223,8 +223,11 @@ end
 
 local function assert_trusted_comment_marker(condition, evidence)
   local body = evidence and evidence.body
-  if body == nil then
-    return
+  if type(body) ~= "string" or body == "" then
+    error(
+      "std.saga_conformance: post_condition " .. tostring(condition.id)
+        .. " requires marker body evidence"
+    )
   end
   if condition.marker ~= nil then
     require_fragment(

@@ -63,6 +63,19 @@ return {
     t.eq(tostring(err):find("step write-comment requires non-empty post_conditions", 1, true) ~= nil, true)
   end,
 
+  test_assert_external_effect_post_condition_requires_trusted_marker_evidence = function()
+    local ok, err = pcall(function()
+      conformance.assert_external_effect_post_condition({
+        id = "trusted-marker-visible",
+        kind = "trusted-comment-marker",
+        marker = "<!-- fkst:test -->",
+      }, {})
+    end)
+
+    t.eq(ok, false)
+    t.eq(tostring(err):find("requires marker body evidence", 1, true) ~= nil, true)
+  end,
+
   test_write_class_classifier_is_explicit = function()
     t.eq(conformance.is_write_class("gh issue comment '42' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh issue reopen '42' --repo 'owner/x'"), true)
