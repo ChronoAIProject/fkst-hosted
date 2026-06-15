@@ -87,6 +87,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     );
   }
 
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('nyxid:auto_login_attempts', '0');
+  }
+
   const contentType = response.headers.get('content-type');
   if (contentType && contentType.includes('application/json')) {
     try {
@@ -145,6 +149,10 @@ export async function requestVoid(path: string, options?: RequestInit): Promise<
       parsedBody,
       isApiErrorBody(body) ? body.message : `Request failed with status ${response.status}`
     );
+  }
+
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('nyxid:auto_login_attempts', '0');
   }
 }
 
