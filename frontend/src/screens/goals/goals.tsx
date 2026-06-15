@@ -249,7 +249,11 @@ export function Goals({
         /* ISSUES VIEW */
         <div className="flex flex-col gap-4">
           <p className="text-[12px] leading-relaxed text-faint">
-            State is derived from trusted-bot <span className="font-mono text-[11.5px] text-dim">state:v1</span> markers; <span className="font-mono text-[11.5px] text-dim">fkst-dev:*</span> labels are self-heal hints only. Stage groups the design / build / review / ship flow; <b>ready · gated</b> is consensus output held at the dependency gate (<span className="font-mono text-[11.5px] text-dim">fkst-dev:n</span> · <span className="font-mono text-[11.5px] text-dim">n:v1</span> marker).
+            {isHostedMode ? (
+              <span>State and status are managed by the hosted service. Stage pipeline mapping is not applicable to hosted goals.</span>
+            ) : (
+              <span>State is derived from trusted-bot <span className="font-mono text-[11.5px] text-dim">state:v1</span> markers; <span className="font-mono text-[11.5px] text-dim">fkst-dev:*</span> labels are self-heal hints only. Stage groups the design / build / review / ship flow; <b>ready · gated</b> is consensus output held at the dependency gate (<span className="font-mono text-[11.5px] text-dim">fkst-dev:n</span> · <span className="font-mono text-[11.5px] text-dim">n:v1</span> marker).</span>
+            )}
           </p>
 
           <div className="w-full overflow-x-auto max-[980px]:scrollbar-thin">
@@ -464,13 +468,17 @@ export function Goals({
               Load all →
             </button>
             <span className="font-mono text-[11px] text-ghost ml-auto max-[600px]:ml-0 max-[600px]:w-full">
-              showing {showData ? goals.length : '—'} · sorted newest · state from trusted GitHub markers (labels are hints) · poll-derived
+              showing {showData ? goals.length : '—'} · sorted newest · {isHostedMode ? 'status from hosted database' : 'state from trusted GitHub markers (labels are hints)'} · poll-derived
             </span>
           </div>
 
           {/* Footer */}
           <div className="foot flex gap-6 font-mono text-[11px] text-ghost flex-wrap mt-6 pt-[14px] border-t border-line">
-            <span>a goal is a <b>GitHub issue</b> labeled <b>fkst-dev:enabled</b></span>
+            {isHostedMode ? (
+              <span>a goal is a record in the hosted database</span>
+            ) : (
+              <span>a goal is a <b>GitHub issue</b> labeled <b>fkst-dev:enabled</b></span>
+            )}
             <span>rows scoped to the <b>{timeWindow}</b> window · open rows drill into the goal page</span>
             <span className="text-gold">fkst-packages CI unknown shown as — , never a pass</span>
             <span>state as of <b>unknown</b> · poll-derived (~5-min ticks), not live</span>

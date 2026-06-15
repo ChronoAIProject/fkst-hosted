@@ -140,7 +140,15 @@ export function Goal({
         });
         toast({
           title: 'Goal Triggered',
-          description: `Goal triggered successfully. Session ${res.session_id} registered.`,
+          description: (
+            <span>
+              Goal triggered successfully. Session{' '}
+              <Link to="/settings" className="underline font-mono">
+                {res.session_id}
+              </Link>{' '}
+              registered.
+            </span>
+          ),
         });
       }
     } catch (err) {
@@ -443,7 +451,16 @@ export function Goal({
               <span className="font-mono text-ghost text-[11.5px]">repo <b className="text-faint font-medium">{repoStr || '—'}</b></span>
               <span className="font-mono text-ghost text-[11.5px]">packages <b className="text-faint font-medium">{packageNames.length > 0 ? packageNames.join(', ') : '—'}</b></span>
               <span className="font-mono text-ghost text-[11.5px]">
-                active session <b className="text-faint font-medium">{activeSessionId || '—'}</b>
+                active session{' '}
+                <b className="text-faint font-medium">
+                  {activeSessionId ? (
+                    <Link to="/settings" className="underline hover:text-dim">
+                      {activeSessionId}
+                    </Link>
+                  ) : (
+                    '—'
+                  )}
+                </b>
               </span>
             </>
           ) : (
@@ -535,6 +552,10 @@ export function Goal({
                 </div>
               ))}
             </div>
+          ) : isHosted ? (
+            <div className="flex items-center justify-center py-12 text-ghost font-mono text-[12px] border border-dashed border-line rounded-panel bg-raise/20">
+              lifecycle timeline not exposed by the v1 API for hosted goals
+            </div>
           ) : (
             <div className="flex items-center justify-center py-12 text-ghost font-mono text-[12px] border border-dashed border-line rounded-panel bg-raise/20">
               no GitHub plane connected — sign-in pending
@@ -548,7 +569,9 @@ export function Goal({
           <div className="panel bg-raise border border-line rounded-[13px] overflow-hidden">
             <div className="ph p-[11px_14px] border-b border-line font-mono font-semibold text-[11px] tracking-[0.1em] uppercase text-faint flex items-center justify-between">
               Merge gate
-              {mergeGate ? (
+              {isHosted ? (
+                <span className="text-ghost text-[10px] lowercase">unavailable</span>
+              ) : mergeGate ? (
                 <span className={cn(
                   "text-[10.5px] font-mono lowercase",
                   Object.values(mergeGate).every(v => v === 'ok')
@@ -568,7 +591,11 @@ export function Goal({
               )}
             </div>
             <div className="pc p-[13px_14px] flex flex-col gap-[11px]">
-              {mergeGate ? (
+              {isHosted ? (
+                <div className="flex flex-col items-center justify-center text-center py-6 text-ghost font-mono text-[11px]">
+                  merge gate not exposed by the v1 API
+                </div>
+              ) : mergeGate ? (
                 <>
                   <div className="gate flex items-center gap-[10px] text-[12.5px] text-dim">
                     {mergeGate.reviewApproved === 'ok' ? (
@@ -742,7 +769,11 @@ export function Goal({
       {/* Footer */}
       <div className="foot flex gap-6 font-mono text-[11px] text-ghost flex-wrap mt-6 pt-[14px] border-t border-line">
         <span>state as of <b>unknown</b> · merge gate from redb <b>unknown</b> · poll-derived</span>
-        <span>every transition re-derived from GitHub on each tick</span>
+        {isHosted ? (
+          <span>hosted goal record; not GitHub-derived</span>
+        ) : (
+          <span>every transition re-derived from GitHub on each tick</span>
+        )}
       </div>
     </div>
   );

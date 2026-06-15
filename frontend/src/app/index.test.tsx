@@ -195,7 +195,7 @@ describe('App Smoke Test', () => {
     window.history.pushState({}, '', '/goals/152');
     renderApp();
     await waitFor(() => {
-      expect(screen.getByText(/no GitHub plane connected/i)).toBeInTheDocument();
+      expect(screen.getByText(/lifecycle timeline not exposed by the v1 API/i)).toBeInTheDocument();
       expect(screen.getByText('#152')).toBeInTheDocument();
     });
   });
