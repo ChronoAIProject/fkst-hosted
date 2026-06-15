@@ -164,6 +164,7 @@ mod tests {
     fn gateway(token_base: &str, gateway_url: &str) -> NyxLlmGateway {
         let nyxid = NyxIdClient::new(
             token_base,
+            "api-github",
             "sa_test".to_string(),
             SecretString::from("sas_secret".to_string()),
             Duration::from_secs(30),
@@ -282,6 +283,7 @@ mod tests {
         const SECRET: &str = "sas_should_never_leak_12345";
         let nyxid = NyxIdClient::new(
             "http://127.0.0.1:1",
+            "api-github",
             "sa_test".to_string(),
             SecretString::from(SECRET.to_string()),
             Duration::from_secs(30),

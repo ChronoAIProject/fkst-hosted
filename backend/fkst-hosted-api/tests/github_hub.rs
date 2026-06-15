@@ -23,7 +23,7 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::nyxid::{NyxIdClient, GITHUB_PROXY_PATH};
+use fkst_hosted_api::nyxid::{NyxIdClient, DEFAULT_GITHUB_PROXY_SLUG};
 use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
@@ -49,6 +49,18 @@ const MONGO_TAG: &str = "7";
 const ISSUER: &str = "nyxid";
 const AUDIENCE: &str = "fkst-test";
 const KID: &str = "test-key-1";
+
+/// GitHub-proxy base path the wiremock matchers expect, built from the default
+/// slug so the integration suite tracks the production path shape after the
+/// slug was made configurable. The `app(...)` helper builds its `NyxIdClient`
+/// with `DEFAULT_GITHUB_PROXY_SLUG`, so this must agree with it.
+const GITHUB_PROXY_PATH: &str = "/api/v1/proxy/api-github";
+// Compile-time guard: keep the literal above in lockstep with the public
+// default slug, so a future slug change cannot silently desync these matchers.
+const _: () = assert!(matches!(
+    DEFAULT_GITHUB_PROXY_SLUG.as_bytes(),
+    b"api-github"
+));
 
 /// True when a Docker daemon answers `docker info`.
 fn docker_available() -> bool {
@@ -182,6 +194,7 @@ async fn app(server: MockServer) -> TestApp {
 
     let nyxid = NyxIdClient::new(
         &server.uri(),
+        DEFAULT_GITHUB_PROXY_SLUG,
         "sa_test_client".to_string(),
         SecretString::from("sas_test_secret".to_string()),
         Duration::from_secs(30),

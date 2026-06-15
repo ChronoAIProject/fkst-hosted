@@ -246,6 +246,7 @@ async fn main() -> ExitCode {
         (fkst_hosted_api::auth::AuthMode::Enabled(settings), Some(id), Some(secret)) => {
             match NyxIdClient::new(
                 &settings.base_url,
+                &config.nyxid_github_proxy_slug,
                 id.clone(),
                 secret.clone(),
                 std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
