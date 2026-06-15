@@ -130,6 +130,52 @@ function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue,
   return false
 end
 
+function M.fork_first_observed_key(repo, issue_number, progress_key)
+  local parts = {
+    "github-devloop",
+    "fork-first-observed",
+    M.safe_repo(repo),
+    "issue",
+    M.safe_issue(issue_number),
+  }
+  if progress_key ~= nil and tostring(progress_key) ~= "" then
+    table.insert(parts, M.safe_updated_at(progress_key))
+  end
+  return M._dedup_key(parts)
+end
+
+function M.fork_grace_seconds(exec)
+  local raw = M.read_env("FKST_DEVLOOP_FORK_GRACE_HOURS", exec)
+  raw = M._trim(raw or "")
+  if raw == "" then
+    return 3 * 60 * 60
+  end
+  local hours = tonumber(raw)
+  if hours == nil or hours <= 0 or hours > 168 then
+    error("github-devloop: invalid FKST_DEVLOOP_FORK_GRACE_HOURS")
+  end
+  return math.floor(hours * 60 * 60)
+end
+
+function M.fork_grace_elapsed(repo, issue_number, current, now_seconds, grace_seconds)
+  local current_seconds = tonumber(now_seconds)
+  local grace = tonumber(grace_seconds)
+  if current_seconds == nil or grace == nil then
+    return false, "fork-grace-age-unknown"
+  end
+  local progress_key = current and (current.updated_at or current.updatedAt)
+  local observed_key = M.fork_first_observed_key(repo, issue_number, progress_key)
+  local first_observed_seconds = tonumber(cache_get(observed_key) or "")
+  if first_observed_seconds == nil then
+    cache_set(observed_key, tostring(current_seconds))
+    return false, "fork-grace-started"
+  end
+  if current_seconds - first_observed_seconds < grace then
+    return false, "fork-grace-pending"
+  end
+  return true, "fork-grace-elapsed", current_seconds - first_observed_seconds
+end
+
 function M.claim_issue_for_management(dept, repo, issue_number, current, proposal_id)
   local owner = M.claim_owner()
   local status = M.issue_claim_state(current and current.assignees, owner)
@@ -154,6 +200,11 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
     end
     if M.has_trusted_issue_create_parent_marker(current and current.comments, request.dedup_key, owner) then
       log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
+      return false
+    end
+    local elapsed = M.fork_grace_elapsed(repo, issue_number, current, now(), M.fork_grace_seconds())
+    if not elapsed then
+      log_claim(dept, proposal_id, "skip-fork-grace", "other-authored unassigned issue is inside fork grace window")
       return false
     end
     log_claim(dept, proposal_id, "fork-raised", "other-authored unassigned issue is forked before management")

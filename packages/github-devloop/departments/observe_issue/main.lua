@@ -385,6 +385,7 @@ function pipeline(event)
     end
 
     local current = core.parse_issue_view_state(state_view.stdout)
+    current.updated_at = current.updated_at or issue.updated_at
     if current.state ~= "OPEN" then
       core.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-advanced-or-diverged", "issue is not open")
       return
