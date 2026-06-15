@@ -54,7 +54,63 @@ We use three separate credential paths:
 - fkst-hosted operators must register and install the GitHub App manually (see runbook below).
 - Until `FKST_GITHUB_APP_ID` is configured, the module is disabled (logged at boot) and dependent features return actionable 422 errors with an install URL.
 - A bad PEM fails at deploy time (startup), not at first session.
-- Adding the `administration` permission to the App would trigger per-installation re-approval; it is deliberately excluded from v1.
+- As of issue #110 the session permission set is **admin-equivalent** (see "Session token permissions" below); adding `administration` triggers per-installation re-approval and makes org installation owner-only. The owner has accepted the increased blast radius of an autonomous session holding repo-admin for the session duration.
+
+### Session token permissions (issue #110)
+
+Substrate sessions hold **admin-equivalent** access to their target repo for the
+whole session. Every minted installation token requests these **Repository
+permissions** at **write**:
+
+| Permission | Level | Why |
+|------------|-------|-----|
+| **Administration** | Read & write | GitHub Apps have no "admin role"; `administration: write` is the closest equivalent — branch protection / rulesets, collaborator & team management, repo settings, visibility, rename/transfer, deploy keys. |
+| **Pull requests** | Read & write | Open / update / merge PRs from session automation. |
+| **Contents** | Read & write | Clone, push progress records, read/write session files. |
+| **Issues** | Read & write | Create / comment / close issues from session automation. |
+| **Metadata** | Read (implicit) | Always granted on installation tokens; never requested explicitly. |
+
+The owner has explicitly accepted the increased blast radius of an autonomous
+agent holding repo-admin for the session duration. The elevated scope only takes
+real effect once the installation token is wired into the engine at startup
+(issue #106).
+
+#### Required GitHub App settings declaration (hard prerequisite)
+
+A mint can only request a **subset of what the GitHub App itself was granted**.
+The fkst-hosted GitHub App **must** declare all four of **Administration**,
+**Pull requests**, **Contents**, and **Issues** as **Read & write** Repository
+permissions in its settings. If the App was never granted one of them, the mint
+returns **422** (`github token request rejected`) — this is logged loudly at the
+mint site (`token_for_repo`) with the rejected-permission detail and surfaced to
+callers as a 422; the token is never logged. Declare these in the App settings
+**before** broad installation so new installs consent up-front (see runbook
+step 1).
+
+#### Re-consent requirement (existing installations)
+
+Adding the `administration` permission to an already-published App **suspends
+that permission on every existing installation until the owner re-approves**.
+Existing installations get a review prompt; the elevated set does not take
+effect on them until re-approved. Wire the operational signal through the
+installation webhook/lifecycle (issue #108).
+
+#### Org consequence: installation becomes owner-only
+
+Requesting `administration` makes **organization installation owner-only**.
+Repo admins are **excluded** from installing an App that requests the repository
+Administration permission, and non-owner members can only **Request** it (an
+org owner then approves). This changes the org install instructions from "an
+admin installs" to "an **org owner** installs / approves".
+
+#### Out of scope (deliberately NOT requested)
+
+`workflows`, `secrets`, `actions`, `repository_hooks`, and `environments` are
+**not** added by this change. Consequently the session token **cannot push
+changes under `.github/workflows/**`** (that needs `workflows: write`) nor
+**manage Actions secrets / variables** (needs `secrets`/`actions`). If a session
+later needs those, file a follow-up issue rather than widening the default set
+silently.
 
 ### Session-token delivery to the engine
 
@@ -96,12 +152,15 @@ When the linked connection lacks the scope, fkst-hosted does not fail opaquely: 
    - **GitHub App name:** `fkst-hosted` (or your preferred name).
    - **Homepage URL:** `https://github.com/ChronoAIProject/fkst-hosted`.
    - **Webhook:** uncheck **Active** (webhooks are OFF in v1).
-   - **Repository permissions (v1):**
+   - **Repository permissions (session admin set — issue #110):**
+     - **Administration:** Read & Write (admin-equivalent: branch protection / rulesets, collaborators & teams, repo settings, visibility, rename/transfer, deploy keys).
+     - **Pull requests:** Read & Write (open / update / merge PRs).
      - **Contents:** Read & Write (clone, push progress records, read/write session files).
-     - **Metadata:** Read (required by GitHub; always read).
-     - **Issues:** Read & Write (dormant in v1; included so the journaling issue-comment mirror can later ride installation tokens).
-     - **Administration:** No access (deliberately excluded; org-repo creation is a later feature and adding permissions triggers per-installation re-approval).
-   - **Where can this GitHub App be installed?** Any account (or restrict to ChronoAI org if preferred).
+     - **Issues:** Read & Write (create / comment / close issues).
+     - **Metadata:** Read (required by GitHub; always read; granted implicitly on installation tokens).
+   - All four of **Administration, Pull requests, Contents, Issues** are a **hard prerequisite** — the token mint can only request a subset of what the App was granted, so a mint **422s** (`github token request rejected`) for any one of them the App lacks.
+   - `workflows`, `secrets`, `actions`, `repository_hooks`, and `environments` are **deliberately NOT requested** (the session token cannot touch `.github/workflows/**` or manage Actions secrets — file a follow-up if needed).
+   - **Where can this GitHub App be installed?** Any account (or restrict to ChronoAI org if preferred). Note: because the App requests **Administration**, **organization** installs are **owner-only** — repo admins cannot install it; non-owner members can only *Request* it for an org owner to approve.
 3. Click **Create GitHub App**.
 4. Note the **App ID** (visible on the app's settings page).
 
@@ -127,10 +186,13 @@ When the linked connection lacks the scope, fkst-hosted does not fail opaquely: 
 
 1. Go to the app's settings page > **Install App**.
 2. Click **Install** next to the target org/user.
+   - **Organization targets are owner-only:** because the App requests the **Administration** permission, only an **org owner** can install (or approve) it. Repo admins are excluded; a non-owner member can only **Request** the install, which an org owner then approves.
 3. Select the repositories the App should access (or "All repositories").
 4. Click **Install**.
 
 The App is now ready. fkst-hosted will detect the configuration at next startup and log `github app enabled (app_id=...)`.
+
+> **Re-consent on existing installations (issue #110):** adding the `administration` permission to an already-published App **suspends that permission on every existing installation until the owner re-approves**. Roll it out by declaring the admin set in the App settings **before** broad installation so new installs consent up-front; existing installations receive a review prompt and must be re-approved (an **org owner** for org installs) before the elevated scope takes effect.
 
 ### 4. Key Rotation
 
@@ -152,7 +214,7 @@ GitHub allows two active private keys simultaneously. Use this for zero-downtime
 | 422 `github app not installed on owner/repo` with install URL | App not installed on that repo | Install the App on the target repo (see step 3). The error message includes the install URL when the slug is configured. |
 | 422 `github app not installed on owner/repo` without install URL | App slug not configured | Set `FKST_GITHUB_APP_SLUG` to get actionable install URLs in error messages. |
 | 503 `github rate limited` | API rate limit exhausted | Wait for the reset period (indicated in the error). Per-installation rate limits apply. |
-| 422 `github token request rejected` | Permission subset exceeds App's granted permissions | Verify the v1 permissions (Contents R&W, Metadata R, Issues R&W) are granted on the installation. |
+| 422 `github token request rejected` | Permission subset exceeds App's granted permissions (e.g. the App lacks `administration`), or an existing install has not re-approved the new admin scope | Verify the App declares **Administration, Pull requests, Contents, Issues** all at **Read & write** (issue #110) and that the installation has re-approved (org installs need an **org owner**). The rejected-permission detail is logged at the mint site (`github installation-token mint rejected (422)`). |
 | 422 "missing the `repo` permission needed to create repositories" | Linked GitHub connection lacks the `repo` OAuth scope | Reconnect GitHub granting repo access, expand the NyxID `github` provider's `default_scopes` to include `repo`, or use the `github-pat` provider with a `repo`-scoped token (see "Repository creation requires `repo` scope" above). |
 | 422 "not SSO-authorized for the `<org>` organization" | Org enforces SAML SSO; the proxied token is not authorized for it | Authorize your GitHub token for the org via the URL surfaced in the error (expires ~1h), then retry. |
 | 422 "organization's policy prevents creating this repository" | Org forbids member repo creation, the OAuth app is not org-approved, or the requested visibility is disallowed | Have an org owner allow repo creation / approve the OAuth app, or request a permitted visibility. |
