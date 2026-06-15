@@ -190,7 +190,7 @@ return {
     mock_merge_command(stale)
     mock_pr_merge(merged_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha, "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
     mock_issue_close()
-    mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
+    mock_queue_list({})
 
     local result = run_starvation_merge_queue_tick(stale, opts("merge-queue-starvation-non-reported-head", {
       FKST_GITHUB_WRITE = "1",
@@ -199,7 +199,6 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge '" .. tostring(stale.pr_number) .. "' --repo 'owner/repo' --merge --match-head-commit"), 1)
-    t.eq(count_calls("gh pr merge '" .. tostring(current.pr_number) .. "' --repo 'owner/repo' --merge --match-head-commit"), 0)
     local reconcile = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(reconcile ~= nil)
     t.eq(reconcile.payload.pr_number, stale.pr_number)
@@ -207,5 +206,39 @@ return {
     t.is_true(reconcile.payload.body:find('pr="' .. tostring(stale.pr_number) .. '"', 1, true) ~= nil)
     t.is_true(reconcile.payload.body:find('head_sha="' .. stale.reviewed_head_sha .. '"', 1, true) ~= nil)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+  end,
+
+  test_queue_starvation_redrive_requeues_after_non_fifo_target_progress = function()
+    local current = merge_ready()
+    local stale = event_for_pr(459, 459, "2026-06-03T00-00-00Z", "abcdef1234567890abcdef1234567890abcdef12")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_repo_env()
+    mock_queue_list({ 7, 459 })
+    mock_queue_pr(current, "2026-06-03T01:00:00Z")
+    mock_queue_pr(stale, "2026-06-03T02:00:00Z")
+    mock_claimed_issue_for_event(stale)
+    mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
+    mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
+    mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
+    mock_merging_comment_for_event(stale)
+    mock_merge_command(stale)
+    mock_pr_merge(merged_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha, "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
+    mock_issue_close()
+    mock_queue_list({ 7 })
+    mock_queue_pr(current, "2026-06-03T01:00:00Z")
+
+    local result = run_starvation_merge_queue_tick(stale, opts("merge-queue-starvation-requeues-after-progress", {
+      FKST_GITHUB_WRITE = "1",
+      FKST_GITHUB_REPO = "owner/repo",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge '" .. tostring(stale.pr_number) .. "' --repo 'owner/repo' --merge --match-head-commit"), 1)
+    local chained = find_raise(result.raises, "devloop_merge_queue_tick")
+    t.is_true(chained ~= nil)
+    t.eq(chained.payload.schema, "github-devloop.merge-queue-tick.v1")
+    t.eq(chained.payload.cause.merged_pr_number, stale.pr_number)
+    t.eq(chained.payload.cause.next_pr_number, current.pr_number)
   end,
 }

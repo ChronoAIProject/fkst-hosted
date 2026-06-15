@@ -910,17 +910,10 @@ local function process_merge_queue_tick(event)
       queue_starvation_cause = cause_kind == "queue-starvation" and cause or nil,
     })
     if outcome ~= nil and outcome.status == "merged" then
-      if cause_kind == "queue-starvation" and not selected_is_fifo_head then
-        core.log_line("info", "merge", merge_ready.proposal_id, "GATE", {
-          "pr=" .. tostring(merge_ready.pr_number),
-          "version=" .. tostring(merge_ready.version),
-          "outcome=quiescent",
-          "reason=queue-starvation-target-redriven",
-          "pass=poll",
-        })
-        return
+      local last_merged_pr_number = outcome.pr_number
+      if cause_kind ~= "queue-starvation" or selected_is_fifo_head then
+        last_merged_pr_number = core.run_merge_batch_window(repo, branches, merge_ready, entries, { write_mode = write_mode }, process_merge_ready_locked)
       end
-      local last_merged_pr_number = core.run_merge_batch_window(repo, branches, merge_ready, entries, { write_mode = write_mode }, process_merge_ready_locked)
       chain_merge_queue_if_non_empty(repo, branches, last_merged_pr_number or outcome.pr_number)
     end
   end)
