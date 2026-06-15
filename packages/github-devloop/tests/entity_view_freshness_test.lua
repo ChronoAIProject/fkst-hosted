@@ -163,6 +163,8 @@ return {
     local issue_number = 4244
     local updated_at = "2026-06-03T01:02:03Z"
     local view_command = core.gh_issue_view_entity_cmd(repo, issue_number)
+    local rest_command = issue_rest_command(repo, issue_number)
+    local comments_command = comments_rest_command(repo, issue_number)
     seed_cached_view(repo, "issue", issue_number, seam.issue_view_stdout({
       repo = repo,
       number = issue_number,
@@ -186,7 +188,9 @@ return {
     t.eq(forced.exit_code, 0)
     t.is_true(forced.stdout:find('"After"', 1, true) ~= nil)
     t.is_true(cached.stdout:find('"After"', 1, true) ~= nil)
-    t.eq(count_calls(view_command), 1)
+    t.eq(count_calls(view_command), 0)
+    t.eq(count_exact_calls(rest_command), 1)
+    t.eq(count_exact_calls(comments_command), 1)
   end,
 
   test_write_invalidation_forces_same_validator_issue_refetch = function()

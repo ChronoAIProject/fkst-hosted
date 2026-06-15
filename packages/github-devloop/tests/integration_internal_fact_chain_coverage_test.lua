@@ -67,6 +67,15 @@ end
 
 local function mock_issue_result_view(labels, comments, extra)
   local fields = extra or {}
+  entity_read_mocks.mock_issue_read_forms(t, {
+    repo = fields.repo,
+    number = fields.number,
+    labels = labels,
+    comments = comments,
+    assignees = fields.assignees,
+    author_login = fields.author_login,
+    times = fields.times,
+  })
   entity_read_mocks.mock_issue_view_selector(t, {
     repo = fields.repo,
     number = fields.number,
@@ -354,7 +363,7 @@ return {
     local feedback = reject_comment(event)
     mock_bot_env()
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:enabled", "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       feedback,
     }, branch, event.version)
@@ -369,7 +378,7 @@ return {
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("feedface", branch)
     mock_write_env("1")
-    mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+    mock_issue_fix_for_event(event, { "fkst-dev:enabled", "fkst-dev:fixing" }, {
       core.state_marker(event.proposal_id, "fixing", event.version),
       feedback,
     }, branch, event.version)
@@ -391,7 +400,17 @@ return {
     mock_pr_origin({
       core.pr_origin_marker(event.proposal_id, "42", branch, impl_version, "dev"),
       core.state_marker(event.proposal_id, "fixing", event.version),
-    }, nil, nil, nil, nil, 2)
+    }, branch, "feedface", nil, nil, 2)
+    t.mock_command("git fetch 'origin' '" .. branch .. "'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+      stdout = "feedface\n",
+      stderr = "",
+      exit_code = 0,
+    })
     local recovered = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("internal-chain-fix-recovery"))
     t.eq(recovered.exit_code, 0)
     local recovered_reviewing = find_raise(recovered.raises, "devloop_reviewing")

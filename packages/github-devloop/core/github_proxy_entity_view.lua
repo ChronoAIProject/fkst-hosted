@@ -445,14 +445,13 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
     error("github-devloop: invalid entity view kind")
   end
 
-  local cmd = entity_view_cmd(repo, selected_kind, number)
   local validator = tostring(updated_at or "")
   local options = opts or {}
   local consumer = tostring(options.consumer or "")
   local timeout = tonumber(options.timeout) or 30
   local key = entity_view_cache_key(repo, selected_kind, number)
   if options.force_fresh == true then
-    local result = M.gh_exec(cmd, timeout)
+    local result = rest_entity_view_result(repo, selected_kind, number, timeout)
     cache_successful_view(key, result, consumer)
     return result
   end
