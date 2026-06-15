@@ -9,7 +9,7 @@ import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-
+import check_repo_gh_git_adapter as gh_git_adapter
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -70,10 +70,8 @@ class LuaStringLiteral:
     line: int
     content: str
 
-
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
 
 def rel(root: Path, path: Path) -> str:
     packages_view = packages_root(root)
@@ -86,7 +84,6 @@ def read_text(path: Path) -> str: return path.read_text(encoding="utf-8")
 def packages_root(root: Path) -> Path: return root / ".fkst" / "packages"
 def line_count(path: Path) -> int: return len(read_text(path).splitlines())
 def add(violations: list[str], rule: str, message: str) -> None: violations.append(f"{rule}: {message}")
-
 
 def long_bracket_at(text: str, index: int) -> tuple[int, str] | None:
     if index >= len(text) or text[index] != "[":
@@ -104,7 +101,6 @@ def mask_span(chars: list[str], start: int, end: int) -> None:
     for index in range(start, end):
         if chars[index] != "\n":
             chars[index] = " "
-
 
 def end_of_long_bracket(text: str, body_start: int, closer: str) -> int:
     close_start = text.find(closer, body_start)
@@ -916,13 +912,19 @@ def check_convergence_budget_caps(root: Path, violations: list[str]) -> None:
         if "hit_round_cap" in source and "core.max_converge_rounds()" in source and f"core.{helper}(" not in source:
             add(violations, "G12", f"{rel(root, path)} convergence cap must use proposal-keyed core.{helper}() budget")
 
+
+def check_gh_git_adapter_ratchet(root: Path, violations: list[str]) -> None:
+    sources = gh_git_adapter.sources(root, packages_root(root), read_text, rel)
+    allowlist = gh_git_adapter.load_allowlist(root / gh_git_adapter.ALLOWLIST)
+    for message in gh_git_adapter.ratchet_messages(sources, allowlist, lua_string_literals):
+        add(violations, "G-ADAPTER", message)
+
 def is_saga_handler_source(source: str) -> bool:
     return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
 
 
 def has_free_form_pipeline_source(source: str) -> bool:
     return FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None
-
 
 def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
     violations: list[str] = []
@@ -939,7 +941,6 @@ def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str]
     if base_allowlist is not None:
         violations.extend(f"G10: {path} grows saga-handler allowlist relative to dev; migrate instead" for path in sorted(allowlist - base_allowlist))
     return violations
-
 
 def saga_allowlist_at_dev_base(root: Path) -> tuple[str, set[str] | None]:
     try:
@@ -963,7 +964,6 @@ def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list
     if base_status == "unresolved": violations.append("G10: cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
     violations.extend(saga_handler_ratchet_violations(sources, allowlist, base_allowlist))
 
-
 def main() -> int:
     root = repo_root()
     violations: list[str] = []
@@ -982,6 +982,7 @@ def main() -> int:
     check_cross_package_require(root, violations)
     check_entity_read_count_assertions(root, violations)
     check_convergence_budget_caps(root, violations)
+    check_gh_git_adapter_ratchet(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
 
     for warning in warnings:
@@ -994,7 +995,6 @@ def main() -> int:
 
     print("OK: repository checks passed")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

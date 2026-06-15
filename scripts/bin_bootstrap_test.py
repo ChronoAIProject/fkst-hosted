@@ -35,6 +35,7 @@ class BootstrapHarness:
         self.cache = Path(self.tmp.name) / "cache"
         self.log = Path(self.tmp.name) / "calls.log"
         self.env = os.environ.copy()
+        self.env.pop("FKST_NO_AUTOBUILD", None)
         self.env.update(
             {
                 "FKST_BIN_CACHE_ROOT": str(self.cache),

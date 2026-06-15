@@ -274,7 +274,7 @@ class RunScriptContractTest(unittest.TestCase):
             scripts.mkdir(parents=True)
             pkg.mkdir(parents=True)
 
-            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py"):
+            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_gh_git_adapter.py"):
                 shutil.copy2(root / "scripts" / name, scripts / name)
             for name in ("check_repo_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "board_test.py", "doctor_test.py"):
                 (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
@@ -581,6 +581,92 @@ class SagaHandlerRatchetTest(unittest.TestCase):
 
         self.assertEqual(warnings, [])
         self.assertEqual(violations, [])
+
+
+class GhGitAdapterRatchetTest(unittest.TestCase):
+    def messages(self, sources: dict[str, str], allowlist: dict[str, set[str]] | None = None) -> list[str]:
+        return check_repo.gh_git_adapter.ratchet_messages(sources, allowlist or {})
+
+    def test_builder_literal_is_flagged(self) -> None:
+        messages = self.messages({
+            "packages/example/core.lua": 'return "gh issue list"\n',
+        })
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("packages/example/core.lua constructs a new gh/git command head 'gh issue'", messages[0])
+
+    def test_log_message_literal_is_excluded(self) -> None:
+        messages = self.messages({
+            "packages/example/core.lua": 'log.info("git merge done")\n',
+        })
+
+        self.assertEqual(messages, [])
+
+    def test_env_cd_absolute_path_shell_c_and_concat_are_normalized(self) -> None:
+        source = (
+            'local a = "FOO=1 cd /tmp && /usr/local/bin/git" .. " -C /repo status --short"\n'
+            'local b = "bash -c \\"gh pr view\\""\n'
+            'local c = "GH_HOST=github.com gh" .. " issue view 1"\n'
+        )
+        heads = check_repo.gh_git_adapter.command_heads(source)
+
+        self.assertEqual(heads, {"git status", "gh pr", "gh issue"})
+
+    def test_new_head_in_allowlisted_file_fails(self) -> None:
+        messages = self.messages(
+            {"packages/example/core.lua": 'return "gh issue list"\nreturn "git status"\n'},
+            {"packages/example/core.lua": {"gh issue"}},
+        )
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("constructs a new gh/git command head 'git status'", messages[0])
+
+    def test_stale_head_forces_allowlist_shrink(self) -> None:
+        messages = self.messages(
+            {"packages/example/core.lua": 'return "gh issue list"\n'},
+            {"packages/example/core.lua": {"gh issue", "git status"}},
+        )
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("no longer constructs 'git status'; update its entry", messages[0])
+
+    def test_root_std_non_adapter_flagged_and_std_github_exempt(self) -> None:
+        sources = {
+            "std/helpers.lua": 'return "git status"\n',
+            "std/github/exec.lua": 'return "gh issue list"\n',
+            "std/github.lua": 'return "gh pr view"\n',
+        }
+
+        messages = self.messages(sources)
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("std/helpers.lua constructs a new gh/git command head 'git status'", messages[0])
+
+    def test_check_repo_wrapper_loads_allowlist_and_prefixes_violations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / ".fkst" / "packages" / "example"
+            migration = root / "migration"
+            package.mkdir(parents=True)
+            migration.mkdir()
+            (package / "core.lua").write_text('return "gh issue list"\n', encoding="utf-8")
+            (migration / "gh-git-adapter.allowlist").write_text(
+                "packages/example/core.lua:\n"
+                "  - gh issue\n",
+                encoding="utf-8",
+            )
+
+            violations: list[str] = []
+            check_repo.check_gh_git_adapter_ratchet(root, violations)
+            self.assertEqual(violations, [])
+
+            (package / "core.lua").write_text('return "gh pr view"\n', encoding="utf-8")
+            check_repo.check_gh_git_adapter_ratchet(root, violations)
+
+        self.assertEqual(len(violations), 2)
+        self.assertTrue(all(message.startswith("G-ADAPTER: ") for message in violations))
+        self.assertIn("constructs a new gh/git command head 'gh pr'", violations[0])
+        self.assertIn("no longer constructs 'gh issue'", violations[1])
 
 
 if __name__ == "__main__":
