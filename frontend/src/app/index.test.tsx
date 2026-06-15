@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { App } from './index';
 import { nextCondensed } from './shell';
+import type { ReactNode } from 'react';
 import { NyxIDProvider } from '../lib/auth';
 
 function renderApp() {
@@ -17,7 +18,8 @@ function renderApp() {
 }
 
 vi.mock('@/lib/auth', () => ({
-  authRequired: () => true,
+  authRequired: () => false,
+  NyxIDProvider: ({ children }: { children: ReactNode }) => children,
   useAuthSession: () => ({
     isAuthenticated: false,
     accessToken: null,
@@ -144,7 +146,7 @@ describe('App Smoke Test', () => {
     window.history.pushState({}, '', '/goals');
     renderApp();
     await waitFor(() => {
-      expect(screen.getByText(/no GitHub plane connected/i)).toBeInTheDocument();
+      expect(screen.getByText(/GitHub status unknown/i)).toBeInTheDocument();
     });
   });
 
