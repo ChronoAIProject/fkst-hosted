@@ -298,6 +298,96 @@ local function liveness_timeout_state(state)
   }
 end
 
+local conflict_redrive_states = {
+  ["pr-open"] = true,
+  reviewing = true,
+}
+
+local function build_conflict_review_fact(origin, pr_number, current_pr, version, reason)
+  local head_sha = tostring(current_pr.head_sha or "")
+  if not core._is_git_sha(head_sha) then
+    return nil, "head-missing"
+  end
+  return {
+    review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, version, head_sha),
+    review_dedup_key = "observe-pr-conflict/" .. tostring(origin.proposal_id) .. "/" .. tostring(version) .. "/" .. tostring(pr_number),
+    reviewed_head_sha = head_sha,
+    gate_failure_excerpt = reason,
+  }, "ok"
+end
+
+local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, state, source_ref, issue_current)
+  if not conflict_redrive_states[state.state] then
+    return false
+  end
+  if tostring(current_pr.state or ""):lower() ~= "open" then
+    return false
+  end
+  local mergeable, reason = core.pr_mergeable(current_pr)
+  if mergeable or not core.is_not_mergeable_reason(reason) then
+    return false
+  end
+  if core.version_fix_round(state.version) >= core.max_fix_rounds() then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, "fixing", "skip-idempotent(fix-loop-max-rounds)", reason)
+    return false
+  end
+  local fix_version = core.next_fix_version(state.version)
+  local visible_state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+  if visible_state.state == "fixing" and tostring(visible_state.version or "") == tostring(fix_version) then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, "fixing", "skip-idempotent(already at to_state)", reason)
+    return true
+  end
+  local review_fact, fact_reason = build_conflict_review_fact(origin, pr_number, current_pr, state.version, reason)
+  if review_fact == nil then
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, "fixing", "retry-pending(" .. fact_reason .. ")", reason)
+    return false
+  end
+  review_fact.fix_version = fix_version
+  local comment_origin = {
+    proposal_id = origin.proposal_id,
+    pr_number = pr_number,
+    version = state.version,
+    review_proposal_id = review_fact.review_proposal_id,
+    review_dedup_key = review_fact.review_dedup_key,
+    reviewed_head_sha = review_fact.reviewed_head_sha,
+    dedup_key = tostring(state.version) .. "/observe-pr-conflict",
+  }
+  local comment_request = core.build_merge_gate_fix_comment_request(
+    origin.repo,
+    origin.issue_number,
+    comment_origin,
+    fix_version,
+    reason,
+    nil,
+    source_ref,
+    nil
+  )
+  local label_request = origin.issue_number ~= nil and core.build_state_label_request(
+    origin.repo,
+    origin.issue_number,
+    "fixing",
+    tostring(state.version) .. "/observe-pr-conflict/label/fixing",
+    core.issue_source_ref(origin.repo, origin.issue_number)
+  ) or nil
+  local fix_payload = core.build_devloop_fixing_payload({
+    proposal_id = origin.proposal_id,
+    impl_version = fix_version,
+  }, pr_number, review_fact, source_ref)
+  core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, "fixing", "applied(not-mergeable)", reason)
+  core.log_apply("observe_pr", origin.proposal_id, "fixing", fix_version, { add = { "fkst-dev:fixing" }, remove = {} }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_fixing",
+  })
+  core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if label_request ~= nil then
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  core.log_raise("observe_pr", origin.proposal_id, "devloop_fixing", fix_payload)
+  maybe_label_hints(origin, pr_number, current_pr, { state = "fixing", version = fix_version }, source_ref)
+  return true
+end
+
 local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, source_ref)
   if origin.issue_number == nil then
     core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "blocked", "skip-not-owned", "backing issue is absent")
@@ -421,6 +511,9 @@ function pipeline(event)
     if maybe_apply_rereview_command(origin, pr.number, current_pr, state, source_ref) then
       return
     end
+    if maybe_redrive_not_mergeable_pr(origin, pr.number, current_pr, state, source_ref, issue_current) then
+      return
+    end
     if state.state ~= nil and state.state ~= "pr-open" then
       local replay_state = pr.source == "poll" and raw.source == "liveness-scan" and liveness_timeout_state(state) or state
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
@@ -457,6 +550,9 @@ function pipeline(event)
     end
     if tostring(current_pr.state or ""):lower() ~= "open" then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
+      return
+    end
+    if maybe_redrive_not_mergeable_pr(origin, pr.number, current_pr, state, source_ref, issue_current) then
       return
     end
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "applied", "writing PR-local reviewing marker")

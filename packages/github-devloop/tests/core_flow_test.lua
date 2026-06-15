@@ -604,8 +604,8 @@ return {
     t.eq(pr_request.expected_version, ready.dedup_key)
     t.is_true(pr_request.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
     t.is_true(pr_request.issue_comment_body_template:find("fkst:github-devloop:pr-link:v1", 1, true) ~= nil)
-    t.eq(pr_request.issue_label_add[1], "fkst-dev:pr-open")
-    t.is_true(has_value(pr_request.issue_label_remove, "fkst-dev:implementing"))
+    t.eq(#pr_request.issue_label_add, 0)
+    t.eq(#pr_request.issue_label_remove, 0)
 
     local origin = core.pr_origin_fact({
       core.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),

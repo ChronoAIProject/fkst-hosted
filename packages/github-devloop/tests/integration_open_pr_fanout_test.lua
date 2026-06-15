@@ -160,7 +160,7 @@ return {
     t.eq(count_calls("merge-base --is-ancestor"), 1)
   end,
 
-  test_open_pr_redrive_repairs_stale_blocked_state_label = function()
+  test_open_pr_redrive_leaves_pr_open_state_label_to_observe_issue = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/1"
     mock_issue_open_pr({ "fkst-dev:blocked" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", impl_version),
@@ -173,13 +173,8 @@ return {
     }), opts("open-pr-redrive-stale-blocked-label"))
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:pr-open")
-    t.is_true(h.has_value(label_raise.payload.remove_labels, "fkst-dev:blocked"))
-    t.is_true(h.has_value(label_raise.payload.remove_labels, "fkst-dev:impl-failed"))
-    t.is_true(h.has_value(label_raise.payload.remove_labels, "fkst-dev:merged"))
-    t.eq(h.has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"), false)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
     t.eq(count_calls("show-ref --verify --quiet"), 0)
     t.eq(count_calls("rev-parse --verify"), 0)
   end,

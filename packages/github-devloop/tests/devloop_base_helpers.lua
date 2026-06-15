@@ -652,7 +652,7 @@ mock_pr_origin_from_cached = function(payload, head_sha)
     state = state,
     base_branch = base_branch,
     labels = pending and pending.labels or {},
-  }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels")
+  }, entity_read_mocks.pr_origin_selector)
   return repo, pr_number
 end
 
