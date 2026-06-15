@@ -125,14 +125,14 @@ describe('AddPackageModal (F2) Tests', () => {
       });
     });
 
-    it('enforces 256-pass file count constraint', async () => {
+    it('enforces 256-pass and 257-fail file count constraints', async () => {
       server.use(
         http.post('*/api/v1/packages', () => {
           return HttpResponse.json({ name: 'limit-pkg' }, { status: 201 });
         })
       );
 
-      render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
+      const { unmount } = render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
         wrapper: createTestWrapper(),
       });
 
@@ -154,18 +154,6 @@ describe('AddPackageModal (F2) Tests', () => {
       await waitFor(() => {
         expect(screen.queryByText(/Maximum of 256 files allowed/i)).toBeNull();
       });
-    });
-
-    it('enforces 257-fail file count constraint', async () => {
-      render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
-        wrapper: createTestWrapper(),
-      });
-
-      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
-      const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
-      const submitBtn = screen.getByRole('button', { name: /Create package/i });
-
-      await userEvent.type(nameInput, 'limit-pkg');
 
       // Wait for the first submission to complete (button becomes enabled again)
       await waitFor(() => {
@@ -181,6 +169,8 @@ describe('AddPackageModal (F2) Tests', () => {
       fireEvent.change(filesTextarea, { target: { value: files257 } });
       await userEvent.click(submitBtn);
       expect(await screen.findByText(/Maximum of 256 files allowed/i)).toBeInTheDocument();
+
+      unmount();
     });
   });
 
