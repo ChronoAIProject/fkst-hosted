@@ -4,6 +4,7 @@ import { WindowControl } from '@/components/layout/window-control';
 import { ViewSwitch } from '@/components/layout/view-switch';
 import { VitalsCell } from '@/components/status/vitals-cell';
 import { GoalView, GoalStatus } from '@/lib/api/goals';
+import { goalStatusPresentation } from '@/lib/api/goal-status';
 import { Link } from 'react-router-dom';
 
 function formatAge(dateStr: string) {
@@ -118,13 +119,7 @@ export function Overview({
   const getStatusGoals = (status: GoalStatus) =>
     goals.filter((g) => 'status' in g && g.status === status) as GoalView[];
 
-  const statuses: { key: GoalStatus; label: string; tone: 'neutral' | 'gold' | 'green' | 'amber' | 'red' }[] = [
-    { key: 'not_started', label: 'Not Started', tone: 'neutral' },
-    { key: 'triggered', label: 'Triggered', tone: 'gold' },
-    { key: 'running', label: 'Running', tone: 'green' },
-    { key: 'stopped', label: 'Stopped', tone: 'amber' },
-    { key: 'failed', label: 'Failed', tone: 'red' },
-  ];
+  const statusKeys: GoalStatus[] = ['not_started', 'triggered', 'running', 'stopped', 'failed'];
 
   // Resolve Stage I/O labels (legacy)
   const getStageIo = (stageName: string) => {
@@ -189,86 +184,61 @@ export function Overview({
 
       {/* Canvas */}
       <div>
-        {isHostedMode && (
-          <div className="border border-line border-l-2 border-l-gold rounded-[9px] p-[11px_14px] bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] text-[12.5px] leading-relaxed text-dim mb-4">
-            Stage pipeline unavailable — hosted goals carry status, not a GitHub stage
-          </div>
-        )}
-        {view === 'pipeline' ? (
-          /* Pipeline View */
-          isHostedMode ? (
-            /* Hosted Pipeline View */
-            <div className="relative flex items-stretch border-t border-b border-line max-[600px]:flex-col overflow-x-auto max-[980px]:scrollbar-thin min-w-0">
-              {/* Conduit Pipe Line */}
-              <div className="absolute left-0 right-0 top-[64px] h-[1px] bg-line max-[600px]:hidden z-0" />
-
-              {statuses.map((status, index) => {
-                const statusGoals = getStatusGoals(status.key);
+        {isHostedMode ? (
+          <div className="flex flex-col gap-6">
+            <div className="border border-line border-l-2 border-l-gold rounded-[9px] p-[15px_18px] bg-[color-mix(in_oklab,var(--raise)_55%,transparent)] text-[13px] leading-relaxed text-dim">
+              Stage pipeline unavailable — hosted goals carry status, not a GitHub stage
+            </div>
+            
+            {/* Plain STATUS COUNTS section */}
+            <div className="grid grid-cols-5 max-[1080px]:grid-cols-2 max-[600px]:grid-cols-1 gap-4">
+              {statusKeys.map((statusKey) => {
+                const { label, tone } = goalStatusPresentation(statusKey);
+                const statusGoals = getStatusGoals(statusKey);
                 return (
-                  <div
-                    key={status.key}
-                    className={cn(
-                      "flex-1 max-[980px]:flex-[0_0_250px] max-[600px]:flex-[1_1_auto] min-w-0 min-h-[300px] max-[600px]:min-h-0 p-[20px_20px] relative cursor-not-allowed bg-bg hover:bg-[color-mix(in_oklab,var(--raise)_45%,var(--bg))] transition-colors z-10",
-                      index > 0 && "border-l border-line max-[600px]:border-l-0 max-[600px]:border-t",
-                      statusGoals.length > 0 && status.key === 'failed' && "before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-red",
-                      statusGoals.length > 0 && (status.key === 'triggered' || status.key === 'stopped') && "before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gold"
-                    )}
-                  >
-                    <span className={cn(
-                      "absolute top-[59px] left-[22px] w-2.5 h-2.5 rounded-full border-2 border-bg z-20 max-[600px]:hidden",
-                      status.key === 'not_started' && "bg-line-2",
-                      status.key === 'triggered' && "bg-gold",
-                      status.key === 'running' && "bg-green",
-                      status.key === 'stopped' && "bg-amber",
-                      status.key === 'failed' && "bg-red"
-                    )} />
-                    <div className="flex items-start justify-between">
-                      <h2 className={cn(
-                        "font-display font-semibold text-[14px] tracking-[0.01em]",
-                        status.key === 'not_started' && "text-faint",
-                        status.key === 'triggered' && "text-gold",
-                        status.key === 'running' && "text-green",
-                        status.key === 'stopped' && "text-amber",
-                        status.key === 'failed' && "text-red"
+                  <div key={statusKey} className="bg-raise border border-line rounded-[12px] p-4 flex flex-col gap-3 min-w-0">
+                    <div className="flex items-center justify-between pb-2 border-b border-line-2">
+                      <span className={cn(
+                        "font-ui font-semibold text-[12px] uppercase tracking-[0.05em]",
+                        tone === 'neutral' && "text-ghost",
+                        tone === 'gold' && "text-gold",
+                        tone === 'green' && "text-green",
+                        tone === 'amber' && "text-amber",
+                        tone === 'red' && "text-red"
                       )}>
-                        {status.label}
-                      </h2>
-                      <span className="font-display font-bold text-[32px] leading-[0.8] tracking-[-0.02em] text-fg">
+                        {label}
+                      </span>
+                      <span className="bct font-display font-bold text-[18px] text-fg leading-none">
                         {statusGoals.length}
                       </span>
                     </div>
-                    <div className="font-mono text-[11px] text-ghost mt-[30px]">
-                      <b className="text-faint font-medium">unknown</b> in · <b className="text-faint font-medium">unknown</b> out · {timeWindow}
-                    </div>
-                    {statusGoals.length > 0 && (
-                      <div className="mt-3.5 flex flex-col gap-2">
+                    {statusGoals.length > 0 ? (
+                      <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto scrollbar-thin pr-1">
                         {statusGoals.map((g) => (
                           <Link
-                            to={`/goals/${g.id}`}
                             key={g.id}
-                            className="flex items-start gap-2 py-2 border-t border-[color-mix(in_oklab,var(--line)_55%,transparent)] first-of-type:border-t-0 text-[12.5px] text-dim min-w-0 hover:bg-[color-mix(in_oklab,var(--raise)_30%,transparent)] rounded-[4px] px-1 -mx-1 transition-colors no-underline"
+                            to={`/goals/${g.id}`}
+                            className="group flex flex-col gap-1 p-2 bg-bg hover:bg-raise-2 border border-line rounded-[8px] transition-all no-underline"
                           >
-                            <span className={cn(
-                              "w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5",
-                              status.key === 'running' && "bg-green",
-                              status.key === 'failed' && "bg-red",
-                              status.key === 'triggered' && "bg-gold",
-                              status.key === 'stopped' && "bg-amber",
-                              status.key === 'not_started' && "bg-ghost"
-                            )} />
-                            <span className="font-mono text-[11.5px] text-faint flex-shrink-0">#{g.id}</span>
-                            <span className="min-w-0 flex-1 leading-[1.34] text-fg line-clamp-2 min-h-[2.68em]">{g.title}</span>
-                            <span className="font-mono text-[11px] text-ghost flex-shrink-0 pl-1.5">{formatAge(g.created_at)}</span>
+                            <span className="font-mono text-[10px] text-ghost group-hover:text-dim">#{g.id}</span>
+                            <span className="text-[12.5px] text-fg font-medium line-clamp-2 leading-snug">{g.title}</span>
+                            <span className="font-mono text-[10px] text-ghost mt-0.5">
+                              {g.repo ? `${g.repo.owner}/${g.repo.name}` : '—'} · {formatAge(g.created_at)}
+                            </span>
                           </Link>
                         ))}
                       </div>
+                    ) : (
+                      <div className="text-[11.5px] text-ghost font-mono py-2 italic">No goals</div>
                     )}
                   </div>
                 );
               })}
             </div>
-          ) : (
-            /* Legacy Pipeline View */
+          </div>
+        ) : (
+          view === 'pipeline' ? (
+            /* Pipeline View */
             <div className="relative flex items-stretch border-t border-b border-line max-[600px]:flex-col overflow-x-auto max-[980px]:scrollbar-thin min-w-0">
               {/* Conduit Pipe Line */}
               <div className="absolute left-0 right-0 top-[64px] h-[1px] bg-line max-[600px]:hidden z-0" />
@@ -300,7 +270,7 @@ export function Overview({
                   </span>
                 </div>
                 <div className="font-mono text-[11px] text-ghost mt-[30px]">
-                  <b className="text-faint font-medium">{designIo.inCount}</b> in · <b className="text-faint font-medium">{designIo.outCount}</b> out · {timeWindow}
+                  {designIo.inCount} in · {designIo.outCount} out · {timeWindow}
                 </div>
                 {showData && designGoals.length > 0 && (
                   <div className="mt-3.5 flex flex-col gap-2">
@@ -332,7 +302,7 @@ export function Overview({
                   </span>
                 </div>
                 <div className="font-mono text-[11px] text-ghost mt-[30px]">
-                  <b className="text-faint font-medium">{buildIo.inCount}</b> in · <b className="text-faint font-medium">{buildIo.outCount}</b> out · {timeWindow}
+                  {buildIo.inCount} in · {buildIo.outCount} out · {timeWindow}
                 </div>
                 {showData && buildGoals.length > 0 && (
                   <div className="mt-3.5 flex flex-col gap-2">
@@ -352,23 +322,10 @@ export function Overview({
               </div>
 
               {/* Review Stage */}
-              <div
-                className={cn(
-                  "flex-1 max-[980px]:flex-[0_0_250px] max-[600px]:flex-[1_1_auto] min-w-0 min-h-[300px] max-[600px]:min-h-0 p-[20px_20px] relative border-l border-line max-[600px]:border-l-0 max-[600px]:border-t cursor-not-allowed bg-bg hover:bg-[color-mix(in_oklab,var(--raise)_45%,var(--bg))] transition-colors z-10",
-                  showData && reviewGoals.some((g) => g.pressure) && "before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gold"
-                )}
-              >
-                <span className={cn(
-                  "absolute top-[59px] left-[22px] w-2.5 h-2.5 rounded-full border-2 border-bg z-20 max-[600px]:hidden",
-                  showData && reviewGoals.some((g) => g.pressure) ? "bg-gold" : "bg-line-2"
-                )} />
+              <div className="flex-1 max-[980px]:flex-[0_0_250px] max-[600px]:flex-[1_1_auto] min-w-0 min-h-[300px] max-[600px]:min-h-0 p-[20px_20px] relative border-l border-line max-[600px]:border-l-0 max-[600px]:border-t cursor-not-allowed bg-bg hover:bg-[color-mix(in_oklab,var(--raise)_45%,var(--bg))] transition-colors z-10 before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gold">
+                <span className="absolute top-[59px] left-[22px] w-2.5 h-2.5 rounded-full bg-gold border-2 border-bg z-20 max-[600px]:hidden" />
                 <div className="flex items-start justify-between">
-                  <h2 className={cn(
-                    "font-display font-semibold text-[14px] tracking-[0.01em]",
-                    showData && reviewGoals.some((g) => g.pressure) ? "text-gold" : "text-faint"
-                  )}>
-                    Review
-                  </h2>
+                  <h2 className="font-display font-semibold text-[14px] tracking-[0.01em] text-gold">Review</h2>
                   <span className={cn(
                     "font-display font-bold text-[32px] leading-[0.8] tracking-[-0.02em]",
                     showData ? "text-fg" : "text-ghost"
@@ -376,20 +333,17 @@ export function Overview({
                     {showData ? reviewGoals.length : '—'}
                   </span>
                 </div>
-                <div className="font-mono text-[11px] text-ghost mt-[30px]">
-                  <b className="text-faint font-medium">{reviewIo.inCount}</b> in · <b className="text-faint font-medium">{reviewIo.outCount}</b> out · {timeWindow}
+                <div className="font-mono text-[11px] text-ghost mt-[30px] flex items-center justify-between gap-1 flex-wrap">
+                  <span>{reviewIo.inCount} in · {reviewIo.outCount} out · {timeWindow}</span>
+                  {showData && reviewPressureLabel && (
+                    <span className="text-gold font-semibold tracking-[0.02em]">{reviewPressureLabel}</span>
+                  )}
                 </div>
-                {showData && reviewGoals.some((g) => g.pressure) && reviewPressureLabel && (
-                  <span className="inline-flex items-center gap-[7px] text-[11px] font-medium mt-[12px] px-2.5 py-1 rounded-[7px] border border-[color-mix(in_oklab,var(--gold)_38%,var(--line))] text-gold">
-                    <span className="w-1.5 h-1.5 rounded-full bg-gold" />
-                    {reviewPressureLabel}
-                  </span>
-                )}
                 {showData && reviewGoals.length > 0 && (
                   <div className="mt-3.5 flex flex-col gap-2">
                     {reviewGoals.map((g) => (
                       <div key={g.id} className="flex items-start gap-2 py-2 border-t border-[color-mix(in_oklab,var(--line)_55%,transparent)] first-of-type:border-t-0 text-[12.5px] text-dim min-w-0">
-                        <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5", g.pressure ? "bg-gold" : "bg-ghost")} />
+                        <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5", g.pressure ? "bg-red" : "bg-gold")} />
                         <span className="font-mono text-[11.5px] text-faint flex-shrink-0">#{g.id}</span>
                         <span className="min-w-0 flex-1 leading-[1.34] text-fg line-clamp-2 min-h-[2.68em]">{g.title}</span>
                         <span className="font-mono text-[11px] text-ghost flex-shrink-0 pl-1.5">{g.age}</span>
@@ -403,23 +357,10 @@ export function Overview({
               </div>
 
               {/* Ship Stage */}
-              <div
-                className={cn(
-                  "flex-1 max-[980px]:flex-[0_0_250px] max-[600px]:flex-[1_1_auto] min-w-0 min-h-[300px] max-[600px]:min-h-0 p-[20px_20px] relative border-l border-line max-[600px]:border-l-0 max-[600px]:border-t cursor-not-allowed bg-bg hover:bg-[color-mix(in_oklab,var(--raise)_45%,var(--bg))] transition-colors z-10",
-                  showData && shipGoals.length > 0 && "before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-red"
-                )}
-              >
-                <span className={cn(
-                  "absolute top-[59px] left-[22px] w-2.5 h-2.5 rounded-full border-2 border-bg z-20 max-[600px]:hidden",
-                  showData && shipGoals.length > 0 ? "bg-red" : "bg-line-2"
-                )} />
+              <div className="flex-1 max-[980px]:flex-[0_0_250px] max-[600px]:flex-[1_1_auto] min-w-0 min-h-[300px] max-[600px]:min-h-0 p-[20px_20px] relative border-l border-line max-[600px]:border-l-0 max-[600px]:border-t cursor-not-allowed bg-bg hover:bg-[color-mix(in_oklab,var(--raise)_45%,var(--bg))] transition-colors z-10 before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-red">
+                <span className="absolute top-[59px] left-[22px] w-2.5 h-2.5 rounded-full bg-red border-2 border-bg z-20 max-[600px]:hidden" />
                 <div className="flex items-start justify-between">
-                  <h2 className={cn(
-                    "font-display font-semibold text-[14px] tracking-[0.01em]",
-                    showData && shipGoals.length > 0 ? "text-red" : "text-faint"
-                  )}>
-                    Ship
-                  </h2>
+                  <h2 className="font-display font-semibold text-[14px] tracking-[0.01em] text-red">Ship</h2>
                   <span className={cn(
                     "font-display font-bold text-[32px] leading-[0.8] tracking-[-0.02em]",
                     showData ? "text-fg" : "text-ghost"
@@ -427,15 +368,12 @@ export function Overview({
                     {showData ? shipGoals.length : '—'}
                   </span>
                 </div>
-                <div className="font-mono text-[11px] text-ghost mt-[30px]">
-                  <b className="text-faint font-medium">{shipIo.inCount}</b> in · <b className="text-faint font-medium">{shipIo.outCount}</b> out · {timeWindow}
+                <div className="font-mono text-[11px] text-ghost mt-[30px] flex items-center justify-between gap-1 flex-wrap">
+                  <span>{shipIo.inCount} in · {shipIo.outCount} out · {timeWindow}</span>
+                  {showData && shipTag && (
+                    <span className="text-red font-semibold tracking-[0.02em]">{shipTag}</span>
+                  )}
                 </div>
-                {showData && shipTag && (
-                  <span className="inline-flex items-center gap-[7px] text-[11px] font-medium mt-[12px] px-2.5 py-1 rounded-[7px] border border-[color-mix(in_oklab,var(--red)_45%,var(--line))] text-red">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red" />
-                    {shipTag}
-                  </span>
-                )}
                 {showData && shipGoals.length > 0 && (
                   <div className="mt-3.5 flex flex-col gap-2">
                     {shipGoals.map((g) => (
@@ -480,80 +418,8 @@ export function Overview({
                 </div>
               )}
             </div>
-          )
-        ) : (
-          /* Board View */
-          isHostedMode ? (
-            /* Hosted Board View */
-            <div className="relative min-h-[300px]">
-              <div className="board grid grid-cols-5 max-[1080px]:flex max-[1080px]:overflow-x-auto max-[1080px]:scrollbar-thin gap-3.5">
-                {statuses.map((status) => {
-                  const statusGoals = getStatusGoals(status.key);
-                  return (
-                    <div key={status.key} className="bcol flex-1 max-[1080px]:flex-[0_0_240px] flex flex-col min-w-0">
-                      <div
-                        className={cn(
-                          "bcol-hd flex items-center justify-between pb-[11px] mb-3 border-b border-line",
-                          status.key === 'triggered' && "border-[color-mix(in_oklab,var(--gold)_42%,var(--line))]",
-                          status.key === 'stopped' && "border-[color-mix(in_oklab,var(--amber)_42%,var(--line))]",
-                          status.key === 'failed' && "border-[color-mix(in_oklab,var(--red)_42%,var(--line))]"
-                        )}
-                      >
-                        <h2
-                          className={cn(
-                            "bnm font-display font-semibold text-[13px] tracking-[0.01em]",
-                            status.key === 'not_started' && "text-faint",
-                            status.key === 'triggered' && "text-gold",
-                            status.key === 'running' && "text-green",
-                            status.key === 'stopped' && "text-amber",
-                            status.key === 'failed' && "text-red"
-                          )}
-                        >
-                          {status.label}
-                        </h2>
-                        <span className="bct font-display font-bold text-[15px] text-fg">
-                          {statusGoals.length}
-                        </span>
-                      </div>
-
-                      <div className="bcards flex flex-col gap-2.5 min-h-[150px]">
-                        {statusGoals.map((g) => (
-                          <Link
-                            key={g.id}
-                            to={`/goals/${g.id}`}
-                            className="card bg-raise border border-line rounded-card p-3 hover:bg-raise-2 hover:border-line-2 transition-colors flex flex-col gap-2 no-underline"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-mono text-[11px] text-faint">#{g.id}</span>
-                              <span
-                                className={cn(
-                                  "font-mono text-[10px] px-1.5 py-0.5 rounded-[5px] border uppercase font-semibold",
-                                  status.key === 'not_started' && "border-line-2 text-ghost",
-                                  status.key === 'triggered' && "border-[color-mix(in_oklab,var(--gold)_40%,var(--line))] text-gold",
-                                  status.key === 'running' && "border-[color-mix(in_oklab,var(--green)_40%,var(--line))] text-green",
-                                  status.key === 'stopped' && "border-[color-mix(in_oklab,var(--amber)_45%,var(--line))] text-amber",
-                                  status.key === 'failed' && "border-[color-mix(in_oklab,var(--red)_45%,var(--line))] text-red"
-                                )}
-                              >
-                                {status.label}
-                              </span>
-                            </div>
-                            <div className="text-[12.5px] text-fg leading-[1.34] line-clamp-2 min-h-[2.68em] font-ui">
-                              {g.title}
-                            </div>
-                            <div className="font-mono text-[10.5px] text-ghost">
-                              {g.repo ? `${g.repo.owner}/${g.repo.name}` : '—'} · {formatAge(g.created_at)}
-                            </div>
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
           ) : (
-            /* Legacy Board View */
+            /* Board View */
             <div className="relative min-h-[300px]">
               <div className="board grid grid-cols-5 max-[1080px]:flex max-[1080px]:overflow-x-auto max-[1080px]:scrollbar-thin gap-3.5">
                 {['Design', 'Build', 'Review', 'Ship', 'Merged'].map((stageName) => {
@@ -582,12 +448,7 @@ export function Overview({
                         >
                           {stageName}
                         </h2>
-                        <span
-                          className={cn(
-                            "bct font-display font-bold text-[15px]",
-                            isMerged ? "text-green" : showData ? "text-fg" : "text-ghost"
-                          )}
-                        >
+                        <span className="bct font-display font-bold text-[15px] text-fg">
                           {showData ? stageGoals.length : '—'}
                         </span>
                       </div>
@@ -596,15 +457,18 @@ export function Overview({
                         {showData && stageGoals.map((g) => (
                           <div
                             key={g.id}
-                            className="card bg-raise border border-line rounded-card p-3 cursor-not-allowed hover:bg-raise-2 hover:border-line-2 transition-colors flex flex-col gap-2"
+                            className="card bg-raise border border-line rounded-card p-3 flex flex-col gap-2 relative"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-mono text-[11px] text-faint">#{g.id}</span>
                               <span
                                 className={cn(
-                                  "font-mono text-[10px] px-1.5 py-0.5 rounded-[5px] border border-line-2 text-ghost lowercase",
-                                  g.state === 'merging' && g.pressure && "text-red border-[color-mix(in_oklab,var(--red)_45%,var(--line))]",
-                                  g.state === 'merged' && "text-green border-[color-mix(in_oklab,var(--green)_40%,var(--line))]"
+                                  "font-mono text-[10px] px-1.5 py-0.5 rounded-[5px] border uppercase font-semibold",
+                                  g.state === 'thinking' && "border-line text-ghost",
+                                  g.state === 'running' && "border-[color-mix(in_oklab,var(--green)_40%,var(--line))] text-green",
+                                  g.state === 'reviewing' && "border-[color-mix(in_oklab,var(--gold)_40%,var(--line))] text-gold",
+                                  g.state === 'merging' && "border-[color-mix(in_oklab,var(--red)_45%,var(--line))] text-red",
+                                  g.state === 'merged' && "border-[color-mix(in_oklab,var(--green)_40%,var(--line))] text-green"
                                 )}
                               >
                                 {g.gated ? `${g.state} · gated` : g.state}
