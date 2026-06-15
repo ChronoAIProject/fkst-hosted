@@ -298,6 +298,27 @@ local function stable_incident_identity(queue_head)
   return table.concat(parts, "/")
 end
 
+local function redrive_payload(repo, evidence)
+  local head = evidence and evidence.queue_head or nil
+  if type(head) ~= "table" or head.pr_number == nil then
+    return nil
+  end
+  return M.merge_queue_starvation_tick_payload(repo, evidence.incident_identity, {
+    pr_number = head.pr_number,
+    proposal_id = head.proposal_id,
+    version = head.state and head.state.version or nil,
+    head_sha = head.head_sha,
+  }, evidence.window_key)
+end
+
+local function raise_redrive(redrive)
+  if redrive == nil then
+    return
+  end
+  M.log_raise("observability", detector .. "/merge-ready", "devloop_merge_queue_tick", redrive)
+  raise("devloop_merge_queue_tick", redrive)
+end
+
 function M.queue_starvation_dedup_key(repo, identity)
   return M._dedup_key({
     detector,
@@ -376,14 +397,6 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
 
   local current_seconds = tonumber(now_seconds) or now()
   local newest = newest_recent_merge(merged, current_seconds)
-  if newest ~= nil and newest.age_minutes <= merge_recent_threshold_minutes then
-    log.info("github-devloop dept=observability tag=QUEUE_STARVATION action=suppress"
-      .. " reason=recent-merge"
-      .. " last_merge_age_minutes=" .. tostring(newest.age_minutes)
-      .. " threshold_minutes=" .. tostring(merge_recent_threshold_minutes))
-    return { action = "suppress", reason = "recent-merge", last_merge_age_minutes = newest.age_minutes }
-  end
-
   local evidence = {
     now_seconds = current_seconds,
     window_key = M.queue_starvation_window_key(current_seconds),
@@ -394,22 +407,25 @@ function M.observe_queue_starvation(repo, entities, limits, deadline, now_second
     recent_closed = recent_closed,
   }
   evidence.incident_identity = stable_incident_identity(queue_head)
+  local redrive = redrive_payload(repo, evidence)
+  if newest ~= nil and newest.age_minutes <= merge_recent_threshold_minutes then
+    raise_redrive(redrive)
+    log.info("github-devloop dept=observability tag=QUEUE_STARVATION action=suppress"
+      .. " reason=recent-merge"
+      .. " last_merge_age_minutes=" .. tostring(newest.age_minutes)
+      .. " threshold_minutes=" .. tostring(merge_recent_threshold_minutes)
+      .. " redrive=" .. tostring(redrive ~= nil))
+    return {
+      action = "suppress",
+      reason = "recent-merge",
+      last_merge_age_minutes = newest.age_minutes,
+      redrive = redrive,
+    }
+  end
   local snapshot = write_snapshot(repo, evidence.window_key, evidence)
   local request = M.build_queue_starvation_issue_create_request(repo, evidence, snapshot)
-  local redrive = nil
-  if queue_head.entity ~= nil and queue_head.entity.pr_number ~= nil then
-    redrive = M.merge_queue_starvation_tick_payload(repo, evidence.incident_identity, {
-      pr_number = queue_head.entity.pr_number,
-      proposal_id = queue_head.entity.proposal_id,
-      version = queue_head.entity.state and queue_head.entity.state.version or nil,
-      head_sha = queue_head.entity.head_sha,
-    }, evidence.window_key)
-  end
   M.log_raise("observability", detector .. "/merge-ready", "github-proxy.github_issue_create_request", request)
-  if redrive ~= nil then
-    M.log_raise("observability", detector .. "/merge-ready", "devloop_merge_queue_tick", redrive)
-    raise("devloop_merge_queue_tick", redrive)
-  end
+  raise_redrive(redrive)
   log.info("github-devloop dept=observability tag=QUEUE_STARVATION"
     .. " action=raise"
     .. " queue_head=" .. tostring(queue_head.entity and queue_head.entity.proposal_id or "")

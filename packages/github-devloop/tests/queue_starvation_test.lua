@@ -285,6 +285,25 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
   end,
 
+  test_queue_starvation_redrives_stale_head_when_recent_unrelated_merge_suppresses_alert = function()
+    mock_env()
+    mock_merge_queue_list({ 459 })
+    mock_merge_queue_pr(459, 459, 120, "abcdef123456")
+    mock_observe_lists(42)
+    mock_queue_head(90)
+    mock_closed_merged_issue(77, 30)
+
+    local result = run_observability("queue-starvation-recent-merge-redrive")
+
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+    local redrive = find_raise(result.raises, "devloop_merge_queue_tick")
+    t.is_true(redrive ~= nil)
+    t.eq(redrive.payload.cause.kind, "queue-starvation")
+    t.eq(redrive.payload.cause.head_pr_number, 459)
+    t.eq(redrive.payload.cause.attempt_key, core.queue_starvation_window_key(now()))
+  end,
+
   test_queue_starvation_fail_closed_when_recent_closed_command_fails = function()
     prepare_stale_head()
     mock_recent_closed("", 1, "gh failed")
