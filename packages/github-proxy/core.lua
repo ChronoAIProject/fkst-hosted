@@ -152,7 +152,10 @@ local function command_result_exit_code(result) return type(result) == "table" a
 function M.is_gh_rate_limited(result)
   local stderr = command_result_stderr(result)
   local lower = stderr:lower()
-  if lower:find("api rate limit exceeded", 1, true) ~= nil then
+  -- Broad "api rate limit" covers both "API rate limit exceeded" and the
+  -- dominant "API rate limit already exceeded for user ID <n>" wording, where
+  -- the interposed "already" defeats a contiguous "api rate limit exceeded".
+  if lower:find("api rate limit", 1, true) ~= nil then
     return true
   end
   if lower:find("was submitted too quickly", 1, true) ~= nil then

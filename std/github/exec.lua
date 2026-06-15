@@ -7,7 +7,10 @@ end
 function M.is_rate_limited(result)
   local stderr = stderr_of(result):lower()
   for _, needle in ipairs({
-    "api rate limit exceeded",
+    -- Broad "api rate limit" covers both "API rate limit exceeded" and the
+    -- dominant "API rate limit already exceeded for user ID <n>" wording, where
+    -- the interposed "already" defeats a contiguous "api rate limit exceeded".
+    "api rate limit",
     "secondary rate limit",
     "was submitted too quickly",
     "http 429",

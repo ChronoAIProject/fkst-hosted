@@ -487,10 +487,14 @@ return {
 
   test_gh_error_classifies_rate_limit_and_abuse = function()
     local api_limit = { stdout = "", stderr = "API rate limit exceeded", exit_code = 1 }
+    -- Regression (#710 Finding 1): the dominant "already exceeded" wording was
+    -- missed by a contiguous "api rate limit exceeded" needle.
+    local already_exceeded = { stdout = "", stderr = "GraphQL: API rate limit already exceeded for user ID 1593871", exit_code = 1 }
     local too_quick = { stdout = "", stderr = "You have triggered an abuse detection mechanism. The request was submitted too quickly.", exit_code = 1 }
     local too_many = { stdout = "", stderr = "HTTP 429: too many requests", exit_code = 1 }
 
     t.eq(core.is_gh_rate_limited(api_limit), true)
+    t.eq(core.is_gh_rate_limited(already_exceeded), true)
     t.eq(core.is_gh_rate_limited(too_quick), true)
     t.eq(core.is_gh_rate_limited(too_many), true)
     t.eq(core.gh_error_class(api_limit), "gh-rate-limited")
