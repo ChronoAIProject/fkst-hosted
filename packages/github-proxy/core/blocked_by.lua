@@ -110,7 +110,11 @@ function M.gh_issue_blocked_by_cmd(repo, issue_number)
 end
 
 function M.gh_add_blocked_by_cmd(blocked_id, blocking_id)
-  local query = "mutation($b:ID!,$g:ID!){addBlockedBy(input:{blockedIssueId:$b,blockingIssueId:$g}){clientMutationId}}"
+  -- GitHub's AddBlockedByInput accepts `issueId` (the blocked issue) and
+  -- `blockingIssueId` (the blocker); `blockedIssueId` is NOT a valid field and
+  -- makes every addBlockedBy mutation fail (the fork-and-block "block" half then
+  -- never lands, so a peer instance is never held at its dependency gate).
+  local query = "mutation($b:ID!,$g:ID!){addBlockedBy(input:{issueId:$b,blockingIssueId:$g}){clientMutationId}}"
   return "gh api graphql -f query=" .. shell_single_quote(query)
     .. " -f b=" .. shell_single_quote(blocked_id)
     .. " -f g=" .. shell_single_quote(blocking_id)
