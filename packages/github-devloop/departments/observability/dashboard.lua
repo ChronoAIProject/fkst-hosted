@@ -338,9 +338,15 @@ end
 
 local function write_dashboard_input(repo, title, body)
   local path = dashboard_input_path(repo, dashboard_version_from_body(body), dashboard_hash_from_body(body))
+  local stamped_body = core.with_github_debug_stamp(body, {
+    emitter = "github-devloop.observability.dashboard",
+    target = "issue:" .. tostring(repo) .. "#dashboard",
+    dedup_key = dashboard_hash_from_body(body),
+    context = dashboard_version_from_body(body),
+  })
   file.write(path, "{"
     .. '"title":' .. common.json_string(title)
-    .. ',"body":' .. common.json_string(body)
+    .. ',"body":' .. common.json_string(stamped_body)
     .. ',"labels":[' .. common.json_string(dashboard_label) .. "]"
     .. "}\n")
   return path

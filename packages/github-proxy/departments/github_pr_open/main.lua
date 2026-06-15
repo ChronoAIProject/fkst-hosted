@@ -280,7 +280,13 @@ function pipeline(event)
       end
 
       local pr_body_path = temp_body_file(repo, payload.branch, "pr-body")
-      file.write(pr_body_path, tostring(payload.body))
+      local pr_create_body = core.with_github_debug_stamp(tostring(payload.body), {
+        emitter = "github-proxy.pr-open",
+        target = "pr:" .. tostring(repo) .. "#new",
+        dedup_key = payload.dedup_key,
+        context = payload.head_sha,
+      })
+      file.write(pr_body_path, pr_create_body)
       local created = core.gh_exec(
         core.gh_pr_create_cmd(repo, payload.branch, payload.base_branch, payload.title, pr_body_path),
         60,
@@ -319,6 +325,12 @@ function pipeline(event)
       local issue_body = render_pr_number_template(payload.issue_comment_body_template, pr.number)
         .. "\n\n" .. core.comment_marker(payload.dedup_key)
         .. "\n"
+      issue_body = core.with_github_debug_stamp(issue_body, {
+        emitter = "github-proxy.pr-open.issue-comment",
+        target = "issue:" .. tostring(repo) .. "#" .. tostring(payload.issue_number),
+        dedup_key = payload.dedup_key,
+        context = pr.number,
+      })
       local issue_body_path = temp_body_file(repo, payload.branch, "issue-comment")
       file.write(issue_body_path, issue_body)
       core.gh_exec(
@@ -336,6 +348,12 @@ function pipeline(event)
     )
     if not core.has_trusted_comment_fragment(core.parse_issue_comments(pr_view.stdout), tostring(payload.body), bot_login) then
       local pr_body = tostring(payload.body) .. "\n\n" .. core.comment_marker(payload.dedup_key) .. "\n"
+      pr_body = core.with_github_debug_stamp(pr_body, {
+        emitter = "github-proxy.pr-open.pr-comment",
+        target = "pr:" .. tostring(repo) .. "#" .. tostring(pr.number),
+        dedup_key = payload.dedup_key,
+        context = payload.head_sha,
+      })
       local pr_body_path = temp_body_file(repo, payload.branch, "pr-comment")
       file.write(pr_body_path, pr_body)
       core.gh_exec(

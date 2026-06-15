@@ -6,6 +6,7 @@ end
 
 require("core.base").install(M)
 require("core.config").install(M)
+require("std.github_debug_stamp").install(M)
 require("core.strings").install(M)
 require("core.commands").install(M)
 require("core.github_proxy_entity_view").install(M)

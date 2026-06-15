@@ -17,6 +17,7 @@ local allowed_env = {
   FKST_DEVLOOP_INTAKE_PROBE_PROOF = true,
   FKST_DEVLOOP_TEST_COMMAND = true,
   FKST_OUTPUT_LANG = true,
+  FKST_DEBUG_STAMP = true,
 }
 
 local allowed_presence_env = {

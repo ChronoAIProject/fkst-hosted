@@ -19,6 +19,7 @@ local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_REPLAY_BUDGET = true,
+  FKST_DEBUG_STAMP = true,
 }
 local trusted_bot_login = nil
 local max_branch_len = 160
@@ -127,6 +128,8 @@ function M.devloop_replay_budget(exec)
   end
   return parsed
 end
+
+require("std.github_debug_stamp").install(M)
 
 function M.log_line(level, dept, tag, fields)
   local parts = {

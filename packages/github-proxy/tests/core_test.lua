@@ -6,10 +6,60 @@ return {
 	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
 	    t.eq(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), 'printf %s "$FKST_GITHUB_BOT_LOGIN"')
 	    t.eq(core.read_env_command("FKST_DEVLOOP_REPLAY_BUDGET"), 'printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"')
+	    t.eq(core.read_env_command("FKST_DEBUG_STAMP"), 'printf %s "$FKST_DEBUG_STAMP"')
 	    t.raises(function()
 	      core.read_env_command("HOME")
 	    end)
 	  end,
+
+  test_github_debug_stamp_is_disabled_by_default = function()
+    t.mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "" })
+
+    local body = "Visible reply\n\n<!-- fkst:github-proxy:comment:dedup-1 -->\n"
+    local stamped = core.with_github_debug_stamp(body, {
+      emitter = "github-proxy.comment",
+      target = "issue:owner/repo#42",
+      dedup_key = "raw/dedup/1",
+      context = "raw context",
+    })
+
+    t.eq(stamped, body)
+  end,
+
+  test_github_debug_stamp_appends_redacted_metadata_once = function()
+    t.mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "1" })
+    t.mock_command("git rev-parse --verify HEAD", {
+      stdout = "ABCDEF1234567890\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local body = "Visible reply\n\n<!-- fkst:github-proxy:comment:dedup-1 -->\n"
+    local stamped = core.with_github_debug_stamp(body, {
+      emitter = "github-proxy.comment",
+      target = "issue:owner/repo#42",
+      dedup_key = "secret/dedup/value",
+      context = "secret context value",
+    })
+    local stamped_again = core.with_github_debug_stamp(stamped, {
+      emitter = "github-proxy.comment",
+      target = "issue:owner/repo#42",
+      dedup_key = "secret/dedup/value",
+      context = "secret context value",
+    })
+
+    t.eq(stamped_again, stamped)
+    t.is_true(stamped:find("Visible reply", 1, true) ~= nil)
+    t.is_true(stamped:find("<!-- fkst:github-proxy:comment:dedup-1 -->", 1, true) ~= nil)
+    t.is_true(stamped:find("<!-- fkst:debug-stamp:v1", 1, true) ~= nil)
+    t.is_true(stamped:find('emitter="github-proxy.comment"', 1, true) ~= nil)
+    t.is_true(stamped:find('target="issue:owner/repo#42"', 1, true) ~= nil)
+    t.is_true(stamped:find('code_version="abcdef1234567890"', 1, true) ~= nil)
+    t.is_true(stamped:find('dedup_hash="', 1, true) ~= nil)
+    t.is_true(stamped:find('context_hash="', 1, true) ~= nil)
+    t.is_nil(stamped:find("secret/dedup/value", 1, true))
+    t.is_nil(stamped:find("secret context value", 1, true))
+  end,
 
   test_read_env_empty_is_nil = function()
     local value = core.read_env("FKST_GITHUB_REPO", function(_cmd)

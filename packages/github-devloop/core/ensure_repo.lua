@@ -102,9 +102,14 @@ end
 
 local function write_dashboard_anchor_input(repo)
   local path = "/tmp/fkst-github-devloop-dashboard-anchor-" .. M.safe_repo(repo):gsub("/", "-") .. ".json"
+  local body = M.with_github_debug_stamp(dashboard_anchor_body(), {
+    emitter = "github-devloop.ensure-repo.dashboard-anchor",
+    target = "issue:" .. tostring(repo) .. "#dashboard-anchor",
+    dedup_key = "dashboard-anchor",
+  })
   file.write(path, "{"
     .. '"title":' .. json_string(dashboard_title)
-    .. ',"body":' .. json_string(dashboard_anchor_body())
+    .. ',"body":' .. json_string(body)
     .. ',"labels":[' .. json_string(dashboard_label) .. "]"
     .. "}\n")
   return path
