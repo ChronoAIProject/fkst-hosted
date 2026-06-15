@@ -140,6 +140,26 @@ return {
     t.eq(lock_calls, 0)
   end,
 
+  test_dashboard_dry_run_logs_deferred_partial_board_when_deadline_exhausted = function()
+    mock_env("")
+    local captured = {}
+    local old_log = log
+    log = {
+      info = function(message) table.insert(captured, tostring(message)) end,
+      warn = function(message) table.insert(captured, tostring(message)) end,
+      error = function(message) table.insert(captured, tostring(message)) end,
+    }
+
+    local result = core.publish_observability_dashboard("owner/repo", dashboard_fixture(), core.observability_limits(), now() - 1)
+    log = old_log
+
+    t.eq(result, "deferred")
+    local body = table.concat(captured, "\n")
+    t.is_true(body:find("tag=DASHBOARD_DEFERRED reason=deadline", 1, true) ~= nil)
+    t.is_true(body:find("tag=DASHBOARD_DRY_RUN", 1, true) ~= nil)
+    t.is_true(body:find("# fkst-dev board", 1, true) ~= nil)
+  end,
+
   test_dashboard_publish_rereads_singleton_under_repo_lock = function()
     mock_env("1")
     local fake = { commands = {}, list_calls = 0, create_calls = 0, issue_body = nil }

@@ -53,16 +53,34 @@ function M.observability_has_budget(deadline)
   return M.observability_remaining_seconds(deadline) > 0
 end
 
+function M.observability_deadline_deferred_result(error_class)
+  return {
+    deferred = true,
+    reason = "deadline",
+    error_class = tostring(error_class or "gh observability command"),
+    stdout = "",
+    stderr = "observability deadline exhausted",
+    exit_code = 0,
+  }
+end
+
+function M.observability_result_deferred(result)
+  return type(result) == "table" and result.deferred == true
+end
+
 function M.observability_exec(cmd, limits, deadline, error_class, exec)
   local timeout = M.observability_call_timeout(limits, deadline)
   if timeout <= 0 then
-    error("github-devloop: " .. tostring(error_class or "gh observability command") .. " failed: observability deadline exhausted")
+    return M.observability_deadline_deferred_result(error_class)
   end
   return M.gh_exec({ cmd = cmd, timeout = timeout }, nil, exec)
 end
 
 function M.observability_run_cmd(cmd, limits, deadline, error_class, exec)
   local result = M.observability_exec(cmd, limits, deadline, error_class, exec)
+  if M.observability_result_deferred(result) then
+    return result
+  end
   if result.exit_code ~= 0 then
     error("github-devloop: " .. tostring(error_class or "gh observability command") .. " failed: " .. tostring(result.stderr))
   end
@@ -243,6 +261,9 @@ end
 
 local function list_rotating_pages(first_cmd, page_cmd, parse, limits, deadline, seed, error_class, exec)
   local first = M.observability_run_cmd(first_cmd, limits, deadline, error_class, exec)
+  if M.observability_result_deferred(first) then
+    return {}, 1
+  end
   local first_parsed = parse(response_body(first.stdout))
   local total_pages = M.observability_total_pages_from_headers(first.stdout, #first_parsed)
   local pages, deferred_pages = M.observability_page_window(total_pages, seed, limits.list_page_cap)
@@ -255,6 +276,9 @@ local function list_rotating_pages(first_cmd, page_cmd, parse, limits, deadline,
       used_first = true
     else
       local listed = M.observability_run_cmd(page_cmd(page), limits, deadline, error_class, exec)
+      if M.observability_result_deferred(listed) then
+        return items, deferred_pages + 1
+      end
       parsed = parse(listed.stdout)
     end
     for _, item in ipairs(parsed or {}) do
