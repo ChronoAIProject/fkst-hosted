@@ -74,13 +74,17 @@ fn run_helper(
         cmd.env("FKST_GITHUB_MINT_WAIT_SECS", w.to_string());
     }
     let mut child = cmd.spawn().expect("spawn helper");
-    // git's request block: key=value lines, blank-line terminated.
-    child
+    // git's request block: key=value lines, blank-line terminated. Tolerate a
+    // BrokenPipe here: for `store`/`erase` the helper exits 0 immediately
+    // WITHOUT draining stdin, so on a fast platform (Linux) the pipe is already
+    // closed when we write (macOS happens to buffer it). The helper reads the
+    // token from the file, never stdin, so a dropped request block is harmless;
+    // the test asserts the helper's stdout + exit status, which is unaffected.
+    let _ = child
         .stdin
         .take()
         .expect("stdin")
-        .write_all(b"protocol=https\nhost=github.com\n\n")
-        .expect("write request");
+        .write_all(b"protocol=https\nhost=github.com\n\n");
     let out = child.wait_with_output().expect("wait helper");
     (
         String::from_utf8_lossy(&out.stdout).into_owned(),
