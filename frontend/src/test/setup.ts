@@ -19,28 +19,4 @@ afterEach(() => {
   cleanup();
 });
 
-import { vi } from 'vitest';
 
-vi.mock('@/lib/auth', () => ({
-  authRequired: vi.fn(() => false),
-  useAuthSession: vi.fn(() => ({
-    isAuthenticated: false,
-    accessToken: null,
-    login: vi.fn(),
-    logout: vi.fn(),
-    handleRedirectCallback: vi.fn(),
-    getUserInfo: vi.fn(),
-  })),
-}));
-
-vi.mock('../lib/auth', () => ({
-  authRequired: vi.fn(() => false),
-  useAuthSession: vi.fn(() => ({
-    isAuthenticated: false,
-    accessToken: null,
-    login: vi.fn(),
-    logout: vi.fn(),
-    handleRedirectCallback: vi.fn(),
-    getUserInfo: vi.fn(),
-  })),
-}));

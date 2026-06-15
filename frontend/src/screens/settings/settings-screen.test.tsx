@@ -9,6 +9,7 @@ import { usePackagesList } from '@/lib/hooks/usePackages';
 import { useSession, useStopSession } from '@/lib/hooks/useSessions';
 import { useSessionRegistry, SessionRegistryProvider } from '@/lib/hooks/session-registry';
 import { ApiError } from '@/lib/api/client';
+import { NyxIDProvider } from '@/lib/auth';
 
 // Mock the hooks
 vi.mock('@/lib/hooks/useHealth');
@@ -29,13 +30,19 @@ function renderWithProviders(ui: React.ReactNode, { sessionIdToRegister }: { ses
       <SessionRegistryProvider>
         <QueryClientProvider client={queryClient}>
           <MemoryRouter>
-            {sessionIdToRegister ? (
-              <RegistryInit packageName="fkst-substrate" sessionId={sessionIdToRegister}>
-                {children}
-              </RegistryInit>
-            ) : (
-              children
-            )}
+            <NyxIDProvider
+              baseUrl="http://localhost"
+              clientId="test-client"
+              redirectUri="http://localhost/auth/callback"
+            >
+              {sessionIdToRegister ? (
+                <RegistryInit packageName="fkst-substrate" sessionId={sessionIdToRegister}>
+                  {children}
+                </RegistryInit>
+              ) : (
+                children
+              )}
+            </NyxIDProvider>
           </MemoryRouter>
         </QueryClientProvider>
       </SessionRegistryProvider>

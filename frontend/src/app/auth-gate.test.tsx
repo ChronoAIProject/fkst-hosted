@@ -1,7 +1,30 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { App } from './index';
 import { authRequired, useAuthSession } from '@/lib/auth';
+
+vi.mock('@/lib/auth', () => {
+  if (!(globalThis as any).__mockAuthRequired) {
+    (globalThis as any).__mockAuthRequired = vi.fn();
+    (globalThis as any).__mockUseAuthSession = vi.fn();
+  }
+  return {
+    authRequired: (globalThis as any).__mockAuthRequired,
+    useAuthSession: (globalThis as any).__mockUseAuthSession,
+  };
+});
+
+vi.mock('../lib/auth', () => {
+  if (!(globalThis as any).__mockAuthRequired) {
+    (globalThis as any).__mockAuthRequired = vi.fn();
+    (globalThis as any).__mockUseAuthSession = vi.fn();
+  }
+  return {
+    authRequired: (globalThis as any).__mockAuthRequired,
+    useAuthSession: (globalThis as any).__mockUseAuthSession,
+  };
+});
 
 // Mock fetch to avoid unhandled network requests
 const mockFetch: typeof fetch = (input: RequestInfo | URL) => {
