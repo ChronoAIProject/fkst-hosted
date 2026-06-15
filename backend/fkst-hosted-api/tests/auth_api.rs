@@ -50,6 +50,8 @@ use tower::ServiceExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+mod support;
+
 /// Mongo image tag.
 const MONGO_TAG: &str = "7";
 
@@ -275,6 +277,7 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
         audience: AUDIENCE.to_string(),
         jwks_cache_ttl: Duration::from_secs(JWKS_TTL_SECS),
     });
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -287,6 +290,7 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
     AuthTestApp {
@@ -322,6 +326,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         packages.clone(),
         EngineConfig::default(),
     );
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -334,6 +339,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
     (container, router)
@@ -584,6 +590,7 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
         audience: AUDIENCE.to_string(),
         jwks_cache_ttl: Duration::from_secs(JWKS_TTL_SECS),
     });
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -596,6 +603,7 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
 
@@ -660,6 +668,7 @@ async fn kid_rotation_recovers_after_refresh() {
         audience: AUDIENCE.to_string(),
         jwks_cache_ttl: Duration::from_secs(JWKS_TTL_SECS),
     });
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -672,6 +681,7 @@ async fn kid_rotation_recovers_after_refresh() {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
 
@@ -747,6 +757,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         packages.clone(),
         EngineConfig::default(),
     );
+    let vault = support::test_vault(&db);
     let state = AppState {
         config,
         db,
@@ -764,6 +775,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     };
 
     // Build a router with a route that extracts AuthContext but is NOT

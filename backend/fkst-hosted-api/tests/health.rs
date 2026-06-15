@@ -22,6 +22,8 @@ use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
+mod support;
+
 /// Nothing listens on port 1; selection fails after ~200ms.
 const UNREACHABLE_URI: &str = "mongodb://127.0.0.1:1";
 
@@ -42,6 +44,7 @@ async fn test_router() -> axum::Router {
         packages.clone(),
         EngineConfig::default(),
     );
+    let vault = support::test_vault(&db);
     build_router(AppState {
         config,
         db,
@@ -54,6 +57,7 @@ async fn test_router() -> axum::Router {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router")
 }

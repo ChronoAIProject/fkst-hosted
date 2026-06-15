@@ -22,6 +22,7 @@ use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
+use secrecy::ExposeSecret;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
@@ -337,6 +338,40 @@ async fn main() -> ExitCode {
         }
     };
 
+    // 5a-ter. Build the vault service (issue #100). The vault is always-on: a
+    //         missing OR invalid master-key source is a fail-closed startup
+    //         error (mirrors the github_app PEM pattern), so the vault routes
+    //         never run without an at-rest encryption key. The base64 key was
+    //         resolved from FKST_HOSTED_VAULT_MASTER_KEY / _PATH by Config; here
+    //         it is decoded + length-validated into the KEK and the unique index
+    //         is ensured.
+    let Some(vault_key) = &config.vault_master_key else {
+        tracing::error!(
+            "vault master key not configured; set FKST_HOSTED_VAULT_MASTER_KEY or \
+             FKST_HOSTED_VAULT_MASTER_KEY_PATH (base64-encoded 32 bytes)"
+        );
+        return ExitCode::FAILURE;
+    };
+    let vault = match fkst_hosted_api::vault::VaultService::with_local_key(
+        &db.database,
+        vault_key.expose_secret(),
+        fkst_hosted_api::vault::VaultLimits {
+            value_byte_cap: config.vault_value_byte_cap,
+            entries_per_scope_cap: config.vault_entries_per_scope_cap,
+        },
+    ) {
+        Ok(vault) => vault,
+        Err(error) => {
+            tracing::error!(error = %error, "invalid vault master key");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = vault.repo().ensure_indexes().await {
+        tracing::error!(error = %error, "failed to ensure vault indexes");
+        return ExitCode::FAILURE;
+    }
+    tracing::info!("vault enabled");
+
     // 5a-bis. Enable goal support in the session service: goal-status sync
     //         writes + token refresh. Requires both the goals repo and the
     //         GitHub App tokens service.
@@ -359,6 +394,7 @@ async fn main() -> ExitCode {
         goals,
         engine: state_engine_config,
         llm,
+        vault,
     }) {
         Ok(router) => router,
         Err(error) => {

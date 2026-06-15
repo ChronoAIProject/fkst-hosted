@@ -43,6 +43,8 @@ use tower::ServiceExt;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+mod support;
+
 const MONGO_TAG: &str = "7";
 const ISSUER: &str = "nyxid";
 const AUDIENCE: &str = "fkst-test";
@@ -186,6 +188,7 @@ async fn app(server: MockServer) -> TestApp {
     )
     .expect("nyxid client");
 
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -203,6 +206,7 @@ async fn app(server: MockServer) -> TestApp {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
 

@@ -171,6 +171,7 @@ async fn app_with(
         packages.clone(),
         EngineConfig::default(),
     );
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db: db.clone(),
@@ -183,6 +184,7 @@ async fn app_with(
         goals,
         engine,
         llm: gateway,
+        vault,
     })
     .expect("router");
     TestApp {
