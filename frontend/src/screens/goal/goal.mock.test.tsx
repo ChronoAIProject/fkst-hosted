@@ -1,6 +1,31 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/hooks/session-registry', () => ({
+  useSessionRegistry: () => ({
+    registerSession: vi.fn(),
+    getSessionId: vi.fn(),
+    clearSession: vi.fn(),
+    clearAllSessions: vi.fn(),
+  }),
+}));
+
+vi.mock('@/lib/hooks/useGoals', () => ({
+  useTriggerGoal: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useUpdateGoal: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useDeleteGoal: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 import { Goal } from './goal';
 import type { GoalProps } from './goal';
 import { mockLifecyclePopulated, mockTerminalBlocked } from '../../fixtures/goal';

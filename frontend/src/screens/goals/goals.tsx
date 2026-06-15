@@ -6,6 +6,23 @@ import { StateBadge, StateBadgeState } from '@/components/status/state-badge';
 import { useAuthSession, authRequired } from '@/lib/auth';
 import { useGitHubAccounts } from '@/lib/hooks/useGitHubAccounts';
 import { AccountView } from '@/lib/api/types';
+import { GoalView } from '@/lib/api/goals';
+import { goalStatusPresentation } from '@/lib/api/goal-status';
+import { Link } from 'react-router-dom';
+
+function formatAge(dateStr: string) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  if (isNaN(diffMs)) return '—';
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d`;
+}
 
 export interface GoalsGoal {
   id: string;
@@ -34,7 +51,7 @@ export interface GoalsRun {
 
 export interface GoalsProps {
   view?: 'issues' | 'activity';
-  goals?: GoalsGoal[];
+  goals?: (GoalsGoal | GoalView)[];
   runs?: GoalsRun[];
   vitals?: {
     runsDispatched?: string | 'unknown';
@@ -50,6 +67,9 @@ export interface GoalsProps {
   accountsOverride?: AccountView[];
   accountsErrorOverride?: unknown;
   accountsLoadingOverride?: boolean;
+  isLoadingGoals?: boolean;
+  isErrorGoals?: boolean;
+  goalsError?: unknown;
 }
 
 export function Goals({
@@ -63,6 +83,9 @@ export function Goals({
   accountsOverride,
   accountsErrorOverride,
   accountsLoadingOverride,
+  isLoadingGoals,
+  isErrorGoals,
+  goalsError,
 }: GoalsProps) {
   const [prevView, setPrevView] = useState(view);
   const [currentView, setCurrentView] = useState<'issues' | 'activity'>(view);
@@ -96,8 +119,10 @@ export function Goals({
     setPrevView(view);
   }
 
+  const isHostedMode = goals && goals.length > 0 && goals[0] && 'status' in goals[0];
+  const isRealHostedMode = isLoadingGoals !== undefined || isHostedMode;
   const isGatePassed = !isAuthPending && !isAccountsLoading && !isAccountsError && accounts !== undefined && accounts.length > 0;
-  const showData = isGatePassed && goals.length > 0;
+  const showData = (isGatePassed || isRealHostedMode) && goals.length > 0;
   const showRuns = runs.length > 0;
 
   return (
@@ -224,7 +249,11 @@ export function Goals({
         /* ISSUES VIEW */
         <div className="flex flex-col gap-4">
           <p className="text-[12px] leading-relaxed text-faint">
-            State is derived from trusted-bot <span className="font-mono text-[11.5px] text-dim">state:v1</span> markers; <span className="font-mono text-[11.5px] text-dim">fkst-dev:*</span> labels are self-heal hints only. Stage groups the design / build / review / ship flow; <b>ready · gated</b> is consensus output held at the dependency gate (<span className="font-mono text-[11.5px] text-dim">fkst-dev:n</span> · <span className="font-mono text-[11.5px] text-dim">n:v1</span> marker).
+            {isHostedMode ? (
+              <span>State and status are managed by the hosted service. Stage pipeline mapping is not applicable to hosted goals.</span>
+            ) : (
+              <span>State is derived from trusted-bot <span className="font-mono text-[11.5px] text-dim">state:v1</span> markers; <span className="font-mono text-[11.5px] text-dim">fkst-dev:*</span> labels are self-heal hints only. Stage groups the design / build / review / ship flow; <b>ready · gated</b> is consensus output held at the dependency gate (<span className="font-mono text-[11.5px] text-dim">fkst-dev:n</span> · <span className="font-mono text-[11.5px] text-dim">n:v1</span> marker).</span>
+            )}
           </p>
 
           <div className="w-full overflow-x-auto max-[980px]:scrollbar-thin">
@@ -243,7 +272,80 @@ export function Goals({
               </div>
 
               {/* Rows / Empty State */}
-              {isAuthPending ? (
+              {isRealHostedMode ? (
+                isLoadingGoals ? (
+                  <div className="flex items-center justify-center py-16 text-ghost font-mono text-[12px]">
+                    loading goals...
+                  </div>
+                ) : isErrorGoals ? (
+                  <div className="flex items-center justify-center py-16 text-red font-mono text-[12px]">
+                    failed to load goals: {String(goalsError)}
+                  </div>
+                ) : goals.length > 0 ? (
+                  <div className="flex flex-col">
+                    {goals.map((g) => {
+                      if ('status' in g) {
+                        const repoStr = g.repo ? `${g.repo.owner}/${g.repo.name}` : '—';
+                        const pres = goalStatusPresentation(g.status);
+                        const ageStr = formatAge(g.created_at);
+                        
+                        let dotTone: 'green' | 'red' | 'gold' | 'neutral' = 'neutral';
+                        if (g.status === 'running') dotTone = 'green';
+                        else if (g.status === 'failed') dotTone = 'red';
+                        else if (g.status === 'triggered' || g.status === 'stopped') dotTone = 'gold';
+                        
+                        return (
+                          <Link
+                            to={`/goals/${g.id}`}
+                            key={g.id}
+                            className="grid grid-cols-[14px_52px_minmax(0,1fr)_104px_128px_56px_40px_64px_116px] gap-4 px-1.5 min-h-[52px] py-2 border-b border-line items-center text-dim text-[13.5px] hover:bg-[color-mix(in_oklab,var(--raise)_30%,transparent)] transition-colors no-underline"
+                          >
+                            <span className={cn(
+                              "w-2.5 h-2.5 rounded-full justify-self-center",
+                              dotTone === 'green' && "bg-green",
+                              dotTone === 'red' && "bg-red",
+                              dotTone === 'gold' && "bg-gold",
+                              dotTone === 'neutral' && "bg-faint"
+                            )} />
+                            <span className="font-mono text-faint text-[12px]">{g.id}</span>
+                            <span className="text-fg font-medium line-clamp-2 leading-[1.32] min-w-0 pr-2">{g.title}</span>
+                            <span className="truncate min-w-0 text-[12.5px] text-ghost">—</span>
+                            <span className="font-mono text-faint text-[11.5px] truncate min-w-0">{repoStr}</span>
+                            <span className="font-mono text-[11.5px] text-ghost">—</span>
+                            <span className="text-ghost text-[11.5px]">—</span>
+                            <span className="font-mono text-ghost text-[11.5px] text-right">{ageStr}</span>
+                            <div className="justify-self-end">
+                              <div className={cn(
+                                "inline-flex items-center gap-[7px] font-ui font-semibold text-[11px] tracking-[0.02em] uppercase px-2 py-[4px] rounded-[6px] border select-none",
+                                pres.tone === 'neutral' && "border-line-2 text-ghost bg-raise",
+                                pres.tone === 'green' && "border-[color-mix(in_oklab,var(--green)_40%,var(--line))] text-green bg-raise-2",
+                                pres.tone === 'red' && "border-[color-mix(in_oklab,var(--red)_45%,var(--line))] text-red bg-raise-2",
+                                pres.tone === 'gold' && "border-[color-mix(in_oklab,var(--gold)_40%,var(--line))] text-gold bg-raise-2",
+                                pres.tone === 'amber' && "border-[color-mix(in_oklab,var(--amber)_45%,var(--line))] text-amber bg-raise-2"
+                              )}>
+                                <span className={cn(
+                                  "w-1.5 h-1.5 rounded-full",
+                                  pres.tone === 'neutral' && "bg-ghost",
+                                  pres.tone === 'green' && "bg-green",
+                                  pres.tone === 'red' && "bg-red",
+                                  pres.tone === 'gold' && "bg-gold",
+                                  pres.tone === 'amber' && "bg-amber"
+                                )} />
+                                <span>{pres.label}</span>
+                              </div>
+                            </div>
+                          </Link>
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center py-16 text-ghost font-mono text-[12px]">
+                    no goals found
+                  </div>
+                )
+              ) : isAuthPending ? (
                 <div className="flex items-center justify-center py-16 text-ghost font-mono text-[12px]">
                   no GitHub plane connected — sign-in pending
                 </div>
@@ -284,20 +386,29 @@ export function Goals({
               ) : goals.length > 0 ? (
                 <div className="flex flex-col">
                   {goals.map((g) => {
-                    const isReview = g.stage === 'Review';
-                    const isShip = g.stage === 'Ship';
-                    const isMerged = g.stage === 'Merged';
-                    const isBlocked = g.stage === 'Blocked';
+                    const isReview = 'stage' in g && g.stage === 'Review';
+                    const isShip = 'stage' in g && g.stage === 'Ship';
+                    const isMerged = 'stage' in g && g.stage === 'Merged';
+                    const isBlocked = 'stage' in g && g.stage === 'Blocked';
 
                     let dotTone: 'green' | 'red' | 'gold' | 'neutral' = 'neutral';
                     if (isMerged) dotTone = 'green';
-                    else if (isBlocked || g.state === 'impl-failed') dotTone = 'red';
-                    else if (isReview && g.state === 'reviewing') dotTone = 'gold';
+                    else if (isBlocked || ('state' in g && g.state === 'impl-failed')) dotTone = 'red';
+                    else if (isReview && ('state' in g && g.state === 'reviewing')) dotTone = 'gold';
+
+                    const stageVal = 'stage' in g ? g.stage : '—';
+                    const stateVal = 'state' in g ? g.state : 'unknown';
+                    const repoVal = 'repo' in g && typeof g.repo === 'string' ? g.repo : '—';
+                    const prVal = 'pr' in g && typeof g.pr === 'string' ? g.pr : '—';
+                    const ageVal = 'age' in g ? g.age : '—';
+                    const ciVal = 'ci' in g ? g.ci : 'unknown';
+                    const gatedVal = 'gated' in g ? g.gated : false;
 
                     return (
-                      <div
+                      <Link
+                        to={`/goals/${g.id}`}
                         key={g.id}
-                        className="grid grid-cols-[14px_52px_minmax(0,1fr)_104px_128px_56px_40px_64px_116px] gap-4 px-1.5 min-h-[52px] py-2 border-b border-line items-center text-dim text-[13.5px]"
+                        className="grid grid-cols-[14px_52px_minmax(0,1fr)_104px_128px_56px_40px_64px_116px] gap-4 px-1.5 min-h-[52px] py-2 border-b border-line items-center text-dim text-[13.5px] hover:bg-[color-mix(in_oklab,var(--raise)_30%,transparent)] transition-colors no-underline"
                       >
                         <span className={cn(
                           "w-2 h-2 rounded-full justify-self-center",
@@ -315,24 +426,24 @@ export function Goals({
                           isMerged && "text-green",
                           isBlocked && "text-red"
                         )}>
-                          {g.stage}
+                          {stageVal}
                         </span>
-                        <span className="font-mono text-faint text-[11.5px] truncate min-w-0">{g.repo}</span>
-                        <span className={cn("font-mono text-[11.5px]", g.pr ? "text-faint" : "text-ghost")}>
-                          {g.pr || '—'}
+                        <span className="font-mono text-faint text-[11.5px] truncate min-w-0">{repoVal}</span>
+                        <span className={cn("font-mono text-[11.5px]", prVal && prVal !== '—' ? "text-faint" : "text-ghost")}>
+                          {prVal || '—'}
                         </span>
-                        <CiGlyph status={g.ci} />
-                        <span className="font-mono text-ghost text-[11.5px] text-right">{g.age}</span>
+                        <CiGlyph status={ciVal} />
+                        <span className="font-mono text-ghost text-[11.5px] text-right">{ageVal}</span>
                         <div className="justify-self-end">
-                          {g.state === 'ready' ? (
-                            <StateBadge state="ready" gated={g.gated} />
-                          ) : g.state === 'reviewing' || g.state === 'review-meta' ? (
-                            <StateBadge state={g.state} />
+                          {stateVal === 'ready' ? (
+                            <StateBadge state="ready" gated={gatedVal} />
+                          ) : stateVal === 'reviewing' || stateVal === 'review-meta' ? (
+                            <StateBadge state={stateVal} />
                           ) : (
-                            <StateBadge state={g.state as Exclude<StateBadgeState, 'ready' | 'reviewing' | 'review-meta'>} />
+                            <StateBadge state={stateVal as Exclude<StateBadgeState, 'ready' | 'reviewing' | 'review-meta'>} />
                           )}
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                 </div>
@@ -357,15 +468,21 @@ export function Goals({
               Load all →
             </button>
             <span className="font-mono text-[11px] text-ghost ml-auto max-[600px]:ml-0 max-[600px]:w-full">
-              showing {showData ? goals.length : '—'} · sorted newest · state from trusted GitHub markers (labels are hints) · poll-derived
+              showing {showData ? goals.length : '—'} · sorted newest · {isHostedMode ? 'status from hosted database' : 'state from trusted GitHub markers (labels are hints)'} · poll-derived
             </span>
           </div>
 
           {/* Footer */}
           <div className="foot flex gap-6 font-mono text-[11px] text-ghost flex-wrap mt-6 pt-[14px] border-t border-line">
-            <span>a goal is a <b>GitHub issue</b> labeled <b>fkst-dev:enabled</b></span>
+            {isHostedMode ? (
+              <span>a goal is a record in the hosted database</span>
+            ) : (
+              <span>a goal is a <b>GitHub issue</b> labeled <b>fkst-dev:enabled</b></span>
+            )}
             <span>rows scoped to the <b>{timeWindow}</b> window · open rows drill into the goal page</span>
-            <span className="text-gold">fkst-packages CI unknown shown as — , never a pass</span>
+            {!isHostedMode && (
+              <span className="text-gold">fkst-packages CI unknown shown as — , never a pass</span>
+            )}
             <span>state as of <b>unknown</b> · poll-derived (~5-min ticks), not live</span>
           </div>
         </div>

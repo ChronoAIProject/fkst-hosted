@@ -1,5 +1,17 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import type { ReactNode } from 'react';
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    Link: ({ children, to, ...props }: { children?: ReactNode; to: string; [key: string]: unknown }) => (
+      <a href={to} {...(props as Record<string, unknown>)}>{children}</a>
+    ),
+  };
+});
+
 import { Goals } from './goals';
 
 vi.mock('@/lib/auth', () => ({
