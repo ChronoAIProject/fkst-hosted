@@ -95,13 +95,22 @@ impl std::fmt::Debug for GithubAppError {
     }
 }
 
-/// Default v1 permissions: contents write + issues write.
+/// Default session permissions: admin-equivalent access to the target repo for
+/// the whole session (issue #110). `administration: write` is GitHub's closest
+/// analogue to a repo-admin role (branch protection / rulesets, collaborator &
+/// team management, repo settings, visibility, rename/transfer, deploy keys).
+///
+/// The mint can only request a subset of what the GitHub App was granted; the
+/// App must declare these as Read & write Repository permissions or the mint
+/// returns 422 (see `docs/github-app.md`). `metadata` is omitted because
+/// installation tokens always include `metadata: read` implicitly.
 pub fn default_permissions() -> TokenPermissions {
     TokenPermissions {
         contents: Some("write".to_string()),
-        metadata: None,
+        pull_requests: Some("write".to_string()),
         issues: Some("write".to_string()),
-        administration: None,
+        administration: Some("write".to_string()),
+        metadata: None,
     }
 }
 
@@ -256,6 +265,25 @@ impl GithubAppTokens {
                     .api
                     .create_installation_token(&app_jwt, install_id, &req)
                     .await?
+            }
+            Err(GithubAppError::TokenRequestRejected(detail)) => {
+                // A 422 here almost always means the GitHub App was not granted
+                // a permission we requested (e.g. `administration`), so the mint
+                // can only subset what the App holds. Surface it loudly at the
+                // mint site so it is diagnosable on EVERY caller path (including
+                // the background token refresh, which otherwise only logs the
+                // permission-less Display string). The detail is GitHub's 422
+                // message describing the rejected permission, never the token
+                // (the token only appears in a 201 success body).
+                tracing::error!(
+                    owner_repo = %owner_repo,
+                    detail = %detail,
+                    "github installation-token mint rejected (422); verify the \
+                     fkst-hosted GitHub App declares the requested Repository \
+                     permissions (administration, pull_requests, contents, \
+                     issues) at Read & write and the install was re-approved"
+                );
+                return Err(GithubAppError::TokenRequestRejected(detail));
             }
             Err(e) => return Err(e),
         };
@@ -635,5 +663,18 @@ mod tests {
                 "{bad}: got {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn default_permissions_grants_session_admin_set() {
+        // Issue #110: sessions hold admin-equivalent access for the whole
+        // session. All four are `write`; `metadata` is implicit on installation
+        // tokens, so it is deliberately left unset.
+        let perms = default_permissions();
+        assert_eq!(perms.contents.as_deref(), Some("write"));
+        assert_eq!(perms.pull_requests.as_deref(), Some("write"));
+        assert_eq!(perms.issues.as_deref(), Some("write"));
+        assert_eq!(perms.administration.as_deref(), Some("write"));
+        assert_eq!(perms.metadata, None);
     }
 }

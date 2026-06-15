@@ -36,6 +36,8 @@ pub struct TokenPermissions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub issues: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull_requests: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub administration: Option<String>,
 }
 
@@ -383,6 +385,52 @@ mod tests {
             .expect("ok");
 
         assert_eq!(result.token.expose_secret(), "ghs_testtoken123");
+    }
+
+    #[tokio::test]
+    async fn token_mint_serializes_admin_and_pull_requests() {
+        // Issue #110: the elevated session permission set must reach GitHub in
+        // the request body. Assert the serialized `permissions` object carries
+        // `administration:write` and `pull_requests:write` (alongside the
+        // existing contents/issues writes).
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/app/installations/7/access_tokens"))
+            .and(body_partial_json(serde_json::json!({
+                "permissions": {
+                    "contents": "write",
+                    "pull_requests": "write",
+                    "issues": "write",
+                    "administration": "write"
+                }
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "token": "ghs_admintoken",
+                "expires_at": "2026-06-12T12:00:00Z"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = api(&server.uri())
+            .create_installation_token(
+                &jwt(),
+                InstallationId(7),
+                &InstallationTokenRequest {
+                    repositories: vec!["site".to_string()],
+                    permissions: Some(TokenPermissions {
+                        contents: Some("write".to_string()),
+                        pull_requests: Some("write".to_string()),
+                        issues: Some("write".to_string()),
+                        administration: Some("write".to_string()),
+                        metadata: None,
+                    }),
+                },
+            )
+            .await
+            .expect("ok");
+
+        assert_eq!(result.token.expose_secret(), "ghs_admintoken");
     }
 
     #[tokio::test]
