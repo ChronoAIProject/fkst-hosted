@@ -220,6 +220,7 @@ async fn app(server: MockServer) -> TestApp {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
 

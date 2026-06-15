@@ -26,6 +26,10 @@ use crate::state::AppState;
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionRequest {
     pub package_name: String,
+    /// Optional Ornn skills/skillsets to inject into the session's codex
+    /// (issue #114). Each `{kind, name, version}`; validated at the boundary.
+    #[serde(default)]
+    pub ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
 }
 
 /// Response body for `POST /api/v1/sessions` (201).
@@ -172,6 +176,13 @@ async fn create(
         ));
     }
 
+    // Boundary-validate the Ornn pins (#114): name/version grammar + the cheap
+    // cross-pin version conflict (the picker UI must pre-validate the same way;
+    // skillset-closure conflicts are re-checked at resolve time in the driver).
+    if let Some(ref pins) = request.ornn_skills {
+        crate::ornn::validate_pins(pins)?;
+    }
+
     let session = state
         .sessions
         .create(
@@ -183,6 +194,7 @@ async fn create(
             // The user's first-party token is forwarded transiently so the
             // driver can mint the per-session NyxID key (#111). Never persisted.
             ctx.raw_token.clone(),
+            request.ornn_skills.clone(),
         )
         .await?;
     let id = session.id.to_string();
@@ -353,6 +365,7 @@ mod tests {
             triggered_by: None,
             nyxid_key_id: None,
             nyxid_key_prefix: None,
+            ornn_skills: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: None,
             stopped_at: None,

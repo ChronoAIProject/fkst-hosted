@@ -91,6 +91,7 @@ async fn app() -> TestApp {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
     TestApp {
@@ -814,6 +815,7 @@ async fn delete_with_running_session_is_409() {
         triggered_by: None,
         nyxid_key_id: None,
         nyxid_key_prefix: None,
+        ornn_skills: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,

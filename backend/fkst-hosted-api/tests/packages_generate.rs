@@ -185,6 +185,7 @@ async fn app_with(
         engine,
         llm: gateway,
         vault,
+        ornn: None,
     })
     .expect("router");
     TestApp {

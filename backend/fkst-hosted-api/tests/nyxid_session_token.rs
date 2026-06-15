@@ -186,6 +186,7 @@ async fn package_session_persists_nyxid_key_refs_never_the_full_key() {
                 org_id: None,
             },
             SecretString::from("user-raw-token".to_string()),
+            None,
         )
         .await
         .expect("create session");
@@ -268,6 +269,7 @@ async fn two_sessions_each_mint_a_key() {
                 org_id: None,
             },
             SecretString::from("tok-a".to_string()),
+            None,
         )
         .await
         .expect("create a");
@@ -280,6 +282,7 @@ async fn two_sessions_each_mint_a_key() {
                 org_id: None,
             },
             SecretString::from("tok-b".to_string()),
+            None,
         )
         .await
         .expect("create b");
@@ -332,6 +335,7 @@ async fn failover_without_token_escalates_for_a_session_that_had_a_key() {
         // escalate instead of silently skipping.
         nyxid_key_id: Some("prior-key".to_string()),
         nyxid_key_prefix: Some("nyxid_ag_old".to_string()),
+        ornn_skills: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,
