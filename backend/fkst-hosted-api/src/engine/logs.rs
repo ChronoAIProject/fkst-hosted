@@ -196,11 +196,17 @@ mod tests {
             github_token: SecretString::from("ghs_logs_audit_secret".to_string()),
             github_token_file: PathBuf::from("/run/session/github-token"),
             goal_file: PathBuf::from("/run/session/goal.json"),
+            helper_path: PathBuf::from("/run/session/git-credential-fkst"),
+            mint_nonce: SecretString::from("nonce_audit_secret".to_string()),
         };
         let rendered = format!("{goal_env:?}");
         assert!(
             !rendered.contains("ghs_logs_audit_secret"),
             "no log/debug path may render the token: {rendered}"
+        );
+        assert!(
+            !rendered.contains("nonce_audit_secret"),
+            "no log/debug path may render the mint nonce: {rendered}"
         );
         assert!(
             rendered.contains("<redacted>"),

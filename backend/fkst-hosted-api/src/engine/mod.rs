@@ -13,6 +13,7 @@
 
 pub mod config;
 pub mod error;
+pub mod goal_token;
 pub mod logs;
 pub mod materialize;
 pub mod process;
@@ -20,6 +21,10 @@ pub mod runner;
 
 pub use config::EngineConfig;
 pub use error::RunnerError;
-pub use materialize::PreparedPackage;
+pub use goal_token::{
+    git_config_entries, write_token_file, GitConfigEntry, HELPER_SCRIPT_NAME, MINT_NONCE_ENV,
+    MINT_REQUEST_SUFFIX, NONCE_FILE_NAME, TOKEN_FILE_NAME,
+};
+pub use materialize::{materialize_helper_script, PreparedPackage};
 pub use process::{is_pid_alive, GoalEnv};
 pub use runner::{GoalContext, LiveStatus, RunningSession, SessionRunner, StartSpec};

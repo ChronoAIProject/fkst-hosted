@@ -195,7 +195,9 @@ impl GithubAppTokens {
         })
     }
 
-    /// Mint (or return cached) installation token for `owner/repo`.
+    /// Mint (or return cached) installation token for `owner/repo`, returning
+    /// only the token. Thin wrapper over [`Self::token_with_expiry_for_repo`]
+    /// for callers that do not need the expiry.
     ///
     /// - `perms`: `None` => [`default_permissions()`].
     /// - `owner_repo` must match `^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`.
@@ -206,6 +208,19 @@ impl GithubAppTokens {
         owner_repo: &str,
         perms: Option<TokenPermissions>,
     ) -> Result<SecretString, GithubAppError> {
+        Ok(self.token_with_expiry_for_repo(owner_repo, perms).await?.0)
+    }
+
+    /// Mint (or return cached) installation token for `owner/repo`, returning the
+    /// token AND its `expires_at` (issue #107). The expiry is what the goal-token
+    /// file writer records as RFC3339 so the credential helper can decide whether
+    /// to force a just-in-time re-mint. Same caching / `InstallationGone`
+    /// semantics as [`Self::token_for_repo`].
+    pub async fn token_with_expiry_for_repo(
+        &self,
+        owner_repo: &str,
+        perms: Option<TokenPermissions>,
+    ) -> Result<(SecretString, SystemTime), GithubAppError> {
         if !REPO_REF_RE.is_match(owner_repo) {
             return Err(GithubAppError::InvalidRepoRef);
         }
@@ -225,7 +240,7 @@ impl GithubAppTokens {
                         owner_repo = %owner_repo,
                         "github app token cache hit"
                     );
-                    return Ok(cached.token.clone());
+                    return Ok((cached.token.clone(), cached.expires_at));
                 }
             }
         }
@@ -294,18 +309,19 @@ impl GithubAppTokens {
         );
 
         // 4. Store in cache.
+        let expires_at = token_result.expires_at;
         {
             let mut cache = self.inner.token_cache.lock().expect("token cache lock");
             cache.insert(
                 key,
                 CachedToken {
                     token: token_result.token.clone(),
-                    expires_at: token_result.expires_at,
+                    expires_at,
                 },
             );
         }
 
-        Ok(token_result.token)
+        Ok((token_result.token, expires_at))
     }
 
     /// The install URL for this app (if slug is configured).
@@ -542,6 +558,26 @@ mod tests {
         let t = svc.token_for_repo("acme/site", None).await.expect("ok");
         assert_ne!(t.expose_secret(), "ghs_expired", "must re-mint");
         assert_eq!(api.mint_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn token_with_expiry_returns_a_future_expiry_and_caches() {
+        let api = Arc::new(FakeApi::new(7));
+        let svc = service(api.clone());
+
+        let (t1, exp1) = svc
+            .token_with_expiry_for_repo("acme/site", None)
+            .await
+            .expect("first");
+        assert!(exp1 > SystemTime::now(), "expiry must be in the future");
+        // A second call is a cache hit: same token, same expiry, no new mint.
+        let (t2, exp2) = svc
+            .token_with_expiry_for_repo("acme/site", None)
+            .await
+            .expect("second");
+        assert_eq!(t1.expose_secret(), t2.expose_secret());
+        assert_eq!(exp1, exp2, "cached expiry must be stable");
+        assert_eq!(api.mint_count(), 1, "only one mint across both calls");
     }
 
     #[tokio::test]

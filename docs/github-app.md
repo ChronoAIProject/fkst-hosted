@@ -123,6 +123,29 @@ The same `GoalContext` path is used identically by the initial start and by the 
 
 > Earlier (pre-#106) the driver started the engine with `goal: None` and the token only reached the runtime dir via the periodic refresh, which was suppressed for the first ~55 minutes — so the engine ran with no credential at startup. That regression is fixed: the token is present from t=0.
 
+### How `git` actually uses the token (credential helper + rotation, #107)
+
+fkst-substrate is **reference-only**: it runs `git`/`gh`/`codex` as child processes and we cannot change how they authenticate. **All of the wiring below is configured from fkst-hosted's side** — the engine-process environment and the runtime dir it owns — with **zero changes to fkst-substrate's `crates/`**. The lever is that substrate builds its child processes **without** `env_clear`, so they inherit the environment and runtime dir fkst-hosted lays down.
+
+Plain `git push` over HTTPS does **not** read `GITHUB_TOKEN`; it consults a credential helper. So setting `GITHUB_TOKEN` alone (as #106 does) authenticates `gh` but not `git`. The credential delivery has three cooperating pieces:
+
+1. **A rotatable token file** — `<runtime_dir>/github-token`, mode `0600`, holding JSON `{ "token": "ghs_…", "expires_at": "<RFC3339>" }`. (Pre-#107 this was a bare token string with no freshness signal.) It is written **atomically** (sibling tmp file + `rename`, atomic on the same filesystem) by **both** the startup write and the periodic/reactive/JIT refresh — through one shared writer (`engine::write_token_file`), so the on-disk format and the atomicity guarantee never diverge. A concurrent reader therefore never sees a torn file.
+
+2. **A credential helper script** — `<runtime_dir>/git-credential-fkst`, mode `0700`, a small `/bin/sh` script materialized into the workspace. As a git credential helper it reads the token file and prints `username=x-access-token` + `password=<token>`. It holds **no** private key and **cannot** mint. Near expiry (the on-disk `expires_at` is within a safety window, default 5 min) it performs a **just-in-time re-mint**: it drops a nonce-bearing request file (`<runtime_dir>/github-token.request`) that the driver services (mint → atomic rewrite of the token file → delete the request file), waits bounded on that deletion, then re-reads. If no fresh token arrives in the window it **falls back to the current token** rather than failing `git` hard — the periodic backstop still covers true expiry. JSON is parsed with anchored POSIX `grep`/`sed` (no `jq`/`python3` dependency).
+
+3. **Git config injected via env** — on the engine process fkst-hosted sets `GIT_CONFIG_COUNT` + `GIT_CONFIG_KEY_i`/`GIT_CONFIG_VALUE_i` pairs for:
+   - `credential.https://github.com.helper = !<absolute helper path>` (git's shell-exec helper form),
+   - `credential.https://github.com.useHttpPath = false` (one credential serves every path under the host),
+   - `url.https://github.com/.insteadOf = git@github.com:` (coerce scp-style SSH remotes to HTTPS so the helper applies).
+
+   The token is **never** embedded in a remote URL or written to any on-disk `.git/config` (leak surface). These keys, plus `GH_TOKEN` and `FKST_GITHUB_MINT_NONCE`, are **platform-reserved** (`is_reserved_env_key`), so a user-supplied `env_profile` can never shadow them and redirect the helper.
+
+**On-demand mint authentication.** The JIT mint request is authenticated to the session by a per-session 128-bit **nonce**: written once at startup to `<runtime_dir>/.mint-nonce` (mode `0600`) and handed to the helper via the reserved `FKST_GITHUB_MINT_NONCE` env var. The driver's poller mints only when the request file's nonce matches the nonce file, so only that session's own engine child can trigger its own re-mint. No new network listener or socket is introduced; the protocol is entirely within the `0600` runtime dir.
+
+**Hardened rotation backstop.** The periodic refresh cooldown **tightens** as expiry approaches (a flaky mint near the deadline is retried every 10 s instead of every 60 s). On a persistent mint failure **with the on-disk token already expired**, or on an `InstallationGone` (the App was uninstalled mid-session), the driver stops the engine and transitions the session to `Failed` with a clear reason — rather than letting substrate keep hitting a silent 401 with a dead token. The token value and the mint nonce are `SecretString` and are never logged.
+
+**The `gh` exception.** `GITHUB_TOKEN`/`GH_TOKEN` are still set on the engine process for `gh`'s convenience, but they are **frozen at spawn** and a GitHub App installation token is **~1 h and non-renewable** — so `gh` cannot rotate past the TTL. Treat substrate's `gh` as best-effort short reads early in the session; durable issue/PR work should route through fkst-hosted's own `github_hub` path. `git`, by contrast, rotates for the whole session via the helper + file above.
+
 ### Repository creation requires `repo` scope (NyxID-side config)
 
 User-attributed repository creation (`create_repo`, reachable via `POST /api/v1/goals/{id}/trigger` with `repo_mode=create_new`) runs on the **NyxID credential-injection proxy path** — fkst-hosted never sees the user's GitHub token. Creating a repository requires the GitHub **`repo`** OAuth scope (or `public_repo` for public-only). The seeded NyxID `github` provider requests only `read:user` and `user:email` by default, so a connection made with those defaults will be rejected by GitHub with a 403.
