@@ -14,6 +14,7 @@
 //!   `logs/framework-child/` itself (`mkdir -p` semantics, spike Q5), so only
 //!   `durable/` is pre-created here.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -62,14 +63,25 @@ pub struct GoalContext {
 }
 
 /// Specification for starting a session with one or more packages and an
-/// optional goal context. Single-package, no-goal specs produce behavior that
-/// is byte-identical to the existing [`SessionRunner::start`] path.
-#[derive(Debug)]
+/// optional goal context. Single-package, no-goal specs with an empty
+/// `env_profile` produce behavior that is byte-identical (modulo the #101 env
+/// isolation) to the existing [`SessionRunner::start`] path.
+///
+/// `Default` is derived so the per-session injection path (#102) and the
+/// goal-token path (#106) can build a spec field-by-field; an empty
+/// `env_profile` is the back-compat default the live driver keeps using until
+/// the injection issue switches it over.
+#[derive(Debug, Default)]
 pub struct StartSpec {
     /// Ordered list of prepared packages (at least one).
     pub packages: Vec<PreparedPackage>,
     /// Goal context; `None` for classic (non-goal) sessions.
     pub goal: Option<GoalContext>,
+    /// Per-session env applied to the engine child via the isolated-env
+    /// mechanism (#101). Values are `SecretString` — never logged. Reserved
+    /// keys (`is_reserved_env_key`) are dropped at the spawn seam. Resolved and
+    /// populated by the injection path (#102); empty for classic sessions.
+    pub env_profile: BTreeMap<String, secrecy::SecretString>,
 }
 
 /// Live handle for one engine process, held by the caller for the session's
@@ -273,6 +285,7 @@ impl SessionRunner {
         let spec = StartSpec {
             packages: vec![pkg.clone()],
             goal: None,
+            env_profile: BTreeMap::new(),
         };
         self.start_with_spec(&spec).await
     }
@@ -374,6 +387,7 @@ impl SessionRunner {
                 &runtime_dir,
                 Duration::from_secs(self.config.conformance_timeout_secs),
                 self.config.error_capture_bytes,
+                &spec.env_profile,
             )
             .await?;
         }
@@ -384,6 +398,7 @@ impl SessionRunner {
             project_root,
             &package_dirs,
             &runtime_dir,
+            &spec.env_profile,
             goal_env.as_ref(),
         )?;
 
@@ -1097,7 +1112,17 @@ esac
             tokio::select! {
                 res = &mut fut => panic!("start must still be mid-ready-wait, got {res:?}"),
                 _ = async {
-                    while !pid_file.exists() {
+                    // Wait for the breadcrumb to be present AND written: the
+                    // shell creates the file (empty) before `echo $$` fills it,
+                    // so gating on existence alone races the write and can read
+                    // an empty file under heavy parallel load.
+                    loop {
+                        if fs::read_to_string(&pid_file)
+                            .ok()
+                            .is_some_and(|s| !s.trim().is_empty())
+                        {
+                            break;
+                        }
                         tokio::time::sleep(Duration::from_millis(25)).await;
                     }
                 } => {}
@@ -1357,6 +1382,7 @@ esac
         let spec = StartSpec {
             packages: vec![pkg.clone()],
             goal: None,
+            env_profile: BTreeMap::new(),
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1441,6 +1467,7 @@ esac
         let spec = StartSpec {
             packages: vec![minimal_package(), second_package()],
             goal: None,
+            env_profile: BTreeMap::new(),
         };
         let mut session = runner.start_with_spec(&spec).await.expect("start multi");
 
@@ -1494,6 +1521,7 @@ esac
         let spec = StartSpec {
             packages: vec![minimal_package(), second_package()],
             goal: None,
+            env_profile: BTreeMap::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(
@@ -1529,6 +1557,7 @@ esac
         let spec = StartSpec {
             packages: vec![minimal_package()],
             goal: Some(goal),
+            env_profile: BTreeMap::new(),
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1612,6 +1641,7 @@ esac
         let spec = StartSpec {
             packages: vec![],
             goal: None,
+            env_profile: BTreeMap::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));
@@ -1631,6 +1661,7 @@ esac
         let spec = StartSpec {
             packages: vec![minimal_package(), bad_second],
             goal: None,
+            env_profile: BTreeMap::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));
