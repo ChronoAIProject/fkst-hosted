@@ -25,6 +25,16 @@ local function run_liveness_scan(name)
   }, opts(name or "liveness-scan"))
 end
 
+local function run_liveness_scan_at(name, ts)
+  return t.run_department("departments/liveness_scan/main.lua", {
+    queue = "devloop_liveness_tick",
+    payload = {
+      schema = "github-devloop.tick.v1",
+    },
+    ts = ts,
+  }, opts(name or "liveness-scan"))
+end
+
 local function mock_repo()
   t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
     stdout = repo,
@@ -285,7 +295,7 @@ return {
     mock_repo()
     mock_issue_list(items)
     mock_empty_pr_list()
-    for number = 1, 100 do
+    for number = 1, 101 do
       mock_issue_state_number(number, { "fkst-dev:enabled", "fkst-dev:merged" }, "OPEN", {
         core.state_marker(core.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
       })
@@ -301,5 +311,35 @@ return {
       end
     end
     t.eq(views, 100)
+  end,
+
+  test_liveness_scan_rotates_large_board_across_ticks = function()
+    local items = {}
+    for number = 1, 101 do
+      table.insert(items, { number = number, state = "open", updated_at = "2026-06-03T01:02:03Z" })
+    end
+    mock_repo()
+    mock_issue_list(items)
+    mock_empty_pr_list()
+    for number = 1, 101 do
+      mock_issue_state_number(number, { "fkst-dev:enabled", "fkst-dev:merged" }, "OPEN", {
+        core.state_marker(core.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
+      })
+    end
+
+    local tick = "2026-06-03T01:32:04Z"
+    local result = run_liveness_scan_at("liveness-scan-rotates-large-board", tick)
+    t.eq(result.exit_code, 0)
+
+    local viewed = {}
+    for _, call in ipairs(t.command_calls()) do
+      local issue_number = tostring(call.rendered or ""):match("gh issue view '(%d+)'")
+      if issue_number ~= nil then
+        viewed[tonumber(issue_number)] = true
+      end
+    end
+    local skipped = ((core.sweep_rotation_offset(#items, tick) + 100) % #items) + 1
+    t.eq(viewed[skipped], nil)
+    t.eq(viewed[101], true)
   end,
 }

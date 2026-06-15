@@ -17,6 +17,34 @@ local function count_calls(needle)
 end
 
 return {
+  test_marker_bearing_issue_state_reader_accepts_explicit_timeout = function()
+    local seen_timeout = nil
+    local old_gh_exec = core.gh_exec
+    core.gh_exec = function(cmd_or_opts, timeout)
+      if type(cmd_or_opts) == "table" then
+        seen_timeout = cmd_or_opts.timeout
+      else
+        seen_timeout = timeout
+      end
+      return {
+        stdout = issue_view_stdout("Timeout"),
+        stderr = "",
+        exit_code = 0,
+      }
+    end
+
+    local ok, result = pcall(function()
+      return core.fetch_issue_view_state("owner/repo", 42, "2026-06-03T01:02:03Z", {
+        timeout = 10,
+      })
+    end)
+    core.gh_exec = old_gh_exec
+
+    t.eq(ok, true, tostring(result))
+    t.eq(result.exit_code, 0)
+    t.eq(seen_timeout, 10)
+  end,
+
   test_post_write_invalidation_bypasses_same_updated_at_issue_view_cache = function()
     local repo = "owner/cache-invalidation"
     local issue_number = 4242
