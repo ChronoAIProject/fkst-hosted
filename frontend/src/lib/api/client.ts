@@ -11,6 +11,7 @@ import {
   isApiErrorBody,
   isHealthResponse,
 } from './types';
+import { getAccessToken, handleUnauthorized } from '../auth/token';
 
 /**
  * Custom error class representing an API failure.
@@ -31,6 +32,22 @@ export class ApiError extends Error {
 }
 
 /**
+ * Helper to build RequestInit options including the Authorization header if a token is present.
+ */
+function buildOptions(options?: RequestInit): RequestInit {
+  const token = getAccessToken();
+  if (!token) {
+    return options || {};
+  }
+  const headers = new Headers(options?.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  return {
+    ...options,
+    headers,
+  };
+}
+
+/**
  * Helper to perform typed requests expecting a JSON response body.
  * Throws ApiError if response is not ok or is not JSON.
  */
@@ -39,13 +56,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
 
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, buildOptions(options));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network failure';
     throw new ApiError(0, null, message);
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized();
+    }
     let body: unknown = null;
     try {
       body = await response.json();
@@ -96,13 +116,16 @@ export async function requestVoid(path: string, options?: RequestInit): Promise<
   let response: Response;
 
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, buildOptions(options));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network failure';
     throw new ApiError(0, null, message);
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized();
+    }
     let body: unknown = null;
     try {
       body = await response.json();
