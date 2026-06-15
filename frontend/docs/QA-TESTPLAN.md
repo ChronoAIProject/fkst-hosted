@@ -67,7 +67,7 @@ Docker path: `docker compose up mongo` (backend/) then run the API. Native path 
 2. Mongo: any local `mongod` on `:27017` (throwaway dbpath).
 3. API: run `fkst-hosted-api` with `MONGODB_URI=mongodb://127.0.0.1:27017`, `FKST_HOSTED_PORT=8080`, `FKST_HOSTED_ENGINE_FRAMEWORK_BIN=<built engine>`, `FKST_JOURNAL_GITHUB_ENABLED=false`. Confirm `curl :8080/health` → `{status:ok,mongo:up}`.
 4. FE: `VITE_FKST_API_BASE=http://127.0.0.1:8080 npm run build && npm run preview`.
-> The package store is **create-only / no-delete** — only ever point write tests at a throwaway backend, never a shared deployment.
+> The package store supports create, update, and delete via the backend API — only ever point write tests at a throwaway backend, never a shared deployment.
 
 ---
 
@@ -75,15 +75,15 @@ Docker path: `docker compose up mongo` (backend/) then run the API. Native path 
 
 ### TC-1.1 Packages list + detail
 - **Steps:** open `/packages` against a backend with ≥1 package.
-- **Expected:** each package row shows mono name + flat/composed badge (composed = `composed_deps.length>0`, amber-tinted) + deps chips. Intro lede + Company·Department·Person levels present. Fields the API doesn't expose (conformance, role, dept counts) render `unknown` with one honest note — never fabricated numbers. **No edit/delete affordance anywhere.**
+- **Expected:** each package row shows mono name + flat/composed badge (composed = `composed_deps.length>0`, amber-tinted) + deps chips. Intro lede + Company·Department·Person levels present. Fields the API doesn't expose (conformance, role, dept counts) render `unknown` with one honest note — never fabricated numbers. **UI currently does not have edit/delete controls (update/delete available via API; UI coming soon).**
 
 ### TC-1.2 Empty vs unreachable (the honesty split)
 - **Steps:** (a) point at an empty store; (b) stop the API and reload.
 - **Expected:** (a) genuine empty state ("no packages…"); (b) "package store unreachable — unknown" — **the two must look/read differently**; unreachable must never render as an empty list or `0`.
 
-### TC-1.3 Add package — create-only, server-authoritative
+### TC-1.3 Add package — server-authoritative
 - **Steps:** "+ Add package" → submit a **new** valid package (name `^[A-Za-z0-9_-]+$`, ≥1 file incl. an engine entry `departments/*/main.lua` or `raisers/*.lua`).
-- **Expected:** 201 → list refreshes → toast "Created — composes on next session start" (not "deployed/live"). The modal carries the create-only/409/conformance-at-start note. Files contain **user-supplied content** (no stubbed/auto-filled content sent).
+- **Expected:** 201 → list refreshes → toast "Created — composes on next session start" (not "deployed/live"). The modal carries the 409/conformance-at-start note. Files contain **user-supplied content** (no stubbed/auto-filled content sent).
 
 ### TC-1.4 Add package — duplicate → 409 inline
 - **Steps:** submit an existing name.

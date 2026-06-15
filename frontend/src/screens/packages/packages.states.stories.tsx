@@ -77,7 +77,7 @@ export const Create409: Story = {
     await userEvent.click(addBtn);
 
     const body = within(canvasElement.ownerDocument.body);
-    const nameInput = await body.findByLabelText(/Name · unique, create-only/i);
+    const nameInput = await body.findByLabelText(/Name · unique on create/i);
     const filesTextarea = await body.findByLabelText(/Files · the package root, inline/i);
     const submitBtn = await body.findByRole('button', { name: /Create package/i });
 

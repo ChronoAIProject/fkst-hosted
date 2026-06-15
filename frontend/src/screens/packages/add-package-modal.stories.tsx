@@ -58,7 +58,7 @@ export const Server409Conflict: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const nameInput = canvas.getByLabelText(/Name · unique, create-only/i);
+    const nameInput = canvas.getByLabelText(/Name · unique on create/i);
     const filesTextarea = canvas.getByLabelText(/Files · the package root, inline/i);
     const submitBtn = canvas.getByRole('button', { name: /Create package/i });
 

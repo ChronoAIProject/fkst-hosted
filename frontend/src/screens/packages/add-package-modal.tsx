@@ -280,7 +280,7 @@ export function AddPackageModal({ isOpen, onOpenChange }: AddPackageModalProps) 
             {/* Name Field */}
             <div className="flex flex-col gap-1.5 min-w-0">
               <label htmlFor="name-input" className="text-[10px] font-mono font-semibold tracking-[0.13em] uppercase text-ghost select-none">
-                Name · unique, create-only
+                Name · unique on create
               </label>
               <input
                 id="name-input"

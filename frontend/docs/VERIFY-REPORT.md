@@ -9,7 +9,7 @@
 - **Mongo:** `mongodb-community@7.0` (brew), throwaway `--dbpath`, db `fkst_hosted_verify`.
 - **API:** `fkst-hosted-api` (release) on `127.0.0.1:8080`, `FKST_HOSTED_ENGINE_FRAMEWORK_BIN` → built engine, `FKST_JOURNAL_GITHUB_ENABLED=false`. `/health` → `{status:ok, mongo:up}`.
 - **FE:** `vite preview` of dist built with `VITE_FKST_API_BASE=http://127.0.0.1:8080`, served at `localhost:4178`.
-- Docker Desktop would not launch (`-1712`); worked around with native mongod + native engine build. **No real deployment touched** (create-only store untouched).
+- Docker Desktop would not launch (`-1712`); worked around with native mongod + native engine build. **No real deployment touched** (package store untouched).
 
 ## API contract layer — 13/13 PASS (curl/urllib)
 - Create package → 201 · duplicate → 409 · invalid (name+no-engine-entry) → 400

@@ -318,7 +318,7 @@
   <div class="pkgbar">
     <button class="add"><span class="pl">+</span> Add package root</button>
     <div class="apply">
-      <span class="note">manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its <span class="mono">composed_deps</span>) — changing the set = create a new package revision (create-only store), then cycle the session; per-package enable switches are a <b>target-state UI</b> over that flow</span>
+      <span class="note">manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its <span class="mono">composed_deps</span>) — changing the set = create a new package revision (update/delete available via API; UI coming soon), then cycle the session; per-package enable switches are a <b>target-state UI</b> over that flow</span>
       <button>Apply changes · stop &amp; restart session</button>
     </div>
   </div>
@@ -632,13 +632,13 @@
       <div class="m-meta">create a package in the hosted store — <span class="mono">POST /api/v1/packages</span></div>
     </div>
     <div class="ngf">
-      <div class="ngrow"><span class="nglab">Name · unique, create-only</span>
+      <div class="ngrow"><span class="nglab">Name · unique on create</span>
         <input class="nginp" placeholder="e.g. github-devloop"></div>
       <div class="ngrow"><span class="nglab">Files · the package root, inline</span>
         <input class="nginp" placeholder="core.lua · departments/&lt;d&gt;/main.lua · raisers/*.lua  —  upload or paste"></div>
       <div class="ngrow"><span class="nglab">composed_deps · optional</span>
         <input class="nginp" placeholder="github-proxy, consensus"></div>
-      <div class="ngnote">Stored in the hosted package store as <span class="mono">{name, files[], composed_deps[]}</span> — <b>create-only</b>: a duplicate name is a <span class="mono">409</span>, and v1 has <b>no update or delete</b> (a new revision is a new name). A package is loaded <b>once</b> at session start and composed into the one static graph — applying it = <b>stop the session, start a new one</b> (<span class="mono">POST /sessions/:id/stop</span> → poll <span class="mono">stopped</span> → <span class="mono">POST /sessions</span>). Create validates <b>structure only</b> (name <span class="mono">[A-Za-z0-9_-]+</span> · ≥1 file · ≤256 files · ≤1&nbsp;MiB/file · ≤12&nbsp;MiB total · must contain <span class="mono">departments/*/main.lua</span> or <span class="mono">raisers/*.lua</span>); <b>conformance runs at session start</b> — the session passes through <span class="mono">validating</span> and lands <span class="mono">failed</span> with the error on the session record if it doesn't conform. The source tree is <b>read-only at runtime</b>.</div>
+      <div class="ngnote">Stored in the hosted package store as <span class="mono">{name, files[], composed_deps[]}</span> — <b>unique on create</b>: a duplicate name is a <span class="mono">409</span>, and updates or deletes are available via API (UI coming soon). A package is loaded <b>once</b> at session start and composed into the one static graph — applying it = <b>stop the session, start a new one</b> (<span class="mono">POST /sessions/:id/stop</span> → poll <span class="mono">stopped</span> → <span class="mono">POST /sessions</span>). Create validates <b>structure only</b> (name <span class="mono">[A-Za-z0-9_-]+</span> · ≥1 file · ≤256 files · ≤1&nbsp;MiB/file · ≤12&nbsp;MiB total · must contain <span class="mono">departments/*/main.lua</span> or <span class="mono">raisers/*.lua</span>); <b>conformance runs at session start</b> — the session passes through <span class="mono">validating</span> and lands <span class="mono">failed</span> with the error on the session record if it doesn't conform. The source tree is <b>read-only at runtime</b>.</div>
     </div>
     <div class="m-act">
       <div class="m-act-l"></div>
