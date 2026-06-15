@@ -58,6 +58,7 @@ use crate::leases::RenewOutcome;
 use crate::models::{SessionDoc, SessionStatus};
 use crate::nyxid::NyxIdClient;
 use crate::packages::{is_valid_name, PackageRepository};
+use crate::sessions::codex_provider::{self, AssumeConnected, ChronoLlmCheck};
 use crate::sessions::nyxid_token::{self, NyxidTokenHandle};
 use crate::sessions::repo::{status_bson, SessionRepo};
 use crate::vault::{EnvScopeRef, VaultService};
@@ -162,6 +163,22 @@ struct Inner {
     /// exactly as pre-#111). When set it carries the NyxID client and the
     /// origin (the NyxID issuer base URL) injected as `NYXID_URL`.
     nyxid: OnceLock<NyxidSetup>,
+    /// Per-session codex LLM-provider config (issue #112), enabled once at
+    /// startup via [`SessionService::enable_codex`]. Unset => the driver does
+    /// NOT render a per-session CODEX_HOME (legacy tests / minimal runs behave
+    /// exactly as pre-#112). When set it carries the operator-pinned chrono-llm
+    /// DEFAULT model + base URL the renderer uses. Rendering also requires the
+    /// vault (#100) to be wired so the user's override/connection can be read.
+    codex: OnceLock<CodexSetup>,
+}
+
+/// Per-session codex provider wiring shared by every driver this service
+/// spawns. Carries the operator-pinned chrono-llm DEFAULT values (#112).
+struct CodexSetup {
+    /// Model the chrono-llm DEFAULT serves (`FKST_HOSTED_CODEX_MODEL`).
+    codex_model: String,
+    /// NyxID proxy base URL for chrono-llm (`FKST_HOSTED_CHRONO_LLM_BASE_URL`).
+    chrono_llm_base_url: String,
 }
 
 /// NyxID token provisioning wiring shared by every driver this service spawns.
@@ -237,6 +254,7 @@ impl SessionService {
                 goal_support: OnceLock::new(),
                 vault: OnceLock::new(),
                 nyxid: OnceLock::new(),
+                codex: OnceLock::new(),
             }),
         }
     }
@@ -301,6 +319,29 @@ impl SessionService {
             return;
         }
         tracing::info!("per-session nyxid token provisioning enabled (wired into the driver)");
+    }
+
+    /// Enable per-session codex LLM-provider config (issue #112): every driver
+    /// renders a per-session CODEX_HOME `config.toml` selecting the provider
+    /// (default chrono-llm; RAW/STRUCTURED vault overrides). `codex_model` and
+    /// `chrono_llm_base_url` are the operator-pinned chrono-llm DEFAULT values.
+    /// Call once at startup, before any session is created; a second call is a
+    /// logged no-op. When never called the driver skips CODEX_HOME rendering
+    /// entirely (legacy behaviour for tests / minimal runs).
+    pub fn enable_codex(&self, codex_model: String, chrono_llm_base_url: String) {
+        if self
+            .inner
+            .codex
+            .set(CodexSetup {
+                codex_model,
+                chrono_llm_base_url,
+            })
+            .is_err()
+        {
+            tracing::warn!("codex provider config already enabled; ignoring the second call");
+            return;
+        }
+        tracing::info!("per-session codex provider config enabled (wired into the driver)");
     }
 
     /// The repository handle (startup hooks: orphan sweep).
@@ -1180,6 +1221,46 @@ async fn drive_inner(
         }
     }
 
+    // (B5) Per-session codex CODEX_HOME (#112): render the codex config.toml
+    // selecting the LLM provider (default chrono-llm; RAW/STRUCTURED vault
+    // overrides) into a fresh 0700 dir holding a 0600 config.toml. Only runs
+    // when BOTH codex config and the vault are wired (production); skipped for
+    // legacy tests / minimal runs, which keeps CODEX_HOME unset and the
+    // behaviour byte-identical. A render/IO failure FAILS the start — a run must
+    // never proceed without a working LLM backend config. The TempDir GUARD is
+    // held in this `drive_inner` frame (`_codex_home_guard`) so the dir lives
+    // for the whole session and is removed on every exit path (mirroring how the
+    // runner holds its runtime/package guards).
+    let codex_home: Option<std::path::PathBuf>;
+    let _codex_home_guard: Option<tempfile::TempDir>;
+    match prepare_codex_home(inner, &session_doc).await {
+        Ok(Some((guard, dir))) => {
+            tracing::info!(session_id = %id, "rendered per-session codex config");
+            codex_home = Some(dir);
+            _codex_home_guard = Some(guard);
+        }
+        Ok(None) => {
+            codex_home = None;
+            _codex_home_guard = None;
+        }
+        Err(error) => {
+            // The error message is client-safe (no provider key — this module
+            // never handles the key value); detail is logged, not persisted raw.
+            tracing::error!(session_id = %id, error = %error, "failed to render codex config");
+            let reason = "failed to render codex provider config";
+            journal_finish(
+                &mut journaler,
+                Transition::Failed {
+                    exit_code: None,
+                    error: reason.to_string(),
+                },
+            )
+            .await;
+            fail_session(inner, id, &fence, reason, goal_info).await;
+            return true;
+        }
+    }
+
     // (C0) For a goal session, mint the GitHub App installation token and build
     // the GoalContext so the engine receives GITHUB_TOKEN + the 0600 token file
     // + goal.json at t=0 (#106 — previously the token only arrived ~55 min in,
@@ -1221,6 +1302,7 @@ async fn drive_inner(
             packages: vec![prepared],
             goal: goal_ctx,
             env_profile,
+            codex_home,
         })
         .await
     {
@@ -1629,6 +1711,94 @@ async fn resolve_env_profile(
         .list_for_scope(owner_user_id, session.org_id.as_deref(), &scope)
         .await?;
     Ok(profile_from_resolved(session.id, resolved))
+}
+
+/// Prepare a per-session CODEX_HOME for the engine's codex provider (#112).
+///
+/// Returns `Ok(None)` when codex config OR the vault is not wired (legacy tests
+/// / minimal runs) — the caller then leaves CODEX_HOME unset and the behaviour
+/// is byte-identical to pre-#112. Otherwise it:
+/// 1. resolves the provider LAYER from the vault (default chrono-llm, with
+///    RAW/STRUCTURED overrides), surfacing the missing-chrono-llm 422;
+/// 2. renders the codex `config.toml` for that layer (operator-pinned chrono-llm
+///    DEFAULT model/base_url from config);
+/// 3. creates a fresh `fkst-codex-*` dir (0700) under the engine temp root and
+///    writes `config.toml` (0600).
+///
+/// Returns the held [`tempfile::TempDir`] guard (the caller keeps it for the
+/// session's lifetime) plus the canonicalized dir path to set as CODEX_HOME.
+/// The rendered toml never contains a provider key (the key rides `env_key`),
+/// and no vault value is logged.
+async fn prepare_codex_home(
+    inner: &Arc<Inner>,
+    session: &SessionDoc,
+) -> Result<Option<(tempfile::TempDir, PathBuf)>, AppError> {
+    let (Some(codex), Some(vault)) = (inner.codex.get(), inner.vault.get()) else {
+        // Codex config or the vault is not wired: skip CODEX_HOME entirely.
+        return Ok(None);
+    };
+
+    let scope = scope_for_session(session);
+    let owner_user_id = session.owner_user_id.as_deref().unwrap_or_default();
+    // v1 connection precondition: assume connected on the online path (the live
+    // chrono-llm connection is verified by the documented manual/staging
+    // preflight, not on every session start). The seam keeps the 422 mapping
+    // exercised by unit tests and lets a future issue swap in a live preflight.
+    let check: &dyn ChronoLlmCheck = &AssumeConnected;
+    let choice = codex_provider::resolve_provider_choice(
+        vault,
+        owner_user_id,
+        session.org_id.as_deref(),
+        &scope,
+        check,
+    )
+    .await?;
+
+    let config_toml = codex_provider::render_codex_config(
+        &choice,
+        &codex.codex_model,
+        &codex.chrono_llm_base_url,
+    )?;
+
+    // 0700 dir under the engine temp root (same filesystem as the runtime dirs).
+    let guard = tempfile::Builder::new()
+        .prefix("fkst-codex-")
+        .tempdir_in(inner.runner.temp_root())
+        .map_err(|error| {
+            tracing::error!(error = %error, "failed to create codex home dir");
+            AppError::Unavailable("failed to create codex home".to_string())
+        })?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(guard.path(), std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| {
+                tracing::error!(error = %error, "failed to chmod codex home dir");
+                AppError::Unavailable("failed to secure codex home".to_string())
+            },
+        )?;
+    }
+
+    // 0600 config.toml inside it.
+    let config_path = guard.path().join("config.toml");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(&config_path, config_toml.as_bytes()).map_err(|error| {
+            tracing::error!(error = %error, "failed to write codex config.toml");
+            AppError::Unavailable("failed to write codex config".to_string())
+        })?;
+        std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |error| {
+                tracing::error!(error = %error, "failed to chmod codex config.toml");
+                AppError::Unavailable("failed to secure codex config".to_string())
+            },
+        )?;
+    }
+
+    let dir = guard.path().canonicalize().map_err(|error| {
+        tracing::error!(error = %error, "failed to canonicalize codex home dir");
+        AppError::Unavailable("failed to resolve codex home".to_string())
+    })?;
+    Ok(Some((guard, dir)))
 }
 
 /// Derive the vault scope to resolve for a session: the persisted non-secret

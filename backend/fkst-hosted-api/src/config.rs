@@ -123,6 +123,18 @@ mod defaults {
     pub(super) fn vault_entries_per_scope_cap() -> usize {
         100
     }
+
+    pub(super) fn codex_model() -> String {
+        // The model the chrono-llm DEFAULT codex provider serves (#112). The
+        // operator pins it to whatever chrono-llm currently serves; this is a
+        // sensible non-empty default, never a literal placeholder.
+        "gpt-5-codex".to_string()
+    }
+
+    pub(super) fn chrono_llm_base_url() -> String {
+        // The NyxID proxy slug for the admin-seeded chrono-llm service (#112).
+        "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm".to_string()
+    }
 }
 
 /// `FKST_HOSTED_*`-prefixed variables (HTTP/server settings).
@@ -170,6 +182,18 @@ struct HttpVars {
     /// `FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP`. Default 100, zero rejected.
     #[serde(default = "defaults::vault_entries_per_scope_cap")]
     vault_entries_per_scope_cap: usize,
+    /// Operator-pinned model the chrono-llm DEFAULT codex provider serves
+    /// (#112). Env: `FKST_HOSTED_CODEX_MODEL`. Default `gpt-5-codex`; blank
+    /// rejected at load (a misconfigured default must fail closed, never render
+    /// an unusable codex config).
+    #[serde(default = "defaults::codex_model")]
+    codex_model: String,
+    /// NyxID proxy base URL for the chrono-llm DEFAULT codex provider (#112).
+    /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
+    /// slug; blank rejected at load. Non-secret (it is a route, like
+    /// `llm_gateway_url`).
+    #[serde(default = "defaults::chrono_llm_base_url")]
+    chrono_llm_base_url: String,
 }
 
 /// Unprefixed MongoDB variables. `MONGODB_URI` has no default: a backend
@@ -339,6 +363,14 @@ pub struct Config {
     /// Max vault entries an owner may hold per scope. Env:
     /// `FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP`. Default 100, zero rejected.
     pub vault_entries_per_scope_cap: usize,
+    /// Operator-pinned model the chrono-llm DEFAULT codex provider serves
+    /// (#112). Env: `FKST_HOSTED_CODEX_MODEL`. Default `gpt-5-codex`; blank
+    /// rejected at load (fail-closed). Non-secret routing config.
+    pub codex_model: String,
+    /// NyxID proxy base URL for the chrono-llm DEFAULT codex provider (#112).
+    /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
+    /// slug; blank rejected at load. Non-secret routing config.
+    pub chrono_llm_base_url: String,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -393,6 +425,9 @@ impl fmt::Debug for Config {
                 "vault_entries_per_scope_cap",
                 &self.vault_entries_per_scope_cap,
             )
+            // Model name + proxy route are non-secret config — show them.
+            .field("codex_model", &self.codex_model)
+            .field("chrono_llm_base_url", &self.chrono_llm_base_url)
             .finish()
     }
 }
@@ -429,6 +464,8 @@ impl Default for Config {
             vault_master_key: None,
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
+            codex_model: defaults::codex_model(),
+            chrono_llm_base_url: defaults::chrono_llm_base_url(),
         }
     }
 }
@@ -604,6 +641,20 @@ impl Config {
                 "FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP must be at least 1".to_string(),
             ));
         }
+        // Codex chrono-llm DEFAULT (fail-closed): both values have serde
+        // defaults so the default path works out of the box, but a blank
+        // override would render an unusable codex config.toml (no model /
+        // unroutable base_url). Reject it loudly at startup, naming the var.
+        if http.codex_model.trim().is_empty() {
+            return Err(AppError::Config(
+                "FKST_HOSTED_CODEX_MODEL must not be blank".to_string(),
+            ));
+        }
+        if http.chrono_llm_base_url.trim().is_empty() {
+            return Err(AppError::Config(
+                "FKST_HOSTED_CHRONO_LLM_BASE_URL must not be blank".to_string(),
+            ));
+        }
         let vault_master_key = match (&http.vault_master_key, &http.vault_master_key_path) {
             (Some(_), Some(_)) => {
                 return Err(AppError::Config(
@@ -657,6 +708,8 @@ impl Config {
             vault_master_key,
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
+            codex_model: http.codex_model,
+            chrono_llm_base_url: http.chrono_llm_base_url,
         })
     }
 
@@ -1387,5 +1440,47 @@ mod tests {
                 .contains("FKST_HOSTED_VAULT_MASTER_KEY_PATH"),
             "error must name the path var, got: {err}"
         );
+    }
+
+    // ---- codex chrono-llm DEFAULT configuration tests (#112) ------------------
+
+    #[test]
+    fn codex_defaults_apply_when_unset() {
+        let config =
+            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        assert_eq!(config.codex_model, "gpt-5-codex");
+        assert_eq!(
+            config.chrono_llm_base_url,
+            "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm"
+        );
+    }
+
+    #[test]
+    fn codex_vars_are_overridable() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_HOSTED_CODEX_MODEL", "gpt-4.1"),
+            (
+                "FKST_HOSTED_CHRONO_LLM_BASE_URL",
+                "https://proxy.example/s/chrono-llm",
+            ),
+        ]))
+        .expect("overrides");
+        assert_eq!(config.codex_model, "gpt-4.1");
+        assert_eq!(
+            config.chrono_llm_base_url,
+            "https://proxy.example/s/chrono-llm"
+        );
+    }
+
+    #[test]
+    fn blank_codex_vars_are_config_errors_naming_the_var() {
+        for var in ["FKST_HOSTED_CODEX_MODEL", "FKST_HOSTED_CHRONO_LLM_BASE_URL"] {
+            let err = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false"), (var, "   ")]))
+                .expect_err("blank must fail");
+            assert!(matches!(err, AppError::Config(_)));
+            assert!(err.to_string().contains(var), "error must name {var}");
+        }
     }
 }
