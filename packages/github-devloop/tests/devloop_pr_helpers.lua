@@ -179,6 +179,7 @@ local function mock_pr_origin(comments, head, head_sha, state, base_branch, time
 end
 
 local function mock_pr_merge(comments, head, head_sha, state, head_repo, cross_repo, mergeable, merge_state, rollup_state, rollup_conclusion, merged_at, is_draft, base_sha)
+  -- Merge-gate PR reads are force-fresh authorization checks, not cacheable observe/open entity reads.
   local input_comments = comments
   local cached = base.take_pr_phase_comments()
   if input_comments == nil or #input_comments == 0 then
