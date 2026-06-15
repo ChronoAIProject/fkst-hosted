@@ -346,6 +346,13 @@ fn apply_isolated_env(
 ///   (issue #101); reserved keys are dropped.
 /// - `goal_env`, when present, adds `GITHUB_TOKEN`, `FKST_GITHUB_TOKEN_FILE`,
 ///   and `FKST_GOAL_FILE` to the child environment.
+/// - `codex_home`, when present, is set as the per-session `CODEX_HOME`
+///   platform var (#112) so codex reads the driver-rendered `config.toml`. It
+///   is layered with the other platform vars AFTER [`apply_isolated_env`], so
+///   it always wins over the allow-listed `CODEX_HOME` (which a user
+///   `env_profile` cannot set — it is reserved). `None` leaves the pre-#112
+///   behaviour: codex falls back to the allow-listed host `CODEX_HOME` or
+///   `$HOME/.codex`.
 ///
 /// The child environment is now fully isolated (`env_clear()` + allow-list +
 /// profile + platform roots) rather than inherited; see [`apply_isolated_env`].
@@ -356,6 +363,7 @@ pub fn spawn_supervise(
     rt_root: &Path,
     env_profile: &BTreeMap<String, secrecy::SecretString>,
     goal_env: Option<&GoalEnv>,
+    codex_home: Option<&Path>,
 ) -> Result<SpawnedChild, RunnerError> {
     let mut command = Command::new(framework_bin);
     command
@@ -389,6 +397,14 @@ pub fn spawn_supervise(
     command
         .env("FKST_RUNTIME_ROOT", rt_root)
         .env("FKST_DURABLE_ROOT", rt_root.join("durable"));
+
+    // Per-session CODEX_HOME (#112): a platform-managed var layered here, after
+    // the isolated-env pass, exactly like the FKST_ roots above so it always
+    // wins over the allow-listed CODEX_HOME (the driver owns the directory and
+    // its rendered config.toml; the runner never touches its lifecycle).
+    if let Some(home) = codex_home {
+        command.env("CODEX_HOME", home);
+    }
 
     let mut child = command.spawn().map_err(RunnerError::Spawn)?;
     let pid = child.id().map(|id| id as i32).ok_or_else(|| {
@@ -978,6 +994,7 @@ sleep 30"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect("spawn stub supervise");
         std::env::remove_var("FKST_PACKAGE_ROOT");
@@ -1066,6 +1083,7 @@ sleep 30"#;
             rt.path(),
             &env_profile,
             None,
+            None,
         )
         .expect("spawn");
         std::env::remove_var("LEAK_CANARY");
@@ -1109,6 +1127,7 @@ sleep 30"#;
                 rt.path(),
                 &env_profile,
                 None,
+                None,
             )
             .expect("spawn");
             (pkg, rt, spawned)
@@ -1151,6 +1170,7 @@ sleep 30"#;
             rt.path(),
             &env_profile,
             None,
+            None,
         )
         .expect("spawn");
         assert!(wait_until(|| spawned.output.snapshot().contains("ENVDUMP_DONE")).await);
@@ -1175,6 +1195,54 @@ sleep 30"#;
         assert!(
             snap.contains(&format!("RT={}", rt.path().display())),
             "platform RT wins over user FKST_RUNTIME_ROOT:\n{snap}"
+        );
+
+        let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
+    }
+
+    /// Issue #112: a `Some(codex_home)` is set as a per-session platform var on
+    /// the supervise child and WINS over the allow-listed host `CODEX_HOME`
+    /// (the parent's value never reaches the child once the driver overrides
+    /// it). `None` leaves the pre-#112 fall-through.
+    #[tokio::test]
+    async fn spawn_supervise_sets_per_session_codex_home_over_the_host_var() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let codex_home = tempfile::tempdir().expect("codex home");
+        let script = stub(
+            dir.path(),
+            "codex-home.sh",
+            r#"echo "CODEX_HOME=${CODEX_HOME:-UNSET}" >&2
+echo "event runtime running handles=3" >&2
+echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+echo "ENVDUMP_DONE" >&2
+sleep 30"#,
+        );
+
+        // A host CODEX_HOME the per-session value must override.
+        std::env::set_var("CODEX_HOME", "/tmp/host-codex-home");
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            &empty_env(),
+            None,
+            Some(codex_home.path()),
+        )
+        .expect("spawn");
+        std::env::remove_var("CODEX_HOME");
+
+        assert!(wait_until(|| spawned.output.snapshot().contains("ENVDUMP_DONE")).await);
+        let snap = spawned.output.snapshot();
+        assert!(
+            snap.contains(&format!("CODEX_HOME={}", codex_home.path().display())),
+            "per-session CODEX_HOME must reach the child:\n{snap}"
+        );
+        assert!(
+            !snap.contains("/tmp/host-codex-home"),
+            "host CODEX_HOME must be overridden:\n{snap}"
         );
 
         let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
@@ -1257,6 +1325,7 @@ sleep 30"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect("spawn raiser");
         let first = tokio::time::timeout(Duration::from_secs(20), spawned.stdout_lines.recv())
@@ -1300,6 +1369,7 @@ sleep 30"#,
             &[pkg.path().to_path_buf()],
             rt.path(),
             &empty_env(),
+            None,
             None,
         )
         .expect("spawn");
@@ -1353,6 +1423,7 @@ sleep 30"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect("spawn");
         let blast = tokio::time::timeout(Duration::from_secs(30), spawned.stdout_lines.recv())
@@ -1399,6 +1470,7 @@ sleep 30"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect("spawn");
         drop(std::mem::replace(
@@ -1438,6 +1510,7 @@ sleep 30"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect("spawn blaster");
         let stderr = spawned.output.clone();
@@ -1476,6 +1549,7 @@ sleep 30"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect_err("missing binary must fail to spawn");
         assert!(matches!(err, RunnerError::Spawn(_)));
@@ -1506,6 +1580,7 @@ sleep 30"#,
             &[pkg.path().to_path_buf()],
             rt.path(),
             &empty_env(),
+            None,
             None,
         )
         .expect("spawn stdout-ready stub");
@@ -1543,6 +1618,7 @@ sleep 30"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect("spawn stderr-ready stub");
         let output = spawned.output.clone();
@@ -1577,6 +1653,7 @@ sleep 30"#,
             &[pkg.path().to_path_buf()],
             rt.path(),
             &empty_env(),
+            None,
             None,
         )
         .expect("spawn panic stub");
@@ -1618,6 +1695,7 @@ sleep 30"#,
             &[pkg.path().to_path_buf()],
             rt.path(),
             &empty_env(),
+            None,
             None,
         )
         .expect("spawn half-alive stub");
@@ -1662,6 +1740,7 @@ wait"#,
             &[pkg.path().to_path_buf()],
             rt.path(),
             &empty_env(),
+            None,
             None,
         )
         .expect("spawn group");
@@ -1714,6 +1793,7 @@ while true; do sleep 1; done"#,
             rt.path(),
             &empty_env(),
             None,
+            None,
         )
         .expect("spawn ignorer");
         // Only signal once the stub has confirmed its TERM trap is live.
@@ -1743,6 +1823,7 @@ while true; do sleep 1; done"#,
             &[pkg.path().to_path_buf()],
             rt.path(),
             &empty_env(),
+            None,
             None,
         )
         .expect("spawn");
@@ -1991,6 +2072,7 @@ exit 1"#,
             &[pkg.path().to_path_buf()],
             rt.path(),
             &empty_env(),
+            None,
             None,
         )
         .expect("spawn");

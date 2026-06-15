@@ -8,6 +8,35 @@
 #     -t fkst-hosted-api:dev .
 
 ARG RUST_VERSION=1
+# Operator-pinned codex CLI version (issue #112). A Feb-2026+ release: the
+# engine runs `codex exec --dangerously-bypass-approvals-and-sandbox` and the
+# default chrono-llm provider needs `wire_api = "responses"`, so an older codex
+# breaks the run. Bumped deliberately, never floated to "latest".
+ARG CODEX_VERSION=0.139.0
+
+# ---- codex install stage: download the prebuilt release asset ----
+# This is a DOWNLOAD of a published binary, not a cargo build — no registry/
+# target cache mount, no build-race risk. The musl asset is static, so it runs
+# as-is in the debian-slim runtime stage. TARGETARCH maps onto the codex asset
+# arch token (amd64 -> x86_64, arm64 -> aarch64); any other arch fails the build
+# loudly rather than producing an image without codex.
+FROM debian:bookworm-slim AS codex-builder
+ARG CODEX_VERSION
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tar \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) A=x86_64;; \
+      arm64) A=aarch64;; \
+      *) echo "ERROR: unsupported TARGETARCH '${TARGETARCH}' for codex install" && exit 1;; \
+    esac; \
+    curl -fsSL -o /tmp/codex.tgz \
+      "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-${A}-unknown-linux-musl.tar.gz"; \
+    tar xzf /tmp/codex.tgz -C /tmp; \
+    mv "/tmp/codex-${A}-unknown-linux-musl" /usr/local/bin/codex; \
+    chmod +x /usr/local/bin/codex; \
+    rm -f /tmp/codex.tgz
 
 # ---- engine build stage: compile fkst-substrate at a pinned ref ----
 # The engine is encapsulated: built from a pinned upstream ref inside this image
@@ -137,11 +166,10 @@ FROM debian:bookworm-slim AS runtime
 ARG FKST_SUBSTRATE_REF
 ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
 ARG PRODUCT_VERSION=0.0.0
-# Engine runtime prerequisites: git + bash (spawned engine sessions use them),
-# ca-certificates for outbound TLS.
-# git + bash for spawned engine sessions, ca-certificates for outbound TLS, and
-# libdbus-1-3 so the bundled nyxid CLI (which links libdbus via its keyring
-# store) loads in the slim runtime.
+ARG CODEX_VERSION
+# git + bash for spawned engine sessions, ca-certificates for outbound TLS
+# (codex talks HTTPS to its LLM provider), and libdbus-1-3 so the bundled nyxid
+# CLI (which links libdbus via its keyring store) loads in the slim runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git bash ca-certificates libdbus-1-3 \
     && rm -rf /var/lib/apt/lists/*
@@ -158,6 +186,13 @@ COPY --from=server-builder /app/target/release/fkst-hosted-api /usr/local/bin/fk
 # pinned v0.7.0.
 COPY --from=cli-builder /cli-dist/nyxid /usr/local/bin/nyxid
 RUN nyxid --version && nyxid --version | grep -q "0.7.0"
+# codex CLI (issue #112): the engine requires it on PATH (fkst-substrate does
+# not install it). The static musl binary needs no extra runtime libs; the
+# assertion below fails the build on version drift OR a missing library (a
+# launch failure would make `codex --version` exit non-zero).
+COPY --from=codex-builder /usr/local/bin/codex /usr/local/bin/codex
+RUN test "$(codex --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$CODEX_VERSION" \
+    && codex --version
 ENV FKST_RUNTIME_ROOT=/var/lib/fkst/runtime \
     PATH=/usr/local/bin:$PATH \
     FKST_HOSTED_PORT=8080 \

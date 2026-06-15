@@ -515,6 +515,31 @@ pending → validating → running → stopping → stopped
 > non-secret id/prefix are persisted (never the full key). This too is automatic
 > — there is no new endpoint, and you keep using your normal bearer token.
 
+> **Codex LLM provider.** The engine reasons with `codex`, which fkst-hosted
+> points at an LLM provider via a per-session `config.toml` (rendered into a
+> private `CODEX_HOME`). By **default** the provider is the NyxID-proxied
+> `chrono-llm` service (OpenAI Responses API), authenticated as the session user
+> with the injected `NYXID_ACCESS_TOKEN` — so inference runs and is billed as
+> that user, with no setup. You can **override** the provider entirely through
+> the [vault](#vault-env-variables--secrets) (precedence: raw > structured >
+> default), again with no new endpoint:
+>
+> - **Structured** — set the `variable`s `CODEX_BASE_URL`, `CODEX_MODEL`,
+>   `CODEX_WIRE_API` (typically `responses`), and `CODEX_ENV_KEY`, plus a
+>   `secret` whose key equals your `CODEX_ENV_KEY` value (the API key codex
+>   sends as `Authorization: Bearer`). fkst-hosted renders an
+>   OpenAI-compatible provider pointing codex at your endpoint. All four
+>   variables must be present, or the default is used.
+> - **Raw** — set the `variable` `CODEX_CONFIG_TOML` to a full codex
+>   `config.toml`; it is written verbatim. (Your API key still rides the
+>   `env_key` named inside it, stored as a separate vault secret.)
+>
+> The provider API key is never embedded in the rendered config and never
+> logged. The chrono-llm default requires the user to have connected
+> `chrono-llm` on NyxID (otherwise the start fails `422`). Operators pin the
+> default model and proxy route via `FKST_HOSTED_CODEX_MODEL` and
+> `FKST_HOSTED_CHRONO_LLM_BASE_URL`.
+
 **Data shape**
 
 ```jsonc

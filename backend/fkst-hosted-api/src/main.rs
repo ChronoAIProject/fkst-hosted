@@ -379,6 +379,20 @@ async fn main() -> ExitCode {
     //         The VaultService is Clone (it joins AppState below too).
     sessions.enable_vault(vault.clone());
 
+    // 5a-ter-quater. Wire per-session codex LLM-provider config into the driver
+    //         (issue #112): every session renders a per-session CODEX_HOME
+    //         config.toml selecting the provider — default the NyxID-proxied
+    //         chrono-llm, with RAW/STRUCTURED vault overrides — so the engine's
+    //         codex reaches a working LLM backend. The operator-pinned chrono-llm
+    //         DEFAULT model + base URL are fail-closed config values (validated
+    //         non-blank at load). Rendering also requires the vault (wired above);
+    //         without it the driver skips CODEX_HOME (legacy behaviour).
+    sessions.enable_codex(
+        config.codex_model.clone(),
+        config.chrono_llm_base_url.clone(),
+    );
+    tracing::info!("per-session codex provider config enabled");
+
     // 5a-ter-ter. Wire per-session NyxID token provisioning into the driver
     //         (issue #111): every session mints a per-session agent key on the
     //         triggering user's behalf and injects NYXID_ACCESS_TOKEN +
