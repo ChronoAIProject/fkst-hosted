@@ -1,21 +1,5 @@
 local core = require("core")
-
-local function production_exec()
-  if type(exec_sync) == "function" then
-    return exec_sync
-  end
-  return function()
-    error("github-devloop: consensus_result production ports require exec_sync")
-  end
-end
-
-local function production_ports()
-  local run = production_exec()
-  return {
-    github = require("std.github").new(run),
-    git = require("std.git").new(run),
-  }
-end
+local ports_seam = require("std.ports")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -214,8 +198,6 @@ local function make_department(ports)
   return { spec = spec, pipeline = pipeline }
 end
 
-local M = make_department(production_ports())
-M.spec = spec
-M.make_department = make_department
+local M = ports_seam.install(make_department)
 
 return M
