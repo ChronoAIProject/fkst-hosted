@@ -85,8 +85,10 @@ Confirmed from `backend/.../router.rs`: routes are exactly `health`, `/api/v1/he
 |---|---|
 | `GET /health`, `GET /api/v1/health` → `{status, mongo, version}` | `useHealth()` short-`staleTime`; drives a degraded banner off **HTTP 200 vs 503** (Mongo-down returns 503 with body). `version` is the **backend crate** build version — labeled as such, **not** the product version. **Does NOT report GitHub sync freshness.** |
 | `GET /api/v1/packages` → `string[]` | `usePackagesList()`; render `[]` as a real empty state. Names only. |
-| `GET /api/v1/packages/:name` → `{name, files[], composed_deps[], created_at, updated_at}` | `usePackage(name)`; drives flat/composed badge (`composed_deps.length>0`), deps chips, read/write tri-panel from `files[].path`. **`updated_at` always == `created_at`** (immutable) — never show "edited." |
-| `POST /api/v1/packages` (create-only) | `useCreatePackage()`; 201 → invalidate list; **409 → inline "name already exists (a revision is a new name)"**; 400 → field-level validation. **No edit/delete affordance** (no endpoint). |
+| `GET /api/v1/packages/:name` → `{name, files[], composed_deps[], created_at, updated_at}` | `usePackage(name)`; drives flat/composed badge (`composed_deps.length>0`), deps chips, read/write tri-panel from `files[].path`. `updated_at` is set on update. |
+| `POST /api/v1/packages` | `useCreatePackage()`; 201 → invalidate list; **409 → inline "name already exists (a revision is a new name)"**; 400 → field-level validation. |
+| `PUT /api/v1/packages/:name` | (Update/replace package) - Supported by backend, UI coming soon |
+| `DELETE /api/v1/packages/:name` | (Delete package) - Supported by backend, UI coming soon |
 | `POST /api/v1/sessions` `{package_name}` | `useCreateSession()`; 201 `{id, status:"pending"}` → begin polling. **409 → "this package already has a live session — stop it first"** (one live per package, lease-fenced; the lease `_id` IS the package name — confirmed in `models.rs::LeaseDoc`). |
 | `GET /api/v1/sessions/:id` → `SessionView` | `useSession(id)` with `refetchInterval` while non-terminal; the **source of truth for run/session status**. On `failed`, render `error` (e.g. conformance failure). `run_key` is **not** in `SessionView`. Don't surface `pod_id/fencing_token/pid/runtime_dir` as user content. |
 | `POST /api/v1/sessions/:id/stop` → `202 {status:"stopping"}` | `useStopSession()`; the 202 is only an ack — **keep polling GET until `stopped`/`failed`.** Stops **one package's session** (the lease is per package), never "the deployment." |

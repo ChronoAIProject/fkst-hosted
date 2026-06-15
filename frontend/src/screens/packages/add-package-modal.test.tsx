@@ -149,6 +149,11 @@ describe('AddPackageModal (F2) Tests', () => {
         expect(screen.queryByText(/Maximum of 256 files allowed/i)).toBeNull();
       });
 
+      // Wait for the first submission to complete (button becomes enabled again)
+      await waitFor(() => {
+        expect(submitBtn).not.toBeDisabled();
+      });
+
       // Construct exactly 257 files including one engine entry point
       let files257 = '--- path: departments/main/main.lua\n-- main code\n';
       for (let i = 1; i < 257; i++) {
