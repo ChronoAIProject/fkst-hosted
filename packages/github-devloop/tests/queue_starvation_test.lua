@@ -285,6 +285,54 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
   end,
 
+  test_queue_starvation_redrives_stale_head_when_recent_unrelated_merge_suppresses_alert = function()
+    mock_env()
+    mock_merge_queue_list({ 459 })
+    mock_merge_queue_pr(459, 459, 120, "abcdef123456")
+    mock_observe_lists(42)
+    mock_queue_head(90)
+    mock_closed_merged_issue(77, 30)
+
+    local result = run_observability("queue-starvation-recent-merge-redrive")
+
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+    local redrive = find_raise(result.raises, "devloop_merge_queue_tick")
+    t.is_true(redrive ~= nil)
+    t.eq(redrive.payload.cause.kind, "queue-starvation")
+    t.eq(redrive.payload.cause.head_pr_number, 459)
+    t.eq(redrive.payload.cause.attempt_key, core.queue_starvation_window_key(now()))
+  end,
+
+  test_queue_starvation_redrive_payload_uses_wrapped_queue_head_entity = function()
+    local version = version_minutes_ago(120)
+    local redrive = core.queue_starvation_redrive_payload("owner/repo", {
+      incident_identity = "merge-ready/pr/459/proposal/github-devloop/issue/owner/repo/459",
+      window_key = "window-queue-head-shape",
+      queue_head = {
+        entity = {
+          proposal_id = "github-devloop/issue/owner/repo/459",
+          pr_number = 459,
+          state = {
+            state = "merge-ready",
+            version = version,
+          },
+          head_sha = "abcdef123456",
+        },
+        age_minutes = 120,
+      },
+    })
+
+    t.is_true(redrive ~= nil)
+    t.eq(redrive.source_ref.ref, "owner/repo#pr/459")
+    t.eq(redrive.cause.kind, "queue-starvation")
+    t.eq(redrive.cause.head_pr_number, 459)
+    t.eq(redrive.cause.head_sha, "abcdef123456")
+    t.eq(redrive.cause.proposal_id, "github-devloop/issue/owner/repo/459")
+    t.eq(redrive.cause.version, version)
+    t.eq(redrive.cause.attempt_key, "window-queue-head-shape")
+  end,
+
   test_queue_starvation_fail_closed_when_recent_closed_command_fails = function()
     prepare_stale_head()
     mock_recent_closed("", 1, "gh failed")

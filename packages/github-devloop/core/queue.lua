@@ -59,10 +59,20 @@ local merge_queue_lane_states = {
   merging = true,
 }
 
+local function has_merge_ready_created_at(entry)
+  local created = tostring(entry and entry.merge_ready_created_at or "")
+  return created ~= ""
+end
+
 local function compare_merge_queue_entries(left, right)
-  local left_created = tostring(left.merge_ready_created_at or "")
-  local right_created = tostring(right.merge_ready_created_at or "")
-  if left_created ~= right_created then
+  local left_has_created = has_merge_ready_created_at(left)
+  local right_has_created = has_merge_ready_created_at(right)
+  if left_has_created ~= right_has_created then
+    return left_has_created
+  end
+  local left_created = tostring(left and left.merge_ready_created_at or "")
+  local right_created = tostring(right and right.merge_ready_created_at or "")
+  if left_has_created and left_created ~= right_created then
     return left_created < right_created
   end
   return tonumber(left.pr_number or 0) < tonumber(right.pr_number or 0)
