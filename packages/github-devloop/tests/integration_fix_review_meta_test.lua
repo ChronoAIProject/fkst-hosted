@@ -837,7 +837,7 @@ return {
     t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
-    local version = core.review_reconcile_state_version(event.issue_version, event.round)
+    local version = core.review_reconcile_terminal_state_version(event.issue_version, event.round)
     t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("no-actionable-framing-after-3-review-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
@@ -849,29 +849,16 @@ return {
 
   test_review_reconcile_visible_marker_is_idempotent = function()
     local event = review_reconcile()
+    local state_version = event.issue_version .. "/review-loop/9"
     mock_bot_env()
     mock_issue_review({ "fkst-dev:blocked" }, {
-      core.build_review_reconcile_comment_request("owner/repo", "42", event, "drop", "already done").body,
+      core.build_review_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", core.review_reconcile_terminal_state_version(state_version, event.round)).body,
     })
 
     local result = run_review_reconcile(event, opts("review-reconcile-idempotent"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
-  end,
-
-  test_review_reconcile_version_cas_skips_newer_reviewing = function()
-    local event = review_reconcile()
-    mock_bot_env()
-    mock_issue_review({ "fkst-dev:reviewing" }, {
-      core.state_marker(event.proposal_id, "reviewing", event.issue_version .. "/review-loop/4"),
-    })
-
-    local result = run_review_reconcile(event, opts("review-reconcile-newer-reviewing"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("gh issue comment"), 0)
-    t.eq(count_calls("gh issue edit"), 0)
   end,
 
   test_review_reconcile_requires_visible_reviewing_marker = function()

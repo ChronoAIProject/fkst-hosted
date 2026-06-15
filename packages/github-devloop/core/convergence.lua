@@ -301,6 +301,30 @@ function M.review_reconcile_state_version(issue_version, round)
   return tostring(issue_version) .. "/review-loop/" .. tostring(round)
 end
 
+function M.reconcile_terminal_state_version(current_version, round)
+  local n = valid_round(round)
+  if n == nil then
+    error("github-devloop: invalid reconcile round")
+  end
+  local next_n = M.version_loop_round(current_version) + 1
+  if n > next_n then
+    next_n = n
+  end
+  return tostring(current_version) .. "/loop/" .. tostring(next_n)
+end
+
+function M.review_reconcile_terminal_state_version(current_version, round)
+  local n = valid_round(round)
+  if n == nil then
+    error("github-devloop: invalid review reconcile round")
+  end
+  local next_n = M.version_review_loop_round(current_version) + 1
+  if n > next_n then
+    next_n = n
+  end
+  return tostring(current_version) .. "/review-loop/" .. tostring(next_n)
+end
+
 function M.fix_reconcile_state_version(issue_version)
   return tostring(issue_version)
 end

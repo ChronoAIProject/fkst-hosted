@@ -45,8 +45,8 @@ function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
   )
 end
 
-function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
-  local version = M.reconcile_state_version(reconcile.base_version, reconcile.round)
+function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason, state_version)
+  local version = state_version or M.reconcile_state_version(reconcile.base_version, reconcile.round)
   local marker = M.reconcile_marker(reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
   local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
@@ -89,8 +89,8 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
   }), fix_reconcile.source_ref)
 end
 
-function M.build_review_reconcile_comment_request(repo, issue_number, review_reconcile, action, reason)
-  local version = M.review_reconcile_state_version(review_reconcile.issue_version, review_reconcile.round)
+function M.build_review_reconcile_comment_request(repo, issue_number, review_reconcile, action, reason, state_version)
+  local version = state_version or M.review_reconcile_state_version(review_reconcile.issue_version, review_reconcile.round)
   local marker = M.review_reconcile_marker(review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
   local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")

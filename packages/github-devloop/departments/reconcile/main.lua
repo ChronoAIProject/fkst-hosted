@@ -79,7 +79,6 @@ local function pipeline_thinking(event)
     local current = core.parse_issue_view_loop(view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = core.current_state(current.comments, reconcile.proposal_id)
-    local version = core.reconcile_state_version(reconcile.base_version, reconcile.round)
     if core.has_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.base_version, reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "skip-idempotent(reconcile marker already visible)", "reconcile result marker for incoming version is already visible")
       return
@@ -88,9 +87,18 @@ local function pipeline_thinking(event)
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
       return
     end
+    if state.state == nil then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "pending", "thinking state marker not yet visible")
+      error("github-devloop: thinking state marker not yet visible for reconcile; retrying")
+    end
+    if state.state ~= "thinking" then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "skip-stale(state-advanced)", "current marker advanced beyond thinking")
+      return
+    end
 
+    local version = core.reconcile_terminal_state_version(state.version, reconcile.round)
     local transition = core.versioned_transition_status(state, { "thinking" }, "blocked", version)
-    if state.state == nil or transition == "pending" then
+    if transition == "pending" then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", core.cas_outcome(state, transition, version), "thinking state marker not yet visible")
       error("github-devloop: thinking state marker not yet visible for reconcile; retrying")
     end
@@ -102,7 +110,7 @@ local function pipeline_thinking(event)
     -- re-design/re-cluster require a trusted directive fact; current deterministic reconcile drops.
     local action = "drop"
     local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-rounds"
-    local comment_request = core.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
+    local comment_request = core.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version)
     local label_request = core.build_reconcile_label_request(repo, issue_number, reconcile)
     emit_blocked_reconcile("thinking", reconcile.proposal_id, state, version, action, reason, comment_request, label_request)
   end)
@@ -149,7 +157,6 @@ local function pipeline_review(event)
     local current = core.parse_pr_view_origin(view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = core.current_entity_state(current.comments, reconcile.proposal_id)
-    local version = core.review_reconcile_state_version(reconcile.issue_version, reconcile.round)
     if core.has_review_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.issue_version, reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(review reconcile marker already visible)", "review reconcile result marker for incoming version is already visible")
       return
@@ -158,16 +165,19 @@ local function pipeline_review(event)
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
       return
     end
-
-    local transition = core.versioned_transition_status(state, { "reviewing" }, "blocked", version)
-    if state.state == nil or transition == "pending" then
-      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
+    if state.state == nil then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "pending", "reviewing state marker not yet visible")
       error("github-devloop: reviewing state marker not yet visible for review reconcile; retrying")
     end
-    if state.state ~= "reviewing"
-      or core.safe_version_segment(tostring(state.version or "")) ~= core.safe_version_segment(tostring(reconcile.issue_version)) then
-      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-stale(version-mismatch)", "review reconcile event does not match canonical reviewing marker")
+    if state.state ~= "reviewing" then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-stale(state-advanced)", "current marker advanced beyond reviewing")
       return
+    end
+    local version = core.review_reconcile_terminal_state_version(state.version, reconcile.round)
+    local transition = core.versioned_transition_status(state, { "reviewing" }, "blocked", version)
+    if transition == "pending" then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
+      error("github-devloop: reviewing state marker not yet visible for review reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "current marker cannot be reconciled from reviewing")
@@ -176,7 +186,7 @@ local function pipeline_review(event)
 
     local action = "drop"
     local reason = "no-actionable-framing-after-" .. tostring(reconcile.round) .. "-review-rounds"
-    local comment_request = core.build_review_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
+    local comment_request = core.build_review_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version)
     local label_request = issue_number ~= nil and core.build_review_reconcile_label_request(repo, issue_number, reconcile) or nil
     emit_blocked_reconcile("reviewing", reconcile.proposal_id, state, version, action, reason, comment_request, label_request, "github-proxy.github_pr_comment_request")
   end)
