@@ -96,6 +96,49 @@ const mockFetch: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) =
       )
     );
   }
+  if (href.includes('/api/v1/goals')) {
+    if (href.includes('/api/v1/goals/')) {
+      const id = href.split('/api/v1/goals/')[1]?.split('?')[0];
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: id || 'goal-123',
+            title: 'Mock Goal Detail',
+            description: 'Mock Description',
+            package_names: ['package-example'],
+            repo: null,
+            status: 'running',
+            owner_user_id: 'user-123',
+            org_id: null,
+            active_session_id: null,
+            created_at: '2026-06-13T00:00:00Z',
+            updated_at: '2026-06-13T00:00:00Z',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+    }
+    return Promise.resolve(
+      new Response(
+        JSON.stringify([
+          {
+            id: 'goal-123',
+            title: 'Mock Goal 1',
+            description: 'Mock Description',
+            package_names: ['package-example'],
+            repo: null,
+            status: 'running',
+            owner_user_id: 'user-123',
+            org_id: null,
+            active_session_id: null,
+            created_at: '2026-06-13T00:00:00Z',
+            updated_at: '2026-06-13T00:00:00Z',
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+  }
   return Promise.reject(new Error(`Unhandled request to ${href}`));
 };
 
