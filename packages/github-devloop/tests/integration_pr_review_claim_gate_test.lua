@@ -40,6 +40,26 @@ local function review_state_marker(version)
   return core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", version)
 end
 
+local function pr_open_state_marker(version)
+  return core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", version)
+end
+
+local function unmanaged_origin_marker(version, base_branch)
+  return core.pr_origin_marker(
+    "github-devloop/issue/owner/repo/42",
+    "42",
+    "devloop-owner-repo-42-01HY",
+    version,
+    base_branch or "integration"
+  )
+end
+
+local function unmanaged_comment_raise(result)
+  return h.find_raise(result.raises, "github-proxy.github_pr_comment_request", function(payload)
+    return tostring(payload.body or ""):find("pr-base-unmanaged", 1, true) ~= nil
+  end)
+end
+
 return {
   test_verify_pr_review_issue_claim_accepts_unassigned_self_author = function()
     mock_bot_env()
@@ -121,6 +141,73 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr diff"), 0)
+  end,
+
+  test_observe_pr_blocks_self_claimed_pr_open_when_base_is_unmanaged = function()
+    local impl_version = reviewing().version
+    mock_bot_env()
+    mock_pr_origin({
+      unmanaged_origin_marker(impl_version, "integration"),
+      pr_open_state_marker(impl_version),
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "integration")
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      pr_open_state_marker(impl_version),
+    }, {
+      assignees = { "fkst-test-bot" },
+    })
+
+    local result = run_observe_pr(pr_event(), opts("observe-pr-self-unmanaged-base"))
+    t.eq(result.exit_code, 0)
+
+    local comment = unmanaged_comment_raise(result)
+    t.is_true(comment ~= nil)
+    t.is_true(comment.payload.body:find(core.state_marker("github-devloop/issue/owner/repo/42", "blocked", impl_version .. "/blocked/pr-base-unmanaged"), 1, true) ~= nil)
+    t.is_true(comment.payload.body:find('reason="pr-base-unmanaged"', 1, true) ~= nil)
+    t.is_true(comment.payload.body:find('pr_base="integration"', 1, true) ~= nil)
+    t.is_true(comment.payload.body:find('integration_branch="dev"', 1, true) ~= nil)
+
+    local label = h.find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
+    t.eq(h.find_raise(result.raises, "devloop_reviewing"), nil)
+  end,
+
+  test_observe_pr_leaves_foreign_claimed_unmanaged_base_untouched = function()
+    local impl_version = reviewing().version
+    mock_bot_env()
+    mock_pr_origin({
+      unmanaged_origin_marker(impl_version, "integration"),
+      pr_open_state_marker(impl_version),
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "integration")
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      pr_open_state_marker(impl_version),
+    }, {
+      assignees = { "other-bot" },
+    })
+
+    local result = run_observe_pr(pr_event(), opts("observe-pr-foreign-unmanaged-base"))
+    t.eq(result.exit_code, 0)
+    t.eq(unmanaged_comment_raise(result), nil)
+    t.eq(h.find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+    t.eq(h.find_raise(result.raises, "devloop_reviewing"), nil)
+  end,
+
+  test_observe_pr_base_matched_self_claimed_pr_open_still_reviews = function()
+    local impl_version = reviewing().version
+    mock_bot_env()
+    mock_pr_origin({
+      unmanaged_origin_marker(impl_version, "dev"),
+      pr_open_state_marker(impl_version),
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev")
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      pr_open_state_marker(impl_version),
+    }, {
+      assignees = { "fkst-test-bot" },
+    })
+
+    local result = run_observe_pr(pr_event(), opts("observe-pr-self-base-matched"))
+    t.eq(result.exit_code, 0)
+    t.eq(unmanaged_comment_raise(result), nil)
+    t.is_true(h.find_raise(result.raises, "devloop_reviewing") ~= nil)
   end,
 
 }

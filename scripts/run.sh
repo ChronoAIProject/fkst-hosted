@@ -31,6 +31,9 @@
 #       Uses .fkst/board-cache.json by default as a TTL cache; --refresh forces
 #       a read from the engine. The cache is local only and never authoritative.
 #
+#   scripts/run.sh health [--refresh] [--ttl seconds] [--stall seconds]
+#       Print only the current HEALTHY / anomaly verdict from the board renderer.
+#
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for packages with composed.deps.
 #
@@ -582,6 +585,10 @@ cmd_board() {
     "$@"
 }
 
+cmd_health() {
+  cmd_board --health "$@"
+}
+
 cmd_supervise() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
@@ -655,6 +662,7 @@ main() {
     check) shift; cmd_check "$@" ;;
     doctor) shift; cmd_doctor "$@" ;;
     board) shift; resolve_bin; ensure_fresh_bin; cmd_board "$@" ;;
+    health) shift; resolve_bin; ensure_fresh_bin; cmd_health "$@" ;;
     test) shift
       # Quiet cmd_check's advisory warnings during a test run unless verbose;
       # surface its full output only when it hard-fails (non-zero). `run.sh check`
