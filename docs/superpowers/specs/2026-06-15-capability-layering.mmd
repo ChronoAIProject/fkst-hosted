@@ -1,0 +1,33 @@
+graph TD
+  subgraph P1["Plane 1 — Generic autonomous-dev MECHANISM (reusable on any GitHub repo)"]
+    GP["github-proxy<br/>(GitHub adapter)"] --> CONS["consensus<br/>(judgment engine)"]
+    CONS --> LIFE["github-devloop lifecycle:<br/>intake → consensus_result → implement<br/>→ open_pr → review → merge"]
+  end
+
+  subgraph P2["Plane 2 — fkst RUN/OPS POLICY (deployment policy over Plane 1)"]
+    OPS["topology/branches: rollup_scan · sync_scan<br/>substrate-ref pin · ensure_repo<br/>scripts/run.sh · board.py"]
+  end
+
+  subgraph DIAG["Diagnosis CONTROL LOOP — cross-cutting (NOT a third product)"]
+    DX["doctor · liveness · dead_letter<br/>state_gap · queue_starvation · error_facts"]
+  end
+
+  subgraph ENG["fkst-substrate ENGINE — separate repo (generic project-agnostic primitives)"]
+    FACTS["observe --json (entity timeline / event ledger)<br/>queue and DLQ depths · cron next-fire<br/>structured error facts · rate-pool facts"]
+  end
+
+  P2 -. "configures / operates" .-> P1
+  ENG -- "consumes facts" --> DX
+  DX -- "files issues / bounded redrive" --> P1
+  P2 -. "P2 down-shift generic facts" .-> ENG
+  DX -. "P2 down-shift generic facts" .-> ENG
+
+  COMP["NOTE: github-devloop stays COMPOSED<br/>(refs github-proxy.* + consensus.*) — not flattened"] -.-> LIFE
+  EXCL["EXCLUDED — separate product:<br/>autochrono / github-autochrono<br/>(issue → consensus → reply)"]
+
+  subgraph ROAD["Staged roadmap"]
+    R0["P0 — clarity (ACCEPTED, planned next):<br/>boundary-map doc · @capability annotations<br/>run.sh help grouping · doctor rename<br/>ZERO behavior change"]
+    R1["P1 — god-package decomposition:<br/>split observability / config / reconcile /<br/>prompts / payloads · clean github-proxy fkst-dev leaks"]
+    R2["P2 — down-shift generic facts to fkst-substrate"]
+    R0 --> R1 --> R2
+  end
