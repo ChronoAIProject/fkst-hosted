@@ -108,7 +108,6 @@ local function should_reinject_issue(repo, issue, limits, deadline)
   local proposal_id = core.proposal_id(repo, issue.number)
   local state_view = core.fetch_issue_view_state(repo, issue.number, issue.updated_at, {
     consumer = "liveness_scan",
-    fresh = true,
     timeout = core.sweep_call_timeout(limits, deadline),
   })
   if state_view.exit_code ~= 0 then
@@ -137,7 +136,6 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   end
   local state_view = core.fetch_pr_view_origin(repo, pr.number, pr.updated_at, {
     consumer = "liveness_scan",
-    fresh = true,
     timeout = core.sweep_call_timeout(limits, deadline),
   })
   if state_view.exit_code ~= 0 then
