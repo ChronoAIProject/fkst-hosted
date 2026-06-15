@@ -33,16 +33,23 @@ import {
 } from '../../components/primitives/dialog';
 import { ModalSheet } from '../../components/layout/modal-sheet';
 
-function getErrorMessage(err: unknown): string {
+function getErrorMessage(err: unknown, resourceName: string = 'package'): string {
   if (err instanceof ApiError) {
     if (err.status === 403) {
       return 'Action forbidden: you do not have permission (403)';
     }
     if (err.status === 404) {
-      return 'Action failed: package not found (404)';
+      return `Action failed: ${resourceName} not found (404)`;
     }
     if (err.status === 409) {
-      return 'Action failed: package is in use or has active sessions (409)';
+      return `Action failed: ${resourceName} is in use or has active sessions (409)`;
+    }
+    if (err.status === 503) {
+      let msg = err.message || 'LLM gateway error';
+      if (!msg.endsWith('(503)')) {
+        msg = `${msg} (503)`;
+      }
+      return msg;
     }
     return err.message || `Request failed with status ${err.status}`;
   }
@@ -57,10 +64,17 @@ function getErrorMessage(err: unknown): string {
     return 'Action forbidden: you do not have permission (403)';
   }
   if (status === 404) {
-    return 'Action failed: package not found (404)';
+    return `Action failed: ${resourceName} not found (404)`;
   }
   if (status === 409) {
-    return 'Action failed: package is in use or has active sessions (409)';
+    return `Action failed: ${resourceName} is in use or has active sessions (409)`;
+  }
+  if (status === 503) {
+    let msg = message || 'LLM gateway error';
+    if (!msg.endsWith('(503)')) {
+      msg = `${msg} (503)`;
+    }
+    return msg;
   }
   return message || (err instanceof Error ? err.message : 'An unexpected error occurred');
 }
@@ -124,7 +138,7 @@ export interface PackagesViewProps {
   onCancelClick?: () => void;
   onUpdateClick?: (name: string) => void;
   onDeleteClick?: (name: string) => void;
-  sharesPanelSlot?: React.ReactNode;
+  onSharesClick?: (name: string) => void;
 }
 
 export function PackagesView({
@@ -142,7 +156,7 @@ export function PackagesView({
   onCancelClick,
   onUpdateClick,
   onDeleteClick,
-  sharesPanelSlot,
+  onSharesClick,
 }: PackagesViewProps) {
   // Compute flat vs composed counts only if ALL details are resolved
   const allResolved =
@@ -332,6 +346,7 @@ export function PackagesView({
                   error={detail.error}
                   onUpdateClick={onUpdateClick ? () => onUpdateClick(name) : undefined}
                   onDeleteClick={onDeleteClick ? () => onDeleteClick(name) : undefined}
+                  onSharesClick={onSharesClick ? () => onSharesClick(name) : undefined}
                 />
               );
             })}
@@ -483,7 +498,7 @@ export function PackagesView({
         </div>
       </div>
 
-      {sharesPanelSlot}
+
 
       {/* READ / WRITE BOUNDARY SECTION */}
       <div>
@@ -581,9 +596,10 @@ export interface PackageRowProps {
   error?: unknown;
   onUpdateClick?: () => void;
   onDeleteClick?: () => void;
+  onSharesClick?: () => void;
 }
 
-export function PackageRow({ name, pkg, isLoading, error, onUpdateClick, onDeleteClick }: PackageRowProps) {
+export function PackageRow({ name, pkg, isLoading, error, onUpdateClick, onDeleteClick, onSharesClick }: PackageRowProps) {
   const [isEnabled, setIsEnabled] = useState(true);
 
   if (isLoading) {
@@ -699,7 +715,16 @@ export function PackageRow({ name, pkg, isLoading, error, onUpdateClick, onDelet
                 Delete
               </button>
             )}
-            {(onUpdateClick || onDeleteClick) && <span className="text-ghost">·</span>}
+            {(onUpdateClick || onDeleteClick) && onSharesClick && <span className="text-ghost">·</span>}
+            {onSharesClick && (
+              <button
+                onClick={onSharesClick}
+                className="text-[12px] text-amber hover:text-amber/80 font-semibold cursor-pointer transition-colors"
+              >
+                Shares
+              </button>
+            )}
+            {(onUpdateClick || onDeleteClick || onSharesClick) && <span className="text-ghost">·</span>}
             <span className="text-[12px] text-ghost/40 cursor-not-allowed select-none">
               View source ↗ <span className="text-[11px] font-sans font-normal">(source viewer not exposed in v1)</span>
             </span>
@@ -860,16 +885,12 @@ export function PackageSharesPanel({ packageName }: { packageName: string }) {
         description: `Successfully revoked share for ${granteeId}`,
       });
     } catch (err) {
-      setActionError(getErrorMessage(err));
+      setActionError(getErrorMessage(err, 'share'));
     }
   };
 
   return (
-    <div className="mt-8 border border-line rounded-panel overflow-hidden bg-raise">
-      <div className="p-[13px_20px] border-b border-line font-mono text-[11.5px] text-ghost flex items-center justify-between">
-        <span>Package Shares · {packageName}</span>
-        <span className="italic">manage read/use permissions for users & orgs</span>
-      </div>
+    <div className="flex flex-col gap-4">
 
       <div className="p-5 flex flex-col gap-4">
         {actionError && (
@@ -991,6 +1012,7 @@ export default function PackagesScreen() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [pkgToUpdate, setPkgToUpdate] = useState<PackageResponse | null>(null);
   const [pkgToDeleteName, setPkgToDeleteName] = useState<string | null>(null);
+  const [pkgToShareName, setPkgToShareName] = useState<string | null>(null);
 
   // Lift per-row details fetching here via useQueries
   const packagesQueries = useQueries({
@@ -1134,7 +1156,7 @@ export default function PackagesScreen() {
       });
       setPkgToDeleteName(null);
     } catch (err) {
-      setDeleteError(getErrorMessage(err));
+      setDeleteError(getErrorMessage(err, 'package'));
     }
   };
 
@@ -1168,7 +1190,9 @@ export default function PackagesScreen() {
         onDeleteClick={(name) => {
           setPkgToDeleteName(name);
         }}
-        sharesPanelSlot={selectedPkgName ? <PackageSharesPanel packageName={selectedPkgName} /> : null}
+        onSharesClick={(name) => {
+          setPkgToShareName(name);
+        }}
       />
       <AddPackageModal
         isOpen={isAddModalOpen || !!pkgToUpdate}
@@ -1196,6 +1220,48 @@ export default function PackagesScreen() {
         isDeleting={deleteMutation.isPending}
         error={deleteError}
       />
+      <SharesModal
+        isOpen={!!pkgToShareName}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPkgToShareName(null);
+          }
+        }}
+        packageName={pkgToShareName || ''}
+      />
     </>
+  );
+}
+
+export interface SharesModalProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  packageName: string;
+}
+
+export function SharesModal({ isOpen, onOpenChange, packageName }: SharesModalProps) {
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="p-0" showClose={false}>
+        <ModalSheet
+          title="Manage shares"
+          meta={
+            <span>
+              sharing controls for package <span className="font-mono text-[11.5px] font-bold text-fg">{packageName}</span>
+            </span>
+          }
+          closeButtonSlot={
+            <DialogClose
+              aria-label="Close"
+              className="w-[30px] h-[30px] rounded-control border border-line bg-raise-2 text-faint hover:text-fg hover:border-faint flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
+            >
+              <span className="text-[17px] leading-none" aria-hidden="true">✕</span>
+            </DialogClose>
+          }
+        >
+          <PackageSharesPanel packageName={packageName} />
+        </ModalSheet>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -76,7 +76,11 @@ function getErrorMessage(err: unknown): string {
       return 'Action failed: package already exists or is in use (409)';
     }
     if (err.status === 503) {
-      return 'AI Generation failed: LLM gateway is not configured (503)';
+      let msg = err.message || 'LLM gateway error';
+      if (!msg.endsWith('(503)')) {
+        msg = `${msg} (503)`;
+      }
+      return msg;
     }
     return err.message || `Request failed with status ${err.status}`;
   }
@@ -97,7 +101,11 @@ function getErrorMessage(err: unknown): string {
     return 'Action failed: package already exists or is in use (409)';
   }
   if (status === 503) {
-    return 'AI Generation failed: LLM gateway is not configured (503)';
+    let msg = message || 'LLM gateway error';
+    if (!msg.endsWith('(503)')) {
+      msg = `${msg} (503)`;
+    }
+    return msg;
   }
   return message || (err instanceof Error ? err.message : 'An unexpected error occurred');
 }
@@ -392,6 +400,30 @@ export function AddPackageModal({
         name: aiName.trim() || undefined,
         save: aiSave,
       });
+
+      const errs: string[] = [];
+      if (!response.validation?.ok) {
+        if (response.validation?.errors && response.validation.errors.length > 0) {
+          errs.push(...response.validation.errors.map(e => `Validation error: ${e}`));
+        } else {
+          errs.push('Validation failed');
+        }
+      }
+      if (response.conformance?.status === 'failed') {
+        if (response.conformance?.errors && response.conformance.errors.length > 0) {
+          errs.push(...response.conformance.errors.map(e => `Conformance error: ${e}`));
+        } else {
+          errs.push('Conformance failed');
+        }
+      } else if (response.conformance?.status === 'skipped') {
+        errs.push(`Conformance skipped: ${response.conformance.skipped_reason || 'reason not specified'}`);
+      }
+
+      if (errs.length > 0) {
+        setAiError(errs.join('\n'));
+        setIsAiSubmitting(false);
+        return;
+      }
 
       if (aiSave) {
         if (response.saved) {

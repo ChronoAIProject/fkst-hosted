@@ -406,11 +406,11 @@ describe('AddPackageModal (F2) Tests', () => {
       });
     });
 
-    it('handles AI Generation 503 error honestly', async () => {
+    it('handles AI Generation 503 error honestly when unconfigured', async () => {
       server.use(
         http.post('*/api/v1/packages/generate', () => {
           return HttpResponse.json(
-            { error: 'service_unavailable', message: 'LLM gateway is not configured (503)' },
+            { error: 'service_unavailable', message: 'LLM gateway is not configured' },
             { status: 503 }
           );
         })
@@ -431,7 +431,36 @@ describe('AddPackageModal (F2) Tests', () => {
       await userEvent.click(submitBtn);
 
       expect(
-        await screen.findByText(/AI Generation failed: LLM gateway is not configured \(503\)/i)
+        await screen.findByText(/LLM gateway is not configured \(503\)/i)
+      ).toBeInTheDocument();
+    });
+
+    it('handles AI Generation 503 error honestly when unreachable', async () => {
+      server.use(
+        http.post('*/api/v1/packages/generate', () => {
+          return HttpResponse.json(
+            { error: 'service_unavailable', message: 'LLM gateway is unreachable' },
+            { status: 503 }
+          );
+        })
+      );
+
+      render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
+        wrapper: createTestWrapper(),
+      });
+
+      // Switch to AI tab
+      const aiTabButton = screen.getByRole('tab', { name: /Generate with AI/i });
+      await userEvent.click(aiTabButton);
+
+      const descInput = screen.getByLabelText(/AI Prompt \/ Description/i);
+      await userEvent.type(descInput, 'create a department');
+
+      const submitBtn = screen.getByRole('button', { name: /Generate package/i });
+      await userEvent.click(submitBtn);
+
+      expect(
+        await screen.findByText(/LLM gateway is unreachable \(503\)/i)
       ).toBeInTheDocument();
     });
   });

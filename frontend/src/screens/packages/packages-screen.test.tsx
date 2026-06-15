@@ -675,7 +675,7 @@ function RegistryInitializer({
           }),
           http.delete('*/api/v1/packages/pkg-a', () => {
             deleteCalled = true;
-            return new HttpResponse(null, { status: 200 });
+            return new HttpResponse(null, { status: 204 });
           })
         );
 
@@ -752,7 +752,7 @@ function RegistryInitializer({
           }),
           http.delete('*/api/v1/packages/pkg-a/shares/share-1', () => {
             deleteShareCalled = true;
-            return new HttpResponse(null, { status: 200 });
+            return new HttpResponse(null, { status: 204 });
           })
         );
 
@@ -761,6 +761,10 @@ function RegistryInitializer({
 
         // Wait for package to load
         await screen.findByText('pkg-a');
+
+        // Click Shares button to open modal
+        const sharesBtn = screen.getByRole('button', { name: /^Shares$/i });
+        await userEvent.click(sharesBtn);
 
         // Verify bob's share is listed
         expect(await screen.findByText('user-bob')).toBeInTheDocument();
