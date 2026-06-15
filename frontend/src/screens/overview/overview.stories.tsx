@@ -1,14 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { Overview } from './overview';
+import { mockHostedGoals } from '../../fixtures/hosted';
+import { MemoryRouter } from 'react-router-dom';
+
 
 const meta: Meta<typeof Overview> = {
   title: 'Screens/Overview',
   component: Overview,
   decorators: [
     (Story) => (
-      <div className="bg-bg text-fg p-6 min-h-screen">
-        <Story />
-      </div>
+      <MemoryRouter>
+        <div className="bg-bg text-fg p-6 min-h-screen">
+          <Story />
+        </div>
+      </MemoryRouter>
     ),
   ],
 };
@@ -114,5 +119,13 @@ export const Populated: Story = {
         actionLabel: 'New issue from this',
       },
     ],
+  },
+};
+
+// 7. Hosted Mode with status counts and stage pipeline unavailable warning
+export const HostedStatusCounts: Story = {
+  args: {
+    goals: mockHostedGoals,
+    onNewGoal: () => alert('New Goal Clicked'),
   },
 };

@@ -1,18 +1,78 @@
+import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Goal } from './goal';
+import { mockHostedGoal } from '../../fixtures/hosted';
+
+const mockSuccessFetch = (url: string, init?: RequestInit) => {
+  if (url.includes('/trigger')) {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          goal_id: '214',
+          session_id: 'session-happy-123',
+          goal_status: 'running',
+          session_status: 'running',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+  }
+  if (url.includes('/api/v1/goals/')) {
+    if (init?.method === 'PATCH') {
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : {};
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...mockHostedGoal,
+            title: body.title || mockHostedGoal.title,
+            description: body.description || mockHostedGoal.description,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+    }
+    if (init?.method === 'DELETE') {
+      return Promise.resolve(new Response(null, { status: 200 }));
+    }
+  }
+  return Promise.reject(new Error('Unknown URL: ' + url));
+};
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      staleTime: 0,
+      gcTime: 0,
+    },
+  },
+});
 
 const meta: Meta<typeof Goal> = {
   title: 'Screens/GoalPage',
   component: Goal,
   decorators: [
-    (Story) => (
-      <MemoryRouter>
-        <div className="bg-bg text-fg p-6 min-h-screen">
-          <Story />
-        </div>
-      </MemoryRouter>
-    ),
+    (Story) => {
+      React.useEffect(() => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mockSuccessFetch as typeof globalThis.fetch;
+        return () => {
+          globalThis.fetch = originalFetch;
+        };
+      }, []);
+
+      return (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <div className="bg-bg text-fg p-6 min-h-screen">
+              <Story />
+            </div>
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    },
   ],
 };
 
@@ -52,5 +112,12 @@ export const Populated: Story = {
       { exitCode: 0, action: 'review angle×3', duration: '44s', permits: 3 },
       { exitCode: 0, action: 'meta-judge', duration: '17s' },
     ],
+  },
+};
+
+// 3. Hosted Goal Detail with honest gaps and Trigger/Edit/Delete affordances
+export const HostedGoalDetail: Story = {
+  args: {
+    goal: mockHostedGoal,
   },
 };
