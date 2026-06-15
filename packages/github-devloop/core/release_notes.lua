@@ -120,6 +120,11 @@ function M.gh_pr_create_body_cmd(repo, head, base, title, body)
     error("github-devloop: invalid PR base branch")
   end
   local normalized_body = M.normalize_release_notes(body)
+  normalized_body = M.with_github_debug_stamp(normalized_body, {
+    emitter = "github-devloop.rollup.pr-create",
+    target = "pr:" .. tostring(repo) .. "#new",
+    dedup_key = tostring(head) .. "->" .. tostring(base),
+  })
   return "gh pr create --repo " .. M._shell_single_quote(repo)
     .. " --head " .. M._shell_single_quote(head)
     .. " --base " .. M._shell_single_quote(base)

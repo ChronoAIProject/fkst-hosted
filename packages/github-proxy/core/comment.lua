@@ -331,6 +331,11 @@ function M.write_comment_request(payload, target)
     end
 
     local body = tostring(payload.body) .. "\n\n" .. M.comment_marker(payload.dedup_key) .. "\n"
+    body = M.with_github_debug_stamp(body, {
+      emitter = "github-proxy.comment",
+      target = tostring(target.kind) .. ":" .. tostring(repo) .. "#" .. tostring(target.number),
+      dedup_key = payload.dedup_key,
+    })
     local path = "/tmp/fkst-github-proxy-" .. runtime_id .. ".md"
     file.write(path, body)
     local edited, edit_status, edited_comment = edit_existing_comment(M, repo, target, path, existing, tostring(replace_marker or ""), bot_login)

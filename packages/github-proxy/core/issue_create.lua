@@ -426,6 +426,11 @@ function M.write_issue_create_request(payload)
       end
 
       local body = tostring(payload.body) .. "\n\n" .. M.issue_create_marker(payload.dedup_key) .. "\n"
+      body = M.with_github_debug_stamp(body, {
+        emitter = "github-proxy.issue-create",
+        target = "issue:" .. tostring(repo) .. "#new",
+        dedup_key = payload.dedup_key,
+      })
       local path = "/tmp/fkst-github-proxy-" .. issue_create_runtime_identity(payload.dedup_key) .. ".md"
       file.write(path, body)
       local created = M.gh_exec(M.gh_issue_create_cmd(repo, payload.title, path, payload.labels, payload.assignees), 30, "gh issue create")
