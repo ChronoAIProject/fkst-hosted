@@ -56,6 +56,17 @@ We use three separate credential paths:
 - A bad PEM fails at deploy time (startup), not at first session.
 - Adding the `administration` permission to the App would trigger per-installation re-approval; it is deliberately excluded from v1.
 
+### Session-token delivery to the engine
+
+A goal session's substrate engine receives its installation token **at t=0**, before the engine process is started (issue #106). The session driver mints the repo-scoped installation token and builds a `GoalContext`, then starts the engine via `start_with_spec(goal: Some(..))`. As a result, before the engine runs the driver has:
+
+- written `<runtime_dir>/github-token` (mode `0600`) and `<runtime_dir>/goal.json`, and
+- set `GITHUB_TOKEN`, `FKST_GITHUB_TOKEN_FILE`, and `FKST_GOAL_FILE` on the substrate child process.
+
+The same `GoalContext` path is used identically by the initial start and by the failover rebuild on a takeover pod — the token is never persisted, always (re-)minted from the `SessionDoc`. Minting is a cache hit after the trigger-time install-check preflight (`token_for_repo` caches per `(repo, perms)`), so this is not a second network mint. The in-run periodic refresh then re-mints ~55 minutes later (5 minutes before the 60-minute TTL).
+
+> Earlier (pre-#106) the driver started the engine with `goal: None` and the token only reached the runtime dir via the periodic refresh, which was suppressed for the first ~55 minutes — so the engine ran with no credential at startup. That regression is fixed: the token is present from t=0.
+
 ---
 
 ## Operations Runbook
