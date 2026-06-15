@@ -22,7 +22,7 @@ export function usePackagesList() {
  * Hook to retrieve details for a specific package.
  *
  * Choices and Rationales:
- * - staleTime (30000ms): Packages are immutable after creation in v1; cached details can be used without frequent refetching.
+ * - staleTime (30000ms): The UI only creates packages in v1, so cached package detail changes infrequently.
  * - retry (false): Fail fast. Do not hold up UI rendering with retries if a package name is invalid or does not exist (404).
  * - enabled: Only executes the query if the package name parameter is provided.
  */
