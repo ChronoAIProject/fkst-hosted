@@ -81,7 +81,13 @@ ARG NYXID_CLI_REF=v0.7.0
 FROM rust:${RUST_VERSION}-bookworm AS cli-builder
 ARG NYXID_CLI_REF
 ARG NYXID_REPO=https://github.com/ChronoAIProject/NyxID.git
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+# git+ca-certificates for the clone; libdbus-1-dev + pkg-config because the CLI
+# pulls libdbus-sys (its OS-keyring credential store), whose build.rs links the
+# system libdbus via pkg-config. The runtime stage carries the matching
+# libdbus-1-3 so the binary loads (the pod uses NYXID_ACCESS_TOKEN, not the
+# keyring, but the binary still dynamically links libdbus).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git ca-certificates libdbus-1-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /nyxid
 # Same uniform shallow-by-ref fetch with a depth-50 fallback as engine-builder.
@@ -128,7 +134,11 @@ ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
 ARG PRODUCT_VERSION=0.0.0
 # Engine runtime prerequisites: git + bash (spawned engine sessions use them),
 # ca-certificates for outbound TLS.
-RUN apt-get update && apt-get install -y --no-install-recommends git bash ca-certificates \
+# git + bash for spawned engine sessions, ca-certificates for outbound TLS, and
+# libdbus-1-3 so the bundled nyxid CLI (which links libdbus via its keyring
+# store) loads in the slim runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git bash ca-certificates libdbus-1-3 \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 10001 fkst && useradd -m -u 10001 -g 10001 -s /usr/sbin/nologin fkst
 # Engine binaries: directory copy is the tolerant mechanism — fkst-framework is
