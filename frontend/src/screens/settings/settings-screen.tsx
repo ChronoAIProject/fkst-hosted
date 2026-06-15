@@ -91,6 +91,7 @@ export function SessionDetails({ packageName, sessionId, onMarkStale }: SessionD
           session?.status !== 'failed' && (
             <DialogTrigger asChild>
               <button
+                data-testid={`stop-session-${packageName}`}
                 disabled={isStopping}
                 className={cn(
                   'self-start text-[11px] font-semibold border rounded-control px-3 py-1 transition-colors',

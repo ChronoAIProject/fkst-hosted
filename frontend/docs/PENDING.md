@@ -7,17 +7,16 @@ As of 2026-06-15. The FE (Waves 0–3) is implemented, dual-reviewed, merged to 
 - Ready: implementation on `feat/frontend-init`; draft PR body at `FKST/PR-DRAFT.md`; changesets present; all local gates green.
 - When write access is granted, per `CLAUDE.md`: open a `feature_request` issue → push branch → `gh pr create` into `develop` with `Closes #N` → ensure changeset → auto-merge on green.
 
-## 2. UI-E2E verification — corrections still owed (codex re-audit)
-Verified on a clean store (**17/18**, `.verify/ui_verify_v3.cjs`): scoped `data-testid` assertions, **UI==API set-equality** (packages, new-goal graph), inline **409** (duplicate), client-side validation error, topology smoke (derived dept + unknown wiring), scoped Settings version == live `/health`, **Apply-changes UI→backend old-session-stopped**, flag-gated seam safety.
+## 2. UI-E2E verification — ✅ RESOLVED (2026-06-15)
+Hardened harness `.verify/ui_verify_v3.cjs` now passes **19/19, three consecutive runs (1 clean store + 2 populated)** against the live throwaway backend. Evidence: `.verify/ui_verify_v3_result.log`. Every previously-owed correction was closed *by strengthening the harness + re-verifying*, not by relabeling:
 
-**To correct / finish (deferred):**
-- **`VERIFY-REPORT.md` wording still overclaims** (codex re-audit flagged):
-  - "Apply-changes → stop→**poll→create**" — the harness only asserts the *old* session stopped. To claim full create, assert a **new** session is created (a `__fkstGetSession` seam addition + assertion is drafted in `.verify` but **unverified** — not committed).
-  - "inline **400**" — the verified case trips **client-side** Zod, not the server. A **server-authoritative 400** (path-traversal that passes client validation, backend rejects, confirmed via the 400 response) is drafted in `.verify` but **unverified**.
-  - Remove/relabel the stale **v1/v2** sections that conflict with the v3 result (e.g. "UI layer — 18/18").
-  - **Settings-Stop**: state "shared stop API + one UI stop path (Apply-changes) proven; Settings-Stop UI is unit/manual covered" — *not* "proven via Apply-changes".
-- **Settings-Stop UI automation is flaky**: the Settings page polls every 2s, re-rendering the Radix confirm dialog so Playwright's click never stabilizes (tried wait-for-visible, force-click, retry-to-open). Capability is otherwise covered by unit tests + manual QA (`QA-TESTPLAN.md` TC-1.9).
-- **Reliability**: session-flow checks are deterministic **only on a clean store** (the create-only store accumulates live sessions; with one-session-per-package + engine load, repeated runs go flaky). The harness should reset/namespace a fresh API DB per run; today it relies on restarting the API on a fresh `MONGODB_DB`. The 16 non-session checks are reliably green regardless.
+- **Apply-changes "stop→poll→create" — now fully proven.** Added the `__fkstGetSession` read-only seam (`src/lib/hooks/session-registry.tsx`, flag-gated under `VITE_E2E`); the harness now selects the package, drives Apply, and asserts the old session reached `stopped` **and** a **new** session id was created (`progress=true oldFinal=stopped newSession=new`).
+- **Server-authoritative 400 — now proven.** A `../escape.lua` path-traversal file (passes client Zod, rejected by the backend per `packages/model.rs` rule 3f) is verified end-to-end: network 400 observed, inline error rendered, package **not** persisted (`srv400=true created=false`). The client-side Zod 400 path is also still asserted — two distinct 400 paths.
+- **Settings-Stop — now proven + deterministic.** The earlier "flake" was a **selector bug**, not Radix/polling: every package row renders a "Stop session" button (disabled without a tab session), so `.first()` matched a disabled button when another package sorted first. Fixed by adding `data-testid={`stop-session-${packageName}`}` to the enabled trigger (`settings-screen.tsx`) and targeting it directly → `ack=true final=stopped`.
+- **Stale totals relabeled.** `VERIFY-REPORT.md` "owed" banner removed; the historical "UI layer — 18/18" section is marked superseded; the authoritative result is the v3 19/19 section.
+- **Reliability — resolved.** Passes on both a clean and a populated store (unique packages per run + scoped selectors). Engine prerequisite recorded: `FKST_HOSTED_ENGINE_TEMP_ROOT` must pre-exist, else the engine fails session start with "io error" and sessions terminate `failed` instantly (environment, not FE).
+
+Source changes (on `feat/frontend-init`): the `__fkstGetSession` seam + the `stop-session-<pkg>` testid. Both are production-safe (`data-testid` is inert in prod; the seam stays strictly `VITE_E2E`-gated).
 
 ## 3. Upstream backend issues to file (FE renders honest gaps until they land)
 - `GET /api/v1/sessions?package_name=` (session lookup) — removes the §1.1 cold-start gap so the UI can manage sessions it didn't create this tab.
@@ -46,5 +45,5 @@ Verified on a clean store (**17/18**, `.verify/ui_verify_v3.cjs`): scoped `data-
 - **PR trigger**: open the PR the moment write access is granted (§1).
 
 ## 8. Task tracker (this engagement)
-- Done: Waves 0–3 (build+review+merge), hosted-flow verification, codex+AGY reconcile, FE-init branch + this doc.
-- Open: **UI-E2E hardening final pass** (§2 — report-wording corrections + the two unverified harness strengthenings) — the only substantive work item left; deferred pending your go.
+- Done: Waves 0–3 (build+review+merge), hosted-flow verification, codex+AGY reconcile, FE-init branch + this doc, **UI-E2E hardening final pass (§2 — 19/19 ×3, all codex gaps closed)**.
+- Open (decisions/access, not code): PR when write access lands (§1), file the 3 upstream backend issues (§3), branch/worktree cleanup (§7), verify-stack teardown (§5). No substantive FE work item remains.
