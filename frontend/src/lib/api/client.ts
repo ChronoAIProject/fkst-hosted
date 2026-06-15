@@ -199,4 +199,3 @@ export async function stopSession(id: string): Promise<StopResponse> {
 export async function getGitHubAccounts(): Promise<AccountView[]> {
   return request<AccountView[]>('/api/v1/github/accounts');
 }
-

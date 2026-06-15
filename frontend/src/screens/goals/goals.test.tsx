@@ -136,7 +136,7 @@ describe('Goals Screen Unit Tests', () => {
         />
       );
       expect(screen.getByText(/no GitHub accounts connected/i)).toBeInTheDocument();
-      
+
       const ctaLink = screen.getByRole('link', { name: /Connect GitHub/i });
       expect(ctaLink).toBeInTheDocument();
       expect(ctaLink.getAttribute('href')).toBeTruthy();
@@ -279,10 +279,10 @@ describe('Goals Screen Unit Tests', () => {
         />
       );
       expect(screen.getByText(/no GitHub accounts connected/i)).toBeInTheDocument();
-      
+
       // The CTA should be a disabled button, not a link, and should have an honest note
       expect(screen.queryByRole('link', { name: /Connect GitHub/i })).toBeNull();
-      
+
       const disabledButton = screen.getByRole('button', { name: /Connect GitHub/i });
       expect(disabledButton).toBeInTheDocument();
       expect(disabledButton).toBeDisabled();
@@ -290,4 +290,3 @@ describe('Goals Screen Unit Tests', () => {
     });
   });
 });
-

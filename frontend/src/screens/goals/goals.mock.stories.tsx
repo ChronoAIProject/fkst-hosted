@@ -54,6 +54,8 @@ export const IssuesPopulated: Story = {
   args: {
     view: 'issues',
     goals: mockGoals,
+    authSessionOverride: { isAuthenticated: true },
+    accountsOverride: [{ connection_id: 'c1', login: 'octocat', primary: true }],
   },
   play: async ({ canvasElement }) => {
     const textContent = canvasElement.textContent || '';

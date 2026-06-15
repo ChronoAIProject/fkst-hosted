@@ -35,7 +35,14 @@ describe('Goals Mock Fixtures Tests', () => {
   });
 
   it('renders issues list correctly in Issues view', () => {
-    render(<Goals view="issues" goals={mockGoals} />);
+    render(
+      <Goals
+        view="issues"
+        goals={mockGoals}
+        authSessionOverride={{ isAuthenticated: true }}
+        accountsOverride={[{ connection_id: 'c1', login: 'octocat', primary: true }]}
+      />
+    );
 
     // Verify goals are rendered in list
     expect(screen.getByText('Tighten consensus parser to handle nested quorum refs')).toBeInTheDocument();

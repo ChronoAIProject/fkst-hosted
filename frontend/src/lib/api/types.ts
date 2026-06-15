@@ -104,4 +104,3 @@ export interface AccountView {
   login: string;
   primary: boolean;
 }
-
