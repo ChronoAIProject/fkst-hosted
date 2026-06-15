@@ -197,7 +197,8 @@ return {
     t.eq(pr_raise.payload.expected_version, impl_version)
     t.is_true(pr_raise.payload.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
     t.is_true(pr_raise.payload.issue_comment_body_template:find("state=\"pr-open\"", 1, true) ~= nil)
-    t.eq(pr_raise.payload.issue_label_add[1], "fkst-dev:pr-open")
+    t.eq(#pr_raise.payload.issue_label_add, 0)
+    t.eq(#pr_raise.payload.issue_label_remove, 0)
     t.eq(count_calls("show-ref --verify --quiet"), 1)
     t.eq(count_calls("rev-parse --verify"), 1)
   end,
