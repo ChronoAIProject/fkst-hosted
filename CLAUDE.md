@@ -67,6 +67,17 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 参考案例：#550（根因）/ #551（harness 硬化）。这是「先找 harness」doctrine 的硬化：安全网已成熟,活性网才是自驱系统反复栽跟头的盲区。
 
+## 全状态转移强制 saga 化（无例外、可审计、harness 化）
+
+**每一次状态转移——无论内部程序态（marker / version / round 计数 / durable 投递 / CAS）还是外部 forge 态（issue / PR / label / comment）——都是一个 saga step，强制按 saga 处理，禁止例外。** 没有「这个 loop 简单」「这条快路径不需要」「这是内部计数不算转移」的豁免。这是「活性 ⟂ 安全双检测」的结构性收口：安全网抓「发生的坏事」，saga 预算 + 保证终止抓「该终止而没终止」。saga step 的硬契约：
+
+- **每个非终止态必有不可击败的硬预算 + 保证到达枚举内带 WHY 的终止态**：任何 bounded loop（convergence / fix / redrive / retry / 任意重试或收敛）必须有 round / attempt / wall-clock 预算；预算耗尽**必然**终止到一个枚举内的终止态并带可读 WHY。预算必须**鲁棒、不可被击败**——不得被 key 漂移（如按 `(base_version, source_ref_digest)` 过滤导致计数 reset）、文本变化（如每轮变化的 `narrowed_question` 击败「N 轮不变」式 stall 检测）、或 filter 失配绕过。round/attempt 计数要从**稳定事实流**派生（稳定 producer key / 可见 marker 流），绝不从会漂移的派生键计数。活样本 #586：convergence round 33+ livelock——cap=8 因 `(base_version,sr_digest)` 漂移拖到 33 才偶发触发、true-stall 被变化的问题文本击败、reconcile 又因 graphql 耗尽写不进 `blocked`，三重失效叠加成无界 livelock。
+- **终止必然可达**：终止动作（`reconcile → blocked` 等）必须对暂态失败鲁棒（可靠投递 + 重试，绝不因一次读失败 fail-closed 就永久搁浅）；终止是「终将发生的好事」，受活性契约约束（#413：每个非终止态 budget + on_timeout 终止兜底）。
+- **可审计**：每次转移落结构化、可 grep 的事实——entry / CAS 决策 + 原因 / 预算与 round / apply / 终止 WHY，带 `proposal_id`；只看日志即可重建整条 saga 轨迹与终止理由。这些程序态只由程序产生，永不手改（见「纪律」与永不手改程序状态）。
+- **harness 化（机械不变式，非逐 dept 手写）**：saga 契约由 conformance 不变式**机械强制覆盖整类**，不是每个 loop/dept 手写一遍——每个非终止态在 `restart_transition_table` 必有 budget + on_timeout 终止行（缺一即 conformance 失败）；每个 bounded loop 的预算计数必须从稳定键派生（机械检查禁止从漂移键计数、禁止把可被表面变化击败的 stall 检测当唯一终止条件）。这是「先找 harness」「让问题都在测试解决」的落地：新增任何状态 / loop 若缺鲁棒预算或保证终止行，**CI 直接拦下**，而不是等 dogfood 发现 livelock。
+
+saga-mandatory umbrella = #375；budget-exhaustion liveness class = #558 / #568 / #535 / #586。与「先止血再根因」一致：livelock 先止血（停掉烧资源的循环），再按本条根因（补鲁棒预算 + 保证终止 + 机械不变式）。
+
 ## 异常向上暴露,直到懂根因的 handler 接手（expose, don't swallow）
 
 非正常路径（异常/错误）的纪律:**异常必须被暴露** —— fail-loud、向上传播、落结构化日志（`error_class`/`fingerprint`/`source_ref`/`attempt`/`terminal`）—— **直到遇到一个实证地懂其根因、且懂正确处置的 handler 把它处理掉**。不得在不理解根因的情况下静默 `skip` / `return` / `catch` 把异常吞掉。被吞的异常既不报错（safety 盲）又常表现为静默缺席（liveness 盲），是自驱系统反复栽跟头的根。
