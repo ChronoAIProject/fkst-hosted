@@ -5,7 +5,16 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NewGoalModal } from './new-goal-modal';
 
-const mockSuccessFetch = (url: string) => {
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = ResizeObserverMock;
+
+const mockSuccessFetch = (url: string, options?: RequestInit) => {
+  const method = options?.method?.toUpperCase() || 'GET';
+
   if (url.includes('/api/v1/packages')) {
     if (url.endsWith('/api/v1/packages')) {
       return Promise.resolve(
@@ -34,7 +43,44 @@ const mockSuccessFetch = (url: string) => {
       })
     );
   }
-  return Promise.reject(new Error('Unknown URL'));
+
+  if (url.endsWith('/api/v1/goals') && method === 'POST') {
+    const body = JSON.parse(options?.body as string || '{}');
+    return Promise.resolve(
+      new Response(JSON.stringify({
+        id: 'mock-goal-123',
+        title: body.title,
+        description: body.description,
+        package_names: body.package_names,
+        repo: body.repo || null,
+        status: 'not_started',
+        owner_user_id: 'user-123',
+        org_id: null,
+        active_session_id: null,
+        created_at: '2026-06-15T00:00:00Z',
+        updated_at: '2026-06-15T00:00:00Z',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  }
+
+  if (url.includes('/api/v1/goals/mock-goal-123/trigger') && method === 'POST') {
+    return Promise.resolve(
+      new Response(JSON.stringify({
+        goal_id: 'mock-goal-123',
+        session_id: 'mock-session-123',
+        goal_status: 'triggered',
+        session_status: 'pending',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  }
+
+  return Promise.reject(new Error('Unknown URL: ' + url));
 };
 
 const mockUnreachableFetch = () => {
@@ -50,7 +96,7 @@ const mockEmptyFetch = (url: string) => {
       })
     );
   }
-  return Promise.reject(new Error('Unknown URL'));
+  return Promise.reject(new Error('Unknown URL: ' + url));
 };
 
 describe('NewGoalModal Unit Tests', () => {
@@ -89,7 +135,7 @@ describe('NewGoalModal Unit Tests', () => {
     });
   };
 
-  it('renders fields and disabled submit button with the NyxID note, even after typing', async () => {
+  it('renders fields and handles validation error when submitting empty fields', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(mockSuccessFetch as typeof globalThis.fetch);
 
     render(
@@ -100,37 +146,203 @@ describe('NewGoalModal Unit Tests', () => {
       </MemoryRouter>
     );
 
-    // Verify Repository select, title, description fields are present
-    const repoTrigger = screen.getByTestId('repo-select-trigger');
+    // Verify Repository input, title, description fields are present
+    const repoInput = screen.getByTestId('repo-input');
     const titleInput = screen.getByTestId('title-input');
     const descTextarea = screen.getByTestId('description-textarea');
 
-    expect(repoTrigger).toBeInTheDocument();
+    expect(repoInput).toBeInTheDocument();
     expect(titleInput).toBeInTheDocument();
     expect(descTextarea).toBeInTheDocument();
 
-    // Verify submit button is disabled initially
     const submitBtn = screen.getByTestId('submit-button');
     expect(submitBtn).toBeInTheDocument();
-    expect(submitBtn).toBeDisabled();
+    expect(submitBtn).not.toBeDisabled();
 
-    // Verify notes are rendered
+    // Verify notes are rendered honestly
     expect(screen.getByTestId('submit-note')).toHaveTextContent('requires NyxID sign-in');
-    expect(screen.getByTestId('engine-pickup-footnote')).toHaveTextContent('the engine\'s next ~5-min poll picks it up → Design stage');
+    expect(screen.getByTestId('engine-pickup-footnote')).toHaveTextContent('the engine\'s next ~5-min poll picks it up → development cycle');
 
-    // Type into Title and Description
+    // Click submit immediately
     const user = userEvent.setup();
-    await user.type(titleInput, 'Add user settings panel');
-    await user.type(descTextarea, 'Neutral product-work description details');
+    await user.click(submitBtn);
 
-    // Select a repository via keyboard to trigger value change in JSDOM safely
-    repoTrigger.focus();
-    await user.keyboard(' '); // opens select listbox
-    await user.keyboard('{ArrowDown}'); // highlight first option
-    await user.keyboard('{Enter}'); // select it
+    // Verify validation errors show up
+    expect(await screen.findByTestId('title-validation-error')).toHaveTextContent('Title is required');
+    expect(await screen.findByTestId('description-validation-error')).toHaveTextContent('Description is required');
+    expect(await screen.findByTestId('package-selection-error')).toHaveTextContent('At least one package must be selected');
+  });
 
-    // Verify submit button remains disabled (the literal contract)
-    expect(submitBtn).toBeDisabled();
+  it('toggles package selection and submits successfully without repository', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(mockSuccessFetch as typeof globalThis.fetch);
+    const onOpenChange = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={createQueryClient()}>
+          <NewGoalModal open={true} onOpenChange={onOpenChange} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('package-graph-list')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+
+    // Fill title and description
+    await user.type(screen.getByTestId('title-input'), 'Test Title');
+    await user.type(screen.getByTestId('description-textarea'), 'Test Description');
+
+    // Toggle package selection
+    const firstCheckbox = screen.getByTestId('package-checkbox-github-devloop');
+    expect(firstCheckbox).not.toBeChecked();
+    await user.click(firstCheckbox);
+    expect(firstCheckbox).toBeChecked();
+
+    // Submit form
+    await user.click(screen.getByTestId('submit-button'));
+
+    // Wait for mockSuccessFetch to be called and modal closed
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
+    // Verify correct body was sent to /api/v1/goals
+    const createCall = fetchSpy.mock.calls.find((call) => call[0].toString().endsWith('/api/v1/goals'));
+    expect(createCall).toBeDefined();
+    const createReqBody = JSON.parse(createCall![1]?.body as string);
+    expect(createReqBody).toEqual({
+      title: 'Test Title',
+      description: 'Test Description',
+      package_names: ['github-devloop'],
+      repo: null,
+    });
+  });
+
+  it('submits successfully with repository and triggers immediately if toggled', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(mockSuccessFetch as typeof globalThis.fetch);
+    const onOpenChange = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={createQueryClient()}>
+          <NewGoalModal open={true} onOpenChange={onOpenChange} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('package-graph-list')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+
+    // Fill details
+    await user.type(screen.getByTestId('repo-input'), 'owner/repo-name');
+    await user.type(screen.getByTestId('title-input'), 'Trigger test goal');
+    await user.type(screen.getByTestId('description-textarea'), 'Description');
+
+    // Toggle package selection
+    await user.click(screen.getByTestId('package-checkbox-github-devloop'));
+
+    // Toggle triggerOnCreate switch
+    const triggerSwitch = screen.getByTestId('trigger-on-create-switch');
+    await user.click(triggerSwitch);
+
+    // Submit form
+    await user.click(screen.getByTestId('submit-button'));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
+    // Verify createGoal call
+    const createCall = fetchSpy.mock.calls.find((call) => call[0].toString().endsWith('/api/v1/goals'));
+    expect(createCall).toBeDefined();
+    const createReqBody = JSON.parse(createCall![1]?.body as string);
+    expect(createReqBody.repo).toEqual({
+      owner: 'owner',
+      name: 'repo-name',
+    });
+
+    // Verify triggerGoal call
+    const triggerCall = fetchSpy.mock.calls.find((call) => call[0].toString().endsWith('/trigger'));
+    expect(triggerCall).toBeDefined();
+    const triggerReqBody = JSON.parse(triggerCall![1]?.body as string);
+    expect(triggerReqBody).toEqual({
+      repo: {
+        owner: 'owner',
+        name: 'repo-name',
+      },
+      repo_mode: 'existing',
+    });
+  });
+
+  it('validates repository input format', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(mockSuccessFetch as typeof globalThis.fetch);
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={createQueryClient()}>
+          <NewGoalModal open={true} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    const user = userEvent.setup();
+
+    // Type invalid repo format
+    await user.type(screen.getByTestId('repo-input'), 'invalid-format');
+    await user.click(screen.getByTestId('submit-button'));
+
+    // Verify repo validation error
+    expect(await screen.findByTestId('repo-validation-error')).toHaveTextContent(
+      "Repository must be in the format 'owner/repo'"
+    );
+  });
+
+  it('surfaces honest submit error via mapRepoTargetError', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url, options) => {
+      const urlStr = typeof url === 'string' ? url : url instanceof Request ? url.url : String(url);
+      const method = options?.method?.toUpperCase() || 'GET';
+      if (urlStr.endsWith('/api/v1/goals') && method === 'POST') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: 'Unprocessable', message: 'GitHub App not installed on owner/repo' }), {
+            status: 422,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+      }
+      return mockSuccessFetch(urlStr, options);
+    });
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={createQueryClient()}>
+          <NewGoalModal open={true} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('package-graph-list')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+
+    await user.type(screen.getByTestId('repo-input'), 'owner/repo-name');
+    await user.type(screen.getByTestId('title-input'), 'Title');
+    await user.type(screen.getByTestId('description-textarea'), 'Description');
+    await user.click(screen.getByTestId('package-checkbox-github-devloop'));
+
+    // Submit form
+    await user.click(screen.getByTestId('submit-button'));
+
+    // Expect submit error to be surfaced
+    const submitError = await screen.findByTestId('submit-error');
+    expect(submitError).toHaveTextContent('GitHub App not installed on owner/repo');
   });
 
   it('renders the package graph from mock data with correct dep chip styling', async () => {
