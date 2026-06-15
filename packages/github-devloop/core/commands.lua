@@ -361,7 +361,7 @@ function M.gh_issue_view_meta_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_implement_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,comments")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,body,labels,comments,state,author")
 end
 
 function M.gh_issue_view_open_pr_cmd(repo, issue_number)

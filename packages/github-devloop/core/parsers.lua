@@ -298,7 +298,12 @@ function M.parse_issue_view_meta(stdout)
 end
 
 function M.parse_issue_view_implement(stdout)
-  return M.parse_issue_view_meta(stdout)
+  local decoded = json.decode(stdout or "{}")
+  local result = M.parse_issue_view_meta(stdout)
+  result.body = tostring(decoded.body or "")
+  result.state = decoded.state
+  result.author_login = M.issue_author_login(decoded)
+  return result
 end
 
 function M.parse_issue_view_open_pr(stdout)

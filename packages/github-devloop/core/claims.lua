@@ -193,9 +193,9 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
     return false
   end
   if author ~= owner then
-    local request = M.build_fork_issue_create_request(repo, issue_number, current, M.issue_source_ref(repo, issue_number))
+    local request, request_reason = M.build_fork_issue_create_request(repo, issue_number, current, M.issue_source_ref(repo, issue_number))
     if request == nil then
-      log_claim(dept, proposal_id, "skip-fork-author-unknown", "fork request could not be built from current issue author")
+      log_claim(dept, proposal_id, "skip-fork-" .. tostring(request_reason or "invalid"), "fork request could not be built from current issue")
       return false
     end
     if M.has_trusted_issue_create_parent_marker(current and current.comments, request.dedup_key, owner) then

@@ -695,7 +695,7 @@ local function mock_issue_commit_subject_title(fields)
   })
 end
 
-local function mock_issue_title_labels_comments(labels, comments, extra, default_label, include_default_marker)
+local function mock_issue_title_labels_comments(labels, comments, extra, default_label, include_default_marker, selector)
   local rendered_labels = {}
   local selected_labels = labels or { default_label }
   for _, label in ipairs(selected_labels) do
@@ -719,18 +719,20 @@ local function mock_issue_title_labels_comments(labels, comments, extra, default
     labels = selected_labels,
     comments = selected_comments,
     title = fields.title,
+    body = fields.body,
+    state = fields.state,
     assignees = fields.assignees,
     author_login = fields.author_login,
-  }, "title,labels,comments", view_count)
+  }, selector or "title,labels,comments", view_count)
   mock_issue_commit_subject_title(fields)
 end
 
 local function mock_issue_implement(labels, comments, extra)
-  mock_issue_title_labels_comments(labels, comments, extra, "fkst-dev:ready", true)
+  mock_issue_title_labels_comments(labels, comments, extra, "fkst-dev:ready", true, "title,body,labels,comments,state,author")
 end
 
 local function mock_issue_implement_raw(labels, comments, extra)
-  mock_issue_title_labels_comments(labels or {}, comments, extra, nil, false)
+  mock_issue_title_labels_comments(labels or {}, comments, extra, nil, false, "title,body,labels,comments,state,author")
 end
 
 local function mock_issue_open_pr(labels, comments, extra)

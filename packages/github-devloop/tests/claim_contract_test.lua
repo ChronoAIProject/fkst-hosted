@@ -54,6 +54,7 @@ local function self_current(extra)
   return {
     assignees = fields.assignees or {},
     title = fields.title or "Implement fork isolation",
+    state = fields.state or "OPEN",
     author_login = fields.author_login or "fkst-test-bot",
     comments = fields.comments or {},
   }

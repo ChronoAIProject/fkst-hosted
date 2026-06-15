@@ -460,7 +460,7 @@ return {
     t.eq(judgment_opts.sandbox, "read-only")
     t.eq(
       core.gh_issue_view_implement_cmd("owner/repo", 42),
-      "gh issue view '42' --repo 'owner/repo' --json title,labels,comments"
+      "gh issue view '42' --repo 'owner/repo' --json title,body,labels,comments,state,author"
     )
     t.eq(core.git_status_cmd("/tmp/devloop-owner-repo-42"), "git -C '/tmp/devloop-owner-repo-42' status --porcelain")
     t.eq(core.git_base_head_cmd("dev"), "git rev-parse --verify refs/remotes/origin/'dev'^{commit}")

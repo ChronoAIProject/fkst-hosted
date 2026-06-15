@@ -176,7 +176,7 @@ return {
       { core.gh_issue_view_result_cmd, "labels,comments" },
       { core.gh_issue_view_loop_cmd, "title,updatedAt,labels,comments,state" },
       { core.gh_issue_view_meta_cmd, "title,labels,comments" },
-      { core.gh_issue_view_implement_cmd, "title,labels,comments" },
+      { core.gh_issue_view_implement_cmd, "title,body,labels,comments,state,author" },
       { core.gh_issue_view_open_pr_cmd, "title,labels,comments,assignees,author" },
       { core.gh_issue_view_reviewing_cmd, "labels,comments" },
       { core.gh_issue_view_review_cmd, "title,labels,comments,assignees,author" },
