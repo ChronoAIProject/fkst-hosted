@@ -4,6 +4,7 @@ local M = {}
 local LIVENESS_SCAN_MAX_PER_TICK = 100
 local LIVENESS_SCAN_CALL_TIMEOUT = 10
 local LIVENESS_SCAN_WALL_CLOCK_BUDGET = 25
+local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/cursor/"
 
 M.spec = {
   consumes = { "devloop_liveness_tick" },
@@ -42,6 +43,22 @@ local function log_deferred(reason, fields)
     "deferred=" .. tostring(fields and fields.deferred or 0),
     "entity_cap=" .. tostring(fields and fields.entity_cap or 0),
   })
+end
+
+local function liveness_cursor_key(repo)
+  return LIVENESS_SCAN_CURSOR_PREFIX .. core.safe_repo(repo)
+end
+
+local function is_timeout_result(result)
+  return type(result) == "table" and result.exit_code ~= 0
+    and (tonumber(result.exit_code) == 124 or core.error_fact_class({ message = result.stderr }) == "timeout")
+end
+
+local function update_liveness_cursor(cursor_key, cursor, total, processed)
+  if cursor_key == nil then
+    return
+  end
+  cache_set(cursor_key, tostring(core.sweep_cursor_advance(cursor, total, processed)))
 end
 
 local function build_observe_payload(repo, entity, kind, tick)
@@ -95,6 +112,9 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     timeout = core.sweep_call_timeout(limits, deadline),
   })
   if state_view.exit_code ~= 0 then
+    if is_timeout_result(state_view) then
+      return nil, "deadline"
+    end
     error("github-devloop: liveness-scan-issue-view-failed: " .. tostring(state_view.stderr))
   end
 
@@ -121,6 +141,9 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     timeout = core.sweep_call_timeout(limits, deadline),
   })
   if state_view.exit_code ~= 0 then
+    if is_timeout_result(state_view) then
+      return nil, "deadline"
+    end
     error("github-devloop: liveness-scan-pr-view-failed: " .. tostring(state_view.stderr))
   end
 
@@ -165,7 +188,7 @@ local function sort_by_number(items)
   return items
 end
 
-local function activation_slice(issues, prs, seed)
+local function activation_slice(repo, issues, prs)
   local activations = {}
   for _, issue in ipairs(sort_by_number(issues or {})) do
     table.insert(activations, { kind = "issue", entity = issue })
@@ -175,10 +198,18 @@ local function activation_slice(issues, prs, seed)
   end
   local total = #activations
   if total > LIVENESS_SCAN_MAX_PER_TICK then
-    local bounded = core.sweep_batch(activations, seed, LIVENESS_SCAN_MAX_PER_TICK, LIVENESS_SCAN_MAX_PER_TICK)
+    local cursor_key = liveness_cursor_key(repo)
+    local cursor = cache_get(cursor_key)
+    local bounded, deferred = core.sweep_cursor_batch(
+      activations,
+      cursor,
+      LIVENESS_SCAN_MAX_PER_TICK,
+      LIVENESS_SCAN_MAX_PER_TICK
+    )
     core.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "deferred-cap", tostring(total - LIVENESS_SCAN_MAX_PER_TICK) .. " open entities deferred by LIVENESS_SCAN_MAX_PER_TICK")
-    return bounded, total - #bounded
+    return bounded, deferred, cursor_key, cursor, total
   end
+  cache_set(liveness_cursor_key(repo), "0")
   return activations, 0
 end
 
@@ -219,17 +250,32 @@ function pipeline(event)
     return
   end
   local prs = list_open_prs(repo, pr_timeout)
-  local activations, deferred_by_cap = activation_slice(issues, prs, core.sweep_rotation_seed(event))
+  local activations, deferred_by_cap, cursor_key, cursor, total = activation_slice(repo, issues, prs)
   local processed = 0
+  local attempted = 0
 
   for _, activation in ipairs(activations) do
+    if not core.sweep_has_budget(deadline) then
+      update_liveness_cursor(cursor_key, cursor, total, attempted)
+      log_deferred("deadline", {
+        listed_issues = #issues,
+        listed_prs = #prs,
+        processed = processed,
+        deferred = (#activations - processed) + deferred_by_cap,
+        entity_cap = limits.entity_cap,
+      })
+      return
+    end
+
     local should_reinject, defer_reason
+    attempted = attempted + 1
     if activation.kind == "issue" then
       should_reinject, defer_reason = should_reinject_issue(repo, activation.entity, limits, deadline)
     elseif activation.kind == "pr" then
       should_reinject, defer_reason = should_reinject_pr(repo, activation.entity, limits, deadline)
     end
     if defer_reason == "deadline" then
+      update_liveness_cursor(cursor_key, cursor, total, attempted)
       log_deferred("deadline", {
         listed_issues = #issues,
         listed_prs = #prs,
@@ -246,6 +292,8 @@ function pipeline(event)
       reinject(repo, activation.entity, "pr", event and event.ts)
     end
   end
+
+  update_liveness_cursor(cursor_key, cursor, total, attempted)
 
   if deferred_by_cap > 0 then
     log_deferred("cap", {

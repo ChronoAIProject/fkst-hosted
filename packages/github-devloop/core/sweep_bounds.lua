@@ -144,6 +144,50 @@ function M.sweep_batch(items, seed, cap, default_cap)
   return selected, math.max(0, #source - #selected)
 end
 
+function M.sweep_cursor_batch(items, cursor, cap, default_cap)
+  local source = items or {}
+  local count = #source
+  local bounded_cap = positive_integer(cap, default_cap or 25, 1, 1000)
+  if count <= bounded_cap then
+    local all_items = {}
+    for _, item in ipairs(source) do
+      table.insert(all_items, item)
+    end
+    return all_items, 0, 0
+  end
+
+  local start = tonumber(cursor) or 0
+  if start < 0 or start ~= math.floor(start) then
+    start = 0
+  end
+  start = start % count
+
+  local selected = {}
+  for i = 1, bounded_cap do
+    local index = ((start + i - 1) % count) + 1
+    table.insert(selected, source[index])
+  end
+
+  local next_cursor = (start + #selected) % count
+  return selected, math.max(0, count - #selected), next_cursor
+end
+
+function M.sweep_cursor_advance(cursor, total, processed)
+  local count = tonumber(total) or 0
+  if count <= 0 or count ~= math.floor(count) then
+    return 0
+  end
+  local start = tonumber(cursor) or 0
+  if start < 0 or start ~= math.floor(start) then
+    start = 0
+  end
+  local step = tonumber(processed) or 0
+  if step < 0 or step ~= math.floor(step) then
+    step = 0
+  end
+  return (start + step) % count
+end
+
 function M.sweep_positive_integer(value, fallback, minimum, maximum)
   return positive_integer(value, fallback, minimum, maximum)
 end
