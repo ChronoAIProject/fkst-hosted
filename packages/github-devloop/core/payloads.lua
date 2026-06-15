@@ -165,22 +165,6 @@ local function bounded_commit_subject(M, prefix, issue_number, current)
   return subject
 end
 
-local function board_digest_issue_list_cmd(M, repo)
-  return "gh issue list"
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --state open"
-    .. " --limit 100"
-    .. " --json number,title,labels"
-end
-
-local function board_digest_pr_list_cmd(M, repo)
-  return "gh pr list"
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --state open"
-    .. " --limit 100"
-    .. " --json number,title,labels"
-end
-
 local function recent_closed_issue_list_cmd(M, repo)
   if type(M.gh_issue_list_recent_closed_cmd) == "function" then
     return M.gh_issue_list_recent_closed_cmd(repo, 30)
@@ -345,8 +329,8 @@ function M.board_digest_block(repo, tick)
     return feed
   end
 
-  local ok_issue, issue_result = pcall(M.gh_exec, { cmd = board_digest_issue_list_cmd(M, repo), timeout = 30 })
-  local ok_pr, pr_result = pcall(M.gh_exec, { cmd = board_digest_pr_list_cmd(M, repo), timeout = 30 })
+  local ok_issue, issue_result = pcall(M.gh_exec, { cmd = M.gh_issue_list_board_digest_cmd(repo), timeout = 30 })
+  local ok_pr, pr_result = pcall(M.gh_exec, { cmd = M.gh_pr_list_board_digest_cmd(repo), timeout = 30 })
   local ok_closed, closed_result = pcall(M.gh_exec, { cmd = recent_closed_issue_list_cmd(M, repo), timeout = 30 })
   if not ok_issue or not ok_pr
     or type(issue_result) ~= "table" or issue_result.exit_code ~= 0
