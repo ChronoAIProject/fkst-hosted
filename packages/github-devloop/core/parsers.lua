@@ -419,6 +419,8 @@ function M.parse_pr_view_origin(stdout)
     comments = M.comments_from_json(decoded.comments),
     head_repository = head_repo,
     is_cross_repository = is_cross_repository,
+    mergeable = decoded.mergeable,
+    merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status,
   }
 end
 

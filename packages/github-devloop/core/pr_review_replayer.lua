@@ -1,6 +1,15 @@
 local S = {}
 
 function S.install(M)
+local function linked_pr_state(pr)
+  return tostring(pr and pr.state or ""):upper()
+end
+
+local function merged_head_sha(pr)
+  local head_sha = tostring(pr and pr.head_sha or "")
+  return M._is_git_sha(head_sha) and head_sha or nil
+end
+
 local function redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, outcome, reason)
   local ready_version = M.orphaned_pr_ready_version(state)
   local ready_payload = M.build_devloop_ready_payload({
@@ -14,6 +23,57 @@ local function redrive_ready_for_replacement_pr(dept, issue, state, proposal_id,
   })
 end
 
+local function mark_issue_merged_from_linked_pr(dept, issue, state, proposal_id, link, pr, tools)
+  local head_sha = merged_head_sha(pr)
+  if head_sha == nil then
+    return tools.log_skip(dept, proposal_id, state, state.state, "merged", "skip-foreign(head)", "merged linked PR head sha is missing")
+  end
+  local merged_body = M.comment_string("merged_pr_prefix") .. tostring(link.pr_number)
+    .. "\n\n" .. M.state_marker(proposal_id, "merged", state.version)
+    .. "\n" .. M.merged_marker(proposal_id, link.pr_number, state.version, head_sha)
+  local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
+  local comment_request = M.build_entity_comment_request({
+    kind = "issue",
+    repo = issue.repo,
+    number = issue.number,
+  }, merged_body, M._dedup_key({
+    "orphaned-pr",
+    "merged",
+    tostring(proposal_id),
+    tostring(state.version),
+    tostring(link.pr_number),
+    tostring(head_sha),
+  }), issue.source_ref)
+  local label_request = M.build_state_label_request(
+    issue.repo,
+    issue.number,
+    "merged",
+    M._dedup_key({
+      "orphaned-pr",
+      "label",
+      "merged",
+      tostring(proposal_id),
+      tostring(state.version),
+      tostring(link.pr_number),
+      tostring(head_sha),
+    }),
+    issue.source_ref
+  )
+  local add_labels, remove_labels = M.state_label_changes("merged")
+  M.log_cas_decision(dept, proposal_id, state, state.state, "merged", "applied(linked-pr-merged)", "linked PR is merged; marking issue complete")
+  return tools.raise_effects(dept, proposal_id, "merged", state.version, { add = add_labels, remove = remove_labels }, {
+    { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
+    { queue = "github-proxy.github_issue_label_request", payload = label_request },
+  })
+end
+
+local function redrive_absent_replacement_pr(dept, issue, state, proposal_id, link, facts, tools)
+  if facts.snapshot.absent_prs ~= nil and facts.snapshot.absent_prs[tostring(link.pr_number or "")] == true then
+    return redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, "applied(orphaned-pr-absent)", "linked PR is absent; re-driving implementation to replace it")
+  end
+  return nil
+end
+
 local function replay_pr_open(dept, issue, state, row, facts, tools)
   local proposal_id = facts.proposal_id
   local link = facts.link
@@ -23,7 +83,11 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
   for _, item in ipairs(facts.snapshot.prs or {}) do
     if tostring(item.number or "") == tostring(link.pr_number or "") then
       local pr = item.current or {}
-      if tostring(pr.state or ""):lower() ~= "open" then
+      local state_name = linked_pr_state(pr)
+      if state_name == "MERGED" then
+        return mark_issue_merged_from_linked_pr(dept, issue, state, proposal_id, link, pr, tools)
+      end
+      if state_name ~= "OPEN" then
         return redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, "applied(orphaned-pr-closed)", "linked PR is closed; re-driving implementation to replace it")
       end
       if tostring(pr.head_ref_name or "") ~= tostring(link.branch or "") then
@@ -66,9 +130,8 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
       })
     end
   end
-  if facts.snapshot.absent_prs ~= nil and facts.snapshot.absent_prs[tostring(link.pr_number or "")] == true then
-    return redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, "applied(orphaned-pr-absent)", "linked PR is absent; re-driving implementation to replace it")
-  end
+  local absent_redrive = redrive_absent_replacement_pr(dept, issue, state, proposal_id, link, facts, tools)
+  if absent_redrive ~= nil then return absent_redrive end
   return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(pr-link)", "linked PR fact is not visible")
 end
 
@@ -80,10 +143,16 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
   end
   local current_pr = tools.find_linked_pr(facts.snapshot, link.pr_number)
   if current_pr == nil then
+    local absent_redrive = redrive_absent_replacement_pr(dept, issue, state, proposal_id, link, facts, tools)
+    if absent_redrive ~= nil then return absent_redrive end
     return tools.log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-foreign(pr-link)", "linked PR fact is not visible")
   end
-  if tostring(current_pr.state or ""):lower() ~= "open" then
-    return tools.log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-stale(pr-closed)", "linked PR is not open")
+  local state_name = linked_pr_state(current_pr)
+  if state_name == "MERGED" then
+    return mark_issue_merged_from_linked_pr(dept, issue, state, proposal_id, link, current_pr, tools)
+  end
+  if state_name ~= "OPEN" then
+    return redrive_ready_for_replacement_pr(dept, issue, state, proposal_id, tools, "applied(orphaned-pr-closed)", "linked PR is closed; re-driving implementation to replace it")
   end
   if not M._is_git_sha(current_pr.head_sha) then
     return tools.log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
