@@ -2,6 +2,19 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { App } from './index';
 import { nextCondensed } from './shell';
+import { NyxIDProvider } from '../lib/auth';
+
+function renderApp() {
+  return render(
+    <NyxIDProvider
+      baseUrl="http://localhost"
+      clientId="test-client"
+      redirectUri="http://localhost/auth/callback"
+    >
+      <App />
+    </NyxIDProvider>
+  );
+}
 
 const mockFetch: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -85,7 +98,7 @@ describe('App Smoke Test', () => {
   });
 
   it('redirects to /overview and renders the Overview screen', async () => {
-    render(<App />);
+    renderApp();
     
     await waitFor(() => {
       expect(screen.getByText('Design')).toBeInTheDocument();
@@ -97,7 +110,7 @@ describe('App Smoke Test', () => {
 
   it('renders Overview screen on /overview', async () => {
     window.history.pushState({}, '', '/overview');
-    render(<App />);
+    renderApp();
     await waitFor(() => {
       expect(screen.getByText('Design')).toBeInTheDocument();
       expect(screen.getByText('Build')).toBeInTheDocument();
@@ -109,7 +122,7 @@ describe('App Smoke Test', () => {
 
   it('renders Goals screen on /goals (issues view)', async () => {
     window.history.pushState({}, '', '/goals');
-    render(<App />);
+    renderApp();
     await waitFor(() => {
       expect(screen.getByText(/no GitHub plane connected/i)).toBeInTheDocument();
     });
@@ -117,7 +130,7 @@ describe('App Smoke Test', () => {
 
   it('renders Goals screen on /goals?view=activity (activity view)', async () => {
     window.history.pushState({}, '', '/goals?view=activity');
-    render(<App />);
+    renderApp();
     await waitFor(() => {
       expect(screen.getByText(/host telemetry not connected/i)).toBeInTheDocument();
       // Assert the Activity segment carries the active treatment
@@ -130,7 +143,7 @@ describe('App Smoke Test', () => {
 
   it('renders Goal screen on /goals/:id', async () => {
     window.history.pushState({}, '', '/goals/152');
-    render(<App />);
+    renderApp();
     await waitFor(() => {
       expect(screen.getByText(/no GitHub plane connected/i)).toBeInTheDocument();
       expect(screen.getByText('#152')).toBeInTheDocument();
@@ -139,7 +152,7 @@ describe('App Smoke Test', () => {
 
   it('renders Packages screen on /packages', async () => {
     window.history.pushState({}, '', '/packages');
-    render(<App />);
+    renderApp();
     await waitFor(() => {
       expect(screen.getByText(/Packages are the/i)).toBeInTheDocument();
     });
@@ -147,7 +160,7 @@ describe('App Smoke Test', () => {
 
   it('renders Settings screen on /settings', async () => {
     window.history.pushState({}, '', '/settings');
-    render(<App />);
+    renderApp();
     await waitFor(() => {
       expect(screen.getByText('Hosted engine — ChronoAI cloud')).toBeInTheDocument();
     });
@@ -155,7 +168,7 @@ describe('App Smoke Test', () => {
 
   it('redirects /runs to /goals?view=activity', async () => {
     window.history.pushState({}, '', '/runs');
-    render(<App />);
+    renderApp();
     await waitFor(() => {
       expect(window.location.pathname).toBe('/goals');
       expect(window.location.search).toBe('?view=activity');
@@ -164,7 +177,7 @@ describe('App Smoke Test', () => {
   });
 
   it('renders topbar logo and nav links correctly, excluding Settings from primary nav', async () => {
-    render(<App />);
+    renderApp();
 
     await waitFor(() => {
       // 1. Logo text "FKST"
