@@ -616,7 +616,7 @@ function RegistryInitializer({
           }),
           http.put('*/api/v1/packages/pkg-a', async ({ request }) => {
             const body = await request.json() as { files: { path: string; content: string }[]; composed_deps?: string[] };
-            expect(body.files[0].content).toBe('print(2)');
+            expect(body.files?.[0]?.content).toBe('print(2)');
             updateCalled = true;
             return HttpResponse.json({
               name: 'pkg-a',
@@ -643,7 +643,7 @@ function RegistryInitializer({
         expect(nameInput).toBeDisabled();
 
         // Verify files pre-filled
-        const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
+        const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i) as HTMLTextAreaElement;
         expect(filesTextarea.value).toContain('print(1)');
 
         // Change files content and submit
