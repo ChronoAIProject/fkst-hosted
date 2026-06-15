@@ -341,7 +341,7 @@ function M.gh_issue_view_intake_judge_cmd(repo, issue_number)
 end
 
 function M.gh_issue_view_state_cmd(repo, issue_number)
-  return M.gh_issue_view_cmd(repo, issue_number, "title,labels,state,comments,assignees,author")
+  return M.gh_issue_view_cmd(repo, issue_number, "title,updatedAt,labels,state,comments,assignees,author")
 end
 
 function M.gh_issue_view_claim_cmd(repo, issue_number)

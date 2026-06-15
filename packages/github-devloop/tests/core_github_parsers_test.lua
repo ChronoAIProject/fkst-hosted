@@ -91,15 +91,16 @@ return {
 
     t.eq(
       core.gh_issue_view_state_cmd("owner/repo", 42),
-      "gh issue view '42' --repo 'owner/repo' --json title,labels,state,comments,assignees,author"
+      "gh issue view '42' --repo 'owner/repo' --json title,updatedAt,labels,state,comments,assignees,author"
     )
     t.eq(
       core.gh_issue_view_result_cmd("owner/repo", 42),
       "gh issue view '42' --repo 'owner/repo' --json labels,comments"
     )
 
-    local state = core.parse_issue_view_state('{"state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[{"body":"hello","author":{"login":"fkst-test-bot"}}]}')
+    local state = core.parse_issue_view_state('{"updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[{"body":"hello","author":{"login":"fkst-test-bot"}}]}')
     t.eq(state.state, "OPEN")
+    t.eq(state.updated_at, "2026-06-03T01:02:03Z")
     t.eq(state.labels[1], "fkst-dev:enabled")
     t.eq(core.comment_body(state.comments[1]), "hello")
     t.eq(core.comment_author_login(state.comments[1]), "fkst-test-bot")
@@ -172,7 +173,7 @@ return {
     local cases = {
       { core.gh_issue_view_intake_scan_cmd, "title,labels,comments,state,assignees,author" },
       { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state,assignees,author" },
-      { core.gh_issue_view_state_cmd, "title,labels,state,comments,assignees,author" },
+      { core.gh_issue_view_state_cmd, "title,updatedAt,labels,state,comments,assignees,author" },
       { core.gh_issue_view_result_cmd, "labels,comments" },
       { core.gh_issue_view_loop_cmd, "title,updatedAt,labels,comments,state" },
       { core.gh_issue_view_meta_cmd, "title,labels,comments" },

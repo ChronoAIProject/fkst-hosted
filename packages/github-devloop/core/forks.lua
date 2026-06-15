@@ -148,12 +148,16 @@ function M.fork_origin_fact(entity)
   return nil
 end
 
-function M.rederive_issue_is_open(repo, issue_number)
+function M.rederive_issue_state(repo, issue_number)
   local view = M.gh_exec({ cmd = M.gh_issue_view_state_cmd(repo, issue_number), timeout = 30 })
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue source_ref state recheck failed: " .. tostring(view.stderr))
   end
-  local current = M.parse_issue_view_state(view.stdout)
+  return M.parse_issue_view_state(view.stdout)
+end
+
+function M.rederive_issue_is_open(repo, issue_number)
+  local current = M.rederive_issue_state(repo, issue_number)
   return tostring(current.state or ""):upper() == "OPEN", current
 end
 

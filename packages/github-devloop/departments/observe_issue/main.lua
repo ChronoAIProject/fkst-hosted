@@ -138,6 +138,7 @@ local function ensure_managed_issue_claim(issue, proposal_id, current, state)
       assignees = {},
       author_login = current.author_login,
       title = current.title,
+      state = current.state,
       comments = current.comments,
     }
     return core.claim_issue_for_management("observe_issue", issue.repo, issue.number, released_current, proposal_id)

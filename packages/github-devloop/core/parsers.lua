@@ -18,6 +18,7 @@ function M.issue_state_from_json(decoded)
 
   return {
     title = decoded.title ~= nil and tostring(decoded.title) or nil,
+    updated_at = decoded.updatedAt or decoded.updated_at,
     labels = labels,
     comments = M.comments_from_json(decoded.comments),
     state = decoded.state,

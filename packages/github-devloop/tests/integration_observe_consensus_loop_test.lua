@@ -118,6 +118,11 @@ return {
 
   test_observe_other_authored_unmanaged_issue_inside_grace_does_not_fork = function()
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human")
+    t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
+      stdout = '{"title":"Issue title","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
 
     local result = run_observe(issue(), opts("observe-other-author-fresh"))
     t.eq(result.exit_code, 0)
@@ -131,6 +136,11 @@ return {
     local seeded = seed_cache(core.fork_first_observed_key("owner/repo", 42, "2026-06-03T01:02:03Z"), now() - (3 * 60 * 60) - 1, run_opts)
     t.eq(seeded.exit_code, 0)
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human")
+    t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
+      stdout = '{"title":"Issue title","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
 
     local result = run_observe(issue(), run_opts)
     t.eq(result.exit_code, 0)
