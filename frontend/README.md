@@ -29,8 +29,8 @@ frontend/
 
 ## What it fronts (the real v1 surface)
 
-- **Hosted backend (this repo):** `GET /api/v1/health` · `GET|POST /api/v1/packages`
-  (create-only, 409 on dup) · `POST /api/v1/sessions` (one live session/package) ·
+- **Hosted backend (this repo):** `GET /api/v1/health` · `GET|POST|PUT|DELETE /api/v1/packages`
+  (create, update, delete; UI currently only supports create, with update/delete coming soon) · `POST /api/v1/sessions` (one live session/package) ·
   `GET /api/v1/sessions/:id` (`pending→validating→running→stopping→stopped/failed`) ·
   `POST /api/v1/sessions/:id/stop`. Data is **poll-derived (~5-min cron), not live.**
 - **GitHub plane (via NyxID `api-github` proxy):** repos, issues, PRs, trusted `state:v1`

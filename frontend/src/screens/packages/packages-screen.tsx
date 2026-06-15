@@ -212,7 +212,7 @@ export function PackagesView({
           </button>
           <div className="min-[601px]:ml-auto flex items-center gap-2 flex-wrap max-[600px]:w-full">
             <span className="font-mono text-[11px] text-ghost leading-normal max-[600px]:w-full">
-              manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its composed_deps) — changing the set = create a new package revision (create-only store), then cycle the session; per-package enable switches are a target-state UI over that flow
+              manage = config + session cycle · <b>not live source edits</b> · <b>v1 grounding:</b> a session runs <b>one composed root</b> (deps come from its composed_deps) — changing the set = create a new package revision (update/delete available via API; UI coming soon), then cycle the session; per-package enable switches are a target-state UI over that flow
             </span>
             {sessionStatusCopy && (
               <span

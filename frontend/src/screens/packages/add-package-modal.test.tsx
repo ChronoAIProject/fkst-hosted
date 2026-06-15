@@ -45,7 +45,7 @@ describe('AddPackageModal (F2) Tests', () => {
         wrapper: createTestWrapper(),
       });
 
-      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
+      const nameInput = screen.getByLabelText(/Name · unique on create/i);
       const submitBtn = screen.getByRole('button', { name: /Create package/i });
 
       // Case 1: Invalid characters (spaces)
@@ -81,7 +81,7 @@ describe('AddPackageModal (F2) Tests', () => {
         wrapper: createTestWrapper(),
       });
 
-      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
+      const nameInput = screen.getByLabelText(/Name · unique on create/i);
       const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
       const submitBtn = screen.getByRole('button', { name: /Create package/i });
 
@@ -130,7 +130,7 @@ describe('AddPackageModal (F2) Tests', () => {
         wrapper: createTestWrapper(),
       });
 
-      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
+      const nameInput = screen.getByLabelText(/Name · unique on create/i);
       const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
       const submitBtn = screen.getByRole('button', { name: /Create package/i });
 
@@ -147,6 +147,11 @@ describe('AddPackageModal (F2) Tests', () => {
       await userEvent.click(submitBtn);
       await waitFor(() => {
         expect(screen.queryByText(/Maximum of 256 files allowed/i)).toBeNull();
+      });
+
+      // Wait for the first submission to complete (button becomes enabled again)
+      await waitFor(() => {
+        expect(submitBtn).not.toBeDisabled();
       });
 
       // Construct exactly 257 files including one engine entry point
@@ -167,7 +172,7 @@ describe('AddPackageModal (F2) Tests', () => {
         wrapper: createTestWrapper(),
       });
 
-      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
+      const nameInput = screen.getByLabelText(/Name · unique on create/i);
       const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
       const submitBtn = screen.getByRole('button', { name: /Create package/i });
 
@@ -206,7 +211,7 @@ describe('AddPackageModal (F2) Tests', () => {
         wrapper: createTestWrapper(),
       });
 
-      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
+      const nameInput = screen.getByLabelText(/Name · unique on create/i);
       const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
       const submitBtn = screen.getByRole('button', { name: /Create package/i });
 
@@ -282,7 +287,7 @@ describe('AddPackageModal (F2) Tests', () => {
       await userEvent.click(addBtn);
 
       // Fill out form
-      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
+      const nameInput = screen.getByLabelText(/Name · unique on create/i);
       const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
       const submitBtn = screen.getByRole('button', { name: /Create package/i });
 

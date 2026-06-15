@@ -280,7 +280,7 @@ export function AddPackageModal({ isOpen, onOpenChange }: AddPackageModalProps) 
             {/* Name Field */}
             <div className="flex flex-col gap-1.5 min-w-0">
               <label htmlFor="name-input" className="text-[10px] font-mono font-semibold tracking-[0.13em] uppercase text-ghost select-none">
-                Name · unique, create-only
+                Name · unique on create
               </label>
               <input
                 id="name-input"
@@ -331,7 +331,7 @@ export function AddPackageModal({ isOpen, onOpenChange }: AddPackageModalProps) 
 
             {/* Honest Note */}
             <div className="font-mono text-[11px] text-ghost leading-relaxed bg-raise-2 border border-line rounded-control p-3 select-none">
-              Stored in the hosted package store as <span className="text-faint">{`{name, files[], composed_deps[]}`}</span> — <b>create-only</b>: a duplicate name is a <b>409</b>, and v1 has <b>no update or delete</b> (a new revision is a new name). A package is loaded <b>once</b> at session start and composed into the one static graph — applying it = <b>stop the session, start a new one</b> (<span className="text-faint">POST /sessions/:id/stop</span> → poll <b>stopped</b> → <span className="text-faint">POST /sessions</span>). Create validates <b>structure only</b> (name <span className="text-faint">[A-Za-z0-9_-]+</span> · ≥1 file · ≤256 files · ≤1&nbsp;MiB/file · ≤12&nbsp;MiB total · must contain <span className="text-faint">departments/*/main.lua</span> or <span className="text-faint">raisers/*.lua</span>); <b>conformance runs at session start</b> — the session passes through <b>validating</b> and lands <b>failed</b> with the error on the session record if it doesn't conform. The source tree is <b>read-only at runtime</b>.
+              Stored in the hosted package store as <span className="text-faint">{`{name, files[], composed_deps[]}`}</span> — a duplicate name on create is a <b>409</b>; updates (PUT) and deletes (DELETE) are supported via the API (UI coming soon). A package is loaded <b>once</b> at session start and composed into the one static graph — applying it = <b>stop the session, start a new one</b> (<span className="text-faint">POST /sessions/:id/stop</span> → poll <b>stopped</b> → <span className="text-faint">POST /sessions</span>). Create validates <b>structure only</b> (name <span className="text-faint">[A-Za-z0-9_-]+</span> · ≥1 file · ≤256 files · ≤1&nbsp;MiB/file · ≤12&nbsp;MiB total · must contain <span className="text-faint">departments/*/main.lua</span> or <span className="text-faint">raisers/*.lua</span>); <b>conformance runs at session start</b> — the session passes through <b>validating</b> and lands <b>failed</b> with the error on the session record if it doesn't conform. The source tree is <b>read-only at runtime</b>.
             </div>
           </div>
         </ModalSheet>
