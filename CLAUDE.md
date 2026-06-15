@@ -85,6 +85,17 @@ prior art:Erlang/OTP「let it crash」(不防御式 catch,交给懂恢复策略�
 
 参考案例：#550 / #558 / #556。
 
+## 先止血,再根因（dogfood 事故响应）
+
+dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / 卡死 / 数据无界增长）时，响应分两步、顺序不可颠倒、也不可只做一半——这是 SRE 事故响应的成熟形态（先 mitigate / stop-the-bleeding 恢复 liveness，再 RCA 根治）：
+
+- **先止血（stabilize，分钟级，恢复活性优先）**：立刻止住正在发生的伤害——杀失控/泄漏进程、清掉已损坏的运行态（如 wipe 撑爆的 durable）、重启到已知良好态、节流/背压/退避。止血只求**让系统重新流动**、争来做根因的时间，可以是一次性手动运维操作；但它**不是修复、不是终点**，且仍守「永不手改程序状态」——止血是运维面动作（杀进程 / 清运行态 / 重启 / 节流），**绝不**手写 marker 或业务状态。
+- **再根因（root-cause fix，经正规管线）**：止血后冷静诊断真根（harness-first 锚定成熟实践），经 sshx → PR → review → merge 做**根因修复**，让同类伤害不再发生；修复要讲清：止血掩盖了什么、真根是什么、为何这次改动根治它。
+
+两个反模式都禁：① **只止血不根因**（反复重启 / wipe 当救命、真根不动 → 必复发）；② **系统流血时却埋头追根因**（放任活性违例持续扩大）。止血手法若**反复需要**（如「定期 fresh durable」），那本身就是根因未除的信号，应立项根治、而非固化成运维仪式。
+
+参考案例：durable backlog 风暴——先 wipe 撑爆的 durable + 重启**止血**，再 substrate#67（reliable raised delivery-id 改 entity-stable 折叠）**根因修复**。
+
 ## 先找 harness 再执行（harness-first）
 
 解决任何非平凡问题前，先识别支配这类问题的**成熟人类理论 / 工业最佳实践 / prior art**，把方案锚定在它之上，再动手：分布式投递 → at-least-once + 幂等 + DLQ + lease/fencing（Temporal/SQS 形态）；并发状态 → CAS / 乐观并发 / 版本总序；外部系统 → 最终一致假设 + 写前重导；测试 → fail-closed mock + 行为验收。产出（设计、实现、判断）要说明：套用了哪个成熟实践、在哪里**有意**偏离、为什么。最好的 harness 是让 AI 先自动找到 harness 然后再执行——判断管线（intake/consensus/review）同样据此审：无理据偏离成熟实践的方案应被质疑；声称新颖前先证明现有实践不适用。
