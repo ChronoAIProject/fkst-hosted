@@ -11,19 +11,19 @@ export function AuthCallback() {
     let active = true;
     handleRedirectCallback(window.location.href)
       .then(() => {
+        try {
+          window.history.replaceState({}, '', window.location.pathname);
+        } catch (e) {
+          console.error('Failed to scrub URL:', e);
+        }
         if (active) {
           navigate('/', { replace: true });
         }
       })
       .catch((err) => {
-        // Scrub URL: remove code, state, error, error_description
+        // Scrub URL: drop the entire search string and hash
         try {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('code');
-          url.searchParams.delete('state');
-          url.searchParams.delete('error');
-          url.searchParams.delete('error_description');
-          window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+          window.history.replaceState({}, '', window.location.pathname);
         } catch (e) {
           console.error('Failed to scrub URL:', e);
         }
