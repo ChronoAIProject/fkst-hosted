@@ -11,6 +11,7 @@ import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription } 
 import { HairlineList } from '@/components/layout/hairline-list';
 import { SessionStateBadge } from './session-state-badge';
 import { cn } from '@/lib/utils';
+import { useAuthSession, authRequired, OAuthUserInfo } from '@/lib/auth';
 
 interface SessionDetailsProps {
   packageName: string;
@@ -144,6 +145,22 @@ export function SettingsScreen() {
   const { getSessionId } = useSessionRegistry();
   const [stalePackages, setStalePackages] = React.useState<Set<string>>(new Set());
 
+  const isAuthRequired = authRequired();
+  const { isAuthenticated, login, logout, getUserInfo } = useAuthSession();
+  const [userInfo, setUserInfo] = React.useState<OAuthUserInfo | null>(null);
+
+  React.useEffect(() => {
+    if (isAuthRequired && isAuthenticated) {
+      getUserInfo()
+        .then((info) => {
+          setUserInfo(info);
+        })
+        .catch((err) => {
+          console.error('Failed to fetch user info in SettingsScreen:', err);
+        });
+    }
+  }, [isAuthRequired, isAuthenticated, getUserInfo]);
+
   const handleMarkStale = React.useCallback((pkg: string) => {
     setStalePackages((prev) => {
       const next = new Set(prev);
@@ -254,29 +271,71 @@ export function SettingsScreen() {
         </h2>
 
         <div className="flex items-center gap-[18px] border border-line rounded-panel bg-raise p-[18px_22px] flex-wrap">
-          <div className="w-12 h-12 rounded-full flex-shrink-0 bg-raise-2 border border-line-2 text-dim font-semibold text-[16px] tracking-[0.02em] flex items-center justify-center">
-            –
-          </div>
+          {isAuthRequired && isAuthenticated && userInfo?.picture ? (
+            <img src={userInfo.picture} className="w-12 h-12 rounded-full flex-shrink-0 object-cover border border-line-2" alt="" />
+          ) : (
+            <div className="w-12 h-12 rounded-full flex-shrink-0 bg-raise-2 border border-line-2 text-dim font-semibold text-[16px] tracking-[0.02em] flex items-center justify-center">
+              {isAuthRequired && isAuthenticated ? (
+                (userInfo?.name?.charAt(0) || userInfo?.email?.charAt(0) || 'U').toUpperCase()
+              ) : (
+                '–'
+              )}
+            </div>
+          )}
           <div className="min-w-0 flex flex-col gap-0.5">
             <span className="font-display font-semibold text-[16px] tracking-[-0.01em] text-fg">
-              Sign-in pending (NyxID)
+              {isAuthRequired && isAuthenticated ? (
+                userInfo?.name || 'Authenticated User'
+              ) : isAuthRequired && !isAuthenticated ? (
+                'Sign in required'
+              ) : (
+                'Sign-in pending (NyxID)'
+              )}
             </span>
             <span className="font-mono text-[12px] text-dim">
-              NyxID integration pending · no active identity
+              {isAuthRequired && isAuthenticated ? (
+                userInfo?.email || userInfo?.sub || 'Active secure session'
+              ) : isAuthRequired && !isAuthenticated ? (
+                'Please sign in with your NyxID account'
+              ) : (
+                'NyxID integration pending · no active identity'
+              )}
             </span>
             <span className="font-mono text-[11px] text-ghost">
-              When NyxID lands, the SPA will carry only a short-lived token — never a raw GitHub token.
+              {isAuthRequired && isAuthenticated ? (
+                'Active secure session — the SPA carries only a short-lived NyxID token.'
+              ) : (
+                'When NyxID lands, the SPA will carry only a short-lived token — never a raw GitHub token.'
+              )}
             </span>
           </div>
           <div className="ml-auto max-[780px]:ml-0 max-[780px]:w-full">
-            <button
-              disabled
-              aria-describedby="account-disabled-note"
-              className="w-full text-dim bg-raise border border-line-2 rounded-control px-3.5 py-1.5 text-[12px] font-medium cursor-not-allowed opacity-[0.5] transition-colors"
-            >
-              Sign out
-            </button>
-            <span id="account-disabled-note" className="sr-only">NyxID integration pending</span>
+            {isAuthRequired && isAuthenticated ? (
+              <button
+                onClick={logout}
+                className="w-full text-dim bg-raise border border-line-2 hover:border-red hover:text-red rounded-control px-3.5 py-1.5 text-[12px] font-medium cursor-pointer transition-colors"
+              >
+                Sign out
+              </button>
+            ) : isAuthRequired && !isAuthenticated ? (
+              <button
+                onClick={() => login()}
+                className="w-full text-amber-ink bg-amber hover:brightness-105 rounded-control px-3.5 py-1.5 text-[12px] font-semibold cursor-pointer transition-all"
+              >
+                Sign in
+              </button>
+            ) : (
+              <>
+                <button
+                  disabled
+                  aria-describedby="account-disabled-note"
+                  className="w-full text-dim bg-raise border border-line-2 rounded-control px-3.5 py-1.5 text-[12px] font-medium cursor-not-allowed opacity-[0.5] transition-colors"
+                >
+                  Sign out
+                </button>
+                <span id="account-disabled-note" className="sr-only">NyxID integration pending</span>
+              </>
+            )}
           </div>
         </div>
       </section>

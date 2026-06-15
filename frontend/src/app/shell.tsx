@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { NewGoalModal } from '../components/new-goal/new-goal-modal';
+import { useAuthSession, authRequired, OAuthUserInfo } from '../lib/auth';
+import { SignInGate } from '../components/auth/sign-in-gate';
 
 export interface ShellOutletContext {
   onNewGoal?: () => void;
@@ -28,6 +30,22 @@ export function Shell() {
   const [isNewGoalOpen, setIsNewGoalOpen] = useState(false);
   const location = useLocation();
 
+  const isAuthRequired = authRequired();
+  const { isAuthenticated, getUserInfo } = useAuthSession();
+  const [userInfo, setUserInfo] = useState<OAuthUserInfo | null>(null);
+
+  useEffect(() => {
+    if (isAuthRequired && isAuthenticated) {
+      getUserInfo()
+        .then((info) => {
+          setUserInfo(info);
+        })
+        .catch((err) => {
+          console.error('Failed to fetch user info in shell:', err);
+        });
+    }
+  }, [isAuthRequired, isAuthenticated, getUserInfo]);
+
   useEffect(() => {
     setIsNewGoalOpen(false);
   }, [location.pathname]);
@@ -44,6 +62,10 @@ export function Shell() {
       window.removeEventListener('scroll', handleScroll);
     };
   }, []);
+
+  if (isAuthRequired && !isAuthenticated) {
+    return <SignInGate />;
+  }
 
   return (
     <div className="min-h-screen bg-bg text-fg font-ui flex flex-col">
@@ -101,17 +123,33 @@ export function Shell() {
 
               <NavLink
                 to="/settings"
-                title="Sign-in pending (NyxID)"
-                aria-label="Settings — sign-in pending (NyxID)"
+                title={
+                  isAuthRequired && isAuthenticated
+                    ? `Settings — signed in as ${userInfo?.name || userInfo?.email || 'User'}`
+                    : 'Sign-in pending (NyxID)'
+                }
+                aria-label={
+                  isAuthRequired && isAuthenticated
+                    ? `Settings — signed in as ${userInfo?.name || userInfo?.email || 'User'}`
+                    : 'Settings — sign-in pending (NyxID)'
+                }
                 className={({ isActive }) =>
-                  `w-[30px] h-[30px] rounded-full bg-raise-2 border flex items-center justify-center text-dim font-semibold text-[11px] tracking-[0.02em] no-underline cursor-pointer transition-colors ${
+                  `w-[30px] h-[30px] rounded-full bg-raise-2 border flex items-center justify-center text-dim font-semibold text-[11px] tracking-[0.02em] no-underline cursor-pointer transition-colors overflow-hidden ${
                     isActive
                       ? 'border-amber text-amber'
                       : 'border-line-2 hover:border-faint hover:text-fg'
                   }`
                 }
               >
-                –
+                {isAuthRequired && isAuthenticated ? (
+                  userInfo?.picture ? (
+                    <img src={userInfo.picture} className="w-full h-full object-cover" alt="" />
+                  ) : (
+                    (userInfo?.name?.charAt(0) || userInfo?.email?.charAt(0) || 'U').toUpperCase()
+                  )
+                ) : (
+                  '–'
+                )}
               </NavLink>
             </div>
           </header>
