@@ -64,6 +64,19 @@ local function entity_view_cmd(repo, kind, number)
   return issue_view_cmd(repo, number)
 end
 
+local function issue_rest_view_cmd(repo, issue_number)
+  return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+end
+
+local function pr_rest_view_cmd(repo, pr_number)
+  return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls/" .. tostring(pr_number))
+end
+
+local function issue_comments_api_cmd(repo, issue_number)
+  return "gh api --paginate --slurp "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
+end
+
 local function parse_view_updated_at(stdout)
   local ok, decoded = pcall(json.decode, stdout or "")
   if not ok or type(decoded) ~= "table" then
@@ -109,7 +122,299 @@ local function json_string(value)
   text = text:gsub("\n", "\\n")
   text = text:gsub("\r", "\\r")
   text = text:gsub("\t", "\\t")
+  text = text:gsub("[%z\1-\31]", function(char)
+    return string.format("\\u%04X", string.byte(char))
+  end)
   return '"' .. text .. '"'
+end
+
+local function json_value(value)
+  if value == nil then
+    return "null"
+  end
+  if type(value) == "boolean" then
+    return value and "true" or "false"
+  end
+  if type(value) == "number" then
+    return tostring(value)
+  end
+  return json_string(value)
+end
+
+local function rest_state(value)
+  if value == nil then
+    return nil
+  end
+  return tostring(value):upper()
+end
+
+local function rest_pr_state(pr)
+  if type(pr) ~= "table" then
+    return nil
+  end
+  local merged_at = pr.merged_at
+  if pr.merged == true or (type(merged_at) == "string" and merged_at ~= "") then
+    return "MERGED"
+  end
+  return rest_state(pr.state)
+end
+
+local function rest_pr_mergeable(value)
+  if value == true then
+    return "MERGEABLE"
+  end
+  if value == false then
+    return "CONFLICTING"
+  end
+  return "UNKNOWN"
+end
+
+local function rest_pr_merge_state_status(value)
+  if value == nil or tostring(value) == "" then
+    return "UNKNOWN"
+  end
+  return tostring(value):upper()
+end
+
+local function append_comments(target, value)
+  if type(value) ~= "table" then
+    return
+  end
+  if type(value.comments) == "table" then
+    append_comments(target, value.comments)
+    return
+  end
+  if value.id ~= nil or value.body ~= nil or value.user ~= nil or value.author ~= nil then
+    table.insert(target, value)
+    return
+  end
+  for _, item in ipairs(value) do
+    append_comments(target, item)
+  end
+end
+
+local function decode_json(stdout)
+  local ok, decoded = pcall(json.decode, stdout or "")
+  if ok and type(decoded) == "table" then
+    return decoded
+  end
+  error("github-devloop: REST response is not valid JSON")
+end
+
+local function decode_entity_json(stdout)
+  if stdout == nil or stdout == "" then
+    error("github-devloop: REST entity response is empty")
+  end
+  return decode_json(stdout)
+end
+
+local function decode_comments_json(stdout)
+  local source = stdout
+  if source == nil or source == "" then
+    source = "[]"
+  end
+  return decode_json(source)
+end
+
+local function labels_json(labels)
+  local parts = {}
+  for _, label in ipairs(labels or {}) do
+    if type(label) == "table" then
+      table.insert(parts, '{"name":' .. json_value(label.name) .. "}")
+    elseif label ~= nil then
+      table.insert(parts, '{"name":' .. json_value(label) .. "}")
+    end
+  end
+  return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function assignees_json(assignees)
+  local parts = {}
+  for _, assignee in ipairs(assignees or {}) do
+    if type(assignee) == "table" then
+      table.insert(parts, '{"login":' .. json_value(assignee.login) .. "}")
+    elseif assignee ~= nil then
+      table.insert(parts, '{"login":' .. json_value(assignee) .. "}")
+    end
+  end
+  return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function comments_json(comments)
+  local parts = {}
+  for _, comment in ipairs(comments or {}) do
+    if type(comment) == "table" then
+      local author_login = nil
+      if type(comment.author) == "table" then
+        author_login = comment.author.login
+      elseif type(comment.user) == "table" then
+        author_login = comment.user.login
+      end
+      local id = comment.databaseId or comment.database_id or comment.id
+      local created_at = comment.createdAt or comment.created_at
+      table.insert(parts, '{"id":' .. json_value(id)
+        .. ',"body":' .. json_value(comment.body)
+        .. ',"author":{"login":' .. json_value(author_login) .. "}"
+        .. ',"createdAt":' .. json_value(created_at)
+        .. "}")
+    end
+  end
+  return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function rest_comments_to_view_json(comments_stdout)
+  local decoded = decode_comments_json(comments_stdout)
+  local comments = {}
+  append_comments(comments, decoded)
+  return comments_json(comments)
+end
+
+local function repo_name_with_owner(repo)
+  if type(repo) ~= "table" then
+    return nil
+  end
+  if repo.full_name ~= nil and tostring(repo.full_name) ~= "" then
+    return tostring(repo.full_name)
+  end
+  if repo.nameWithOwner ~= nil and tostring(repo.nameWithOwner) ~= "" then
+    return tostring(repo.nameWithOwner)
+  end
+  if type(repo.owner) == "table" and repo.owner.login ~= nil and repo.name ~= nil then
+    return tostring(repo.owner.login) .. "/" .. tostring(repo.name)
+  end
+  return nil
+end
+
+local function repo_owner_login(repo)
+  if type(repo) == "table" and type(repo.owner) == "table" and repo.owner.login ~= nil then
+    return tostring(repo.owner.login)
+  end
+  local name_with_owner = repo_name_with_owner(repo)
+  return name_with_owner and name_with_owner:match("^([^/]+)/") or nil
+end
+
+local function rest_issue_to_view_json(issue_stdout, comments_stdout)
+  local issue = decode_entity_json(issue_stdout)
+  local comment_source = comments_stdout
+  if type(issue.comments) == "table" then
+    comment_source = '{"comments":' .. comments_json(issue.comments) .. "}"
+  end
+  local author_login = nil
+  if type(issue.user) == "table" then
+    author_login = issue.user.login
+  end
+  return '{"number":' .. json_value(issue.number)
+    .. ',"title":' .. json_value(issue.title)
+    .. ',"body":' .. json_value(issue.body)
+    .. ',"labels":' .. labels_json(issue.labels)
+    .. ',"state":' .. json_value(rest_state(issue.state))
+    .. ',"updatedAt":' .. json_value(issue.updated_at or issue.updatedAt)
+    .. ',"assignees":' .. assignees_json(issue.assignees)
+    .. ',"author":{"login":' .. json_value(author_login) .. "}"
+    .. ',"comments":' .. rest_comments_to_view_json(comment_source)
+    .. "}"
+end
+
+local function rest_pr_to_view_json(pr_stdout, comments_stdout)
+  local pr = decode_entity_json(pr_stdout)
+  local head = type(pr.head) == "table" and pr.head or {}
+  local base = type(pr.base) == "table" and pr.base or {}
+  local head_repo = type(head.repo) == "table" and head.repo or nil
+  local base_repo = type(base.repo) == "table" and base.repo or nil
+  local head_name_with_owner = repo_name_with_owner(head_repo)
+  local base_name_with_owner = repo_name_with_owner(base_repo)
+  if head_name_with_owner == nil or base_name_with_owner == nil then
+    error("github-devloop: REST PR view missing repository facts")
+  end
+  local is_cross_repository = tostring(head_name_with_owner):lower() ~= tostring(base_name_with_owner):lower()
+  local comment_source = comments_stdout
+  if type(pr.comments) == "table" then
+    comment_source = '{"comments":' .. comments_json(pr.comments) .. "}"
+  end
+  local head_repository = '{"nameWithOwner":' .. json_value(head_name_with_owner)
+    .. ',"owner":{"login":' .. json_value(repo_owner_login(head_repo)) .. "}}"
+  local owner_login = repo_owner_login(head_repo)
+  local head_repository_owner = "{}"
+  if owner_login ~= nil then
+    head_repository_owner = '{"login":' .. json_value(owner_login) .. "}"
+  end
+  local merged_at = pr.merged_at or pr.mergedAt
+  local merged = pr.merged == true or (type(merged_at) == "string" and merged_at ~= "")
+  return '{"number":' .. json_value(pr.number)
+    .. ',"title":' .. json_value(pr.title)
+    .. ',"body":' .. json_value(pr.body)
+    .. ',"headRefName":' .. json_value(head.ref)
+    .. ',"headRefOid":' .. json_value(head.sha)
+    .. ',"baseRefName":' .. json_value(base.ref)
+    .. ',"baseRefOid":' .. json_value(base.sha)
+    .. ',"state":' .. json_value(rest_pr_state(pr))
+    .. ',"updatedAt":' .. json_value(pr.updated_at or pr.updatedAt)
+    .. ',"isDraft":' .. json_value(pr.draft or pr.isDraft or false)
+    .. ',"merged":' .. json_value(merged)
+    .. ',"mergedAt":' .. json_value(merged_at)
+    .. ',"labels":' .. labels_json(pr.labels)
+    .. ',"comments":' .. rest_comments_to_view_json(comment_source)
+    .. ',"headRepository":' .. head_repository
+    .. ',"headRepositoryOwner":' .. head_repository_owner
+    .. ',"isCrossRepository":' .. json_value(is_cross_repository)
+    .. ',"mergeable":' .. json_value(rest_pr_mergeable(pr.mergeable))
+    .. ',"mergeStateStatus":' .. json_value(rest_pr_merge_state_status(pr.mergeable_state))
+    .. "}"
+end
+
+local function rest_issue_view_result(repo, issue_number, timeout)
+  local issue = M.gh_exec(issue_rest_view_cmd(repo, issue_number), timeout)
+  if issue.exit_code ~= 0 then
+    return issue
+  end
+  local comments = M.gh_exec(issue_comments_api_cmd(repo, issue_number), timeout)
+  if comments.exit_code ~= 0 then
+    return comments
+  end
+  local ok, view_json = pcall(rest_issue_to_view_json, issue.stdout, comments.stdout)
+  if not ok then
+    return {
+      stdout = "",
+      stderr = tostring(view_json),
+      exit_code = 1,
+    }
+  end
+  return {
+    stdout = view_json,
+    stderr = "",
+    exit_code = 0,
+  }
+end
+
+local function rest_pr_view_result(repo, pr_number, timeout)
+  local pr = M.gh_exec(pr_rest_view_cmd(repo, pr_number), timeout)
+  if pr.exit_code ~= 0 then
+    return pr
+  end
+  local comments = M.gh_exec(issue_comments_api_cmd(repo, pr_number), timeout)
+  if comments.exit_code ~= 0 then
+    return comments
+  end
+  local ok, view_json = pcall(rest_pr_to_view_json, pr.stdout, comments.stdout)
+  if not ok then
+    return {
+      stdout = "",
+      stderr = tostring(view_json),
+      exit_code = 1,
+    }
+  end
+  return {
+    stdout = view_json,
+    stderr = "",
+    exit_code = 0,
+  }
+end
+
+local function rest_entity_view_result(repo, kind, number, timeout)
+  if kind == "pr" then
+    return rest_pr_view_result(repo, number, timeout)
+  end
+  return rest_issue_view_result(repo, number, timeout)
 end
 
 local function encode_cached_view(stdout, updated_at, producer)
@@ -159,7 +464,7 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
     if cached ~= nil and cached.updated_at == validator then
       return success_from_cache(cached)
     end
-    local result = M.gh_exec(cmd, timeout)
+    local result = rest_entity_view_result(repo, selected_kind, number, timeout)
     cache_successful_view(key, result, consumer)
     return result
   end
@@ -175,7 +480,7 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
     cache_set(key, "")
   end
 
-  local result = M.gh_exec(cmd, timeout)
+  local result = rest_entity_view_result(repo, selected_kind, number, timeout)
   cache_successful_view(key, result, consumer)
   return result
 end

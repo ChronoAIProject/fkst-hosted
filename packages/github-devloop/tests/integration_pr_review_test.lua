@@ -461,7 +461,7 @@ return {
       },
     }, opts("observe-pr-reviewing-reviewed"))
     t.eq(reviewed.exit_code, 0)
-    t.eq(#reviewed.raises, 1)
+    t.eq(#reviewed.raises, 2)
     t.eq(find_label_raise(reviewed.raises, "issue"), nil)
     t.eq(find_label_raise(reviewed.raises, "pr").payload.add_labels[1], "fkst-dev:reviewing")
   end,

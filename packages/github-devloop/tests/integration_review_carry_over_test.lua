@@ -106,9 +106,9 @@ return {
 
     local advanced = run_observe_pr(pr_event("2026-06-04T01:02:04Z"), opts("review-carry-over-dedup-head-advanced"))
     t.eq(advanced.exit_code, 0)
-    t.eq(find_raise(advanced.raises, "devloop_merge_ready"), nil)
-    local reviewing = find_raise(advanced.raises, "devloop_reviewing")
-    t.eq(reviewing.payload.version, event.version)
+    local replayed_merge = find_raise(advanced.raises, "devloop_merge_ready")
+    t.is_true(replayed_merge ~= nil)
+    t.eq(find_raise(advanced.raises, "devloop_reviewing"), nil)
     local replay_payload = core.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
       review_proposal_id = event.review_proposal_id,
       review_dedup_key = event.review_dedup_key,

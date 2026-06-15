@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -198,6 +199,15 @@ local function mock_result_issue(labels, comments)
 end
 
 local function mock_observe_issue(labels, comments)
+  entity_read_mocks.mock_issue_read_forms(t, {
+    repo = repo,
+    number = 42,
+    labels = labels or { "fkst-dev:enabled", "fkst-dev:ready" },
+    comments = comments or {
+      core.state_marker(proposal_id, "ready", version),
+    },
+    times = 1,
+  })
   t.mock_command(core.gh_issue_view_entity_cmd(repo, 42), {
     stdout = issue_view_json(labels or { "fkst-dev:enabled", "fkst-dev:ready" }, comments or {
       core.state_marker(proposal_id, "ready", version),

@@ -13,6 +13,36 @@ local function count_calls(needle)
   return count
 end
 
+local function count_exact_calls(command)
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    if tostring(call.rendered or "") == command then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local function decode(text)
+  local ok, decoded = pcall(json.decode, text or "")
+  t.eq(ok, true)
+  return decoded
+end
+
+local function issue_rest_command(repo, number)
+  return "gh api '" .. tostring("repos/" .. repo .. "/issues/" .. tostring(number)):gsub("'", "'\\''") .. "'"
+end
+
+local function pr_rest_command(repo, number)
+  return "gh api '" .. tostring("repos/" .. repo .. "/pulls/" .. tostring(number)):gsub("'", "'\\''") .. "'"
+end
+
+local function comments_rest_command(repo, number)
+  return "gh api --paginate --slurp '"
+    .. tostring("repos/" .. repo .. "/issues/" .. tostring(number) .. "/comments?per_page=100"):gsub("'", "'\\''")
+    .. "'"
+end
+
 local function json_string(value)
   return tostring(value or "")
     :gsub("\\", "\\\\")
@@ -94,10 +124,12 @@ return {
     t.eq(count_calls(probe_command), 0)
   end,
 
-  test_validator_mismatch_fetches_full_issue_view_and_recaches = function()
+  test_validator_mismatch_fetches_rest_issue_view_and_recaches = function()
     local repo = "owner/cache-miss"
     local issue_number = 4243
     local view_command = core.gh_issue_view_entity_cmd(repo, issue_number)
+    local rest_command = issue_rest_command(repo, issue_number)
+    local comments_command = comments_rest_command(repo, issue_number)
     seed_cached_view(repo, "issue", issue_number, seam.issue_view_stdout({
       repo = repo,
       number = issue_number,
@@ -121,7 +153,9 @@ return {
     t.is_true(second.stdout:find('"After"', 1, true) ~= nil)
     t.eq(third.exit_code, 0)
     t.is_true(third.stdout:find('"After"', 1, true) ~= nil)
-    t.eq(count_calls(view_command), 1)
+    t.eq(count_calls(view_command), 0)
+    t.eq(count_exact_calls(rest_command), 1)
+    t.eq(count_exact_calls(comments_command), 1)
   end,
 
   test_force_fresh_issue_view_bypasses_cache_and_recaches = function()
@@ -160,6 +194,8 @@ return {
     local issue_number = 4245
     local updated_at = "2026-06-03T01:02:03Z"
     local view_command = core.gh_issue_view_entity_cmd(repo, issue_number)
+    local rest_command = issue_rest_command(repo, issue_number)
+    local comments_command = comments_rest_command(repo, issue_number)
     seed_cached_view(repo, "issue", issue_number, seam.issue_view_stdout({
       repo = repo,
       number = issue_number,
@@ -183,7 +219,9 @@ return {
 
     t.eq(after.exit_code, 0)
     t.is_true(after.stdout:find('"After"', 1, true) ~= nil)
-    t.eq(count_calls(view_command), 1)
+    t.eq(count_calls(view_command), 0)
+    t.eq(count_exact_calls(rest_command), 1)
+    t.eq(count_exact_calls(comments_command), 1)
     t.eq(cache_get(core.entity_view_cache_key(repo, "issue", issue_number)) ~= "", true)
   end,
 
@@ -244,13 +282,15 @@ return {
     t.eq(count_calls(view_command), 0)
   end,
 
-  test_no_validator_probe_mismatch_fetches_full_pr_view = function()
+  test_no_validator_probe_mismatch_fetches_rest_pr_view = function()
     local repo = "owner/probe-miss"
     local pr_number = 8
     local cached_updated_at = "2026-06-03T01:02:03Z"
     local current_updated_at = "2026-06-03T01:02:04Z"
     local view_command = core.gh_pr_view_entity_cmd(repo, pr_number)
     local probe_command = core.gh_entity_updated_at_cmd(repo, "pr", pr_number)
+    local rest_command = pr_rest_command(repo, pr_number)
+    local comments_command = comments_rest_command(repo, pr_number)
     seed_cached_view(repo, "pr", pr_number, seam.pr_view_stdout({
       repo = repo,
       number = pr_number,
@@ -274,7 +314,51 @@ return {
 
     t.eq(probed.exit_code, 0)
     t.is_true(probed.stdout:find('"def456"', 1, true) ~= nil)
-    t.eq(count_calls(view_command), 1)
+    t.eq(count_calls(view_command), 0)
+    t.eq(count_exact_calls(rest_command), 1)
+    t.eq(count_exact_calls(comments_command), 1)
     t.eq(count_calls(probe_command), 1)
+  end,
+
+  test_observe_cache_miss_rest_pr_shape_preserves_mergeability_fields = function()
+    local repo = "owner/rest-shape"
+    local pr_number = 9
+    seam.mock_pr_read_forms(t, {
+      repo = repo,
+      number = pr_number,
+      head = "feature/rest-shape",
+      head_sha = "cafebabe",
+      base_branch = "dev",
+      state = "OPEN",
+      updated_at = "2026-06-03T01:02:04Z",
+      mergeable = "CONFLICTING",
+      mergeable_state = "dirty",
+      labels = { "fkst-dev:reviewing" },
+      comments = {
+        { id = 9001, body = "marker", author_login = "fkst-test-bot" },
+      },
+      register_all_views = true,
+      times = 1,
+    })
+
+    local result = core.fetch_pr_view_origin(repo, pr_number, "2026-06-03T01:02:04Z", {
+      consumer = "observe_pr",
+    })
+    local decoded = decode(result.stdout)
+
+    t.eq(result.exit_code, 0)
+    t.eq(decoded.headRefName, "feature/rest-shape")
+    t.eq(decoded.headRefOid, "cafebabe")
+    t.eq(decoded.baseRefName, "dev")
+    t.eq(decoded.state, "OPEN")
+    t.eq(decoded.updatedAt, "2026-06-03T01:02:04Z")
+    t.eq(decoded.headRepository.nameWithOwner, repo)
+    t.eq(decoded.headRepositoryOwner.login, "owner")
+    t.eq(decoded.isCrossRepository, false)
+    t.eq(decoded.mergeable, "CONFLICTING")
+    t.eq(decoded.mergeStateStatus, "DIRTY")
+    t.eq(decoded.comments[1].id, 9001)
+    t.eq(decoded.comments[1].body, "marker")
+    t.eq(decoded.comments[1].author.login, "fkst-test-bot")
   end,
 }

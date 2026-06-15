@@ -66,24 +66,17 @@ local function mock_issue_list(items)
 end
 
 local function mock_issue_state_number(issue_number, labels, state, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
-  end
-  local rendered_comments = {}
-  for _, comment in ipairs(comments or {}) do
-    table.insert(rendered_comments, render_comment(comment))
-  end
-  t.mock_command(core.gh_issue_view_entity_cmd(repo, issue_number), {
-    stdout = string.format(
-      '{"title":"Issue %d","body":"","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
-      tonumber(issue_number),
-      json_string(state or "OPEN"),
-      table.concat(rendered_labels, ","),
-      table.concat(rendered_comments, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
+  entity_read_mocks.mock_issue_read_forms(t, {
+    repo = repo,
+    number = issue_number,
+    title = "Issue " .. tostring(issue_number),
+    body = "",
+    state = state or "OPEN",
+    updated_at = "2026-06-03T01:02:03Z",
+    labels = labels,
+    comments = comments,
+    assignees = { "fkst-test-bot" },
+    times = 1,
   })
 end
 
@@ -104,18 +97,16 @@ local function mock_pr_list(items)
 end
 
 local function mock_pr_state(comments, state)
-  local rendered = {}
-  for _, comment in ipairs(comments or {}) do
-    table.insert(rendered, render_comment(comment))
-  end
-  t.mock_command(core.gh_pr_view_entity_cmd(repo, 7), {
-    stdout = string.format(
-      '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-04T01:02:03Z","comments":[%s]}\n',
-      json_string(state or "OPEN"),
-      table.concat(rendered, ",")
-    ),
-    stderr = "",
-    exit_code = 0,
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = repo,
+    number = 7,
+    head = "devloop-owner-repo-42-01HY",
+    head_sha = "def456",
+    base_branch = "dev",
+    state = state or "OPEN",
+    updated_at = "2026-06-04T01:02:03Z",
+    comments = comments,
+    times = 1,
   })
 end
 
@@ -137,6 +128,19 @@ local function mock_linked_pr_state(comments, state, exit_code, times)
     stderr = stderr,
     exit_code = exit_code or 0,
   }, times or 1)
+  if exit_code == nil or exit_code == 0 then
+    entity_read_mocks.mock_pr_read_forms(t, {
+      repo = repo,
+      number = 7,
+      head = "devloop-owner-repo-42-01HY",
+      head_sha = "def456",
+      base_branch = "dev",
+      state = state or "OPEN",
+      updated_at = "2026-06-04T01:02:03Z",
+      comments = comments,
+      times = times or 1,
+    })
+  end
 end
 
 local function mock_linked_pr_absent(times)
@@ -150,6 +154,10 @@ end
 local function assert_no_entity_change(result)
   t.eq(result.exit_code, 0)
   t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
+end
+
+local function issue_rest_view_number(rendered)
+  return tostring(rendered or ""):match("gh api 'repos/owner/repo/issues/(%d+)'$")
 end
 
 return {
@@ -395,7 +403,7 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
     local views = 0
     for _, call in ipairs(t.command_calls()) do
-      if tostring(call.rendered or ""):find("--json title,body,comments,labels,state,updatedAt,assignees", 1, true) ~= nil then
+      if issue_rest_view_number(call.rendered) ~= nil then
         views = views + 1
       end
     end
@@ -422,7 +430,7 @@ return {
 
     local viewed = {}
     for _, call in ipairs(t.command_calls()) do
-      local issue_number = tostring(call.rendered or ""):match("gh issue view '(%d+)'")
+      local issue_number = issue_rest_view_number(call.rendered)
       if issue_number ~= nil then
         viewed[tonumber(issue_number)] = true
       end
@@ -454,7 +462,7 @@ return {
       t.eq(result.exit_code, 0)
 
       for _, call in ipairs(t.command_calls()) do
-        local issue_number = tostring(call.rendered or ""):match("gh issue view '(%d+)'")
+        local issue_number = issue_rest_view_number(call.rendered)
         if issue_number ~= nil then
           viewed[tonumber(issue_number)] = true
         end
@@ -470,7 +478,7 @@ return {
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     mock_empty_pr_list()
-    t.mock_command(core.gh_issue_view_entity_cmd(repo, 42), {
+    t.mock_command("gh api 'repos/owner/repo/issues/42'", {
       stdout = "",
       stderr = "timed out",
       exit_code = 124,

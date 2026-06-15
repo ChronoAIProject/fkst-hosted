@@ -71,6 +71,8 @@ return {
       state = "MERGED",
       updated_at = "2026-06-14T11:11:12Z",
       merged_at = "2026-06-14T11:20:00Z",
+      mergeable = "CONFLICTING",
+      merge_state = "DIRTY",
       labels = { "fkst-dev:reviewing", "ci:green" },
       comments = {
         { id = "PRC_1", body = "review marker", author_login = "fkst-test-bot", created_at = "2026-06-14T11:12:00Z" },
@@ -98,6 +100,10 @@ return {
     t.eq(view.headRepositoryOwner.login, rest.head.repo.owner.login)
     t.eq(rest.base.repo.owner.login, "owner")
     t.eq(view.updatedAt, rest.updated_at)
+    t.eq(rest.mergeable, false)
+    t.eq(rest.mergeable_state, "DIRTY")
+    t.eq(view.mergeable, "CONFLICTING")
+    t.eq(view.mergeStateStatus, "DIRTY")
     t.eq(probe.stdout, view.updatedAt .. "\n")
     t.eq(#view.labels, #rest.labels)
     t.eq(view.labels[1].name, rest.labels[1].name)

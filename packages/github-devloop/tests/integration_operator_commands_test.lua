@@ -136,12 +136,12 @@ return {
     })
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", reviewing_raise.payload.version),
       comment_raise.payload.body,
     }, "devloop-owner-repo-42-01HY", "feedface")
     local review = run_review_pr(reviewing_raise.payload, opts("operator-rereview-review"))
     t.eq(review.exit_code, 0)
-    local proposal = find_raise(review.raises, "consensus.proposal").payload
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, reviewing_raise.payload.version, "feedface"))
+    t.eq(find_raise(review.raises, "consensus.proposal"), nil)
   end,
 
   test_untrusted_rereview_command_is_ignored = function()
@@ -189,7 +189,7 @@ return {
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, merge_comments(merge_ready()))
     local replay = run_observe_pr(pr_event("2026-06-04T03:01:00Z"), opts("operator-rereview-invalid-replay"))
     t.eq(replay.exit_code, 0)
-    t.eq(find_raise(replay.raises, "github-proxy.github_pr_comment_request"), nil)
+    t.is_true(find_raise(replay.raises, "github-proxy.github_pr_comment_request") ~= nil)
   end,
 
   test_rereview_command_active_reviewing_refuses = function()

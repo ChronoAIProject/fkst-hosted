@@ -197,8 +197,20 @@ local function pr_rest_stdout(fields)
   local head_repo = f.head_repo or repo
   local state = tostring(f.state or "OPEN")
   local merged_at = f.merged_at or (state == "MERGED" and "2026-06-03T02:05:04Z" or "")
+  local mergeable = f.rest_mergeable
+  if mergeable == nil then
+    mergeable = f.mergeable
+  end
+  if mergeable == nil or mergeable == "MERGEABLE" then
+    mergeable = true
+  elseif mergeable == "CONFLICTING" then
+    mergeable = false
+  elseif mergeable == "UNKNOWN" then
+    mergeable = nil
+  end
+  local mergeable_state = f.rest_mergeable_state or f.mergeable_state or f.merge_state or "clean"
   return string.format(
-    '{"number":%d,"state":"%s","updated_at":"%s","merged_at":%s,"draft":%s,"labels":[%s],"user":{"login":"%s"},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}}}\n',
+    '{"number":%d,"state":"%s","updated_at":"%s","merged_at":%s,"draft":%s,"labels":[%s],"user":{"login":"%s"},"mergeable":%s,"mergeable_state":%s,"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}}}\n',
     tonumber(f.number) or 7,
     json_string(state == "MERGED" and "closed" or state:lower()),
     json_string(f.updated_at or "2026-06-03T02:03:04Z"),
@@ -206,6 +218,8 @@ local function pr_rest_stdout(fields)
     f.is_draft == true and "true" or "false",
     labels_json(f.labels),
     json_string(f.author_login or "fkst-test-bot"),
+    mergeable == nil and "null" or (mergeable == true and "true" or "false"),
+    json_value(mergeable_state),
     json_string(f.head or "devloop-owner-repo-42-01HY"),
     json_string(f.head_sha or "def456"),
     json_string(head_repo),
@@ -227,12 +241,14 @@ local function mock_probe(t, path, updated_at)
   end
 end
 
-local function mock_comments(t, repo, issue_number, comments)
-  t.mock_command("gh api --paginate --slurp " .. shell_quote("repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100"), {
-    stdout = "[" .. rest_comments_json(comments) .. "]\n",
-    stderr = "",
-    exit_code = 0,
-  })
+local function mock_comments(t, repo, issue_number, comments, times)
+  for _ = 1, times or 1 do
+    t.mock_command("gh api --paginate --slurp " .. shell_quote("repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100"), {
+      stdout = "[" .. rest_comments_json(comments) .. "]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local issue_view_selectors = {
@@ -278,6 +294,14 @@ local function pr_view_command(repo, number, fields)
   return "gh pr view " .. shell_quote(number)
     .. " --repo " .. shell_quote(repo)
     .. " --json " .. fields
+end
+
+local function issue_rest_command(repo, number)
+  return "gh api " .. shell_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(number))
+end
+
+local function pr_rest_command(repo, number)
+  return "gh api " .. shell_quote("repos/" .. tostring(repo) .. "/pulls/" .. tostring(number))
 end
 
 local function list_labels_json(labels)
@@ -389,6 +413,12 @@ function M.mock_issue_view_selector(t, fields, selector, times)
   register_view_commands(t, {
     issue_view_command(repo, number, selector),
   }, M.issue_view_stdout(f), times or 1)
+  if selector == "title,body,comments,labels,state,updatedAt,assignees,author" then
+    register_view_commands(t, {
+      issue_rest_command(repo, number),
+    }, issue_rest_stdout(f), times or 1)
+    mock_comments(t, repo, number, f.comments, times or 1)
+  end
 end
 
 function M.mock_issue_view_raw_selector(t, fields, selector, result, times)
@@ -403,6 +433,12 @@ function M.mock_pr_view_selector(t, fields, selector, times)
   register_view_commands(t, {
     pr_view_command(repo, number, selector),
   }, M.pr_view_stdout(f), times or 1)
+  if selector == pr_origin_selector then
+    register_view_commands(t, {
+      pr_rest_command(repo, number),
+    }, pr_rest_stdout(f), times or 1)
+    mock_comments(t, repo, number, f.comments, times or 1)
+  end
 end
 
 function M.mock_pr_view_raw_selector(t, fields, selector, result, times)
@@ -425,13 +461,11 @@ function M.mock_issue_read_forms(t, fields)
     end
     register_view_commands(t, commands, stdout, times)
   end
-  t.mock_command("gh api " .. shell_quote(path), {
-    stdout = issue_rest_stdout(f),
-    stderr = "",
-    exit_code = 0,
-  })
   mock_probe(t, path, updated_at)
-  mock_comments(t, repo, number, f.comments)
+  register_view_commands(t, {
+    "gh api " .. shell_quote(path),
+  }, issue_rest_stdout(f), f.times or 30)
+  mock_comments(t, repo, number, f.comments, f.times or 30)
 end
 
 function M.mock_pr_read_forms(t, fields)
@@ -462,13 +496,11 @@ function M.mock_pr_read_forms(t, fields)
       pr_view_command(repo, number, pr_merge_without_rollup_selector),
     }, M.pr_view_stdout(f), times)
   end
-  t.mock_command("gh api " .. shell_quote(path), {
-    stdout = pr_rest_stdout(f),
-    stderr = "",
-    exit_code = 0,
-  })
   mock_probe(t, path, updated_at)
-  mock_comments(t, repo, number, f.comments)
+  register_view_commands(t, {
+    "gh api " .. shell_quote(path),
+  }, pr_rest_stdout(f), f.times or 30)
+  mock_comments(t, repo, number, f.comments, f.times or 30)
 end
 
 function M.mock_pr_merge_view(t, fields, times)
