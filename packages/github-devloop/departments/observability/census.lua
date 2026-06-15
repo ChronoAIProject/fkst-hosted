@@ -74,6 +74,10 @@ local function observe_issue_candidate(repo, issue_number, entities, seen_prs, l
     return issue_views, pr_views
   end
   local issue = common.fetch_issue(core, repo, issue_number, limits, deadline)
+  if issue == nil then
+    budget.deadline_deferred = true
+    return issue_views, pr_views
+  end
   budget.remaining = budget.remaining - 1
   issue_views = issue_views + 1
   local entity, link = put_issue_entity(entities, repo, issue_number, issue)
@@ -83,6 +87,10 @@ local function observe_issue_candidate(repo, issue_number, entities, seen_prs, l
     end
     seen_prs[link.pr_number] = true
     local pr = common.fetch_pr(core, repo, link.pr_number, limits, deadline)
+    if pr == nil then
+      budget.deadline_deferred = true
+      return issue_views, pr_views
+    end
     budget.remaining = budget.remaining - 1
     pr_views = pr_views + 1
     put_pr_entity(entities, repo, link.pr_number, pr)
@@ -100,6 +108,10 @@ local function observe_pr_candidate(repo, pr_number, entities, seen_prs, limits,
   if seen_prs[pr_number] == nil then
     seen_prs[pr_number] = true
     local pr = common.fetch_pr(core, repo, pr_number, limits, deadline)
+    if pr == nil then
+      budget.deadline_deferred = true
+      return pr_views
+    end
     budget.remaining = budget.remaining - 1
     pr_views = pr_views + 1
     put_pr_entity(entities, repo, pr_number, pr)
@@ -121,6 +133,9 @@ local function observe_candidates(repo, candidates, entities, seen_prs, limits, 
       processed_prs = processed_prs + pr_views
     elseif candidate.kind == "pr" then
       processed_prs = processed_prs + observe_pr_candidate(repo, candidate.number, entities, seen_prs, limits, deadline, budget)
+    end
+    if budget.deadline_deferred then
+      break
     end
   end
   return processed_issues, processed_prs, budget.remaining
