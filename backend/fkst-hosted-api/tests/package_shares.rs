@@ -394,6 +394,7 @@ async fn share_app() -> ShareTestApp {
         auth_mode,
         authz,
         github_app: None,
+        github_app_webhook_secret: None,
         goals,
         engine: EngineConfig::default(),
         llm: None,

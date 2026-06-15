@@ -5,6 +5,10 @@
 //!   - `FKST_GITHUB_APP_PRIVATE_KEY_PEM`   (PEM content inline; `\n` escapes normalized)
 //!   - `FKST_GITHUB_APP_PRIVATE_KEY_PATH`  (file path; mutually exclusive with _PEM)
 //!   - `FKST_GITHUB_APP_SLUG`              (optional; used in install-hint URLs)
+//!   - `FKST_GITHUB_APP_WEBHOOK_SECRET`    (optional-but-recommended, issue #108;
+//!     when set, the webhook endpoint requires a valid `X-Hub-Signature-256`;
+//!     when unset the webhook route is NOT mounted and resolution degrades to
+//!     on-demand — a warning is logged at startup)
 //!
 //! Fail-closed rules:
 //!   - ID set without exactly one key source => config error naming the vars.
@@ -22,6 +26,7 @@ const ENV_APP_ID: &str = "FKST_GITHUB_APP_ID";
 const ENV_KEY_PEM: &str = "FKST_GITHUB_APP_PRIVATE_KEY_PEM";
 const ENV_KEY_PATH: &str = "FKST_GITHUB_APP_PRIVATE_KEY_PATH";
 const ENV_SLUG: &str = "FKST_GITHUB_APP_SLUG";
+const ENV_WEBHOOK_SECRET: &str = "FKST_GITHUB_APP_WEBHOOK_SECRET";
 
 /// GitHub App configuration. The PEM is held in a [`SecretString`] and never
 /// appears in `Debug` output.
@@ -29,6 +34,10 @@ pub struct GithubAppConfig {
     pub app_id: u64,
     pub private_key_pem: SecretString,
     pub app_slug: Option<String>,
+    /// Webhook HMAC secret (issue #108). `None` when unset: the webhook route is
+    /// not mounted and resolution degrades to on-demand. Held in a
+    /// [`SecretString`] and never rendered in `Debug` or logged.
+    pub webhook_secret: Option<SecretString>,
     /// API base (default `https://api.github.com`; tests inject for wiremock).
     pub api_base: String,
 }
@@ -39,6 +48,11 @@ impl fmt::Debug for GithubAppConfig {
             .field("app_id", &self.app_id)
             .field("private_key_pem", &"<redacted>")
             .field("app_slug", &self.app_slug)
+            // Never render the secret itself — only whether one is configured.
+            .field(
+                "webhook_secret",
+                &self.webhook_secret.as_ref().map(|_| "<redacted>"),
+            )
             .field("api_base", &self.api_base)
             .finish()
     }
@@ -75,6 +89,7 @@ impl GithubAppConfig {
         let mut key_pem: Option<String> = None;
         let mut key_path: Option<String> = None;
         let mut slug: Option<String> = None;
+        let mut webhook_secret: Option<String> = None;
 
         for (key, value) in vars {
             match key.as_str() {
@@ -96,6 +111,9 @@ impl GithubAppConfig {
                 }
                 ENV_SLUG if !value.is_empty() => {
                     slug = Some(value);
+                }
+                ENV_WEBHOOK_SECRET if !value.is_empty() => {
+                    webhook_secret = Some(value);
                 }
                 _ => {}
             }
@@ -142,6 +160,7 @@ impl GithubAppConfig {
             app_id,
             private_key_pem: SecretString::from(pem),
             app_slug: slug,
+            webhook_secret: webhook_secret.map(SecretString::from),
             api_base: "https://api.github.com".to_string(),
         }))
     }
@@ -294,6 +313,49 @@ mod tests {
             .expect("ok")
             .expect("some");
         assert!(cfg.app_slug.is_none());
+    }
+
+    #[test]
+    fn webhook_secret_is_optional_and_loads_when_set() {
+        let pem = test_pem();
+        // Absent => None (webhook disabled, degrade to on-demand).
+        let cfg = GithubAppConfig::from_vars(vars(&[(ENV_APP_ID, "7"), (ENV_KEY_PEM, &pem)]))
+            .expect("ok")
+            .expect("some");
+        assert!(cfg.webhook_secret.is_none());
+
+        // Present => Some, with the raw value recoverable for HMAC verification.
+        let cfg = GithubAppConfig::from_vars(vars(&[
+            (ENV_APP_ID, "7"),
+            (ENV_KEY_PEM, &pem),
+            (ENV_WEBHOOK_SECRET, "whsec_supersecret"),
+        ]))
+        .expect("ok")
+        .expect("some");
+        assert_eq!(
+            cfg.webhook_secret
+                .as_ref()
+                .map(|s| s.expose_secret().to_string()),
+            Some("whsec_supersecret".to_string())
+        );
+    }
+
+    #[test]
+    fn debug_never_contains_webhook_secret() {
+        let pem = test_pem();
+        let cfg = GithubAppConfig::from_vars(vars(&[
+            (ENV_APP_ID, "7"),
+            (ENV_KEY_PEM, &pem),
+            (ENV_WEBHOOK_SECRET, "whsec_leaky_value"),
+        ]))
+        .expect("ok")
+        .expect("some");
+        let debug = format!("{cfg:?}");
+        assert!(
+            !debug.contains("whsec_leaky_value"),
+            "Debug leaked webhook secret: {debug}"
+        );
+        assert!(debug.contains("<redacted>"));
     }
 
     #[test]

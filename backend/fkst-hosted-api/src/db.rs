@@ -9,7 +9,7 @@ use mongodb::{Client, Collection, IndexModel};
 
 use crate::config::Config;
 use crate::error::AppError;
-use crate::models::{LeaseDoc, SessionDoc};
+use crate::models::{GithubInstallationDoc, LeaseDoc, SessionDoc};
 
 /// Collection names (single source of truth). The `packages` collection name
 /// is owned by `crate::packages::PACKAGES_COLLECTION`.
@@ -17,6 +17,9 @@ pub const SESSIONS: &str = "sessions";
 pub const LEASES: &str = "leases";
 /// The per-session secret/variable vault collection (issue #100).
 pub const VAULT_ENTRIES: &str = "vault_entries";
+/// GitHub App installation records (issue #108). One document per installation,
+/// `_id` = the GitHub installation id.
+pub const GITHUB_INSTALLATIONS: &str = "github_installations";
 
 /// Stable index names (deterministic idempotency; asserted by integration
 /// tests). No index is declared for `leases._id` — the implicit `_id` index
@@ -32,6 +35,12 @@ pub const IDX_LEASES_EXPIRES_AT: &str = "leases_expires_at";
 /// Unique vault index over `(owner_user_id, scope_key, key)` — one entry per
 /// key within an owner's scope (issue #100). Owned by `crate::vault::VaultRepo`.
 pub const IDX_VAULT_OWNER_SCOPE_KEY: &str = "vault_owner_scope_key_unique";
+/// Index over `github_installations.repos` (issue #108): resolve which
+/// installation covers a `owner/name` repo by membership in the array.
+pub const IDX_GH_INSTALL_REPOS: &str = "github_installations_repos";
+/// Index over `github_installations.account_login` (issue #108): resolve an
+/// account-wide (`all`) installation by owner login.
+pub const IDX_GH_INSTALL_ACCOUNT: &str = "github_installations_account_login";
 
 /// Cheap-to-clone handle to the Mongo database (`mongodb::Database` is
 /// `Arc`-backed internally).
@@ -138,6 +147,15 @@ impl Db {
         self.collection(VAULT_ENTRIES)
     }
 
+    /// The `github_installations` collection (issue #108), typed to
+    /// [`GithubInstallationDoc`]. The lifecycle logic lives on
+    /// [`crate::github_app::MongoInstallationStore`]; this accessor gives the
+    /// collection a single home alongside the others and lets integration tests
+    /// inspect the stored BSON shape.
+    pub fn github_installations(&self) -> Collection<GithubInstallationDoc> {
+        self.collection(GITHUB_INSTALLATIONS)
+    }
+
     /// Idempotently create all secondary indexes (stable names). Safe across
     /// restarts and concurrent pod starts: MongoDB de-duplicates by index
     /// name + spec. Never drops or alters existing indexes.
@@ -171,6 +189,28 @@ impl Db {
             .await?;
         for (_, name) in &lease_indexes {
             tracing::debug!(collection = LEASES, index = name, "index ensured");
+        }
+
+        // GitHub App installations (issue #108): `repos` membership answers
+        // selected-install coverage; `account_login` answers account-wide
+        // (`all`) coverage. `_id` (the installation id) is implicitly unique.
+        let install_indexes = [
+            (doc! { "repos": 1 }, IDX_GH_INSTALL_REPOS),
+            (doc! { "account_login": 1 }, IDX_GH_INSTALL_ACCOUNT),
+        ];
+        self.github_installations()
+            .create_indexes(
+                install_indexes
+                    .iter()
+                    .map(|(keys, name)| index_model(keys.clone(), name)),
+            )
+            .await?;
+        for (_, name) in &install_indexes {
+            tracing::debug!(
+                collection = GITHUB_INSTALLATIONS,
+                index = name,
+                "index ensured"
+            );
         }
 
         // No INFO here: the single "indexes ensured" lifecycle line is

@@ -134,6 +134,7 @@ fn test_github_config() -> GithubAppConfig {
         app_id: 42,
         private_key_pem: SecretString::from(pem.to_string()),
         app_slug: Some("fkst-test".to_string()),
+        webhook_secret: None,
         api_base: "https://api.github.com".to_string(),
     }
 }

@@ -37,6 +37,12 @@ pub struct AppState {
     /// (module disabled). Wired into `AppState` so a bad PEM fails at deploy
     /// time and the trigger issue consumes it with zero re-plumbing.
     pub github_app: Option<GithubAppTokens>,
+    /// GitHub App webhook HMAC secret (issue #108): `None` when
+    /// `FKST_GITHUB_APP_WEBHOOK_SECRET` is unset — the webhook route is then NOT
+    /// mounted and installation resolution degrades to on-demand. Held in a
+    /// `SecretString` and never logged; the webhook handler uses it to verify
+    /// `X-Hub-Signature-256` over the raw body before any parse.
+    pub github_app_webhook_secret: Option<secrecy::SecretString>,
     /// Repository over the `goals` collection (domain layer owned by the goals
     /// module). Goal CRUD handlers go through this, never raw Mongo.
     pub goals: GoalRepo,
