@@ -41,8 +41,8 @@ use tokio::sync::watch;
 use crate::distribution::{Distributor, DriverHost, PlacementError};
 use crate::engine::config::is_reserved_env_key;
 use crate::engine::{
-    EngineConfig, LiveStatus, PreparedPackage, RunnerError, RunningSession, SessionRunner,
-    StartSpec,
+    EngineConfig, GoalContext, LiveStatus, PreparedPackage, RunnerError, RunningSession,
+    SessionRunner, StartSpec,
 };
 use crate::error::AppError;
 use crate::github_app::GithubAppTokens;
@@ -1004,16 +1004,46 @@ async fn drive_inner(
         );
     }
 
+    // (C0) For a goal session, mint the GitHub App installation token and build
+    // the GoalContext so the engine receives GITHUB_TOKEN + the 0600 token file
+    // + goal.json at t=0 (#106 — previously the token only arrived ~55 min in,
+    // if ever). Minting here (rather than threading the trigger-time preflight
+    // token across the detached driver boundary) unifies the initial start and
+    // the failover rebuild: both rebuild the GoalContext purely from the
+    // SessionDoc + a fresh mint, and `token_for_repo` caches per (repo, perms),
+    // so this is a cache hit after the trigger preflight — not a second network
+    // mint. A mint/goal-load failure FAILS the start: a goal run must never
+    // proceed without its credential.
+    let goal_ctx = match goal_info.as_mut() {
+        Some(gi) => match build_goal_context(inner, gi).await {
+            Ok(ctx) => Some(ctx),
+            Err(reason) => {
+                tracing::error!(session_id = %id, reason = %reason, "failed to prepare goal context");
+                journal_finish(
+                    &mut journaler,
+                    Transition::Failed {
+                        exit_code: None,
+                        error: reason.clone(),
+                    },
+                )
+                .await;
+                fail_session(inner, id, &fence, &reason, goal_info).await;
+                return true;
+            }
+        },
+        None => None,
+    };
+
     // (C) Start the engine. This await runs to completion (never
-    // select-cancelled); a stop that raced in is honored right after.
-    // `goal: None` STAYS here — the goal-session GitHub-App goal arm is #106's
-    // job; #102 owns only the start() -> start_with_spec() migration and the
-    // env_profile threading.
+    // select-cancelled); a stop that raced in is honored right after. For a
+    // goal session `goal_ctx` is `Some(..)`, so `start_with_spec` writes the
+    // token file + goal.json and `spawn_supervise` sets the GitHub env vars
+    // before the engine runs.
     let mut session = match inner
         .runner
         .start_with_spec(&StartSpec {
             packages: vec![prepared],
-            goal: None,
+            goal: goal_ctx,
             env_profile,
         })
         .await
@@ -1569,6 +1599,53 @@ async fn goal_status_sync(
 /// attempt has passed. Writes `<token_path>.tmp` then `fs::rename` for
 /// atomicity on the same filesystem. Failures are WARN'd; the engine keeps
 /// using the previous token.
+/// Build the [`GoalContext`] for a goal session: load the goal (for its
+/// title/description, written into `goal.json`) and mint a fresh GitHub App
+/// installation token for its repo. Used IDENTICALLY by the initial start and
+/// the failover rebuild — the token is never persisted, always (re-)minted
+/// here. `token_for_repo` caches per `(repo, perms)`, so right after the
+/// trigger-time install-check preflight this is a cache hit, not a second
+/// network mint.
+///
+/// Records the actual mint instant on the `GoalDrive` so the periodic refresh
+/// fires ~55 min later (5 min before the 60-min TTL) rather than being
+/// suppressed for 55 min from the pre-seeded driver-creation `minted_at`
+/// (the #106 refresh-seed bug).
+async fn build_goal_context(inner: &Arc<Inner>, gi: &mut GoalDrive) -> Result<GoalContext, String> {
+    let Some(gs) = inner.goal_support.get() else {
+        return Err("goal support not enabled; cannot mint github token".to_string());
+    };
+    let goal = match gs.goals.get(gi.goal_id).await {
+        Ok(Some(goal)) => goal,
+        Ok(None) => return Err("goal not found for session".to_string()),
+        Err(error) => {
+            tracing::error!(goal_id = %gi.goal_id, error = %error, "failed to load goal for context");
+            return Err("failed to load goal".to_string());
+        }
+    };
+    let repo_ref = format!("{}/{}", gi.repo.owner, gi.repo.name);
+    let token = match gs.github_app.token_for_repo(&repo_ref, None).await {
+        Ok(token) => token,
+        Err(error) => {
+            // The error may carry the install URL hint (NotInstalled); log it,
+            // never the token. The trigger preflight already validated install,
+            // so a failure here is transient/edge — fail the start; #107 adds
+            // the retry/pause hardening on top.
+            tracing::error!(goal_id = %gi.goal_id, repo = %repo_ref, error = %error, "failed to mint github token at startup");
+            return Err("failed to mint github token for the goal repo".to_string());
+        }
+    };
+    // The token is in use from t=0; reset the refresh clock to this instant.
+    gi.minted_at = std::time::Instant::now();
+    Ok(GoalContext {
+        goal_id: gi.goal_id,
+        title: goal.title,
+        description: goal.description,
+        repo: gi.repo.clone(),
+        github_token: token,
+    })
+}
+
 async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
     let now = std::time::Instant::now();
     if drive.minted_at.elapsed() < TOKEN_REFRESH_INTERVAL {
