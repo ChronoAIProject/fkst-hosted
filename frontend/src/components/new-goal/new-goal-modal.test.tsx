@@ -303,13 +303,77 @@ describe('NewGoalModal Unit Tests', () => {
     );
   });
 
-  it('surfaces honest submit error via mapRepoTargetError', async () => {
+  it('validates whitespace-only title and description', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(mockSuccessFetch as typeof globalThis.fetch);
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={createQueryClient()}>
+          <NewGoalModal open={true} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    const user = userEvent.setup();
+
+    // Type spaces in title and description
+    await user.type(screen.getByTestId('title-input'), '   ');
+    await user.type(screen.getByTestId('description-textarea'), '   ');
+    await user.click(screen.getByTestId('submit-button'));
+
+    // Verify validation errors show up
+    expect(await screen.findByTestId('title-validation-error')).toHaveTextContent('Title is required');
+    expect(await screen.findByTestId('description-validation-error')).toHaveTextContent('Description is required');
+  });
+
+  it('surfaces honest API error on createGoal failure', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((url, options) => {
       const urlStr = typeof url === 'string' ? url : url instanceof Request ? url.url : String(url);
       const method = options?.method?.toUpperCase() || 'GET';
       if (urlStr.endsWith('/api/v1/goals') && method === 'POST') {
         return Promise.resolve(
-          new Response(JSON.stringify({ error: 'Unprocessable', message: 'GitHub App not installed on owner/repo' }), {
+          new Response(JSON.stringify({ error: 'Conflict', message: 'Goal with this title already exists' }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+      }
+      return mockSuccessFetch(urlStr, options);
+    });
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={createQueryClient()}>
+          <NewGoalModal open={true} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('package-graph-list')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+
+    await user.type(screen.getByTestId('title-input'), 'Title');
+    await user.type(screen.getByTestId('description-textarea'), 'Description');
+    await user.click(screen.getByTestId('package-checkbox-github-devloop'));
+
+    // Submit form
+    await user.click(screen.getByTestId('submit-button'));
+
+    // Expect submit error to be surfaced honestly without repo target mapping
+    const submitError = await screen.findByTestId('submit-error');
+    expect(submitError).toHaveTextContent('Goal with this title already exists');
+  });
+
+  it('surfaces mapped repo target error on triggerGoal failure', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url, options) => {
+      const urlStr = typeof url === 'string' ? url : url instanceof Request ? url.url : String(url);
+      const method = options?.method?.toUpperCase() || 'GET';
+      if (urlStr.includes('/trigger') && method === 'POST') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: 'Unprocessable', message: 'Some other error' }), {
             status: 422,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -337,10 +401,14 @@ describe('NewGoalModal Unit Tests', () => {
     await user.type(screen.getByTestId('description-textarea'), 'Description');
     await user.click(screen.getByTestId('package-checkbox-github-devloop'));
 
+    // Toggle triggerOnCreate switch
+    const triggerSwitch = screen.getByTestId('trigger-on-create-switch');
+    await user.click(triggerSwitch);
+
     // Submit form
     await user.click(screen.getByTestId('submit-button'));
 
-    // Expect submit error to be surfaced
+    // Expect trigger error to be mapped honestly to GitHub App error
     const submitError = await screen.findByTestId('submit-error');
     expect(submitError).toHaveTextContent('GitHub App not installed on owner/repo');
   });

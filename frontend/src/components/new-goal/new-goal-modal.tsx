@@ -7,7 +7,8 @@ import { Switch } from '../primitives/switch';
 import { usePackagesList, usePackage } from '../../lib/hooks/usePackages';
 import { useCreateGoal, useTriggerGoal } from '../../lib/hooks/useGoals';
 import { mapRepoTargetError } from '../../lib/api/goals';
-import { RepoRef } from '../../lib/api/types';
+import { RepoRef, isApiErrorBody } from '../../lib/api/types';
+import { ApiError } from '../../lib/api/client';
 
 export interface NewGoalModalProps {
   open?: boolean;
@@ -192,6 +193,7 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
 
   const onSubmit = async (values: NewGoalFormValues) => {
     setSubmitError(null);
+    let createdGoal;
     try {
       let repo: RepoRef | null = null;
       if (values.repository.trim() !== '') {
@@ -203,15 +205,39 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
       }
 
       // 1. Create the goal
-      const createdGoal = await createGoal({
+      createdGoal = await createGoal({
         title: values.title.trim(),
         description: values.description.trim(),
         package_names: values.package_names,
         repo,
       });
+    } catch (err) {
+      console.error('Failed to create goal:', err);
+      if (err instanceof ApiError) {
+        let message = '';
+        if (err.body) {
+          if (isApiErrorBody(err.body)) {
+            message = err.body.message;
+          } else if (typeof err.body === 'object' && 'message' in err.body) {
+            const bodyRecord = err.body as Record<string, unknown>;
+            if (typeof bodyRecord.message === 'string') {
+              message = bodyRecord.message;
+            }
+          }
+        }
+        if (!message) {
+          message = err.message;
+        }
+        setSubmitError(message || 'An unexpected error occurred');
+      } else {
+        setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred');
+      }
+      return;
+    }
 
-      // 2. Optional: Trigger goal run immediately
-      if (values.triggerOnCreate) {
+    // 2. Optional: Trigger goal run immediately
+    if (values.triggerOnCreate) {
+      try {
         await triggerGoal({
           id: createdGoal.id,
           req: {
@@ -219,14 +245,15 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
             repo_mode: 'existing',
           },
         });
+      } catch (err) {
+        console.error('Failed to trigger goal:', err);
+        setSubmitError(mapRepoTargetError(err, 'trigger'));
+        return;
       }
-
-      onOpenChange?.(false);
-      reset();
-    } catch (err) {
-      console.error('Failed to create goal:', err);
-      setSubmitError(mapRepoTargetError(err, 'trigger'));
     }
+
+    onOpenChange?.(false);
+    reset();
   };
 
   const modalContent = (
@@ -299,7 +326,7 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
                   }
                 })}
                 className="bg-raise-2 border border-line-2 rounded-[9px] text-fg font-sans text-[13px] px-3 py-[9px] outline-none w-full transition-colors duration-120 ease focus:border-faint focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
-                placeholder="e.g. example-org/repo-name"
+                placeholder="owner/repo"
                 data-testid="repo-input"
               />
               {errors.repository && (
@@ -316,7 +343,10 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
               </label>
               <input
                 id="title-field"
-                {...register('title', { required: 'Title is required' })}
+                {...register('title', {
+                  required: 'Title is required',
+                  validate: (v) => v.trim() !== '' || 'Title is required',
+                })}
                 className="bg-raise-2 border border-line-2 rounded-[9px] text-fg font-sans text-[13px] px-3 py-[9px] outline-none w-full transition-colors duration-120 ease focus:border-faint focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2"
                 placeholder="e.g. Add caching layer to database queries"
                 data-testid="title-input"
@@ -335,9 +365,12 @@ export function NewGoalModal({ open, onOpenChange, trigger }: NewGoalModalProps)
               </label>
               <textarea
                 id="desc-field"
-                {...register('description', { required: 'Description is required' })}
+                {...register('description', {
+                  required: 'Description is required',
+                  validate: (v) => v.trim() !== '' || 'Description is required',
+                })}
                 className="bg-raise-2 border border-line-2 rounded-[9px] text-fg font-sans text-[13px] px-3 py-[9px] outline-none w-full transition-colors duration-120 ease focus:border-faint focus-visible:outline-2 focus-visible:outline-amber focus-visible:outline-offset-2 min-h-[84px] resize-y leading-[1.5]"
-                placeholder="What should change, and why. The engine reads the full issue + comments at intake."
+                placeholder="What should change, and why. The engine reads the title, description, and packages at intake."
                 data-testid="description-textarea"
               />
               {errors.description && (
