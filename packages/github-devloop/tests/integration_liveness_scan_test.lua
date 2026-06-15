@@ -139,6 +139,14 @@ local function mock_linked_pr_state(comments, state, exit_code, times)
   }, times or 1)
 end
 
+local function mock_linked_pr_absent(times)
+  entity_read_mocks.mock_pr_view_raw_selector(t, { repo = repo, number = 7 }, entity_read_mocks.pr_origin_selector, {
+    stdout = "",
+    stderr = "HTTP 404: Not Found",
+    exit_code = 1,
+  }, times or 1)
+end
+
 local function assert_no_entity_change(result)
   t.eq(result.exit_code, 0)
   t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
@@ -183,6 +191,88 @@ return {
     t.eq(reviewing_raise.payload.proposal_id, ready_payload.proposal_id)
     t.eq(reviewing_raise.payload.pr_number, ready_payload.pr_number)
     t.eq(reviewing_raise.payload.version, version .. "/review-loop/1")
+  end,
+
+  test_observe_pr_open_closed_unmerged_pr_redrives_ready = function()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
+      core.state_marker(proposal_id, "pr-open", version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
+    })
+    mock_linked_pr_state({}, "CLOSED", nil, 2)
+
+    local result = run_observe(issue({
+      dedup_key = "liveness-scan/closed-pr-open",
+      source = "liveness-scan",
+    }), opts("observe-pr-open-closed-redrive"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.is_true(ready_raise ~= nil)
+    t.eq(ready_raise.payload.proposal_id, proposal_id)
+    t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(tostring(ready_raise.payload.dedup_key):find("reimplement/1", 1, true) ~= nil)
+  end,
+
+  test_observe_reviewing_closed_unmerged_pr_redrives_ready = function()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.state_marker(proposal_id, "reviewing", version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
+    })
+    mock_linked_pr_state({}, "CLOSED", nil, 2)
+
+    local result = run_observe(issue({
+      dedup_key = "liveness-scan/closed-reviewing",
+      source = "liveness-scan",
+    }), opts("observe-reviewing-closed-redrive"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.is_true(ready_raise ~= nil)
+    t.eq(ready_raise.payload.proposal_id, proposal_id)
+    t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(tostring(ready_raise.payload.dedup_key):find("reimplement/1", 1, true) ~= nil)
+  end,
+
+  test_observe_reviewing_absent_pr_redrives_ready = function()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.state_marker(proposal_id, "reviewing", version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
+    })
+    mock_linked_pr_absent(2)
+
+    local result = run_observe(issue({
+      dedup_key = "liveness-scan/absent-reviewing",
+      source = "liveness-scan",
+    }), opts("observe-reviewing-absent-redrive"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.is_true(ready_raise ~= nil)
+    t.eq(ready_raise.payload.proposal_id, proposal_id)
+    t.is_true(tostring(ready_raise.payload.dedup_key):find("reimplement/1", 1, true) ~= nil)
+  end,
+
+  test_observe_reviewing_merged_pr_marks_issue_merged_without_reimplementing = function()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.state_marker(proposal_id, "reviewing", version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
+    })
+    mock_linked_pr_state({}, "MERGED", nil, 2)
+
+    local result = run_observe(issue({
+      dedup_key = "liveness-scan/merged-reviewing",
+      source = "liveness-scan",
+    }), opts("observe-reviewing-merged"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment_raise ~= nil)
+    t.is_true(tostring(comment_raise.payload.body):find('state="merged"', 1, true) ~= nil)
+    t.is_true(tostring(comment_raise.payload.body):find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(label_raise ~= nil)
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:merged")
   end,
 
   test_liveness_scan_skips_terminal_issue = function()
