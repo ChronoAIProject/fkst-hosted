@@ -621,6 +621,55 @@ function M.build_reviewing_label_request(repo, issue_number, origin, pr_number, 
   )
 end
 
+function M.pr_base_unmanaged_blocked_version(version)
+  return tostring(version or "") .. "/blocked/pr-base-unmanaged"
+end
+
+function M.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, integration_branch, source_ref)
+  local blocked_version = M.pr_base_unmanaged_blocked_version(origin.impl_version)
+  local state_marker = M.state_marker(origin.proposal_id, "blocked", blocked_version)
+  local reason_marker = M.pr_base_unmanaged_marker(origin.proposal_id, pr_number, origin.base_branch, integration_branch)
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = pr_number,
+  }, "github-devloop blocked PR because its base branch is not managed by this instance."
+    .. "\n\nReason: pr-base-unmanaged"
+    .. "\nPR base: " .. tostring(origin.base_branch)
+    .. "\nConfigured integration branch: " .. tostring(integration_branch)
+    .. "\n\n" .. state_marker
+    .. "\n" .. reason_marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "observe-pr",
+    "blocked",
+    "pr-base-unmanaged",
+    tostring(origin.proposal_id),
+    tostring(origin.impl_version),
+    tostring(pr_number),
+    tostring(origin.base_branch),
+    tostring(integration_branch),
+  }), source_ref)
+end
+
+function M.build_pr_base_unmanaged_label_request(repo, issue_number, origin, pr_number, integration_branch, source_ref)
+  return M.build_state_label_request(
+    repo,
+    issue_number,
+    "blocked",
+    M._dedup_key({
+      "observe-pr",
+      "label",
+      "pr-base-unmanaged",
+      tostring(origin.proposal_id),
+      tostring(origin.impl_version),
+      tostring(pr_number),
+      tostring(origin.base_branch),
+      tostring(integration_branch),
+    }),
+    source_ref
+  )
+end
+
 function M.build_review_result_label_request(repo, issue_number, issue_proposal_id, reached, source_ref)
   local to_state = reached.reflection_checkpoint and "review-meta"
     or reached.decision == "approve" and "merge-ready"

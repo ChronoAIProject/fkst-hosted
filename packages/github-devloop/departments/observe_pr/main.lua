@@ -80,6 +80,15 @@ local function origin_matches_pr(origin, current_pr, repo, branches, require_iss
   return true, "ok"
 end
 
+local function origin_base_matches_current_pr(origin, current_pr)
+  return tostring(current_pr.base_ref_name or "") == tostring(origin.base_branch)
+end
+
+local function origin_base_matches_integration(origin, branches)
+  return origin.base_branch ~= nil
+    and tostring(origin.base_branch or "") == tostring(branches.integration)
+end
+
 local function maybe_issue_label_hint(origin, state, source_ref, current_issue)
   if origin.issue_number == nil or state.state == nil then
     return
@@ -312,6 +321,61 @@ local function liveness_timeout_state(state)
   }
 end
 
+local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, source_ref)
+  if origin.issue_number == nil then
+    core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "blocked", "skip-not-owned", "backing issue is absent")
+    return true
+  end
+  local lock_key = core.transition_lock_key(origin.proposal_id)
+  if lock_key == nil then
+    core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "blocked", "skip-foreign(proposal_id)", "no transition lock key")
+    return true
+  end
+
+  with_lock(lock_key, function()
+    local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    local issue_current = issue_claim_for_origin(origin)
+    if not core.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
+      return
+    end
+    if state.state == "blocked" then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "skip-idempotent(already at to_state)", "blocked marker visible on PR")
+      maybe_label_hints(origin, pr.number, current_pr, state, source_ref, issue_current)
+      return
+    end
+    if state.state ~= "pr-open" then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "skip-stale(state-mismatch)", "PR is not in pr-open state")
+      return
+    end
+    if tostring(state.version or "") ~= tostring(origin.impl_version or "") then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "skip-stale(version-mismatch)", "PR-open marker version does not match PR origin")
+      return
+    end
+    if tostring(current_pr.state or ""):lower() ~= "open" then
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "skip-stale(pr-closed)", "re-derived PR is not open")
+      return
+    end
+
+    local blocked_version = core.pr_base_unmanaged_blocked_version(origin.impl_version)
+    local blocked_state = {
+      state = "blocked",
+      version = blocked_version,
+      proposal_id = origin.proposal_id,
+    }
+    local comment_request = core.build_pr_base_unmanaged_comment_request(origin.repo, pr.number, origin, branches.integration, source_ref)
+    local label_request = core.build_pr_base_unmanaged_label_request(origin.repo, origin.issue_number, origin, pr.number, branches.integration, core.issue_source_ref(origin.repo, origin.issue_number))
+    core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "applied(pr-base-unmanaged)", "self-claimed PR base is not managed by this instance")
+    core.log_apply("observe_pr", origin.proposal_id, "blocked", blocked_version, { add = { "fkst-dev:blocked" }, remove = {} }, {
+      "github-proxy.github_pr_comment_request",
+      "github-proxy.github_issue_label_request",
+    })
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+    core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    maybe_pr_label_hint(origin, pr.number, current_pr, blocked_state, source_ref)
+  end)
+  return true
+end
+
 function pipeline(event)
   local pr = pr_context(event)
   local raw = event.payload or {}
@@ -337,6 +401,14 @@ function pipeline(event)
   end
   local ok, reason = origin_matches_pr(origin, current_pr, pr.repo, branches, false)
   if not ok then
+    if reason == "base"
+      and origin_base_matches_current_pr(origin, current_pr)
+      and not origin_base_matches_integration(origin, branches) then
+      local source_ref = pr_source_ref(pr.repo, pr.number)
+      if maybe_block_unmanaged_base(pr, origin, current_pr, branches, source_ref) then
+        return
+      end
+    end
     core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(" .. reason .. ")", "PR origin mismatch")
     return
   end
