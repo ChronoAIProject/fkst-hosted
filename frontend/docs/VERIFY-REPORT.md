@@ -1,5 +1,7 @@
 # FKST FE — Hosted-Flow Verification Report (2026-06-15)
 
+> ⚠️ **Known wording corrections pending — see [`PENDING.md`](./PENDING.md) §2.** A codex re-audit found this report still overstates a few items (Apply-changes "stop→poll→create"; "inline 400"; stale v1/v2 sections vs the v3 result; Settings-Stop). Those corrections + the harness strengthening to back them are recorded as pending, not yet applied. Read the verified facts via the **v3 hardening** section + the **Reconciliation / Honest coverage split** below; treat older totals as historical.
+
 **Scope:** verify all hosted-backed user flows against a **local throwaway backend** (user-chosen), full coverage incl. the real engine. FE built from local `develop` (`4f70d80`, Waves 0–3 complete).
 
 ## Environment stood up (all throwaway, in `FKST/.verify/`)
