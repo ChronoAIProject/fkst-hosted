@@ -71,6 +71,36 @@ RUN awk -F'"' '/^\[/ { table = $0 } table == "[workspace.package]" && /^version[
     || (echo "ERROR: engine version '$(cat /engine-dist/ENGINE_VERSION)' is not semver-shaped" && exit 1); \
     echo "INFO: engine version $(cat /engine-dist/ENGINE_VERSION)"
 
+# ---- nyxid CLI build stage: compile the nyxid CLI at a pinned tag ----
+# A fkst-package's business logic may shell out to `nyxid ...` to reach a
+# NyxID-brokered service AS the session user (#103). The per-session
+# NYXID_ACCESS_TOKEN + NYXID_URL it authenticates with are provisioned by #111;
+# this stage only puts the binary on PATH and proves it launches. Pinned to
+# v0.7.0 — the CLI auth contract is version-specific.
+ARG NYXID_CLI_REF=v0.7.0
+FROM rust:${RUST_VERSION}-bookworm AS cli-builder
+ARG NYXID_CLI_REF
+ARG NYXID_REPO=https://github.com/ChronoAIProject/NyxID.git
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /nyxid
+# Same uniform shallow-by-ref fetch with a depth-50 fallback as engine-builder.
+# The crate is the workspace member `cli` (crate `nyxid-cli`, bin `nyxid`).
+RUN git init -q \
+    && git remote add origin "$NYXID_REPO" \
+    && ((git -c protocol.version=2 fetch --depth 1 origin "$NYXID_CLI_REF" \
+         && git checkout -q FETCH_HEAD) \
+        || (echo "INFO: shallow ref fetch failed; falling back to depth-50 fetch" \
+            && git fetch --depth 50 origin \
+            && git checkout -q "$NYXID_CLI_REF"))
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/nyxid/target \
+    cargo build --release --locked -p nyxid-cli \
+    && mkdir -p /cli-dist \
+    && cp target/release/nyxid /cli-dist/nyxid
+RUN test -x /cli-dist/nyxid \
+    || (echo "ERROR: nyxid binary not produced by the CLI build" && exit 1)
+
 # ---- server build stage ----
 FROM rust:${RUST_VERSION}-bookworm AS server-builder
 WORKDIR /app
@@ -108,6 +138,11 @@ COPY --from=engine-builder /engine-dist/bin/ /usr/local/bin/
 COPY --from=engine-builder /engine-dist/ENGINE_SHA /etc/fkst-engine-sha
 COPY --from=engine-builder /engine-dist/ENGINE_VERSION /etc/fkst-engine-version
 COPY --from=server-builder /app/target/release/fkst-hosted-api /usr/local/bin/fkst-hosted-api
+# nyxid CLI for in-session NyxID-brokered business calls (#103). Assert it
+# launches in the slim runtime (catches a missing shared lib) and reports the
+# pinned v0.7.0.
+COPY --from=cli-builder /cli-dist/nyxid /usr/local/bin/nyxid
+RUN nyxid --version && nyxid --version | grep -q "0.7.0"
 ENV FKST_RUNTIME_ROOT=/var/lib/fkst/runtime \
     PATH=/usr/local/bin:$PATH \
     FKST_HOSTED_PORT=8080 \
