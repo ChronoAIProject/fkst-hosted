@@ -60,6 +60,10 @@ pub struct GoalContext {
     pub description: String,
     pub repo: crate::models::RepoRef,
     pub github_token: secrecy::SecretString,
+    /// Expiry of `github_token`, written as RFC3339 into the `0600` token file
+    /// so the credential helper can decide whether to force a just-in-time
+    /// re-mint (issue #107).
+    pub token_expires_at: std::time::SystemTime,
 }
 
 /// Specification for starting a session with one or more packages and an
@@ -372,26 +376,38 @@ impl SessionRunner {
                 "session.prepare.goal_json"
             );
 
-            let token_path = runtime_dir.join("github-token");
-            {
-                use secrecy::ExposeSecret;
-                use std::os::unix::fs::PermissionsExt;
-                let token_str = goal.github_token.expose_secret();
-                std::fs::write(&token_path, token_str.as_bytes()).map_err(RunnerError::Io)?;
-                std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(RunnerError::Io)?;
-            }
+            // Token file: JSON `{token, expires_at}` at mode 0600, written
+            // atomically (#107). The expiry lets the credential helper force a
+            // just-in-time re-mint near expiry; the token value is never logged.
+            let token_path = runtime_dir.join(crate::engine::TOKEN_FILE_NAME);
+            crate::engine::write_token_file(
+                &token_path,
+                &goal.github_token,
+                goal.token_expires_at,
+            )?;
             tracing::debug!(
                 path = %token_path.display(),
                 "session.prepare.github_token"
             );
 
-            // The token stays a SecretString into GoalEnv (#109); clone the
-            // context's secret rather than expose-then-rewrap a String.
+            // Credential helper (#107): drop the 0700 script into the runtime
+            // dir; git is pointed at it via the GIT_CONFIG_* env in spawn.
+            let helper_path = crate::engine::materialize_helper_script(&runtime_dir)?;
+
+            // Per-session JIT mint nonce: written 0600 next to the token and
+            // handed to the helper via FKST_GITHUB_MINT_NONCE so it can
+            // authenticate a re-mint request to the driver's poller.
+            let mint_nonce = generate_mint_nonce();
+            crate::engine::goal_token::write_nonce_file(&runtime_dir, &mint_nonce)?;
+
+            // The token + nonce stay SecretString into GoalEnv (#109/#107);
+            // clone the context's secret rather than expose-then-rewrap a String.
             Some(GoalEnv {
                 github_token: goal.github_token.clone(),
                 github_token_file: token_path,
                 goal_file: goal_json_path,
+                helper_path,
+                mint_nonce: secrecy::SecretString::from(mint_nonce),
             })
         } else {
             None
@@ -559,6 +575,17 @@ async fn fail_startup(
     RunnerError::StartupFailed {
         stderr: format!("{reason}\n{tail}"),
     }
+}
+
+/// A 32-hex-char (128-bit) per-session JIT mint nonce. Random, unguessable, and
+/// known only to this session's helper (via env) and its driver poller (via the
+/// 0600 nonce file) — so only that session's own git child can trigger its own
+/// re-mint (#107). `rand` is already a dependency (vault DEK/nonce).
+fn generate_mint_nonce() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Keep the NEWEST `cap` bytes of `text`, cutting at a char boundary (the
@@ -1570,6 +1597,7 @@ esac
                 name: "test-repo".to_string(),
             },
             github_token: secrecy::SecretString::new("ghp_test_token_12345".to_string().into()),
+            token_expires_at: std::time::SystemTime::now() + Duration::from_secs(3600),
         }
     }
 
@@ -1603,11 +1631,17 @@ esac
         assert_eq!(parsed["repo"]["owner"], "acme");
         assert_eq!(parsed["repo"]["name"], "test-repo");
 
-        // github-token written with mode 0600.
+        // github-token written as JSON {token, expires_at} with mode 0600 (#107).
         let token_path = session.runtime_dir.join("github-token");
         assert!(token_path.is_file(), "github-token must exist");
         let token_content = fs::read_to_string(&token_path).expect("read token");
-        assert_eq!(token_content, "ghp_test_token_12345");
+        let token_json: serde_json::Value =
+            serde_json::from_str(&token_content).expect("token file must be JSON");
+        assert_eq!(token_json["token"], "ghp_test_token_12345");
+        assert!(
+            token_json["expires_at"].as_str().is_some(),
+            "token file must carry an RFC3339 expires_at"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1617,6 +1651,26 @@ esac
                 .mode();
             assert_eq!(mode & 0o777, 0o600, "token file must be mode 0600");
         }
+
+        // Credential helper materialized 0700 + the 0600 mint nonce (#107).
+        let helper_path = session.runtime_dir.join(crate::engine::HELPER_SCRIPT_NAME);
+        assert!(helper_path.is_file(), "credential helper must exist");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let hmode = fs::metadata(&helper_path)
+                .expect("metadata")
+                .permissions()
+                .mode();
+            assert_eq!(hmode & 0o777, 0o700, "helper must be mode 0700");
+        }
+        assert!(
+            session
+                .runtime_dir
+                .join(crate::engine::NONCE_FILE_NAME)
+                .is_file(),
+            "mint nonce file must exist"
+        );
 
         // The stub echoes env vars; verify goal env is set.
         let mut stdout = session.take_stdout().expect("stdout");

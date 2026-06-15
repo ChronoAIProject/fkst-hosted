@@ -39,6 +39,7 @@ use tokio::process::{Child, Command};
 
 use crate::engine::config::{is_reserved_env_key, ENGINE_ENV_ALLOWLIST};
 use crate::engine::error::{truncate_output_lossy, RunnerError};
+use crate::engine::goal_token::{git_config_entries, MINT_NONCE_ENV};
 
 /// Byte cap of the shared output ring buffer (64 KiB) that merges the
 /// child's stdout and stderr. The drain tasks run for the child's lifetime so
@@ -48,30 +49,49 @@ pub const OUTPUT_RING_CAP_BYTES: usize = 64 * 1024;
 /// Environment variables forwarded to the supervise child for goal sessions.
 /// The `github_token` is held in a [`SecretString`] (issue #109) so it never
 /// leaks through a stray `Debug`/log of this struct: it is exposed at exactly
-/// one point — the `.env("GITHUB_TOKEN", ...)` set-site in
+/// one point — the `GITHUB_TOKEN`/`GH_TOKEN` set-site in
 /// [`apply_isolated_env`] — and the manual [`fmt::Debug`] below redacts it. The
 /// value is still materialized on disk by the caller (the token file the engine
 /// reads); this type only carries it into the child environment.
+///
+/// Issue #107 adds the git credential-delivery wiring: `git push` does NOT read
+/// `GITHUB_TOKEN`, so the engine's `git` is pointed at a credential helper via
+/// `GIT_CONFIG_*` env (the helper reads the rotatable `0600` token file). The
+/// helper authenticates a just-in-time re-mint request with the per-session
+/// `mint_nonce`. `GITHUB_TOKEN`/`GH_TOKEN` are still set for `gh` as a frozen,
+/// best-effort convenience (it cannot rotate past the ~1h TTL — documented in
+/// `docs/github-app.md`).
 #[derive(Clone)]
 pub struct GoalEnv {
-    /// `GITHUB_TOKEN` value for the engine's GitHub integration. Secret: only
+    /// `GITHUB_TOKEN`/`GH_TOKEN` value for `gh` (frozen at spawn). Secret: only
     /// the [`apply_isolated_env`] set-site exposes it; `Debug` redacts it.
     pub github_token: SecretString,
-    /// Path to the token file, forwarded as `FKST_GITHUB_TOKEN_FILE`.
+    /// Path to the token file, forwarded as `FKST_GITHUB_TOKEN_FILE` and read by
+    /// the credential helper.
     pub github_token_file: PathBuf,
     /// Path to `goal.json`, forwarded as `FKST_GOAL_FILE`.
     pub goal_file: PathBuf,
+    /// Absolute path to the materialized credential-helper script, wired into
+    /// the child's `git` via the `GIT_CONFIG_*` entries (#107).
+    pub helper_path: PathBuf,
+    /// Per-session JIT mint nonce, set as `FKST_GITHUB_MINT_NONCE` so the helper
+    /// can authenticate a re-mint request to the driver's poller. Secret: only
+    /// the set-site exposes it; `Debug` redacts it.
+    pub mint_nonce: SecretString,
 }
 
 impl fmt::Debug for GoalEnv {
-    /// Redacts the secret `github_token` (mirrors `github_app/config.rs`) while
-    /// keeping the non-secret path fields visible for diagnostics. A derived
-    /// `Debug` would print the raw token through any `{:?}` of this struct.
+    /// Redacts the secret `github_token` and `mint_nonce` (mirrors
+    /// `github_app/config.rs`) while keeping the non-secret path fields visible
+    /// for diagnostics. A derived `Debug` would print the raw secrets through any
+    /// `{:?}` of this struct.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GoalEnv")
             .field("github_token", &"<redacted>")
             .field("github_token_file", &self.github_token_file)
             .field("goal_file", &self.goal_file)
+            .field("helper_path", &self.helper_path)
+            .field("mint_nonce", &"<redacted>")
             .finish()
     }
 }
@@ -347,9 +367,26 @@ fn apply_isolated_env(
     // is a SecretString (#109): this is the SINGLE point that exposes it, only
     // to hand the raw value to the child env.
     if let Some(env) = goal {
+        // `GITHUB_TOKEN`/`GH_TOKEN` serve `gh` only (frozen at spawn, ~1h TTL —
+        // see docs/github-app.md). git authenticates through the credential
+        // helper + rotatable token file instead, which is why these are NOT the
+        // source of truth for git (#107).
         cmd.env("GITHUB_TOKEN", env.github_token.expose_secret())
+            .env("GH_TOKEN", env.github_token.expose_secret())
             .env("FKST_GITHUB_TOKEN_FILE", &env.github_token_file)
-            .env("FKST_GOAL_FILE", &env.goal_file);
+            .env("FKST_GOAL_FILE", &env.goal_file)
+            .env(MINT_NONCE_ENV, env.mint_nonce.expose_secret());
+
+        // git credential delivery (#107): point the engine's `git` at our helper
+        // via GIT_CONFIG_* (no on-disk .git/config, no token in any remote URL).
+        // GIT_CONFIG_COUNT + GIT_CONFIG_KEY_i/VALUE_i are git's env-config
+        // protocol; these are platform-set (reserved keys, never user-overridable).
+        let entries = git_config_entries(&env.helper_path);
+        cmd.env("GIT_CONFIG_COUNT", entries.len().to_string());
+        for (i, entry) in entries.iter().enumerate() {
+            cmd.env(format!("GIT_CONFIG_KEY_{i}"), &entry.key)
+                .env(format!("GIT_CONFIG_VALUE_{i}"), &entry.value);
+        }
     }
 }
 
@@ -1228,11 +1265,17 @@ sleep 30"#;
             github_token: SecretString::from("ghs_supersecret_token_value".to_string()),
             github_token_file: PathBuf::from("/run/session/github-token"),
             goal_file: PathBuf::from("/run/session/goal.json"),
+            helper_path: PathBuf::from("/run/session/git-credential-fkst"),
+            mint_nonce: SecretString::from("supersecretnonce".to_string()),
         };
         let debug = format!("{goal_env:?}");
         assert!(
             !debug.contains("ghs_supersecret_token_value"),
             "Debug must NOT contain the token value: {debug}"
+        );
+        assert!(
+            !debug.contains("supersecretnonce"),
+            "Debug must NOT contain the nonce value: {debug}"
         );
         assert!(debug.contains("<redacted>"), "Debug must show <redacted>");
         // The non-secret paths stay visible for diagnostics.
@@ -1243,6 +1286,10 @@ sleep 30"#;
         assert!(
             debug.contains("/run/session/goal.json"),
             "goal file path visible: {debug}"
+        );
+        assert!(
+            debug.contains("/run/session/git-credential-fkst"),
+            "helper path visible: {debug}"
         );
     }
 
@@ -1261,6 +1308,8 @@ sleep 30"#;
             github_token: SecretString::from("ghs_exposed_to_child".to_string()),
             github_token_file: token_file,
             goal_file,
+            helper_path: rt.path().join("git-credential-fkst"),
+            mint_nonce: SecretString::from("noncevalue".to_string()),
         };
 
         let mut spawned = spawn_supervise(
@@ -1283,6 +1332,124 @@ sleep 30"#;
             snap.contains("GHTOK=ghs_exposed_to_child"),
             "the exposed token must reach GITHUB_TOKEN in the child env:\n{snap}"
         );
+
+        let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
+    }
+
+    /// Issue #107: `spawn_supervise` with a goal env sets the git
+    /// credential-delivery vars — `GH_TOKEN` (for `gh`), the per-session mint
+    /// nonce, and the `GIT_CONFIG_*` family pointing git at the helper — on the
+    /// child. The helper path, host-scope, useHttpPath and insteadOf entries are
+    /// all asserted from the child's own view of its environment.
+    #[tokio::test]
+    async fn spawn_supervise_injects_git_credential_delivery_env() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let helper = rt.path().join("git-credential-fkst");
+        let script = stub(
+            dir.path(),
+            "git-env.sh",
+            r#"echo "GHTOK=${GITHUB_TOKEN:-UNSET}" >&2
+echo "GH_TOKEN=${GH_TOKEN:-UNSET}" >&2
+echo "NONCE=${FKST_GITHUB_MINT_NONCE:-UNSET}" >&2
+echo "COUNT=${GIT_CONFIG_COUNT:-UNSET}" >&2
+echo "K0=${GIT_CONFIG_KEY_0:-UNSET}" >&2
+echo "V0=${GIT_CONFIG_VALUE_0:-UNSET}" >&2
+echo "K1=${GIT_CONFIG_KEY_1:-UNSET}" >&2
+echo "V1=${GIT_CONFIG_VALUE_1:-UNSET}" >&2
+echo "K2=${GIT_CONFIG_KEY_2:-UNSET}" >&2
+echo "V2=${GIT_CONFIG_VALUE_2:-UNSET}" >&2
+echo "event runtime running handles=3" >&2
+echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+echo "ENVDUMP_DONE" >&2
+sleep 30"#,
+        );
+        let goal_env = GoalEnv {
+            github_token: SecretString::from("ghs_for_gh".to_string()),
+            github_token_file: rt.path().join("github-token"),
+            goal_file: rt.path().join("goal.json"),
+            helper_path: helper.clone(),
+            mint_nonce: SecretString::from("abc123nonce".to_string()),
+        };
+
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            &empty_env(),
+            Some(&goal_env),
+            None,
+        )
+        .expect("spawn");
+
+        assert!(wait_until(|| spawned.output.snapshot().contains("ENVDUMP_DONE")).await);
+        let snap = spawned.output.snapshot();
+        assert!(
+            snap.contains("GH_TOKEN=ghs_for_gh"),
+            "GH_TOKEN set:\n{snap}"
+        );
+        assert!(
+            snap.contains("NONCE=abc123nonce"),
+            "mint nonce set:\n{snap}"
+        );
+        assert!(snap.contains("COUNT=3"), "GIT_CONFIG_COUNT=3:\n{snap}");
+        assert!(
+            snap.contains("K0=credential.https://github.com.helper"),
+            "helper config key:\n{snap}"
+        );
+        assert!(
+            snap.contains(&format!("V0=!{}", helper.display())),
+            "helper config value is the shell-exec helper path:\n{snap}"
+        );
+        assert!(
+            snap.contains("K1=credential.https://github.com.useHttpPath")
+                && snap.contains("V1=false"),
+            "useHttpPath=false:\n{snap}"
+        );
+        assert!(
+            snap.contains("K2=url.https://github.com/.insteadOf")
+                && snap.contains("V2=git@github.com:"),
+            "insteadOf coerces ssh remotes:\n{snap}"
+        );
+
+        let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
+    }
+
+    /// A non-goal spawn sets NONE of the git credential-delivery vars — the
+    /// classic path stays byte-identical (no GIT_CONFIG_* / GH_TOKEN leakage).
+    #[tokio::test]
+    async fn spawn_supervise_without_goal_sets_no_git_config_env() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(
+            dir.path(),
+            "no-goal-git-env.sh",
+            r#"echo "COUNT=${GIT_CONFIG_COUNT:-UNSET}" >&2
+echo "GH_TOKEN=${GH_TOKEN:-UNSET}" >&2
+echo "event runtime running handles=3" >&2
+echo "consumer started dept=hello reliable_queues=[] ephemeral_queues=[]" >&2
+echo "ENVDUMP_DONE" >&2
+sleep 30"#,
+        );
+
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            &empty_env(),
+            None,
+            None,
+        )
+        .expect("spawn");
+
+        assert!(wait_until(|| spawned.output.snapshot().contains("ENVDUMP_DONE")).await);
+        let snap = spawned.output.snapshot();
+        assert!(snap.contains("COUNT=UNSET"), "no GIT_CONFIG_COUNT:\n{snap}");
+        assert!(snap.contains("GH_TOKEN=UNSET"), "no GH_TOKEN:\n{snap}");
 
         let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
     }

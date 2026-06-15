@@ -11,13 +11,18 @@
 //! HostFact VALUES are never logged.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
 use crate::engine::error::RunnerError;
+use crate::engine::goal_token::{CREDENTIAL_HELPER_SCRIPT, HELPER_SCRIPT_NAME};
 use crate::packages::model::PackageFile;
 use crate::packages::{is_valid_name, Package};
+
+/// Owner-only rwx for the executable credential-helper script.
+const HELPER_SCRIPT_MODE: u32 = 0o700;
 
 /// Host-owned files at the package root that a package may never supply:
 /// `composed.deps` is rendered from `composed_deps` (an empty list means NO
@@ -263,6 +268,25 @@ pub fn write_fkst_env(
         "session.prepare.fkst_env"
     );
     Ok(())
+}
+
+/// Materialize the goal-session git credential-helper script into `dir`
+/// (`<dir>/git-credential-fkst`, mode `0700`) and return its canonical absolute
+/// path. Only goal sessions call this (issue #107). The script holds no secret —
+/// it reads the rotatable `0600` token file at credential time — so it is safe at
+/// `0700`. The path is canonicalized so the `GIT_CONFIG` helper entry is the
+/// absolute path git executes.
+pub fn materialize_helper_script(dir: &Path) -> Result<PathBuf, RunnerError> {
+    let path = dir.join(HELPER_SCRIPT_NAME);
+    fs::write(&path, CREDENTIAL_HELPER_SCRIPT.as_bytes()).map_err(RunnerError::Io)?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(HELPER_SCRIPT_MODE))
+        .map_err(RunnerError::Io)?;
+    let canonical = path.canonicalize().map_err(RunnerError::Io)?;
+    tracing::debug!(
+        path = %canonical.display(),
+        "session.prepare.credential_helper"
+    );
+    Ok(canonical)
 }
 
 #[cfg(test)]
@@ -668,6 +692,23 @@ mod tests {
         assert_eq!(
             fs::read(base.path().join("fkst.env")).unwrap(),
             b"FKST_CANDIDATE_FROM_SEP=--\nFKST_CANDIDATE_PREFIX=cand/\n"
+        );
+    }
+
+    // ---- materialize_helper_script ----------------------------------------------
+
+    #[test]
+    fn helper_script_is_materialized_executable_and_absolute() {
+        let base = base_dir();
+        let path = materialize_helper_script(base.path()).expect("materialize helper");
+        assert!(path.is_absolute(), "helper path must be absolute");
+        assert!(path.ends_with(HELPER_SCRIPT_NAME));
+        let mode = fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, HELPER_SCRIPT_MODE, "helper must be 0700");
+        let body = fs::read_to_string(&path).expect("read helper");
+        assert!(
+            body.starts_with("#!/bin/sh"),
+            "helper must be a /bin/sh script"
         );
     }
 }

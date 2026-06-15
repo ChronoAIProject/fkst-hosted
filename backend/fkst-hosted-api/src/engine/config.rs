@@ -196,11 +196,23 @@ pub const ENGINE_ENV_ALLOWLIST: &[&str] = &[
 ];
 
 /// Exact keys that a user-supplied `env_profile` may never set because the
-/// platform owns them (the goal-session GitHub wiring). Combined with the
-/// [`RESERVED_ENV_PREFIX`] and [`ENGINE_ENV_ALLOWLIST`] in
+/// platform owns them (the goal-session GitHub wiring + #107 git credential
+/// delivery). Combined with the [`RESERVED_ENV_PREFIX`],
+/// [`RESERVED_ENV_NAME_PREFIXES`] and [`ENGINE_ENV_ALLOWLIST`] in
 /// [`is_reserved_env_key`].
-pub const RESERVED_ENV_KEYS: &[&str] =
-    &["GITHUB_TOKEN", "FKST_GITHUB_TOKEN_FILE", "FKST_GOAL_FILE"];
+pub const RESERVED_ENV_KEYS: &[&str] = &[
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "FKST_GITHUB_TOKEN_FILE",
+    "FKST_GOAL_FILE",
+    "GIT_CONFIG_COUNT",
+];
+
+/// Key-name PREFIXES the platform owns dynamically. `GIT_CONFIG_KEY_<n>` /
+/// `GIT_CONFIG_VALUE_<n>` are git's env-config protocol (#107): their count is
+/// not fixed, so the whole `GIT_CONFIG_` family is reserved by prefix rather
+/// than by exact name (a user value here could redirect the credential helper).
+pub const RESERVED_ENV_NAME_PREFIXES: &[&str] = &["GIT_CONFIG_"];
 
 /// Every platform-managed variable shares this prefix, so a user `env_profile`
 /// can never shadow one (e.g. `FKST_RUNTIME_ROOT`, `FKST_DURABLE_ROOT`).
@@ -208,14 +220,18 @@ pub const RESERVED_ENV_PREFIX: &str = "FKST_";
 
 /// Whether a key is platform-owned and must be dropped from a user-supplied
 /// `env_profile` before it is applied to an engine child. A key is reserved
-/// when it starts with [`RESERVED_ENV_PREFIX`], is listed in
-/// [`RESERVED_ENV_KEYS`], or names an [`ENGINE_ENV_ALLOWLIST`] host var — so a
-/// user entry can never shadow an allow-listed host var or a platform var.
+/// when it starts with [`RESERVED_ENV_PREFIX`] or any [`RESERVED_ENV_NAME_PREFIXES`]
+/// entry, is listed in [`RESERVED_ENV_KEYS`], or names an [`ENGINE_ENV_ALLOWLIST`]
+/// host var — so a user entry can never shadow an allow-listed host var or a
+/// platform var.
 ///
 /// Shared with the vault write-validator (#100) and the env-injection path
 /// (#102) so there is a single source of truth for "keys a user may not set".
 pub fn is_reserved_env_key(key: &str) -> bool {
     key.starts_with(RESERVED_ENV_PREFIX)
+        || RESERVED_ENV_NAME_PREFIXES
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
         || RESERVED_ENV_KEYS.contains(&key)
         || ENGINE_ENV_ALLOWLIST.contains(&key)
 }
@@ -415,6 +431,18 @@ mod tests {
         assert!(is_reserved_env_key("PATH"));
         assert!(is_reserved_env_key("HOME"));
         assert!(is_reserved_env_key("CODEX_HOME"));
+    }
+
+    #[test]
+    fn git_credential_delivery_keys_are_reserved() {
+        // #107: the git credential-delivery env must never be user-overridable,
+        // or a user value could redirect the credential helper / leak the token.
+        assert!(is_reserved_env_key("GH_TOKEN"));
+        assert!(is_reserved_env_key("GIT_CONFIG_COUNT"));
+        assert!(is_reserved_env_key("GIT_CONFIG_KEY_0"));
+        assert!(is_reserved_env_key("GIT_CONFIG_VALUE_0"));
+        assert!(is_reserved_env_key("GIT_CONFIG_KEY_99"));
+        assert!(is_reserved_env_key("FKST_GITHUB_MINT_NONCE"));
     }
 
     #[test]

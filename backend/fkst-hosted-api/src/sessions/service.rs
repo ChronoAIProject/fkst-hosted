@@ -121,14 +121,44 @@ const TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(55 * 60);
 /// hammer the GitHub API more often than once per minute).
 const TOKEN_REFRESH_COOLDOWN: Duration = Duration::from_secs(60);
 
+/// Tightened cooldown used once the on-disk token is within this margin of its
+/// expiry (#107): as the deadline approaches a flaky mint gets retried more
+/// aggressively (every 10s instead of every 60s) so a transient GitHub blip
+/// does not let the credential lapse silently.
+const TOKEN_REFRESH_COOLDOWN_URGENT: Duration = Duration::from_secs(10);
+
+/// Margin before expiry at which the urgent cooldown engages (#107).
+const TOKEN_EXPIRY_URGENT_MARGIN: Duration = Duration::from_secs(600);
+
+/// Consecutive mint failures, WITH the token already past expiry, that escalate
+/// the session to Failed instead of letting substrate hit a silent 401 (#107).
+const MAX_CONSECUTIVE_MINT_FAILURES: u32 = 5;
+
+/// Poll cadence of the JIT mint-request servicer (#107). Faster than the
+/// supervise tick so a credential-helper's near-expiry re-mint request is
+/// serviced within a git operation's patience window.
+const MINT_REQUEST_POLL: Duration = Duration::from_millis(200);
+
 /// Per-session goal drive state: tracks token lifecycle and goal association
 /// for a goal-triggered session running inside the driver's supervise loop.
 struct GoalDrive {
     goal_id: bson::Uuid,
     repo: RepoRef,
     token_path: PathBuf,
+    /// `<runtime_dir>` for this session, known once the engine starts. The JIT
+    /// mint-request file (`<token_path>.request`) and the nonce file live under
+    /// it; the poller services requests against this dir (#107).
+    runtime_dir: PathBuf,
     minted_at: std::time::Instant,
     last_attempt: std::time::Instant,
+    /// Expiry of the token currently on disk (#107). Drives the escalating
+    /// retry: as expiry approaches the refresh cooldown is tightened so a flaky
+    /// mint gets more attempts before the token actually dies.
+    token_expires_at: std::time::SystemTime,
+    /// Consecutive mint-failure count, reset on every success. A sustained run
+    /// of failures with the token already expired transitions the session to a
+    /// clear Failed state rather than letting substrate hit a silent 401 (#107).
+    consecutive_failures: u32,
 }
 
 /// Shared internals behind the clonable service handle.
@@ -796,8 +826,13 @@ impl SessionService {
                 // engine starts and the runtime dir is known; until then
                 // this placeholder is never written).
                 token_path: PathBuf::new(),
+                runtime_dir: PathBuf::new(),
                 minted_at: std::time::Instant::now(),
                 last_attempt: std::time::Instant::now(),
+                // Seeded at the unix epoch so the first real mint always rewrites
+                // the on-disk expiry; build_goal_context sets the true value.
+                token_expires_at: std::time::SystemTime::UNIX_EPOCH,
+                consecutive_failures: 0,
             }
         });
         tokio::spawn(async move {
@@ -1486,9 +1521,11 @@ async fn drive_inner(
         .await;
     }
 
-    // Update goal drive token_path now that the runtime dir is known.
+    // Update goal drive token_path + runtime_dir now that the runtime dir is
+    // known: the JIT mint-request poller services requests under it (#107).
     if let Some(ref mut gi) = goal_info {
-        gi.token_path = session.runtime_dir.join("github-token");
+        gi.runtime_dir = session.runtime_dir.clone();
+        gi.token_path = session.runtime_dir.join(crate::engine::TOKEN_FILE_NAME);
     }
 
     // The journal's RAISED source: the engine's line-framed stdout, taken
@@ -1506,6 +1543,11 @@ async fn drive_inner(
     };
     let mut renew_tick = tokio::time::interval(renew_interval);
     renew_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Fast JIT mint-request servicer (#107): polls for the credential helper's
+    // near-expiry re-mint request so it is serviced within a git operation's
+    // patience window (the 500ms supervise tick alone would be too slow).
+    let mut mint_tick = tokio::time::interval(MINT_REQUEST_POLL);
+    mint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Self-fencing clock: the lease was live when this driver claimed the
     // session, so the success window starts now. Renew ERRORS (Mongo
     // unreachable) leave us blind: past the TTL the lease may have lapsed
@@ -1514,6 +1556,24 @@ async fn drive_inner(
     let mut last_renew_success = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            // JIT mint-request servicer (#107): the credential helper drops a
+            // nonce-bearing request file near token expiry; service it (mint +
+            // atomic rewrite + delete the request) so git gets a fresh token
+            // without waiting for the periodic interval. A FatalExpired outcome
+            // (e.g. the App was uninstalled) fails the session loudly.
+            _ = mint_tick.tick() => {
+                let jit_outcome = match goal_info {
+                    Some(ref mut gi) => Some(service_mint_request(inner, gi).await),
+                    None => None,
+                };
+                if let Some(MintOutcome::FatalExpired { reason }) = jit_outcome {
+                    fail_running_for_token(
+                        inner, id, &fence, &mut session, &mut journaler, goal_info, &reason,
+                    )
+                    .await;
+                    return true;
+                }
+            }
             // A closed channel (service dropped) also reads as a stop: this
             // pod is going away and the engine must not be orphaned silently.
             line = next_stdout_line(&mut stdout_rx) => {
@@ -1524,15 +1584,24 @@ async fn drive_inner(
                         // (cooldown-gated), instead of waiting for the 55-min
                         // interval loop to catch the expiry. Checked BEFORE
                         // journaling so a real 401 cannot be swallowed by it.
-                        if let Some(ref mut gi) = goal_info {
-                            if is_github_auth_failure(&raw) {
+                        let reactive_outcome = match goal_info {
+                            Some(ref mut gi) if is_github_auth_failure(&raw) => {
                                 tracing::warn!(
                                     session_id = %id,
                                     goal_id = %gi.goal_id,
                                     "github auth failure detected on engine output; re-minting goal token"
                                 );
-                                reactive_refresh_goal_token(inner, gi).await;
+                                Some(reactive_refresh_goal_token(inner, gi).await)
                             }
+                            _ => None,
+                        };
+                        if let Some(MintOutcome::FatalExpired { reason }) = reactive_outcome {
+                            fail_running_for_token(
+                                inner, id, &fence, &mut session, &mut journaler, goal_info,
+                                &reason,
+                            )
+                            .await;
+                            return true;
                         }
                         journal_stdout_line(&mut journaler, &raw).await;
                     }
@@ -1697,9 +1766,20 @@ async fn drive_inner(
 
                 // Token refresh for goal sessions: mint a fresh GitHub
                 // installation token when the current one is nearing expiry
-                // and the cooldown since the last attempt has passed.
-                if let Some(ref mut gi) = goal_info {
-                    refresh_goal_token(inner, gi).await;
+                // and the (escalating) cooldown since the last attempt has
+                // passed. A FatalExpired outcome (persistent mint failure with
+                // an already-expired token, or InstallationGone) fails the
+                // session loudly instead of letting substrate hit a silent 401.
+                let refresh_outcome = match goal_info {
+                    Some(ref mut gi) => Some(refresh_goal_token(inner, gi).await),
+                    None => None,
+                };
+                if let Some(MintOutcome::FatalExpired { reason }) = refresh_outcome {
+                    fail_running_for_token(
+                        inner, id, &fence, &mut session, &mut journaler, goal_info, &reason,
+                    )
+                    .await;
+                    return true;
                 }
 
                 let live = session.status();
@@ -2003,10 +2083,65 @@ async fn fail_session(
     }
 }
 
+/// Converge a RUNNING goal session to Failed when its GitHub credential can no
+/// longer be served (#107): a persistent mint failure with the token already
+/// expired, or the App installation removed. This is the hardened backstop's
+/// loud-failure path — rather than letting substrate keep hitting a silent 401
+/// with a dead token, the engine is stopped, the session CAS'd
+/// `running|stopping -> failed` with a clear reason, the failure journaled, and
+/// the goal synced to Failed. The credential reason never contains the token.
+async fn fail_running_for_token(
+    inner: &Inner,
+    id: bson::Uuid,
+    fence: &Document,
+    session: &mut RunningSession,
+    journaler: &mut Option<ServiceJournaler>,
+    goal_info: &Option<GoalDrive>,
+    reason: &str,
+) {
+    tracing::error!(session_id = %id, reason, "goal token unrecoverable; failing the session");
+    // Watermark before stop() removes the runtime dirs.
+    journal_watermark(journaler, &session.runtime_dir).await;
+    if let Err(error) = inner.runner.stop(session).await {
+        tracing::error!(session_id = %id, error = %error, "engine stop failed during token-failure");
+    }
+    let _ = inner
+        .repo
+        .transition_guarded(
+            id,
+            &[SessionStatus::Running, SessionStatus::Stopping],
+            fence.clone(),
+            doc! {
+                "status": status_bson(SessionStatus::Failed),
+                "error": truncate_error(reason),
+                "stopped_at": bson::DateTime::now(),
+            },
+        )
+        .await;
+    journal_finish(
+        journaler,
+        Transition::Failed {
+            exit_code: None,
+            error: reason.to_string(),
+        },
+    )
+    .await;
+    if let Some(ref gi) = goal_info {
+        goal_status_sync(
+            inner,
+            gi.goal_id,
+            id,
+            &[GoalStatus::Triggered, GoalStatus::Running],
+            GoalStatus::Failed,
+        )
+        .await;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Goal-status sync + token refresh (issue #63). Best-effort CAS writes to the
 // goals collection, logged and swallowed — never load-bearing. Token refresh
-// writes <token_path>.tmp then renames atomically.
+// uses the shared atomic JSON token-file writer (engine::write_token_file, #107).
 // ---------------------------------------------------------------------------
 
 /// Best-effort CAS transition of a goal's status. The CAS is guarded with
@@ -2084,26 +2219,52 @@ async fn build_goal_context(inner: &Arc<Inner>, gi: &mut GoalDrive) -> Result<Go
         }
     };
     let repo_ref = format!("{}/{}", gi.repo.owner, gi.repo.name);
-    let token = match gs.github_app.token_for_repo(&repo_ref, None).await {
-        Ok(token) => token,
+    let (token, expires_at) = match gs
+        .github_app
+        .token_with_expiry_for_repo(&repo_ref, None)
+        .await
+    {
+        Ok(pair) => pair,
         Err(error) => {
             // The error may carry the install URL hint (NotInstalled); log it,
             // never the token. The trigger preflight already validated install,
-            // so a failure here is transient/edge — fail the start; #107 adds
-            // the retry/pause hardening on top.
+            // so a failure here is transient/edge — fail the start.
             tracing::error!(goal_id = %gi.goal_id, repo = %repo_ref, error = %error, "failed to mint github token at startup");
             return Err("failed to mint github token for the goal repo".to_string());
         }
     };
-    // The token is in use from t=0; reset the refresh clock to this instant.
+    // The token is in use from t=0; reset the refresh clock and record its
+    // expiry so the credential helper's JIT path and the escalating backstop
+    // both know the true freshness (#107).
     gi.minted_at = std::time::Instant::now();
+    gi.token_expires_at = expires_at;
+    gi.consecutive_failures = 0;
     Ok(GoalContext {
         goal_id: gi.goal_id,
         title: goal.title,
         description: goal.description,
         repo: gi.repo.clone(),
         github_token: token,
+        token_expires_at: expires_at,
     })
+}
+
+/// Outcome of a mint-and-rewrite attempt (#107). The driver uses
+/// [`Self::FatalExpired`] to transition the session to a clear Failed state
+/// instead of letting substrate keep hitting a silent 401 with a dead token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MintOutcome {
+    /// Token re-minted and the file atomically rewritten.
+    Refreshed,
+    /// Gated (cooldown not elapsed, no goal support, or runtime dir unknown);
+    /// nothing attempted.
+    Skipped,
+    /// A mint/write attempt failed but the current token is still valid — keep
+    /// supervising; the next (tightening) interval retries.
+    TransientFailure,
+    /// Persistent mint failure with the on-disk token already past expiry: the
+    /// credential can no longer be served, so the session must fail loudly.
+    FatalExpired { reason: String },
 }
 
 /// Time-based refresh of the GitHub installation token for a goal session.
@@ -2111,87 +2272,145 @@ async fn build_goal_context(inner: &Arc<Inner>, gi: &mut GoalDrive) -> Result<Go
 /// ~60-min TTL) AND the cooldown since the last attempt has passed. This is the
 /// periodic-loop entry; reactive (auth-failure-driven) refreshes go through
 /// [`reactive_refresh_goal_token`], which skips the interval gate.
-async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
+async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) -> MintOutcome {
     if drive.minted_at.elapsed() < TOKEN_REFRESH_INTERVAL {
-        return;
+        return MintOutcome::Skipped;
     }
-    mint_and_rewrite_token(inner, drive, "interval").await;
+    mint_and_rewrite_token(inner, drive, "interval").await
 }
 
 /// Reactive re-mint (issue #109): a detected GitHub auth failure for the
 /// session's work re-mints the token IMMEDIATELY — BYPASSING the 55-min
 /// interval gate — rather than waiting for the periodic loop to catch the
-/// expiry. The 60s cooldown is still respected so a burst of auth-failure
-/// signals cannot hammer the GitHub mint API. Replaces the previous
-/// WARN-and-keep-the-stale-token behaviour for a true 401/403.
-///
-/// TODO(#107): when the credential-delivery/rotation work lands an on-demand
-/// mint entry (e.g. a credential-helper callback), this hook is the integration
-/// point — route that signal here so the re-mint stays unified.
-async fn reactive_refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
-    mint_and_rewrite_token(inner, drive, "auth-failure").await;
+/// expiry. The cooldown is still respected so a burst of auth-failure signals
+/// cannot hammer the GitHub mint API.
+async fn reactive_refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) -> MintOutcome {
+    mint_and_rewrite_token(inner, drive, "auth-failure").await
 }
 
-/// Shared mint-and-rewrite core for both the interval and reactive refresh
-/// paths. Respects the per-attempt cooldown, mints a fresh installation token,
-/// and atomically rewrites the token file (`<token_path>.tmp` then
-/// `fs::rename`, atomic on the same filesystem). Failures are WARN'd and the
-/// engine keeps using the previous token. `reason` tags the trigger in logs.
-async fn mint_and_rewrite_token(inner: &Inner, drive: &mut GoalDrive, reason: &str) {
-    // Cooldown gate (applies to BOTH paths): never hammer the mint API more
-    // than once per cooldown window, even on a flood of auth-failure signals.
-    if drive.last_attempt.elapsed() < TOKEN_REFRESH_COOLDOWN {
-        return;
+/// Service a pending just-in-time mint request from the credential helper
+/// (#107). The helper drops `<token_path>.request` containing the per-session
+/// nonce when the on-disk token is near expiry; this verifies the nonce, mints
+/// a fresh token, atomically rewrites the token file, and ONLY THEN deletes the
+/// request file (the helper waits on that deletion as the "fresh token ready"
+/// signal). A non-matching/absent nonce or no request file is a no-op.
+///
+/// The mint here shares [`mint_and_rewrite_token`]'s cooldown + coalescing, so a
+/// burst of git invocations cannot trigger redundant App-token calls.
+async fn service_mint_request(inner: &Inner, drive: &mut GoalDrive) -> MintOutcome {
+    if drive.token_path.as_os_str().is_empty() {
+        return MintOutcome::Skipped;
+    }
+    let request_path = mint_request_path(&drive.token_path);
+    let Ok(contents) = tokio::fs::read_to_string(&request_path).await else {
+        return MintOutcome::Skipped; // no pending request
+    };
+    // Authenticate the request against the per-session nonce file (0600). Only
+    // this session's own engine child knows the nonce (env + 0600 dir), so a
+    // mismatch means a stray/forged file — drop it without minting.
+    let nonce_path = drive.runtime_dir.join(crate::engine::NONCE_FILE_NAME);
+    let expected = tokio::fs::read_to_string(&nonce_path).await.ok();
+    let presented = contents.trim();
+    if expected.as_deref().map(str::trim) != Some(presented) || presented.is_empty() {
+        tracing::warn!(
+            goal_id = %drive.goal_id,
+            "mint request nonce mismatch; ignoring and clearing the request file"
+        );
+        let _ = tokio::fs::remove_file(&request_path).await;
+        return MintOutcome::Skipped;
+    }
+
+    let outcome = mint_and_rewrite_token(inner, drive, "jit-helper").await;
+    // Signal completion to the waiting helper by deleting the request file —
+    // ALWAYS, even on a transient failure, so the helper stops waiting and falls
+    // back to the current token rather than blocking the whole patience window.
+    let _ = tokio::fs::remove_file(&request_path).await;
+    outcome
+}
+
+/// Path of the credential-helper's JIT mint-request file for a token file.
+fn mint_request_path(token_path: &std::path::Path) -> PathBuf {
+    let mut p = token_path.as_os_str().to_owned();
+    p.push(crate::engine::MINT_REQUEST_SUFFIX);
+    PathBuf::from(p)
+}
+
+/// Effective cooldown for this attempt: tightened to [`TOKEN_REFRESH_COOLDOWN_URGENT`]
+/// once the on-disk token is within [`TOKEN_EXPIRY_URGENT_MARGIN`] of expiry, so
+/// a flaky mint near the deadline gets retried aggressively (#107).
+fn effective_cooldown(token_expires_at: std::time::SystemTime) -> Duration {
+    let remaining = token_expires_at
+        .duration_since(std::time::SystemTime::now())
+        .unwrap_or(Duration::ZERO);
+    if remaining <= TOKEN_EXPIRY_URGENT_MARGIN {
+        TOKEN_REFRESH_COOLDOWN_URGENT
+    } else {
+        TOKEN_REFRESH_COOLDOWN
+    }
+}
+
+/// Shared mint-and-rewrite core for the interval, reactive, and JIT refresh
+/// paths. Respects an escalating per-attempt cooldown, mints a fresh
+/// installation token, and atomically rewrites the JSON token file
+/// (`{token, expires_at}`, mode 0600, tmp + rename — #107). On success the
+/// failure counter resets; on failure the engine keeps the previous token until
+/// the token is past expiry AND failures persist, at which point a
+/// [`MintOutcome::FatalExpired`] is returned for the caller to fail the session.
+/// `reason` tags the trigger in logs. The token value is never logged.
+async fn mint_and_rewrite_token(inner: &Inner, drive: &mut GoalDrive, reason: &str) -> MintOutcome {
+    // Escalating cooldown gate (applies to ALL paths): never hammer the mint API
+    // more than once per window, but tighten the window as expiry approaches.
+    if drive.last_attempt.elapsed() < effective_cooldown(drive.token_expires_at) {
+        return MintOutcome::Skipped;
     }
     drive.last_attempt = std::time::Instant::now();
 
     let Some(gs) = inner.goal_support.get() else {
-        return;
+        return MintOutcome::Skipped;
     };
     let github_app = &gs.github_app;
 
     if drive.token_path.as_os_str().is_empty() {
         // Runtime dir not yet established (engine not started).
-        return;
+        return MintOutcome::Skipped;
     }
 
     let repo_ref = format!("{}/{}", drive.repo.owner, drive.repo.name);
-    match github_app.token_for_repo(&repo_ref, None).await {
-        Ok(token) => {
-            let tmp_path = drive.token_path.with_extension("tmp");
-            use secrecy::ExposeSecret;
-            let token_str = token.expose_secret();
-            match tokio::fs::write(&tmp_path, token_str.as_bytes()).await {
-                Ok(()) => match tokio::fs::rename(&tmp_path, &drive.token_path).await {
-                    Ok(()) => {
-                        drive.minted_at = std::time::Instant::now();
-                        tracing::info!(
-                            goal_id = %drive.goal_id,
-                            reason,
-                            "github token refreshed"
-                        );
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            goal_id = %drive.goal_id,
-                            path = %drive.token_path.display(),
-                            error = %error,
-                            "token rename failed; retrying next tick"
-                        );
-                        let _ = tokio::fs::remove_file(&tmp_path).await;
-                    }
-                },
+    match github_app.token_with_expiry_for_repo(&repo_ref, None).await {
+        Ok((token, expires_at)) => {
+            // Atomic JSON rewrite via the shared engine writer so the on-disk
+            // format and atomicity match the startup write exactly (#107).
+            match crate::engine::write_token_file(&drive.token_path, &token, expires_at) {
+                Ok(()) => {
+                    drive.minted_at = std::time::Instant::now();
+                    drive.token_expires_at = expires_at;
+                    drive.consecutive_failures = 0;
+                    tracing::info!(
+                        goal_id = %drive.goal_id,
+                        reason,
+                        "github token refreshed"
+                    );
+                    MintOutcome::Refreshed
+                }
                 Err(error) => {
                     tracing::warn!(
                         goal_id = %drive.goal_id,
-                        path = %tmp_path.display(),
+                        path = %drive.token_path.display(),
                         error = %error,
-                        "token tmp write failed; retrying next tick"
+                        "token file rewrite failed; retrying next tick"
                     );
+                    classify_mint_failure(drive)
                 }
             }
         }
         Err(error) => {
+            // InstallationGone after a fresh re-resolve means the App was
+            // uninstalled mid-session — the credential cannot be recovered, so
+            // fail loudly rather than spin (#107).
+            let installation_gone = matches!(
+                error,
+                crate::github_app::GithubAppError::InstallationGone { .. }
+            );
             tracing::warn!(
                 goal_id = %drive.goal_id,
                 repo = %repo_ref,
@@ -2199,7 +2418,32 @@ async fn mint_and_rewrite_token(inner: &Inner, drive: &mut GoalDrive, reason: &s
                 error = %error,
                 "token mint failed; engine keeps previous token"
             );
+            if installation_gone {
+                return MintOutcome::FatalExpired {
+                    reason: "github app installation removed for the goal repo".to_string(),
+                };
+            }
+            classify_mint_failure(drive)
         }
+    }
+}
+
+/// Bump the consecutive-failure counter and decide whether the failure is fatal:
+/// fatal only once the on-disk token is genuinely past expiry AND the failures
+/// have persisted, so a transient blip while the token is still valid never
+/// kills a healthy session (#107).
+fn classify_mint_failure(drive: &mut GoalDrive) -> MintOutcome {
+    drive.consecutive_failures = drive.consecutive_failures.saturating_add(1);
+    let expired = drive.token_expires_at <= std::time::SystemTime::now();
+    if expired && drive.consecutive_failures >= MAX_CONSECUTIVE_MINT_FAILURES {
+        MintOutcome::FatalExpired {
+            reason: format!(
+                "github token mint failed {} times and the token has expired",
+                drive.consecutive_failures
+            ),
+        }
+    } else {
+        MintOutcome::TransientFailure
     }
 }
 
@@ -2659,8 +2903,13 @@ mod tests {
             // Non-empty so the path is not short-circuited by the
             // "runtime dir not yet established" guard.
             token_path: PathBuf::from("/run/session/github-token"),
+            runtime_dir: PathBuf::from("/run/session"),
             minted_at: now - minted_ago,
             last_attempt: now - last_attempt_ago,
+            // Far in the future so the escalating-cooldown gate uses the normal
+            // 60s window in the gating tests (not the urgent 10s one).
+            token_expires_at: std::time::SystemTime::now() + Duration::from_secs(3600),
+            consecutive_failures: 0,
         }
     }
 
@@ -2705,6 +2954,92 @@ mod tests {
         assert_eq!(
             drive.last_attempt, before,
             "a re-mint inside the cooldown window must be suppressed"
+        );
+    }
+
+    /// #107: the refresh cooldown tightens to the urgent window once the token is
+    /// within the urgent margin of expiry, and stays at the normal window while
+    /// the token is comfortably fresh.
+    #[test]
+    fn effective_cooldown_tightens_near_expiry() {
+        let fresh = std::time::SystemTime::now() + Duration::from_secs(3600);
+        assert_eq!(effective_cooldown(fresh), TOKEN_REFRESH_COOLDOWN);
+        let near = std::time::SystemTime::now() + Duration::from_secs(60);
+        assert_eq!(effective_cooldown(near), TOKEN_REFRESH_COOLDOWN_URGENT);
+        let expired = std::time::SystemTime::UNIX_EPOCH;
+        assert_eq!(effective_cooldown(expired), TOKEN_REFRESH_COOLDOWN_URGENT);
+    }
+
+    /// #107: a mint failure is only fatal once the token is genuinely expired AND
+    /// the failures have persisted; a blip while the token is still valid stays
+    /// transient so a healthy session is never killed.
+    #[test]
+    fn classify_mint_failure_only_fatal_when_expired_and_persistent() {
+        // Still valid: never fatal, however many failures.
+        let mut drive = goal_drive_with(Duration::ZERO, Duration::from_secs(3600));
+        for _ in 0..(MAX_CONSECUTIVE_MINT_FAILURES + 3) {
+            assert_eq!(
+                classify_mint_failure(&mut drive),
+                MintOutcome::TransientFailure
+            );
+        }
+
+        // Expired token: fatal only once the failure count crosses the threshold.
+        let mut drive = goal_drive_with(Duration::ZERO, Duration::from_secs(3600));
+        drive.token_expires_at = std::time::SystemTime::UNIX_EPOCH;
+        for _ in 0..(MAX_CONSECUTIVE_MINT_FAILURES - 1) {
+            assert_eq!(
+                classify_mint_failure(&mut drive),
+                MintOutcome::TransientFailure
+            );
+        }
+        assert!(matches!(
+            classify_mint_failure(&mut drive),
+            MintOutcome::FatalExpired { .. }
+        ));
+    }
+
+    /// #107: the JIT mint-request path is `<token_path>` + the request suffix.
+    #[test]
+    fn mint_request_path_appends_the_request_suffix() {
+        let token = PathBuf::from("/run/session/github-token");
+        let req = mint_request_path(&token);
+        assert_eq!(req, PathBuf::from("/run/session/github-token.request"));
+    }
+
+    /// #107: a JIT request whose nonce does not match the session nonce file is
+    /// ignored (no mint) and the stray request file is cleared.
+    #[tokio::test]
+    async fn service_mint_request_rejects_a_bad_nonce_and_clears_the_file() {
+        let service = no_goal_support_service().await;
+        let dir = tempfile::tempdir().expect("dir");
+        let mut drive = goal_drive_with(Duration::ZERO, Duration::from_secs(3600));
+        drive.runtime_dir = dir.path().to_path_buf();
+        drive.token_path = dir.path().join(crate::engine::TOKEN_FILE_NAME);
+
+        // Real session nonce, and a request file presenting a DIFFERENT one.
+        crate::engine::goal_token::write_nonce_file(dir.path(), "realnonce").expect("nonce");
+        let request = mint_request_path(&drive.token_path);
+        tokio::fs::write(&request, b"forgednonce\n")
+            .await
+            .expect("write request");
+
+        let outcome = service_mint_request(&service.inner, &mut drive).await;
+        assert_eq!(outcome, MintOutcome::Skipped, "bad nonce must not mint");
+        assert!(!request.exists(), "stray request file must be cleared");
+    }
+
+    /// #107: no pending request file is a no-op (the common idle case).
+    #[tokio::test]
+    async fn service_mint_request_no_request_is_a_noop() {
+        let service = no_goal_support_service().await;
+        let dir = tempfile::tempdir().expect("dir");
+        let mut drive = goal_drive_with(Duration::ZERO, Duration::from_secs(3600));
+        drive.runtime_dir = dir.path().to_path_buf();
+        drive.token_path = dir.path().join(crate::engine::TOKEN_FILE_NAME);
+        assert_eq!(
+            service_mint_request(&service.inner, &mut drive).await,
+            MintOutcome::Skipped
         );
     }
 }
