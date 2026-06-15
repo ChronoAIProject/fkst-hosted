@@ -215,18 +215,22 @@ local function fetch_pr_entity(repo, pr)
   }
 end
 
-local function list_open_issues(repo)
-  local opts = M.gh_issue_list_observe_opts(repo)
-  local result = M.gh_exec(opts)
+local function list_open_issues(repo, poll_key)
+  local result = M.fetch_shared_issue_observe_list(repo, {
+    timeout = 60,
+    poll_key = poll_key,
+  })
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-issue-list-failed: " .. tostring(result.stderr))
   end
   return M.parse_issue_list_observe(result.stdout)
 end
 
-local function list_open_prs(repo)
-  local opts = M.gh_pr_list_observe_opts(repo)
-  local result = M.gh_exec(opts)
+local function list_open_prs(repo, poll_key)
+  local result = M.fetch_shared_pr_observe_list(repo, {
+    timeout = 60,
+    poll_key = poll_key,
+  })
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-pr-list-failed: " .. tostring(result.stderr))
   end
@@ -260,9 +264,10 @@ function M.saga_doctor_collect(opts)
   local options = opts or {}
   local repo = options.repo or read_repo()
   M.assert_trusted_bot_configured()
+  local poll_key = options.poll_key
 
-  local issues = options.issues or list_open_issues(repo)
-  local prs = options.prs or list_open_prs(repo)
+  local issues = options.issues or list_open_issues(repo, poll_key)
+  local prs = options.prs or list_open_prs(repo, poll_key)
   local pr_numbers = open_pr_number_set(prs)
   local entities = {}
   for _, issue in ipairs(sort_by_number(issues)) do
