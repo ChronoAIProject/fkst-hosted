@@ -79,6 +79,31 @@ fi
             check=False,
         )
 
+    def run_health(self, *extra: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["BIN"] = str(self.framework)
+        env["FKST_NO_AUTOBUILD"] = "1"
+        return subprocess.run(
+            [
+                "/bin/bash",
+                "scripts/run.sh",
+                "health",
+                "--cache",
+                str(self.cache),
+                "--durable-root",
+                str(self.durable),
+                "--now",
+                "2026-06-14T10:00:00Z",
+                *extra,
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
     def calls(self) -> str:
         return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
 
@@ -120,6 +145,128 @@ class BoardScriptTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_first_line_reports_healthy_when_only_expected_transients_exist(self) -> None:
+        h = BoardHarness(
+            {
+                "entities": [
+                    {
+                        "entity": "github-devloop/issue/owner/repo/623",
+                        "events": [
+                            {
+                                "queue": "devloop_ready",
+                                "outcome": "retry-pending",
+                                "error_class": "retry-pending",
+                                "ts": "2026-06-14T09:59:30Z",
+                            },
+                            {
+                                "queue": "github-proxy.github_entity_changed",
+                                "outcome": "skip-foreign",
+                                "ts": "2026-06-14T09:59:40Z",
+                            },
+                            {
+                                "queue": "devloop_observe_tick",
+                                "outcome": "deadline-defer",
+                                "ts": "2026-06-14T09:00:00Z",
+                            },
+                            {
+                                "queue": "devloop_merge_ready",
+                                "error_class": "marker-lag",
+                                "ts": "2026-06-14T09:00:00Z",
+                            },
+                        ],
+                    }
+                ],
+                "queues": [{"queue": "devloop_ready", "ready": 0, "leased": 0, "retry": 1, "dlq": 0}],
+                "failure_facts": [
+                    {
+                        "schema": "fkst.failure_fact.v1",
+                        "origin_queue": "devloop_ready",
+                        "origin_dept": "github-devloop.implement",
+                        "error_class": "retry-pending",
+                        "fingerprint": "retry-pending:abc",
+                        "attempt": 1,
+                    }
+                ],
+            }
+        )
+        try:
+            result = h.run_board("--refresh", "--stall", "1800")
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(result.stdout.splitlines()[0], "HEALTHY")
+            self.assertIn("Expected transients", result.stdout)
+            self.assertIn("disposition=expected-transient", result.stdout)
+            self.assertIn("retry-pending:abc", result.stdout)
+            self.assertIn("outcome=deadline-defer", result.stdout)
+            self.assertIn("error_class=marker-lag", result.stdout)
+            self.assertNotIn("ANOMALIES NEEDING ATTENTION", result.stdout)
+        finally:
+            h.close()
+
+    def test_first_line_counts_terminal_dlq_and_stalled_non_terminal_entities(self) -> None:
+        h = BoardHarness(
+            {
+                "entities": [
+                    {
+                        "entity": "github-devloop/issue/owner/repo/620",
+                        "terminal": False,
+                        "events": [{"queue": "devloop_ready", "ts": "2026-06-14T09:00:00Z"}],
+                    },
+                    {
+                        "entity": "github-devloop/issue/owner/repo/621",
+                        "terminal": True,
+                        "events": [{"queue": "devloop_merged", "ts": "2026-06-14T08:00:00Z"}],
+                    },
+                ],
+                "queues": [
+                    {"queue": "devloop_ready", "ready": 0, "leased": 0, "retry": 0, "dlq": 1},
+                    {"queue": "devloop_fixing", "ready": 0, "leased": 0, "retry": 2, "dlq": 0},
+                ],
+                "failure_facts": [
+                    {
+                        "schema": "fkst.failure_fact.v1",
+                        "origin_queue": "devloop_fixing",
+                        "origin_dept": "github-devloop.fix",
+                        "error_class": "framework_child_nonzero",
+                        "fingerprint": "framework_child_nonzero:ghi",
+                        "attempt": 2,
+                        "terminal": True,
+                    }
+                ],
+            }
+        )
+        try:
+            result = h.run_board("--refresh", "--stall", "1800")
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(result.stdout.splitlines()[0], "3 ANOMALIES NEEDING ATTENTION")
+            self.assertIn("Anomalies needing attention", result.stdout)
+            self.assertIn("type=terminal-failure", result.stdout)
+            self.assertIn("type=stalled-entity", result.stdout)
+            self.assertIn("type=queue-dlq", result.stdout)
+            self.assertIn("framework_child_nonzero:ghi", result.stdout)
+            self.assertNotIn("- github-devloop/issue/owner/repo/621 latest=devloop_merged dwell=2h0m", result.stdout)
+        finally:
+            h.close()
+
+    def test_health_subcommand_prints_compact_verdict_from_same_observe_cache(self) -> None:
+        h = BoardHarness(
+            {
+                "entities": [
+                    {
+                        "entity": "github-devloop/issue/owner/repo/623",
+                        "events": [{"queue": "devloop_ready", "ts": "2026-06-14T09:59:30Z"}],
+                    }
+                ],
+                "queues": [{"queue": "devloop_ready", "ready": 0, "leased": 0, "retry": 1, "dlq": 0}],
+            }
+        )
+        try:
+            result = h.run_health("--refresh", "--stall", "1800")
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(result.stdout.strip(), "HEALTHY")
+            self.assertIn("observe --project-root", h.calls())
+        finally:
+            h.close()
+
     def test_fresh_cache_hit_does_not_call_engine(self) -> None:
         h = BoardHarness(exit_code=42, stderr="observe should not run")
         try:
@@ -158,7 +305,6 @@ class BoardScriptTest(unittest.TestCase):
             self.assertFalse(h.cache.exists())
         finally:
             h.close()
-
 
 if __name__ == "__main__":
     unittest.main()

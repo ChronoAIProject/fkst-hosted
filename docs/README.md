@@ -16,6 +16,8 @@ Docs are split by audience:
     converge/reconcile redesign.
   - [`dev/harness-construction-methodology.md`](dev/harness-construction-methodology.md) —
     harness-first methodology.
+  - [`dev/observability-legibility.md`](dev/observability-legibility.md) — local health verdict and
+    board classification contract.
   - [`dev/scaffold-install-upgrade-design.md`](dev/scaffold-install-upgrade-design.md) — host-repo
     scaffold install + upgrade + package-reference update design.
 
