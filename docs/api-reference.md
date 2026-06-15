@@ -16,6 +16,7 @@ shapes, and examples. For a high-level overview of the project, see the
 - [Sessions](#sessions)
 - [Goals](#goals)
 - [GitHub issues hub](#github-issues-hub)
+- [Vault (env variables & secrets)](#vault-env-variables--secrets)
 - [Appendix: data types & limits](#appendix-data-types--limits)
 
 ---
@@ -966,6 +967,137 @@ curl -X POST "$FKST_API/api/v1/github/repos/acme/billing/issues/7/comments" \
 
 ---
 
+## Vault (env variables & secrets)
+
+The **vault** is a fkst-hosted-owned, encrypted-at-rest key–value store for the
+environment **variables** (non-secret config) and **secrets** an engine run
+needs. Each entry has a `kind`, an env-var `key`, and a `scope` — either
+owner-wide (`global`) or a specific GitHub repo. Entries are owned by the caller
+and enforced by the same owner/org authorization as the rest of the API.
+
+> **Secrets are write-only.** A `secret` value is accepted on `PUT` and is
+> **never** returned by any read — not in the `PUT` response and not in `GET`.
+> A read shows only a display-only `masked_hint` (`"…last4"`). A `variable`
+> value, being non-secret config, **is** returned. Secret values are
+> envelope-encrypted (AES-256-GCM) at rest and never stored in plaintext.
+
+**Common data shapes**
+
+```jsonc
+// Scope (request + response): exactly one of global / repo
+{ "global": true }                 // owner-wide
+{ "repo": "acme/site" }            // a specific repo
+
+// EntryView (response): a secret omits `value`; a variable includes it
+{
+  "id": "f0e1d2c3-…",
+  "key": "OPENAI_API_KEY",
+  "kind": "secret",                // or "variable"
+  "scope": { "global": true },
+  "masked_hint": "…cret",          // secrets only; display-only
+  "value": "debug",                // variables only; omitted for secrets
+  "updated_at": "2026-06-16T12:00:00Z"
+}
+```
+
+See [vault limits](#vault-limits) for the value-size and per-scope caps.
+
+---
+
+### `GET /api/v1/vault/entries` — list entries in a scope
+
+Returns the caller's entries in a scope (key-sorted). **Secret values are never
+included**; variable values are.
+
+- **Permission:** authenticated; returns only your own entries.
+- **Headers:** `Authorization: Bearer …`.
+
+**Query parameters**
+
+| Param | Values | Notes |
+|-------|--------|-------|
+| `scope` | `global` (default), `repo` | The scope to list |
+| `repo` | `owner/name` | Required when `scope=repo` |
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "$FKST_API/api/v1/vault/entries?scope=global"
+# [ { "id": "...", "key": "OPENAI_API_KEY", "kind": "secret",
+#     "scope": { "global": true }, "masked_hint": "…cret",
+#     "updated_at": "2026-06-16T12:00:00Z" } ]
+```
+
+---
+
+### `PUT /api/v1/vault/entries` — create or update an entry
+
+Upsert an entry by `(owner, scope, key)`. A `secret` value is encrypted and
+stored with a masked hint; a `variable` value is stored as plaintext config.
+
+- **Permission:** authenticated. If `org_id` is supplied, the caller must be an
+  **org Member or Admin** (else `403`); the entry is still owned by the caller.
+- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+
+**Request body**
+
+| Field | Type | Required | Notes |
+|-------|------|:--------:|-------|
+| `scope` | object | yes | Exactly one of `{ "global": true }` or `{ "repo": "owner/name" }` |
+| `key` | string | yes | Env-var name; must match `^[A-Za-z_][A-Za-z0-9_]*$` |
+| `kind` | string | yes | `secret` or `variable` |
+| `value` | string | yes | ≤ the value-size cap; a `secret` is encrypted at rest |
+| `org_id` | string | no | Attach to an org (caller must be a writer) |
+
+**Responses**
+
+| Status | Meaning |
+|--------|---------|
+| `200 OK` | Upserted. Body is the redacted `EntryView` (no secret value) |
+| `400` | Malformed body or scope (not exactly one of global/repo) |
+| `403` | `org_id` given but caller is not an org writer |
+| `422` | Invalid key name, a **reserved** platform key (`FKST_*`, `GITHUB_TOKEN`, allow-listed host vars), an oversized value, or the per-scope entry cap exceeded |
+| `500` | Vault key provider not configured (a deploy-time misconfiguration) |
+
+```sh
+curl -X PUT "$FKST_API/api/v1/vault/entries" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "scope": { "global": true },
+    "key": "OPENAI_API_KEY",
+    "kind": "secret",
+    "value": "sk-…"
+  }'
+# 200 -> { "id": "...", "key": "OPENAI_API_KEY", "kind": "secret",
+#          "scope": { "global": true }, "masked_hint": "…",
+#          "updated_at": "..." }   // note: no `value`
+```
+
+---
+
+### `DELETE /api/v1/vault/entries/{id}` — delete an entry
+
+Remove an entry by its UUID.
+
+- **Permission:** authenticated; you must own (or be an org admin of) the entry.
+- **Headers:** `Authorization: Bearer …`.
+
+**Responses**
+
+| Status | Meaning |
+|--------|---------|
+| `204 No Content` | Deleted |
+| `400` | `{id}` is not a valid UUID |
+| `403` | The entry exists but you cannot manage it |
+| `404` | No such entry |
+
+```sh
+curl -X DELETE "$FKST_API/api/v1/vault/entries/f0e1d2c3-…" \
+  -H "Authorization: Bearer $TOKEN"
+# 204 No Content
+```
+
+---
+
 ## Appendix: data types & limits
 
 ### Enumerations
@@ -978,6 +1110,7 @@ curl -X POST "$FKST_API/api/v1/github/repos/acme/billing/issues/7/comments" \
 | Share level | `read`, `use` |
 | Conformance status | `ok`, `failed`, `skipped` |
 | GitHub repo mode (goal trigger) | `existing`, `create_new` |
+| Vault entry kind | `variable`, `secret` |
 
 ### Package limits
 
@@ -1008,3 +1141,14 @@ curl -X POST "$FKST_API/api/v1/github/repos/acme/billing/issues/7/comments" \
 |-------|-------|
 | Description | 1–8192 bytes |
 | Generated name (when given) | `^[A-Za-z0-9_-]+$` |
+
+### Vault limits
+
+| Limit | Value |
+|-------|-------|
+| Entry key | `^[A-Za-z_][A-Za-z0-9_]*$` |
+| Reserved keys (rejected with `422`) | any `FKST_*`, `GITHUB_TOKEN`, `FKST_GITHUB_TOKEN_FILE`, `FKST_GOAL_FILE`, and the allow-listed host vars (`PATH`, `HOME`, `CODEX_HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `TZ`, `SSL_CERT_FILE`, `SSL_CERT_DIR`) |
+| Single value | ≤ 64 KiB (default; `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`) |
+| Entries per scope | ≤ 100 (default; `FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP`) |
+| Scope | `global` (owner-wide) or `repo:<owner>/<name>` |
+| Secret encryption | AES-256-GCM envelope (per-secret DEK wrapped by a KEK); secrets never returned, logged, or stored in plaintext |

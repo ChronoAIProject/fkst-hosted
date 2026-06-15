@@ -41,6 +41,8 @@ use tower::ServiceExt;
 use wiremock::matchers::{body_string_contains, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+mod support;
+
 /// Mongo image tag.
 const MONGO_TAG: &str = "7";
 
@@ -381,6 +383,7 @@ async fn share_app() -> ShareTestApp {
     });
 
     let authz = Authorizer::with_shares(Some(nyxid_client), shares.clone());
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -393,6 +396,7 @@ async fn share_app() -> ShareTestApp {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
 

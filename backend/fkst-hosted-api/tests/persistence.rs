@@ -32,6 +32,8 @@ use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
+mod support;
+
 /// True when a Docker daemon answers `docker info`.
 fn docker_available() -> bool {
     std::process::Command::new("docker")
@@ -313,6 +315,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
         packages.clone(),
         EngineConfig::default(),
     );
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -325,6 +328,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
 

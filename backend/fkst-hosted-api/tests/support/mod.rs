@@ -13,10 +13,30 @@
 //! 4. Otherwise none. The docker-extracted binary is a LINUX binary — on
 //!    macOS it cannot run on the host, so without `FKST_ENGINE_BIN` the
 //!    consuming suites self-skip there.
-#![allow(dead_code)]
+// This module is compiled into every integration-test binary that needs ANY of
+// its helpers; a given binary rarely uses all of them. Allow the resulting
+// per-binary "unused" diagnostics so the shared module stays a single source of
+// truth instead of being split per consumer.
+#![allow(dead_code, unused_macros, unused_imports)]
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+use fkst_hosted_api::db::Db;
+use fkst_hosted_api::vault::{VaultLimits, VaultService};
+
+/// Deterministic 32-byte vault KEK (base64) for integration tests. NOT a real
+/// secret — only ever used to satisfy the always-on vault wiring so the router
+/// builds. Issue #100 added a required `AppState.vault`.
+pub const TEST_VAULT_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+/// Build a `VaultService` over `db` keyed by the deterministic test KEK with the
+/// default per-scope limits. The key is valid base64-32-bytes, so this never
+/// fails.
+pub fn test_vault(db: &Db) -> VaultService {
+    VaultService::with_local_key(&db.database, TEST_VAULT_KEY_B64, VaultLimits::default())
+        .expect("test vault key is valid")
+}
 
 /// Default binary location inside the engine image / engine-based pods.
 pub const IMAGE_ENGINE_BIN: &str = "/usr/local/bin/fkst-framework";

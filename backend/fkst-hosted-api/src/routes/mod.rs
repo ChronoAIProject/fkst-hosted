@@ -7,6 +7,7 @@ pub mod goals;
 pub mod health;
 pub mod packages;
 pub mod sessions;
+pub mod vault;
 
 use crate::error::AppError;
 

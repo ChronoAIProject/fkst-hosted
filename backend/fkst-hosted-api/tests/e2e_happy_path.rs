@@ -212,6 +212,7 @@ async fn e2e_happy_path_runs_then_stops_against_the_real_engine() {
     let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
     let sessions = SessionService::new(SessionRepo::new(&db), packages.clone(), engine);
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
@@ -224,6 +225,7 @@ async fn e2e_happy_path_runs_then_stops_against_the_real_engine() {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
 

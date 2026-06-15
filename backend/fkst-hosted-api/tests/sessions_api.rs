@@ -32,6 +32,8 @@ use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
+mod support;
+
 /// True when a Docker daemon answers `docker info`.
 fn docker_available() -> bool {
     std::process::Command::new("docker")
@@ -121,6 +123,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
     let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
     let sessions = SessionService::new(SessionRepo::new(&db), packages.clone(), engine);
+    let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db: db.clone(),
@@ -133,6 +136,7 @@ async fn app(conformance_body: &str, supervise_body: &str) -> TestApp {
         goals,
         engine: EngineConfig::default(),
         llm: None,
+        vault,
     })
     .expect("router");
     TestApp {

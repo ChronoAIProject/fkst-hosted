@@ -8,6 +8,7 @@ use crate::github_app::GithubAppTokens;
 use crate::goals::GoalRepo;
 use crate::packages::{PackageRepository, ShareRepo};
 use crate::sessions::SessionService;
+use crate::vault::VaultService;
 
 /// Clonable state shared across the router. Every member is cheap to clone
 /// (`Db` and the repository's `Collection` are `Arc`-backed inside the
@@ -47,4 +48,8 @@ pub struct AppState {
     /// is unset → `POST /api/v1/packages/generate` answers 503. The trait object
     /// is the only LLM seam, so the concrete gateway stays swappable/mockable.
     pub llm: Option<std::sync::Arc<dyn crate::llm::LlmGateway>>,
+    /// Per-session secret/variable vault (issue #100). Always present: the
+    /// `KeyProvider` is built fail-closed at boot, so the vault routes never
+    /// run without an at-rest encryption key.
+    pub vault: VaultService,
 }
