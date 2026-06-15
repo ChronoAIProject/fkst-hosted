@@ -163,16 +163,22 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   return should_reinject_state(proposal_id, core.current_entity_state(current.comments, origin.proposal_id))
 end
 
-local function list_open_issues(repo, timeout)
-  local list = core.gh_exec({ cmd = core.gh_issue_list_observe_cmd(repo), timeout = timeout or 60 })
+local function list_open_issues(repo, timeout, poll_key)
+  local list = core.fetch_shared_issue_observe_list(repo, {
+    timeout = timeout or 60,
+    poll_key = poll_key,
+  })
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-issue-list-failed: " .. tostring(list.stderr))
   end
   return core.parse_issue_list_observe(list.stdout)
 end
 
-local function list_open_prs(repo, timeout)
-  local list = core.gh_exec({ cmd = core.gh_pr_list_observe_cmd(repo), timeout = timeout or 60 })
+local function list_open_prs(repo, timeout, poll_key)
+  local list = core.fetch_shared_pr_observe_list(repo, {
+    timeout = timeout or 60,
+    poll_key = poll_key,
+  })
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-pr-list-failed: " .. tostring(list.stderr))
   end
@@ -232,12 +238,13 @@ function pipeline(event)
 
   local limits = liveness_scan_limits()
   local deadline = core.sweep_deadline(now(), limits)
+  local poll_key = core.entity_list_poll_key(event)
   local issue_timeout = core.sweep_call_timeout(limits, deadline)
   if issue_timeout <= 0 then
     log_deferred("deadline", { entity_cap = limits.entity_cap })
     return
   end
-  local issues = list_open_issues(repo, issue_timeout)
+  local issues = list_open_issues(repo, issue_timeout, poll_key)
   local pr_timeout = core.sweep_call_timeout(limits, deadline)
   if pr_timeout <= 0 then
     log_deferred("deadline", {
@@ -247,7 +254,7 @@ function pipeline(event)
     })
     return
   end
-  local prs = list_open_prs(repo, pr_timeout)
+  local prs = list_open_prs(repo, pr_timeout, poll_key)
   local activations, deferred_by_cap, cursor_key, cursor, total = activation_slice(repo, issues, prs)
   local processed = 0
   local attempted = 0

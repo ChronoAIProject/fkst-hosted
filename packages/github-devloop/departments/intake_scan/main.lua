@@ -69,7 +69,10 @@ function pipeline(event)
     return
   end
 
-  local list = core.gh_exec({ cmd = core.gh_issue_list_intake_cmd(repo, INTAKE_LIMIT), timeout = 30 })
+  local list = core.fetch_shared_issue_intake_list(repo, INTAKE_LIMIT, {
+    timeout = 30,
+    poll_key = core.entity_list_poll_key(event),
+  })
   if list.exit_code ~= 0 then
     error("github-devloop: gh issue intake list failed: " .. tostring(list.stderr))
   end
