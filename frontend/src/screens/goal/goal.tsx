@@ -484,7 +484,11 @@ export function Goal({
         {/* Left Side: Lifecycle Timeline */}
         <div className="min-w-0">
           <div className="font-mono text-eyebrow text-ghost uppercase mb-4">
-            Lifecycle · current state = MAX trusted state:v1 marker by (version, stage_rank) · fkst-dev labels are hints
+            {isHosted ? (
+              <span>Lifecycle · hosted goal status · not a GitHub marker</span>
+            ) : (
+              <span>Lifecycle · current state = MAX trusted state:v1 marker by (version, stage_rank) · fkst-dev labels are hints</span>
+            )}
           </div>
 
           {hasData && lifecycleEvents.length > 0 ? (
