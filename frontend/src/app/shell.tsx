@@ -103,6 +103,9 @@ export function Shell() {
               <NavLink to="/packages" className={navLinkClass}>
                 Packages
               </NavLink>
+              <NavLink to="/issues" className={navLinkClass}>
+                Issues
+              </NavLink>
             </nav>
 
             <div className="flex items-center gap-2 ml-auto">

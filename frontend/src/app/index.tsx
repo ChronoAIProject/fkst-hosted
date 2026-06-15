@@ -20,18 +20,41 @@ const queryClient = new QueryClient({
   },
 });
 
+import { useGoalsList, useGoal } from '../lib/hooks/useGoals';
+import IssuesScreen from '../screens/issues/issues-screen';
+
 function OverviewRoute() {
   const context = useOutletContext<ShellOutletContext>();
+  const { data: goals, isLoading, isError, error } = useGoalsList();
+
   useEffect(() => {
     document.title = 'FKST — Overview';
   }, []);
-  return <Overview onNewGoal={context?.onNewGoal} />;
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[300px] text-ghost font-mono text-[12px]">
+        loading overview...
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[300px] text-red font-mono text-[12px]">
+        failed to load goals: {String(error)}
+      </div>
+    );
+  }
+
+  return <Overview goals={goals} onNewGoal={context?.onNewGoal} />;
 }
 
 function GoalsRoute() {
   const [searchParams, setSearchParams] = useSearchParams();
   const context = useOutletContext<ShellOutletContext>();
   const view = searchParams.get('view') === 'activity' ? 'activity' : 'issues';
+  const { data: goals, isLoading, isError, error } = useGoalsList();
   
   useEffect(() => {
     document.title = 'FKST — Goals';
@@ -47,15 +70,59 @@ function GoalsRoute() {
     }
   };
 
-  return <Goals view={view} onNewGoal={context?.onNewGoal} onViewChange={handleViewChange} />;
+  return (
+    <Goals 
+      view={view} 
+      goals={goals}
+      isLoadingGoals={isLoading}
+      isErrorGoals={isError}
+      goalsError={error}
+      onNewGoal={context?.onNewGoal} 
+      onViewChange={handleViewChange} 
+    />
+  );
 }
 
 function GoalRoute() {
   const { id } = useParams<{ id: string }>();
+  const { data: goal, isLoading, isError, error } = useGoal(id);
+
   useEffect(() => {
     document.title = id ? `FKST — Goal #${id}` : 'FKST — Goal Details';
   }, [id]);
-  return <Goal goalId={id} />;
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[300px] text-ghost font-mono text-[12px]">
+        loading goal details...
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[300px] text-red font-mono text-[12px]">
+        failed to load goal #{id}: {String(error)}
+      </div>
+    );
+  }
+
+  if (!goal) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[300px] text-ghost font-mono text-[12px]">
+        goal not found
+      </div>
+    );
+  }
+
+  return <Goal goal={goal} />;
+}
+
+function IssuesRoute() {
+  useEffect(() => {
+    document.title = 'FKST — Issues';
+  }, []);
+  return <IssuesScreen />;
 }
 
 function PackagesRoute() {
@@ -105,6 +172,10 @@ export function App() {
         {
           path: 'settings',
           element: <SettingsRoute />,
+        },
+        {
+          path: 'issues',
+          element: <IssuesRoute />,
         },
         {
           path: 'runs',

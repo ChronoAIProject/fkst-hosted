@@ -96,6 +96,34 @@ const mockFetch: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) =
       )
     );
   }
+  if (href.includes('/api/v1/goals')) {
+    if (href.endsWith('/api/v1/goals/152')) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: '152',
+            title: 'Mock Goal 152',
+            description: 'Mock Description',
+            package_names: ['package-example'],
+            repo: { owner: 'foo', name: 'bar' },
+            status: 'running',
+            owner_user_id: 'user-123',
+            org_id: null,
+            active_session_id: 'session-123',
+            created_at: '2026-06-13T00:00:00Z',
+            updated_at: '2026-06-13T00:00:00Z'
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+    }
+    return Promise.resolve(
+      new Response(
+        JSON.stringify([]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+  }
   return Promise.reject(new Error(`Unhandled request to ${href}`));
 };
 
@@ -146,7 +174,7 @@ describe('App Smoke Test', () => {
     window.history.pushState({}, '', '/goals');
     renderApp();
     await waitFor(() => {
-      expect(screen.getByText(/GitHub status unknown/i)).toBeInTheDocument();
+      expect(screen.getByText(/no goals found/i)).toBeInTheDocument();
     });
   });
 
