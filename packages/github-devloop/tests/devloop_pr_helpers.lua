@@ -103,6 +103,8 @@ local function mock_pr_origin_for(fields)
     state = effective.state or "OPEN",
     base_branch = effective.base_branch or "dev",
     labels = effective.labels or {},
+    mergeable = effective.mergeable,
+    merge_state = effective.merge_state,
     times = effective.times or 1,
   })
   entity_read_mocks.mock_pr_view_selector(t, {
@@ -114,6 +116,8 @@ local function mock_pr_origin_for(fields)
     state = effective.state or "OPEN",
     base_branch = effective.base_branch or "dev",
     labels = effective.labels or {},
+    mergeable = effective.mergeable,
+    merge_state = effective.merge_state,
   }, entity_read_mocks.pr_origin_selector, effective.times or 1)
 end
 
@@ -467,7 +471,7 @@ local function mock_pr_origin_sequence(entries)
       state = entry.state or "OPEN",
       base_branch = "dev",
       labels = {},
-    }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels")
+    }, entity_read_mocks.pr_origin_selector)
   end
 end
 
