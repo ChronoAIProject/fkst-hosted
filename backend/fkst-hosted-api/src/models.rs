@@ -86,6 +86,17 @@ pub struct SessionDoc {
     /// Event that triggered this session (e.g. `"goal-trigger"`, `"manual"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triggered_by: Option<String>,
+    /// NON-secret id of the per-session NyxID agent key minted for this run
+    /// (issue #111), used to revoke the key at teardown. The full key
+    /// (`nyxid_ag_…`) is NEVER persisted — it rides the engine `env_profile`
+    /// as a `SecretString` only. Omitted when no NyxID token was provisioned
+    /// (vault/nyxid disabled, or a pre-#111 document).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nyxid_key_id: Option<String>,
+    /// NON-secret short prefix of the minted key for diagnostics only (e.g.
+    /// `nyxid_ag_abc`). Never the full key. Omitted with `nyxid_key_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nyxid_key_prefix: Option<String>,
     pub created_at: bson::DateTime,
     pub started_at: Option<bson::DateTime>,
     pub stopped_at: Option<bson::DateTime>,
@@ -154,6 +165,8 @@ mod tests {
             repo: None,
             env_scope: None,
             triggered_by: None,
+            nyxid_key_id: None,
+            nyxid_key_prefix: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
             stopped_at: None,
@@ -415,6 +428,47 @@ mod tests {
                 && !scope.contains_key("value_enc"),
             "env_scope must not carry any value-bearing field"
         );
+    }
+
+    // ---- nyxid session token refs (issue #111) serde tests ----
+
+    #[test]
+    fn nyxid_key_refs_are_omitted_when_absent() {
+        let raw = bson::to_document(&sample_session()).expect("serialize");
+        assert!(
+            !raw.contains_key("nyxid_key_id"),
+            "nyxid_key_id must be omitted when None"
+        );
+        assert!(
+            !raw.contains_key("nyxid_key_prefix"),
+            "nyxid_key_prefix must be omitted when None"
+        );
+    }
+
+    #[test]
+    fn nyxid_key_refs_round_trip_and_hold_no_full_key() {
+        let mut doc = sample_session();
+        doc.nyxid_key_id = Some("key-123".to_string());
+        // Only a short, non-secret PREFIX is persisted — never the full key.
+        doc.nyxid_key_prefix = Some("nyxid_ag_abc".to_string());
+        let raw = bson::to_document(&doc).expect("serialize");
+        assert_eq!(raw.get_str("nyxid_key_id").expect("id"), "key-123");
+        assert_eq!(
+            raw.get_str("nyxid_key_prefix").expect("prefix"),
+            "nyxid_ag_abc"
+        );
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn pre_111_docs_without_nyxid_refs_still_deserialize() {
+        let mut raw = bson::to_document(&sample_session()).expect("serialize");
+        raw.remove("nyxid_key_id");
+        raw.remove("nyxid_key_prefix");
+        let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+        assert_eq!(back.nyxid_key_id, None);
+        assert_eq!(back.nyxid_key_prefix, None);
     }
 
     #[test]

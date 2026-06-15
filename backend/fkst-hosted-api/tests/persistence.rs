@@ -109,6 +109,8 @@ fn sample_session() -> SessionDoc {
         repo: None,
         env_scope: None,
         triggered_by: None,
+        nyxid_key_id: None,
+        nyxid_key_prefix: None,
         created_at: bson::DateTime::from_millis(1_700_000_000_000),
         started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
         stopped_at: None,

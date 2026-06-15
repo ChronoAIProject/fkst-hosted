@@ -10,6 +10,7 @@
 //! - The document shape itself ([`crate::models::SessionDoc`]) is owned by
 //!   the shared models module; this module owns behavior.
 
+pub mod nyxid_token;
 pub mod repo;
 pub mod service;
 

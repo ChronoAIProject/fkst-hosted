@@ -132,6 +132,9 @@ impl NyxIdGithubProxy {
                 }
             }
             NyxIdError::ServiceAuth => ProxyError::Delegation,
+            // The github-proxy path never mints an agent key, so this variant
+            // cannot arise here; map it to a credential-rejection for safety.
+            NyxIdError::UserTokenRejected => ProxyError::Delegation,
         }
     }
 }

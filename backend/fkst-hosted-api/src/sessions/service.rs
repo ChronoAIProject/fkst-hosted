@@ -56,7 +56,9 @@ use crate::journal::{
 };
 use crate::leases::RenewOutcome;
 use crate::models::{SessionDoc, SessionStatus};
+use crate::nyxid::NyxIdClient;
 use crate::packages::{is_valid_name, PackageRepository};
+use crate::sessions::nyxid_token::{self, NyxidTokenHandle};
 use crate::sessions::repo::{status_bson, SessionRepo};
 use crate::vault::{EnvScopeRef, VaultService};
 
@@ -154,6 +156,19 @@ struct Inner {
     /// env profile (legacy tests / minimal runs behave exactly as pre-#102);
     /// production always enables it. A second call is a logged no-op.
     vault: OnceLock<VaultService>,
+    /// Per-session NyxID token provisioning (issue #111), enabled once at
+    /// startup via [`SessionService::enable_nyxid_token`]. Unset => the driver
+    /// skips token provisioning entirely (legacy tests / minimal runs behave
+    /// exactly as pre-#111). When set it carries the NyxID client and the
+    /// origin (the NyxID issuer base URL) injected as `NYXID_URL`.
+    nyxid: OnceLock<NyxidSetup>,
+}
+
+/// NyxID token provisioning wiring shared by every driver this service spawns.
+struct NyxidSetup {
+    client: NyxIdClient,
+    /// The NyxID origin the engine talks to, injected as `NYXID_URL`.
+    origin: String,
 }
 
 /// Journaling wiring shared by every driver this service spawns.
@@ -221,6 +236,7 @@ impl SessionService {
                 journal: OnceLock::new(),
                 goal_support: OnceLock::new(),
                 vault: OnceLock::new(),
+                nyxid: OnceLock::new(),
             }),
         }
     }
@@ -272,6 +288,21 @@ impl SessionService {
         tracing::info!("session env injection enabled (vault wired into the driver)");
     }
 
+    /// Enable per-session NyxID token provisioning (issue #111): the driver
+    /// mints a per-session agent key on the triggering user's behalf and
+    /// injects it as `NYXID_ACCESS_TOKEN` (+ `NYXID_URL`) into the engine env,
+    /// then revokes it at teardown. `origin` is the NyxID issuer base URL.
+    /// Call once at startup, before any session is created; a second call is a
+    /// logged no-op. When never called the driver skips provisioning entirely
+    /// (legacy behaviour for tests / minimal runs).
+    pub fn enable_nyxid_token(&self, client: NyxIdClient, origin: String) {
+        if self.inner.nyxid.set(NyxidSetup { client, origin }).is_err() {
+            tracing::warn!("nyxid token provisioning already enabled; ignoring the second call");
+            return;
+        }
+        tracing::info!("per-session nyxid token provisioning enabled (wired into the driver)");
+    }
+
     /// The repository handle (startup hooks: orphan sweep).
     pub fn repo(&self) -> &SessionRepo {
         &self.inner.repo
@@ -291,6 +322,7 @@ impl SessionService {
         &self,
         package_name: &str,
         owner: SessionOwner,
+        raw_token: SecretString,
     ) -> Result<SessionDoc, AppError> {
         if !is_valid_name(package_name) || package_name.len() > MAX_PACKAGE_NAME_BYTES {
             tracing::warn!(
@@ -329,6 +361,8 @@ impl SessionService {
             // persisted so a failover rebuild re-resolves the same scope.
             env_scope: Some(EnvScopeRef::global()),
             triggered_by: None,
+            nyxid_key_id: None,
+            nyxid_key_prefix: None,
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,
@@ -337,7 +371,9 @@ impl SessionService {
 
         let Some(distributor) = self.inner.distribution.clone() else {
             // Single-pod posture: spawn the detached driver inline, no lease.
-            self.spawn_driver(&session);
+            // The user's raw token rides into the detached task transiently so
+            // the driver can mint the per-session NyxID key (#111).
+            self.spawn_driver(&session, Some(raw_token));
             return Ok(session);
         };
 
@@ -346,7 +382,7 @@ impl SessionService {
                 let mut owned = session.clone();
                 owned.pod_id = Some(placement.pod_id);
                 owned.fencing_token = Some(placement.fencing_token);
-                self.spawn_driver(&owned);
+                self.spawn_driver(&owned, Some(raw_token));
                 Ok(session)
             }
             Ok(placement) => {
@@ -427,6 +463,7 @@ impl SessionService {
         &self,
         goals: &GoalRepo,
         trigger: GoalTriggerInfo,
+        raw_token: SecretString,
     ) -> Result<GoalTriggerResult, AppError> {
         let now = bson::DateTime::now();
 
@@ -469,6 +506,8 @@ impl SessionService {
             // on a key collision — see VaultService::list_for_scope). #102.
             env_scope: Some(EnvScopeRef::repo(&trigger.repo.owner, &trigger.repo.name)),
             triggered_by: Some("goal-trigger".to_string()),
+            nyxid_key_id: None,
+            nyxid_key_prefix: None,
             created_at: now,
             started_at: None,
             stopped_at: None,
@@ -493,11 +532,13 @@ impl SessionService {
             let lease_key = session.lease_key();
             match distributor.place(&lease_key, session.id).await {
                 Ok(placement) if placement.pod_id == distributor.pod_id() => {
-                    // This pod was chosen; spawn the driver.
+                    // This pod was chosen; spawn the driver. The user's raw
+                    // token rides into the detached task transiently so the
+                    // driver can mint the per-session NyxID key (#111).
                     let mut owned = session.clone();
                     owned.pod_id = Some(placement.pod_id);
                     owned.fencing_token = Some(placement.fencing_token);
-                    self.spawn_driver(&owned);
+                    self.spawn_driver(&owned, Some(raw_token.clone()));
                 }
                 Ok(_placement) => {
                     // Another pod was chosen; its reaper picks it up.
@@ -558,7 +599,7 @@ impl SessionService {
             }
         } else {
             // Single-pod posture: spawn the driver inline.
-            self.spawn_driver(&session);
+            self.spawn_driver(&session, Some(raw_token.clone()));
         }
 
         // Step 7: Set active_session_id on goal (CAS guarded to triggered).
@@ -637,7 +678,14 @@ impl SessionService {
     /// (and, when fenced, the lease) stays the authoritative dedupe; this
     /// guard only prevents a second in-process task from clobbering the
     /// first one's stop channel.
-    fn spawn_driver(&self, session: &SessionDoc) {
+    ///
+    /// `raw_token` is the triggering user's first-party access token, threaded
+    /// transiently into the detached task so the driver can mint the
+    /// per-session NyxID key (#111). It is `Some` only on the create/trigger
+    /// path (where a live HTTP request supplied it) and `None` on the
+    /// reaper/failover seam (which rebuilds purely from `SessionDoc`, with no
+    /// user token in hand). It is NEVER persisted.
+    fn spawn_driver(&self, session: &SessionDoc, raw_token: Option<SecretString>) {
         let (stop_tx, stop_rx) = watch::channel(false);
         {
             let mut registry = self
@@ -684,6 +732,7 @@ impl SessionService {
                 stop_rx,
                 fencing_token,
                 goal_info,
+                raw_token,
             )
             .await;
             inner
@@ -749,7 +798,11 @@ impl SessionService {
 #[async_trait]
 impl DriverHost for SessionService {
     async fn ensure_driver(&self, session: &SessionDoc) {
-        self.spawn_driver(session);
+        // The reaper rebuilds from SessionDoc alone — no user token in hand.
+        // `None` makes the driver take the failover branch (#111): re-mint is
+        // impossible without a live token, so a session that previously had a
+        // NyxID key ESCALATES rather than running with broken auth.
+        self.spawn_driver(session, None);
     }
 }
 
@@ -819,7 +872,14 @@ async fn drive(
     stop_rx: watch::Receiver<bool>,
     fencing_token: Option<i64>,
     mut goal_info: Option<GoalDrive>,
+    raw_token: Option<SecretString>,
 ) {
+    // Holds the per-session NyxID key handle once the driver provisions it, so
+    // `drive` can revoke it at teardown regardless of which exit path
+    // `drive_inner` took. `drive_inner` writes it via this out-parameter
+    // (mirroring how `goal_info` is threaded) to avoid rewriting its many
+    // early returns.
+    let mut nyxid_handle: Option<NyxidTokenHandle> = None;
     let release = drive_inner(
         &inner,
         id,
@@ -827,8 +887,21 @@ async fn drive(
         stop_rx,
         fencing_token,
         &mut goal_info,
+        raw_token,
+        &mut nyxid_handle,
     )
     .await;
+
+    // Teardown revoke (#111): best-effort revoke of the per-session NyxID key
+    // on EVERY terminal driver exit, including a lease loss / self-fence — the
+    // key was minted by THIS driver and is revoked by its id, so revoking it
+    // here cannot touch a takeover pod's freshly-minted key. A revoke failure
+    // is logged and swallowed (the key is non-expiring; a sweep is the
+    // backstop) so it never blocks lease release below.
+    if let (Some(setup), Some(handle)) = (inner.nyxid.get(), &nyxid_handle) {
+        nyxid_token::revoke(&setup.client, handle).await;
+    }
+
     if !release {
         return;
     }
@@ -856,6 +929,7 @@ async fn drive(
 /// the document terminal or owned by whoever won the race. Returns whether
 /// the caller should release the lease (`false` only when the lease was
 /// LOST — the document belongs to a takeover pod and must not be touched).
+#[allow(clippy::too_many_arguments)]
 async fn drive_inner(
     inner: &Arc<Inner>,
     id: bson::Uuid,
@@ -863,6 +937,8 @@ async fn drive_inner(
     mut stop_rx: watch::Receiver<bool>,
     fencing_token: Option<i64>,
     goal_info: &mut Option<GoalDrive>,
+    raw_token: Option<SecretString>,
+    nyxid_handle: &mut Option<NyxidTokenHandle>,
 ) -> bool {
     let now = bson::DateTime::now;
 
@@ -974,7 +1050,7 @@ async fn drive_inner(
             return true;
         }
     };
-    let env_profile = match resolve_env_profile(inner, &session_doc).await {
+    let mut env_profile = match resolve_env_profile(inner, &session_doc).await {
         Ok(profile) => profile,
         Err(error) => {
             // Host-side detail (decrypt internals) stays in the logs; the
@@ -1002,6 +1078,106 @@ async fn drive_inner(
             keys = %env_profile.keys().cloned().collect::<Vec<_>>().join(","),
             "injected session env"
         );
+    }
+
+    // (B4) Per-session NyxID token (#111): mint ONE non-expiring agent key on
+    // the triggering user's behalf and merge NYXID_ACCESS_TOKEN + NYXID_URL into
+    // the env_profile so the engine's `nyxid` CLI and codex provider act as that
+    // user. Only runs when provisioning is wired (production); skipped for
+    // legacy tests / minimal runs. A mint failure FAILS the start — a run must
+    // never proceed without the credential its consumers expect. On a failover
+    // rebuild (raw_token is None) for a session that previously had a key, the
+    // token cannot be re-minted (no live user token on the rebuild pod), so per
+    // the ESCALATE-ONLY v1 policy the session is failed rather than run with
+    // broken auth.
+    if let Some(setup) = inner.nyxid.get() {
+        match &raw_token {
+            Some(token) => {
+                match nyxid_token::provision(&setup.client, id, &setup.origin, token).await {
+                    Ok((handle, entries)) => {
+                        // The two entries are SECRETS (the key) and a non-secret
+                        // origin; neither is reserved, so both survive the engine
+                        // env filter. Merge into the profile the run starts with.
+                        for (key, value) in entries {
+                            env_profile.insert(key, value);
+                        }
+                        // Persist ONLY the non-secret refs so a teardown/sweep
+                        // can find the key; the full key is NEVER written. CAS is
+                        // pinned by the fence so a superseded driver cannot stamp.
+                        if let Err(error) = inner
+                            .repo
+                            .transition_guarded(
+                                id,
+                                &[SessionStatus::Validating],
+                                fence.clone(),
+                                doc! {
+                                    "nyxid_key_id": &handle.key_id,
+                                    "nyxid_key_prefix": &handle.key_prefix,
+                                },
+                            )
+                            .await
+                        {
+                            // The key was minted but the ref could not be
+                            // persisted: fail the start AND revoke immediately so
+                            // we never leak an unreferenced key.
+                            tracing::error!(session_id = %id, error = %error, "failed to persist nyxid key ref");
+                            nyxid_token::revoke(&setup.client, &handle).await;
+                            fail_session(
+                                inner,
+                                id,
+                                &fence,
+                                "failed to persist nyxid session credential reference",
+                                goal_info,
+                            )
+                            .await;
+                            return true;
+                        }
+                        // Hand the handle to `drive` for teardown revoke.
+                        *nyxid_handle = Some(handle);
+                    }
+                    Err(error) => {
+                        // `provision` already logged the precise cause (and never
+                        // the token); the served `error` field stays generic.
+                        tracing::error!(session_id = %id, error = %error, "failed to provision nyxid session token");
+                        fail_session(
+                            inner,
+                            id,
+                            &fence,
+                            "failed to provision nyxid session credential",
+                            goal_info,
+                        )
+                        .await;
+                        return true;
+                    }
+                }
+            }
+            None => {
+                if session_doc.nyxid_key_id.is_some() {
+                    // ESCALATE: a failover rebuild with no user token cannot
+                    // re-establish the NyxID session identity. Never run with
+                    // broken auth.
+                    tracing::error!(
+                        session_id = %id,
+                        "cannot re-establish nyxid session token on failover; no user access token available"
+                    );
+                    fail_session(
+                        inner,
+                        id,
+                        &fence,
+                        "cannot re-establish NyxID session token on failover; no user access token available",
+                        goal_info,
+                    )
+                    .await;
+                    return true;
+                }
+                // No prior key (this session never had one) and no token to mint
+                // with: proceed without a NyxID token, unchanged behaviour.
+                tracing::debug!(
+                    session_id = %id,
+                    "no user token on this driver and no prior nyxid key; skipping token provisioning"
+                );
+            }
+        }
     }
 
     // (C0) For a goal session, mint the GitHub App installation token and build
@@ -1989,6 +2165,8 @@ mod tests {
             repo: None,
             env_scope: None,
             triggered_by: None,
+            nyxid_key_id: None,
+            nyxid_key_prefix: None,
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,

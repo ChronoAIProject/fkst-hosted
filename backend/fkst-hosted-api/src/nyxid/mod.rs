@@ -28,6 +28,11 @@ pub const ORGS_PATH: &str = "/api/v1/orgs";
 /// Users endpoint (service-account lookups).
 pub const USERS_PATH: &str = "/api/v1/users";
 
+/// Agent API-key endpoint. `POST` mints a per-user agent key (`nyxid_ag_…`)
+/// presenting the user's own bearer; `DELETE {path}/{id}` soft-revokes it.
+/// Verified against NyxID main v0.7.0 (`models/api_key.rs`, `key_service.rs`).
+pub const API_KEYS_PATH: &str = "/api/v1/api-keys";
+
 /// GitHub credential-injection proxy path.
 ///
 /// **UNVERIFIED — confirm against NyxID main.** Kept in one constant so
@@ -77,6 +82,14 @@ pub enum NyxIdError {
     /// RFC 8693 token exchange was rejected by NyxID.
     #[error("token exchange rejected: {0}")]
     ExchangeRejected(String),
+    /// The user's first-party access token was rejected by NyxID when minting
+    /// an agent API key (401/403): expired, revoked, or a delegated/service
+    /// token the human-only mint route refuses. Kept DISTINCT from the
+    /// service-credential [`Self::ServiceAuth`] and the generic [`Self::Http`]
+    /// so the session driver can surface the precise reason without ever
+    /// logging the token itself.
+    #[error("nyxid user token rejected for api-key mint")]
+    UserTokenRejected,
 }
 
 // ---- DTOs ----
@@ -138,6 +151,26 @@ impl fmt::Debug for DelegatedToken {
         f.debug_struct("DelegatedToken")
             .field("access_token", &"<redacted>")
             .field("expires_in", &self.expires_in)
+            .finish()
+    }
+}
+
+/// A freshly minted agent API key. NyxID returns the `full_key` (the
+/// `nyxid_ag_…` value) exactly ONCE at creation; the `id` is the stable
+/// handle used to revoke it later. The full key is a secret: it is held in a
+/// `SecretString` and redacted from `Debug` so it never lands in a log line.
+pub struct CreatedKey {
+    /// Stable key identifier (used by [`NyxIdClient::revoke_api_key`]).
+    pub id: String,
+    /// The one-time-visible `nyxid_ag_…` secret. NEVER log or persist this.
+    pub full_key: SecretString,
+}
+
+impl fmt::Debug for CreatedKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CreatedKey")
+            .field("id", &self.id)
+            .field("full_key", &"<redacted>")
             .finish()
     }
 }
@@ -660,6 +693,98 @@ impl NyxIdClient {
             }
         }
     }
+
+    /// Mint a per-user agent API key on the caller's behalf by presenting the
+    /// user's OWN first-party access token as the bearer (NyxID's mint route
+    /// is human-only and binds the new key to that user). The body carries the
+    /// key `name`, its `scopes`, and `allow_all_services`; `expires_at` is
+    /// deliberately OMITTED so the key is non-expiring (no refresh treadmill —
+    /// the session revokes it at teardown instead).
+    ///
+    /// Returns [`CreatedKey`] with the one-time-visible `full_key`. A 401/403
+    /// maps to the DISTINCT [`NyxIdError::UserTokenRejected`] (the user token
+    /// was expired/revoked/delegated) so the caller can fail the session with a
+    /// precise reason. The token and the minted key are never logged.
+    pub async fn mint_user_api_key(
+        &self,
+        raw_token: &SecretString,
+        name: &str,
+        scopes: &str,
+        allow_all_services: bool,
+    ) -> Result<CreatedKey, NyxIdError> {
+        let url = format!("{}{API_KEYS_PATH}", self.inner.base_url);
+        let response = self
+            .inner
+            .http
+            .post(&url)
+            .bearer_auth(raw_token.expose_secret())
+            .json(&serde_json::json!({
+                "name": name,
+                "scopes": scopes,
+                "allow_all_services": allow_all_services,
+            }))
+            .send()
+            .await
+            .map_err(|e| http_err("api-key mint", e))?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            // The body may carry NyxID's reason but never our token (it was a
+            // request header, not the response). We discard it: the typed
+            // variant already states the cause, and logging a rejected-auth
+            // body risks echoing sensitive request context back into the logs.
+            tracing::error!(status = %status, "nyxid rejected the user token for api-key mint");
+            return Err(NyxIdError::UserTokenRejected);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            tracing::error!(status = %status, "nyxid api-key mint failed");
+            return Err(NyxIdError::Http(format!(
+                "api-key mint status {status}: {}",
+                &body[..body.len().min(200)]
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct MintResponse {
+            id: String,
+            full_key: String,
+        }
+        let body: MintResponse = response
+            .json()
+            .await
+            .map_err(|e| NyxIdError::Malformed(format!("api-key mint body: {e}")))?;
+
+        Ok(CreatedKey {
+            id: body.id,
+            full_key: SecretString::from(body.full_key),
+        })
+    }
+
+    /// Soft-revoke a previously minted agent API key by its id
+    /// (`DELETE {API_KEYS_PATH}/{id}`, NyxID flips `is_active=false`). Uses the
+    /// service token so revoke works at teardown even after the user's own
+    /// token has expired. Accepts both 200 and 204; a missing key (404) is
+    /// treated as already-gone (`Ok`) so a double teardown is idempotent.
+    pub async fn revoke_api_key(&self, id: &str) -> Result<(), NyxIdError> {
+        let token = self.service_token().await?;
+        let url = format!("{}{API_KEYS_PATH}/{id}", self.inner.base_url);
+        let response = self
+            .inner
+            .http
+            .delete(&url)
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| http_err("api-key revoke", e))?;
+
+        let status = response.status();
+        if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        tracing::error!(key_id = %id, status = %status, "nyxid api-key revoke failed");
+        Err(NyxIdError::Http(format!("api-key revoke status {status}")))
+    }
 }
 
 #[cfg(test)]
@@ -972,6 +1097,206 @@ mod tests {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
+    // ---- mint_user_api_key / revoke_api_key ----
+
+    #[tokio::test]
+    async fn mint_user_api_key_posts_bearer_and_body_then_maps_created_key() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(API_KEYS_PATH))
+            .and(header("authorization", "Bearer user_raw_tok"))
+            .and(body_string_contains("fkst-session-abc"))
+            .and(body_string_contains("proxy"))
+            .and(body_string_contains("allow_all_services"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "key-id-1",
+                "full_key": "nyxid_ag_deadbeefdeadbeefdeadbeef",
+                "name": "fkst-session-abc"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let raw = SecretString::from("user_raw_tok".to_string());
+        let created = client
+            .mint_user_api_key(&raw, "fkst-session-abc", "proxy", true)
+            .await
+            .expect("mint");
+        assert_eq!(created.id, "key-id-1");
+        assert_eq!(
+            created.full_key.expose_secret(),
+            "nyxid_ag_deadbeefdeadbeefdeadbeef"
+        );
+        // The minted key is a secret: its Debug must be redacted.
+        let debug = format!("{created:?}");
+        assert!(!debug.contains("nyxid_ag_"), "Debug leaked the full key");
+        assert!(debug.contains("<redacted>"));
+    }
+
+    #[tokio::test]
+    async fn mint_user_api_key_accepts_200_as_well_as_201() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(API_KEYS_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "k2", "full_key": "nyxid_ag_00"
+            })))
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        let raw = SecretString::from("tok".to_string());
+        let created = client
+            .mint_user_api_key(&raw, "n", "proxy", true)
+            .await
+            .expect("mint 200");
+        assert_eq!(created.id, "k2");
+    }
+
+    #[tokio::test]
+    async fn mint_user_api_key_401_is_user_token_rejected() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(API_KEYS_PATH))
+            .respond_with(ResponseTemplate::new(401).set_body_string("token expired"))
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        let err = client
+            .mint_user_api_key(&SecretString::from("bad".to_string()), "n", "proxy", true)
+            .await
+            .expect_err("must fail");
+        assert!(matches!(err, NyxIdError::UserTokenRejected), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn mint_user_api_key_403_is_user_token_rejected() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(API_KEYS_PATH))
+            .respond_with(
+                ResponseTemplate::new(403).set_body_string("delegated tokens cannot mint"),
+            )
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        let err = client
+            .mint_user_api_key(
+                &SecretString::from("delegated".to_string()),
+                "n",
+                "proxy",
+                true,
+            )
+            .await
+            .expect_err("must fail");
+        assert!(matches!(err, NyxIdError::UserTokenRejected), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn mint_user_api_key_500_is_generic_http_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(API_KEYS_PATH))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        let err = client
+            .mint_user_api_key(&SecretString::from("tok".to_string()), "n", "proxy", true)
+            .await
+            .expect_err("must fail");
+        assert!(matches!(err, NyxIdError::Http(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn revoke_api_key_deletes_with_service_token_and_accepts_204() {
+        let server = MockServer::start().await;
+        // The revoke uses the SERVICE token, so the client first fetches it.
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "svc_tok", "token_type": "Bearer", "expires_in": 3600
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path(format!("{API_KEYS_PATH}/key-id-1")))
+            .and(header("authorization", "Bearer svc_tok"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        client.revoke_api_key("key-id-1").await.expect("revoke 204");
+    }
+
+    #[tokio::test]
+    async fn revoke_api_key_treats_404_as_already_gone() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "svc_tok", "token_type": "Bearer", "expires_in": 3600
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path(format!("{API_KEYS_PATH}/missing")))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        client
+            .revoke_api_key("missing")
+            .await
+            .expect("404 is idempotent ok");
+    }
+
+    #[tokio::test]
+    async fn revoke_api_key_500_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "svc_tok", "token_type": "Bearer", "expires_in": 3600
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path(format!("{API_KEYS_PATH}/k")))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        let err = client.revoke_api_key("k").await.expect_err("must fail");
+        assert!(matches!(err, NyxIdError::Http(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn mint_user_api_key_never_leaks_the_raw_token_in_errors() {
+        // Point at nothing to force a transport error carrying the URL; the
+        // raw token must never appear in Display or Debug of the error.
+        let client = test_client("http://127.0.0.1:1");
+        let secret_tok = "user_raw_super_secret_token";
+        let err = client
+            .mint_user_api_key(
+                &SecretString::from(secret_tok.to_string()),
+                "n",
+                "proxy",
+                true,
+            )
+            .await
+            .expect_err("unreachable");
+        assert!(
+            !format!("{err}").contains(secret_tok),
+            "Display leaked token"
+        );
+        assert!(
+            !format!("{err:?}").contains(secret_tok),
+            "Debug leaked token"
+        );
+    }
+
     // ---- secret hygiene ----
 
     #[tokio::test]
@@ -992,6 +1317,7 @@ mod tests {
             NyxIdError::Http("status 500".to_string()),
             NyxIdError::Malformed("bad json".to_string()),
             NyxIdError::ExchangeRejected("denied".to_string()),
+            NyxIdError::UserTokenRejected,
         ];
         for err in &errors {
             let display = format!("{err}");

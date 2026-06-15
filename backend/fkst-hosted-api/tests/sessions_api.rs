@@ -691,6 +691,8 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         repo: None,
         env_scope: None,
         triggered_by: None,
+        nyxid_key_id: None,
+        nyxid_key_prefix: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,
