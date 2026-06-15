@@ -779,6 +779,40 @@ local function chain_merge_queue_if_non_empty(repo, branches, merged_pr_number)
   end
 end
 
+local function queue_starvation_cause_matches_entry(cause, entry)
+  local cause_pr = tonumber(cause and cause.head_pr_number)
+  if cause_pr == nil or type(entry) ~= "table" then
+    return false
+  end
+  return tostring(entry.pr_number or "") == tostring(cause_pr)
+    and tostring(entry.head_sha or "") == tostring(cause.head_sha or "")
+    and tostring(entry.proposal_id or "") == tostring(cause.proposal_id or "")
+    and tostring(entry.version or "") == tostring(cause.version or "")
+end
+
+local function queue_starvation_target_entry(cause, entries)
+  for _, entry in ipairs(entries or {}) do
+    if queue_starvation_cause_matches_entry(cause, entry) then
+      return entry
+    end
+  end
+  return nil
+end
+
+local function raise_queue_starvation_reconcile_only(repo, merge_ready, cause)
+  local entity = core.parse_entity_proposal_id(merge_ready and merge_ready.proposal_id)
+  if entity == nil then
+    core.log_cas_decision("merge", merge_ready and merge_ready.proposal_id or "unknown", { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    return
+  end
+  if not core.verify_pr_review_issue_claim("merge", repo, entity.issue_number, nil, merge_ready.proposal_id) then
+    return
+  end
+  local comment_request = core.build_queue_starvation_reconcile_comment_request(repo, merge_ready, cause)
+  core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  raise("github-proxy.github_pr_comment_request", comment_request)
+end
+
 local function process_merge_queue_tick(event)
   local cause = type(event and event.payload) == "table" and event.payload.cause or nil
   local cause_kind = type(cause) == "table" and tostring(cause.kind or "") or ""
@@ -816,31 +850,46 @@ local function process_merge_queue_tick(event)
       })
       return
     end
-    if head.state == "merging" then
-      core.log_line("info", "merge", head.proposal_id, "GATE", {
-        "pr=" .. tostring(head.pr_number),
-        "version=" .. tostring(head.version),
-        "outcome=skip",
-        "reason=merge-queue-head-merging",
-        "pass=poll",
-      })
-      return
-    end
+    local selected = head
     if cause_kind == "queue-starvation" then
-      core.log_line("info", "merge", head.proposal_id, "GATE", {
-        "pr=" .. tostring(head.pr_number),
-        "version=" .. tostring(head.version),
+      local cause_proposal = tostring(cause and cause.proposal_id or "")
+      selected = queue_starvation_target_entry(cause, entries)
+      if selected == nil then
+        core.log_line("info", "merge", tostring(cause_proposal ~= "" and cause_proposal or head.proposal_id), "GATE", {
+          "pr=" .. tostring(head.pr_number),
+          "reported_pr=" .. tostring(cause and cause.head_pr_number or ""),
+          "version=" .. tostring(head.version),
+          "outcome=hold",
+          "reason=queue-starvation-target-not-current",
+          "incident=" .. tostring(cause and cause.incident_identity or ""),
+          "pass=poll",
+        })
+        return
+      end
+      core.log_line("info", "merge", selected.proposal_id, "GATE", {
+        "pr=" .. tostring(selected.pr_number),
+        "version=" .. tostring(selected.version),
         "outcome=reconcile",
         "reason=queue-starvation-redrive",
         "incident=" .. tostring(cause.incident_identity or ""),
         "pass=poll",
       })
     end
-    local merge_ready = synthesize_merge_ready_from_queue_head(repo, head)
+    if selected.state == "merging" then
+      core.log_line("info", "merge", selected.proposal_id, "GATE", {
+        "pr=" .. tostring(selected.pr_number),
+        "version=" .. tostring(selected.version),
+        "outcome=skip",
+        "reason=merge-queue-head-merging",
+        "pass=poll",
+      })
+      return
+    end
+    local merge_ready = synthesize_merge_ready_from_queue_head(repo, selected)
     if merge_ready == nil or not core.is_supported_merge_ready(merge_ready) then
-      core.log_line("info", "merge", head.proposal_id, "GATE", {
-        "pr=" .. tostring(head.pr_number),
-        "version=" .. tostring(head.version),
+      core.log_line("info", "merge", selected.proposal_id, "GATE", {
+        "pr=" .. tostring(selected.pr_number),
+        "version=" .. tostring(selected.version),
         "outcome=skip",
         "reason=merge-queue-head-missing-merge-ready-fact",
         "pass=poll",
@@ -854,6 +903,10 @@ local function process_merge_queue_tick(event)
     end
     merge_ready._merge_pass = "poll"
     core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
+    if cause_kind == "queue-starvation" and not queue_starvation_cause_matches_entry(cause, head) then
+      raise_queue_starvation_reconcile_only(repo, merge_ready, cause)
+      return
+    end
     local write_mode = core.write_mode()
     local outcome = process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches, nil, {
       enforce_queue = false,
