@@ -179,4 +179,37 @@ mod tests {
         fs::write(log_dir.join("hello-1-2-0.log"), "a\nb\n").expect("write log");
         assert_eq!(tail_child_logs(rt.path(), 0).as_deref(), Some(""));
     }
+
+    /// Issue #109 log audit (defense in depth): the spawn/refresh paths only ever
+    /// log the goal token-file PATH and a `has_goal_env` boolean — never the
+    /// token or a struct carrying it. This nails down the load-bearing guarantee
+    /// the whole hardening rests on: a `{:?}` of `GoalEnv` (the one struct that
+    /// holds the live credential) redacts the token, so a stray debug-log here or
+    /// in any spawn path can never surface it.
+    #[test]
+    fn goal_env_debug_never_leaks_the_token_to_logs() {
+        use crate::engine::GoalEnv;
+        use secrecy::SecretString;
+        use std::path::PathBuf;
+
+        let goal_env = GoalEnv {
+            github_token: SecretString::from("ghs_logs_audit_secret".to_string()),
+            github_token_file: PathBuf::from("/run/session/github-token"),
+            goal_file: PathBuf::from("/run/session/goal.json"),
+        };
+        let rendered = format!("{goal_env:?}");
+        assert!(
+            !rendered.contains("ghs_logs_audit_secret"),
+            "no log/debug path may render the token: {rendered}"
+        );
+        assert!(
+            rendered.contains("<redacted>"),
+            "token must show <redacted>"
+        );
+        // The token-file path is the only token-related thing that may be logged.
+        assert!(
+            rendered.contains("/run/session/github-token"),
+            "token-file path remains loggable for diagnostics: {rendered}"
+        );
+    }
 }

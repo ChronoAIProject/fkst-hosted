@@ -1518,7 +1518,24 @@ async fn drive_inner(
             // pod is going away and the engine must not be orphaned silently.
             line = next_stdout_line(&mut stdout_rx) => {
                 match line {
-                    Some(raw) => journal_stdout_line(&mut journaler, &raw).await,
+                    Some(raw) => {
+                        // Reactive re-mint (#109): a GitHub auth failure on the
+                        // engine's stdout re-mints the goal token immediately
+                        // (cooldown-gated), instead of waiting for the 55-min
+                        // interval loop to catch the expiry. Checked BEFORE
+                        // journaling so a real 401 cannot be swallowed by it.
+                        if let Some(ref mut gi) = goal_info {
+                            if is_github_auth_failure(&raw) {
+                                tracing::warn!(
+                                    session_id = %id,
+                                    goal_id = %gi.goal_id,
+                                    "github auth failure detected on engine output; re-minting goal token"
+                                );
+                                reactive_refresh_goal_token(inner, gi).await;
+                            }
+                        }
+                        journal_stdout_line(&mut journaler, &raw).await;
+                    }
                     // EOF/closed: park this arm (recv on a closed channel
                     // answers instantly — polling it again would busy-loop).
                     None => stdout_rx = None,
@@ -2042,11 +2059,6 @@ async fn goal_status_sync(
     }
 }
 
-/// Refresh the GitHub installation token for a goal session. Minted fresh
-/// when the refresh interval has elapsed and the cooldown since the last
-/// attempt has passed. Writes `<token_path>.tmp` then `fs::rename` for
-/// atomicity on the same filesystem. Failures are WARN'd; the engine keeps
-/// using the previous token.
 /// Build the [`GoalContext`] for a goal session: load the goal (for its
 /// title/description, written into `goal.json`) and mint a fresh GitHub App
 /// installation token for its repo. Used IDENTICALLY by the initial start and
@@ -2094,15 +2106,44 @@ async fn build_goal_context(inner: &Arc<Inner>, gi: &mut GoalDrive) -> Result<Go
     })
 }
 
+/// Time-based refresh of the GitHub installation token for a goal session.
+/// Minted fresh ONLY when the refresh interval has elapsed (token nearing the
+/// ~60-min TTL) AND the cooldown since the last attempt has passed. This is the
+/// periodic-loop entry; reactive (auth-failure-driven) refreshes go through
+/// [`reactive_refresh_goal_token`], which skips the interval gate.
 async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
-    let now = std::time::Instant::now();
     if drive.minted_at.elapsed() < TOKEN_REFRESH_INTERVAL {
         return;
     }
+    mint_and_rewrite_token(inner, drive, "interval").await;
+}
+
+/// Reactive re-mint (issue #109): a detected GitHub auth failure for the
+/// session's work re-mints the token IMMEDIATELY — BYPASSING the 55-min
+/// interval gate — rather than waiting for the periodic loop to catch the
+/// expiry. The 60s cooldown is still respected so a burst of auth-failure
+/// signals cannot hammer the GitHub mint API. Replaces the previous
+/// WARN-and-keep-the-stale-token behaviour for a true 401/403.
+///
+/// TODO(#107): when the credential-delivery/rotation work lands an on-demand
+/// mint entry (e.g. a credential-helper callback), this hook is the integration
+/// point — route that signal here so the re-mint stays unified.
+async fn reactive_refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
+    mint_and_rewrite_token(inner, drive, "auth-failure").await;
+}
+
+/// Shared mint-and-rewrite core for both the interval and reactive refresh
+/// paths. Respects the per-attempt cooldown, mints a fresh installation token,
+/// and atomically rewrites the token file (`<token_path>.tmp` then
+/// `fs::rename`, atomic on the same filesystem). Failures are WARN'd and the
+/// engine keeps using the previous token. `reason` tags the trigger in logs.
+async fn mint_and_rewrite_token(inner: &Inner, drive: &mut GoalDrive, reason: &str) {
+    // Cooldown gate (applies to BOTH paths): never hammer the mint API more
+    // than once per cooldown window, even on a flood of auth-failure signals.
     if drive.last_attempt.elapsed() < TOKEN_REFRESH_COOLDOWN {
         return;
     }
-    drive.last_attempt = now;
+    drive.last_attempt = std::time::Instant::now();
 
     let Some(gs) = inner.goal_support.get() else {
         return;
@@ -2126,6 +2167,7 @@ async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
                         drive.minted_at = std::time::Instant::now();
                         tracing::info!(
                             goal_id = %drive.goal_id,
+                            reason,
                             "github token refreshed"
                         );
                     }
@@ -2153,11 +2195,29 @@ async fn refresh_goal_token(inner: &Inner, drive: &mut GoalDrive) {
             tracing::warn!(
                 goal_id = %drive.goal_id,
                 repo = %repo_ref,
+                reason,
                 error = %error,
                 "token mint failed; engine keeps previous token"
             );
         }
     }
+}
+
+/// Detect a GitHub authentication/authorization failure in one engine stdout
+/// line (issue #109). The engine surfaces its GitHub work on stdout; a 401/403
+/// or an expired/bad-credentials message is the reactive-re-mint signal. Matched
+/// case-insensitively against the well-known GitHub auth-failure phrases so a
+/// real expiry triggers an immediate re-mint instead of waiting for the
+/// time-based loop. Conservative by design: only unambiguous auth markers match,
+/// so ordinary chatter never spuriously burns a mint attempt (the cooldown is
+/// the additional backstop).
+fn is_github_auth_failure(raw: &[u8]) -> bool {
+    let line = String::from_utf8_lossy(raw).to_ascii_lowercase();
+    line.contains("bad credentials")
+        || line.contains("401 unauthorized")
+        || line.contains("http 401")
+        || line.contains("requires authentication")
+        || (line.contains("github") && line.contains("token") && line.contains("expired"))
 }
 
 // ---------------------------------------------------------------------------
@@ -2548,6 +2608,103 @@ mod tests {
         assert!(
             profile.is_empty(),
             "no vault wired => empty env profile (legacy behaviour)"
+        );
+    }
+
+    // ---- reactive goal-token re-mint (issue #109) -----------------------------
+
+    /// The auth-failure detector recognises the well-known GitHub 401/403
+    /// markers (case-insensitively) and ignores ordinary engine chatter, so a
+    /// real expiry triggers a re-mint while normal output never burns one.
+    #[test]
+    fn is_github_auth_failure_matches_only_real_auth_markers() {
+        assert!(is_github_auth_failure(b"GitHub API error: Bad credentials"));
+        assert!(is_github_auth_failure(b"response: 401 Unauthorized"));
+        assert!(is_github_auth_failure(b"HTTP 401 from api.github.com"));
+        assert!(is_github_auth_failure(b"Requires authentication"));
+        assert!(is_github_auth_failure(
+            b"the github installation token expired"
+        ));
+        // Ordinary chatter must NOT match (no spurious mint attempts).
+        assert!(!is_github_auth_failure(b"RAISED: eyJkZXB0IjoiaGVsbG8ifQ=="));
+        assert!(!is_github_auth_failure(b"consumer started dept=hello"));
+        assert!(!is_github_auth_failure(b"token written successfully"));
+    }
+
+    /// A service with no goal-support wired: `mint_and_rewrite_token` still runs
+    /// its cooldown gate + stamps `last_attempt` before the (absent) mint, so
+    /// this exercises the gating without any GitHub/Mongo wiring.
+    async fn no_goal_support_service() -> SessionService {
+        let db = crate::db::Db {
+            database: mongodb::Client::with_uri_str("mongodb://localhost:27017")
+                .await
+                .expect("client")
+                .database("sessions_unit_test"),
+        };
+        SessionService::new(
+            SessionRepo::new(&db),
+            PackageRepository::new(&db.database),
+            EngineConfig::default(),
+        )
+    }
+
+    fn goal_drive_with(minted_ago: Duration, last_attempt_ago: Duration) -> GoalDrive {
+        let now = std::time::Instant::now();
+        GoalDrive {
+            goal_id: bson::Uuid::new(),
+            repo: RepoRef {
+                owner: "acme".to_string(),
+                name: "site".to_string(),
+            },
+            // Non-empty so the path is not short-circuited by the
+            // "runtime dir not yet established" guard.
+            token_path: PathBuf::from("/run/session/github-token"),
+            minted_at: now - minted_ago,
+            last_attempt: now - last_attempt_ago,
+        }
+    }
+
+    /// A simulated auth failure triggers an IMMEDIATE re-mint attempt even when
+    /// the 55-min interval has NOT elapsed (the reactive path bypasses the
+    /// interval gate). The observable is `last_attempt` advancing: the gate is
+    /// passed and the attempt stamp is taken before the mint fires.
+    #[tokio::test]
+    async fn reactive_refresh_bypasses_the_interval_gate() {
+        let service = no_goal_support_service().await;
+        // minted just now (interval NOT elapsed); last attempt long ago
+        // (cooldown clear).
+        let mut drive = goal_drive_with(Duration::ZERO, Duration::from_secs(3600));
+        let before = drive.last_attempt;
+
+        // The periodic path would no-op (interval not elapsed)...
+        refresh_goal_token(&service.inner, &mut drive).await;
+        assert_eq!(
+            drive.last_attempt, before,
+            "the interval-gated path must NOT attempt while the interval is unmet"
+        );
+
+        // ...but the reactive path attempts immediately despite the fresh mint.
+        reactive_refresh_goal_token(&service.inner, &mut drive).await;
+        assert!(
+            drive.last_attempt > before,
+            "the reactive path must attempt a re-mint immediately, bypassing the interval gate"
+        );
+    }
+
+    /// The reactive path still RESPECTS the 60s cooldown: a second auth-failure
+    /// signal arriving inside the cooldown window does not take another attempt
+    /// (no hammering the GitHub mint API on a burst of 401s).
+    #[tokio::test]
+    async fn reactive_refresh_respects_the_cooldown() {
+        let service = no_goal_support_service().await;
+        // A very recent attempt (cooldown NOT elapsed); interval irrelevant.
+        let mut drive = goal_drive_with(Duration::ZERO, Duration::from_millis(10));
+        let before = drive.last_attempt;
+
+        reactive_refresh_goal_token(&service.inner, &mut drive).await;
+        assert_eq!(
+            drive.last_attempt, before,
+            "a re-mint inside the cooldown window must be suppressed"
         );
     }
 }

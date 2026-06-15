@@ -25,6 +25,7 @@
 //!   untested (spike Q8), so both variables are removed from the child env.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -32,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use nix::sys::signal::{kill, killpg, Signal};
 use nix::unistd::Pid;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
 
@@ -45,18 +46,34 @@ use crate::engine::error::{truncate_output_lossy, RunnerError};
 pub const OUTPUT_RING_CAP_BYTES: usize = 64 * 1024;
 
 /// Environment variables forwarded to the supervise child for goal sessions.
-/// The `github_token` is a bare `String` (not `SecretString`) because the
-/// process module is a low-level OS abstraction: the secret is already
-/// materialized on disk by the caller and must be set in the child env. The
-/// caller is responsible for zeroing/protecting the token at higher layers.
-#[derive(Debug, Clone)]
+/// The `github_token` is held in a [`SecretString`] (issue #109) so it never
+/// leaks through a stray `Debug`/log of this struct: it is exposed at exactly
+/// one point — the `.env("GITHUB_TOKEN", ...)` set-site in
+/// [`apply_isolated_env`] — and the manual [`fmt::Debug`] below redacts it. The
+/// value is still materialized on disk by the caller (the token file the engine
+/// reads); this type only carries it into the child environment.
+#[derive(Clone)]
 pub struct GoalEnv {
-    /// `GITHUB_TOKEN` value for the engine's GitHub integration.
-    pub github_token: String,
+    /// `GITHUB_TOKEN` value for the engine's GitHub integration. Secret: only
+    /// the [`apply_isolated_env`] set-site exposes it; `Debug` redacts it.
+    pub github_token: SecretString,
     /// Path to the token file, forwarded as `FKST_GITHUB_TOKEN_FILE`.
     pub github_token_file: PathBuf,
     /// Path to `goal.json`, forwarded as `FKST_GOAL_FILE`.
     pub goal_file: PathBuf,
+}
+
+impl fmt::Debug for GoalEnv {
+    /// Redacts the secret `github_token` (mirrors `github_app/config.rs`) while
+    /// keeping the non-secret path fields visible for diagnostics. A derived
+    /// `Debug` would print the raw token through any `{:?}` of this struct.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GoalEnv")
+            .field("github_token", &"<redacted>")
+            .field("github_token_file", &self.github_token_file)
+            .field("goal_file", &self.goal_file)
+            .finish()
+    }
 }
 
 /// Byte cap of a SINGLE output line fed into the ring (8 KiB): a newline-free
@@ -326,9 +343,11 @@ fn apply_isolated_env(
         }
     }
 
-    // 3. Goal-session GitHub wiring (platform-owned, reserved keys).
+    // 3. Goal-session GitHub wiring (platform-owned, reserved keys). The token
+    // is a SecretString (#109): this is the SINGLE point that exposes it, only
+    // to hand the raw value to the child env.
     if let Some(env) = goal {
-        cmd.env("GITHUB_TOKEN", &env.github_token)
+        cmd.env("GITHUB_TOKEN", env.github_token.expose_secret())
             .env("FKST_GITHUB_TOKEN_FILE", &env.github_token_file)
             .env("FKST_GOAL_FILE", &env.goal_file);
     }
@@ -1200,6 +1219,74 @@ sleep 30"#;
         let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
     }
 
+    /// Issue #109: `GoalEnv` redacts the secret token in `Debug`/`{:?}` while
+    /// keeping the non-secret path fields visible, so a stray debug-log of the
+    /// struct can never leak the credential.
+    #[test]
+    fn goal_env_debug_redacts_the_token() {
+        let goal_env = GoalEnv {
+            github_token: SecretString::from("ghs_supersecret_token_value".to_string()),
+            github_token_file: PathBuf::from("/run/session/github-token"),
+            goal_file: PathBuf::from("/run/session/goal.json"),
+        };
+        let debug = format!("{goal_env:?}");
+        assert!(
+            !debug.contains("ghs_supersecret_token_value"),
+            "Debug must NOT contain the token value: {debug}"
+        );
+        assert!(debug.contains("<redacted>"), "Debug must show <redacted>");
+        // The non-secret paths stay visible for diagnostics.
+        assert!(
+            debug.contains("/run/session/github-token"),
+            "token file path visible: {debug}"
+        );
+        assert!(
+            debug.contains("/run/session/goal.json"),
+            "goal file path visible: {debug}"
+        );
+    }
+
+    /// Issue #109: the secret token still reaches the child env intact — the
+    /// `SecretString` is exposed at exactly the `.env("GITHUB_TOKEN", ...)`
+    /// set-site, so the spawned process sees the correct raw value.
+    #[tokio::test]
+    async fn spawn_supervise_sets_github_token_from_the_goal_env_secret() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pkg = tempfile::tempdir().expect("pkg dir");
+        let rt = tempfile::tempdir().expect("rt dir");
+        let script = stub(dir.path(), "goal-token.sh", ENV_DUMP_BODY);
+        let token_file = rt.path().join("github-token");
+        let goal_file = rt.path().join("goal.json");
+        let goal_env = GoalEnv {
+            github_token: SecretString::from("ghs_exposed_to_child".to_string()),
+            github_token_file: token_file,
+            goal_file,
+        };
+
+        let mut spawned = spawn_supervise(
+            &script,
+            pkg.path(),
+            &[pkg.path().to_path_buf()],
+            rt.path(),
+            &empty_env(),
+            Some(&goal_env),
+            None,
+        )
+        .expect("spawn");
+
+        assert!(
+            wait_until(|| spawned.output.snapshot().contains("ENVDUMP_DONE")).await,
+            "env dump must surface"
+        );
+        let snap = spawned.output.snapshot();
+        assert!(
+            snap.contains("GHTOK=ghs_exposed_to_child"),
+            "the exposed token must reach GITHUB_TOKEN in the child env:\n{snap}"
+        );
+
+        let _ = reap_with_grace(&mut spawned.child, spawned.pid, Duration::from_secs(5)).await;
+    }
+
     /// Issue #112: a `Some(codex_home)` is set as a per-session platform var on
     /// the supervise child and WINS over the allow-listed host `CODEX_HOME`
     /// (the parent's value never reaches the child once the driver overrides
@@ -2039,7 +2126,18 @@ exit 1"#,
             tokio::select! {
                 res = &mut fut => panic!("conformance must still be in flight, got {res:?}"),
                 _ = async {
-                    while !pid_file.exists() {
+                    // Wait for the breadcrumb to be present AND written: the
+                    // shell creates the file (empty) before `echo $$` fills it,
+                    // so gating on existence alone races the write and can read
+                    // an empty file under heavy parallel load (a flaky panic in
+                    // the parse below).
+                    loop {
+                        if fs::read_to_string(&pid_file)
+                            .ok()
+                            .is_some_and(|s| !s.trim().is_empty())
+                        {
+                            break;
+                        }
                         tokio::time::sleep(Duration::from_millis(25)).await;
                     }
                 } => {}
