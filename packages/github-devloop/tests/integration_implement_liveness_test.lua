@@ -181,6 +181,45 @@ return {
     t.is_true(comment.payload.body:find(core.state_marker(current.proposal_id, "impl-failed", current.dedup_key), 1, true) ~= nil)
   end,
 
+  test_implementing_liveness_redrive_takes_over_orphaned_owner_marker = function()
+    local current = ready()
+    local event = liveness_redrive_ready(current)
+    local branch = deterministic_branch_for(current)
+    local comments = {
+      core.state_marker(current.proposal_id, "implementing", current.dedup_key),
+      core.implementing_marker(current.proposal_id, current.dedup_key, branch, "abc123", "dev", "abc123"),
+    }
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
+    mock_missing_remote_branch(branch)
+    mock_fresh_implement_worktree()
+    mock_implement_codex(0, "implemented after orphan takeover")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
+
+    local result = run_implement(event, opts("implement-liveness-redrive-orphaned-owner"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
+    t.eq(core.implement_attempt_count({ comment }, current.proposal_id, current.dedup_key), 1)
+    t.eq(find_raise(result.raises, "devloop_open_pr").payload.head_sha, "def456")
+  end,
+
+  test_implementing_liveness_redrive_skips_live_attempt = function()
+    local current = ready()
+    local event = liveness_redrive_ready(current)
+    local comments = {
+      core.state_marker(current.proposal_id, "implementing", current.dedup_key),
+      core.implement_attempt_marker(current.proposal_id, current.dedup_key, 1, tostring(now())),
+    }
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
+
+    local result = run_implement(event, opts("implement-liveness-redrive-live-attempt"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(#result.raises, 0)
+  end,
+
   test_implementing_redelivery_recovers_local_branch_before_attempt_budget = function()
     local event = ready()
     local comments, branch = implementing_comments(event, {
