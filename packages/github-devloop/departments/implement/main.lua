@@ -3,6 +3,7 @@ local core = require("core")
 local M = {}
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
+local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
 
 M.spec = {
@@ -136,6 +137,34 @@ local function ready_for_implementation_version(ready, version)
   return copy
 end
 
+local function stale_version_mismatch_attempt(event)
+  return tonumber(event and event.attempt) or 1
+end
+
+local function handle_implementing_version_mismatch(event, ready, state, expected_version)
+  local attempt = stale_version_mismatch_attempt(event)
+  local message = "ready event does not match current implementing version"
+  if attempt < MAX_VERSION_MISMATCH_DELIVERIES then
+    core.log_error_fact("warn", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
+      source_ref = ready.source_ref,
+      attempt = attempt,
+      terminal = false,
+    })
+    core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", message)
+    return
+  end
+  core.log_error_fact("error", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
+    source_ref = ready.source_ref,
+    attempt = attempt,
+    terminal = true,
+  })
+  core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "fail-closed(version-mismatch-budget)", message)
+  error("github-devloop: implement-version-mismatch: ready event version "
+    .. tostring(expected_version or "")
+    .. " does not match current implementing version "
+    .. tostring(state and state.version or ""))
+end
+
 local function implementing_takeover_guard(current, proposal_id, dedup_key)
   local attempt = core.latest_implement_attempt_fact(current.comments, proposal_id, dedup_key)
   if attempt ~= nil then
@@ -169,6 +198,7 @@ local function implementing_recovery_ready(ready, state, current)
     proposal_id = ready.proposal_id,
     dedup_key = current_version,
     source_ref = ready.source_ref,
+    impl_retry_attempt = core.implementation_retry_attempt(current_version),
   }).dedup_key
   if tostring(ready.dedup_key or "") ~= replay_version then
     return nil, nil
@@ -613,7 +643,7 @@ local function process_ready_event(event)
         core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(liveness-redrive)", recovery_reason)
       end
       if tostring(state.version or "") ~= tostring(marker_ready.dedup_key or "") then
-        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "ready event does not match current implementing version")
+        handle_implementing_version_mismatch(event, ready, state, marker_ready.dedup_key)
         return
       end
       local link = core.pr_link_fact(current.comments, ready.proposal_id)

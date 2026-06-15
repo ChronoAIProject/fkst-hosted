@@ -398,6 +398,66 @@ return {
     t.eq(find_raise(result.raises, "devloop_open_pr") ~= nil, true)
   end,
 
+  test_observe_reraises_reimplement_attempt_preserving_suffix = function()
+    local event = ready()
+    local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
+    local stuck = {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, tostring(now() - 7201)),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-721-reimplement-redrive"))
+    t.eq(result.exit_code, 0)
+    local raised = find_raise(result.raises, "devloop_ready")
+    t.eq(raised.payload.proposal_id, event.proposal_id)
+    t.eq(raised.payload.dedup_key, retry_version)
+    t.eq(raised.payload.impl_retry_attempt, 2)
+  end,
+
+  test_observe_reraised_reimplement_ready_round_trips_into_implement_without_skip_stale = function()
+    local event = ready()
+    local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
+    local branch = deterministic_branch_for(event)
+    local stuck = {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, tostring(now() - 7201)),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
+    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-721-roundtrip"))
+    t.eq(observed.exit_code, 0)
+    local reraised = find_raise(observed.raises, "devloop_ready")
+    t.eq(reraised ~= nil, true)
+
+    local progress = {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, "1"),
+      core.implementing_marker(event.proposal_id, retry_version, branch, "abc123", "dev", "abc123"),
+    }
+    mock_issue_implement({ "fkst-dev:implementing" }, progress)
+    mock_remote_branch(branch, "abc123")
+
+    local result = run_implement(reraised.payload, opts("implement-721-roundtrip"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    local kickoff = find_raise(result.raises, "devloop_open_pr")
+    t.eq(kickoff ~= nil, true)
+    t.eq(kickoff.payload.head_sha, "abc123")
+  end,
+
+  test_implementing_version_mismatch_fails_closed_after_delivery_budget = function()
+    local event = ready()
+    local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, "1"),
+    })
+
+    local result = run_implement(event, opts("implement-721-version-mismatch-budget"), nil, { attempt = 3 })
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+  end,
+
   test_observe_skips_implementing_state_marker_without_progress_facts = function()
     local event = ready({
       dedup_key = "ready/consensus-github-devloop/issue/owner/repo/42/2026-01-01T00-00-00Z",

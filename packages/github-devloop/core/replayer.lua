@@ -541,16 +541,14 @@ local function replay_implementing(dept, issue, state, row, facts)
   end
   -- Pass the INNER (unwrapped) version: build_devloop_ready_payload re-applies
   -- the "ready/" wrapper, so re-wrapping the already-wrapped state.version would
-  -- double-wrap it ("ready/ready/...") and the implement receiver would reject
-  -- the re-drive as skip-stale(version-mismatch) forever (#718). Stripping one
-  -- wrapper here makes the re-raised dedup_key reproduce state.version exactly so
-  -- the version-CAS matches and the stuck first-attempt implement re-enters.
-  -- (The deeper /reimplement/N variant -- the receiver also strips that suffix
-  -- unless impl_retry_attempt is re-supplied -- is a tracked follow-up.)
+  -- double-wrap it ("ready/ready/..."). Preserve the retry suffix as structured
+  -- attempt metadata so re-drives reproduce frozen "ready/.../reimplement/N"
+  -- markers exactly.
   local payload = M.build_devloop_ready_payload({
     proposal_id = proposal_id,
     dedup_key = M.ready_payload_inner_version(state.version),
     source_ref = issue.source_ref,
+    impl_retry_attempt = M.implementation_retry_attempt(state.version),
   })
   M.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(liveness-expired)", "implement attempt exceeded liveness budget")
   return raise_effects(dept, proposal_id, "implementing", state.version, { add = {}, remove = {} }, {
