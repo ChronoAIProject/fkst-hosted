@@ -98,7 +98,7 @@ local function mock_context_bundle(payload)
     stderr = "",
     exit_code = 0,
   })
-  entity_read_mocks.mock_issue_list_command(helpers.t, helpers.core.gh_issue_list_intake_cmd(repo, 100), {})
+  entity_read_mocks.mock_issue_board_digest_list(helpers.t, repo, {})
   entity_read_mocks.mock_issue_list_command(helpers.t, helpers.core.gh_issue_list_recent_closed_cmd(repo, 30), {})
   for _ = 1, 12 do
     helpers.t.mock_command("touch ", ok)

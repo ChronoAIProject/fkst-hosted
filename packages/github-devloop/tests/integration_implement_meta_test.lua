@@ -456,7 +456,9 @@ return {
     assert_implement_attempt(result.raises, event)
     assert_open_pr_kickoff(result.raises, event, branch, "def456")
     t.eq(count_calls("git worktree add"), 1)
-    t.eq(count_calls("git worktree remove --force"), 1)
+    -- 2 = removing the one non-current-runtime stale worktree, plus the idempotent
+    -- force-clean of the target path before `git worktree add` (#677).
+    t.eq(count_calls("git worktree remove --force"), 2)
     t.eq(count_calls("reset --hard"), 1)
     t.eq(count_calls("clean -fd"), 1)
 
@@ -493,7 +495,9 @@ return {
     t.eq(#result.raises, 5)
     assert_implement_attempt(result.raises, event)
     assert_open_pr_kickoff(result.raises, event, branch, "def456")
-    t.eq(count_calls("git worktree remove --force"), 2)
+    -- 3 = removing the two non-current-runtime stale worktrees, plus the idempotent
+    -- force-clean of the target path before `git worktree add` (#677).
+    t.eq(count_calls("git worktree remove --force"), 3)
     t.eq(count_calls("git worktree add"), 1)
     t.eq(count_calls("reset --hard"), 1)
     t.eq(count_calls("clean -fd"), 1)

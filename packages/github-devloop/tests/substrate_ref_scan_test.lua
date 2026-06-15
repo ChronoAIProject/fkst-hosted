@@ -1,7 +1,7 @@
 local t = fkst.test
 local core = require("core")
 
-local current_pin = "bce8afb5ce11577b8b3f9a3ea4cceffcd362077a"
+local current_pin = "216cac9681bf43d7166472d7597a684cd987b0d1"
 local target_sha = "1234567890abcdef1234567890abcdef12345678"
 local base_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 local old_branch_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

@@ -476,6 +476,13 @@ return {
     t.eq(core.git_worktree_clean_cmd(worktree_path), "git -C '" .. worktree_path .. "' clean -fd")
     t.eq(core.git_worktree_list_cmd(), "git worktree list --porcelain")
     t.is_true(core.git_worktree_add_remote_branch_cmd(worktree_path, "origin", deterministic_branch, true):find("git worktree add --force -B", 1, true) ~= nil)
+    -- #677: idempotent clear of the target worktree path before `git worktree add`,
+    -- robust to an orphan dir (present on disk but unregistered) as well as a
+    -- registered worktree; must remove --force, rm -rf, and prune, and exit 0.
+    local force_clean = core.git_worktree_force_clean_cmd(worktree_path)
+    t.is_true(force_clean:find("git worktree remove --force '" .. worktree_path .. "'", 1, true) ~= nil)
+    t.is_true(force_clean:find("rm -rf '" .. worktree_path .. "'", 1, true) ~= nil)
+    t.is_true(force_clean:find("git worktree prune", 1, true) ~= nil)
     local list = "worktree /tmp/main\nHEAD abc123\nbranch refs/heads/dev\n\n"
       .. "worktree " .. worktree_path .. "\nHEAD def456\nbranch refs/heads/" .. deterministic_branch .. "\n\n"
     t.eq(core.find_worktree_for_branch(list, deterministic_branch), worktree_path)

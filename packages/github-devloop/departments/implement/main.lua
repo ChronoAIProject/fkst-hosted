@@ -256,12 +256,14 @@ local function prepare_worktree(repo, issue_number, ready, branch, base_head)
         "reason=reusing current-runtime deterministic worktree",
       })
     else
+      exec_sync({ cmd = core.git_worktree_force_clean_cmd(worktree), timeout = 60 })
       local worktree_result = exec_sync({ cmd = core.git_worktree_add_existing_branch_cmd(worktree, branch), timeout = 60 })
       if worktree_result.exit_code ~= 0 then
         error("github-devloop: git worktree add failed: " .. tostring(worktree_result.stderr))
       end
     end
   else
+    exec_sync({ cmd = core.git_worktree_force_clean_cmd(worktree), timeout = 60 })
     local worktree_result = exec_sync({ cmd = core.git_worktree_add_new_branch_cmd(worktree, branch, base_head), timeout = 60 })
     if worktree_result.exit_code ~= 0 then
       error("github-devloop: git worktree add failed: " .. tostring(worktree_result.stderr))
