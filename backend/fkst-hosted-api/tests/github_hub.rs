@@ -216,6 +216,7 @@ async fn app(server: MockServer) -> TestApp {
         }),
         authz: Authorizer::new(Some(nyxid)),
         github_app: None,
+        github_app_webhook_secret: None,
         goals,
         engine: EngineConfig::default(),
         llm: None,

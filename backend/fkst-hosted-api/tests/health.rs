@@ -54,6 +54,7 @@ async fn test_router() -> axum::Router {
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
+        github_app_webhook_secret: None,
         goals,
         engine: EngineConfig::default(),
         llm: None,

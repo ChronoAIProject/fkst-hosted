@@ -68,6 +68,54 @@ impl fmt::Debug for InstallationToken {
     }
 }
 
+/// Resolved installation coverage for a repo, returned by [`InstallationStore`]
+/// lookups. `account_type` lets a caller distinguish an org-owned installation
+/// (owner-gated install) from a personal one without re-querying GitHub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoredInstallation {
+    pub id: InstallationId,
+    /// `true` when the account is an organization (vs a personal user account).
+    pub is_organization: bool,
+    /// `true` when GitHub has suspended the installation (cannot mint tokens).
+    pub suspended: bool,
+}
+
+/// Persistence seam for GitHub App installations (issue #108). The token
+/// service ([`super::GithubAppTokens`]) resolves an installation from this
+/// store BEFORE probing the GitHub API and evicts the persisted record when an
+/// installation is gone, all WITHOUT depending on MongoDB directly — the
+/// concrete store is injected. Tests use an in-memory fake; production uses the
+/// Mongo-backed `MongoInstallationStore` (`crate::db`).
+#[async_trait]
+pub trait InstallationStore: Send + Sync {
+    /// Look up the installation covering `owner/repo`, if one is persisted and
+    /// not suspended. `Ok(None)` means "not known" — the caller falls back to
+    /// the on-demand GitHub probe. An error is the store's own failure
+    /// (logged + propagated; never silently treated as a miss).
+    async fn lookup_repo(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Option<StoredInstallation>, GithubAppError>;
+
+    /// Persist that `owner/repo` is covered by `installation_id`, learned from
+    /// an on-demand GitHub probe (a persistence miss). Idempotent and
+    /// non-destructive: it must never downgrade a richer webhook-authored record
+    /// (correct account type / `all` selection) — it only ensures the repo is
+    /// recorded so the next resolve is a persistence hit and survives a restart.
+    async fn remember_repo(
+        &self,
+        owner: &str,
+        repo: &str,
+        installation_id: InstallationId,
+    ) -> Result<(), GithubAppError>;
+
+    /// Forget any persisted coverage of `owner/repo` (an installation/repo was
+    /// removed). Best-effort: a store failure is logged and surfaced so the
+    /// caller can decide, but the in-memory cache eviction still proceeds.
+    async fn forget_repo(&self, owner: &str, repo: &str) -> Result<(), GithubAppError>;
+}
+
 /// Abstract GitHub API transport. `HttpGithubApi` is the production impl;
 /// tests inject a fake.
 #[async_trait]

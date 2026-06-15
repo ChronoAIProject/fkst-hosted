@@ -809,9 +809,12 @@ async fn trigger(
             )
             .map_err(AppError::Validation)?;
 
+            // Whether the new repo is owned by an org (drives the install-hint
+            // wording: an org install is owner-gated per #110).
+            let is_org_repo = spec.org_login.is_some();
             // Idempotency: if the goal already has a repo matching the requested
             // name, skip creation.
-            if let Some(ref existing_repo) = goal.repo {
+            let created = if let Some(ref existing_repo) = goal.repo {
                 let matches = if let Some(ref org) = spec.org_login {
                     existing_repo.name == spec.name && existing_repo.owner == *org
                 } else {
@@ -830,7 +833,42 @@ async fn trigger(
                 }
             } else {
                 create_new_repo(&state, &ctx, &goal, spec).await?
+            };
+
+            // New-repo install bridge (#108): a repo created on the user's
+            // behalf does NOT guarantee the fkst-hosted App is installed on it
+            // — installation is a separate, interactive consent. Probe now and,
+            // when the App is not installed (or its `administration` permission
+            // is still pending an org owner's approval), STOP with an actionable
+            // hint rather than letting the later token mint surface a generic
+            // error. We do not auto-install (GitHub requires interactive
+            // consent).
+            if let Some(github_app) = state.github_app.as_ref() {
+                let owner_repo = format!("{}/{}", created.owner, created.name);
+                match github_app.probe_installation(&owner_repo).await {
+                    Ok(crate::github_app::InstallationProbe::Installed) => {}
+                    Ok(crate::github_app::InstallationProbe::NotInstalled { install_url }) => {
+                        return Err(AppError::Unprocessable(install_hint_message(
+                            &created.owner,
+                            is_org_repo,
+                            false,
+                            install_url,
+                        )));
+                    }
+                    Ok(crate::github_app::InstallationProbe::AwaitingApproval) => {
+                        return Err(AppError::Unprocessable(install_hint_message(
+                            &created.owner,
+                            is_org_repo,
+                            true,
+                            github_app.install_url(),
+                        )));
+                    }
+                    // Auth/rate-limit/transport: map through the normal path.
+                    Err(error) => return Err(AppError::from(error)),
+                }
             }
+
+            created
         }
     };
 
@@ -911,6 +949,52 @@ async fn trigger(
             session_status: "pending",
         }),
     ))
+}
+
+/// Build the actionable "install the App" hint (#108) for a freshly-created
+/// repo the App is not yet (fully) installed on.
+///
+/// - `owner`: the new repo's owner login (a user or an org).
+/// - `is_org_repo`: the repo is under an organization — the install is
+///   OWNER-gated. Because the App requests the `administration` permission
+///   (#110), repo admins are excluded; only an org **owner** can install or
+///   approve it, and a non-owner can merely *request* it. The copy therefore
+///   tells the caller to ask an org owner — it never implies self-install.
+/// - `awaiting_approval`: an installation EXISTS but the requested permission is
+///   still pending the owner's approval (a distinct state from "not installed").
+/// - `install_url`: the App's install URL when the slug is configured.
+fn install_hint_message(
+    owner: &str,
+    is_org_repo: bool,
+    awaiting_approval: bool,
+    install_url: Option<String>,
+) -> String {
+    let url_suffix = install_url
+        .map(|url| format!(" ({url})"))
+        .unwrap_or_default();
+    match (is_org_repo, awaiting_approval) {
+        (true, true) => format!(
+            "The repository was created, but the fkst-hosted GitHub App's required \
+             permission is still pending approval for the `{owner}` organization. Ask an \
+             organization OWNER to approve the updated permissions for `{owner}`, then retry.\
+             {url_suffix}"
+        ),
+        (true, false) => format!(
+            "The repository was created, but the fkst-hosted GitHub App is not installed on \
+             the `{owner}` organization. Ask an organization OWNER to install/approve the \
+             fkst-hosted App for `{owner}` (org installs are owner-gated; a non-owner can only \
+             request it), then retry.{url_suffix}"
+        ),
+        (false, true) => format!(
+            "The repository was created, but the fkst-hosted GitHub App's required permission \
+             is still pending your approval. Approve the updated permissions, then retry.\
+             {url_suffix}"
+        ),
+        (false, false) => format!(
+            "The repository was created, but the fkst-hosted GitHub App is not installed on it \
+             yet. Install the fkst-hosted App on `{owner}`, then retry.{url_suffix}"
+        ),
+    }
 }
 
 /// Create a new GitHub repo via the NyxID proxy and persist it on the goal.
@@ -1142,5 +1226,53 @@ mod tests {
     fn create_repo_spec_body_rejects_unknown_fields() {
         let result = serde_json::from_str::<CreateRepoSpecBody>(r#"{"name":"x","extra":true}"#);
         assert!(result.is_err());
+    }
+
+    // ---- install-hint wording (#108) ----
+
+    #[test]
+    fn install_hint_org_repo_says_ask_an_org_owner() {
+        let msg = install_hint_message(
+            "acme",
+            true,
+            false,
+            Some("https://github.com/apps/fkst-hosted/installations/new".to_string()),
+        );
+        // Org install is owner-gated: the copy must point at an org OWNER and
+        // never imply the requester can self-install.
+        assert!(
+            msg.contains("organization OWNER"),
+            "must name an org owner: {msg}"
+        );
+        assert!(msg.contains("acme"), "must name the org: {msg}");
+        assert!(
+            msg.to_lowercase().contains("owner-gated") || msg.contains("request it"),
+            "must convey owner-gating: {msg}"
+        );
+        assert!(msg.contains("fkst-hosted"), "carries install url: {msg}");
+    }
+
+    #[test]
+    fn install_hint_org_repo_awaiting_approval_is_distinct() {
+        let msg = install_hint_message("acme", true, true, None);
+        // The awaiting-owner-approval state is distinct from "not installed".
+        assert!(
+            msg.contains("pending approval"),
+            "awaiting-approval wording: {msg}"
+        );
+        assert!(
+            msg.contains("organization OWNER"),
+            "still owner-gated: {msg}"
+        );
+    }
+
+    #[test]
+    fn install_hint_personal_repo_does_not_mention_org_owner() {
+        let msg = install_hint_message("octocat", false, false, None);
+        assert!(
+            !msg.contains("organization OWNER"),
+            "personal repo must not invoke an org owner: {msg}"
+        );
+        assert!(msg.contains("octocat"), "names the owner: {msg}");
     }
 }

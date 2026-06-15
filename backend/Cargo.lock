@@ -885,6 +885,7 @@ dependencies = [
  "bson",
  "envy",
  "filetime",
+ "hmac",
  "http-body-util",
  "jsonwebtoken",
  "mongodb",

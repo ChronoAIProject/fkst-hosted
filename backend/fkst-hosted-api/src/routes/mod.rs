@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod extract;
 pub mod generate;
 pub mod github;
+pub mod github_app_webhook;
 pub mod goals;
 pub mod health;
 pub mod packages;

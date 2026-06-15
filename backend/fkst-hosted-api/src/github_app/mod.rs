@@ -14,6 +14,7 @@
 pub mod api;
 pub mod config;
 pub mod jwt;
+pub mod store;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -30,6 +31,14 @@ pub use config::GithubAppConfig;
 
 /// Re-export API types for downstream consumers.
 pub use api::{InstallationId, InstallationToken, TokenPermissions};
+
+/// Re-export the installation-persistence seam (issue #108) so the webhook
+/// route and `main.rs` can depend on the abstraction and its Mongo impl.
+pub use api::{InstallationStore, StoredInstallation};
+pub use store::MongoInstallationStore;
+
+// `InstallationProbe` is defined in this module; it is `pub` already and needs
+// no re-export.
 
 /// Buffer before token expiry at which we re-mint (5 minutes).
 const EXPIRY_BUFFER: Duration = Duration::from_secs(300);
@@ -95,6 +104,19 @@ impl std::fmt::Debug for GithubAppError {
     }
 }
 
+/// Outcome of [`GithubAppTokens::probe_installation`] (issue #108): the App's
+/// install state for a repo, used to drive the new-repo install hint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallationProbe {
+    /// A token minted: installed and granted the needed permissions.
+    Installed,
+    /// No installation covers the repo; the user must install the App.
+    NotInstalled { install_url: Option<String> },
+    /// An installation exists but the requested permission is still pending
+    /// (an org owner must approve the new `administration` permission per #110).
+    AwaitingApproval,
+}
+
 /// Default session permissions: admin-equivalent access to the target repo for
 /// the whole session (issue #110). `administration: write` is GitHub's closest
 /// analogue to a repo-admin role (branch protection / rulesets, collaborator &
@@ -146,6 +168,11 @@ struct Inner {
     encoding_key: jsonwebtoken::EncodingKey,
     app_slug: Option<String>,
     api: std::sync::Arc<dyn GithubApi>,
+    /// Durable installation persistence (issue #108): resolved BEFORE the
+    /// on-demand GitHub probe and evicted on uninstall. `None` keeps the
+    /// pre-#108 behaviour (in-memory caches only), so tests / minimal runs are
+    /// byte-identical.
+    store: Option<std::sync::Arc<dyn InstallationStore>>,
     token_cache: Mutex<HashMap<TokenKey, CachedToken>>,
     installation_cache: Mutex<HashMap<String, CachedInstallation>>,
 }
@@ -181,6 +208,18 @@ impl GithubAppTokens {
         config: &GithubAppConfig,
         api: std::sync::Arc<dyn GithubApi>,
     ) -> Result<Self, GithubAppError> {
+        Self::with_api_and_store(config, api, None)
+    }
+
+    /// Construct with an injected transport AND an installation-persistence
+    /// store (issue #108). Production passes the Mongo-backed store so
+    /// resolution reads persistence before probing GitHub and survives a pod
+    /// restart; tests pass `None` (in-memory caches only) or a fake store.
+    pub fn with_api_and_store(
+        config: &GithubAppConfig,
+        api: std::sync::Arc<dyn GithubApi>,
+        store: Option<std::sync::Arc<dyn InstallationStore>>,
+    ) -> Result<Self, GithubAppError> {
         let encoding_key =
             build_encoding_key(&config.private_key_pem).map_err(|_| GithubAppError::InvalidKey)?;
         Ok(Self {
@@ -189,10 +228,23 @@ impl GithubAppTokens {
                 encoding_key,
                 app_slug: config.app_slug.clone(),
                 api,
+                store,
                 token_cache: Mutex::new(HashMap::new()),
                 installation_cache: Mutex::new(HashMap::new()),
             }),
         })
+    }
+
+    /// Construct the service with the default HTTP transport AND a persistence
+    /// store (issue #108). The production constructor: `main.rs` builds the
+    /// Mongo store from the `Db` and passes it here so installation resolution
+    /// reads persistence before probing GitHub and survives a pod restart.
+    pub fn new_with_store(
+        config: &GithubAppConfig,
+        store: std::sync::Arc<dyn InstallationStore>,
+    ) -> Result<Self, GithubAppError> {
+        let api = HttpGithubApi::new(&config.api_base)?;
+        Self::with_api_and_store(config, std::sync::Arc::new(api), Some(store))
     }
 
     /// Mint (or return cached) installation token for `owner/repo`, returning
@@ -332,12 +384,50 @@ impl GithubAppTokens {
             .map(|slug| format!("https://github.com/apps/{slug}/installations/new"))
     }
 
-    /// Resolve the installation ID for a repo, using the cache if available.
+    /// Probe whether the App can act on `owner/repo` by attempting a token mint
+    /// (issue #108, new-repo install bridge). The mint IS the authoritative
+    /// installation check: it resolves the installation AND verifies the App
+    /// holds the requested permissions. Distinguishes three states:
+    ///
+    /// - [`InstallationProbe::Installed`] — a token minted (the App is installed
+    ///   and granted the needed permissions).
+    /// - [`InstallationProbe::NotInstalled`] — no installation covers the repo;
+    ///   carries the install URL for actionable guidance.
+    /// - [`InstallationProbe::AwaitingApproval`] — an installation EXISTS but the
+    ///   requested permission is still pending (a 422 on mint): for an org this
+    ///   is the owner-approval-pending state, not a hard failure.
+    ///
+    /// Other errors (auth, rate limit, transport) surface as `Err` so the
+    /// caller can map them to the right status — the probe is only about the
+    /// install lifecycle, not infrastructure failures.
+    pub async fn probe_installation(
+        &self,
+        owner_repo: &str,
+    ) -> Result<InstallationProbe, GithubAppError> {
+        match self.token_for_repo(owner_repo, None).await {
+            Ok(_) => Ok(InstallationProbe::Installed),
+            Err(GithubAppError::NotInstalled { .. }) => Ok(InstallationProbe::NotInstalled {
+                install_url: self.install_url(),
+            }),
+            Err(GithubAppError::InstallationGone { .. }) => Ok(InstallationProbe::NotInstalled {
+                install_url: self.install_url(),
+            }),
+            Err(GithubAppError::TokenRequestRejected(_)) => Ok(InstallationProbe::AwaitingApproval),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Resolve the installation ID for a repo. Order (issue #108):
+    ///   1. the in-memory installation cache (1h TTL);
+    ///   2. the durable persistence store, if wired — a hit means no GitHub
+    ///      probe is needed and survives a pod restart;
+    ///   3. the on-demand `GET /repos/{owner}/{repo}/installation` GitHub probe,
+    ///      whose result is then persisted so the NEXT resolve is a store hit.
     async fn resolve_installation(
         &self,
         owner_repo: &str,
     ) -> Result<InstallationId, GithubAppError> {
-        // Check installation cache.
+        // 1. In-memory cache.
         {
             let cache = self
                 .inner
@@ -351,8 +441,32 @@ impl GithubAppTokens {
             }
         }
 
-        // Resolve via API.
         let (owner, repo) = owner_repo.split_once('/').expect("validated by regex");
+
+        // 2. Durable persistence: resolve before any live GitHub probe so a
+        //    cold pod (empty in-memory cache) does not hit the API and so a
+        //    suspended/removed install is reflected immediately. A store error
+        //    is logged and treated as a miss (fall through to the API) — the
+        //    durable layer must never become a hard dependency of minting.
+        if let Some(store) = &self.inner.store {
+            match store.lookup_repo(owner, repo).await {
+                Ok(Some(found)) => {
+                    self.cache_installation(owner_repo, found.id);
+                    tracing::debug!(owner_repo = %owner_repo, "installation resolved from persistence");
+                    return Ok(found.id);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        owner_repo = %owner_repo,
+                        error = %error,
+                        "installation store lookup failed; falling back to on-demand resolve"
+                    );
+                }
+            }
+        }
+
+        // 3. On-demand GitHub probe.
         let app_jwt = mint_app_jwt(self.inner.app_id, &self.inner.encoding_key)
             .map_err(|e| GithubAppError::Http(format!("jwt mint for installation: {e}")))?;
 
@@ -369,23 +483,59 @@ impl GithubAppTokens {
                 other => other,
             })?;
 
-        // Cache the installation ID.
-        {
-            let mut cache = self
-                .inner
-                .installation_cache
-                .lock()
-                .expect("installation cache lock");
-            cache.insert(
-                owner_repo.to_string(),
-                CachedInstallation {
-                    id: install_id,
-                    resolved_at: SystemTime::now(),
-                },
-            );
+        self.cache_installation(owner_repo, install_id);
+
+        // Persist the probe result so the next resolve is a store hit and the
+        // mapping survives a restart. Best-effort: a store write failure is
+        // logged and swallowed — the token mint already has the id it needs.
+        if let Some(store) = &self.inner.store {
+            if let Err(error) = store.remember_repo(owner, repo, install_id).await {
+                tracing::warn!(
+                    owner_repo = %owner_repo,
+                    error = %error,
+                    "failed to persist resolved installation; resolution still succeeded"
+                );
+            }
         }
 
         Ok(install_id)
+    }
+
+    /// Insert/refresh the in-memory installation cache entry for a repo.
+    fn cache_installation(&self, owner_repo: &str, id: InstallationId) {
+        let mut cache = self
+            .inner
+            .installation_cache
+            .lock()
+            .expect("installation cache lock");
+        cache.insert(
+            owner_repo.to_string(),
+            CachedInstallation {
+                id,
+                resolved_at: SystemTime::now(),
+            },
+        );
+    }
+
+    /// Evict both in-memory caches AND the persisted record for a repo (issue
+    /// #108). Called by the webhook handler on an `installation deleted` /
+    /// `repository removed` event so the next mint correctly 404s instead of
+    /// reusing a stale id. The persisted eviction is best-effort: a store
+    /// failure is logged but the in-memory eviction still happens, so this pod
+    /// stops minting for the repo immediately regardless.
+    pub async fn evict_repo(&self, owner: &str, repo: &str) {
+        let owner_repo = format!("{owner}/{repo}");
+        self.invalidate_caches_for_repo(&owner_repo);
+        if let Some(store) = &self.inner.store {
+            if let Err(error) = store.forget_repo(owner, repo).await {
+                tracing::warn!(
+                    owner_repo = %owner_repo,
+                    error = %error,
+                    "failed to evict persisted installation record"
+                );
+            }
+        }
+        tracing::info!(owner_repo = %owner_repo, "evicted installation caches for repo");
     }
 
     /// Invalidate both token and installation caches for a repo.
@@ -414,10 +564,64 @@ mod tests {
     use secrecy::{ExposeSecret, SecretString};
 
     use super::api::{
-        GithubApi, InstallationId, InstallationToken, InstallationTokenRequest, TokenPermissions,
+        GithubApi, InstallationId, InstallationStore, InstallationToken, InstallationTokenRequest,
+        StoredInstallation, TokenPermissions,
     };
     use super::config::GithubAppConfig;
     use super::*;
+
+    // ---- fake installation store ---------------------------------------------
+
+    /// In-memory [`InstallationStore`] for the resolve-from-persistence tests.
+    /// `hit` is the installation returned by `lookup_repo`; the call counters
+    /// prove the DB seam is consulted before (and instead of) the GitHub API.
+    #[derive(Debug, Default)]
+    struct FakeStore {
+        hit: std::sync::Mutex<Option<StoredInstallation>>,
+        lookups: AtomicUsize,
+        remembers: AtomicUsize,
+        forgets: AtomicUsize,
+    }
+
+    impl FakeStore {
+        fn with_hit(id: u64) -> Self {
+            Self {
+                hit: std::sync::Mutex::new(Some(StoredInstallation {
+                    id: InstallationId(id),
+                    is_organization: true,
+                    suspended: false,
+                })),
+                ..Self::default()
+            }
+        }
+    }
+
+    #[async_trait]
+    impl InstallationStore for FakeStore {
+        async fn lookup_repo(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> Result<Option<StoredInstallation>, GithubAppError> {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            Ok(*self.hit.lock().unwrap())
+        }
+
+        async fn remember_repo(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _installation_id: InstallationId,
+        ) -> Result<(), GithubAppError> {
+            self.remembers.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn forget_repo(&self, _owner: &str, _repo: &str) -> Result<(), GithubAppError> {
+            self.forgets.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
 
     // ---- fake transport -------------------------------------------------------
 
@@ -511,6 +715,7 @@ mod tests {
             app_id: 42,
             private_key_pem: SecretString::from(pem.to_string()),
             app_slug: Some("fkst-test".to_string()),
+            webhook_secret: None,
             api_base: "https://api.github.com".to_string(),
         }
     }
@@ -712,5 +917,97 @@ mod tests {
         assert_eq!(perms.issues.as_deref(), Some("write"));
         assert_eq!(perms.administration.as_deref(), Some("write"));
         assert_eq!(perms.metadata, None);
+    }
+
+    // ---- resolve-from-persistence (issue #108) -------------------------------
+
+    #[tokio::test]
+    async fn resolve_reads_store_before_github_api() {
+        let api = Arc::new(FakeApi::new(1));
+        let store = Arc::new(FakeStore::with_hit(777));
+        let config = test_config();
+        let svc = GithubAppTokens::with_api_and_store(&config, api.clone(), Some(store.clone()))
+            .expect("svc");
+
+        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
+
+        // The store was consulted; the GitHub installation API was NOT.
+        assert_eq!(store.lookups.load(Ordering::SeqCst), 1, "store consulted");
+        assert_eq!(
+            api.installation_calls(),
+            0,
+            "github installation API must not be hit on a store hit"
+        );
+        // A token was still minted against the store-resolved installation id.
+        assert_eq!(api.mint_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn resolve_falls_back_to_api_and_persists_on_store_miss() {
+        let api = Arc::new(FakeApi::new(1));
+        // Store with no hit => miss => fall through to the API + remember.
+        let store = Arc::new(FakeStore::default());
+        let config = test_config();
+        let svc = GithubAppTokens::with_api_and_store(&config, api.clone(), Some(store.clone()))
+            .expect("svc");
+
+        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
+
+        assert_eq!(store.lookups.load(Ordering::SeqCst), 1, "store consulted");
+        assert_eq!(api.installation_calls(), 1, "API consulted on a store miss");
+        assert_eq!(
+            store.remembers.load(Ordering::SeqCst),
+            1,
+            "resolved installation persisted for next time"
+        );
+    }
+
+    #[tokio::test]
+    async fn evict_repo_invalidates_caches_and_forgets_persisted() {
+        let api = Arc::new(FakeApi::new(1));
+        let store = Arc::new(FakeStore::with_hit(5));
+        let config = test_config();
+        let svc = GithubAppTokens::with_api_and_store(&config, api.clone(), Some(store.clone()))
+            .expect("svc");
+
+        // Prime both caches.
+        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
+
+        svc.evict_repo("acme", "site").await;
+        assert_eq!(
+            store.forgets.load(Ordering::SeqCst),
+            1,
+            "persisted record forgotten"
+        );
+        // After eviction the in-memory installation cache is empty: the next
+        // resolve consults the store again (lookup count grows).
+        let before = store.lookups.load(Ordering::SeqCst);
+        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
+        assert!(
+            store.lookups.load(Ordering::SeqCst) > before,
+            "installation cache was evicted; store re-consulted"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_installation_distinguishes_states() {
+        // Installed: a token mints.
+        let api = Arc::new(FakeApi::new(1));
+        let svc = service(api.clone());
+        assert_eq!(
+            svc.probe_installation("acme/site").await.expect("probe"),
+            InstallationProbe::Installed
+        );
+
+        // Not installed: the installation lookup 404s.
+        let api = Arc::new(FakeApi::new(1));
+        api.set_next_install_not_found(true);
+        let svc = service(api.clone());
+        match svc.probe_installation("acme/missing").await.expect("probe") {
+            InstallationProbe::NotInstalled { install_url } => {
+                assert!(install_url.is_some(), "carries install url when slug set");
+            }
+            other => panic!("expected NotInstalled, got {other:?}"),
+        }
     }
 }

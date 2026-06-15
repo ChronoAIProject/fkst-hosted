@@ -779,6 +779,44 @@ impl SessionService {
         }
     }
 
+    /// Fail every active session targeting `owner/name` because the GitHub App
+    /// was uninstalled from (or had the repo removed from) that repo (issue
+    /// #108). The document CAS runs FIRST so the intent is durable, then each
+    /// affected driver living on this pod is signalled to stop (best-effort) —
+    /// it will also observe the terminal status on its next supervise tick and
+    /// converge. Returns the number of sessions transitioned to Failed.
+    ///
+    /// `reason` is fixed, operator-authored text (never a secret or a webhook
+    /// payload value); it becomes the failed session's user-visible error.
+    pub async fn fail_for_uninstalled_repo(
+        &self,
+        owner: &str,
+        name: &str,
+        reason: &str,
+    ) -> Result<u64, AppError> {
+        // Snapshot the affected session ids BEFORE the bulk CAS so we can wake
+        // their local drivers; the CAS outcome stays authoritative regardless.
+        let affected = self.inner.repo.active_ids_for_repo(owner, name).await?;
+        let failed = self
+            .inner
+            .repo
+            .fail_active_for_repo(owner, name, reason)
+            .await?;
+        if failed > 0 {
+            let registry = self
+                .inner
+                .registry
+                .lock()
+                .expect("session registry lock poisoned");
+            for id in &affected {
+                if let Some(sender) = registry.get(id) {
+                    let _ = sender.send(true);
+                }
+            }
+        }
+        Ok(failed)
+    }
+
     /// Entry-guarded driver spawn: start a detached driver task for
     /// `session` unless one is already registered. The driver's claim CAS
     /// (and, when fenced, the lease) stays the authoritative dedupe; this

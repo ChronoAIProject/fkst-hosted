@@ -181,6 +181,7 @@ async fn app_with(
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
+        github_app_webhook_secret: None,
         goals,
         engine,
         llm: gateway,

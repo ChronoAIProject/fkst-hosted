@@ -314,13 +314,26 @@ async fn main() -> ExitCode {
     };
 
     // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must
-    //     never reach a live session).
+    //     never reach a live session). The token service is built WITH the
+    //     Mongo-backed installation store (issue #108) so installation
+    //     resolution reads persistence before probing GitHub and survives a pod
+    //     restart. The webhook secret (if set) is lifted out into AppState so
+    //     the router can mount the signature-verified webhook route.
+    let mut github_app_webhook_secret: Option<secrecy::SecretString> = None;
     let github_app = match fkst_hosted_api::github_app::GithubAppConfig::load_from_env() {
         Ok(Some(config)) => {
             let app_id = config.app_id;
-            match fkst_hosted_api::github_app::GithubAppTokens::new(&config) {
+            github_app_webhook_secret = config.webhook_secret.clone();
+            let store = std::sync::Arc::new(
+                fkst_hosted_api::github_app::MongoInstallationStore::new(&db),
+            );
+            match fkst_hosted_api::github_app::GithubAppTokens::new_with_store(&config, store) {
                 Ok(tokens) => {
-                    tracing::info!(app_id, "github app enabled");
+                    tracing::info!(
+                        app_id,
+                        webhook = github_app_webhook_secret.is_some(),
+                        "github app enabled"
+                    );
                     Some(tokens)
                 }
                 Err(error) => {
@@ -464,6 +477,7 @@ async fn main() -> ExitCode {
         auth_mode,
         authz,
         github_app,
+        github_app_webhook_secret,
         goals,
         engine: state_engine_config,
         llm,
