@@ -99,8 +99,13 @@ RUN git init -q \
         || (echo "INFO: shallow ref fetch failed; falling back to depth-50 fetch" \
             && git fetch --depth 50 origin \
             && git checkout -q "$NYXID_CLI_REF"))
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/nyxid/target \
+# Distinct cache-mount ids: the engine-builder also mounts a cache at
+# /usr/local/cargo/registry (default id = the path), and BuildKit builds the
+# two stages in PARALLEL — sharing that registry cache races on .cargo-ok
+# (`File exists (os error 17)`). Isolating the ids gives this stage its own
+# registry/target caches.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=nyxid-cli-cargo-registry \
+    --mount=type=cache,target=/nyxid/target,id=nyxid-cli-cargo-target \
     cargo build --release --locked -p nyxid-cli \
     && mkdir -p /cli-dist \
     && cp target/release/nyxid /cli-dist/nyxid
