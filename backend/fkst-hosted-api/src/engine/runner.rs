@@ -82,6 +82,14 @@ pub struct StartSpec {
     /// keys (`is_reserved_env_key`) are dropped at the spawn seam. Resolved and
     /// populated by the injection path (#102); empty for classic sessions.
     pub env_profile: BTreeMap<String, secrecy::SecretString>,
+    /// Per-session `CODEX_HOME` directory holding the rendered codex
+    /// `config.toml` (#112). When `Some`, it is set as a platform-managed env
+    /// var on the supervise child (layered AFTER the host allow-list, so it
+    /// always wins over the allow-listed `CODEX_HOME`). The DRIVER owns this
+    /// directory's lifecycle — the runner only points the child at it and never
+    /// creates or removes it. `None` for classic / minimal runs, which keeps
+    /// the pre-#112 behaviour byte-identical.
+    pub codex_home: Option<PathBuf>,
 }
 
 /// Live handle for one engine process, held by the caller for the session's
@@ -265,6 +273,14 @@ impl SessionRunner {
         tail_child_logs(runtime_dir, self.config.log_tail_lines)
     }
 
+    /// The configured engine temp root — the parent dir for the ephemeral
+    /// `fkst-pkg-*` / `fkst-rt-*` (and #112's `fkst-codex-*`) session dirs. The
+    /// driver needs it to place a per-session CODEX_HOME on the same filesystem
+    /// as the runtime dirs (so it shares their cleanup/reconcile semantics).
+    pub fn temp_root(&self) -> &Path {
+        &self.config.temp_root
+    }
+
     /// Delegate: [`RunningSession::status`].
     pub fn status(&self, session: &mut RunningSession) -> LiveStatus {
         session.status()
@@ -286,6 +302,7 @@ impl SessionRunner {
             packages: vec![pkg.clone()],
             goal: None,
             env_profile: BTreeMap::new(),
+            codex_home: None,
         };
         self.start_with_spec(&spec).await
     }
@@ -392,7 +409,10 @@ impl SessionRunner {
             .await?;
         }
 
-        // 6. Spawn supervise in its own process group.
+        // 6. Spawn supervise in its own process group. The per-session
+        //    CODEX_HOME (when present) is passed as a platform-managed var so
+        //    codex discovers the rendered config.toml; the driver owns its
+        //    lifecycle, so the runner never creates or cleans it.
         let spawned = spawn_supervise(
             &self.config.framework_bin,
             project_root,
@@ -400,6 +420,7 @@ impl SessionRunner {
             &runtime_dir,
             &spec.env_profile,
             goal_env.as_ref(),
+            spec.codex_home.as_deref(),
         )?;
 
         // 7. Bounded ready-wait. Every failure path group-kills, reaps, and
@@ -1383,6 +1404,7 @@ esac
             packages: vec![pkg.clone()],
             goal: None,
             env_profile: BTreeMap::new(),
+            codex_home: None,
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1468,6 +1490,7 @@ esac
             packages: vec![minimal_package(), second_package()],
             goal: None,
             env_profile: BTreeMap::new(),
+            codex_home: None,
         };
         let mut session = runner.start_with_spec(&spec).await.expect("start multi");
 
@@ -1522,6 +1545,7 @@ esac
             packages: vec![minimal_package(), second_package()],
             goal: None,
             env_profile: BTreeMap::new(),
+            codex_home: None,
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(
@@ -1558,6 +1582,7 @@ esac
             packages: vec![minimal_package()],
             goal: Some(goal),
             env_profile: BTreeMap::new(),
+            codex_home: None,
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1642,6 +1667,7 @@ esac
             packages: vec![],
             goal: None,
             env_profile: BTreeMap::new(),
+            codex_home: None,
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));
@@ -1662,6 +1688,7 @@ esac
             packages: vec![minimal_package(), bad_second],
             goal: None,
             env_profile: BTreeMap::new(),
+            codex_home: None,
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));
