@@ -291,6 +291,7 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
     AuthTestApp {
@@ -340,6 +341,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
     (container, router)
@@ -604,6 +606,7 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
 
@@ -682,6 +685,7 @@ async fn kid_rotation_recovers_after_refresh() {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
 
@@ -776,6 +780,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     };
 
     // Build a router with a route that extracts AuthContext but is NOT

@@ -86,6 +86,7 @@ fn session(status: SessionStatus, runtime_dir: Option<&Path>) -> SessionDoc {
         triggered_by: None,
         nyxid_key_id: None,
         nyxid_key_prefix: None,
+        ornn_skills: None,
         created_at: bson::DateTime::now(),
         started_at: Some(bson::DateTime::now()),
         stopped_at: None,

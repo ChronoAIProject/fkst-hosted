@@ -440,6 +440,7 @@ async fn driver_journals_raised_lines_lifecycle_and_run_key_end_to_end() {
                 org_id: None,
             },
             SecretString::from("test-raw-token".to_string()),
+            None,
         )
         .await
         .expect("create session");
@@ -676,6 +677,7 @@ async fn failing_journal_sink_never_blocks_a_normal_stop() {
                 org_id: None,
             },
             SecretString::from("test-raw-token".to_string()),
+            None,
         )
         .await
         .expect("create session");
@@ -775,6 +777,7 @@ async fn failing_journal_sink_preserves_a_conformance_failure_disposition() {
                 org_id: None,
             },
             SecretString::from("test-raw-token".to_string()),
+            None,
         )
         .await
         .expect("create session");

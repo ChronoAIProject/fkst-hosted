@@ -49,7 +49,8 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         .merge(routes::sessions::router())
         .merge(routes::goals::router())
         .merge(routes::github::router())
-        .merge(routes::vault::router());
+        .merge(routes::vault::router())
+        .merge(routes::catalog::router());
 
     let api_routes = match &state.auth_mode {
         AuthMode::Enabled(settings) => {

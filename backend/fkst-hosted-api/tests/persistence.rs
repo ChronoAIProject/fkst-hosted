@@ -111,6 +111,7 @@ fn sample_session() -> SessionDoc {
         triggered_by: None,
         nyxid_key_id: None,
         nyxid_key_prefix: None,
+        ornn_skills: None,
         created_at: bson::DateTime::from_millis(1_700_000_000_000),
         started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
         stopped_at: None,
@@ -332,6 +333,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
 

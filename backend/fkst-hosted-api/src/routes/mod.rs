@@ -1,5 +1,6 @@
 //! HTTP route handlers.
 
+pub mod catalog;
 pub mod extract;
 pub mod generate;
 pub mod github;

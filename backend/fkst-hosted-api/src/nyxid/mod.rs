@@ -145,6 +145,26 @@ pub struct GithubConnection {
     pub primary: bool,
 }
 
+/// Buffered result of a generic NyxID proxy call ([`NyxIdClient::proxy_request`]).
+///
+/// Carries the upstream status, headers, and the fully-read body bytes. The
+/// whole response is buffered (rather than streamed) so the proxy helper stays
+/// transport-agnostic and trivially testable; the bodies fkst-hosted proxies
+/// through Ornn are small JSON envelopes, never large package zips (those are
+/// fetched DIRECTLY from chrono-storage, not through this proxy).
+#[derive(Debug)]
+pub struct ProxyResponse {
+    /// Upstream HTTP status, surfaced verbatim so callers can pass Ornn's
+    /// 4xx/5xx through as the authoritative result (fkst-hosted adds no
+    /// permission logic of its own).
+    pub status: reqwest::StatusCode,
+    /// Upstream response headers (e.g. content-type), surfaced verbatim.
+    pub headers: reqwest::header::HeaderMap,
+    /// The fully-read response body. A `Vec<u8>` (not a `bytes::Bytes`) so the
+    /// type needs no extra dependency; the proxied bodies are small JSON.
+    pub body: Vec<u8>,
+}
+
 /// Delegated token obtained via RFC 8693 token exchange.
 pub struct DelegatedToken {
     pub access_token: SecretString,
@@ -612,6 +632,62 @@ impl NyxIdClient {
         self.proxy_github(delegated, method, &routed, body).await
     }
 
+    /// Proxy an arbitrary request to a downstream service through NyxID's
+    /// credential-injection proxy, presenting the user's OWN bearer token.
+    ///
+    /// Builds `{base}/api/v1/proxy/s/{slug}{path}` + `query`, sets
+    /// `Authorization: Bearer <user_token>`, optionally attaches `body` (used
+    /// for non-GET methods), and buffers the full response into a
+    /// [`ProxyResponse`]. The slug-based `proxy/s/{slug}` shape is NyxID's
+    /// generic credential proxy (distinct from the legacy GitHub-only
+    /// `proxy/{slug}` path that [`proxy_github`] uses), so this one helper
+    /// serves every slugged service — e.g. `ornn-api` for the Ornn skill
+    /// registry (#114). The user token is exposed only to build the header and
+    /// is NEVER captured into any error, log line, or the returned value.
+    ///
+    /// The status is surfaced verbatim (no success-mapping here): callers that
+    /// front a downstream API are expected to pass its 4xx/5xx through as the
+    /// authoritative result rather than reinterpret it.
+    pub async fn proxy_request(
+        &self,
+        slug: &str,
+        method: reqwest::Method,
+        path: &str,
+        query: &[(&str, &str)],
+        user_token: &SecretString,
+        body: Option<Vec<u8>>,
+    ) -> Result<ProxyResponse, NyxIdError> {
+        let url = format!("{}/api/v1/proxy/s/{slug}{path}", self.inner.base_url);
+        let mut request = self
+            .inner
+            .http
+            .request(method, &url)
+            .bearer_auth(user_token.expose_secret());
+        if !query.is_empty() {
+            request = request.query(query);
+        }
+        if let Some(bytes) = body {
+            request = request.body(bytes);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|e| http_err("nyxid proxy request", e))?;
+
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|e| http_err("nyxid proxy body", e))?
+            .to_vec();
+        Ok(ProxyResponse {
+            status,
+            headers,
+            body,
+        })
+    }
+
     /// List the caller's linked GitHub connections via NyxID, using the
     /// delegated bearer. Maps NyxID's response into [`GithubConnection`]s.
     ///
@@ -1030,6 +1106,93 @@ mod tests {
             .await
             .expect("proxy");
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    // ---- proxy_request (generic slug proxy) ----
+
+    #[tokio::test]
+    async fn proxy_request_builds_slug_path_query_and_bearer() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/proxy/s/ornn-api/api/v1/skills/demo"))
+            .and(header("authorization", "Bearer user_tok"))
+            .and(wiremock::matchers::query_param("version", "1.2"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_json(serde_json::json!({"data": {"name": "demo"}})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let token = SecretString::from("user_tok".to_string());
+        let resp = client
+            .proxy_request(
+                "ornn-api",
+                reqwest::Method::GET,
+                "/api/v1/skills/demo",
+                &[("version", "1.2")],
+                &token,
+                None,
+            )
+            .await
+            .expect("proxy request");
+        assert_eq!(resp.status, reqwest::StatusCode::OK);
+        assert!(resp
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .contains("application/json"));
+        assert!(!resp.body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn proxy_request_passes_upstream_status_through_verbatim() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/proxy/s/ornn-api/api/v1/skills/private"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let token = SecretString::from("user_tok".to_string());
+        let resp = client
+            .proxy_request(
+                "ornn-api",
+                reqwest::Method::GET,
+                "/api/v1/skills/private",
+                &[],
+                &token,
+                None,
+            )
+            .await
+            .expect("proxy request returns Ok even on 4xx");
+        assert_eq!(resp.status, reqwest::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn proxy_request_never_leaks_the_user_token_in_errors() {
+        // Point at nothing to force a transport error carrying the URL; the
+        // user token must never appear in Display or Debug of the error.
+        let client = test_client("http://127.0.0.1:1");
+        let secret = "user_super_secret_proxy_token";
+        let err = client
+            .proxy_request(
+                "ornn-api",
+                reqwest::Method::GET,
+                "/api/v1/skills/demo",
+                &[],
+                &SecretString::from(secret.to_string()),
+                None,
+            )
+            .await
+            .expect_err("unreachable");
+        assert!(!format!("{err}").contains(secret), "Display leaked token");
+        assert!(!format!("{err:?}").contains(secret), "Debug leaked token");
     }
 
     // ---- github_connections ----

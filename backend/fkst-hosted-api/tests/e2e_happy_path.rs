@@ -226,6 +226,7 @@ async fn e2e_happy_path_runs_then_stops_against_the_real_engine() {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
 

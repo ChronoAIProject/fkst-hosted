@@ -397,6 +397,7 @@ async fn authz_app_with_db() -> AuthzTestAppWithDb {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router");
 

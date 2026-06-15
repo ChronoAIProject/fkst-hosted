@@ -50,9 +50,9 @@ pub enum LiveStatus {
 
 /// Goal context for a session started from a goal. Carries the goal identity
 /// and the GitHub token needed by the engine's GitHub integration. The token
-/// is `secrecy::SecretString` so callers cannot accidentally log it; the
-/// process layer receives it as a bare `String` (its `GoalEnv` struct) because
-/// the child environment is low-level by nature.
+/// is `secrecy::SecretString` so callers cannot accidentally log it; it stays a
+/// `SecretString` all the way into the process layer's `GoalEnv` (#109), which
+/// exposes it only at the `.env(...)` set-site.
 #[derive(Debug, Clone)]
 pub struct GoalContext {
     pub goal_id: bson::Uuid,
@@ -373,9 +373,10 @@ impl SessionRunner {
             );
 
             let token_path = runtime_dir.join("github-token");
-            let token_str = secrecy::ExposeSecret::expose_secret(&goal.github_token);
             {
+                use secrecy::ExposeSecret;
                 use std::os::unix::fs::PermissionsExt;
+                let token_str = goal.github_token.expose_secret();
                 std::fs::write(&token_path, token_str.as_bytes()).map_err(RunnerError::Io)?;
                 std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))
                     .map_err(RunnerError::Io)?;
@@ -385,8 +386,10 @@ impl SessionRunner {
                 "session.prepare.github_token"
             );
 
+            // The token stays a SecretString into GoalEnv (#109); clone the
+            // context's secret rather than expose-then-rewrap a String.
             Some(GoalEnv {
-                github_token: token_str.to_string(),
+                github_token: goal.github_token.clone(),
                 github_token_file: token_path,
                 goal_file: goal_json_path,
             })

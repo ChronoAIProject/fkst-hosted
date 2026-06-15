@@ -58,6 +58,7 @@ async fn test_router() -> axum::Router {
         engine: EngineConfig::default(),
         llm: None,
         vault,
+        ornn: None,
     })
     .expect("router")
 }

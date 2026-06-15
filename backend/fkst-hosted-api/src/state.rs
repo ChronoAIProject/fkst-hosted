@@ -52,4 +52,9 @@ pub struct AppState {
     /// `KeyProvider` is built fail-closed at boot, so the vault routes never
     /// run without an at-rest encryption key.
     pub vault: VaultService,
+    /// Ornn skill-registry client for the catalog API (issue #114): `None` when
+    /// NyxID is not configured (auth disabled / no service client) — the catalog
+    /// endpoints then answer `503`. The catalog forwards the caller's NyxID
+    /// token to Ornn, which enforces all visibility; fkst-hosted adds no policy.
+    pub ornn: Option<crate::ornn::OrnnClient>,
 }
