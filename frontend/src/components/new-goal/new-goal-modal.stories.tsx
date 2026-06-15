@@ -231,7 +231,7 @@ export const FormFilled: Story = {
   decorators: [createQueryDecorator(mockSuccessFetch)],
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body);
-    
+
     const titleInput = await body.findByTestId('title-input');
     const descInput = await body.findByTestId('description-textarea');
     const repoInput = await body.findByTestId('repo-input');
@@ -281,7 +281,7 @@ export const ApiConflictError: Story = {
   decorators: [createQueryDecorator(mockConflictFetch)],
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body);
-    
+
     const titleInput = await body.findByTestId('title-input');
     const descInput = await body.findByTestId('description-textarea');
     const checkbox = await body.findByTestId('package-checkbox-github-devloop');
@@ -305,7 +305,7 @@ export const ApiTriggerError: Story = {
   decorators: [createQueryDecorator(mockTriggerErrorFetch)],
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body);
-    
+
     const titleInput = await body.findByTestId('title-input');
     const descInput = await body.findByTestId('description-textarea');
     const repoInput = await body.findByTestId('repo-input');
@@ -324,4 +324,3 @@ export const ApiTriggerError: Story = {
     expect(submitError).toHaveTextContent('GitHub App not installed on ChronoAIProject/fkst-substrate');
   },
 };
-

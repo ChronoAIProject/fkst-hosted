@@ -164,7 +164,7 @@ export const IssueDetailDrawer: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    
+
     // Wait for the issue card containing #214 to appear in the list
     const hashEl = await canvas.findByText(/#214/);
     const targetCard = hashEl.closest('[role="button"]') as HTMLElement | null;
