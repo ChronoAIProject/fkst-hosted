@@ -460,6 +460,8 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
     return true, "wip-cap-disabled", 0, nil
   end
 
+  local integration_branch = M.branch_config().integration
+
   local list = M.gh_exec({ cmd = M.gh_issue_list_wip_cmd(repo), timeout = 30 })
   if list.exit_code ~= 0 then
     error("github-devloop: WIP issue list failed: " .. tostring(list.stderr))
@@ -477,7 +479,26 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
       local proposal_id = M.proposal_id(repo, issue_number)
       local state = M.current_state(current.comments, proposal_id)
       if active_wip_states[state.state] then
-        count = count + 1
+        -- Admission control must not be deadlockable by un-progressable holders.
+        -- A PR-bound active holder whose pr-link base branch is not this instance's
+        -- integration branch (e.g. a PR stranded on a retired integration branch after
+        -- a topology migration) can never be advanced by this instance's observe_pr
+        -- (it skips base-mismatched PRs). Counting it would let a permanently stuck
+        -- holder pin a MAX_INFLIGHT slot and starve all new work. It is not this
+        -- instance's in-flight work, so exclude it from the cap. Log every exclusion so
+        -- the admission cap is never silently narrowed.
+        local link = M.pr_link_fact(current.comments, proposal_id)
+        if link ~= nil and tostring(link.base_branch or "") ~= tostring(integration_branch or "") then
+          M.log_line("info", "wip", proposal_id, "WIP_EXCLUDE", {
+            "reason=base-unmanaged",
+            "state=" .. tostring(state.state),
+            "pr=" .. tostring(link.pr_number),
+            "pr_base=" .. tostring(link.base_branch),
+            "integration=" .. tostring(integration_branch),
+          })
+        else
+          count = count + 1
+        end
       end
     end
   end
