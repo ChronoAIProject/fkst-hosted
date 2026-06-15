@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, ComponentType } from 'react';
+
 import { MemoryRouter } from 'react-router-dom';
 import { NewGoalModal } from './new-goal-modal';
 
@@ -15,6 +16,7 @@ type Story = StoryObj<typeof NewGoalModal>;
 // --- Fetch Mocking Implementations ---
 
 const mockSuccessFetch = (url: string) => {
+
   if (url.includes('/api/v1/packages')) {
     if (url.endsWith('/api/v1/packages')) {
       return Promise.resolve(
@@ -31,19 +33,22 @@ const mockSuccessFetch = (url: string) => {
       deps = ['github-proxy', 'consensus'];
     }
     return Promise.resolve(
-      new Response(JSON.stringify({
-        name: pkgName,
-        files: [],
-        composed_deps: deps,
-        created_at: '2026-06-13T00:00:00Z',
-        updated_at: '2026-06-13T00:00:00Z',
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      new Response(
+        JSON.stringify({
+          name: pkgName,
+          files: [],
+          composed_deps: deps,
+          created_at: '2026-06-13T00:00:00Z',
+          updated_at: '2026-06-13T00:00:00Z',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
     );
   }
-  return Promise.reject(new Error('Unknown URL'));
+  return Promise.reject(new Error('Unknown URL: ' + url));
 };
 
 const mockLoadingFetch = () => {
@@ -63,12 +68,79 @@ const mockEmptyFetch = (url: string) => {
       })
     );
   }
-  return Promise.reject(new Error('Unknown URL'));
+  return Promise.reject(new Error('Unknown URL: ' + url));
+};
+
+// --- Custom Failure Mocks ---
+
+const mockConflictFetch = (url: string, init?: RequestInit) => {
+  if (url.includes('/api/v1/packages')) {
+    return mockSuccessFetch(url);
+  }
+  if (url.endsWith('/api/v1/goals') && init?.method === 'POST') {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          error: 'Conflict',
+          message: 'Goal with this title already exists',
+        }),
+        {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+  }
+  return Promise.reject(new Error('Unknown URL: ' + url));
+};
+
+const mockTriggerErrorFetch = (url: string, init?: RequestInit) => {
+  if (url.includes('/api/v1/packages')) {
+    return mockSuccessFetch(url);
+  }
+  if (url.endsWith('/api/v1/goals') && init?.method === 'POST') {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          id: 'mock-goal-123',
+          title: 'Trigger Failure Goal',
+          description: 'New Goal Description',
+          package_names: ['github-devloop'],
+          repo: { owner: 'ChronoAIProject', name: 'fkst-substrate' },
+          status: 'not_started',
+          owner_user_id: 'user-1',
+          org_id: null,
+          active_session_id: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+  }
+  if (url.includes('/trigger') && init?.method === 'POST') {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          error: 'Unprocessable',
+          message: 'GitHub App not installed on ChronoAIProject/fkst-substrate',
+        }),
+        {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+  }
+  return Promise.reject(new Error('Unknown URL: ' + url));
 };
 
 // --- Decorator Creator ---
 
-const createQueryDecorator = (fetchMock: (url: string) => Promise<Response>) => {
+const createQueryDecorator = (fetchMock: (url: string, init?: RequestInit) => Promise<Response>) => {
   return (Story: ComponentType) => {
     useEffect(() => {
       const originalFetch = globalThis.fetch;
@@ -148,4 +220,121 @@ export const ClosedWithTrigger: Story = {
       />
     </div>
   ),
+};
+
+// 6. Form pre-filled (created state view)
+export const FormFilled: Story = {
+  args: {
+    open: true,
+  },
+  decorators: [createQueryDecorator(mockSuccessFetch)],
+  play: async ({ canvasElement }) => {
+    // Fill title
+    const titleInput = canvasElement.querySelector('[data-testid="title-input"]') as HTMLInputElement;
+    if (titleInput) {
+      titleInput.value = 'Database Caching Integration';
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    // Fill description
+    const descInput = canvasElement.querySelector('[data-testid="description-textarea"]') as HTMLTextAreaElement;
+    if (descInput) {
+      descInput.value = 'Add Redis caching layer to speed up user profile queries by 200%.';
+      descInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    // Fill repository
+    const repoInput = canvasElement.querySelector('[data-testid="repo-input"]') as HTMLInputElement;
+    if (repoInput) {
+      repoInput.value = 'ChronoAIProject/fkst-substrate';
+      repoInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    // Toggle first package
+    const checkbox = canvasElement.querySelector('[data-testid="package-checkbox-github-devloop"]') as HTMLInputElement;
+    if (checkbox) {
+      checkbox.click();
+    }
+    // Enable triggerOnCreate
+    const switchEl = canvasElement.querySelector('[data-testid="trigger-on-create-switch"]') as HTMLButtonElement;
+    if (switchEl) {
+      switchEl.click();
+    }
+  },
+};
+
+// 7. Validation errors triggered by submitting empty fields
+export const ValidationErrors: Story = {
+  args: {
+    open: true,
+  },
+  decorators: [createQueryDecorator(mockSuccessFetch)],
+  play: async ({ canvasElement }) => {
+    const submitButton = canvasElement.querySelector('[data-testid="submit-button"]') as HTMLButtonElement;
+    if (submitButton) {
+      submitButton.click();
+    }
+  },
+};
+
+// 8. API conflict error on creation (e.g., duplicate title)
+export const ApiConflictError: Story = {
+  args: {
+    open: true,
+  },
+  decorators: [createQueryDecorator(mockConflictFetch)],
+  play: async ({ canvasElement }) => {
+    const titleInput = canvasElement.querySelector('[data-testid="title-input"]') as HTMLInputElement;
+    if (titleInput) {
+      titleInput.value = 'Duplicate Goal Title';
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const descInput = canvasElement.querySelector('[data-testid="description-textarea"]') as HTMLTextAreaElement;
+    if (descInput) {
+      descInput.value = 'This is a description for a duplicate goal.';
+      descInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const checkbox = canvasElement.querySelector('[data-testid="package-checkbox-github-devloop"]') as HTMLInputElement;
+    if (checkbox) {
+      checkbox.click();
+    }
+    const submitButton = canvasElement.querySelector('[data-testid="submit-button"]') as HTMLButtonElement;
+    if (submitButton) {
+      submitButton.click();
+    }
+  },
+};
+
+// 9. API trigger error after successful creation
+export const ApiTriggerError: Story = {
+  args: {
+    open: true,
+  },
+  decorators: [createQueryDecorator(mockTriggerErrorFetch)],
+  play: async ({ canvasElement }) => {
+    const titleInput = canvasElement.querySelector('[data-testid="title-input"]') as HTMLInputElement;
+    if (titleInput) {
+      titleInput.value = 'Trigger Failure Goal';
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const descInput = canvasElement.querySelector('[data-testid="description-textarea"]') as HTMLTextAreaElement;
+    if (descInput) {
+      descInput.value = 'This goal is created successfully but trigger fails.';
+      descInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const repoInput = canvasElement.querySelector('[data-testid="repo-input"]') as HTMLInputElement;
+    if (repoInput) {
+      repoInput.value = 'ChronoAIProject/fkst-substrate';
+      repoInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const checkbox = canvasElement.querySelector('[data-testid="package-checkbox-github-devloop"]') as HTMLInputElement;
+    if (checkbox) {
+      checkbox.click();
+    }
+    const switchEl = canvasElement.querySelector('[data-testid="trigger-on-create-switch"]') as HTMLButtonElement;
+    if (switchEl) {
+      switchEl.click();
+    }
+    const submitButton = canvasElement.querySelector('[data-testid="submit-button"]') as HTMLButtonElement;
+    if (submitButton) {
+      submitButton.click();
+    }
+  },
 };

@@ -1,28 +1,56 @@
+import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Goal } from './goal';
 import { mockLifecyclePopulated, mockTerminalBlocked } from '../../fixtures/goal';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      staleTime: 0,
+      gcTime: 0,
+    },
+  },
+});
+
+const mockSuccessFetch = () => {
+  return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+};
 
 const meta: Meta<typeof Goal> = {
   title: 'Mock / Goal',
   component: Goal,
   decorators: [
-    (Story) => (
-      <MemoryRouter>
-        <div className="relative pt-8">
-          {/* Thin gold-tinted strip banner */}
-          <div className="absolute top-0 left-0 right-0 h-8 bg-amber/10 border-b border-amber/20 flex items-center px-4 select-none">
-            <div className="flex items-center gap-2 text-[10.5px] font-mono text-amber-ink/90 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber" />
-              <span>Mock Data Mode</span>
+    (Story) => {
+      React.useEffect(() => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mockSuccessFetch as typeof globalThis.fetch;
+        return () => {
+          globalThis.fetch = originalFetch;
+        };
+      }, []);
+
+      return (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <div className="relative pt-8">
+              {/* Thin gold-tinted strip banner */}
+              <div className="absolute top-0 left-0 right-0 h-8 bg-amber/10 border-b border-amber/20 flex items-center px-4 select-none">
+                <div className="flex items-center gap-2 text-[10.5px] font-mono text-amber-ink/90 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber" />
+                  <span>Mock Data Mode</span>
+                </div>
+              </div>
+              <div className="bg-bg text-fg p-6 min-h-screen">
+                <Story />
+              </div>
             </div>
-          </div>
-          <div className="bg-bg text-fg p-6 min-h-screen">
-            <Story />
-          </div>
-        </div>
-      </MemoryRouter>
-    ),
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    },
   ],
 };
 
