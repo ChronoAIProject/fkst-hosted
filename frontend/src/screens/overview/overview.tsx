@@ -3,6 +3,8 @@ import { cn } from '@/lib/utils';
 import { WindowControl } from '@/components/layout/window-control';
 import { ViewSwitch } from '@/components/layout/view-switch';
 import { VitalsCell } from '@/components/status/vitals-cell';
+import { GoalView } from '@/lib/api/goals';
+import { goalStatusPresentation } from '@/lib/api/goal-status';
 
 export interface OverviewGoal {
   id: string;
@@ -18,7 +20,8 @@ export interface OverviewGoal {
 }
 
 export interface OverviewProps {
-  goals?: OverviewGoal[];
+  goals?: (OverviewGoal | GoalView)[];
+  statusPresentation?: typeof goalStatusPresentation;
   vitals?: {
     inFlight?: number | 'unknown';
     merged24h?: number | 'unknown';
@@ -72,7 +75,14 @@ export function Overview({
   const [timeWindow, setTimeWindow] = useState<string>(initialWindow);
 
   // Derive stage counts
-  const getStageGoals = (stageName: string) => goals.filter((g) => g.stage === stageName);
+  const getStageGoals = (stageName: string): OverviewGoal[] => {
+    return (goals || []).filter((g): g is OverviewGoal => {
+      if ('status' in g && !('stage' in g)) {
+        return false;
+      }
+      return g.stage === stageName;
+    });
+  };
   const designGoals = getStageGoals('Design');
   const buildGoals = getStageGoals('Build');
   const reviewGoals = getStageGoals('Review');

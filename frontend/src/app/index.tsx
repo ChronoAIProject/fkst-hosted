@@ -10,6 +10,9 @@ import PackagesScreen from '../screens/packages/packages-screen';
 import SettingsScreen from '../screens/settings/settings-screen';
 import { useEffect, useState } from 'react';
 import { AuthCallback } from './auth-callback';
+import { useGoalsList, useGoal } from '../lib/hooks/useGoals';
+import IssuesScreen from '../screens/issues/issues-screen';
+import { goalStatusPresentation } from '../lib/api/goal-status';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,16 +25,32 @@ const queryClient = new QueryClient({
 
 function OverviewRoute() {
   const context = useOutletContext<ShellOutletContext>();
+  const { data: goals, isLoading, isError, error } = useGoalsList();
+
   useEffect(() => {
     document.title = 'FKST — Overview';
   }, []);
-  return <Overview onNewGoal={context?.onNewGoal} />;
+
+  if (isLoading) {
+    return <div className="p-6 text-dim font-mono text-[13.5px]">Loading overview...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="p-6 text-red font-mono text-[13.5px]">
+        Error loading overview: {error instanceof Error ? error.message : 'Unknown error'}
+      </div>
+    );
+  }
+
+  return <Overview goals={goals} statusPresentation={goalStatusPresentation} onNewGoal={context?.onNewGoal} />;
 }
 
 function GoalsRoute() {
   const [searchParams, setSearchParams] = useSearchParams();
   const context = useOutletContext<ShellOutletContext>();
   const view = searchParams.get('view') === 'activity' ? 'activity' : 'issues';
+  const { data: goals, isLoading, isError, error } = useGoalsList();
   
   useEffect(() => {
     document.title = 'FKST — Goals';
@@ -47,15 +66,57 @@ function GoalsRoute() {
     }
   };
 
-  return <Goals view={view} onNewGoal={context?.onNewGoal} onViewChange={handleViewChange} />;
+  if (isLoading) {
+    return <div className="p-6 text-dim font-mono text-[13.5px]">Loading goals...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="p-6 text-red font-mono text-[13.5px]">
+        Error loading goals: {error instanceof Error ? error.message : 'Unknown error'}
+      </div>
+    );
+  }
+
+  return (
+    <Goals
+      view={view}
+      goals={goals}
+      statusPresentation={goalStatusPresentation}
+      onNewGoal={context?.onNewGoal}
+      onViewChange={handleViewChange}
+    />
+  );
 }
 
 function GoalRoute() {
   const { id } = useParams<{ id: string }>();
+  const { data: goal, isLoading, isError, error } = useGoal(id);
+
   useEffect(() => {
     document.title = id ? `FKST — Goal #${id}` : 'FKST — Goal Details';
   }, [id]);
-  return <Goal goalId={id} />;
+
+  if (isLoading) {
+    return <div className="p-6 text-dim font-mono text-[13.5px]">Loading goal details...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="p-6 text-red font-mono text-[13.5px]">
+        Error loading goal details: {error instanceof Error ? error.message : 'Unknown error'}
+      </div>
+    );
+  }
+
+  return (
+    <Goal
+      goalId={goal?.id}
+      title={goal?.title}
+      state={goal?.status}
+      isReal={true}
+    />
+  );
 }
 
 function PackagesRoute() {
@@ -105,6 +166,10 @@ export function App() {
         {
           path: 'settings',
           element: <SettingsRoute />,
+        },
+        {
+          path: 'issues',
+          element: <IssuesScreen />,
         },
         {
           path: 'runs',
