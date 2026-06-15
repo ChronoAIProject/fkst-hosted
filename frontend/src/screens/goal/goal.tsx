@@ -1,6 +1,13 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { PostureChip } from '@/components/status/posture-chip';
+import React, { useState } from 'react';
+import { GoalView, mapRepoTargetError } from '@/lib/api/goals';
+import { goalStatusPresentation } from '@/lib/api/goal-status';
+import { useTriggerGoal, useUpdateGoal, useDeleteGoal } from '@/lib/hooks/useGoals';
+import { useSessionRegistry } from '@/lib/hooks/session-registry';
+import { toast } from '@/components/primitives/toaster';
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogTrigger, DialogClose } from '@/components/primitives/dialog';
 
 export interface LifecycleEvent {
   name: string;
@@ -13,6 +20,7 @@ export interface LifecycleEvent {
 }
 
 export interface GoalProps {
+  goal?: GoalView;
   goalId?: string;
   title?: string;
   state?: string;
@@ -54,9 +62,10 @@ export interface GoalProps {
 }
 
 export function Goal({
-  goalId = '—',
-  title,
-  state = 'unknown',
+  goal,
+  goalId: initialGoalId = '—',
+  title: initialTitle,
+  state: initialState = 'unknown',
   version = 'unknown',
   headSha = 'unknown',
   branch = 'unknown',
@@ -69,7 +78,130 @@ export function Goal({
   mergeGate,
   consensus,
 }: GoalProps) {
-  const hasData = title !== undefined || lifecycleEvents.length > 0;
+  const navigate = useNavigate();
+  const { registerSession } = useSessionRegistry();
+
+  // Mutations
+  const triggerMutation = useTriggerGoal();
+  const updateMutation = useUpdateGoal();
+  const deleteMutation = useDeleteGoal();
+
+  // Dialog/Modal local states
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  
+  // Edit Form states
+  const [editTitle, setEditTitle] = useState(goal ? goal.title : '');
+  const [editDescription, setEditDescription] = useState(goal ? goal.description : '');
+  const [editPackages, setEditPackages] = useState(goal ? goal.package_names.join(', ') : '');
+  const [editRepoOwner, setEditRepoOwner] = useState(goal && goal.repo ? goal.repo.owner : '');
+  const [editRepoName, setEditRepoName] = useState(goal && goal.repo ? goal.repo.name : '');
+  const [editClearRepo, setEditClearRepo] = useState(false);
+
+  // Sync edit form states when goal changes
+  React.useEffect(() => {
+    if (goal) {
+      setEditTitle(goal.title);
+      setEditDescription(goal.description);
+      setEditPackages(goal.package_names.join(', '));
+      setEditRepoOwner(goal.repo ? goal.repo.owner : '');
+      setEditRepoName(goal.repo ? goal.repo.name : '');
+      setEditClearRepo(false);
+    }
+  }, [goal]);
+
+  // Derive variables from goal (if present) or fallback
+  const isHosted = !!goal;
+  const goalId = goal ? goal.id : initialGoalId;
+  const title = goal ? goal.title : initialTitle;
+  const repoStr = goal && goal.repo ? `${goal.repo.owner}/${goal.repo.name}` : undefined;
+  const packageNames = goal ? goal.package_names : [];
+  const activeSessionId = goal ? goal.active_session_id : null;
+
+  // Derive status/state presentation
+  const pres = goal ? goalStatusPresentation(goal.status) : null;
+  const state = goal ? goal.status : initialState;
+
+  const hasData = title !== undefined || lifecycleEvents.length > 0 || isHosted;
+
+  const handleTrigger = async () => {
+    if (!goal) return;
+    try {
+      const res = await triggerMutation.mutateAsync({
+        id: goal.id,
+        req: {
+          repo_mode: 'existing',
+          repo: goal.repo,
+        },
+      });
+      if (res.session_id) {
+        goal.package_names.forEach((pkgName) => {
+          registerSession(pkgName, res.session_id);
+        });
+        toast({
+          title: 'Goal Triggered',
+          description: `Goal triggered successfully. Session ${res.session_id} registered.`,
+        });
+      }
+    } catch (err) {
+      const msg = mapRepoTargetError(err, 'trigger');
+      toast({
+        title: 'Trigger Failed',
+        description: msg,
+      });
+    }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!goal) return;
+    
+    const pkgs = editPackages.split(',').map((p) => p.trim()).filter(Boolean);
+    const repo = (!editClearRepo && editRepoOwner && editRepoName)
+      ? { owner: editRepoOwner.trim(), name: editRepoName.trim() }
+      : null;
+      
+    try {
+      await updateMutation.mutateAsync({
+        id: goal.id,
+        req: {
+          title: editTitle.trim(),
+          description: editDescription.trim(),
+          package_names: pkgs,
+          repo,
+          clear_repo: editClearRepo ? true : undefined,
+        },
+      });
+      setIsEditDialogOpen(false);
+      toast({
+        title: 'Goal Updated',
+        description: 'Goal updated successfully.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Update Failed',
+        description: err instanceof Error ? err.message : 'An error occurred',
+      });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!goal) return;
+    try {
+      await deleteMutation.mutateAsync(goal.id);
+      setIsDeleteDialogOpen(false);
+      toast({
+        title: 'Goal Deleted',
+        description: 'Goal deleted successfully.',
+      });
+      navigate('/goals');
+    } catch (err) {
+      toast({
+        title: 'Delete Failed',
+        description: err instanceof Error ? err.message : 'An error occurred',
+      });
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -81,12 +213,158 @@ export function Goal({
         >
           ← Goals · list
         </Link>
-        <button
-          disabled
-          className="font-ui font-semibold text-[12.5px] bg-amber/50 text-amber-ink/50 cursor-not-allowed rounded-control px-3.5 py-[7px] opacity-50 select-none flex-shrink-0"
-        >
-          + New goal
-        </button>
+        {isHosted ? (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleTrigger}
+              disabled={triggerMutation.isPending}
+              className="font-ui font-semibold text-[12.5px] bg-amber text-amber-ink border-0 rounded-control px-3.5 py-[7px] cursor-pointer hover:brightness-[1.06] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+            >
+              {triggerMutation.isPending ? 'Triggering...' : 'Trigger'}
+            </button>
+            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+              <DialogTrigger asChild>
+                <button className="font-ui font-semibold text-[12.5px] bg-raise border border-line-2 text-fg rounded-control px-3.5 py-[7px] cursor-pointer hover:bg-raise-2 transition-colors flex-shrink-0">
+                  Edit
+                </button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogTitle>Edit Goal</DialogTitle>
+                <DialogDescription>Modify hosted goal properties.</DialogDescription>
+                <form onSubmit={handleEditSubmit} className="flex flex-col gap-4 mt-4 text-left">
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="edit-title" className="text-[12px] text-faint font-medium">Title</label>
+                    <input
+                      id="edit-title"
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="bg-bg border border-line rounded-control p-2 text-[13px] text-fg focus:outline-none focus:border-amber"
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="edit-desc" className="text-[12px] text-faint font-medium">Description</label>
+                    <textarea
+                      id="edit-desc"
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      className="bg-bg border border-line rounded-control p-2 text-[13px] text-fg focus:outline-none focus:border-amber min-h-[80px]"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="edit-packages" className="text-[12px] text-faint font-medium">Packages (comma-separated)</label>
+                    <input
+                      id="edit-packages"
+                      type="text"
+                      value={editPackages}
+                      onChange={(e) => setEditPackages(e.target.value)}
+                      className="bg-bg border border-line rounded-control p-2 text-[13px] text-fg focus:outline-none focus:border-amber"
+                      placeholder="e.g. pkg1, pkg2"
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="edit-repo-owner" className="text-[12px] text-faint font-medium">Target GitHub Repo (owner/name)</label>
+                    <div className="flex gap-2">
+                      <input
+                        id="edit-repo-owner"
+                        type="text"
+                        value={editRepoOwner}
+                        onChange={(e) => {
+                          setEditRepoOwner(e.target.value);
+                          setEditClearRepo(false);
+                        }}
+                        placeholder="owner"
+                        className="bg-bg border border-line rounded-control p-2 text-[13px] text-fg focus:outline-none focus:border-amber flex-1"
+                        disabled={editClearRepo}
+                      />
+                      <span className="text-ghost self-center">/</span>
+                      <input
+                        id="edit-repo-name"
+                        type="text"
+                        value={editRepoName}
+                        onChange={(e) => {
+                          setEditRepoName(e.target.value);
+                          setEditClearRepo(false);
+                        }}
+                        placeholder="repo"
+                        className="bg-bg border border-line rounded-control p-2 text-[13px] text-fg focus:outline-none focus:border-amber flex-1"
+                        disabled={editClearRepo}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      type="checkbox"
+                      id="clearRepoCheckbox"
+                      checked={editClearRepo}
+                      onChange={(e) => {
+                        setEditClearRepo(e.target.checked);
+                        if (e.target.checked) {
+                          setEditRepoOwner('');
+                          setEditRepoName('');
+                        }
+                      }}
+                      className="accent-amber cursor-pointer"
+                    />
+                    <label htmlFor="clearRepoCheckbox" className="text-[12px] text-dim cursor-pointer select-none">
+                      Clear repository connection
+                    </label>
+                  </div>
+                  <div className="flex gap-2 justify-end mt-4">
+                    <DialogClose asChild>
+                      <button type="button" className="text-[12.5px] font-semibold bg-raise border border-line-2 text-fg rounded-control px-4 py-2 cursor-pointer hover:bg-raise-2 transition-colors">
+                        Cancel
+                      </button>
+                    </DialogClose>
+                    <button
+                      type="submit"
+                      disabled={updateMutation.isPending}
+                      className="text-[12.5px] font-semibold bg-amber text-amber-ink rounded-control px-4 py-2 cursor-pointer hover:brightness-[1.06] transition-colors disabled:opacity-50"
+                    >
+                      {updateMutation.isPending ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+              <DialogTrigger asChild>
+                <button className="font-ui font-semibold text-[12.5px] bg-red text-fg border-0 rounded-control px-3.5 py-[7px] cursor-pointer hover:brightness-[1.06] transition-colors flex-shrink-0">
+                  Delete
+                </button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogTitle>Delete Goal</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete this goal? This action cannot be undone.
+                </DialogDescription>
+                <div className="flex gap-2 justify-end mt-6">
+                  <DialogClose asChild>
+                    <button className="text-[12.5px] font-semibold bg-raise border border-line-2 text-fg rounded-control px-4 py-2 cursor-pointer hover:bg-raise-2 transition-colors">
+                      Cancel
+                    </button>
+                  </DialogClose>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleteMutation.isPending}
+                    className="text-[12.5px] font-semibold bg-red text-fg rounded-control px-4 py-2 cursor-pointer hover:brightness-[1.06] transition-colors disabled:opacity-50"
+                  >
+                    {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        ) : (
+          <button
+            disabled
+            className="font-ui font-semibold text-[12.5px] bg-amber/50 text-amber-ink/50 cursor-not-allowed rounded-control px-3.5 py-[7px] opacity-50 select-none flex-shrink-0"
+          >
+            + New goal
+          </button>
+        )}
       </div>
 
       {/* Decision Header */}
@@ -121,25 +399,63 @@ export function Goal({
 
         <div className="flex items-center gap-3.5 flex-wrap text-dim text-[12px]">
           {/* State Pill */}
-          <div className="inline-flex items-center gap-[7px] font-ui font-semibold text-[11.5px] tracking-[0.02em] uppercase px-[10px] py-[5px] rounded-[8px] border border-line-2 text-dim bg-raise select-none">
-            <span className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              state === 'merged' && "bg-green",
-              (state === 'blocked' || state === 'impl-failed') && "bg-red",
-              (state === 'reviewing' || state === 'fixing') && "bg-gold",
-              state === 'unknown' && "bg-ghost",
-              state !== 'merged' && state !== 'blocked' && state !== 'impl-failed' && state !== 'reviewing' && state !== 'fixing' && state !== 'unknown' && "bg-faint"
-            )} />
-            <span>{state}</span>
-          </div>
+          {isHosted && pres ? (
+            <div className={cn(
+              "inline-flex items-center gap-[7px] font-ui font-semibold text-[11.5px] tracking-[0.02em] uppercase px-[10px] py-[5px] rounded-[8px] border bg-raise select-none",
+              pres.tone === 'neutral' && "border-line-2 text-ghost",
+              pres.tone === 'green' && "border-[color-mix(in_oklab,var(--green)_40%,var(--line))] text-green",
+              pres.tone === 'red' && "border-[color-mix(in_oklab,var(--red)_45%,var(--line))] text-red",
+              pres.tone === 'gold' && "border-[color-mix(in_oklab,var(--gold)_40%,var(--line))] text-gold",
+              pres.tone === 'amber' && "border-[color-mix(in_oklab,var(--amber)_45%,var(--line))] text-amber"
+            )}>
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                pres.tone === 'neutral' && "bg-ghost",
+                pres.tone === 'green' && "bg-green",
+                pres.tone === 'red' && "bg-red",
+                pres.tone === 'gold' && "bg-gold",
+                pres.tone === 'amber' && "bg-amber"
+              )} />
+              <span>{pres.label}</span>
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-[7px] font-ui font-semibold text-[11.5px] tracking-[0.02em] uppercase px-[10px] py-[5px] rounded-[8px] border border-line-2 text-dim bg-raise select-none">
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                state === 'merged' && "bg-green",
+                (state === 'blocked' || state === 'impl-failed') && "bg-red",
+                (state === 'reviewing' || state === 'fixing') && "bg-gold",
+                state === 'unknown' && "bg-ghost",
+                state !== 'merged' && state !== 'blocked' && state !== 'impl-failed' && state !== 'reviewing' && state !== 'fixing' && state !== 'unknown' && "bg-faint"
+              )} />
+              <span>{state}</span>
+            </div>
+          )}
 
-          <span className="font-mono text-ghost text-[11.5px]">= max trusted <b className="text-faint font-medium">state:v1</b> · labels are hints</span>
-          <span className="font-mono text-ghost text-[11.5px]">version <b className="text-faint font-medium">{version}</b></span>
-          <span className="font-mono text-ghost text-[11.5px]">head <b className="text-faint font-medium">{headSha}</b></span>
-          <span className="font-mono text-ghost text-[11.5px]">branch <b className="text-faint font-medium">{branch}</b></span>
-          <span className="font-mono text-ghost text-[11.5px]">
-            blocks <b className="text-faint font-medium">{blocksGoalId ? `#${blocksGoalId}` : '—'}</b>
-          </span>
+          {isHosted ? (
+            <span className="font-mono text-ghost text-[11.5px]">hosted goal status · not a GitHub marker</span>
+          ) : (
+            <span className="font-mono text-ghost text-[11.5px]">= max trusted <b className="text-faint font-medium">state:v1</b> · labels are hints</span>
+          )}
+
+          {isHosted ? (
+            <>
+              <span className="font-mono text-ghost text-[11.5px]">repo <b className="text-faint font-medium">{repoStr || '—'}</b></span>
+              <span className="font-mono text-ghost text-[11.5px]">packages <b className="text-faint font-medium">{packageNames.length > 0 ? packageNames.join(', ') : '—'}</b></span>
+              <span className="font-mono text-ghost text-[11.5px]">
+                active session <b className="text-faint font-medium">{activeSessionId || '—'}</b>
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-mono text-ghost text-[11.5px]">version <b className="text-faint font-medium">{version}</b></span>
+              <span className="font-mono text-ghost text-[11.5px]">head <b className="text-faint font-medium">{headSha}</b></span>
+              <span className="font-mono text-ghost text-[11.5px]">branch <b className="text-faint font-medium">{branch}</b></span>
+              <span className="font-mono text-ghost text-[11.5px]">
+                blocks <b className="text-faint font-medium">{blocksGoalId ? `#${blocksGoalId}` : '—'}</b>
+              </span>
+            </>
+          )}
         </div>
 
         {/* Inert Decide Box if populated, or omitted by default */}
