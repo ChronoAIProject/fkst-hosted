@@ -1,7 +1,11 @@
 declare global {
   interface ImportMetaEnv {
     readonly VITE_FKST_API_BASE?: string;
-    readonly VITE_NYXID_BASE?: string;
+    readonly VITE_NYXID_BASE_URL?: string;
+    readonly VITE_NYXID_CLIENT_ID?: string;
+    readonly VITE_NYXID_REDIRECT_URI?: string;
+    readonly VITE_AUTH_REQUIRED?: string | boolean;
+    readonly MODE?: string;
   }
 
   interface ImportMeta {
@@ -23,5 +27,5 @@ export function apiBase(): string {
  * Reserved for future authentication and identity integrations.
  */
 export function nyxidBase(): string {
-  return import.meta.env.VITE_NYXID_BASE ?? '';
+  return import.meta.env.VITE_NYXID_BASE_URL ?? '';
 }

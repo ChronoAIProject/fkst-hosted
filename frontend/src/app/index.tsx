@@ -9,6 +9,7 @@ import { Goal } from '../screens/goal/goal';
 import PackagesScreen from '../screens/packages/packages-screen';
 import SettingsScreen from '../screens/settings/settings-screen';
 import { useEffect, useState } from 'react';
+import { AuthCallback } from './auth-callback';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -73,6 +74,10 @@ function SettingsRoute() {
 
 export function App() {
   const [router] = useState(() => createBrowserRouter([
+    {
+      path: '/auth/callback',
+      element: <AuthCallback />,
+    },
     {
       path: '/',
       element: <Shell />,

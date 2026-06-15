@@ -125,7 +125,13 @@ describe('AddPackageModal (F2) Tests', () => {
       });
     });
 
-    it('enforces 256-pass and 257-fail file count constraints', async () => {
+    it('enforces 256-pass file count constraint', async () => {
+      server.use(
+        http.post('*/api/v1/packages', () => {
+          return HttpResponse.json({ name: 'limit-pkg' }, { status: 201 });
+        })
+      );
+
       render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
         wrapper: createTestWrapper(),
       });
@@ -148,6 +154,18 @@ describe('AddPackageModal (F2) Tests', () => {
       await waitFor(() => {
         expect(screen.queryByText(/Maximum of 256 files allowed/i)).toBeNull();
       });
+    });
+
+    it('enforces 257-fail file count constraint', async () => {
+      render(<AddPackageModal isOpen={true} onOpenChange={() => {}} />, {
+        wrapper: createTestWrapper(),
+      });
+
+      const nameInput = screen.getByLabelText(/Name · unique, create-only/i);
+      const filesTextarea = screen.getByLabelText(/Files · the package root, inline/i);
+      const submitBtn = screen.getByRole('button', { name: /Create package/i });
+
+      await userEvent.type(nameInput, 'limit-pkg');
 
       // Wait for the first submission to complete (button becomes enabled again)
       await waitFor(() => {
@@ -217,7 +235,7 @@ describe('AddPackageModal (F2) Tests', () => {
 
       await userEvent.type(nameInput, 'pending-pkg');
       fireEvent.change(filesTextarea, { target: { value: '--- path: departments/my-dept/main.lua\nreturn {}' } });
-      
+
       // Click submit (spawns mutation async)
       await userEvent.click(submitBtn);
 
