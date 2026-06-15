@@ -144,7 +144,36 @@ local function merged_comments_for_event(event)
 end
 
 return {
-  test_queue_starvation_redrive_targets_reported_aged_entry_behind_fifo_head = function()
+  test_queue_starvation_scheduler_selects_reported_aged_entry_behind_fifo_head = function()
+    local fifo_head = merge_ready()
+    local aged = event_for_pr(459, 459, "2026-06-03T00-00-00Z", "abcdef1234567890abcdef1234567890abcdef12")
+    local entries = {
+      {
+        pr_number = fifo_head.pr_number,
+        proposal_id = fifo_head.proposal_id,
+        version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T02-50-00Z",
+        state = "merge-ready",
+        head_sha = fifo_head.reviewed_head_sha,
+        merge_ready_created_at = "2026-06-03T01:00:00Z",
+      },
+      {
+        pr_number = aged.pr_number,
+        proposal_id = aged.proposal_id,
+        version = aged.version,
+        state = "merge-ready",
+        head_sha = aged.reviewed_head_sha,
+        merge_ready_created_at = "2026-06-03T02:00:00Z",
+      },
+    }
+
+    local selected, age = core.merge_queue_starvation_candidate(entries, 60, core.iso_timestamp_epoch_seconds("2026-06-03T02:30:00Z"))
+
+    t.eq(selected.pr_number, 459)
+    t.eq(selected.proposal_id, aged.proposal_id)
+    t.eq(age, 150)
+  end,
+
+  test_queue_starvation_redrive_merges_reported_aged_entry_behind_fifo_head = function()
     local current = merge_ready()
     local stale = event_for_pr(459, 459, "2026-06-03T00-00-00Z", "abcdef1234567890abcdef1234567890abcdef12")
     mock_bot_env()

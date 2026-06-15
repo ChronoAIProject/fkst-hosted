@@ -220,16 +220,13 @@ end
 
 local function merge_queue_head_entity(repo, now_seconds)
   local branches = M.branch_config()
-  local head = M.merge_queue_head(repo, branches.integration)
-  if head == nil or tostring(head.state or "") ~= "merge-ready" then
+  local _, entries = M.merge_queue_head(repo, branches.integration)
+  local head, age = M.merge_queue_starvation_candidate(entries, merge_ready_stale_threshold_minutes, now_seconds)
+  if head == nil then
     return nil
   end
   local repo_from_proposal, issue_number = M.parse_proposal_id(head.proposal_id)
   if repo_from_proposal == nil then
-    return nil
-  end
-  local age = M.stall_suspect_age_minutes(head.version, now_seconds)
-  if tonumber(age) == nil or tonumber(age) <= merge_ready_stale_threshold_minutes then
     return nil
   end
   return {

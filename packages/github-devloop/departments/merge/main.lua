@@ -791,12 +791,21 @@ local function queue_starvation_cause_matches_entry(cause, entry)
 end
 
 local function queue_starvation_target_entry(cause, entries)
+  local target = nil
   for _, entry in ipairs(entries or {}) do
     if queue_starvation_cause_matches_entry(cause, entry) then
-      return entry
+      target = entry
+      break
     end
   end
-  return nil
+  if target == nil then
+    return nil, nil, "target-not-current"
+  end
+  local candidate, age_minutes = core.merge_queue_starvation_candidate(entries, 60, now())
+  if not queue_starvation_cause_matches_entry(cause, candidate) then
+    return nil, age_minutes, "target-not-aged-candidate"
+  end
+  return target, age_minutes, "aged-candidate"
 end
 
 local function process_merge_queue_tick(event)
@@ -839,14 +848,17 @@ local function process_merge_queue_tick(event)
     local selected = head
     if cause_kind == "queue-starvation" then
       local cause_proposal = tostring(cause and cause.proposal_id or "")
-      selected = queue_starvation_target_entry(cause, entries)
+      local selected_age
+      local selected_reason
+      selected, selected_age, selected_reason = queue_starvation_target_entry(cause, entries)
       if selected == nil then
         core.log_line("info", "merge", tostring(cause_proposal ~= "" and cause_proposal or head.proposal_id), "GATE", {
           "pr=" .. tostring(head.pr_number),
           "reported_pr=" .. tostring(cause and cause.head_pr_number or ""),
           "version=" .. tostring(head.version),
           "outcome=hold",
-          "reason=queue-starvation-target-not-current",
+          "reason=queue-starvation-" .. tostring(selected_reason or "target-not-current"),
+          "age_minutes=" .. tostring(selected_age or ""),
           "incident=" .. tostring(cause and cause.incident_identity or ""),
           "pass=poll",
         })
@@ -857,6 +869,7 @@ local function process_merge_queue_tick(event)
         "version=" .. tostring(selected.version),
         "outcome=reconcile",
         "reason=queue-starvation-redrive",
+        "age_minutes=" .. tostring(selected_age or ""),
         "incident=" .. tostring(cause.incident_identity or ""),
         "pass=poll",
       })
