@@ -17,6 +17,10 @@ local function is_marker_value(value)
     and tostring(value):find('[<>"\r\n]') == nil
 end
 
+local function optional_marker_value(value)
+  return value == nil or is_marker_value(value)
+end
+
 local function is_positive_integer(value)
   local n = tonumber(value)
   return n ~= nil and n >= 1 and n % 1 == 0 and n <= 2147483647
@@ -67,6 +71,10 @@ function M.validate_issue_blocked_by_payload(payload)
     return false
   end
   if not is_marker_value(payload.dedup_key) then
+    return false
+  end
+  if not optional_marker_value(payload.external_effect_saga)
+    or not optional_marker_value(payload.external_effect_step) then
     return false
   end
   if type(payload.source_ref) ~= "table"

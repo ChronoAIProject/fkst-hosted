@@ -23,6 +23,46 @@ local function run_git_push()
 end
 
 return {
+  test_assert_external_effect_saga_requires_declared_post_conditions = function()
+    local saga_def = {
+      id = "test.external",
+      steps = {
+        {
+          id = "write-comment",
+          effect = "github.issue.comment",
+          request_queue = "github_issue_comment_request",
+          post_conditions = {
+            {
+              id = "trusted-marker-visible",
+              kind = "trusted-comment-marker",
+              marker = "<!-- fkst:test -->",
+            },
+          },
+        },
+      },
+    }
+
+    conformance.assert_external_effect_saga(saga_def)
+  end,
+
+  test_assert_external_effect_saga_rejects_steps_without_post_conditions = function()
+    local ok, err = pcall(function()
+      conformance.assert_external_effect_saga({
+        id = "test.external",
+        steps = {
+          {
+            id = "write-comment",
+            effect = "github.issue.comment",
+            request_queue = "github_issue_comment_request",
+          },
+        },
+      })
+    end)
+
+    t.eq(ok, false)
+    t.eq(tostring(err):find("step write-comment requires non-empty post_conditions", 1, true) ~= nil, true)
+  end,
+
   test_write_class_classifier_is_explicit = function()
     t.eq(conformance.is_write_class("gh issue comment '42' --repo 'owner/x'"), true)
     t.eq(conformance.is_write_class("gh issue reopen '42' --repo 'owner/x'"), true)
