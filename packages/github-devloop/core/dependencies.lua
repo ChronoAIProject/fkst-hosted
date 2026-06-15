@@ -428,10 +428,12 @@ function M.gh_blocked_by_cmd(repo, issue_number)
   if owner == nil or not core._is_positive_pr_number(issue_number) then
     error("github-devloop: invalid dependency query target")
   end
-  local query = '{repository(owner:"' .. owner .. '",name:"' .. name
-    .. '"){issue(number:' .. tostring(math.floor(tonumber(issue_number)))
-    .. '){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number state stateReason repository{nameWithOwner}}}}}}'
-  return "gh api graphql -f query=" .. core._shell_single_quote(query)
+  local query = core.render_github_graphql_query("dependency_blocked_by", {
+    owner = owner,
+    name = name,
+    issue_number = tostring(math.floor(tonumber(issue_number))),
+  })
+  return core.github_graphql_command_templates.graphql_query .. core._shell_single_quote(query)
 end
 
 function M.dependency_gate(repo, issue_number, context)

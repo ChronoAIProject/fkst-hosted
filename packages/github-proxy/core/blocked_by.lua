@@ -111,19 +111,17 @@ function M.gh_issue_blocked_by_cmd(repo, issue_number)
   if owner == nil or not is_positive_integer(issue_number) then
     error("github-proxy: invalid blockedBy query target")
   end
-  local query = '{repository(owner:"' .. owner .. '",name:"' .. name
-    .. '"){issue(number:' .. tostring(math.floor(tonumber(issue_number)))
-    .. '){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number repository{nameWithOwner}}}}}}'
-  return "gh api graphql -f query=" .. shell_single_quote(query)
+  local query = M.render_github_graphql_query("blocked_by", {
+    owner = owner,
+    name = name,
+    issue_number = tostring(math.floor(tonumber(issue_number))),
+  })
+  return M.github_graphql_command_templates.graphql_query .. shell_single_quote(query)
 end
 
 function M.gh_add_blocked_by_cmd(blocked_id, blocking_id)
-  -- GitHub's AddBlockedByInput accepts `issueId` (the blocked issue) and
-  -- `blockingIssueId` (the blocker); `blockedIssueId` is NOT a valid field and
-  -- makes every addBlockedBy mutation fail (the fork-and-block "block" half then
-  -- never lands, so a peer instance is never held at its dependency gate).
-  local query = "mutation($b:ID!,$g:ID!){addBlockedBy(input:{issueId:$b,blockingIssueId:$g}){clientMutationId}}"
-  return "gh api graphql -f query=" .. shell_single_quote(query)
+  local query = M.github_graphql_queries.add_blocked_by
+  return M.github_graphql_command_templates.graphql_query .. shell_single_quote(query)
     .. " -f b=" .. shell_single_quote(blocked_id)
     .. " -f g=" .. shell_single_quote(blocking_id)
 end
