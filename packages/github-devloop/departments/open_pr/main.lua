@@ -14,7 +14,7 @@ M.spec = {
 
 local function open_pr_context(event)
   local payload = event.payload or {}
-  if core.is_supported_open_pr(payload) then
+  if core.event_queue_matches(event, "devloop_open_pr") and core.is_supported_open_pr(payload) then
     return {
       source = "direct",
       repo = payload.repo,
@@ -28,7 +28,7 @@ local function open_pr_context(event)
       source_ref = payload.source_ref,
     }
   end
-  if core.is_supported_issue(payload) then
+  if core.event_queue_matches(event, "github-proxy.github_entity_changed") and core.is_supported_issue(payload) then
     return {
       source = "poll",
       repo = payload.repo,
