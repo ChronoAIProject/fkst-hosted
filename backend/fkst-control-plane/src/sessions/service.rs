@@ -814,6 +814,37 @@ impl SessionService {
         Ok(failed)
     }
 
+    /// Fail every active session whose repo owner is `owner` because the GitHub
+    /// App was uninstalled from (or suspended on) the whole account (#141). The
+    /// owner-wide counterpart of [`Self::fail_for_uninstalled_repo`], used by the
+    /// webhook when an `installation deleted` / `suspend` event enumerates no
+    /// concrete repos (an `all` install never lists them). Same CAS-first then
+    /// wake-local-drivers discipline; returns the count transitioned.
+    ///
+    /// `reason` is fixed, operator-authored text (never a secret or a webhook
+    /// payload value).
+    pub async fn fail_for_uninstalled_owner(
+        &self,
+        owner: &str,
+        reason: &str,
+    ) -> Result<u64, AppError> {
+        let affected = self.inner.repo.active_ids_for_owner(owner).await?;
+        let failed = self.inner.repo.fail_active_for_owner(owner, reason).await?;
+        if failed > 0 {
+            let registry = self
+                .inner
+                .registry
+                .lock()
+                .expect("session registry lock poisoned");
+            for id in &affected {
+                if let Some(sender) = registry.get(id) {
+                    let _ = sender.send(true);
+                }
+            }
+        }
+        Ok(failed)
+    }
+
     /// Entry-guarded driver spawn: start a detached driver task for
     /// `session` unless one is already registered. The driver's claim CAS
     /// (and, when fenced, the lease) stays the authoritative dedupe; this

@@ -3,23 +3,28 @@
 //!
 //! The module mints short-lived, repo-scoped GitHub installation tokens on
 //! demand. Tokens are cached per `(repo, permissions)` pair and re-minted
-//! 5 minutes before expiry. Installation IDs are cached for 1 hour.
+//! 5 minutes before expiry. Installation IDs are cached in memory only (#141):
+//! the durable installation store was removed, so resolution is stateless —
+//! cache hit -> on-demand `GET …/installation` probe -> cache. Each cache entry
+//! carries a jittered ~15-minute expiry (`INSTALLATION_TTL_BASE` ± up to
+//! `INSTALLATION_TTL_JITTER`) so a worker fleet does not re-probe in lockstep.
 //!
 //! Cache lock discipline: locks are held for map access only; minting happens
 //! outside the lock (rare duplicate mints accepted over lock contention).
 //!
 //! `InstallationGone` invalidates BOTH caches and makes one transparent
-//! re-resolve attempt before surfacing.
+//! re-resolve attempt before surfacing — this is the self-correct path that
+//! makes the stateless model safe (a stale mapping is repaired at the next mint).
 
 pub mod api;
 pub mod config;
 pub mod jwt;
-pub mod store;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
+use rand::Rng;
 use regex::Regex;
 use secrecy::SecretString;
 
@@ -32,19 +37,37 @@ pub use config::GithubAppConfig;
 /// Re-export API types for downstream consumers.
 pub use api::{InstallationId, InstallationToken, TokenPermissions};
 
-/// Re-export the installation-persistence seam (issue #108) so the webhook
-/// route and `main.rs` can depend on the abstraction and its Mongo impl.
-pub use api::{InstallationStore, StoredInstallation};
-pub use store::MongoInstallationStore;
-
 // `InstallationProbe` is defined in this module; it is `pub` already and needs
 // no re-export.
 
 /// Buffer before token expiry at which we re-mint (5 minutes).
 const EXPIRY_BUFFER: Duration = Duration::from_secs(300);
 
-/// How long to cache installation IDs (1 hour).
-const INSTALLATION_TTL: Duration = Duration::from_secs(3600);
+/// Base TTL for an in-memory installation-cache entry (15 minutes). With the
+/// durable installation store removed (#141), each entry is a cheap optimisation
+/// over the on-demand `GET …/installation` probe, so the window is deliberately
+/// short: a stale mapping self-corrects at the next mint (the `InstallationGone`
+/// backstop), and a shorter window bounds how long a removed install lingers.
+const INSTALLATION_TTL_BASE: Duration = Duration::from_secs(900);
+
+/// Per-entry jitter added on top of [`INSTALLATION_TTL_BASE`] (0..=5 minutes).
+///
+/// why: a fleet of N stateless workers that all cold-probe the same repo would
+/// otherwise expire and re-probe in lockstep, synchronising an N-wide stampede
+/// against the shared 5000/hr GitHub REST budget every TTL window. Spreading the
+/// expiry uniformly over a ±5-minute window de-synchronises the refresh so the
+/// re-probes smear across the window instead of bunching at one instant.
+const INSTALLATION_TTL_JITTER: Duration = Duration::from_secs(300);
+
+/// Sample a uniform random jitter `Duration` in `0..=INSTALLATION_TTL_JITTER`.
+/// Added to [`INSTALLATION_TTL_BASE`] when computing a cache entry's `expires_at`
+/// so per-entry expiries de-synchronise across the worker fleet (see the const
+/// docs above). The inclusive upper bound is intentional: an entry may live for
+/// the full base + max-jitter window.
+fn rand_jitter() -> Duration {
+    let jitter_secs = INSTALLATION_TTL_JITTER.as_secs();
+    Duration::from_secs(rand::thread_rng().gen_range(0..=jitter_secs))
+}
 
 /// Regex for validating `owner/repo` format.
 static REPO_REF_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
@@ -137,6 +160,56 @@ pub fn default_permissions() -> TokenPermissions {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-worker eviction broadcast seam (#141)
+// ---------------------------------------------------------------------------
+
+/// Cross-worker installation-eviction broadcast seam (#141).
+///
+/// The stateless model (#141) keeps no durable installation record: each pod
+/// resolves on demand and caches in memory. The webhook terminates on whichever
+/// pod serves public ingress (the controller), so after that pod busts its own
+/// caches it must fan the eviction out to every other worker — otherwise a
+/// worker's local cache could keep minting for a repo the App was uninstalled
+/// from until its own TTL lapses.
+///
+/// This is the injectable seam for that fan-out. The default
+/// [`NoopEvictionBroadcaster`] is wired today: the controller→worker "evict"
+/// channel does not yet exist (worker engine execution was deferred to #151;
+/// the internal protocol currently only carries register/heartbeat/pull/
+/// draining/released), so the controller-local eviction + session-fail still
+/// runs and the broadcast is a no-op. Swapping in a real broadcaster that writes
+/// to the controller→worker channel is then a one-line change at construction.
+///
+/// `Send + Sync` so it can live behind the `Arc` shared by every `GithubAppTokens`
+/// clone; the method is intentionally synchronous and best-effort (a dead or
+/// unreachable worker is logged by the implementation, never fatal — it
+/// self-corrects at its next mint via the `InstallationGone` backstop).
+pub trait InstallationEvictionBroadcaster: Send + Sync + std::fmt::Debug {
+    /// Fan an eviction of `owner/name` out to every other worker (best-effort).
+    fn broadcast_evict(&self, owner: &str, name: &str);
+}
+
+/// Default no-op broadcaster: the controller→worker evict channel is not wired
+/// yet (#134/#151), so the cluster-wide fan-out degrades to controller-local
+/// eviction. Each worker self-corrects on its own TTL lapse / next-mint
+/// `InstallationGone` until the real channel lands.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopEvictionBroadcaster;
+
+impl InstallationEvictionBroadcaster for NoopEvictionBroadcaster {
+    fn broadcast_evict(&self, owner: &str, name: &str) {
+        // TODO(#134/#151): fan eviction out to workers over the
+        // controller→worker channel. Until that channel exists, the broadcast
+        // is a no-op and each worker self-corrects at its next mint.
+        tracing::debug!(
+            owner = %owner,
+            name = %name,
+            "installation eviction broadcast is a no-op (controller→worker channel not wired)"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Cache types
 // ---------------------------------------------------------------------------
 
@@ -156,7 +229,11 @@ struct CachedToken {
 #[derive(Debug)]
 struct CachedInstallation {
     id: InstallationId,
-    resolved_at: SystemTime,
+    /// Absolute expiry, computed at insert time as
+    /// `now + INSTALLATION_TTL_BASE + rand_jitter()`. Storing the absolute
+    /// instant (instead of a `resolved_at` + a fixed TTL) lets each entry carry
+    /// its own jittered lifetime so expiries de-synchronise across the fleet.
+    expires_at: SystemTime,
 }
 
 // ---------------------------------------------------------------------------
@@ -168,11 +245,11 @@ struct Inner {
     encoding_key: jsonwebtoken::EncodingKey,
     app_slug: Option<String>,
     api: std::sync::Arc<dyn GithubApi>,
-    /// Durable installation persistence (issue #108): resolved BEFORE the
-    /// on-demand GitHub probe and evicted on uninstall. `None` keeps the
-    /// pre-#108 behaviour (in-memory caches only), so tests / minimal runs are
-    /// byte-identical.
-    store: Option<std::sync::Arc<dyn InstallationStore>>,
+    /// Cross-worker eviction fan-out (#141). `evict_repo` calls this after the
+    /// local cache bust so the eviction reaches every other worker. Defaults to
+    /// [`NoopEvictionBroadcaster`] until the controller→worker channel is wired
+    /// (#134/#151).
+    eviction_broadcaster: std::sync::Arc<dyn InstallationEvictionBroadcaster>,
     token_cache: Mutex<HashMap<TokenKey, CachedToken>>,
     installation_cache: Mutex<HashMap<String, CachedInstallation>>,
 }
@@ -203,22 +280,26 @@ impl GithubAppTokens {
         Self::with_api(config, std::sync::Arc::new(api))
     }
 
-    /// Construct the service with an injected transport (for tests).
+    /// Construct the service with an injected transport (for tests). Uses the
+    /// default [`NoopEvictionBroadcaster`] (#141) — the controller→worker evict
+    /// channel is not wired yet, so the cross-worker fan-out degrades to
+    /// controller-local eviction.
     pub fn with_api(
         config: &GithubAppConfig,
         api: std::sync::Arc<dyn GithubApi>,
     ) -> Result<Self, GithubAppError> {
-        Self::with_api_and_store(config, api, None)
+        Self::with_api_and_broadcaster(config, api, std::sync::Arc::new(NoopEvictionBroadcaster))
     }
 
-    /// Construct with an injected transport AND an installation-persistence
-    /// store (issue #108). Production passes the Mongo-backed store so
-    /// resolution reads persistence before probing GitHub and survives a pod
-    /// restart; tests pass `None` (in-memory caches only) or a fake store.
-    pub fn with_api_and_store(
+    /// Construct with an injected transport AND eviction broadcaster (#141).
+    /// `pub(crate)` so the webhook layer and unit tests can inject a recording
+    /// broadcaster to assert the cross-worker fan-out is invoked; the public
+    /// constructors remain [`Self::new`] / [`Self::with_api`], both of which
+    /// default to [`NoopEvictionBroadcaster`].
+    pub(crate) fn with_api_and_broadcaster(
         config: &GithubAppConfig,
         api: std::sync::Arc<dyn GithubApi>,
-        store: Option<std::sync::Arc<dyn InstallationStore>>,
+        eviction_broadcaster: std::sync::Arc<dyn InstallationEvictionBroadcaster>,
     ) -> Result<Self, GithubAppError> {
         let encoding_key =
             build_encoding_key(&config.private_key_pem).map_err(|_| GithubAppError::InvalidKey)?;
@@ -228,23 +309,11 @@ impl GithubAppTokens {
                 encoding_key,
                 app_slug: config.app_slug.clone(),
                 api,
-                store,
+                eviction_broadcaster,
                 token_cache: Mutex::new(HashMap::new()),
                 installation_cache: Mutex::new(HashMap::new()),
             }),
         })
-    }
-
-    /// Construct the service with the default HTTP transport AND a persistence
-    /// store (issue #108). The production constructor: `main.rs` builds the
-    /// Mongo store from the `Db` and passes it here so installation resolution
-    /// reads persistence before probing GitHub and survives a pod restart.
-    pub fn new_with_store(
-        config: &GithubAppConfig,
-        store: std::sync::Arc<dyn InstallationStore>,
-    ) -> Result<Self, GithubAppError> {
-        let api = HttpGithubApi::new(&config.api_base)?;
-        Self::with_api_and_store(config, std::sync::Arc::new(api), Some(store))
     }
 
     /// Mint (or return cached) installation token for `owner/repo`, returning
@@ -417,17 +486,19 @@ impl GithubAppTokens {
         }
     }
 
-    /// Resolve the installation ID for a repo. Order (issue #108):
-    ///   1. the in-memory installation cache (1h TTL);
-    ///   2. the durable persistence store, if wired — a hit means no GitHub
-    ///      probe is needed and survives a pod restart;
-    ///   3. the on-demand `GET /repos/{owner}/{repo}/installation` GitHub probe,
-    ///      whose result is then persisted so the NEXT resolve is a store hit.
+    /// Resolve the installation ID for a repo. Stateless (#141), in order:
+    ///   1. the in-memory installation cache (jittered ~15-min TTL);
+    ///   2. the on-demand `GET /repos/{owner}/{repo}/installation` GitHub probe,
+    ///      whose result is cached so the next resolve is a cache hit.
+    ///
+    /// The durable installation store was removed (#141): a cold pod probes on
+    /// demand and a stale mapping self-corrects at the next mint (the
+    /// `InstallationGone` backstop in `token_with_expiry_for_repo`).
     async fn resolve_installation(
         &self,
         owner_repo: &str,
     ) -> Result<InstallationId, GithubAppError> {
-        // 1. In-memory cache.
+        // 1. In-memory cache (each entry carries its own jittered expiry).
         {
             let cache = self
                 .inner
@@ -435,7 +506,7 @@ impl GithubAppTokens {
                 .lock()
                 .expect("installation cache lock");
             if let Some(cached) = cache.get(owner_repo) {
-                if cached.resolved_at + INSTALLATION_TTL > SystemTime::now() {
+                if cached.expires_at > SystemTime::now() {
                     return Ok(cached.id);
                 }
             }
@@ -443,30 +514,7 @@ impl GithubAppTokens {
 
         let (owner, repo) = owner_repo.split_once('/').expect("validated by regex");
 
-        // 2. Durable persistence: resolve before any live GitHub probe so a
-        //    cold pod (empty in-memory cache) does not hit the API and so a
-        //    suspended/removed install is reflected immediately. A store error
-        //    is logged and treated as a miss (fall through to the API) — the
-        //    durable layer must never become a hard dependency of minting.
-        if let Some(store) = &self.inner.store {
-            match store.lookup_repo(owner, repo).await {
-                Ok(Some(found)) => {
-                    self.cache_installation(owner_repo, found.id);
-                    tracing::debug!(owner_repo = %owner_repo, "installation resolved from persistence");
-                    return Ok(found.id);
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    tracing::warn!(
-                        owner_repo = %owner_repo,
-                        error = %error,
-                        "installation store lookup failed; falling back to on-demand resolve"
-                    );
-                }
-            }
-        }
-
-        // 3. On-demand GitHub probe.
+        // 2. On-demand GitHub probe.
         let app_jwt = mint_app_jwt(self.inner.app_id, &self.inner.encoding_key)
             .map_err(|e| GithubAppError::Http(format!("jwt mint for installation: {e}")))?;
 
@@ -485,24 +533,14 @@ impl GithubAppTokens {
 
         self.cache_installation(owner_repo, install_id);
 
-        // Persist the probe result so the next resolve is a store hit and the
-        // mapping survives a restart. Best-effort: a store write failure is
-        // logged and swallowed — the token mint already has the id it needs.
-        if let Some(store) = &self.inner.store {
-            if let Err(error) = store.remember_repo(owner, repo, install_id).await {
-                tracing::warn!(
-                    owner_repo = %owner_repo,
-                    error = %error,
-                    "failed to persist resolved installation; resolution still succeeded"
-                );
-            }
-        }
-
         Ok(install_id)
     }
 
-    /// Insert/refresh the in-memory installation cache entry for a repo.
+    /// Insert/refresh the in-memory installation cache entry for a repo. The
+    /// entry's `expires_at` is `now + INSTALLATION_TTL_BASE + rand_jitter()`, so
+    /// each entry carries its own jittered lifetime (#141).
     fn cache_installation(&self, owner_repo: &str, id: InstallationId) {
+        let expires_at = SystemTime::now() + INSTALLATION_TTL_BASE + rand_jitter();
         let mut cache = self
             .inner
             .installation_cache
@@ -510,32 +548,51 @@ impl GithubAppTokens {
             .expect("installation cache lock");
         cache.insert(
             owner_repo.to_string(),
-            CachedInstallation {
-                id,
-                resolved_at: SystemTime::now(),
-            },
+            CachedInstallation { id, expires_at },
         );
     }
 
-    /// Evict both in-memory caches AND the persisted record for a repo (issue
-    /// #108). Called by the webhook handler on an `installation deleted` /
-    /// `repository removed` event so the next mint correctly 404s instead of
-    /// reusing a stale id. The persisted eviction is best-effort: a store
-    /// failure is logged but the in-memory eviction still happens, so this pod
-    /// stops minting for the repo immediately regardless.
+    /// Evict the in-memory caches for a repo (#141) and broadcast the eviction
+    /// to other workers. Called by the webhook handler on an `installation
+    /// deleted` / `repository removed` event so the next mint correctly 404s
+    /// instead of reusing a stale id. There is no durable record to forget — the
+    /// stateless model relies on the next-mint `InstallationGone` self-correct
+    /// for any pod that misses the broadcast.
+    #[allow(clippy::unused_async)] // kept async: callers await it and a future broadcast hook may await
     pub async fn evict_repo(&self, owner: &str, repo: &str) {
         let owner_repo = format!("{owner}/{repo}");
         self.invalidate_caches_for_repo(&owner_repo);
-        if let Some(store) = &self.inner.store {
-            if let Err(error) = store.forget_repo(owner, repo).await {
-                tracing::warn!(
-                    owner_repo = %owner_repo,
-                    error = %error,
-                    "failed to evict persisted installation record"
-                );
-            }
-        }
+        // Fan the eviction out to every other worker (best-effort; a dead worker
+        // is logged by the broadcaster, never fatal — it self-corrects at mint).
+        self.inner.eviction_broadcaster.broadcast_evict(owner, repo);
         tracing::info!(owner_repo = %owner_repo, "evicted installation caches for repo");
+    }
+
+    /// Evict every in-memory cache entry for `owner`'s repos (#141). Used by the
+    /// webhook for the account-wide uninstall path (an `installation deleted` /
+    /// `suspend` that enumerates no concrete repos): every cache key prefixed
+    /// `"{owner}/"` is dropped from both caches so the next mint for any of that
+    /// owner's repos correctly re-probes (and 404s if the App is gone).
+    ///
+    /// No cross-worker broadcast is fanned here: the broadcaster seam is
+    /// per-repo and this path has no enumerated repos to name. Each other worker
+    /// self-corrects at its next mint via the `InstallationGone` backstop.
+    #[allow(clippy::unused_async)] // kept async to mirror evict_repo and stay await-compatible for callers
+    pub async fn evict_owner(&self, owner: &str) {
+        let prefix = format!("{owner}/");
+        {
+            let mut cache = self.inner.token_cache.lock().expect("token cache lock");
+            cache.retain(|k, _| !k.owner_repo.starts_with(&prefix));
+        }
+        {
+            let mut cache = self
+                .inner
+                .installation_cache
+                .lock()
+                .expect("installation cache lock");
+            cache.retain(|k, _| !k.starts_with(&prefix));
+        }
+        tracing::info!(owner = %owner, "evicted installation caches for owner (account-wide)");
     }
 
     /// Invalidate both token and installation caches for a repo.
@@ -564,62 +621,26 @@ mod tests {
     use secrecy::{ExposeSecret, SecretString};
 
     use super::api::{
-        GithubApi, InstallationId, InstallationStore, InstallationToken, InstallationTokenRequest,
-        StoredInstallation, TokenPermissions,
+        GithubApi, InstallationId, InstallationToken, InstallationTokenRequest, TokenPermissions,
     };
     use super::config::GithubAppConfig;
     use super::*;
 
-    // ---- fake installation store ---------------------------------------------
+    // ---- recording eviction broadcaster (#141) -------------------------------
 
-    /// In-memory [`InstallationStore`] for the resolve-from-persistence tests.
-    /// `hit` is the installation returned by `lookup_repo`; the call counters
-    /// prove the DB seam is consulted before (and instead of) the GitHub API.
+    /// Records every cross-worker eviction broadcast so a test can assert the
+    /// fan-out seam fires exactly once per evicted repo.
     #[derive(Debug, Default)]
-    struct FakeStore {
-        hit: std::sync::Mutex<Option<StoredInstallation>>,
-        lookups: AtomicUsize,
-        remembers: AtomicUsize,
-        forgets: AtomicUsize,
+    struct RecordingBroadcaster {
+        broadcasts: std::sync::Mutex<Vec<String>>,
     }
 
-    impl FakeStore {
-        fn with_hit(id: u64) -> Self {
-            Self {
-                hit: std::sync::Mutex::new(Some(StoredInstallation {
-                    id: InstallationId(id),
-                    is_organization: true,
-                    suspended: false,
-                })),
-                ..Self::default()
-            }
-        }
-    }
-
-    #[async_trait]
-    impl InstallationStore for FakeStore {
-        async fn lookup_repo(
-            &self,
-            _owner: &str,
-            _repo: &str,
-        ) -> Result<Option<StoredInstallation>, GithubAppError> {
-            self.lookups.fetch_add(1, Ordering::SeqCst);
-            Ok(*self.hit.lock().unwrap())
-        }
-
-        async fn remember_repo(
-            &self,
-            _owner: &str,
-            _repo: &str,
-            _installation_id: InstallationId,
-        ) -> Result<(), GithubAppError> {
-            self.remembers.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-
-        async fn forget_repo(&self, _owner: &str, _repo: &str) -> Result<(), GithubAppError> {
-            self.forgets.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+    impl InstallationEvictionBroadcaster for RecordingBroadcaster {
+        fn broadcast_evict(&self, owner: &str, name: &str) {
+            self.broadcasts
+                .lock()
+                .unwrap()
+                .push(format!("{owner}/{name}"));
         }
     }
 
@@ -919,74 +940,92 @@ mod tests {
         assert_eq!(perms.metadata, None);
     }
 
-    // ---- resolve-from-persistence (issue #108) -------------------------------
+    // ---- stateless resolution (#141) -----------------------------------------
 
     #[tokio::test]
-    async fn resolve_reads_store_before_github_api() {
+    async fn resolve_uses_on_demand_probe_then_caches() {
+        // First mint cold-probes the installation once; a second mint within the
+        // TTL is a cache hit (no second probe). Replaces the removed durable
+        // store: resolution is now probe-on-cold-cache, in-memory only.
         let api = Arc::new(FakeApi::new(1));
-        let store = Arc::new(FakeStore::with_hit(777));
-        let config = test_config();
-        let svc = GithubAppTokens::with_api_and_store(&config, api.clone(), Some(store.clone()))
-            .expect("svc");
+        let svc = service(api.clone());
 
-        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
-
-        // The store was consulted; the GitHub installation API was NOT.
-        assert_eq!(store.lookups.load(Ordering::SeqCst), 1, "store consulted");
+        let _ = svc.token_for_repo("acme/site", None).await.expect("first");
         assert_eq!(
             api.installation_calls(),
-            0,
-            "github installation API must not be hit on a store hit"
-        );
-        // A token was still minted against the store-resolved installation id.
-        assert_eq!(api.mint_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn resolve_falls_back_to_api_and_persists_on_store_miss() {
-        let api = Arc::new(FakeApi::new(1));
-        // Store with no hit => miss => fall through to the API + remember.
-        let store = Arc::new(FakeStore::default());
-        let config = test_config();
-        let svc = GithubAppTokens::with_api_and_store(&config, api.clone(), Some(store.clone()))
-            .expect("svc");
-
-        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
-
-        assert_eq!(store.lookups.load(Ordering::SeqCst), 1, "store consulted");
-        assert_eq!(api.installation_calls(), 1, "API consulted on a store miss");
-        assert_eq!(
-            store.remembers.load(Ordering::SeqCst),
             1,
-            "resolved installation persisted for next time"
+            "the cold cache triggers exactly one on-demand installation probe"
+        );
+
+        let _ = svc.token_for_repo("acme/site", None).await.expect("second");
+        assert_eq!(
+            api.installation_calls(),
+            1,
+            "a second call within TTL is a cache hit (no extra probe)"
         );
     }
 
     #[tokio::test]
-    async fn evict_repo_invalidates_caches_and_forgets_persisted() {
+    async fn evict_repo_busts_installation_cache() {
+        // Prime the cache, evict, then assert the next resolve re-probes (the
+        // cache was busted) AND the cross-worker broadcast fired once per evict.
         let api = Arc::new(FakeApi::new(1));
-        let store = Arc::new(FakeStore::with_hit(5));
+        let broadcaster = Arc::new(RecordingBroadcaster::default());
         let config = test_config();
-        let svc = GithubAppTokens::with_api_and_store(&config, api.clone(), Some(store.clone()))
-            .expect("svc");
+        let svc =
+            GithubAppTokens::with_api_and_broadcaster(&config, api.clone(), broadcaster.clone())
+                .expect("svc");
 
-        // Prime both caches.
-        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
+        let _ = svc.token_for_repo("acme/site", None).await.expect("prime");
+        assert_eq!(api.installation_calls(), 1, "primed with one probe");
 
         svc.evict_repo("acme", "site").await;
         assert_eq!(
-            store.forgets.load(Ordering::SeqCst),
-            1,
-            "persisted record forgotten"
+            broadcaster.broadcasts.lock().unwrap().clone(),
+            vec!["acme/site".to_string()],
+            "evict_repo broadcasts the eviction to other workers exactly once"
         );
-        // After eviction the in-memory installation cache is empty: the next
-        // resolve consults the store again (lookup count grows).
-        let before = store.lookups.load(Ordering::SeqCst);
-        let _ = svc.token_for_repo("acme/site", None).await.expect("token");
-        assert!(
-            store.lookups.load(Ordering::SeqCst) > before,
-            "installation cache was evicted; store re-consulted"
+
+        // The token cache was also busted, so the next call re-resolves the
+        // installation (the probe count grows).
+        let _ = svc
+            .token_for_repo("acme/site", None)
+            .await
+            .expect("after evict");
+        assert_eq!(
+            api.installation_calls(),
+            2,
+            "installation cache was busted; resolve re-probes after eviction"
         );
+    }
+
+    #[test]
+    fn installation_ttl_has_jitter_within_bounds() {
+        // The jitter helper must stay within [0, JITTER], and the computed
+        // expiry within [now+BASE, now+BASE+JITTER]. Sample many times to catch
+        // an off-by-one at either inclusive bound.
+        let jitter_max = INSTALLATION_TTL_JITTER;
+        for _ in 0..1000 {
+            let jitter = rand_jitter();
+            assert!(
+                jitter <= jitter_max,
+                "jitter {jitter:?} exceeds max {jitter_max:?}"
+            );
+            // (Duration is unsigned, so the lower bound `>= 0` is structural.)
+
+            let before = SystemTime::now();
+            let expires_at = before + INSTALLATION_TTL_BASE + rand_jitter();
+            let lower = before + INSTALLATION_TTL_BASE;
+            let upper = before + INSTALLATION_TTL_BASE + INSTALLATION_TTL_JITTER;
+            assert!(
+                expires_at >= lower,
+                "expiry {expires_at:?} earlier than now+BASE {lower:?}"
+            );
+            assert!(
+                expires_at <= upper,
+                "expiry {expires_at:?} later than now+BASE+JITTER {upper:?}"
+            );
+        }
     }
 
     #[tokio::test]

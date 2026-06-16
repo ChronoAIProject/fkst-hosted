@@ -284,4 +284,89 @@ impl SessionRepo {
         }
         Ok(result.modified_count)
     }
+
+    /// Return the ids of every pre-terminal session whose repo owner is `owner`
+    /// (#141). Used for the owner-wide uninstall path (an `installation deleted`
+    /// / `suspend` that enumerates no concrete repos) so the matching local
+    /// drivers can be woken; the bulk CAS stays authoritative.
+    pub async fn active_ids_for_owner(&self, owner: &str) -> Result<Vec<bson::Uuid>, AppError> {
+        let pre_terminal: Vec<Bson> = [
+            SessionStatus::Pending,
+            SessionStatus::Validating,
+            SessionStatus::Running,
+            SessionStatus::Stopping,
+        ]
+        .iter()
+        .map(|status| status_bson(*status))
+        .collect();
+        let mut cursor = self
+            .coll
+            .find(doc! {
+                "repo.owner": owner,
+                "status": { "$in": pre_terminal },
+            })
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "active_ids_for_owner find failed");
+                AppError::Mongo(error)
+            })?;
+        let mut ids = Vec::new();
+        while cursor.advance().await.map_err(|error| {
+            tracing::error!(error = %error, "active_ids_for_owner cursor failed");
+            AppError::Mongo(error)
+        })? {
+            let doc = cursor.deserialize_current().map_err(|error| {
+                tracing::error!(error = %error, "active_ids_for_owner deserialize failed");
+                AppError::Mongo(error)
+            })?;
+            ids.push(doc.id);
+        }
+        Ok(ids)
+    }
+
+    /// Fail every pre-terminal session whose repo owner is `owner` with `reason`
+    /// (#141: the GitHub App was uninstalled from / suspended on an account that
+    /// did not enumerate concrete repos). Same bulk-CAS discipline as
+    /// [`Self::fail_active_for_repo`]; returns the count transitioned.
+    pub async fn fail_active_for_owner(&self, owner: &str, reason: &str) -> Result<u64, AppError> {
+        let pre_terminal: Vec<Bson> = [
+            SessionStatus::Pending,
+            SessionStatus::Validating,
+            SessionStatus::Running,
+            SessionStatus::Stopping,
+        ]
+        .iter()
+        .map(|status| status_bson(*status))
+        .collect();
+        let result = self
+            .coll
+            .update_many(
+                doc! {
+                    "repo.owner": owner,
+                    "status": { "$in": pre_terminal },
+                },
+                doc! { "$set": {
+                    "status": status_bson(SessionStatus::Failed),
+                    "error": reason,
+                    "stopped_at": bson::DateTime::now(),
+                } },
+            )
+            .await
+            .map_err(|error| {
+                tracing::error!(
+                    repo_owner = %owner,
+                    error = %error,
+                    "failing sessions for uninstalled owner failed"
+                );
+                AppError::Mongo(error)
+            })?;
+        if result.modified_count > 0 {
+            tracing::warn!(
+                repo_owner = %owner,
+                count = result.modified_count,
+                "failed active sessions after github app account uninstall/suspend"
+            );
+        }
+        Ok(result.modified_count)
+    }
 }

@@ -13,12 +13,6 @@
 //! Re-exports: [`RepoRef`] is shared by both the sessions and goals domains.
 //! The canonical definition lives here; `goals/model.rs` re-exports it.
 
-pub mod github_installation;
-
-pub use github_installation::{
-    AccountType, GithubInstallationDoc, RepositorySelection, COVERS_ALL,
-};
-
 use serde::{Deserialize, Serialize};
 
 /// GitHub repository reference: `owner/name`. Shared by sessions (via
