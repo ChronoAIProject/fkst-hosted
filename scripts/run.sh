@@ -28,7 +28,7 @@
 #   scripts/run.sh board [--refresh] [--ttl seconds] [--stall seconds]
 #       Render the local github-devloop observability board from the engine's
 #       generic `observe --json` event/entity timeline and queue/DLQ state.
-#       Uses .fkst/board-cache.json by default as a TTL cache; --refresh forces
+#       Uses .fkst/run/board-cache.json by default as a TTL cache; --refresh forces
 #       a read from the engine. The cache is local only and never authoritative.
 #
 #   scripts/run.sh health [--refresh] [--ttl seconds] [--stall seconds]
@@ -45,16 +45,16 @@
 #       env, e.g.:
 #         PACKAGE_CONFIG=value scripts/run.sh run example-package example_department
 #       Reuses $FKST_RUNTIME_ROOT if already set (run twice with the same one to
-#       observe dedup), else uses .fkst/runtime. Never sets FKST_GITHUB_WRITE, so
+#       observe dedup), else uses .fkst/run/runtime. Never sets FKST_GITHUB_WRITE, so
 #       a read-only inbound dogfood stays read-only.
 #
 #   scripts/run.sh supervise <package>
 #       Start the real fkst-framework supervise event loop for one package.
-#       Uses .fkst/runtime and .fkst/durable by default and requires
+#       Uses .fkst/run/runtime and .fkst/run/durable by default and requires
 #       FKST_RATE_POOL_ROOT from the host so named external-command
 #       rate pools are shared across supervise instances. Runs in the foreground
 #       until Ctrl-C. FKST_PROJECT_ROOT can override the default project root of
-#       .fkst/packages/<package>.
+#       .fkst/local-packages/<package>.
 #
 #   scripts/run.sh build
 #       Local-only helper: update the fkst-substrate dev checkout and build
@@ -68,9 +68,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FKST_DIR="$ROOT/.fkst"
-PACKAGES_ROOT="$FKST_DIR/packages"
-DEFAULT_RUNTIME_ROOT="$FKST_DIR/runtime"
-DEFAULT_DURABLE_ROOT="$FKST_DIR/durable"
+SOURCE_PACKAGES_ROOT="$ROOT/packages"
+LOCAL_PACKAGES_ROOT="$FKST_DIR/local-packages"
+EXTERNAL_PACKAGES_ROOT="$FKST_DIR/packages"
+DEFAULT_RUNTIME_ROOT="$FKST_DIR/run/runtime"
+DEFAULT_DURABLE_ROOT="$FKST_DIR/run/durable"
 
 # shellcheck source=scripts/bin_bootstrap.sh
 . "$ROOT/scripts/bin_bootstrap.sh"
@@ -93,6 +95,24 @@ shell_single_quote() {
 
 default_board_cmd() {
   printf 'FKST_NO_AUTOBUILD=1 %s board' "$(shell_single_quote "$ROOT/scripts/run.sh")"
+}
+
+ensure_package_view() {
+  mkdir -p "$FKST_DIR"
+  ln -sfn ../packages "$LOCAL_PACKAGES_ROOT"
+}
+
+package_root_for_name() {
+  local name="$1"
+  if [ -d "$LOCAL_PACKAGES_ROOT/$name" ]; then
+    printf '%s\n' "$LOCAL_PACKAGES_ROOT/$name"
+    return 0
+  fi
+  if [ -d "$EXTERNAL_PACKAGES_ROOT/$name" ]; then
+    printf '%s\n' "$EXTERNAL_PACKAGES_ROOT/$name"
+    return 0
+  fi
+  return 1
 }
 
 # Resolve a path to its physical location, following file symlinks too (portable:
@@ -151,7 +171,9 @@ usage() {
 cmd_check() {
   local fail=0
   python3 -B "$ROOT/scripts/check_repo.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_fkst_layout.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
@@ -167,8 +189,8 @@ check_test_file_coverage() {
 
   (
     cd "$ROOT"
-    find -H "$PACKAGES_ROOT" \( -path '*/tests/*_test.lua' -o -path '*/departments/*/*_test.lua' \) -type f -print \
-      | while IFS= read -r path; do printf 'packages/%s\n' "${path#"$PACKAGES_ROOT"/}"; done \
+    find "$SOURCE_PACKAGES_ROOT" \( -path '*/tests/*_test.lua' -o -path '*/departments/*/*_test.lua' \) -type f -print \
+      | while IFS= read -r path; do printf 'packages/%s\n' "${path#"$SOURCE_PACKAGES_ROOT"/}"; done \
       | LC_ALL=C sort -u
   ) > "$expected"
 
@@ -341,9 +363,12 @@ cmd_test() {
     fail=$((fail + 1))
   fi
 
-  for pkg in "$PACKAGES_ROOT"/*/; do
+  ensure_package_view
+  for src_pkg in "$SOURCE_PACKAGES_ROOT"/*/; do
+    [ -d "$src_pkg" ] || continue
+    name="$(basename "$src_pkg")"
+    pkg="$LOCAL_PACKAGES_ROOT/$name"
     [ -d "$pkg" ] || continue
-    name="$(basename "$pkg")"
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
     echo "=== $name ==="
     ran=$((ran + 1))
@@ -393,7 +418,7 @@ cmd_test() {
 
 collect_composed_package() {
   local name="$1" pkg dep
-  pkg="$PACKAGES_ROOT/$name"
+  pkg="$(package_root_for_name "$name")" || { echo "error: composed package dependency not found: $name" >&2; return 1; }
   [ -d "$pkg" ] || { echo "error: composed package dependency not found: $name" >&2; return 1; }
   case " ${COMPOSED_SEEN[*]-} " in
     *" $name "*) return 0 ;;
@@ -412,8 +437,9 @@ collect_composed_package() {
 
 cmd_test_composed() {
   local pkg name args
+  ensure_package_view
   COMPOSED_SEEN=()
-  for pkg in "$PACKAGES_ROOT"/*/; do
+  for pkg in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
     [ -d "$pkg" ] || continue
     [ -f "$pkg/composed.deps" ] || continue
     name="$(basename "$pkg")"
@@ -426,7 +452,15 @@ cmd_test_composed() {
 
   args=()
   for name in "${COMPOSED_SEEN[@]}"; do
-    args+=(--package-root "$PACKAGES_ROOT/$name")
+    pkg="$(package_root_for_name "$name")" || return 1
+    args+=(--package-root "$pkg")
+  done
+  for pkg in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
+    [ -d "$pkg" ] || continue
+    case " ${COMPOSED_SEEN[*]} " in
+      *" $(basename "$pkg") "*) continue ;;
+    esac
+    args+=(--package-root "${pkg%/}")
   done
   echo "=== composed conformance ==="
   run_quiet_pass "$BIN" conformance --project-root "$ROOT" "${args[@]}"
@@ -495,7 +529,9 @@ cmd_run() {
     event="$inline_event"
   fi
 
-  local pkgdir="$PACKAGES_ROOT/$pkg" lua
+  ensure_package_view
+  local pkgdir lua args rootdir
+  pkgdir="$(package_root_for_name "$pkg")" || { echo "error: no package named $pkg" >&2; exit 1; }
   lua="$pkgdir/departments/$dept/main.lua"
   [ -f "$lua" ] || { echo "error: no department at $lua" >&2; exit 1; }
 
@@ -516,7 +552,13 @@ cmd_run() {
   # Capture rc without set -e aborting at the assignment, so failure logs and
   # any partial RAISED/<RT> still print; propagate rc as the run's exit.
   local out rc=0
-  out="$("$BIN" run "$lua" --project-root "$ROOT" --package-root "$pkgdir" --event "$event" 2>&1)" || rc=$?
+  args=("$BIN" run "$lua" --project-root "$ROOT")
+  for rootdir in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
+    [ -d "$rootdir" ] || continue
+    args+=(--package-root "${rootdir%/}")
+  done
+  args+=(--owner-namespace "$pkg" --event "$event")
+  out="$("${args[@]}" 2>&1)" || rc=$?
 
   echo "--- logs ---"
   printf '%s\n' "$out" | grep -vE '^RAISED:' || true
@@ -553,10 +595,18 @@ cmd_doctor() {
       fi
       resolve_bin
       ensure_fresh_bin
-      local pkgdir="$PACKAGES_ROOT/github-devloop"
+      ensure_package_view
+      local pkgdir rootdir args
+      pkgdir="$(package_root_for_name github-devloop)" || { echo "error: no package named github-devloop" >&2; exit 1; }
       local lua="$pkgdir/departments/doctor/main.lua"
       [ -f "$lua" ] || { echo "error: no saga doctor at $lua" >&2; exit 1; }
-      "$BIN" run "$lua" --project-root "$ROOT" --package-root "$pkgdir" --event '{"queue":"devloop_doctor_tick","payload":{}}' \
+      args=("$BIN" run "$lua" --project-root "$ROOT")
+      for rootdir in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
+        [ -d "$rootdir" ] || continue
+        args+=(--package-root "${rootdir%/}")
+      done
+      args+=(--owner-namespace github-devloop --event '{"queue":"devloop_doctor_tick","payload":{}}')
+      "${args[@]}" \
         | grep -vE '^RAISED:'
       ;;
     --running|--system)
@@ -576,7 +626,7 @@ cmd_doctor() {
 
 cmd_board() {
   local durable="${FKST_DURABLE_ROOT:-$DEFAULT_DURABLE_ROOT}"
-  local cache="$FKST_DIR/board-cache.json"
+  local cache="$FKST_DIR/run/board-cache.json"
   python3 -B "$ROOT/scripts/board.py" \
     --bin "$BIN" \
     --project-root "$ROOT" \
@@ -606,7 +656,9 @@ cmd_supervise() {
       exit 1
       ;;
   esac
-  local pkgdir="$PACKAGES_ROOT/$pkg"
+  ensure_package_view
+  local pkgdir rootdir args
+  pkgdir="$(package_root_for_name "$pkg")" || { echo "error: no package named $pkg" >&2; exit 1; }
   [ -d "$pkgdir" ] || { echo "error: no package at $pkgdir" >&2; exit 1; }
 
   local project_root rt durable
@@ -627,8 +679,14 @@ cmd_supervise() {
   echo "FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT"
   echo "FKST_RATE_POOL_ROOT=$FKST_RATE_POOL_ROOT"
   echo "This starts the real supervise event loop in the foreground. Press Ctrl-C to stop."
-  echo "exec: \"$BIN\" supervise --project-root \"$project_root\" --package-root \"$pkgdir\" --framework-bin \"$BIN\""
-  exec "$BIN" supervise --project-root "$project_root" --package-root "$pkgdir" --framework-bin "$BIN"
+  args=("$BIN" supervise --project-root "$project_root")
+  for rootdir in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
+    [ -d "$rootdir" ] || continue
+    args+=(--package-root "${rootdir%/}")
+  done
+  args+=(--framework-bin "$BIN")
+  echo "exec: ${args[*]}"
+  exec "${args[@]}"
 }
 
 cmd_build() {

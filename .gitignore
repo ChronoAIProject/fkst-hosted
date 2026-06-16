@@ -1,8 +1,8 @@
 # Local, machine-specific config. Tracked template lives in .fkst/env.example.
-.fkst/env
-.fkst/board-cache.json
-.fkst/runtime/
-.fkst/durable/
+/.fkst/packages
+/.fkst/local-packages
+/.fkst/run/
+/.fkst/env
 
 # Python bytecode
 __pycache__/

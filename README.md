@@ -19,8 +19,10 @@ state.
 
 `fkst` is split into an engine and package repositories. `fkst-substrate` owns the runtime,
 delivery, SDK primitives, conformance checks, and `fkst-framework` binary. `fkst-packages` is
-library B: it defines Lua packages loaded under `.fkst/packages/`, with departments, raisers,
-package-local shared code, and tests.
+library B: it defines Lua package development source under `packages/`, with departments, raisers,
+package-local shared code, and tests. The engine never loads from repo-root `packages/` directly:
+`scripts/run.sh` regenerates `.fkst/local-packages -> ../packages` for this repository's own
+packages, and also loads any external runtime packages present under `.fkst/packages/`.
 
 Packages communicate through event queues. Flat packages are self-contained and use bare queue
 names internally. Composed packages are first-class packages that adapt or combine sibling package
@@ -98,8 +100,12 @@ ports, production port wiring, fake-port testing, strings, and GitHub debug stam
 raw call sites are migration debt in `migration/gh-git-adapter.allowlist` that the G-ADAPTER ratchet
 shrinks. Tests use `std.testing` with `std.github_fake` / `std.git_fake`.
 
-The runtime package view is `.fkst/packages/`. In this repository it is a relative symlink to
-`packages/`; host repositories may place runtime packages directly under `.fkst/packages/`.
+Runtime package roots live only under `.fkst/`. In this library repository, `.fkst/local-packages`
+is a regenerated relative symlink to `packages/` and represents this repo's own packages.
+`.fkst/packages/` is reserved for external referenced packages assembled by the operator or
+dogfood host; it is empty for the package library itself. Both paths are runtime-only and
+gitignored. The committed `.fkst/` contents are only `.fkst/substrate-ref` and `.fkst/env.example`;
+generated runtime, durable, and board-cache state goes under `.fkst/run/`.
 
 ## Package Catalog
 
@@ -162,7 +168,7 @@ scripts/run.sh doctor
 ```
 
 Static guards include the 1000-line hard limit for `.lua`, `.sh`, `.py`, and `.rs` source files
-under `.fkst/packages/` and `scripts/`; package test naming rules; helper reachability checks; and
+under `packages/` and `scripts/`; package test naming rules; helper reachability checks; and
 selected repository-shape checks. Engine tests remain the authority for real package behavior.
 
 Repository-shape guards include G9, which forbids peer cross-package `require` and keeps sharing on
@@ -179,8 +185,10 @@ GitHub writes are dry-run by default. `FKST_GITHUB_WRITE=1` is the only write po
 is unset or any other value, outbound GitHub operations are not mutated. Real supervisor runs also
 need host-stable runtime, durable, and rate-pool roots:
 
-- `FKST_RUNTIME_ROOT`: scratch runtime state for local worktrees, locks, logs, cache, and once marks.
-- `FKST_DURABLE_ROOT`: durable delivery store for reliable subscriptions.
+- `FKST_RUNTIME_ROOT`: scratch runtime state for local worktrees, locks, logs, cache, and once marks;
+  defaults to `.fkst/run/runtime`.
+- `FKST_DURABLE_ROOT`: durable delivery store for reliable subscriptions; defaults to
+  `.fkst/run/durable`.
 - `FKST_RATE_POOL_ROOT`: shared host path for external-command rate pools.
 - `FKST_RATE_POOL_GH`: host-owned GitHub rate-pool sizing for the named pool `gh`.
 

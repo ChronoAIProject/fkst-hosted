@@ -25,7 +25,7 @@ scripts/run.sh run <package> <department> '{"payload":{}}'
 scripts/run.sh supervise <package>
 ```
 
-`run` and `supervise` default to `.fkst/runtime` and `.fkst/durable` when the corresponding host
+`run` and `supervise` default to `.fkst/run/runtime` and `.fkst/run/durable` when the corresponding host
 facts are unset. `run` never sets `FKST_GITHUB_WRITE`. Real GitHub writes happen only when
 `FKST_GITHUB_WRITE=1`.
 
@@ -44,7 +44,10 @@ facts are unset. `run` never sets `FKST_GITHUB_WRITE`. Real GitHub writes happen
 
 ## Package Structure
 
-Packages live under `packages/<pkg>/`, with `.fkst/packages/` as the runtime package view.
+Packages live under `packages/<pkg>/` as committed development source. The engine loads runtime
+package roots only from `.fkst/`: `.fkst/local-packages` is regenerated as a relative symlink to
+`packages/` for this repository's own packages, and `.fkst/packages/` is reserved for external
+referenced packages. Both runtime load directories are gitignored.
 
 ```text
 packages/<pkg>/
@@ -92,7 +95,7 @@ names, command names, protocol names, test assertions, and quoted source text st
 
 ## File Size and Test Discipline
 
-Source files under `.fkst/packages/` and `scripts/` have a hard 1000-line limit for `.lua`, `.sh`,
+Source files under `packages/` and `scripts/` have a hard 1000-line limit for `.lua`, `.sh`,
 `.py`, and `.rs` files. Split by stable responsibility before a file reaches the limit. Do not use
 empty forwarding files or compatibility shells to satisfy the limit.
 

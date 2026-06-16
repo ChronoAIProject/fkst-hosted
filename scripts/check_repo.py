@@ -81,7 +81,7 @@ def rel(root: Path, path: Path) -> str:
         return path.relative_to(root).as_posix()
 
 def read_text(path: Path) -> str: return path.read_text(encoding="utf-8")
-def packages_root(root: Path) -> Path: return root / ".fkst" / "packages"
+def packages_root(root: Path) -> Path: return root / "packages"
 def line_count(path: Path) -> int: return len(read_text(path).splitlines())
 def add(violations: list[str], rule: str, message: str) -> None: violations.append(f"{rule}: {message}")
 

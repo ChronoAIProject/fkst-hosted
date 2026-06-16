@@ -246,17 +246,31 @@ class RunScriptContractTest(unittest.TestCase):
         source = self.source()
 
         self.assertIn('python3 -B "$ROOT/scripts/check_repo.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/check_repo_fkst_layout.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_bootstrap_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/board_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/doctor_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/check_repo_fkst_layout.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/check_repo_fkst_layout_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/board_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
+
+    def test_package_runtime_view_is_regenerated_from_source_packages(self) -> None:
+        source = self.source()
+
+        self.assertIn('SOURCE_PACKAGES_ROOT="$ROOT/packages"', source)
+        self.assertIn('LOCAL_PACKAGES_ROOT="$FKST_DIR/local-packages"', source)
+        self.assertIn('EXTERNAL_PACKAGES_ROOT="$FKST_DIR/packages"', source)
+        self.assertIn('ln -sfn ../packages "$LOCAL_PACKAGES_ROOT"', source)
+        self.assertIn('for src_pkg in "$SOURCE_PACKAGES_ROOT"/*/; do', source)
+        self.assertIn('pkg="$LOCAL_PACKAGES_ROOT/$name"', source)
 
     def test_full_test_blocks_on_repository_check_before_engine_resolution(self) -> None:
         source = self.source()
@@ -270,7 +284,7 @@ class RunScriptContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             probe = Path(tmp) / "repo"
             scripts = probe / "scripts"
-            pkg = probe / ".fkst" / "packages" / "oversized"
+            pkg = probe / "packages" / "oversized"
             scripts.mkdir(parents=True)
             pkg.mkdir(parents=True)
 
@@ -311,7 +325,7 @@ class LineLimitGuardTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             probe = Path(tmp) / "repo"
-            module_dir = probe / ".fkst" / "packages" / "github-devloop" / "departments" / "observability"
+            module_dir = probe / "packages" / "github-devloop" / "departments" / "observability"
             module_dir.mkdir(parents=True)
             (module_dir / "dashboard.lua").write_text("-- filler\n" * (check_repo.LINE_LIMIT + 1), encoding="utf-8")
 
@@ -332,7 +346,7 @@ class LineLimitGuardTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             probe = Path(tmp) / "repo"
             script_dir = probe / "scripts"
-            pkg = probe / ".fkst" / "packages" / "near-limit"
+            pkg = probe / "packages" / "near-limit"
             script_dir.mkdir(parents=True)
             pkg.mkdir(parents=True)
             (script_dir / "helper.py").write_text("print('ok')\n", encoding="utf-8")
@@ -362,7 +376,7 @@ class LineLimitGuardTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             probe = Path(tmp) / "repo"
-            pkg = probe / ".fkst" / "packages" / "oversized"
+            pkg = probe / "packages" / "oversized"
             pkg.mkdir(parents=True)
             (pkg / "core.lua").write_text("-- filler\n" * (check_repo.LINE_LIMIT + 1), encoding="utf-8")
 
@@ -412,7 +426,7 @@ class RepositoryInterfaceContractTest(unittest.TestCase):
     def test_repository_checks_scan_fkst_packages_view(self) -> None:
         root = Path(__file__).resolve().parents[1]
 
-        self.assertEqual(check_repo.packages_root(root), root / ".fkst" / "packages")
+        self.assertEqual(check_repo.packages_root(root), root / "packages")
 
 
 class CrossPackageRequireTest(unittest.TestCase):
@@ -463,8 +477,8 @@ class ConvergenceBudgetGuardTest(unittest.TestCase):
     def violations(self, loop_source: str, review_source: str | None = None) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            loop = root / ".fkst" / "packages" / "github-devloop" / "departments" / "loop"
-            review = root / ".fkst" / "packages" / "github-devloop" / "departments" / "review_loop"
+            loop = root / "packages" / "github-devloop" / "departments" / "loop"
+            review = root / "packages" / "github-devloop" / "departments" / "review_loop"
             loop.mkdir(parents=True)
             review.mkdir(parents=True)
             loop.joinpath("main.lua").write_text(loop_source, encoding="utf-8")
@@ -583,7 +597,7 @@ class SagaHandlerRatchetTest(unittest.TestCase):
     def test_missing_dev_base_is_violation_not_warning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dept = root / ".fkst" / "packages" / "example" / "departments" / "dept"
+            dept = root / "packages" / "example" / "departments" / "dept"
             dept.mkdir(parents=True)
             (dept / "main.lua").write_text(
                 'function pipeline(event)\n  return event\nend\n',
@@ -607,7 +621,7 @@ class SagaHandlerRatchetTest(unittest.TestCase):
     def test_first_introduction_without_base_allowlist_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dept = root / ".fkst" / "packages" / "example" / "departments" / "dept"
+            dept = root / "packages" / "example" / "departments" / "dept"
             dept.mkdir(parents=True)
             (dept / "main.lua").write_text(
                 'function pipeline(event)\n  return event\nend\n',
@@ -771,7 +785,7 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
     def test_check_repo_wrapper_loads_allowlist_and_prefixes_violations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package = root / ".fkst" / "packages" / "example"
+            package = root / "packages" / "example"
             migration = root / "migration"
             package.mkdir(parents=True)
             migration.mkdir()
