@@ -17,8 +17,9 @@
 # runtime. This slim image therefore BUILDS and runs (uid 10001) but cannot yet
 # run engine sessions; until #151 moves engine execution onto the worker, the
 # control-plane Deployment runs from the engine-laden worker image (see
-# backend/fkst-worker/Dockerfile and backend/deploy/k8s/README.md). The slim
-# image becomes the controller's production home once #151 lands.
+# backend/fkst-worker/Dockerfile and
+# backend/fkst-control-plane/k8s_sample/README.md). The slim image becomes the
+# controller's production home once #151 lands.
 
 ARG RUST_VERSION=1
 ARG PRODUCT_VERSION=0.0.0

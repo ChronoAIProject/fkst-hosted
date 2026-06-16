@@ -1,3 +1,10 @@
+# ==========================================================================
+# TRANSITIONAL until #143 removes MongoDB. This StatefulSet (and the paired
+# mongodb-service.yaml + the control-plane Deployment's wait-for-mongodb
+# initContainer) exist only while the control plane is DB-backed. When #143
+# lands the DB-free pivot, this whole Mongo pair is deleted mechanically.
+# ==========================================================================
+#
 # Single-replica MongoDB for the local MVP. Durable storage comes from the
 # volumeClaimTemplate (PVC data-mongodb-0), which is RETAINED across pod and
 # StatefulSet deletion — deleting the PVC (or the namespace) is the explicit
@@ -31,9 +38,13 @@ spec:
           ports:
             - name: mongo
               containerPort: 27017
+          # Reads MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD from
+          # the single shared control-plane Secret (the same Secret the
+          # control-plane container's envFrom also pulls — see README §4). The
+          # username:password here MUST match the userinfo in MONGODB_URI.
           envFrom:
             - secretRef:
-                name: fkst-hosted-secret
+                name: fkst-control-plane-secret
           # Authenticated ping via mongosh (mongo:7.0 ships mongosh). Wrapped
           # in bash -c so the env vars expand inside the container. The
           # initialDelay/failureThreshold budget absorbs the first-init auth

@@ -1,0 +1,37 @@
+# `kubectl apply -k backend/fkst-control-plane/k8s_sample` brings up the
+# control-plane stack (plus the transitional Mongo pair and the shared
+# Namespace). This is a convenience entry — the directory is primarily the
+# authoritative SAMPLE set; the config loaders are the source of truth for keys.
+#
+# secret.example.yaml is DELIBERATELY excluded: the real fkst-control-plane-secret
+# is created by the operator first (see secret.example.yaml header), and an
+# apply must never overwrite it with placeholders.
+#
+# namespace.yaml is shared by both deployables; applying it here is harmless and
+# idempotent (the worker dir's kustomization does not re-declare it).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: fkst-hosted
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - service.yaml
+  - deployment.yaml
+  - pdb.yaml
+  # TRANSITIONAL until #143 removes MongoDB:
+  - mongodb-service.yaml
+  - mongodb-statefulset.yaml
+# Image-tag seam: change the deployed control-plane tag in one place.
+# TRANSITIONAL until #151: the control plane still drives the engine, so point
+# this at the engine-laden `fkst-worker` image (with a command override) until
+# engine execution moves to the worker; then switch back to the slim
+# `fkst-control-plane` image. See deployment.yaml header.
+images:
+  - name: fkst-control-plane
+    newTag: dev
+# Replica edit-point. The control-plane range is 3..5 (keep >= 3 so the PDB
+# minAvailable:2 has headroom); the database-free pivot (#143/#144) collapses it
+# to a single authoritative controller.
+replicas:
+  - name: fkst-control-plane
+    count: 3
