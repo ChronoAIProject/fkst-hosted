@@ -24,6 +24,7 @@ local max_branch_len = 160
 local max_sha_len = 64
 local max_pr_title_len = 240
 local max_judgment_prefix_len = 120
+local max_round = 100000
 local action_label = "⟦FKST:ACTION⟧"
 local intake_label = "⟦FKST:INTAKE⟧"
 local class_label = "⟦FKST:CLASS⟧"
@@ -607,6 +608,26 @@ function M.iso_timestamp_epoch_seconds(timestamp)
   return days_since_epoch * 86400 + hour * 3600 + minute * 60 + second
 end
 
+function M.age_minutes(timestamp, now_seconds)
+  local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+  if seconds == nil then
+    return nil
+  end
+  local age = (tonumber(now_seconds) or now()) - seconds
+  if age < 0 then
+    return nil
+  end
+  return math.floor(age / 60)
+end
+
+function M.valid_round(value)
+  local n = tonumber(value)
+  if n == nil or n < 0 or n ~= math.floor(n) or n > max_round then
+    return nil
+  end
+  return n
+end
+
 function M.observe_lock_key(repo, issue_number)
   return "github-devloop/transition/" .. M.safe_repo(repo) .. "/issue/" .. M.safe_issue(issue_number)
 end
@@ -725,6 +746,19 @@ function M.judgment_worktree_path(runtime_root, role, identity)
   end
   local suffix = decimal_checksum(tostring(role) .. "#" .. tostring(identity))
   return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
+end
+
+function M.judgment_worktree(role, identity)
+  local runtime = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+  if runtime.exit_code ~= 0 then
+    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
+  end
+  local worktree = M.judgment_worktree_path(runtime.stdout, role, identity)
+  local mkdir = exec_sync({ cmd = M.mkdir_p_cmd(worktree), timeout = 30 })
+  if mkdir.exit_code ~= 0 then
+    error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
+  end
+  return worktree
 end
 
 function M.judgment_codex_opts(prompt, worktree)
@@ -894,6 +928,7 @@ M._max_blocking_gap_len = max_blocking_gap_len
 M._max_review_ledger_len = max_review_ledger_len
 M._max_pr_issue_context_len = max_pr_issue_context_len
 M._max_pr_title_len = max_pr_title_len
+M._max_round = max_round
 M._action_label = action_label
 M._intake_label = intake_label
 M._class_label = class_label
