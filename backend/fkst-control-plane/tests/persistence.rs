@@ -42,7 +42,7 @@ fn docker_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Mongo image tag — pinned to the same major as `backend/docker-compose.yml`
+/// Mongo image tag — Mongo 7 (the integration-test datastore major, until issue 143 removes Mongo)
 /// so integration tests and local dev exercise the same server line.
 const MONGO_TAG: &str = "7";
 

@@ -151,6 +151,7 @@ graph LR
 ## Quick Rules Summary
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
+- The fkst deployables run exclusively on Kubernetes (per-deployable `k8s_sample/` dirs); `docker-compose` is not used in this repo.
 - Treat the upstream engine and packages repos as read-only references.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
