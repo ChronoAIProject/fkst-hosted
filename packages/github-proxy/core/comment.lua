@@ -1,6 +1,7 @@
 local S = {}
 
-function S.install(M)
+function S.install(M, deps)
+local shared = deps or M
 local max_runtime_id_len = 180
 local stale_comment_target_error_class = "stale-comment-target"
 
@@ -27,17 +28,6 @@ local function comment_body(comment)
   return tostring(comment or "")
 end
 
--- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
--- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
--- configured bot login match regardless of which API populated the field.
--- No-op for ordinary user logins (which never end in "[bot]").
-local function strip_bot_login_suffix(login)
-  if login == nil then
-    return nil
-  end
-  return (tostring(login):gsub("%[bot%]$", ""))
-end
-
 local function comment_author_login(comment)
   local raw = nil
   if type(comment) == "table" then
@@ -49,7 +39,7 @@ local function comment_author_login(comment)
       raw = comment.user.login
     end
   end
-  return strip_bot_login_suffix(raw)
+  return shared.strip_bot_login_suffix(raw)
 end
 
 function M._comment_body(comment)
