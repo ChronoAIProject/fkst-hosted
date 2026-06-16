@@ -57,4 +57,26 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:ready")
     t.is_true(find_raise(result.raises, "devloop_ready") ~= nil)
   end,
+
+  test_consensus_result_from_loop_advances_answered_intake_marker = function()
+    local intake_version = "github-devloop/issue/owner/repo/42/intake/2485289059"
+    local consensus_version = "consensus:" .. intake_version .. "/loop/5"
+    local current = reached({
+      dedup_key = consensus_version,
+    })
+    mock_issue_result({ "fkst-dev:thinking" }, {
+      core.state_marker(current.proposal_id, "thinking", intake_version),
+    })
+
+    local result = run_result(current, opts("result-loop-answers-intake-marker"))
+
+    t.eq(result.exit_code, 0)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.is_true(comment_raise ~= nil)
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
+    t.eq(ready_raise.payload.dedup_key, core.build_devloop_ready_payload(current).dedup_key)
+    t.is_true(comment_raise.payload.body:find(core.state_marker(current.proposal_id, "ready", consensus_version, "result-marker,ready-label,devloop-ready"), 1, true) ~= nil)
+  end,
 }
