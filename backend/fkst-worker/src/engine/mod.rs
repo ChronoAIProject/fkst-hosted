@@ -21,6 +21,7 @@
 //! engine spawn are unchanged.
 
 pub mod executor;
+pub mod journal;
 pub mod refresh;
 pub mod supervise;
 

@@ -300,7 +300,7 @@ async fn status_transitions_are_reported() {
     // report Stopped. Bound it so a hang fails loudly.
     tokio::time::timeout(
         Duration::from_secs(10),
-        supervise_session(ctx, running, guards, stop_rx),
+        supervise_session(ctx, running, guards, None, stop_rx),
     )
     .await
     .expect("supervise loop must finish when the engine exits");
@@ -350,7 +350,7 @@ async fn stop_session_stops_engine_and_releases() {
         initial_fencing_id: Some(d.fencing_id),
     };
     let (stop_tx, stop_rx) = watch::channel(false);
-    let loop_handle = tokio::spawn(supervise_session(ctx, running, guards, stop_rx));
+    let loop_handle = tokio::spawn(supervise_session(ctx, running, guards, None, stop_rx));
 
     // Let the loop report Running, then command a stop.
     tokio::time::sleep(Duration::from_millis(700)).await;

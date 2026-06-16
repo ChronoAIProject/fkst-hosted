@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 
 use fkst_engine::{scan_and_adopt, RunningSession, SessionRunner};
+use fkst_journal::Journaler;
 use fkst_shared::protocol::ResolvedDispatch;
 
 use super::{LiveSession, WorkerAgent};
@@ -44,11 +45,12 @@ impl WorkerAgent {
                     Arc::new(AlreadyConfirmed(dispatch.fencing_id));
                 let repo_ref = format!("{}/{}", dispatch.goal.repo.owner, dispatch.goal.repo.name);
                 let expires_at = unix_ms_to_system_time(dispatch.github_token_expires_at_unix_ms);
-                let (running, guards) = session.into_parts();
+                let (running, guards, journaler) = session.into_parts();
                 self.spawn_supervise(
                     session_id.clone(),
                     running,
                     guards,
+                    journaler,
                     repo_ref,
                     expires_at,
                     Some(dispatch.fencing_id),
@@ -77,6 +79,11 @@ impl WorkerAgent {
         session_id: String,
         running: RunningSession,
         guards: SessionGuards,
+        // The per-session journaler (#151 i6c), `Some` only for a FRESH dispatch
+        // that carried a `JournalPlan`. `None` for an adopted session (no
+        // dispatch/clone in hand to rebuild it). The supervise loop journals the
+        // engine's RAISED stdout + lifecycle transitions through it.
+        journaler: Option<Journaler>,
         repo_ref: String,
         token_expires_at: SystemTime,
         initial_fencing_id: Option<i64>,
@@ -103,7 +110,7 @@ impl WorkerAgent {
             initial_fencing_id,
         };
         let (stop_tx, stop_rx) = watch::channel(false);
-        let handle = tokio::spawn(supervise_session(ctx, running, guards, stop_rx));
+        let handle = tokio::spawn(supervise_session(ctx, running, guards, journaler, stop_rx));
         self.insert_live_session(session_id.clone(), LiveSession::new(stop_tx, handle));
         tracing::info!(session_id = %session_id, pid, "engine supervised and session registered");
         true
@@ -190,10 +197,14 @@ impl WorkerAgent {
             // activation increment supplies them with the confirmed fence — they
             // are unused while parked (the servicer never mints).
             let confirmer: Arc<dyn FenceConfirmer> = Arc::new(NeverConfirmed);
+            // No journaler: an adopted engine carries no dispatch/clone to
+            // rebuild the per-session journaler from (the activation increment
+            // re-supplies a plan with the confirmed fence).
             self.spawn_supervise(
                 session_id,
                 running,
                 SessionGuards::none(),
+                None,
                 String::new(),
                 now,
                 None,

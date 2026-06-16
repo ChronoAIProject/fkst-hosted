@@ -172,7 +172,9 @@ pub(crate) async fn spawn_engine(
         .await
         .expect("dispatch executes");
     let runtime_dir = session.running.runtime_dir.clone();
-    let (running, guards) = session.into_parts();
+    // The journaler is dropped: these tests drive sessions with `journal: None`,
+    // so it is always `None` (journaling is exercised by the journal suite).
+    let (running, guards, _journaler) = session.into_parts();
     (running, guards, runtime_dir)
 }
 

@@ -26,8 +26,10 @@ use fkst_engine::goal_token::write_nonce_file;
 use fkst_engine::{
     EngineConfig, GoalContext, RunnerError, RunningSession, SessionRunner, StartSpec,
 };
+use fkst_journal::{Journaler, Transition};
 use fkst_shared::protocol::{OrnnPlan, OrnnSource, ResolvedDispatch};
 
+use super::journal::{self, start_session_journaler};
 use super::{ClonedHandle, Cloner, RealCloner};
 
 /// Owner-only permission for the CODEX_HOME dir and its `config.toml`, matching
@@ -65,26 +67,43 @@ impl SessionGuards {
 }
 
 /// A spawned, running engine plus the on-disk guards the worker owns for the
-/// session's lifetime. Dropping it removes the clone working tree and the
-/// CODEX_HOME dir; the engine itself is stopped explicitly later (the supervise
-/// loop), never on drop. `running` is `pub` so the caller can register it and
-/// supervise it; [`Self::into_parts`] hands the running engine + its guards to
+/// session's lifetime and the per-session journaler (`None` when journaling is
+/// off). Dropping it removes the clone working tree and the CODEX_HOME dir; the
+/// engine itself is stopped explicitly later (the supervise loop), never on
+/// drop. `running` is `pub` so the caller can register it and supervise it;
+/// [`Self::into_parts`] hands the running engine + its guards + the journaler to
 /// the supervise task.
-#[derive(Debug)]
 pub struct ExecutedSession {
     /// The live engine handle (`SessionRunner::start_with_spec` output).
     pub running: RunningSession,
     /// The on-disk guards (clone tree + CODEX_HOME), moved into the supervise
     /// task so the dirs outlive the engine.
     guards: SessionGuards,
+    /// The per-session journaler, `Some` only when the dispatch carried a
+    /// `JournalPlan`. Moved into the supervise loop, which journals the engine's
+    /// RAISED stdout + lifecycle transitions through it.
+    journaler: Option<Journaler>,
+}
+
+// Hand-written so the journaler (which is NOT `Debug` and holds a `SecretString`
+// token) cannot leak via a derived `Debug`; only its presence is rendered.
+impl std::fmt::Debug for ExecutedSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutedSession")
+            .field("running", &self.running)
+            .field("guards", &self.guards)
+            .field("journaling", &self.journaler.is_some())
+            .finish()
+    }
 }
 
 impl ExecutedSession {
-    /// Split into the running engine and its on-disk guards, so the supervise
-    /// task can own both (it `&mut`-drives the engine and holds the guards for
-    /// the dirs' lifetime).
-    pub fn into_parts(self) -> (RunningSession, SessionGuards) {
-        (self.running, self.guards)
+    /// Split into the running engine, its on-disk guards, and the per-session
+    /// journaler, so the supervise task can own all three (it `&mut`-drives the
+    /// engine, holds the guards for the dirs' lifetime, and journals through the
+    /// journaler).
+    pub fn into_parts(self) -> (RunningSession, SessionGuards, Option<Journaler>) {
+        (self.running, self.guards, self.journaler)
     }
 }
 
@@ -154,6 +173,16 @@ pub(crate) async fn execute_dispatch_with(
         .await
         .map_err(ExecError::Clone)?;
 
+    // (2b) Start the per-session journaler (#151 i6c) and journal the first
+    // lifecycle transition (Validating). `None` when the dispatch carries no
+    // `JournalPlan` (journaling off) — then every journal call below is a no-op.
+    // The fingerprint root is the FIRST cloned package dir (request order), the
+    // run's primary package (mirrors the driver). Journaling is NEVER
+    // load-bearing: a journaler start failure proceeds unjournaled.
+    let mut journaler =
+        start_session_journaler(dispatch, cloned.package_roots.first().map(|p| p.as_path())).await;
+    journal::journal_lifecycle(&mut journaler, Transition::Validating).await;
+
     // (3) Per-session CODEX_HOME (#112/#114): rendered ONLY when the dispatch
     // carries codex config OR an ornn plan — exactly `prepare_codex_home`'s
     // condition. Order inside mirrors the driver: 0700 dir, then 0600
@@ -206,6 +235,10 @@ pub(crate) async fn execute_dispatch_with(
     write_nonce_file(&running.runtime_dir, dispatch.mint_nonce.expose_secret())
         .map_err(runner_io_to_exec)?;
 
+    // The engine is spawned: journal the Spawned{pid} lifecycle (mirrors the
+    // driver, which journals it right after start returns). No-op when off.
+    journal::journal_lifecycle(&mut journaler, Transition::Spawned { pid: running.pid }).await;
+
     tracing::info!(
         session_id = %dispatch.session_id,
         worker_id = %dispatch.worker_id,
@@ -220,6 +253,7 @@ pub(crate) async fn execute_dispatch_with(
             _clone: cloned,
             _codex_home: codex_home,
         },
+        journaler,
     })
 }
 
