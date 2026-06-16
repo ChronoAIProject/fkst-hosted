@@ -263,6 +263,8 @@ cmd_config() {
 
 cmd_board() {
   local target="${1:-}" stale="${2:-6}"
+  # accept `board <stale_hours>` (numeric first arg) as well as `board [name] [stale_hours]`
+  if [ -n "$target" ] && [ -z "${target//[0-9]/}" ]; then stale="$target"; target=""; fi
   [ -z "$target" ] && target="$DOGFOOD_REPOS" || target=$(expand "$target")
   for n in $target; do board_one "$n" "$stale"; done
   echo "✓ flowing / tracking / parked = ok   ·   ⚠ STUCK/STRANDED/CI-RED/NO-CI = needs attention (stale=${stale}h)"
