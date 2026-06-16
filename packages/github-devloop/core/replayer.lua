@@ -575,7 +575,12 @@ local function replay_impl_failed(dept, issue, state, row, facts)
     replay_facts[key] = value
   end
   replay_facts.current = replay_facts.current or { comments = {}, labels = {} }
-  replay_facts.ready_payload = M.build_devloop_ready_payload({ proposal_id = fields.proposal_id, dedup_key = fields.dedup_key, source_ref = fields.source_ref, impl_retry_attempt = M.next_impl_retry_attempt(failure) })
+  replay_facts.ready_payload = M.build_devloop_ready_payload({
+    proposal_id = fields.proposal_id,
+    dedup_key = M.ready_payload_inner_version(fields.dedup_key),
+    source_ref = fields.source_ref,
+    impl_retry_attempt = M.next_impl_retry_attempt(failure),
+  })
   return replay_ready(dept, issue, retry_state, M.restart_transition_row("ready"), replay_facts)
 end
 

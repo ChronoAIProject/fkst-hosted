@@ -30,9 +30,10 @@ local function forged_command()
 end
 
 local function impl_failed_comments(event, reason, attempt, command)
+  local version = core.build_devloop_ready_payload(event).dedup_key
   local comments = {
-    core.state_marker(event.proposal_id, "impl-failed", event.dedup_key),
-    core.impl_failure_marker(event.proposal_id, event.dedup_key, reason or "codex-failed", attempt),
+    core.state_marker(event.proposal_id, "impl-failed", version),
+    core.impl_failure_marker(event.proposal_id, version, reason or "codex-failed", attempt),
   }
   if command ~= nil then
     table.insert(comments, command)
@@ -93,6 +94,7 @@ return {
     t.eq(result.exit_code, 0)
     local ready = find_raise(result.raises, "devloop_ready")
     t.is_true(ready ~= nil)
+    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload(event).dedup_key)
     t.eq(ready.payload.impl_retry_attempt, 3)
     local response = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(response.payload.body:find("operator command accepted: reimplement", 1, true) ~= nil)
