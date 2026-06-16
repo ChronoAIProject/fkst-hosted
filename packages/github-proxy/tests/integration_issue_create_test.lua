@@ -57,12 +57,12 @@ local function mock_parent_pr_comment_write()
 end
 
 local function mock_parent_issue_comment_write()
-  t.mock_command("gh issue comment '42' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-intent-", {
+  t.mock_command("gh issue comment 42 --repo owner/x --body-file /tmp/fkst-github-proxy-intent-", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("gh issue comment '42' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-created-", {
+  t.mock_command("gh issue comment 42 --repo owner/x --body-file /tmp/fkst-github-proxy-created-", {
     stdout = "",
     stderr = "",
     exit_code = 0,
@@ -123,7 +123,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 0)
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
   end,
@@ -149,7 +149,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 0)
   end,
@@ -175,7 +175,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 0)
@@ -206,7 +206,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 2)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 2)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 1)
     t.eq(count_calls("--assignee 'fkst-test-bot'"), 1)
@@ -363,7 +363,7 @@ return {
       payload = payload,
     }, run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 3)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 3)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 1)
   end,
@@ -387,7 +387,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 0)
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
   end,

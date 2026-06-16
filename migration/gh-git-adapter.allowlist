@@ -61,14 +61,6 @@ packages/github-devloop/departments/observability/dashboard.lua:
   - gh dashboard
 packages/github-devloop/departments/observability/reaper.lua:
   - gh orphan
-packages/github-proxy/core.lua:
-  - gh api
-  - gh issue
-  - gh label
-  - gh pr
-  - git merge-base
-  - git push
-  - git show-ref
 packages/github-proxy/core/claims.lua:
   - gh issue
 packages/github-proxy/core/comment.lua:
@@ -78,9 +70,6 @@ packages/github-proxy/core/comment.lua:
   - gh pr
 packages/github-proxy/core/entity_view.lua:
   - gh api
-packages/github-proxy/core/gh_rate.lua:
-  - gh
-  - gh command
 packages/github-proxy/core/github_graphql.lua:
   - gh api
 packages/github-proxy/core/issue_create.lua:

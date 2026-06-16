@@ -40,7 +40,7 @@ local pr_open_event = h.pr_open_event
 local pr_open_guard_comments = h.pr_open_guard_comments
 local pr_open_visible_comments = h.pr_open_visible_comments
 local reviewing_marker = h.reviewing_marker
-local issue_comment_create = "gh api --method POST 'repos/owner/x/issues/42/comments'"
+local issue_comment_create = "gh api --method POST repos/owner/x/issues/42/comments"
 
 local function pr_json(number, updated_at, state)
   return string.format(
@@ -94,6 +94,12 @@ local function find_entity_raise(raises, entity_type, number)
   return nil
 end
 
+local function has_arg_pair(rendered, flag, value)
+  local text = tostring(rendered or "")
+  return text:find(tostring(flag) .. " '" .. tostring(value) .. "'", 1, true) ~= nil
+    or text:find(tostring(flag) .. " " .. tostring(value), 1, true) ~= nil
+end
+
 return {
   test_inbound_poll_raises_issue_and_pr_then_cache_hit = function()
     local event = { queue = "github_poll_tick", payload = {} }
@@ -131,8 +137,8 @@ return {
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 2)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 2)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 2)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 2)
   end,
 
   test_inbound_poll_re_raises_when_updated_at_changes = function()
@@ -177,8 +183,8 @@ return {
     local closed = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(closed.exit_code, 0)
     t.eq(#closed.raises, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 2)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 2)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 2)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 2)
   end,
 
   test_inbound_poll_open_pr_coverage_is_not_limited_by_terminal_volume = function()
@@ -198,12 +204,9 @@ return {
     t.eq(target.queue, "github_entity_changed")
     t.eq(target.payload.updated_at, "2026-06-02T00:00:00Z")
     t.eq(target.payload.dedup_key, "owner/x#pr#12@2026-06-02T00:00:00Z")
-    t.eq(core.gh_pr_list_cmd("owner/x"), "gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'")
-    t.is_true(core.gh_pr_list_cmd("owner/x"):find("state=open", 1, true) ~= nil)
-    t.is_true(core.gh_pr_list_cmd("owner/x"):find("per_page=100", 1, true) ~= nil)
-    t.eq(core.gh_pr_list_cmd("owner/x"):find("--state all", 1, true), nil)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 1)
+    t.eq(calls_matching("--state all")[1], nil)
   end,
 
   test_inbound_poll_paces_cold_replay_and_continues_next_cycle = function()
@@ -397,8 +400,8 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github_entity_changed")
     t.eq(result.raises[1].payload.type, "pr")
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 1)
   end,
 
   test_inbound_poll_continues_when_pr_list_fails = function()
@@ -411,8 +414,8 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github_entity_changed")
     t.eq(result.raises[1].payload.type, "issue")
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 1)
   end,
 
   test_inbound_poll_rate_limit_failure_errors_for_retry = function()
@@ -422,8 +425,8 @@ return {
 
     local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, opts("issue-list-rate-limit"))
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 0)
   end,
 
   test_inbound_poll_no_raise_without_repo_env = function()
@@ -438,8 +441,8 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues?state=open&per_page=100'"), 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues?state=open&per_page=100"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&per_page=100"), 0)
   end,
 
   test_same_version_meta_comment_marker_dedups_opposite_action = function()
@@ -646,7 +649,7 @@ return {
     }))
     t.eq(result.exit_code, 0)
 
-    local view_calls = calls_matching("gh api --paginate --slurp 'repos/owner/payload/issues/42/comments?per_page=100'")
+    local view_calls = calls_matching("gh api --paginate --slurp repos/owner/payload/issues/42/comments?per_page=100")
     t.eq(#view_calls, 1)
     t.is_true(view_calls[1].rendered:find("repos/owner/payload/issues/42/comments", 1, true) ~= nil)
     local comment_calls = calls_matching("gh api --method POST")
@@ -669,7 +672,7 @@ return {
     mock_write_env("1")
     mock_bot_env()
     mock_comment_view("existing comment")
-    t.mock_command("gh api --method POST 'repos/owner/x/issues/42/comments' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-issue-42.md'", {
+    t.mock_command("gh api --method POST repos/owner/x/issues/42/comments --field body=/tmp/fkst-github-proxy-comment-owner_x-issue-42.md", {
       stdout = "",
       stderr = "forced comment failure",
       exit_code = 1,
@@ -702,7 +705,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 1)
     t.eq(count_calls(issue_comment_create), 0)
   end,
 
@@ -755,8 +758,8 @@ return {
     t.eq(count_calls("gh label create"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local edit_calls = calls_matching("gh issue edit")
-    t.is_true(edit_calls[1].rendered:find("--add-label 'fkst-dev:ready'", 1, true) ~= nil)
-    t.is_true(edit_calls[1].rendered:find("--remove-label 'fkst-dev:thinking'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(edit_calls[1].rendered, "--add-label", "fkst-dev:ready"))
+    t.is_true(has_arg_pair(edit_calls[1].rendered, "--remove-label", "fkst-dev:thinking"))
 
     mock_write_env("1")
     mock_label_write()
@@ -797,10 +800,10 @@ return {
     t.eq(count_calls("gh label create"), 1)
     t.eq(count_calls("gh issue edit"), 1)
     local create = calls_matching("gh label create")[1]
-    t.is_true(create.rendered:find("'fkst-dev:fresh'", 1, true) ~= nil)
-    t.is_true(create.rendered:find("--repo 'owner/x'", 1, true) ~= nil)
+    t.is_true(create.rendered:find("fkst-dev:fresh", 1, true) ~= nil)
+    t.is_true(create.rendered:find("--repo owner/x", 1, true) ~= nil)
     local edit = calls_matching("gh issue edit")[1]
-    t.is_true(edit.rendered:find("--add-label 'fkst-dev:fresh'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(edit.rendered, "--add-label", "fkst-dev:fresh"))
   end,
 
   test_label_request_skips_remove_when_repo_label_is_missing = function()
@@ -894,11 +897,11 @@ return {
     mock_label_write()
     local current = t.run_department("departments/github_issue_label/main.lua", event, write_opts)
     t.eq(current.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local current_edit = calls_matching("gh issue edit")[1]
-    t.is_true(current_edit.rendered:find("--add-label 'fkst-dev:ready'", 1, true) ~= nil)
-    t.is_true(current_edit.rendered:find("--remove-label 'fkst-dev:thinking'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(current_edit.rendered, "--add-label", "fkst-dev:ready"))
+    t.is_true(has_arg_pair(current_edit.rendered, "--remove-label", "fkst-dev:thinking"))
   end,
 
   test_label_request_applies_exclusive_hint_without_state_precondition = function()
@@ -925,11 +928,11 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local edit = calls_matching("gh issue edit")[1]
-    t.is_true(edit.rendered:find("--add-label 'fkst-dev:blocked'", 1, true) ~= nil)
-    t.is_true(edit.rendered:find("--remove-label 'fkst-dev:ready'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(edit.rendered, "--add-label", "fkst-dev:blocked"))
+    t.is_true(has_arg_pair(edit.rendered, "--remove-label", "fkst-dev:ready"))
   end,
 
 }

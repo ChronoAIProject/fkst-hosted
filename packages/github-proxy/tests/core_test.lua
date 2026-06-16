@@ -1,6 +1,24 @@
 local core = require("core")
 local t = fkst.test
 
+local raw_mock_command = t.mock_command
+
+local function normalize_rendered_command(command)
+  local rendered = tostring(command or "")
+  rendered = rendered:gsub("'([^']*)'", "%1")
+  rendered = rendered:gsub("body=@", "body=")
+  rendered = rendered:gsub("%s+", " ")
+  return rendered
+end
+
+local function mock_command(command, response)
+  raw_mock_command(command, response)
+  local normalized = normalize_rendered_command(command)
+  if normalized ~= command then
+    raw_mock_command(normalized, response)
+  end
+end
+
 return {
   test_env_command_whitelist = function()
 	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
@@ -13,7 +31,7 @@ return {
 	  end,
 
   test_github_debug_stamp_is_disabled_by_default = function()
-    t.mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "" })
+    mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "" })
 
     local body = "Visible reply\n\n<!-- fkst:github-proxy:comment:dedup-1 -->\n"
     local stamped = core.with_github_debug_stamp(body, {
@@ -27,8 +45,8 @@ return {
   end,
 
   test_github_debug_stamp_appends_redacted_metadata_once = function()
-    t.mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "1" })
-    t.mock_command("git rev-parse --verify HEAD", {
+    mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "1" })
+    mock_command("git rev-parse --verify HEAD", {
       stdout = "ABCDEF1234567890\n",
       stderr = "",
       exit_code = 0,
@@ -147,12 +165,12 @@ return {
   end,
 
   test_rest_issue_view_fails_closed_on_malformed_success_stdout = function()
-    t.mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
+    mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
       stdout = '{"title":',
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
+    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -165,12 +183,12 @@ return {
   end,
 
   test_rest_issue_view_fails_closed_on_empty_success_stdout = function()
-    t.mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
+    mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
+    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -183,12 +201,12 @@ return {
   end,
 
   test_rest_pr_view_fails_closed_on_malformed_success_stdout = function()
-    t.mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
+    mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
       stdout = "not json",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
+    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -201,12 +219,12 @@ return {
   end,
 
   test_rest_pr_view_fails_closed_on_empty_success_stdout = function()
-    t.mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
+    mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
+    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -219,12 +237,12 @@ return {
   end,
 
   test_rest_issue_view_empty_comments_stdout_uses_empty_comments_fallback = function()
-    t.mock_command(core.gh_issue_rest_view_cmd("owner/repo", 4), {
+    mock_command(core.gh_issue_rest_view_cmd("owner/repo", 4), {
       stdout = '{"title":"Issue","body":"Body","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[],"assignees":[]}',
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_issue_comments_api_cmd("owner/repo", 4), {
+    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 4), {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -500,27 +518,6 @@ return {
     t.eq(entities[1].number, 8)
   end,
 
-  test_gh_exec_returns_success_result = function()
-    local result = core.gh_exec("gh issue list", 30, "gh issue list", function(spec)
-      t.eq(spec.cmd, "gh issue list")
-      t.eq(spec.timeout, 30)
-      t.eq(spec.rate_pool.name, "gh")
-      t.eq(spec.rate_pool.burst, nil)
-      t.eq(spec.rate_pool.refill_per_hour, nil)
-      return { stdout = "[]\n", stderr = "", exit_code = 0 }
-    end)
-
-    t.eq(result.stdout, "[]\n")
-  end,
-
-  test_gh_exec_opts_preserves_options = function()
-    local spec = core.gh_exec_opts({ cmd = "gh pr list", timeout = 60, cwd = "/tmp" })
-    t.eq(spec.cmd, "gh pr list")
-    t.eq(spec.timeout, 60)
-    t.eq(spec.cwd, "/tmp")
-    t.eq(spec.rate_pool.name, "gh")
-  end,
-
   test_gh_error_classifies_rate_limit_and_abuse = function()
     local api_limit = { stdout = "", stderr = "API rate limit exceeded", exit_code = 1 }
     -- Regression (#710 Finding 1): the dominant "already exceeded" wording was
@@ -540,9 +537,7 @@ return {
   end,
 
   test_gh_exec_result_returns_structured_failure = function()
-    local ok, err = core.gh_exec_result("gh issue list", 30, "gh issue list", function(_spec)
-      return { stdout = "", stderr = "GraphQL: field does not exist", exit_code = 1 }
-    end)
+    local ok, err = core.gh_exec_result({ stdout = "", stderr = "GraphQL: field does not exist", exit_code = 1 }, 30, "gh issue list")
 
     t.eq(ok, false)
     t.eq(err.class, "gh-command-failed")
@@ -644,9 +639,7 @@ return {
 
   test_gh_exec_fails_closed_for_non_rate_limit_failure = function()
     local ok, err = pcall(function()
-      core.gh_exec("gh issue list", 30, "gh issue list", function(_spec)
-        return { stdout = "", stderr = "GraphQL: field does not exist", exit_code = 1 }
-      end)
+      core.gh_exec({ stdout = "", stderr = "GraphQL: field does not exist", exit_code = 1 }, 30, "gh issue list")
     end)
 
     t.eq(ok, false)
@@ -657,9 +650,7 @@ return {
 
   test_gh_exec_raises_retryable_rate_limit_class = function()
     local ok, err = pcall(function()
-      core.gh_exec("gh issue list", 30, "gh issue list", function(_spec)
-        return { stdout = "", stderr = "API rate limit exceeded", exit_code = 1 }
-      end)
+      core.gh_exec({ stdout = "", stderr = "API rate limit exceeded", exit_code = 1 }, 30, "gh issue list")
     end)
 
     t.eq(ok, false)
@@ -667,31 +658,7 @@ return {
     t.eq(core.is_gh_rate_limit_error(err), true)
   end,
 
-  test_gh_commands_are_quoted = function()
-    t.eq(
-      core.gh_issue_list_cmd("owner/repo"),
-      "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'"
-    )
-    t.eq(
-      core.gh_pr_list_cmd("owner/repo"),
-      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'"
-    )
-    t.eq(
-      core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY"),
-      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Adevloop-owner-repo-42-01HY&per_page=100'"
-    )
-    t.eq(
-      core.gh_pr_list_head_cmd("owner/repo", "devloop-owner-repo-42-01HY", "dev"),
-      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Adevloop-owner-repo-42-01HY&per_page=100&base=dev'"
-    )
-    t.eq(
-      core.git_push_branch_cmd("devloop-owner-repo-42-01HY"),
-      "git push -u origin 'devloop-owner-repo-42-01HY'"
-    )
-    t.eq(
-      core.git_show_ref_branch_cmd("devloop-owner-repo-42-01HY"),
-      "git show-ref --verify refs/heads/'devloop-owner-repo-42-01HY'"
-    )
+  test_github_proxy_parsers_and_rest_command_builders_are_quoted = function()
     t.eq(
       core.parse_git_show_ref_head("abc123 refs/heads/devloop-owner-repo-42-01HY\n", "devloop-owner-repo-42-01HY"),
       "abc123"
@@ -699,14 +666,6 @@ return {
     t.eq(
       core.parse_git_show_ref_head("abc123 refs/tags/devloop-owner-repo-42-01HY\n", "devloop-owner-repo-42-01HY"),
       nil
-    )
-    t.eq(
-      core.gh_pr_create_cmd("owner/repo", "devloop-owner-repo-42-01HY", nil, "Fix title", "/tmp/body.md"),
-      "gh pr create --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --title 'Fix title' --body-file '/tmp/body.md'"
-    )
-    t.eq(
-      core.gh_pr_create_cmd("owner/repo", "devloop-owner-repo-42-01HY", "dev", "Fix title", "/tmp/body.md"),
-      "gh pr create --repo 'owner/repo' --head 'devloop-owner-repo-42-01HY' --base 'dev' --title 'Fix title' --body-file '/tmp/body.md'"
     )
     local listed = core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","baseRefName":"dev","state":"OPEN"}]', "devloop-owner-repo-42-01HY")
     t.eq(listed.number, 7)
@@ -716,10 +675,6 @@ return {
     t.eq(rest_listed.url, "https://example.test/8")
     t.eq(rest_listed.base_ref_name, "dev")
     t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","state":"CLOSED"}]', "devloop-owner-repo-42-01HY"), nil)
-    t.eq(
-      core.gh_pr_view_head_oid_cmd("owner/repo", 7),
-      "gh api 'repos/owner/repo/pulls/7'"
-    )
     local same_repo_pr = core.parse_pr_view_head_state(
       '{"head":{"ref":"feature","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open","merged":false}',
       "owner/repo"
@@ -743,40 +698,9 @@ return {
       core.gh_issue_view_comments_cmd("owner/repo", 3),
       "gh api --paginate --slurp 'repos/owner/repo/issues/3/comments?per_page=100'"
     )
-    local expected_label_colors = {
-      ["fkst-dev:enabled"] = "1D76DB",
-      ["fkst-dev:tracking"] = "C5DEF5",
-      ["fkst-dev:thinking"] = "8250DF",
-      ["fkst-dev:ready"] = "0E8A16",
-      ["fkst-dev:implementing"] = "FBCA04",
-      ["fkst-dev:pr-open"] = "006B75",
-      ["fkst-dev:reviewing"] = "5319E7",
-      ["fkst-dev:fixing"] = "D93F0B",
-      ["fkst-dev:merge-ready"] = "2EA44F",
-      ["fkst-dev:merging"] = "C2E0C6",
-      ["fkst-dev:merged"] = "8957E5",
-      ["fkst-dev:impl-failed"] = "B60205",
-      ["fkst-dev:blocked"] = "1B1F23",
-      ["fkst-dev:blocked-on-dependency"] = "E99695",
-      ["fkst-dev:review-meta"] = "BFD4F2",
-    }
-    for label, color in pairs(expected_label_colors) do
-      t.eq(
-        core.gh_label_create_cmd("owner/repo", label),
-        "gh label create '" .. label .. "' --repo 'owner/repo' --color '" .. color .. "'"
-      )
-    end
-    t.eq(
-      core.gh_label_create_cmd("owner/repo", "custom'label"),
-      "gh label create 'custom'\\''label' --repo 'owner/repo' --color 'ededed'"
-    )
     t.eq(
       core.gh_issue_comment_cmd("owner/repo", 3, "/tmp/body's.md"),
       "gh issue comment '3' --repo 'owner/repo' --body-file '/tmp/body'\\''s.md'"
-    )
-    t.eq(
-      core.gh_issue_edit_labels_cmd("owner/repo", 3, { "fkst-dev:ready" }, { "fkst-dev:thinking", "needs'user" }),
-      "gh issue edit '3' --repo 'owner/repo' --add-label 'fkst-dev:ready' --remove-label 'fkst-dev:thinking' --remove-label 'needs'\\''user'"
     )
   end,
 }

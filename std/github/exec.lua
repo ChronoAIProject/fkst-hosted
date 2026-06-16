@@ -66,6 +66,7 @@ function M.run(exec, argv, timeout, context)
       class = class,
       retryable = class == "gh-rate-limited",
       result = result,
+      context = context,
       message = message,
     }, {
       __tostring = function(err)

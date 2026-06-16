@@ -3,14 +3,14 @@ local t = fkst.test
 
 local function run_write()
   exec_sync({
-    cmd = "gh issue comment '42' --repo 'owner/x' --body-file '/tmp/std-saga.md'",
+    cmd = "gh issue comment 42 --repo owner/x --body-file /tmp/std-saga.md",
     timeout = 30,
   })
 end
 
 local function run_read()
   exec_sync({
-    cmd = "gh issue view '42' --repo 'owner/x' --json title",
+    cmd = "gh issue view '42' --repo owner/x --json title",
     timeout = 30,
   })
 end
@@ -77,21 +77,21 @@ return {
   end,
 
   test_write_class_classifier_is_explicit = function()
-    t.eq(conformance.is_write_class("gh issue comment '42' --repo 'owner/x'"), true)
-    t.eq(conformance.is_write_class("gh issue reopen '42' --repo 'owner/x'"), true)
-    t.eq(conformance.is_write_class("gh pr merge '7' --repo 'owner/x'"), true)
-    t.eq(conformance.is_write_class("gh pr close '7' --repo 'owner/x'"), true)
-    t.eq(conformance.is_write_class("gh pr ready '7' --repo 'owner/x'"), true)
-    t.eq(conformance.is_write_class("gh pr reopen '7' --repo 'owner/x'"), true)
-    t.eq(conformance.is_write_class("gh label create 'fkst-dev:ready' --repo 'owner/x'"), true)
-    t.eq(conformance.is_write_class("gh workflow run 'ci.yml' --repo 'owner/x'"), true)
+    t.eq(conformance.is_write_class("gh issue comment 42 --repo owner/x"), true)
+    t.eq(conformance.is_write_class("gh issue reopen '42' --repo owner/x"), true)
+    t.eq(conformance.is_write_class("gh pr merge '7' --repo owner/x"), true)
+    t.eq(conformance.is_write_class("gh pr close '7' --repo owner/x"), true)
+    t.eq(conformance.is_write_class("gh pr ready '7' --repo owner/x"), true)
+    t.eq(conformance.is_write_class("gh pr reopen '7' --repo owner/x"), true)
+    t.eq(conformance.is_write_class("gh label create 'fkst-dev:ready' --repo owner/x"), true)
+    t.eq(conformance.is_write_class("gh workflow run 'ci.yml' --repo owner/x"), true)
     t.eq(conformance.is_write_class("git push origin HEAD:branch"), true)
     t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' push origin HEAD:branch"), true)
-    t.eq(conformance.is_write_class("gh api --method POST 'repos/owner/x/issues/42/comments'"), true)
+    t.eq(conformance.is_write_class("gh api --method POST repos/owner/x/issues/42/comments"), true)
     t.eq(conformance.is_write_class("gh api graphql\nmutation { addLabelsToLabelable(input: {}) { clientMutationId } }"), true)
-    t.eq(conformance.is_write_class("gh issue view '42' --repo 'owner/x'"), false)
-    t.eq(conformance.is_write_class("gh pr diff '7' --repo 'owner/x'"), false)
-    t.eq(conformance.is_write_class("gh api 'repos/owner/x/issues/42'"), false)
+    t.eq(conformance.is_write_class("gh issue view '42' --repo owner/x"), false)
+    t.eq(conformance.is_write_class("gh pr diff '7' --repo owner/x"), false)
+    t.eq(conformance.is_write_class("gh api repos/owner/x/issues/42"), false)
     t.eq(conformance.is_write_class("gh api graphql\nquery { viewer { login } }"), false)
     t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' log --oneline"), false)
     t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' show HEAD"), false)
@@ -102,7 +102,7 @@ return {
   end,
 
   test_assert_progress_passes_when_first_writes = function()
-    t.mock_command("gh issue comment '42'", {
+    t.mock_command("gh issue comment 42", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -128,7 +128,7 @@ return {
   end,
 
   test_assert_idempotent_passes_when_second_only_reads = function()
-    t.mock_command("gh issue comment '42'", {
+    t.mock_command("gh issue comment 42", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -146,12 +146,12 @@ return {
   end,
 
   test_assert_idempotent_fails_when_second_writes = function()
-    t.mock_command("gh issue comment '42'", {
+    t.mock_command("gh issue comment 42", {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh issue comment '42'", {
+    t.mock_command("gh issue comment 42", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -168,7 +168,7 @@ return {
   end,
 
   test_assert_idempotent_fails_when_second_errors_before_writing = function()
-    t.mock_command("gh issue comment '42'", {
+    t.mock_command("gh issue comment 42", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -183,7 +183,7 @@ return {
       })
     end)
 
-    t.mock_command("gh issue comment '42'", {
+    t.mock_command("gh issue comment 42", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -202,7 +202,7 @@ return {
   end,
 
   test_assert_idempotent_fails_when_second_git_c_pushes = function()
-    t.mock_command("gh issue comment '42'", {
+    t.mock_command("gh issue comment 42", {
       stdout = "",
       stderr = "",
       exit_code = 0,

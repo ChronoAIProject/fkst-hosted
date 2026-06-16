@@ -8,6 +8,7 @@ function M.new(exec)
   function handle._exec(argv, timeout, context)
     return exec_wrap.run(exec, argv, timeout, context)
   end
+  require("std.git.refs").install(handle)
   return handle
 end
 

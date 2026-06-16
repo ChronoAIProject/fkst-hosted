@@ -9,6 +9,7 @@ function M.new(exec)
     return exec_wrap.run(exec, argv, timeout, context)
   end
   require("std.github.issue").install(handle)
+  require("std.github.entities").install(handle)
   return handle
 end
 

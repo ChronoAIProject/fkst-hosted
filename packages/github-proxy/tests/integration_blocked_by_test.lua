@@ -77,7 +77,7 @@ local function mock_add_blocked_by()
 end
 
 local function mock_blocked_by_marker_comment()
-  t.mock_command("gh issue comment '42' --repo 'owner/x' --body-file '/tmp/fkst-github-proxy-blocked-by-", {
+  t.mock_command("gh issue comment 42 --repo owner/x --body-file /tmp/fkst-github-proxy-blocked-by-", {
     stdout = "",
     stderr = "",
     exit_code = 0,
@@ -92,7 +92,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("addBlockedBy"), 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 0)
   end,
 
   test_blocked_by_real_write_adds_graphql_edge_and_marker = function()
@@ -126,7 +126,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("addBlockedBy"), 0)
-    t.eq(count_calls("gh issue comment '42'"), 1)
+    t.eq(count_calls("gh issue comment 42"), 1)
   end,
 
   test_blocked_by_existing_trusted_marker_is_idempotent_noop = function()
@@ -146,7 +146,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("addBlockedBy"), 0)
-    t.eq(count_calls("gh issue comment '42'"), 0)
+    t.eq(count_calls("gh issue comment 42"), 0)
   end,
 
   test_blocked_by_malformed_graphql_read_fails_closed_without_effects = function()
@@ -165,7 +165,7 @@ return {
 
     t.eq(result.exit_code, 1)
     t.eq(count_calls("addBlockedBy"), 0)
-    t.eq(count_calls("gh issue comment '42'"), 0)
+    t.eq(count_calls("gh issue comment 42"), 0)
   end,
 
   test_blocked_by_malformed_payload_fails_closed = function()

@@ -30,6 +30,7 @@ function M.new(model)
     })
     return { stdout = "", stderr = "", exit_code = 0 }
   end
+  require("std.git.refs").install(handle)
   return handle
 end
 

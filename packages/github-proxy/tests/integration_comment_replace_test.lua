@@ -7,7 +7,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_pr_comment_view = h.mock_pr_comment_view
 local mock_pr_comment_write = h.mock_pr_comment_write
 local count_calls = h.count_calls
-local pr_comment_create = "gh api --method POST 'repos/owner/x/issues/7/comments'"
+local pr_comment_create = "gh api --method POST repos/owner/x/issues/7/comments"
 
 local function event(extra)
   local payload = {
@@ -32,7 +32,7 @@ local function event(extra)
 end
 
 local function mock_comment_edit()
-  t.mock_command("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-pr-7.md'", {
+  t.mock_command("gh api --method PATCH repos/owner/x/issues/comments/123456 --field body=/tmp/fkst-github-proxy-comment-owner_x-pr-7.md", {
     stdout = "",
     stderr = "",
     exit_code = 0,
@@ -40,7 +40,7 @@ local function mock_comment_edit()
 end
 
 local function mock_comment_edit_result(comment_id, exit_code, stderr)
-  t.mock_command("gh api --method PATCH 'repos/owner/x/issues/comments/" .. tostring(comment_id) .. "' --field body=@'/tmp/fkst-github-proxy-comment-owner_x-pr-7.md'", {
+  t.mock_command("gh api --method PATCH repos/owner/x/issues/comments/" .. tostring(comment_id) .. " --field body=/tmp/fkst-github-proxy-comment-owner_x-pr-7.md", {
     stdout = "",
     stderr = stderr or "",
     exit_code = exit_code or 0,
@@ -67,8 +67,8 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
-    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
+    t.eq(count_calls("gh api --method PATCH repos/owner/x/issues/comments/123456 --field body=@"), 1)
     t.eq(count_calls("issues/comments/IC_kwDOSwWu288AAAABF40Vmg"), 0)
     t.eq(count_calls(pr_comment_create), 0)
   end,
@@ -85,7 +85,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
     t.eq(count_calls("gh api --method PATCH"), 0)
     t.eq(count_calls(pr_comment_create), 1)
   end,
@@ -110,8 +110,8 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 2)
-    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 2)
+    t.eq(count_calls("gh api --method PATCH repos/owner/x/issues/comments/123456 --field body=@"), 1)
     t.eq(count_calls(pr_comment_create), 1)
   end,
 
@@ -141,9 +141,9 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 2)
-    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/123456' --field body=@"), 1)
-    t.eq(count_calls("gh api --method PATCH 'repos/owner/x/issues/comments/654321' --field body=@"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 2)
+    t.eq(count_calls("gh api --method PATCH repos/owner/x/issues/comments/123456 --field body=@"), 1)
+    t.eq(count_calls("gh api --method PATCH repos/owner/x/issues/comments/654321 --field body=@"), 1)
     t.eq(count_calls(pr_comment_create), 0)
   end,
 

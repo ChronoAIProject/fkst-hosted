@@ -12,7 +12,7 @@ local calls_matching = h.calls_matching
 local count_calls = h.count_calls
 local capture_comment_department_logs = h.capture_comment_department_logs
 
-local issue_comment_create = "gh api --method POST 'repos/owner/x/issues/42/comments'"
+local issue_comment_create = "gh api --method POST repos/owner/x/issues/42/comments"
 
 return {
   test_outbound_dry_run_write_and_marker_idempotency = function()
@@ -67,7 +67,7 @@ return {
     mock_write_env("1")
     mock_bot_env()
     mock_comment_view("existing comment <!-- fkst:github-proxy:comment:reply-42 -->")
-    t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'", {
+    t.mock_command("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100", {
       stdout = '[[{"id":123456,"body":"existing comment <!-- fkst:github-proxy:comment:reply-42 -->","user":{"login":"fkst-test-bot"}}]]\n',
       stderr = "",
       exit_code = 0,
@@ -81,7 +81,7 @@ return {
     t.eq(#comment_calls, 1)
     t.is_true(comment_calls[1].rendered:find(issue_comment_create, 1, true) ~= nil)
     t.eq(comment_calls[1].rendered:find("github.com", 1, true), nil)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'"), 2)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 2)
   end,
 
   test_existing_comment_replay_emits_rest_comment_id = function()
@@ -116,7 +116,7 @@ return {
         author_login = "fkst-test-bot",
       },
     })
-    t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'", {
+    t.mock_command("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100", {
       stdout = '[[{"id":123456,"body":"existing comment ' .. json_string(marker) .. '","user":{"login":"fkst-test-bot"}}]]\n',
       stderr = "",
       exit_code = 0,

@@ -41,16 +41,6 @@ local state_stage_rank = {
   merged = 900,
 }
 
-local function shell_single_quote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
-
-local function url_encode(value)
-  return (tostring(value or ""):gsub("([^%w%-%._~])", function(char) return string.format("%%%02X", string.byte(char)) end))
-end
-
-local function repo_owner(repo) return tostring(repo or ""):match("^([^/]+)/") end
-
 local function is_bounded_string(value, limit) return type(value) == "string" and value ~= "" and #value <= limit end
 
 local function is_git_ref_safe(value)
@@ -564,28 +554,23 @@ end
 function M.parse_issue_list(gh_json_stdout)
   return M.parse_entity_list(gh_json_stdout, "issue")
 end
-function M.gh_issue_list_cmd(repo)
-  return "gh api --paginate --slurp " .. shell_single_quote("repos/" .. tostring(repo) .. "/issues?state=open&per_page=100")
+
+function M.github_issue_list(repo, timeout)
+  return M.github().issue_list(repo, timeout or 30)
 end
 
-function M.gh_pr_list_cmd(repo)
-  return "gh api --paginate --slurp " .. shell_single_quote("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
+function M.github_pr_list(repo, timeout)
+  return M.github().pr_list(repo, timeout or 30)
 end
 
-function M.gh_pr_list_head_cmd(repo, branch, base_branch)
+function M.github_pr_list_head(repo, branch, base_branch, timeout)
   if not is_git_ref_safe(branch) then
     error("github-proxy: invalid branch")
   end
   if base_branch ~= nil and not is_git_ref_safe(base_branch) then
     error("github-proxy: invalid base branch")
   end
-  local owner = repo_owner(repo)
-  local head_filter = owner ~= nil and (owner .. ":" .. tostring(branch)) or tostring(branch)
-  local query = "repos/" .. tostring(repo) .. "/pulls?state=open&head=" .. url_encode(head_filter) .. "&per_page=100" -- gh api --paginate
-  if base_branch ~= nil then
-    query = query .. "&base=" .. url_encode(base_branch)
-  end
-  return "gh api --paginate --slurp " .. shell_single_quote(query)
+  return M.github().pr_list_head(repo, branch, base_branch, timeout or 30)
 end
 
 function M.parse_pr_list_for_head(gh_json_stdout, branch)
@@ -621,31 +606,28 @@ function M.parse_pr_list_for_head(gh_json_stdout, branch)
   return nil
 end
 
-function M.git_push_branch_cmd(branch)
+function M.git_push_branch(branch, timeout)
   if not is_git_ref_safe(branch) then
     error("github-proxy: invalid branch")
   end
-  return "git push -u origin " .. shell_single_quote(branch)
+  return M.git().push_branch(branch, timeout or 120)
 end
 
-function M.git_show_ref_branch_cmd(branch)
+function M.git_show_ref_branch(branch, timeout)
   if not is_git_ref_safe(branch) then
     error("github-proxy: invalid branch")
   end
-  return "git show-ref --verify refs/heads/" .. shell_single_quote(branch)
+  return M.git().show_ref_branch(branch, timeout or 30)
 end
 
-function M.git_is_ancestor_cmd(maybe_ancestor_sha, descendant_sha)
+function M.git_is_ancestor(maybe_ancestor_sha, descendant_sha, timeout)
   if not is_git_sha(maybe_ancestor_sha) then
     error("github-proxy: invalid ancestor sha")
   end
   if not is_git_sha(descendant_sha) then
     error("github-proxy: invalid descendant sha")
   end
-  return "git merge-base --is-ancestor "
-    .. shell_single_quote(maybe_ancestor_sha)
-    .. " "
-    .. shell_single_quote(descendant_sha)
+  return M.git().is_ancestor(maybe_ancestor_sha, descendant_sha, timeout or 30)
 end
 
 function M.parse_git_show_ref_head(stdout, branch)
@@ -656,22 +638,14 @@ function M.parse_git_show_ref_head(stdout, branch)
   return nil
 end
 
-function M.gh_pr_create_cmd(repo, branch, base_branch, title, body_file)
+function M.github_pr_create(repo, branch, base_branch, title, body_file, timeout)
   if not is_git_ref_safe(branch) then
     error("github-proxy: invalid branch")
   end
   if base_branch ~= nil and not is_git_ref_safe(base_branch) then
     error("github-proxy: invalid base branch")
   end
-  local base_arg = ""
-  if base_branch ~= nil then
-    base_arg = " --base " .. shell_single_quote(base_branch)
-  end
-  return "gh pr create --repo " .. shell_single_quote(repo)
-    .. " --head " .. shell_single_quote(branch)
-    .. base_arg
-    .. " --title " .. shell_single_quote(title)
-    .. " --body-file " .. shell_single_quote(body_file)
+  return M.github().pr_create(repo, branch, base_branch, title, body_file, timeout or 60)
 end
 
 function M.parse_pr_create(stdout)
@@ -686,11 +660,11 @@ function M.parse_pr_create(stdout)
   return nil
 end
 
-function M.gh_pr_view_head_oid_cmd(repo, pr_number)
+function M.github_pr_view_head_oid(repo, pr_number, timeout)
   if not is_positive_number(pr_number) then
     error("github-proxy: invalid PR number")
   end
-  return M.gh_pr_rest_view_cmd(repo, pr_number)
+  return M.github().pr_view(repo, pr_number, timeout or 30)
 end
 
 local function repository_name_with_owner(head_repository, head_repository_owner)
@@ -764,8 +738,8 @@ function M.parse_pr_view_head_state(gh_json_stdout, target_repo)
   return nil
 end
 
-function M.gh_label_list_cmd(repo)
-  return "gh label list --repo " .. shell_single_quote(repo) .. " --limit 1000 --json name"
+function M.github_label_list(repo, timeout)
+  return M.github().label_list(repo, timeout or 30)
 end
 
 local fkst_dev_label_colors = {
@@ -786,11 +760,9 @@ local fkst_dev_label_colors = {
   ["fkst-dev:review-meta"] = "BFD4F2",
 }
 
-function M.gh_label_create_cmd(repo, label)
+function M.github_label_create(repo, label, timeout)
   local color = fkst_dev_label_colors[label] or "ededed"
-  return "gh label create " .. shell_single_quote(label)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --color " .. shell_single_quote(color)
+  return M.github().label_create(repo, label, color, timeout or 30)
 end
 
 function M.parse_issue_labels(gh_json_stdout)
@@ -860,7 +832,9 @@ function M.ensure_repo_label(repo, label, existing_labels)
     return true
   end
 
-  local ok, result_or_error = M.gh_exec_result(M.gh_label_create_cmd(repo, label), 30, "gh label create")
+  local ok, result_or_error = M.gh_exec_result(function(timeout)
+    return M.github_label_create(repo, label, timeout)
+  end, 30, "label create")
   if not ok then
     local raw_result = result_or_error.result
     if raw_result == nil or not M.is_gh_label_already_exists(raw_result) then
@@ -871,28 +845,12 @@ function M.ensure_repo_label(repo, label, existing_labels)
   return true
 end
 
-function M.gh_issue_edit_labels_cmd(repo, issue_number, add_labels, remove_labels)
-  local cmd = "gh issue edit " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-  for _, label in ipairs(add_labels or {}) do
-    cmd = cmd .. " --add-label " .. shell_single_quote(label)
-  end
-  for _, label in ipairs(remove_labels or {}) do
-    cmd = cmd .. " --remove-label " .. shell_single_quote(label)
-  end
-  return cmd
+function M.github_issue_edit_labels(repo, issue_number, add_labels, remove_labels, timeout)
+  return M.github().issue_edit_labels(repo, issue_number, add_labels, remove_labels, timeout or 30)
 end
 
-function M.gh_pr_edit_labels_cmd(repo, pr_number, add_labels, remove_labels)
-  local cmd = "gh pr edit " .. shell_single_quote(pr_number)
-    .. " --repo " .. shell_single_quote(repo)
-  for _, label in ipairs(add_labels or {}) do
-    cmd = cmd .. " --add-label " .. shell_single_quote(label)
-  end
-  for _, label in ipairs(remove_labels or {}) do
-    cmd = cmd .. " --remove-label " .. shell_single_quote(label)
-  end
-  return cmd
+function M.github_pr_edit_labels(repo, pr_number, add_labels, remove_labels, timeout)
+  return M.github().pr_edit_labels(repo, pr_number, add_labels, remove_labels, timeout or 30)
 end
 
 function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_labels)
@@ -902,7 +860,9 @@ function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_lab
     return false
   end
 
-  local listed = M.gh_exec(M.gh_label_list_cmd(repo), 30, "gh label list")
+  local listed = M.gh_exec(function(timeout)
+    return M.github_label_list(repo, timeout)
+  end, 30, "label list")
   local existing = label_set(M.parse_repo_labels(listed.stdout))
 
   for _, label in ipairs(add) do
@@ -923,20 +883,24 @@ function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_lab
   end
 
   local kind = tostring(target_kind or "issue")
-  local edit_cmd = nil
+  local edit = nil
   local edit_context = nil
   if kind == "issue" then
-    edit_cmd = M.gh_issue_edit_labels_cmd(repo, number, add, safe_remove)
-    edit_context = "gh issue edit"
+    edit = function(timeout)
+      return M.github_issue_edit_labels(repo, number, add, safe_remove, timeout)
+    end
+    edit_context = "issue edit-labels"
   elseif kind == "pr" then
-    edit_cmd = M.gh_pr_edit_labels_cmd(repo, number, add, safe_remove)
-    edit_context = "gh pr edit"
+    edit = function(timeout)
+      return M.github_pr_edit_labels(repo, number, add, safe_remove, timeout)
+    end
+    edit_context = "pr edit-labels"
   else
     error("github-proxy: invalid label target kind")
   end
 
   M.gh_exec(
-    edit_cmd,
+    edit,
     30,
     edit_context
   )

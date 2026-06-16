@@ -48,8 +48,14 @@ local function count_exact_calls(rendered)
   return total
 end
 
+local function has_arg_pair(rendered, flag, value)
+  local text = tostring(rendered or "")
+  return text:find(tostring(flag) .. " '" .. tostring(value) .. "'", 1, true) ~= nil
+    or text:find(tostring(flag) .. " " .. tostring(value), 1, true) ~= nil
+end
+
 local function assert_pr_rest_view_fetch(pr_number)
-  t.eq(count_exact_calls(core.gh_pr_rest_view_cmd("owner/x", pr_number)), 1)
+  t.eq(count_calls(core.gh_pr_rest_view_cmd("owner/x", pr_number)), 1)
   t.is_true(count_calls(core.gh_issue_comments_api_cmd("owner/x", pr_number)) >= 1)
 end
 
@@ -111,11 +117,11 @@ return {
     t.eq(result.raises[2].payload.head_sha, "abc123")
     t.eq(result.raises[2].payload.base_branch, "dev")
     t.eq(result.raises[2].payload.source_ref.ref, "owner/x#pr/7")
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
     assert_pr_rest_view_fetch(7)
     local create = calls_matching("gh pr create")[1]
     t.eq(create.rendered:find("--json", 1, true), nil)
-    t.is_true(create.rendered:find("--base 'dev'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(create.rendered, "--base", "dev"))
 
     local issue_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-issue-comment.md")
     t.is_true(issue_written:find("github-devloop PR opened: #7", 1, true) ~= nil)
@@ -168,7 +174,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue comment"), 1)
     t.eq(count_calls("gh pr comment"), 1)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
     assert_pr_rest_view_fetch(7)
     t.eq(count_calls("gh issue edit"), 0)
   end,
@@ -194,7 +200,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue comment"), 1)
     t.eq(count_calls("gh pr comment"), 1)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
     assert_pr_rest_view_fetch(7)
     t.eq(count_calls("gh issue edit"), 0)
   end,
@@ -221,8 +227,8 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue edit"), 1)
     local edit = calls_matching("gh issue edit")[1]
-    t.is_true(edit.rendered:find("--add-label 'fkst-dev:pr-open'", 1, true) ~= nil)
-    t.is_true(edit.rendered:find("--remove-label 'fkst-dev:implementing'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(edit.rendered, "--add-label", "fkst-dev:pr-open"))
+    t.is_true(has_arg_pair(edit.rendered, "--remove-label", "fkst-dev:implementing"))
   end,
 
   test_pr_open_write_guard_bypasses_warm_entity_view_cache = function()
@@ -231,12 +237,12 @@ return {
     })
     mock_write_env("1")
     mock_bot_env()
-    t.mock_command("gh api 'repos/owner/x/issues/42'", {
+    t.mock_command("gh api repos/owner/x/issues/42", {
       stdout = '{"title":"Cached","body":"","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"fkst-dev:enabled"}],"assignees":[]}\n',
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("gh api --paginate --slurp 'repos/owner/x/issues/42/comments?per_page=100'", {
+    t.mock_command("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100", {
       stdout = "[]\n",
       stderr = "",
       exit_code = 0,
@@ -258,7 +264,7 @@ return {
     }, run_opts)
     t.eq(cached.exit_code, 0)
 
-    local guard_calls_before = count_calls("gh api 'repos/owner/x/issues/42'")
+    local guard_calls_before = count_calls("gh api repos/owner/x/issues/42")
     local pr_create_calls_before = count_calls("gh pr create")
     mock_pr_open_guard(nil, pr_open_guard_comments())
     mock_branch_head("abc123")
@@ -275,7 +281,7 @@ return {
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), run_opts)
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'") - guard_calls_before, 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42") - guard_calls_before, 2)
     t.eq(count_calls("gh pr create") - pr_create_calls_before, 1)
   end,
 
@@ -439,7 +445,7 @@ return {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/pulls?state=open&head=owner%3A"), 2)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/pulls?state=open&head=owner%3A"), 2)
     t.eq(count_calls("gh pr create"), 1)
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "github_entity_changed")
@@ -632,7 +638,7 @@ return {
     t.eq(count_calls("gh issue comment"), 0)
     t.eq(count_calls("gh pr comment"), 1)
     t.eq(count_calls("gh issue edit"), 1)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
     t.eq(#result.raises, 2)
     t.eq(result.raises[1].queue, "github_entity_changed")
     t.eq(result.raises[1].payload.type, "pr")
@@ -643,7 +649,7 @@ return {
     local pr_written = file.read("/tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md")
     t.is_true(pr_written:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
     local edit = calls_matching("gh issue edit")[1]
-    t.is_true(edit.rendered:find("--add-label 'fkst-dev:pr-open'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(edit.rendered, "--add-label", "fkst-dev:pr-open"))
   end,
 
   test_pr_open_guard_uses_canonical_rank_so_meta_escalated_implementing_can_open_pr = function()
@@ -700,7 +706,7 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("gh issue edit"), 0)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
   end,
 
   test_pr_open_retry_after_fixing_suffix_does_not_revert_issue_label = function()
@@ -735,6 +741,6 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("gh issue edit"), 0)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
   end,
 }

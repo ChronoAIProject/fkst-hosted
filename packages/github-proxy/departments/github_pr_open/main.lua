@@ -53,11 +53,9 @@ local function render_pr_number_template(value, pr_number)
 end
 
 local function verify_pr_remote_head(repo, pr_number, expected_head_sha, expected_base_branch)
-  local pr_head = core.gh_exec(
-    core.gh_pr_view_head_oid_cmd(repo, pr_number),
-    30,
-    "gh PR REST head repository/headRefOid/state"
-  )
+  local pr_head = core.gh_exec(function(timeout)
+    return core.github_pr_view_head_oid(repo, pr_number, timeout)
+  end, 30, "gh PR REST head repository/headRefOid/state")
   local remote_pr = core.parse_pr_view_head_state(pr_head.stdout, repo)
   if remote_pr == nil then
     error("github-proxy: gh PR REST head repository/headRefOid/state did not return a valid open PR fact")
@@ -134,7 +132,7 @@ local function guard_pr_open_write(repo, payload, bot_login)
     return nil
   end
 
-  local branch_ref = exec_sync({ cmd = core.git_show_ref_branch_cmd(payload.branch), timeout = 30 })
+  local branch_ref = core.git_show_ref_branch(payload.branch, 30)
   if branch_ref.exit_code ~= 0 then
     error("github-proxy: implementing branch ref missing before PR open: " .. tostring(branch_ref.stderr))
   end
@@ -148,7 +146,7 @@ local function guard_pr_open_write(repo, payload, bot_login)
     return nil
   end
   if current_head ~= tostring(fact.head_sha):lower() then
-    local ancestry = exec_sync({ cmd = core.git_is_ancestor_cmd(fact.head_sha, current_head), timeout = 30 })
+    local ancestry = core.git_is_ancestor(fact.head_sha, current_head, 30)
     if ancestry.exit_code ~= 0 then
       log.warn("github-proxy: PR open skipped because branch head is not descended from implementing fact")
       return nil
@@ -262,11 +260,9 @@ function pipeline(event)
       return
     end
 
-    local existing = core.gh_exec(
-      core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch),
-      30,
-      "gh pr list --head"
-    )
+    local existing = core.gh_exec(function(timeout)
+      return core.github_pr_list_head(repo, payload.branch, payload.base_branch, timeout)
+    end, 30, "gh pr list --head")
     local pr = core.parse_pr_list_for_head(existing.stdout, payload.branch)
 
     if pr == nil then
@@ -274,7 +270,7 @@ function pipeline(event)
         error("github-proxy: pr-open marker exists but no matching open PR was found for branch")
       end
 
-      local push = exec_sync({ cmd = core.git_push_branch_cmd(payload.branch), timeout = 120 })
+      local push = core.git_push_branch(payload.branch, 120)
       if push.exit_code ~= 0 then
         error("github-proxy: git push failed: " .. tostring(push.stderr))
       end
@@ -287,18 +283,14 @@ function pipeline(event)
         context = payload.head_sha,
       })
       file.write(pr_body_path, pr_create_body)
-      local created = core.gh_exec(
-        core.gh_pr_create_cmd(repo, payload.branch, payload.base_branch, payload.title, pr_body_path),
-        60,
-        "gh pr create"
-      )
+      local created = core.gh_exec(function(timeout)
+        return core.github_pr_create(repo, payload.branch, payload.base_branch, payload.title, pr_body_path, timeout)
+      end, 60, "gh pr create")
       pr = core.parse_pr_create(created.stdout)
       if pr == nil then
-        local listed = core.gh_exec(
-          core.gh_pr_list_head_cmd(repo, payload.branch, payload.base_branch),
-          30,
-          "gh pr list --head after create"
-        )
+        local listed = core.gh_exec(function(timeout)
+          return core.github_pr_list_head(repo, payload.branch, payload.base_branch, timeout)
+        end, 30, "gh pr list --head after create")
         pr = core.parse_pr_list_for_head(listed.stdout, payload.branch)
       end
       if pr == nil then

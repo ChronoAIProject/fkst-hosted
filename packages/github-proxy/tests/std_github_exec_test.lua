@@ -151,4 +151,90 @@ return {
       assert(call.rate_pool == nil, "read_issue must not pass rate_pool")
     end
   end,
+
+  test_github_entity_methods_build_argv = function()
+    local calls = {}
+    local handle = gh.new(function(opts)
+      table.insert(calls, opts)
+      return { stdout = "ok", stderr = "", exit_code = 0 }
+    end)
+
+    handle.issue_list("owner/repo", 11)
+    handle.pr_list("owner/repo", 12)
+    handle.pr_list_head("owner/repo", "feature/a", "dev", 13)
+    handle.pr_view("owner/repo", 7, 14)
+    handle.pr_create("owner/repo", "feature/a", "dev", "Fix title", "/tmp/body.md", 15)
+    handle.label_list("owner/repo", 16)
+    handle.label_create("owner/repo", "fkst-dev:ready", "0E8A16", 17)
+    handle.issue_edit_labels("owner/repo", 42, { "fkst-dev:ready" }, { "fkst-dev:thinking" }, 18)
+    handle.pr_edit_labels("owner/repo", 7, { "review" }, { "draft" }, 19)
+
+    assert_argv_equal(
+      calls[1].argv,
+      { "gh", "api", "--paginate", "--slurp", "repos/owner/repo/issues?state=open&per_page=100" },
+      "issue_list"
+    )
+    assert_argv_equal(
+      calls[2].argv,
+      { "gh", "api", "--paginate", "--slurp", "repos/owner/repo/pulls?state=open&per_page=100" },
+      "pr_list"
+    )
+    assert_argv_equal(
+      calls[3].argv,
+      { "gh", "api", "--paginate", "--slurp", "repos/owner/repo/pulls?state=open&head=owner%3Afeature%2Fa&per_page=100&base=dev" },
+      "pr_list_head"
+    )
+    assert_argv_equal(calls[4].argv, { "gh", "api", "repos/owner/repo/pulls/7" }, "pr_view")
+    assert_argv_equal(
+      calls[5].argv,
+      { "gh", "pr", "create", "--repo", "owner/repo", "--head", "feature/a", "--base", "dev", "--title", "Fix title", "--body-file", "/tmp/body.md" },
+      "pr_create"
+    )
+    assert_argv_equal(
+      calls[6].argv,
+      { "gh", "label", "list", "--repo", "owner/repo", "--limit", "1000", "--json", "name" },
+      "label_list"
+    )
+    assert_argv_equal(
+      calls[7].argv,
+      { "gh", "label", "create", "fkst-dev:ready", "--repo", "owner/repo", "--color", "0E8A16" },
+      "label_create"
+    )
+    assert_argv_equal(
+      calls[8].argv,
+      { "gh", "issue", "edit", "42", "--repo", "owner/repo", "--add-label", "fkst-dev:ready", "--remove-label", "fkst-dev:thinking" },
+      "issue_edit_labels"
+    )
+    assert_argv_equal(
+      calls[9].argv,
+      { "gh", "pr", "edit", "7", "--repo", "owner/repo", "--add-label", "review", "--remove-label", "draft" },
+      "pr_edit_labels"
+    )
+    for index, call in ipairs(calls) do
+      assert(call.timeout == index + 10, "github method timeout mismatch for call " .. tostring(index))
+      assert(call.cmd == nil, "github method must not pass cmd")
+      assert(call.rate_pool == nil, "github method must not pass rate_pool")
+    end
+  end,
+
+  test_git_methods_build_argv = function()
+    local calls = {}
+    local handle = git.new(function(opts)
+      table.insert(calls, opts)
+      return { stdout = "ok", stderr = "", exit_code = 0 }
+    end)
+
+    handle.push_branch("feature/a", 21)
+    handle.show_ref_branch("feature/a", 22)
+    handle.is_ancestor("abc123", "def456", 23)
+
+    assert_argv_equal(calls[1].argv, { "git", "push", "-u", "origin", "feature/a" }, "push_branch")
+    assert_argv_equal(calls[2].argv, { "git", "show-ref", "--verify", "refs/heads/feature/a" }, "show_ref_branch")
+    assert_argv_equal(calls[3].argv, { "git", "merge-base", "--is-ancestor", "abc123", "def456" }, "is_ancestor")
+    for index, call in ipairs(calls) do
+      assert(call.timeout == index + 20, "git method timeout mismatch for call " .. tostring(index))
+      assert(call.cmd == nil, "git method must not pass cmd")
+      assert(call.rate_pool == nil, "git method must not pass rate_pool")
+    end
+  end,
 }

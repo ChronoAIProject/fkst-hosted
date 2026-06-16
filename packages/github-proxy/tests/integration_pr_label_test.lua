@@ -51,6 +51,12 @@ local function state_marker(state, version)
     .. '" stage_rank="675" -->'
 end
 
+local function has_arg_pair(rendered, flag, value)
+  local text = tostring(rendered or "")
+  return text:find(tostring(flag) .. " '" .. tostring(value) .. "'", 1, true) ~= nil
+    or text:find(tostring(flag) .. " " .. tostring(value), 1, true) ~= nil
+end
+
 return {
   test_pr_label_request_is_guarded_by_pr_comment_stream = function()
     mock_write_env("1")
@@ -58,7 +64,7 @@ return {
     mock_pr_label_guard({ "fkst-dev:pr-open" }, { state_marker("reviewing", "v1") })
     mock_repo_label_list({ "fkst-dev:reviewing", "fkst-dev:pr-open" })
     t.mock_command("gh pr edit", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("gh api 'repos/owner/x/issues/42'", {
+    t.mock_command("gh api repos/owner/x/issues/42", {
       stdout = '{"assignees":[{"login":"fkst-test-bot"}]}\n',
       stderr = "",
       exit_code = 0,
@@ -69,14 +75,14 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api 'repos/owner/x/pulls/7'"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 1)
+    t.eq(count_calls("gh api repos/owner/x/pulls/7"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 1)
     t.eq(count_calls("gh pr edit"), 1)
     t.eq(count_calls("gh issue edit"), 0)
     local edit = calls_matching("gh pr edit")[1]
-    t.is_true(edit.rendered:find("--add-label 'fkst-dev:reviewing'", 1, true) ~= nil)
-    t.is_true(edit.rendered:find("--remove-label 'fkst-dev:pr-open'", 1, true) ~= nil)
+    t.is_true(has_arg_pair(edit.rendered, "--add-label", "fkst-dev:reviewing"))
+    t.is_true(has_arg_pair(edit.rendered, "--remove-label", "fkst-dev:pr-open"))
   end,
 
   test_pr_label_request_retries_when_pr_marker_is_not_visible = function()
@@ -89,10 +95,10 @@ return {
     }))
 
     t.eq(result.exit_code, 1)
-    t.eq(count_calls("gh api 'repos/owner/x/pulls/7'"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
+    t.eq(count_calls("gh api repos/owner/x/pulls/7"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
     t.eq(count_calls("gh pr edit"), 0)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 0)
   end,
 
   test_pr_label_request_skips_stale_visible_pr_marker = function()
@@ -105,9 +111,9 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh api 'repos/owner/x/pulls/7'"), 1)
-    t.eq(count_calls("gh api --paginate --slurp 'repos/owner/x/issues/7/comments?per_page=100'"), 1)
+    t.eq(count_calls("gh api repos/owner/x/pulls/7"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
     t.eq(count_calls("gh pr edit"), 0)
-    t.eq(count_calls("gh api 'repos/owner/x/issues/42'"), 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 0)
   end,
 }
