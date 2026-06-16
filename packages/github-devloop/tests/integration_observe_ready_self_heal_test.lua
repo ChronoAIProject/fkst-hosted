@@ -17,6 +17,7 @@ local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local proposal_id = "github-devloop/issue/owner/repo/42"
 
 local function has_value(values, expected)
   for _, value in ipairs(values or {}) do
@@ -76,6 +77,31 @@ local function merge_gate_fix_marker(event)
     nil,
     "rollup-red"
   )
+end
+
+local function assert_ready_redrive(result, expected_proposal_id, expected_dedup_key)
+  t.eq(result.exit_code, 0)
+  t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+  t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
+  local ready = find_raise(result.raises, "devloop_ready")
+  t.is_true(ready ~= nil)
+  t.eq(ready.payload.proposal_id, expected_proposal_id)
+  t.eq(ready.payload.dedup_key, expected_dedup_key)
+  t.eq(ready.payload.source_ref.ref, "owner/repo#issue/42")
+end
+
+local function assert_merged_terminal(result)
+  t.eq(result.exit_code, 0)
+  t.eq(find_raise(result.raises, "devloop_ready"), nil)
+  t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+  t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
+  local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+  t.is_true(comment ~= nil)
+  t.is_true(tostring(comment.payload.body):find('state="merged"', 1, true) ~= nil)
+  t.is_true(tostring(comment.payload.body):find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+  local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
+  t.is_true(label ~= nil)
+  t.eq(label.payload.add_labels[1], "fkst-dev:merged")
 end
 
 local function fresh_thinking_marker(proposal_id, version)
@@ -450,6 +476,87 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+  end,
+
+  test_observe_issue_fixing_closed_link_redrives_ready_for_replacement_pr = function()
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local issue_version = base .. "/fix/1"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.state_marker(proposal_id, "fixing", issue_version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", base, "dev"),
+    })
+    mock_linked_pr_state({}, "CLOSED", nil, 2)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" }, source = "liveness-scan" }), opts("observe-issue-fixing-closed-link-redrive"))
+    assert_ready_redrive(result, proposal_id, "ready/" .. core.orphaned_pr_ready_version({ version = issue_version }))
+  end,
+
+  test_observe_issue_fixing_merged_link_marks_issue_merged = function()
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local issue_version = base .. "/fix/1"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:fixing" }, "OPEN", {
+      core.state_marker(proposal_id, "fixing", issue_version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", base, "dev"),
+    })
+    mock_linked_pr_state({}, "MERGED", nil, 2)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" }, source = "liveness-scan" }), opts("observe-issue-fixing-merged-link"))
+    assert_merged_terminal(result)
+  end,
+
+  test_observe_issue_review_meta_closed_link_redrives_ready_for_replacement_pr = function()
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local issue_version = base .. "/review-meta/1"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:review-meta" }, "OPEN", {
+      core.state_marker(proposal_id, "review-meta", issue_version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", base, "dev"),
+    })
+    mock_linked_pr_state({}, "CLOSED", nil, 2)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:review-meta" }, source = "liveness-scan" }), opts("observe-issue-review-meta-closed-link-redrive"))
+    assert_ready_redrive(result, proposal_id, "ready/" .. core.orphaned_pr_ready_version({ version = issue_version }))
+  end,
+
+  test_observe_issue_merge_ready_closed_link_redrives_ready_for_replacement_pr = function()
+    local event = {
+      proposal_id = proposal_id,
+      pr_number = 7,
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456"),
+      review_dedup_key = "consensus:review",
+      reviewed_head_sha = "def456",
+      head_sha = "def456",
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:merge-ready" }, "OPEN", {
+      core.state_marker(proposal_id, "merge-ready", event.version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", event.version, "dev"),
+      core.merge_ready_marker(proposal_id, 7, event.version, event.review_proposal_id, event.review_dedup_key, event.head_sha),
+    })
+    mock_linked_pr_state({}, "CLOSED", nil, 2)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:merge-ready" }, source = "liveness-scan" }), opts("observe-issue-merge-ready-closed-link-redrive"))
+    assert_ready_redrive(result, proposal_id, "ready/" .. event.version .. "/reimplement/1")
+  end,
+
+  test_observe_issue_merge_ready_merged_link_marks_issue_merged = function()
+    local event = {
+      proposal_id = proposal_id,
+      pr_number = 7,
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456"),
+      review_dedup_key = "consensus:review",
+      reviewed_head_sha = "def456",
+      head_sha = "def456",
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:merge-ready" }, "OPEN", {
+      core.state_marker(proposal_id, "merge-ready", event.version),
+      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", event.version, "dev"),
+      core.merge_ready_marker(proposal_id, 7, event.version, event.review_proposal_id, event.review_dedup_key, event.head_sha),
+    })
+    mock_linked_pr_state({}, "MERGED", nil, 2)
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:merge-ready" }, source = "liveness-scan" }), opts("observe-issue-merge-ready-merged-link"))
+    assert_merged_terminal(result)
   end,
 
   test_observe_issue_timeout_redrives_issue_local_non_replay_state = function()

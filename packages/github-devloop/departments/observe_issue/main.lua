@@ -28,8 +28,11 @@ local observe_replay_states = {
   ready = true,
   implementing = true,
   ["pr-open"] = true,
+  reviewing = true,
   fixing = true,
   ["review-meta"] = true,
+  ["merge-ready"] = true,
+  merging = true,
   blocked = true,
   ["impl-failed"] = true,
 }
@@ -86,11 +89,11 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     snapshot = snapshot,
     event_ts = event_ts,
   }
-  if issue.source == "liveness-scan"
-    and state.state == "pr-open"
-    and issue_state ~= nil
+  local state_is_issue_local = issue_state ~= nil
     and issue_state.state == state.state
     and tostring(issue_state.version or "") == tostring(state.version or "")
+  if ((issue.source == "liveness-scan" and state.state == "pr-open") or state.state == "reviewing")
+    and state_is_issue_local
     and core.liveness_timeout_due(row, state, now()) then
     local timeout_state = {
       state = state.state,
@@ -102,10 +105,7 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     return core.replay_from_table("observe_issue", issue, timeout_state, row, facts)
   end
   if observe_replay_states[state.state] and state.state == "thinking" then
-    if issue_state ~= nil
-      and issue_state.state == state.state
-      and tostring(issue_state.version or "") == tostring(state.version or "")
-      and core.liveness_timeout_due(row, state, now()) then
+    if state_is_issue_local and core.liveness_timeout_due(row, state, now()) then
       if core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts) then
         return true
       end
@@ -113,6 +113,7 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     return core.replay_from_table("observe_issue", issue, state, row, facts)
   end
   if observe_replay_states[state.state]
+    and state_is_issue_local
     and core.replay_from_table("observe_issue", issue, state, row, facts) then
     return true
   end

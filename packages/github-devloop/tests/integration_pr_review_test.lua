@@ -544,7 +544,7 @@ return {
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
     t.eq(find_label_raise(result.raises, "pr"), nil)
   end,
-  test_observe_pr_closed_pr_does_not_advance_issue_to_reviewing = function()
+  test_observe_pr_closed_pr_redrives_ready_without_advancing_to_reviewing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
@@ -564,7 +564,10 @@ return {
       },
     }, opts("observe-pr-closed"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    local ready = find_raise(result.raises, "devloop_ready")
+    t.is_true(ready ~= nil)
+    t.eq(ready.payload.dedup_key, "ready/" .. impl_version .. "/reimplement/1")
   end,
   test_observe_pr_ignores_forged_backpointer_and_uses_pr_native_origin = function()
     mock_pr_origin({

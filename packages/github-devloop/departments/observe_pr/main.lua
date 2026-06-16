@@ -138,10 +138,6 @@ local function issue_claim_for_origin(origin)
 end
 
 local function raise_current_state(origin, pr_number, current_pr, state, source_ref, known_issue)
-  if state.state == "fixing" and tostring(current_pr.state or ""):lower() ~= "open" then
-    core.log_cas_decision("observe_pr", origin.proposal_id, state, "fixing", "fixing", "skip-stale(pr-closed)", "re-derived PR is not open")
-    return false
-  end
   local issue_comments = known_issue and known_issue.comments or nil
   if issue_comments == nil and state.state == "fixing" then
     issue_comments = issue_comments_for_origin(origin)
@@ -542,6 +538,12 @@ function pipeline(event)
     end
     if state.state == "pr-open" and tostring(state.version or "") ~= tostring(origin.impl_version or "") then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-stale(version-mismatch)", "PR-open marker version does not match PR origin")
+      return
+    end
+    if state.state == "pr-open" and tostring(current_pr.state or ""):lower() ~= "open" then
+      if raise_current_state(origin, pr.number, current_pr, state, source_ref, issue_current) then
+        maybe_label_hints(origin, pr.number, current_pr, state, source_ref)
+      end
       return
     end
     if transition ~= "apply" and transition ~= "idempotent" then

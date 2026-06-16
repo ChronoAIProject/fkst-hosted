@@ -106,6 +106,15 @@ local function has_reviewing_marker_for_comments(comments, proposal_id, version)
   return M.has_state_marker(comments, proposal_id, "reviewing", version)
 end
 
+local pr_review_tools = nil
+
+local function maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, current_pr, facts)
+  if pr_review_tools == nil or type(pr_review_tools.terminal_linked_pr_action) ~= "function" then
+    return nil
+  end
+  return pr_review_tools.terminal_linked_pr_action(dept, issue, state, proposal_id, link, current_pr, facts)
+end
+
 local function snapshot_from_issue_comments(repo, proposal_id, comments)
   return M.linked_entity_snapshot(repo, proposal_id, comments or {})
 end
@@ -630,8 +639,12 @@ local function replay_fixing(dept, issue, state, row, facts)
   end
   local current_pr = find_linked_pr(facts.snapshot, link.pr_number)
   if current_pr == nil then
+    local terminal = maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, nil, facts)
+    if terminal ~= nil then return terminal end
     return log_skip(dept, proposal_id, state, "fixing", "fixing|reviewing", "skip-foreign(pr-link)", "linked PR fact is not visible")
   end
+  local terminal = maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, current_pr, facts)
+  if terminal ~= nil then return terminal end
   if tostring(current_pr.state or ""):lower() ~= "open" then
     return log_skip(dept, proposal_id, state, "fixing", "fixing|reviewing", "skip-stale(pr-closed)", "linked PR is not open")
   end
@@ -714,8 +727,12 @@ local function replay_review_meta(dept, issue, state, row, facts)
   end
   local current_pr = find_linked_pr(facts.snapshot, link.pr_number)
   if current_pr == nil then
+    local terminal = maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, nil, facts)
+    if terminal ~= nil then return terminal end
     return log_skip(dept, proposal_id, state, "review-meta", "review-meta", "skip-foreign(pr-link)", "linked PR fact is not visible")
   end
+  local terminal = maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, current_pr, facts)
+  if terminal ~= nil then return terminal end
   if tostring(current_pr.state or ""):lower() ~= "open" then
     return log_skip(dept, proposal_id, state, "review-meta", "review-meta", "skip-stale(pr-closed)", "linked PR is not open")
   end
@@ -822,8 +839,12 @@ local function replay_merge_ready_like(dept, issue, state, row, facts)
   end
   local current_pr = find_linked_pr(facts.snapshot, link.pr_number)
   if current_pr == nil then
+    local terminal = maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, nil, facts)
+    if terminal ~= nil then return terminal end
     return log_skip(dept, proposal_id, state, row.from_state, "merge-ready", "skip-foreign(pr-link)", "linked PR fact is not visible")
   end
+  local terminal = maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, current_pr, facts)
+  if terminal ~= nil then return terminal end
   if maybe_replay_review_carry_over(dept, issue, state, row, facts, link, current_pr) then
     return true
   end
@@ -902,12 +923,13 @@ local replayers = {
   blocked = replay_blocked,
 }
 
-M.install_pr_review_replayers(replayers, {
+pr_review_tools = {
   find_linked_pr = find_linked_pr,
   log_skip = log_skip,
   raise_effects = raise_effects,
   resolve_payload_fields = resolve_payload_fields,
-})
+}
+M.install_pr_review_replayers(replayers, pr_review_tools)
 
 function M.replay_from_table(dept, entity, state, table_row, facts)
   local row = table_row or transition_row(state and state.state)
