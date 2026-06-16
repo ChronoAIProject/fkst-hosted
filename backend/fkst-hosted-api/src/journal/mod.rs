@@ -33,6 +33,7 @@ use std::time::Duration;
 use secrecy::SecretString;
 use sha2::{Digest, Sha256};
 
+use crate::engine::materialize::PackageFile;
 use crate::journal::github::{FileSha, ProgressRepo, RemoteRecord, DEFAULT_API_BASE};
 use crate::journal::model::{
     sanitize_event_json, CompletedEntry, LifecycleDoc, LifecycleEntry, LogRef, ProgressKind,
@@ -40,7 +41,6 @@ use crate::journal::model::{
     UNVERIFIED_SHA,
 };
 use crate::journal::store::{InsertOutcome, ProgressStore};
-use crate::packages::model::PackageFile;
 
 /// Journaling failures. Secret hygiene is load-bearing: no variant ever
 /// carries the GitHub token (asserted by tests in [`github`]); HTTP errors
@@ -576,7 +576,7 @@ impl<S: ProgressStore> Journaler<S> {
         cfg: JournalConfig,
         store: S,
     ) -> Result<Self, JournalError> {
-        if !crate::packages::is_valid_name(&ctx.package_name) {
+        if !crate::engine::is_valid_name(&ctx.package_name) {
             return Err(JournalError::Other(anyhow::anyhow!(
                 "invalid package name for journaling: must fully match [A-Za-z0-9_-]+"
             )));

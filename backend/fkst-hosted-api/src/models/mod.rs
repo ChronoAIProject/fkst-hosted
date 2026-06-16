@@ -1,6 +1,5 @@
 //! Authoritative BSON document shapes for the `sessions` and `leases`
-//! collections. (The `packages` collection shape is owned by
-//! [`crate::packages`].)
+//! collections.
 //!
 //! Conventions (load-bearing for downstream queries):
 //! - `Option<T>` fields serialize as explicit BSON `null` (no

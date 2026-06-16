@@ -5,7 +5,7 @@
 //! Docker is unavailable.
 //!
 //! Test cases:
-//!  1. Valid RS256 token -> 200 on protected /api/v1/packages
+//!  1. Valid RS256 token -> 200 on protected /api/v1/goals
 //!  2. No token -> 401 with {"error":"unauthorized"} + WWW-Authenticate: Bearer
 //!  3. Malformed Authorization header -> 401
 //!  4. Expired token -> 401
@@ -32,7 +32,6 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -263,14 +262,8 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let auth_mode = AuthMode::Enabled(NyxIdAuthSettings {
         base_url: mock_server.uri(),
         issuer: ISSUER.to_string(),
@@ -281,16 +274,12 @@ async fn auth_app(jwks_response_body: Value) -> AuthTestApp {
     let router = build_router(AppState {
         config,
         db,
-        packages,
-        shares,
         sessions,
         auth_mode,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })
@@ -320,28 +309,18 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
-        packages,
-        shares,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })
@@ -408,7 +387,8 @@ async fn valid_rs256_token_returns_200_on_protected_route() {
     }
     let token = sign_token(&valid_claims(), KID);
     let app = auth_app(jwks_response(KID)).await;
-    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/packages", &token).await;
+    // /api/v1/goals is a surviving protected route that returns an empty list.
+    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/goals", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body, json!([]), "empty store returns empty array");
 }
@@ -420,7 +400,7 @@ async fn no_token_returns_401_with_www_authenticate() {
         return;
     }
     let app = auth_app(jwks_response(KID)).await;
-    let (status, headers, body) = get_no_auth(&app.router, "/api/v1/packages").await;
+    let (status, headers, body) = get_no_auth(&app.router, "/api/v1/goals").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
     assert_eq!(body["error"], "unauthorized");
     let www = headers
@@ -439,7 +419,7 @@ async fn malformed_authorization_header_returns_401() {
     }
     let app = auth_app(jwks_response(KID)).await;
     let (status, _headers, body) =
-        get_with_header(&app.router, "/api/v1/packages", "Basic abc123").await;
+        get_with_header(&app.router, "/api/v1/goals", "Basic abc123").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
     assert_eq!(body["error"], "unauthorized");
 }
@@ -454,7 +434,7 @@ async fn expired_token_returns_401() {
     claims.exp = now_secs() - 300; // expired 5 minutes ago
     let token = sign_token(&claims, KID);
     let app = auth_app(jwks_response(KID)).await;
-    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/packages", &token).await;
+    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/goals", &token).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
     assert_eq!(body["error"], "unauthorized");
 }
@@ -469,7 +449,7 @@ async fn wrong_issuer_returns_401() {
     claims.iss = "wrong-issuer".to_string();
     let token = sign_token(&claims, KID);
     let app = auth_app(jwks_response(KID)).await;
-    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/packages", &token).await;
+    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/goals", &token).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
     assert_eq!(body["error"], "unauthorized");
 }
@@ -484,7 +464,7 @@ async fn wrong_audience_returns_401() {
     claims.aud = "wrong-audience".to_string();
     let token = sign_token(&claims, KID);
     let app = auth_app(jwks_response(KID)).await;
-    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/packages", &token).await;
+    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/goals", &token).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
     assert_eq!(body["error"], "unauthorized");
 }
@@ -499,7 +479,7 @@ async fn non_access_token_type_returns_401() {
     claims.token_type = Some("refresh".to_string());
     let token = sign_token(&claims, KID);
     let app = auth_app(jwks_response(KID)).await;
-    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/packages", &token).await;
+    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/goals", &token).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
     assert_eq!(body["error"], "unauthorized");
 }
@@ -512,7 +492,7 @@ async fn hs256_token_returns_401_algorithm_confusion() {
     }
     let token = sign_hs256_token(&valid_claims());
     let app = auth_app(jwks_response(KID)).await;
-    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/packages", &token).await;
+    let (status, _headers, body) = get_with_auth(&app.router, "/api/v1/goals", &token).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
     assert_eq!(body["error"], "unauthorized");
 }
@@ -544,8 +524,8 @@ async fn auth_disabled_routes_are_open_and_extractor_yields_dev() {
     }
     let (_container, router) = no_auth_app().await;
 
-    // No token needed
-    let (status, _headers, body) = get_no_auth(&router, "/api/v1/packages").await;
+    // No token needed; /api/v1/goals returns an empty list for the dev identity.
+    let (status, _headers, body) = get_no_auth(&router, "/api/v1/goals").await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body, json!([]));
 }
@@ -580,14 +560,8 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let auth_mode = AuthMode::Enabled(NyxIdAuthSettings {
         base_url: mock_server.uri(),
         issuer: ISSUER.to_string(),
@@ -598,23 +572,19 @@ async fn jwks_outage_returns_503_for_unknown_kid() {
     let router = build_router(AppState {
         config,
         db,
-        packages,
-        shares,
         sessions,
         auth_mode,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })
     .expect("router");
 
     let token = sign_token(&valid_claims(), "unknown-kid");
-    let (status, _headers, body) = get_with_auth(&router, "/api/v1/packages", &token).await;
+    let (status, _headers, body) = get_with_auth(&router, "/api/v1/goals", &token).await;
     // Must be 503, NOT 401
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "body: {body}");
     assert_eq!(body["error"], "unavailable");
@@ -660,14 +630,8 @@ async fn kid_rotation_recovers_after_refresh() {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let auth_mode = AuthMode::Enabled(NyxIdAuthSettings {
         base_url: mock_server.uri(),
         issuer: ISSUER.to_string(),
@@ -678,16 +642,12 @@ async fn kid_rotation_recovers_after_refresh() {
     let router = build_router(AppState {
         config,
         db,
-        packages,
-        shares,
         sessions,
         auth_mode,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })
@@ -695,7 +655,7 @@ async fn kid_rotation_recovers_after_refresh() {
 
     // First request with KID will fail (kid not in initial JWKS).
     let token = sign_token(&valid_claims(), KID);
-    let (status, _headers, _body) = get_with_auth(&router, "/api/v1/packages", &token).await;
+    let (status, _headers, _body) = get_with_auth(&router, "/api/v1/goals", &token).await;
     // Either 401 (unknown kid from stale cache) or 503 (JWKS error). Both
     // are acceptable for the "before rotation" state.
     assert!(
@@ -708,7 +668,7 @@ async fn kid_rotation_recovers_after_refresh() {
 
     // After refresh, the JWKS now includes KID, so the token should work.
     let token = sign_token(&valid_claims(), KID);
-    let (status, _headers, body) = get_with_auth(&router, "/api/v1/packages", &token).await;
+    let (status, _headers, body) = get_with_auth(&router, "/api/v1/goals", &token).await;
     assert_eq!(status, StatusCode::OK, "after rotation body: {body}");
 }
 
@@ -757,20 +717,12 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
     let state = AppState {
         config,
         db,
-        packages,
-        shares,
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
             base_url: mock_server.uri(),
@@ -782,8 +734,6 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     };

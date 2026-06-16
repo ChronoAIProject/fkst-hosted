@@ -15,7 +15,6 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -340,27 +339,17 @@ async fn entries_per_scope_cap_is_enforced() {
 
 /// Build a router (auth disabled: the dev context owns everything) over `db`.
 fn router(db: Db, vault: VaultService) -> axum::Router {
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     build_router(AppState {
         config: Config::default(),
         db,
-        packages,
-        shares,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })

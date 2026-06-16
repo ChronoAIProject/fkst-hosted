@@ -253,24 +253,12 @@ async fn create(
     )
     .map_err(AppError::Validation)?;
 
-    // Validate each package exists and caller can use it.
-    for name in &request.package_names {
-        let pkg = state.packages.get(name).await?;
-        match pkg {
-            Some(p) => {
-                let can_use = state
-                    .authz
-                    .can_use_package(&ctx, name, p.owner_user_id.as_deref(), p.org_id.as_deref())
-                    .await;
-                if !can_use {
-                    return Err(AppError::Forbidden(format!("package not usable: {name}")));
-                }
-            }
-            None => {
-                return Err(AppError::Validation(format!("package not found: {name}")));
-            }
-        }
-    }
+    // Package existence + authorization are no longer checked here: packages
+    // became repo-scoped (#115). The names are validated for FORMAT only above
+    // (validate_goal_fields); each is resolved against the goal repo's
+    // `.fkst/packages/<name>/` at session spawn (the driver clones the repo and
+    // fails the spawn with a clear error for an absent dir). Access to those
+    // packages is governed by the repo's GitHub permissions, not a store grant.
 
     let now = bson::DateTime::now();
     let id = bson::Uuid::new();
@@ -505,7 +493,10 @@ async fn update(
                 "at least one package is required".to_string(),
             ));
         }
-        // Validate each package: format, existence, can_use.
+        // Validate each package name's FORMAT only (#115): existence + access
+        // are resolved against the goal repo's `.fkst/packages/<name>/` at
+        // session spawn, not a store. Duplicates and over-long names are still
+        // rejected here so the stored selector stays well-formed.
         let mut seen = std::collections::HashSet::new();
         for name in package_names {
             if name.len() > crate::goals::MAX_PACKAGE_NAME_BYTES {
@@ -515,7 +506,7 @@ async fn update(
                     crate::goals::MAX_PACKAGE_NAME_BYTES
                 )));
             }
-            if !crate::packages::is_valid_name(name) {
+            if !crate::engine::is_valid_name(name) {
                 return Err(AppError::Validation(format!(
                     "invalid package name: {:?}",
                     name
@@ -526,26 +517,6 @@ async fn update(
                     "duplicate package name: {:?}",
                     name
                 )));
-            }
-            let pkg = state.packages.get(name).await?;
-            match pkg {
-                Some(p) => {
-                    let can_use = state
-                        .authz
-                        .can_use_package(
-                            &ctx,
-                            name,
-                            p.owner_user_id.as_deref(),
-                            p.org_id.as_deref(),
-                        )
-                        .await;
-                    if !can_use {
-                        return Err(AppError::Forbidden(format!("package not usable: {name}")));
-                    }
-                }
-                None => {
-                    return Err(AppError::Validation(format!("package not found: {name}")));
-                }
             }
         }
         set.insert(
@@ -881,26 +852,11 @@ async fn trigger(
     )
     .map_err(AppError::Validation)?;
 
-    // Re-validate every package_names entry exists + caller can_use_package.
-    for name in &goal.package_names {
-        let pkg = state.packages.get(name).await?;
-        match pkg {
-            Some(p) => {
-                let can_use = state
-                    .authz
-                    .can_use_package(&ctx, name, p.owner_user_id.as_deref(), p.org_id.as_deref())
-                    .await;
-                if !can_use {
-                    return Err(AppError::Forbidden(format!("package not usable: {name}")));
-                }
-            }
-            None => {
-                return Err(AppError::Unprocessable(format!(
-                    "package not found: {name}"
-                )));
-            }
-        }
-    }
+    // Package existence/authorization is no longer re-validated here (#115):
+    // each `package_names` entry is resolved against the goal repo's
+    // `.fkst/packages/<name>/` at session spawn (the driver clones the repo and
+    // fails the spawn with a clear error for an absent dir). The names were
+    // format-validated when the goal was created/updated.
 
     // Step 3: Mint installation token.
     let github_app = state.github_app.as_ref().ok_or_else(|| {

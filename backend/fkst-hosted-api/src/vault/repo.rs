@@ -1,9 +1,9 @@
 //! MongoDB-backed repository for the `vault_entries` collection.
 //!
-//! Mirrors `crate::packages::PackageRepository`: a cheap-to-clone handle over a
-//! typed `Collection`, an idempotent `ensure_indexes` startup hook, and CRUD
-//! that maps driver failures onto [`AppError`] (driver text is logged
-//! server-side only, never echoed to a client).
+//! A cheap-to-clone handle over a typed `Collection`, an idempotent
+//! `ensure_indexes` startup hook, and CRUD that maps driver failures onto
+//! [`AppError`] (driver text is logged server-side only, never echoed to a
+//! client).
 
 use bson::{doc, Document};
 use mongodb::options::ReturnDocument;

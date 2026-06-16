@@ -1,43 +1,28 @@
-//! Session HTTP API: `POST /api/v1/sessions`, `GET /api/v1/sessions/{id}`,
-//! and `POST /api/v1/sessions/{id}/stop`.
+//! Session HTTP API: `GET /api/v1/sessions/{id}` and
+//! `POST /api/v1/sessions/{id}/stop`.
 //!
 //! Pure web edge: wire DTOs, UUID parsing, and status mapping. All
 //! orchestration (driver task, engine lifecycle, CAS transitions) lives in
 //! [`crate::sessions::SessionService`].
+//!
+//! Sessions are created exclusively via a goal trigger
+//! (`POST /api/v1/goals/{id}/trigger`) since packages became repo-scoped
+//! (#115): a session loads its packages from its goal repo's
+//! `.fkst/packages/`, so there is no longer a repo-less "classic" session to
+//! create directly. These read/stop endpoints serve goal sessions.
 
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderName, HeaderValue, StatusCode};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::auth::AuthContext;
 use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::models::{SessionDoc, SessionStatus};
-use crate::packages::is_valid_name;
-use crate::routes::extract::AppJson;
 use crate::routes::rfc3339;
-use crate::sessions::SessionOwner;
 use crate::state::AppState;
-
-/// Request body for `POST /api/v1/sessions`. Unknown fields fail loudly.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CreateSessionRequest {
-    pub package_name: String,
-    /// Optional Ornn skills/skillsets to inject into the session's codex
-    /// (issue #114). Each `{kind, name, version}`; validated at the boundary.
-    #[serde(default)]
-    pub ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
-}
-
-/// Response body for `POST /api/v1/sessions` (201).
-#[derive(Debug, Serialize)]
-pub struct CreateSessionResponse {
-    pub id: String,
-    pub status: SessionStatus,
-}
 
 /// Response body for `POST /api/v1/sessions/{id}/stop` (202). Always
 /// `{"status":"stopping"}`: the 202 acknowledges the request; clients poll
@@ -121,94 +106,6 @@ fn parse_session_id(raw: &str) -> Result<bson::Uuid, AppError> {
         tracing::warn!(id_bytes = raw.len(), "malformed session id rejected");
         AppError::Validation("invalid session id: must be a UUID".to_string())
     })
-}
-
-/// `POST /api/v1/sessions`: validate, persist `pending`, spawn the driver,
-/// answer `201` with a `Location` header immediately.
-async fn create(
-    State(state): State<AppState>,
-    ctx: AuthContext,
-    AppJson(request): AppJson<CreateSessionRequest>,
-) -> Result<
-    (
-        StatusCode,
-        [(HeaderName, HeaderValue); 1],
-        Json<CreateSessionResponse>,
-    ),
-    AppError,
-> {
-    // Validate package name format before DB lookup (catches bad names
-    // early with 400, distinct from 404 for valid-but-absent names).
-    if !is_valid_name(&request.package_name)
-        || request.package_name.len() > 128
-        || request.package_name.is_empty()
-    {
-        return Err(AppError::Validation(
-            "invalid package name: must fully match [A-Za-z0-9_-]+ and be at most 128 bytes"
-                .to_string(),
-        ));
-    }
-
-    // Fetch the package first (need its ownership for authz check).
-    let package = state
-        .packages
-        .get(&request.package_name)
-        .await?
-        .ok_or_else(|| {
-            AppError::NotFound(format!("package not found: {}", request.package_name))
-        })?;
-
-    // Session create requires "use" level access (share-aware): owner, org
-    // writer, or use-level share grant. A read-level share grantee can see but
-    // not start sessions.
-    let can_use = state
-        .authz
-        .can_use_package(
-            &ctx,
-            &request.package_name,
-            package.owner_user_id.as_deref(),
-            package.org_id.as_deref(),
-        )
-        .await;
-    if !can_use {
-        return Err(AppError::Forbidden(
-            "insufficient permissions: use-level access required".to_string(),
-        ));
-    }
-
-    // Boundary-validate the Ornn pins (#114): name/version grammar + the cheap
-    // cross-pin version conflict (the picker UI must pre-validate the same way;
-    // skillset-closure conflicts are re-checked at resolve time in the driver).
-    if let Some(ref pins) = request.ornn_skills {
-        crate::ornn::validate_pins(pins)?;
-    }
-
-    let session = state
-        .sessions
-        .create(
-            &request.package_name,
-            SessionOwner {
-                owner_user_id: ctx.user_id.clone(),
-                org_id: package.org_id.clone(),
-            },
-            // The user's first-party token is forwarded transiently so the
-            // driver can mint the per-session NyxID key (#111). Never persisted.
-            ctx.raw_token.clone(),
-            request.ornn_skills.clone(),
-        )
-        .await?;
-    let id = session.id.to_string();
-    // The id is a canonical lowercase hyphenated UUID: ASCII, header-safe.
-    let location = HeaderValue::try_from(format!("/api/v1/sessions/{id}"))
-        .expect("uuid string is ASCII and header-safe");
-    Ok((
-        StatusCode::CREATED,
-        [(header::LOCATION, location)],
-        Json(CreateSessionResponse {
-            id,
-            status: session.status,
-        }),
-    ))
 }
 
 /// `GET /api/v1/sessions/{id}`: full status projection or `404`.
@@ -310,7 +207,6 @@ fn authorize_session_write<'a>(
 /// Session routes, to be nested under `/api/v1`.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/sessions", post(create))
         .route("/sessions/:id", get(get_one))
         .route("/sessions/:id/stop", post(stop))
 }
@@ -318,22 +214,6 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn create_response_serializes_to_the_documented_shape() {
-        let body = serde_json::to_value(CreateSessionResponse {
-            id: "f4e2c0a1-9b3d-4d2e-8c11-3a6b5e0d7f12".to_string(),
-            status: SessionStatus::Pending,
-        })
-        .unwrap();
-        assert_eq!(
-            body,
-            serde_json::json!({
-                "id": "f4e2c0a1-9b3d-4d2e-8c11-3a6b5e0d7f12",
-                "status": "pending"
-            })
-        );
-    }
 
     #[test]
     fn stop_response_serializes_to_the_documented_shape() {

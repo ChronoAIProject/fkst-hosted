@@ -44,9 +44,7 @@ fn cors_layer() -> CorsLayer {
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let timeout = Duration::from_secs(state.config.request_timeout_secs);
 
-    let api_routes = routes::packages::router()
-        .merge(routes::generate::router())
-        .merge(routes::sessions::router())
+    let api_routes = routes::sessions::router()
         .merge(routes::goals::router())
         .merge(routes::github::router())
         .merge(routes::vault::router())

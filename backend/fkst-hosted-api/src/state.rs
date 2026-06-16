@@ -6,7 +6,6 @@ use crate::config::Config;
 use crate::db::Db;
 use crate::github_app::GithubAppTokens;
 use crate::goals::GoalRepo;
-use crate::packages::{PackageRepository, ShareRepo};
 use crate::sessions::SessionService;
 use crate::vault::VaultService;
 
@@ -17,13 +16,6 @@ use crate::vault::VaultService;
 pub struct AppState {
     pub config: Config,
     pub db: Db,
-    /// Repository over the `packages` collection (domain layer owned by the
-    /// packages module); HTTP handlers go through this, never raw Mongo.
-    pub packages: PackageRepository,
-    /// Repository over the `package_shares` collection (domain layer owned by
-    /// the packages module). Share-aware policy checks and the share HTTP
-    /// handlers go through this.
-    pub shares: ShareRepo,
     /// Single-pod session orchestration (sessions module); HTTP handlers go
     /// through this, never raw Mongo or the engine runner.
     pub sessions: SessionService,
@@ -46,14 +38,6 @@ pub struct AppState {
     /// Repository over the `goals` collection (domain layer owned by the goals
     /// module). Goal CRUD handlers go through this, never raw Mongo.
     pub goals: GoalRepo,
-    /// Cloned engine config so the generate-endpoint's conformance dry-run can
-    /// reach the engine plumbing (materialize + conformance) WITHOUT coupling
-    /// to `SessionService` (which owns the long-lived session lifecycle).
-    pub engine: crate::engine::EngineConfig,
-    /// LLM gateway for package generation: `None` when `FKST_HOSTED_LLM_GATEWAY_URL`
-    /// is unset → `POST /api/v1/packages/generate` answers 503. The trait object
-    /// is the only LLM seam, so the concrete gateway stays swappable/mockable.
-    pub llm: Option<std::sync::Arc<dyn crate::llm::LlmGateway>>,
     /// Per-session secret/variable vault (issue #100). Always present: the
     /// `KeyProvider` is built fail-closed at boot, so the vault routes never
     /// run without an at-rest encryption key.

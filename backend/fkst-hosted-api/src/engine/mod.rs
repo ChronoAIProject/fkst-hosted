@@ -11,6 +11,7 @@
 //! The runner is Mongo-agnostic and pure: callers load the package document,
 //! build a [`PreparedPackage`], and persist whatever the runner returns.
 
+pub mod clone;
 pub mod config;
 pub mod error;
 pub mod goal_token;
@@ -18,7 +19,9 @@ pub mod logs;
 pub mod materialize;
 pub mod process;
 pub mod runner;
+pub mod util;
 
+pub use clone::{clone_repo_packages, ClonedRepo};
 pub use config::EngineConfig;
 pub use error::RunnerError;
 pub use goal_token::{
@@ -28,3 +31,4 @@ pub use goal_token::{
 pub use materialize::{materialize_helper_script, PreparedPackage};
 pub use process::{is_pid_alive, GoalEnv};
 pub use runner::{GoalContext, LiveStatus, RunningSession, SessionRunner, StartSpec};
+pub use util::is_valid_name;

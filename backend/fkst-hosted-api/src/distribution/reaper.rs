@@ -31,7 +31,6 @@ use super::distributor::{Distributor, Placement, PlacementError};
 use super::health::active_status_bson;
 use crate::leases::AcquireOutcome;
 use crate::models::{LeaseDoc, SessionDoc, SessionStatus};
-use crate::packages::PACKAGES_COLLECTION;
 use crate::sessions::repo::{status_bson, ORPHANED_ERROR};
 
 /// The seam through which the reaper asks the local session service to run
@@ -246,45 +245,11 @@ impl Distributor {
             Some(session) => session,
         };
 
-        // Package-deleted check: for classic sessions, verify the single
-        // package; for goal sessions, verify ALL package names in the
-        // effective set. A deleted package means the session must fail
-        // rather than redo indefinitely.
-        let names_to_check = session.effective_package_names();
-        for name in &names_to_check {
-            let exists = self
-                .db
-                .collection::<bson::Document>(PACKAGES_COLLECTION)
-                .find_one(doc! { "_id": name })
-                .await?
-                .is_some();
-            if !exists {
-                tracing::warn!(
-                    package_name = %name,
-                    session_id = %session.id,
-                    "package deleted while session active; failing the session"
-                );
-                let _ = self
-                    .db
-                    .sessions()
-                    .update_one(
-                        doc! {
-                            "_id": session.id,
-                            "status": { "$in": active_status_bson() },
-                        },
-                        doc! { "$set": {
-                            "status": status_bson(SessionStatus::Failed),
-                            "error": format!(
-                                "package {name} deleted while session active"
-                            ),
-                            "stopped_at": bson::DateTime::now(),
-                        } },
-                    )
-                    .await?;
-                self.release_as_holder(lease).await;
-                return Ok(None);
-            }
-        }
+        // Package existence is no longer checked here: packages became
+        // repo-scoped (#115), so a named package that no longer exists in the
+        // goal repo's `.fkst/packages/` surfaces at spawn (the driver's
+        // clone-resolve step fails the session with a clear error) rather than
+        // via a store lookup the reaper used to perform.
 
         // A healthy holder (other than us) with a lapsed lease is a GC
         // pause / clock-skew smell: fail closed, skip the tick. Our own

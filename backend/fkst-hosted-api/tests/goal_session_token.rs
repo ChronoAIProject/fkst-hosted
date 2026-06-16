@@ -8,18 +8,21 @@
 //! the engine (the `build_goal_context` -> `start_with_spec(goal: Some(..))`
 //! path).
 //!
-//! These tests assert that behavior end-to-end against a real Mongo container
-//! and the real driver state machine, with the GitHub transport replaced by a
-//! counting fake. The engine binary is absent in CI, so a driven goal session
-//! ends `failed` at engine start — but `build_goal_context` (and therefore the
-//! token mint) runs strictly BEFORE that, so the mint is observable regardless.
-//! The two facts under test:
+//! After issue #115 (Mongo package store removed), sessions are created
+//! exclusively via `POST /api/v1/goals/:id/trigger`; the driver now clones
+//! the goal repo's `.fkst/packages/` at spawn. No package doc in Mongo is
+//! needed: `create_for_goal` only inserts the session doc, and the driver
+//! proceeds to `build_goal_context` (token mint) before the clone attempt.
+//!
+//! The facts under test:
 //!   1. POSITIVE — a goal session mints the installation token for the goal's
 //!      repo (mint count >= 1), and the session's failure reason is the
-//!      downstream engine-start failure, NOT a mint failure (proving
+//!      downstream engine/clone failure, NOT a mint failure (proving
 //!      `build_goal_context` succeeded and the token reached the start path).
-//!   2. NEGATIVE — a non-goal (package) session never mints a GitHub token
-//!      (its `GoalContext` stays `None`).
+//!
+//! The NEGATIVE case (`package_session_does_not_mint_github_token`) was deleted
+//! by #115: `SessionService::create` (classic package session create) no longer
+//! exists; sessions are created only via a goal trigger.
 //!
 //! Every test gets a fresh container and self-skips when Docker is unavailable
 //! so `cargo test` stays green on runners without a daemon.
@@ -37,8 +40,7 @@ use fkst_hosted_api::github_app::api::{
 use fkst_hosted_api::github_app::{GithubAppConfig, GithubAppTokens};
 use fkst_hosted_api::goals::{GoalDoc, GoalRepo, GoalStatus, GOALS_COLLECTION};
 use fkst_hosted_api::models::{RepoRef, SessionStatus};
-use fkst_hosted_api::packages::{Package, PackageFile, PackageRepository, PACKAGES_COLLECTION};
-use fkst_hosted_api::sessions::service::{GoalTriggerInfo, SessionOwner};
+use fkst_hosted_api::sessions::service::GoalTriggerInfo;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use secrecy::SecretString;
 use testcontainers::runners::AsyncRunner;
@@ -151,7 +153,7 @@ struct TestCtx {
 /// Start an ephemeral Mongo and build a single-pod `SessionService` with goal
 /// support (backed by the counting fake) and the test vault wired in. The
 /// engine binary stays the absent default so a driven session fails at start —
-/// after `build_goal_context` has already run.
+/// after `build_goal_context` has already run and minted the token.
 async fn ctx() -> TestCtx {
     let container = Mongo::default()
         .with_tag(MONGO_TAG)
@@ -170,10 +172,10 @@ async fn ctx() -> TestCtx {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
 
-    let packages = PackageRepository::new(&db.database);
+    // PackageRepository is no longer an arg to SessionService::new (#115);
+    // packages are resolved from the goal repo clone at spawn, not from Mongo.
     let sessions = SessionService::new(
         SessionRepo::new(&db),
-        packages,
         // Default engine config -> framework_bin is the absent
         // /usr/local/bin/fkst-framework, so the engine start fails (downstream
         // of the token mint). That is the expected terminal state here.
@@ -194,30 +196,6 @@ async fn ctx() -> TestCtx {
         goals,
         github_api,
     }
-}
-
-/// Insert a `Package` document directly so the driver's package load succeeds
-/// and execution reaches the goal-context build. Bypasses the HTTP validation
-/// layer (the content is irrelevant to this test; the engine never runs it).
-async fn seed_package(db: &Db, name: &str) {
-    let now = bson::DateTime::now();
-    let package = Package {
-        name: name.to_string(),
-        files: vec![PackageFile {
-            path: "departments/hello/main.lua".to_string(),
-            content: "return {}\n".to_string(),
-        }],
-        composed_deps: Vec::new(),
-        owner_user_id: Some("owner-1".to_string()),
-        org_id: None,
-        created_at: now,
-        updated_at: now,
-    };
-    db.database
-        .collection::<Package>(PACKAGES_COLLECTION)
-        .insert_one(&package)
-        .await
-        .expect("seed package");
 }
 
 /// Insert a NotStarted goal bound to `repo` naming `package`. Returns its id.
@@ -247,7 +225,7 @@ async fn seed_goal(db: &Db, repo: RepoRef, package: &str) -> bson::Uuid {
 
 /// Poll the session document until it leaves `pending`/`validating`, returning
 /// the terminal-ish doc. Panics after ~20s. The driver fails the session at
-/// engine start (no binary), so this resolves quickly to `failed`.
+/// the clone/engine start (no binary), so this resolves quickly to `failed`.
 async fn poll_until_settled(
     repo: &SessionRepo,
     id: bson::Uuid,
@@ -267,8 +245,13 @@ async fn poll_until_settled(
 }
 
 /// #106 — a goal session mints the GitHub App installation token for the goal's
-/// repo at startup, and the failure is the downstream engine start (not a mint
-/// failure), proving the driver now delivers a token at t=0.
+/// repo at startup, and the failure is the downstream engine/clone start (not a
+/// mint failure), proving the driver now delivers a token at t=0.
+///
+/// After #115: no Mongo package doc is seeded — `create_for_goal` only needs
+/// the goal doc and repo info; the driver resolves packages from the git clone
+/// AFTER minting the token. The clone will fail (no real GitHub credential /
+/// repo), but the mint is observable regardless.
 #[tokio::test]
 async fn goal_session_mints_github_token_at_startup() {
     if !docker_available() {
@@ -280,7 +263,7 @@ async fn goal_session_mints_github_token_at_startup() {
         owner: "acme".to_string(),
         name: "site".to_string(),
     };
-    seed_package(&ctx.db, "goal-pkg").await;
+    // No seed_package needed: packages come from the repo clone, not Mongo (#115).
     let goal_id = seed_goal(&ctx.db, repo.clone(), "goal-pkg").await;
 
     let result = ctx
@@ -317,13 +300,13 @@ async fn goal_session_mints_github_token_at_startup() {
         "the mint must target the goal's repo (acme/site)"
     );
 
-    // The session failed at the engine start (binary absent), NOT at the token
-    // mint — proving build_goal_context succeeded and the token reached the
-    // start path. The error string is the runner's, never the mint sentinel.
+    // The session failed at the engine/clone start, NOT at the token mint —
+    // proving build_goal_context succeeded and the token reached the start path.
+    // The error string is the runner's/clone's, never the mint sentinel.
     assert_eq!(
         doc.status,
         SessionStatus::Failed,
-        "engine start fails (no binary)"
+        "engine/clone start fails (no binary / real repo)"
     );
     let error = doc.error.unwrap_or_default();
     assert!(
@@ -332,41 +315,10 @@ async fn goal_session_mints_github_token_at_startup() {
     );
 }
 
-/// #106 — a non-goal (package) session never mints a GitHub token: its
-/// `GoalContext` stays `None`, so `build_goal_context` is not reached.
-#[tokio::test]
-async fn package_session_does_not_mint_github_token() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
-    let ctx = ctx().await;
-    seed_package(&ctx.db, "plain-pkg").await;
-
-    let session = ctx
-        .sessions
-        .create(
-            "plain-pkg",
-            SessionOwner {
-                owner_user_id: "owner-1".to_string(),
-                org_id: None,
-            },
-            SecretString::from("test-raw-token".to_string()),
-            None,
-        )
-        .await
-        .expect("create package session");
-
-    let repo_handle = SessionRepo::new(&ctx.db);
-    let _doc = poll_until_settled(&repo_handle, session.id).await;
-
-    assert_eq!(
-        ctx.github_api.mint_count(),
-        0,
-        "a non-goal session must never mint a GitHub token"
-    );
-    assert!(
-        ctx.github_api.resolved_repos().is_empty(),
-        "a non-goal session must never resolve an installation"
-    );
-}
+// package_session_does_not_mint_github_token was deleted by #115:
+// `SessionService::create` (the classic package session create, bypassing a
+// goal) no longer exists. Sessions are created exclusively via a goal trigger
+// (`create_for_goal`), which always carries a GoalContext and therefore always
+// reaches `build_goal_context`. The NEGATIVE assertion (non-goal session never
+// mints) has no plausible code path after #115 and cannot be expressed with
+// the surviving API.

@@ -40,6 +40,11 @@ pub enum RunnerError {
     /// API 500.
     #[error("signal error")]
     Signal(#[source] nix::Error),
+    /// `git clone` of the goal repo failed (issue #115). Carries only the
+    /// `owner/name` — never the installation token, which lives in a `0600` file
+    /// and is never on the clone argv. Maps to session `failed`.
+    #[error("failed to clone goal repo {repo}")]
+    CloneFailed { repo: String },
 }
 
 /// Lossily decode captured process output and truncate it to at most `cap`
@@ -168,6 +173,13 @@ mod tests {
         assert_eq!(
             RunnerError::Signal(nix::Error::ESRCH).to_string(),
             "signal error"
+        );
+        assert_eq!(
+            RunnerError::CloneFailed {
+                repo: "acme/site".into()
+            }
+            .to_string(),
+            "failed to clone goal repo acme/site"
         );
     }
 

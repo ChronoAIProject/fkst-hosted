@@ -20,9 +20,6 @@ use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::leases::{LeaseStore, PoolConfig, IDX_LEASES_HOLDER_POD};
 use fkst_hosted_api::models::{SessionDoc, SessionStatus};
-use fkst_hosted_api::packages::{
-    Package, PackageFile, PackageRepository, ShareRepo, PACKAGES_COLLECTION,
-};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -118,27 +115,6 @@ fn sample_session() -> SessionDoc {
     }
 }
 
-fn sample_package() -> Package {
-    Package {
-        name: "demo-package".to_string(),
-        files: vec![
-            PackageFile {
-                path: "init.lua".to_string(),
-                content: "return {}".to_string(),
-            },
-            PackageFile {
-                path: "lib/util.lua".to_string(),
-                content: "-- util".to_string(),
-            },
-        ],
-        composed_deps: vec!["base".to_string()],
-        owner_user_id: None,
-        org_id: None,
-        created_at: bson::DateTime::from_millis(1_700_000_000_000),
-        updated_at: bson::DateTime::from_millis(1_700_000_001_000),
-    }
-}
-
 #[tokio::test]
 async fn connect_and_ping_succeed_against_a_real_mongo() {
     if !docker_available() {
@@ -209,35 +185,6 @@ async fn ensure_indexes_creates_exact_stable_names_and_is_idempotent() {
 
     assert_eq!(index_specs(&db.sessions()).await, expected_sessions);
     assert_eq!(index_specs(&db.leases()).await, expected_leases);
-    // No secondary index is ever declared for packages and nothing has been
-    // inserted, so the collection does not exist; mongo:7 answers
-    // NamespaceNotFound for list_indexes on a missing namespace (verified
-    // empirically). Stay tolerant of an existing-but-empty collection too.
-    match db
-        .collection::<Package>(PACKAGES_COLLECTION)
-        .list_indexes()
-        .await
-    {
-        Ok(mut cursor) => {
-            let mut package_names = Vec::new();
-            while cursor.advance().await.expect("cursor advance") {
-                let model = cursor.deserialize_current().expect("index model");
-                package_names.push(model.options.and_then(|o| o.name).expect("index name"));
-            }
-            assert!(
-                package_names.is_empty() || package_names == vec!["_id_".to_string()],
-                "unexpected packages indexes: {package_names:?}"
-            );
-        }
-        Err(error) => {
-            let rendered = error.to_string();
-            assert!(
-                rendered.contains("NamespaceNotFound") || rendered.contains("ns does not exist"),
-                "unexpected list_indexes error for packages: {rendered}"
-            );
-        }
-    }
-
     // Second run: Ok, identical specs (idempotency, no duplicates).
     db.ensure_indexes().await.expect("second ensure_indexes");
     lease_store
@@ -280,30 +227,6 @@ async fn session_doc_round_trips_by_uuid_id() {
 }
 
 #[tokio::test]
-async fn package_doc_round_trips_with_id_as_name() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
-    let (_container, _config, db) = mongo_db(5000).await;
-    let package = sample_package();
-
-    db.collection::<Package>(PACKAGES_COLLECTION)
-        .insert_one(package.clone())
-        .await
-        .expect("insert package");
-
-    let found = db
-        .collection::<Package>(PACKAGES_COLLECTION)
-        .find_one(doc! { "_id": &package.name })
-        .await
-        .expect("find_one")
-        .expect("package must be found by name _id");
-    assert_eq!(found, package, "_id mapping and files array intact");
-    assert_eq!(found.files.len(), 2);
-}
-
-#[tokio::test]
 async fn health_endpoints_reflect_mongo_liveness() {
     if !docker_available() {
         eprintln!("skipped: docker unavailable");
@@ -311,28 +234,18 @@ async fn health_endpoints_reflect_mongo_liveness() {
     }
     // Short selection timeout so the post-stop request fails fast.
     let (container, config, db) = mongo_db(500).await;
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db,
-        packages,
-        shares,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })
