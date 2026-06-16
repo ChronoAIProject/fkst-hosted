@@ -26,9 +26,16 @@ function M.production_handles()
   }
 end
 
+local function validate_department(department)
+  if type(department) ~= "table" or type(department.spec) ~= "table" or type(department.pipeline) ~= "function" then
+    error("std.ports.install: make_department must return a table with spec and pipeline", 2)
+  end
+end
+
 function M.install(make_department)
   assert(type(make_department) == "function", "std.ports.install requires a make_department function")
   local department = make_department(M.production_handles())
+  validate_department(department)
   department.make_department = make_department
   return department
 end
