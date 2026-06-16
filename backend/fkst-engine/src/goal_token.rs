@@ -300,9 +300,13 @@ mod tests {
     #[test]
     fn write_nonce_file_is_0600() {
         let dir = tempfile::tempdir().expect("dir");
-        write_nonce_file(dir.path(), "deadbeef").expect("nonce");
+        // Use a real generated nonce (not a hard-coded literal) so the test
+        // exercises the actual nonce shape and carries no embedded secret-like
+        // constant for scanners to flag.
+        let nonce = generate_mint_nonce();
+        write_nonce_file(dir.path(), &nonce).expect("nonce");
         let path = dir.path().join(NONCE_FILE_NAME);
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), "deadbeef");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), nonce);
         let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
         assert_eq!(mode, SECRET_FILE_MODE);
     }
@@ -312,10 +316,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("dir");
         // Absent before any write.
         assert_eq!(read_nonce_file(dir.path()).expect("read"), None);
-        write_nonce_file(dir.path(), "cafef00d").expect("nonce");
+        let nonce = generate_mint_nonce();
+        write_nonce_file(dir.path(), &nonce).expect("nonce");
         assert_eq!(
             read_nonce_file(dir.path()).expect("read").as_deref(),
-            Some("cafef00d")
+            Some(nonce.as_str())
         );
     }
 
