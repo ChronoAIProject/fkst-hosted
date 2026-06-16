@@ -397,11 +397,21 @@ local function run_decompose(payload, run_opts)
   }, run_opts)
 end
 
-local function run_implement(payload, run_opts, queue)
+local function run_implement(payload, run_opts, queue, event_extra)
   mock_branch_config_env()
-  return t.run_department("departments/implement/main.lua", {
+  local event = {
     queue = queue or "devloop_ready",
     payload = payload,
+  }
+  for key, value in pairs(event_extra or {}) do
+    event[key] = value
+  end
+  return t.run_department("departments/implement/main.lua", {
+    queue = event.queue,
+    payload = event.payload,
+    attempt = event.attempt,
+    terminal = event.terminal,
+    ts = event.ts,
   }, run_opts)
 end
 

@@ -89,6 +89,10 @@ function M.implementation_base_version(version)
   return tostring(version or ""):gsub("/reimplement/%d+$", "")
 end
 
+function M.implementation_retry_attempt(version)
+  return valid_attempt(tostring(version or ""):match("/reimplement/(%d+)$"))
+end
+
 -- The `implementing` marker version is the ALREADY-wrapped ready dedup_key
 -- ("ready/<inner>"), because build_devloop_ready_payload applies the
 -- _dedup_key({"ready", ...}) wrapper when the ready event is first raised. A

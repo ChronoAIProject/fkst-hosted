@@ -459,6 +459,25 @@ function M.build_implement_attempt_comment_request(repo, issue_number, ready, at
   }
 end
 
+function M.build_implement_version_mismatch_comment_request(repo, issue_number, ready, expected_version, current_version, attempt)
+  local marker = M.implement_version_mismatch_marker(ready.proposal_id, expected_version, current_version, attempt)
+  return {
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop implementation version mismatch observed\n\n" .. marker,
+    dedup_key = M._dedup_key({
+      "implement",
+      "comment",
+      "version-mismatch",
+      tostring(ready.proposal_id),
+      M.implement_version_mismatch_key(expected_version, current_version),
+      tostring(attempt),
+    }),
+    source_ref = M.normalize_source_ref(ready.source_ref),
+  }
+end
+
 function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
   local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
   local retry_attempt = tonumber(attempt) or 1

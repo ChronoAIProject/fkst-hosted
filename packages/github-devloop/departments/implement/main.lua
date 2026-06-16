@@ -3,6 +3,7 @@ local core = require("core")
 local M = {}
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
+local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
 
 M.spec = {
@@ -136,6 +137,52 @@ local function ready_for_implementation_version(ready, version)
   return copy
 end
 
+local function raise_implement_version_mismatch(repo, issue_number, ready, state, expected_version, attempt)
+  local request = core.build_implement_version_mismatch_comment_request(
+    repo,
+    issue_number,
+    ready,
+    expected_version,
+    state and state.version,
+    attempt
+  )
+  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
+end
+
+local function handle_implementing_version_mismatch(repo, issue_number, current, ready, state, expected_version)
+  local prior_attempts = core.implement_version_mismatch_attempt_count(
+    current and current.comments,
+    ready.proposal_id,
+    expected_version,
+    state and state.version
+  )
+  local attempt = prior_attempts + 1
+  local message = "ready event does not match current implementing version"
+  if attempt < MAX_VERSION_MISMATCH_DELIVERIES then
+    core.log_error_fact("warn", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
+      source_ref = ready.source_ref,
+      attempt = attempt,
+      terminal = false,
+    })
+    core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", message)
+    raise_implement_version_mismatch(repo, issue_number, ready, state, expected_version, attempt)
+    error("github-devloop: implement-version-mismatch retrying: ready event version "
+      .. tostring(expected_version or "")
+      .. " does not match current implementing version "
+      .. tostring(state and state.version or ""))
+  end
+  core.log_error_fact("error", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
+    source_ref = ready.source_ref,
+    attempt = attempt,
+    terminal = true,
+  })
+  core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "fail-closed(version-mismatch-budget)", message)
+  error("github-devloop: implement-version-mismatch: ready event version "
+    .. tostring(expected_version or "")
+    .. " does not match current implementing version "
+    .. tostring(state and state.version or ""))
+end
+
 local function implementing_takeover_guard(current, proposal_id, dedup_key)
   local attempt = core.latest_implement_attempt_fact(current.comments, proposal_id, dedup_key)
   if attempt ~= nil then
@@ -169,15 +216,22 @@ local function implementing_recovery_ready(ready, state, current)
     proposal_id = ready.proposal_id,
     dedup_key = current_version,
     source_ref = ready.source_ref,
+    impl_retry_attempt = core.implementation_retry_attempt(current_version),
   }).dedup_key
   if tostring(ready.dedup_key or "") ~= replay_version then
     return nil, nil
   end
   local allowed, reason = implementing_takeover_guard(current, ready.proposal_id, current_version)
   if not allowed then
-    return nil, nil
+    return nil, reason, true
   end
-  return ready_for_implementation_version(ready, current_version), reason
+  return ready_for_implementation_version(ready, current_version), reason, true
+end
+
+local function implementing_mismatch_is_durable(current, proposal_id, state)
+  local version = state and state.version
+  return core.latest_implement_attempt_fact(current and current.comments, proposal_id, version) ~= nil
+    or core.implementing_fact(current and current.comments, proposal_id, version) ~= nil
 end
 
 implemented_branch_head = function(base_head, branch)
@@ -605,15 +659,22 @@ local function process_ready_event(event)
     local branch = core.implement_branch(repo, issue_number, branch_version)
 
     if state.state == "implementing" then
-      local recovery_ready, recovery_reason = implementing_recovery_ready(ready, state, current)
+      local recovery_ready, recovery_reason, recovery_matched = implementing_recovery_ready(ready, state, current)
       if recovery_ready ~= nil then
         marker_ready = recovery_ready
         branch_version = core.implementation_base_version(marker_ready.dedup_key)
         branch = core.implement_branch(repo, issue_number, branch_version)
         core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(liveness-redrive)", recovery_reason)
+      elseif recovery_matched then
+        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "skip-stale(liveness-budget)", recovery_reason)
+        return
       end
       if tostring(state.version or "") ~= tostring(marker_ready.dedup_key or "") then
-        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "ready event does not match current implementing version")
+        if not implementing_mismatch_is_durable(current, ready.proposal_id, state) then
+          core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "implementing state marker has no durable progress fact")
+          return
+        end
+        handle_implementing_version_mismatch(repo, issue_number, current, ready, state, marker_ready.dedup_key)
         return
       end
       local link = core.pr_link_fact(current.comments, ready.proposal_id)
