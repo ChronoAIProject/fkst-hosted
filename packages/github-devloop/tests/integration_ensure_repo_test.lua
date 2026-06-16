@@ -23,16 +23,16 @@ local function run_ensure(run_opts)
   }, run_opts or opts("ensure-repo"))
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
 
 local function label_json(label)
   return string.format(
     '{"name":"%s","color":"%s","description":"%s"}',
-    json_string(label.name),
-    json_string(label.color or ""),
-    json_string(label.description or "")
+    encode_json_string(label.name),
+    encode_json_string(label.color or ""),
+    encode_json_string(label.description or "")
   )
 end
 
@@ -230,7 +230,7 @@ return {
     for _, label in ipairs(canonical_labels()) do
       if label.name ~= labels[1].name and label.name ~= labels[2].name then
         t.mock_command(core.gh_repo_label_create_cmd("owner/repo", label.name, label.color, label.description), {
-          stdout = '{"name":"' .. json_string(label.name) .. '"}\n',
+          stdout = '{"name":"' .. encode_json_string(label.name) .. '"}\n',
           stderr = "",
           exit_code = 0,
         })
@@ -281,7 +281,7 @@ return {
     mock_topology(0)
     local desired = canonical_labels()[1]
     t.mock_command(core.gh_repo_label_update_cmd("owner/repo", desired.name, desired.color, desired.description), {
-      stdout = '{"name":"' .. json_string(desired.name) .. '"}\n',
+      stdout = '{"name":"' .. encode_json_string(desired.name) .. '"}\n',
       stderr = "",
       exit_code = 0,
     })

@@ -1,6 +1,20 @@
 local S = {}
+local github_view = require("std.github_view")
 
 function S.install(M)
+local parse_view_updated_at = github_view.parse_view_updated_at
+local parse_updated_at_stdout = github_view.parse_updated_at_stdout
+local json_string = github_view.json_string
+local json_value = github_view.json_value
+local rest_state = github_view.rest_state
+local rest_pr_state = github_view.rest_pr_state
+local append_comments = github_view.append_comments
+local labels_json = github_view.labels_json
+local assignees_json = github_view.assignees_json
+local repo_name_with_owner = github_view.repo_name_with_owner
+local repo_owner_login = github_view.repo_owner_login
+local decode_comments_json = function(stdout) return github_view.decode_comments_json(stdout, "github-devloop: REST") end
+
 local max_cache_key_segment_len = 120
 
 local function sanitize_cache_segment(value, allow_slash)
@@ -77,27 +91,6 @@ local function issue_comments_api_cmd(repo, issue_number)
     .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
 end
 
-local function parse_view_updated_at(stdout)
-  local ok, decoded = pcall(json.decode, stdout or "")
-  if not ok or type(decoded) ~= "table" then
-    return nil
-  end
-  local updated_at = decoded.updatedAt or decoded.updated_at
-  if updated_at == nil or tostring(updated_at) == "" then
-    return nil
-  end
-  return tostring(updated_at)
-end
-
-local function parse_updated_at_stdout(stdout)
-  local text = tostring(stdout or "")
-  text = text:gsub("^%s+", ""):gsub("%s+$", "")
-  if text == "" then
-    return nil
-  end
-  return text
-end
-
 local function decode_cached_view(encoded)
   local ok, decoded = pcall(json.decode, encoded or "")
   if not ok or type(decoded) ~= "table" then
@@ -111,52 +104,6 @@ local function decode_cached_view(encoded)
   end
   decoded.updated_at = tostring(decoded.updated_at)
   return decoded
-end
-
-local function json_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\")
-  text = text:gsub('"', '\\"')
-  text = text:gsub("\b", "\\b")
-  text = text:gsub("\f", "\\f")
-  text = text:gsub("\n", "\\n")
-  text = text:gsub("\r", "\\r")
-  text = text:gsub("\t", "\\t")
-  text = text:gsub("[%z\1-\31]", function(char)
-    return string.format("\\u%04X", string.byte(char))
-  end)
-  return '"' .. text .. '"'
-end
-
-local function json_value(value)
-  if value == nil then
-    return "null"
-  end
-  if type(value) == "boolean" then
-    return value and "true" or "false"
-  end
-  if type(value) == "number" then
-    return tostring(value)
-  end
-  return json_string(value)
-end
-
-local function rest_state(value)
-  if value == nil then
-    return nil
-  end
-  return tostring(value):upper()
-end
-
-local function rest_pr_state(pr)
-  if type(pr) ~= "table" then
-    return nil
-  end
-  local merged_at = pr.merged_at
-  if pr.merged == true or (type(merged_at) == "string" and merged_at ~= "") then
-    return "MERGED"
-  end
-  return rest_state(pr.state)
 end
 
 local function rest_pr_mergeable(value)
@@ -176,23 +123,6 @@ local function rest_pr_merge_state_status(value)
   return tostring(value):upper()
 end
 
-local function append_comments(target, value)
-  if type(value) ~= "table" then
-    return
-  end
-  if type(value.comments) == "table" then
-    append_comments(target, value.comments)
-    return
-  end
-  if value.id ~= nil or value.body ~= nil or value.user ~= nil or value.author ~= nil then
-    table.insert(target, value)
-    return
-  end
-  for _, item in ipairs(value) do
-    append_comments(target, item)
-  end
-end
-
 local function decode_json(stdout)
   local ok, decoded = pcall(json.decode, stdout or "")
   if ok and type(decoded) == "table" then
@@ -206,38 +136,6 @@ local function decode_entity_json(stdout)
     error("github-devloop: REST entity response is empty")
   end
   return decode_json(stdout)
-end
-
-local function decode_comments_json(stdout)
-  local source = stdout
-  if source == nil or source == "" then
-    source = "[]"
-  end
-  return decode_json(source)
-end
-
-local function labels_json(labels)
-  local parts = {}
-  for _, label in ipairs(labels or {}) do
-    if type(label) == "table" then
-      table.insert(parts, '{"name":' .. json_value(label.name) .. "}")
-    elseif label ~= nil then
-      table.insert(parts, '{"name":' .. json_value(label) .. "}")
-    end
-  end
-  return "[" .. table.concat(parts, ",") .. "]"
-end
-
-local function assignees_json(assignees)
-  local parts = {}
-  for _, assignee in ipairs(assignees or {}) do
-    if type(assignee) == "table" then
-      table.insert(parts, '{"login":' .. json_value(assignee.login) .. "}")
-    elseif assignee ~= nil then
-      table.insert(parts, '{"login":' .. json_value(assignee) .. "}")
-    end
-  end
-  return "[" .. table.concat(parts, ",") .. "]"
 end
 
 local function comments_json(comments)
@@ -267,30 +165,6 @@ local function rest_comments_to_view_json(comments_stdout)
   local comments = {}
   append_comments(comments, decoded)
   return comments_json(comments)
-end
-
-local function repo_name_with_owner(repo)
-  if type(repo) ~= "table" then
-    return nil
-  end
-  if repo.full_name ~= nil and tostring(repo.full_name) ~= "" then
-    return tostring(repo.full_name)
-  end
-  if repo.nameWithOwner ~= nil and tostring(repo.nameWithOwner) ~= "" then
-    return tostring(repo.nameWithOwner)
-  end
-  if type(repo.owner) == "table" and repo.owner.login ~= nil and repo.name ~= nil then
-    return tostring(repo.owner.login) .. "/" .. tostring(repo.name)
-  end
-  return nil
-end
-
-local function repo_owner_login(repo)
-  if type(repo) == "table" and type(repo.owner) == "table" and repo.owner.login ~= nil then
-    return tostring(repo.owner.login)
-  end
-  local name_with_owner = repo_name_with_owner(repo)
-  return name_with_owner and name_with_owner:match("^([^/]+)/") or nil
 end
 
 local function rest_issue_to_view_json(issue_stdout, comments_stdout)

@@ -27,7 +27,7 @@ local function mock_claim_env()
   end
 end
 
-local function assignees_json(logins)
+local function encode_assignees_json(logins)
   local rendered = {}
   for _, login in ipairs(logins or {}) do
     table.insert(rendered, string.format('{"login":"%s"}', h.json_string(login)))
@@ -53,7 +53,7 @@ end
 
 local function mock_claim_view(logins)
   t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
-    stdout = assignees_json(logins):gsub("}\n$", ',"author":{"login":"fkst-test-bot"}}\n'),
+    stdout = encode_assignees_json(logins):gsub("}\n$", ',"author":{"login":"fkst-test-bot"}}\n'),
     stderr = "",
     exit_code = 0,
   })

@@ -54,7 +54,7 @@ local function mock_env(bot_login, write_mode)
   end
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
 
@@ -77,9 +77,9 @@ end
 local function render_comment(body, author, created_at)
   return string.format(
     '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
-    json_string(body),
-    json_string(author or "fkst-test-bot"),
-    json_string(created_at or "2026-06-03T01:02:03Z")
+    encode_json_string(body),
+    encode_json_string(author or "fkst-test-bot"),
+    encode_json_string(created_at or "2026-06-03T01:02:03Z")
   )
 end
 
@@ -88,7 +88,7 @@ local function mock_all_issue_lists(items)
   for _, item in ipairs(items or {}) do
     local number = type(item) == "table" and item.number or item
     local state = type(item) == "table" and item.state or "open"
-    table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
+    table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, encode_json_string(state)))
   end
   local stdout = "[" .. table.concat(rendered, ",") .. "]\n"
   t.mock_command(observe_issue_list_first_command(core._enabled_label), {
@@ -117,7 +117,7 @@ local function mock_pr_list(items)
   for _, item in ipairs(items or {}) do
     local number = type(item) == "table" and item.number or item
     local state = type(item) == "table" and item.state or "open"
-    table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, json_string(state)))
+    table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, encode_json_string(state)))
   end
   t.mock_command(observe_pr_list_first_command(), {
     stdout = "[" .. table.concat(rendered, ",") .. "]\n",
@@ -135,7 +135,7 @@ end
 
 local function render_assignees(logins)
   local rendered = {}
-  for _, login in ipairs(logins or {}) do rendered[#rendered + 1] = '{"login":"' .. json_string(login) .. '"}' end
+  for _, login in ipairs(logins or {}) do rendered[#rendered + 1] = '{"login":"' .. encode_json_string(login) .. '"}' end
   return "[" .. table.concat(rendered, ",") .. "]"
 end
 

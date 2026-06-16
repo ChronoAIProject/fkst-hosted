@@ -8,8 +8,8 @@ local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 
-local function json_string(value)
-  return h.json_string(value)
+local function encode_json_string(value)
+  return h.encode_json_string(value)
 end
 
 local function render_comment(comment)
@@ -26,7 +26,7 @@ end
 
 local function mock_issue_list(updated_at)
   t.mock_command(core.gh_issue_list_observe_cmd(repo), {
-    stdout = '[{"number":42,"state":"open","updated_at":"' .. json_string(updated_at or "2026-06-03T01:02:03Z") .. '"}]\n',
+    stdout = '[{"number":42,"state":"open","updated_at":"' .. encode_json_string(updated_at or "2026-06-03T01:02:03Z") .. '"}]\n',
     stderr = "",
     exit_code = 0,
   })

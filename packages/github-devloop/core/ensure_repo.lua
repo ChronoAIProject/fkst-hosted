@@ -33,7 +33,7 @@ local function require_repo(repo)
   return value
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   local text = tostring(value or "")
   text = text:gsub("\\", "\\\\")
   text = text:gsub('"', '\\"')
@@ -108,9 +108,9 @@ local function write_dashboard_anchor_input(repo)
     dedup_key = "dashboard-anchor",
   })
   file.write(path, "{"
-    .. '"title":' .. json_string(dashboard_title)
-    .. ',"body":' .. json_string(body)
-    .. ',"labels":[' .. json_string(dashboard_label) .. "]"
+    .. '"title":' .. encode_json_string(dashboard_title)
+    .. ',"body":' .. encode_json_string(body)
+    .. ',"labels":[' .. encode_json_string(dashboard_label) .. "]"
     .. "}\n")
   return path
 end
