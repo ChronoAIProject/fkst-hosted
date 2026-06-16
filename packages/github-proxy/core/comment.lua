@@ -1,6 +1,7 @@
 local S = {}
 
-function S.install(M)
+function S.install(M, deps)
+local shared = deps or M
 local max_runtime_id_len = 180
 local stale_comment_target_error_class = "stale-comment-target"
 
@@ -38,7 +39,7 @@ local function comment_author_login(comment)
       raw = comment.user.login
     end
   end
-  return M.strip_bot_login_suffix(raw)
+  return shared.strip_bot_login_suffix(raw)
 end
 
 function M._comment_body(comment)

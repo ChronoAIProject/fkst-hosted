@@ -23,14 +23,19 @@ function M.is_positive_integer(value)
   return n ~= nil and n >= 1 and n % 1 == 0 and n <= 2147483647
 end
 
-require("core.issue_create").install(M)
+local shared_helpers = {
+  strip_bot_login_suffix = M.strip_bot_login_suffix,
+  is_positive_integer = M.is_positive_integer,
+}
+
+require("core.issue_create").install(M, shared_helpers)
 require("core.github_graphql").install(M)
-require("core.blocked_by").install(M)
+require("core.blocked_by").install(M, shared_helpers)
 require("core.external_effect_sagas").install(M)
 require("core.rest_view").install(M)
 require("core.entity_view").install(M)
 require("core.gh_rate").install(M)
-require("core.comment").install(M)
+require("core.comment").install(M, shared_helpers)
 require("core.claims").install(M)
 
 local allowed_env = {

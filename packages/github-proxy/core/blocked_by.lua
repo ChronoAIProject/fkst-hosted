@@ -1,6 +1,7 @@
 local S = {}
 
-function S.install(M)
+function S.install(M, deps)
+local shared = deps or M
 local strings = require("std.strings")
 local max_dedup_len = 512
 local max_repo_len = 200
@@ -40,7 +41,7 @@ local function issue_author_login(comment)
   elseif type(comment.user) == "table" and comment.user.login ~= nil then
     raw = comment.user.login
   end
-  return M.strip_bot_login_suffix(raw)
+  return shared.strip_bot_login_suffix(raw)
 end
 
 function M.validate_issue_blocked_by_payload(payload)
@@ -53,8 +54,8 @@ function M.validate_issue_blocked_by_payload(payload)
   if not strings.is_bounded_string(payload.repo, max_repo_len) or split_repo(payload.repo) == nil then
     return false
   end
-  if not M.is_positive_integer(payload.blocked_issue_number)
-    or not M.is_positive_integer(payload.blocking_issue_number) then
+  if not shared.is_positive_integer(payload.blocked_issue_number)
+    or not shared.is_positive_integer(payload.blocking_issue_number) then
     return false
   end
   if not is_marker_value(payload.dedup_key) then
@@ -95,7 +96,7 @@ end
 
 function M.gh_issue_blocked_by_cmd(repo, issue_number)
   local owner, name = split_repo(repo)
-  if owner == nil or not M.is_positive_integer(issue_number) then
+  if owner == nil or not shared.is_positive_integer(issue_number) then
     error("github-proxy: invalid blockedBy query target")
   end
   local query = M.render_github_graphql_query("blocked_by", {
@@ -131,7 +132,7 @@ local function parse_blocked_by(stdout)
   end
   local edges = {}
   for _, node in ipairs(nodes) do
-    if type(node) ~= "table" or not M.is_positive_integer(node.number) then
+    if type(node) ~= "table" or not shared.is_positive_integer(node.number) then
       error("github-proxy: malformed blockedBy node")
     end
     local node_repo = node.repository and node.repository.nameWithOwner
@@ -158,8 +159,8 @@ end
 
 function M.blocked_by_marker(dedup_key, blocked_issue_number, blocking_issue_number)
   if not is_marker_value(dedup_key)
-    or not M.is_positive_integer(blocked_issue_number)
-    or not M.is_positive_integer(blocking_issue_number) then
+    or not shared.is_positive_integer(blocked_issue_number)
+    or not shared.is_positive_integer(blocking_issue_number) then
     error("github-proxy: invalid blocked-by marker fields")
   end
   return '<!-- fkst:github-proxy:blocked-by:v1 dedup="' .. tostring(dedup_key)

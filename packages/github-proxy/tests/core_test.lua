@@ -138,6 +138,52 @@ return {
     t.eq(core.is_positive_integer("2147483648"), false)
   end,
 
+  test_core_submodules_use_injected_shared_helpers = function()
+    local helpers = {
+      strip_bot_login_suffix = core.strip_bot_login_suffix,
+      is_positive_integer = core.is_positive_integer,
+    }
+
+    local comment_target = {}
+    require("core.comment").install(comment_target, helpers)
+    t.eq(comment_target._comment_author_login({
+      author = { login = "fkst-test-bot[bot]" },
+    }), "fkst-test-bot")
+
+    local blocked_by_target = {
+      render_github_graphql_query = function(_, values)
+        return "issue:" .. tostring(values.issue_number)
+      end,
+      github_graphql = function()
+        return { stdout = "{}", stderr = "", exit_code = 0 }
+      end,
+    }
+    require("core.blocked_by").install(blocked_by_target, helpers)
+    t.eq(blocked_by_target.validate_issue_blocked_by_payload({
+      schema = "github-proxy.issue-blocked-by.v1",
+      repo = "owner/repo",
+      blocked_issue_number = "1",
+      blocking_issue_number = "2",
+      dedup_key = "dedup",
+      source_ref = { kind = "external", ref = "owner/repo#issue/1" },
+    }), true)
+
+    local issue_create_target = {}
+    require("core.issue_create").install(issue_create_target, helpers)
+    t.eq(issue_create_target.validate_issue_create_payload({
+      schema = "github-proxy.issue-create.v1",
+      repo = "owner/repo",
+      title = "Title",
+      body = "Body",
+      dedup_key = "dedup",
+      parent_comment_target = {
+        repo = "owner/repo",
+        pr_number = "3",
+      },
+      source_ref = { kind = "external", ref = "owner/repo#issue/1" },
+    }), true)
+  end,
+
   test_entity_cache_key = function()
     local key = core.entity_cache_key("owner/repo", "issue", 12)
     t.eq(key, "github-proxy/issue/owner/repo/12")

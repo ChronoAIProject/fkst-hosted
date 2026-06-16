@@ -1,6 +1,7 @@
 local S = {}
 
-function S.install(M)
+function S.install(M, deps)
+local shared = deps or M
 local strings = require("std.strings")
 local max_title_len = 240
 local max_body_len = 12000
@@ -77,7 +78,7 @@ local function issue_author_login(issue)
   elseif type(issue.author) == "table" and issue.author.login ~= nil then
     raw = issue.author.login
   end
-  return M.strip_bot_login_suffix(raw)
+  return shared.strip_bot_login_suffix(raw)
 end
 
 function M.issue_create_marker(dedup_key)
@@ -143,14 +144,14 @@ local function normalize_parent_comment_target(target)
   if type(target) ~= "table" or not strings.is_bounded_string(target.repo, 200) then
     return false
   end
-  if M.is_positive_integer(target.pr_number) then
+  if shared.is_positive_integer(target.pr_number) then
     return {
       kind = "pr",
       repo = tostring(target.repo),
       number = tostring(target.pr_number),
     }
   end
-  if M.is_positive_integer(target.issue_number) then
+  if shared.is_positive_integer(target.issue_number) then
     return {
       kind = "issue",
       repo = tostring(target.repo),
@@ -238,7 +239,7 @@ function M.trusted_issue_created_number(comments, dedup_key, bot_login)
       for marker in body:gmatch(marker_pattern) do
         if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
           local issue_number = marker:match('issue="(%d+)"')
-          if M.is_positive_integer(issue_number) then
+          if shared.is_positive_integer(issue_number) then
             return tostring(math.floor(tonumber(issue_number)))
           end
         end
@@ -335,7 +336,7 @@ function M.validate_issue_create_payload(payload)
   if payload.post_create_blocked_by ~= nil then
     local post = payload.post_create_blocked_by
     if type(post) ~= "table"
-      or not M.is_positive_integer(post.blocked_issue_number)
+      or not shared.is_positive_integer(post.blocked_issue_number)
       or not is_bounded_marker_value(post.dedup_key, max_dedup_len)
       or not optional_bounded_marker_value(post.external_effect_saga, max_dedup_len)
       or not optional_bounded_marker_value(post.external_effect_step, max_dedup_len) then
@@ -358,7 +359,7 @@ local function maybe_raise_post_create_blocked_by(payload, issue_number)
   if post == nil then
     return
   end
-  if not M.is_positive_integer(issue_number) then
+  if not shared.is_positive_integer(issue_number) then
     error("github-proxy: issue-create post_create_blocked_by missing created issue number")
   end
   raise("github_issue_blocked_by_request", {
