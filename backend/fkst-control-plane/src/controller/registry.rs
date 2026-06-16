@@ -70,6 +70,13 @@ impl WorkerRegistry {
     }
 
     /// Register (or re-register) a worker: reset `last_seen` and mark `Active`.
+    ///
+    /// Registration is NON-rebalancing (#140): a newly registered worker receives
+    /// only NEW placements + REDO sessions (a dead/drained worker's reassigned
+    /// work) — it never proactively migrates already-live sessions off other
+    /// workers. A worker re-registering under the SAME `worker_id` (a restarted
+    /// pod reusing its id) simply overwrites its entry as `Active`; it does NOT
+    /// trigger any reassignment, since the claim map is untouched here.
     pub async fn register(&self, req: &RegisterRequest) {
         let mut map = self.inner.write().await;
         map.insert(

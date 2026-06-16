@@ -13,9 +13,11 @@
 pub mod codex_provider;
 pub mod dispatch;
 pub mod nyxid_token;
+pub mod redispatch;
 pub mod repo;
 pub mod service;
 
+pub use redispatch::DispatchRedispatch;
 pub use repo::SessionRepo;
 pub use service::{GoalTriggerInfo, GoalTriggerResult, SessionOwner, SessionService};
 

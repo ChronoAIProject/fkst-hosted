@@ -428,8 +428,59 @@ async fn main() -> ExitCode {
             // false expiry; the controller is authoritative for this cadence.
             let heartbeat_interval_secs = (worker_liveness_ttl_secs / 3).max(1);
             let sweep_interval_secs = (worker_liveness_ttl_secs / 2).max(1);
+            // The controller's claim authority for the mid-run worker channels
+            // (#151). A FRESH empty map: placement only inserts into it under
+            // dispatch mode, so with dispatch OFF the credential-refresh /
+            // status-report routes are reachable but inert in prod (every fence
+            // check misses) — develop behaviour is byte-identical.
+            let claims = std::sync::Arc::new(fkst_control_plane::controller::ClaimMap::new());
+            tracing::info!(
+                route_prefix = "/internal/v1",
+                "internal worker protocol enabled"
+            );
+            // Dispatch mode (#151 i7b / #140, default OFF): only when the operator
+            // opts in AND the internal protocol is enabled (we are inside that
+            // arm) do we enable controller-backed placement + worker reassignment.
+            // The handle/driver MUST share the SAME registry + claims that
+            // `mount_internal` uses — so a dispatch queued here is drained by the
+            // heartbeat handler, and the fence the worker echoes is checked
+            // against the live claim map — hence the clones BEFORE `registry`
+            // moves into `mount_internal`. When OFF the controller + reassign
+            // driver stay None: goal sessions run the byte-identical in-process
+            // distributor path and the sweeper stays log-only.
+            let reassign: Option<std::sync::Arc<fkst_control_plane::controller::ReassignDriver>> =
+                if dispatch_mode_enabled {
+                    let controller_handle =
+                        ControllerHandle::new(claims.clone(), registry.clone(), dispatch_max_load);
+                    sessions.enable_controller(controller_handle);
+                    // The real re-dispatch seam (#140): re-resolves a reassigned
+                    // session's dispatch + queues it to the new worker. Shares the
+                    // SAME registry so the redo lands on the live outbound queue.
+                    let redispatch = sessions.make_redispatch(registry.clone());
+                    let driver =
+                        std::sync::Arc::new(fkst_control_plane::controller::ReassignDriver::new(
+                            claims.clone(),
+                            registry.clone(),
+                            dispatch_max_load,
+                            redispatch,
+                        ));
+                    tracing::info!(
+                        max_load = dispatch_max_load,
+                        "dispatch mode ENABLED: goal sessions are dispatched to workers; \
+                         dead/drained workers are reassigned"
+                    );
+                    Some(driver)
+                } else {
+                    None
+                };
+            // The sweeper expires stale workers; under dispatch mode it ALSO
+            // reassigns each expired worker's in-flight work onto a live worker
+            // (the abrupt-death path: fence-bump + git-idempotency keep the redo
+            // safe). With dispatch OFF (`reassign` is None) it stays log-only,
+            // byte-identical to before.
             let sweep_registry = registry.clone();
             let sweeper_cancel = registry_sweeper_shutdown.clone();
+            let sweep_reassign = reassign.clone();
             let handle = tokio::spawn(async move {
                 let mut interval =
                     tokio::time::interval(std::time::Duration::from_secs(sweep_interval_secs));
@@ -439,40 +490,24 @@ async fn main() -> ExitCode {
                             let expired = sweep_registry.expire_stale().await;
                             if !expired.is_empty() {
                                 tracing::info!(count = expired.len(), "swept stale workers");
+                                if let Some(reassign) = &sweep_reassign {
+                                    for worker_id in &expired {
+                                        let n = reassign.on_worker_dead(worker_id).await;
+                                        if n > 0 {
+                                            tracing::info!(
+                                                worker_id = %worker_id,
+                                                reassigned = n,
+                                                "reassigned a dead worker's in-flight sessions"
+                                            );
+                                        }
+                                    }
+                                }
                             }
                         }
                         _ = sweeper_cancel.cancelled() => break,
                     }
                 }
             });
-            // The controller's claim authority for the mid-run worker channels
-            // (#151). A FRESH empty map: placement does not insert into it yet,
-            // so the credential-refresh / status-report routes are reachable but
-            // inert in prod (every fence check misses) — develop behaviour is
-            // byte-identical. A later increment wires placement into this map.
-            let claims = std::sync::Arc::new(fkst_control_plane::controller::ClaimMap::new());
-            tracing::info!(
-                route_prefix = "/internal/v1",
-                "internal worker protocol enabled"
-            );
-            // Dispatch mode (#151 i7b, default OFF): only when the operator opts
-            // in AND the internal protocol is enabled (we are inside that arm) do
-            // we enable controller-backed placement. The handle MUST share the
-            // SAME registry + claims that `mount_internal` uses — so a dispatch
-            // queued here is drained by the heartbeat handler, and the fence the
-            // worker echoes is checked against the live claim map — hence the
-            // clones BEFORE `registry` moves into `mount_internal`. When OFF the
-            // controller stays None and goal sessions run the byte-identical
-            // in-process distributor path.
-            if dispatch_mode_enabled {
-                let controller_handle =
-                    ControllerHandle::new(claims.clone(), registry.clone(), dispatch_max_load);
-                sessions.enable_controller(controller_handle);
-                tracing::info!(
-                    max_load = dispatch_max_load,
-                    "dispatch mode ENABLED: goal sessions are dispatched to workers"
-                );
-            }
             (
                 mount_internal(
                     app,
@@ -481,6 +516,7 @@ async fn main() -> ExitCode {
                     heartbeat_interval_secs,
                     claims,
                     session_minter,
+                    reassign,
                 ),
                 Some(handle),
             )

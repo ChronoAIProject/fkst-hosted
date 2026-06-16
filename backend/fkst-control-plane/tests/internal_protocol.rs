@@ -37,6 +37,13 @@ fn no_minter() -> Option<Arc<dyn SessionTokenMinter>> {
     None
 }
 
+/// No reassignment driver — these #134 transport tests do not exercise the
+/// graceful-drain reassignment (#140), so the drain handlers log only, exactly
+/// as before dispatch mode.
+fn no_reassign() -> Option<Arc<fkst_control_plane::controller::ReassignDriver>> {
+    None
+}
+
 /// Build a signed (auth-header-bearing) POST request to an internal route.
 fn post<T: serde::Serialize>(uri: &str, body: &T) -> Request<Body> {
     Request::builder()
@@ -75,7 +82,14 @@ fn heartbeat(id: &str) -> Heartbeat {
 #[tokio::test]
 async fn register_then_heartbeat_marks_worker_live() {
     let registry = WorkerRegistry::new(Duration::from_secs(10));
-    let router = internal_router(registry.clone(), auth(), 5, empty_claims(), no_minter());
+    let router = internal_router(
+        registry.clone(),
+        auth(),
+        5,
+        empty_claims(),
+        no_minter(),
+        no_reassign(),
+    );
 
     let resp = router
         .clone()
@@ -111,6 +125,7 @@ async fn internal_route_without_auth_header_is_401() {
         5,
         empty_claims(),
         no_minter(),
+        no_reassign(),
     );
     let req = Request::builder()
         .method("POST")
@@ -130,6 +145,7 @@ async fn wrong_auth_header_is_401() {
         5,
         empty_claims(),
         no_minter(),
+        no_reassign(),
     );
     let req = Request::builder()
         .method("POST")
@@ -145,7 +161,14 @@ async fn wrong_auth_header_is_401() {
 #[tokio::test]
 async fn stale_worker_expires() {
     let registry = WorkerRegistry::new(Duration::from_millis(1));
-    let router = internal_router(registry.clone(), auth(), 5, empty_claims(), no_minter());
+    let router = internal_router(
+        registry.clone(),
+        auth(),
+        5,
+        empty_claims(),
+        no_minter(),
+        no_reassign(),
+    );
     router
         .oneshot(post("/internal/v1/register", &register_req("w1")))
         .await
@@ -159,7 +182,14 @@ async fn stale_worker_expires() {
 #[tokio::test]
 async fn controller_receives_draining_and_released() {
     let registry = WorkerRegistry::new(Duration::from_secs(10));
-    let router = internal_router(registry.clone(), auth(), 5, empty_claims(), no_minter());
+    let router = internal_router(
+        registry.clone(),
+        auth(),
+        5,
+        empty_claims(),
+        no_minter(),
+        no_reassign(),
+    );
     router
         .clone()
         .oneshot(post("/internal/v1/register", &register_req("w1")))
@@ -205,6 +235,7 @@ async fn pull_returns_no_assignments() {
         5,
         empty_claims(),
         no_minter(),
+        no_reassign(),
     );
     let resp = router
         .oneshot(post(
@@ -225,7 +256,14 @@ async fn pull_returns_no_assignments() {
 #[tokio::test]
 async fn worker_agent_register_and_heartbeat_against_in_process_controller() {
     let registry = WorkerRegistry::new(Duration::from_secs(10));
-    let router = internal_router(registry.clone(), auth(), 7, empty_claims(), no_minter());
+    let router = internal_router(
+        registry.clone(),
+        auth(),
+        7,
+        empty_claims(),
+        no_minter(),
+        no_reassign(),
+    );
 
     // Serve the internal router on an ephemeral port.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

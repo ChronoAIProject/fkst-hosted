@@ -60,6 +60,11 @@ struct InternalState {
     /// Session token minter (#151). `None` when the GitHub App is unconfigured,
     /// in which case credential-refresh answers `503`.
     minter: Option<Arc<dyn SessionTokenMinter>>,
+    /// Reassignment driver (#140). `Some` only when dispatch mode is enabled, so
+    /// the drain handlers can reassign a `Released` session to a live worker.
+    /// `None` (dispatch off) makes the `draining`/`released` handlers behave
+    /// exactly as before — register + log only, no reassignment.
+    reassign: Option<Arc<ReassignDriver>>,
 }
 
 /// Build the internal worker-protocol router, guarded by the shared secret.
@@ -67,19 +72,23 @@ struct InternalState {
 /// back to workers on registration. `claims` is the controller's claim authority
 /// (fence-guards the mid-run channels, #151); `minter` mints session tokens for
 /// credential-refresh (`None` => the App is unconfigured and refresh answers
-/// `503`).
+/// `503`); `reassign` reassigns a `Released` session to a live worker (#140) and
+/// is `Some` only under dispatch mode (`None` => the drain handlers log only,
+/// byte-identical to pre-#140).
 pub fn internal_router(
     registry: WorkerRegistry,
     auth: InternalAuth,
     heartbeat_interval_secs: u64,
     claims: Arc<ClaimMap>,
     minter: Option<Arc<dyn SessionTokenMinter>>,
+    reassign: Option<Arc<ReassignDriver>>,
 ) -> Router {
     let state = InternalState {
         registry,
         heartbeat_interval_secs,
         claims,
         minter,
+        reassign,
     };
     Router::new()
         .route("/internal/v1/register", post(register))
@@ -165,12 +174,39 @@ async fn pull(State(_st): State<InternalState>, Json(req): Json<PullRequest>) ->
 }
 
 async fn draining(State(st): State<InternalState>, Json(d): Json<Draining>) -> Response {
+    // Mark the worker Draining FIRST: this removes it from the placement +
+    // reassignment candidate set (the Active filter), so it stops receiving new
+    // work immediately. Reassignment of its live sessions is deferred until each
+    // session's `Released` ack (collapsing the double-run window to ~zero); the
+    // driver call here only logs (it does NOT reassign).
     st.registry.mark_draining(&d).await;
+    if let Some(reassign) = &st.reassign {
+        reassign.on_worker_draining(&d.worker_id).await;
+    }
     ack()
 }
 
 async fn released(State(st): State<InternalState>, Json(r): Json<Released>) -> Response {
     st.registry.note_released(&r).await;
+    // Graceful-drain per-session reassignment (#140): the worker confirmed THIS
+    // session's engine is stopped, so reassigning it now has a ~zero double-run
+    // window. Only when dispatch mode wired the driver (`Some`); a malformed
+    // session_id is logged + skipped (the ack still succeeds — a `Released` is
+    // fire-and-forget). With the driver absent (dispatch off) this is a no-op,
+    // byte-identical to the prior log-only behaviour.
+    if let Some(reassign) = &st.reassign {
+        match parse_session_id(&r.session_id) {
+            Some(session_id) => {
+                reassign.on_session_released(session_id).await;
+            }
+            None => {
+                tracing::warn!(
+                    worker_id = %r.worker_id,
+                    "released ack carried a malformed session_id; skipping reassignment"
+                );
+            }
+        }
+    }
     ack()
 }
 
