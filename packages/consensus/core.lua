@@ -214,14 +214,7 @@ local function bounded(value, limit)
   return text
 end
 
-local function decimal_checksum(value)
-  local hash = 2166136261
-  local text = tostring(value or "")
-  for i = 1, #text do
-    hash = (hash * 16777619 + text:byte(i)) % 4294967291
-  end
-  return string.format("%010d", hash)
-end
+local decimal_checksum = strings.decimal_checksum
 
 local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
