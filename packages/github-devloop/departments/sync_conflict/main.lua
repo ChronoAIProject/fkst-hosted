@@ -217,6 +217,18 @@ function pipeline(event)
       if tostring(unmerged.stdout or "") == "" then
         error("github-devloop: sync conflict merge failed without unmerged paths")
       end
+      local active_fingerprint = core.sync_conflict_fingerprint(active_conflict, tostring(unmerged.stdout or ""))
+      local prior_attempts = core.sync_conflict_attempt_count(active_conflict, active_fingerprint)
+      if prior_attempts >= core.max_sync_conflict_attempts() then
+        raise_sync_conflict_escalation(
+          active_conflict,
+          active_fingerprint,
+          prior_attempts,
+          "sync conflict retry budget already exhausted before codex",
+          tostring(unmerged.stdout or "")
+        )
+        return
+      end
 
       core.log_codex_start("sync_conflict", "branch-sync", "sync-conflict")
       local result = spawn_codex_sync({

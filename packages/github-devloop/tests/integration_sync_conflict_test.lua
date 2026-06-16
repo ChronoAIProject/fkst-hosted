@@ -175,6 +175,27 @@ return {
     t.is_true(create.payload.dedup_key:find("sync-conflict-escalation", 1, true) ~= nil)
   end,
 
+  test_sync_conflict_attempt_cap_escalates_before_codex = function()
+    local payload = event()
+    local remaining = "100644 abc 1\tcore.lua\n"
+    local fingerprint = core.sync_conflict_fingerprint(payload, remaining)
+    local run_opts = opts("sync-conflict-pre-codex-terminal", "1")
+    seed_cache(core.sync_conflict_attempt_key(payload, fingerprint), tostring(core.max_sync_conflict_attempts()), run_opts)
+    mock_fetch_and_heads()
+    mock_conflicting_worktree()
+    mock_cleanup()
+
+    local result = run_conflict(payload, run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(h.count_calls("codex exec"), 0)
+    t.eq(h.count_calls("commit -F"), 0)
+    t.eq(h.count_calls("push origin HEAD:refs/heads/"), 0)
+    local create = h.find_raise(result.raises, "github-proxy.github_issue_create_request")
+    t.is_true(create ~= nil)
+    t.is_true(create.payload.body:find("Attempt: " .. tostring(core.max_sync_conflict_attempts()), 1, true) ~= nil)
+    t.is_true(create.payload.body:find("Reason: sync conflict retry budget already exhausted before codex", 1, true) ~= nil)
+  end,
+
   test_sync_conflict_staged_conflict_marker_errors_without_commit_or_push = function()
     mock_fetch_and_heads()
     mock_conflicting_worktree()
