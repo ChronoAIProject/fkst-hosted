@@ -12,7 +12,7 @@ return function(M, h)
     driving_queue = "devloop_decompose",
     output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator rereview/reintake command" }, { "blocked", "reviewing", "thinking" }),
     reentry_commands = { "rereview", "reintake" },
-    budget = budget(1440),
+    budget = budget(1440, "No receiver work is expected; the row waits up to 1410 minutes for operator reentry before the 30 minute watchdog margin."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
       receiver_bound_minutes = 0,
