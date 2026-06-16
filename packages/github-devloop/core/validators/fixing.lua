@@ -1,3 +1,5 @@
+local source_refs = require("std.source_ref")
+
 return function(M)
 function M.is_supported_fixing(payload)
   if type(payload) ~= "table"
@@ -11,7 +13,7 @@ function M.is_supported_fixing(payload)
     or (payload.gate_failure_excerpt ~= nil and not M._is_bounded_string(payload.gate_failure_excerpt, M._max_rollup_failure_summary_len))
     or (payload.framing ~= nil and not M._is_bounded_string(payload.framing, M._max_framing_len))
     or (payload.blocking_gap ~= nil and not M._is_bounded_string(payload.blocking_gap, M._max_blocking_gap_len))
-    or not M._has_bounded_source_ref(payload.source_ref) then
+    or not source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len) then
     return false
   end
 

@@ -1,4 +1,5 @@
 local core = require("core")
+local source_refs = require("std.source_ref")
 
 local M = {}
 
@@ -23,14 +24,14 @@ local function supported_handoff(payload)
     and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.version)
     and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.marker_version)
     and core._is_bounded_string(handoff.version, core._max_dedup_len)
-    and core._has_bounded_source_ref(handoff.source_ref) then
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
     return handoff
   end
   if handoff.kind == "github-devloop.reviewing"
     and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
     and core.is_safe_pr_number(handoff.pr_number)
     and core._is_bounded_string(handoff.version, core._max_dedup_len)
-    and core._has_bounded_source_ref(handoff.source_ref) then
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
     return handoff
   end
   return nil

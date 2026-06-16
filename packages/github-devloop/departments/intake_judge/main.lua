@@ -105,19 +105,6 @@ local function has_devloop_state_label(labels)
   return false
 end
 
-local function judgment_worktree(role, identity)
-  local runtime = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
-  if runtime.exit_code ~= 0 then
-    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
-  end
-  local worktree = core.judgment_worktree_path(runtime.stdout, role, identity)
-  local mkdir = exec_sync({ cmd = core.mkdir_p_cmd(worktree), timeout = 30 })
-  if mkdir.exit_code ~= 0 then
-    error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
-  end
-  return worktree
-end
-
 local function copy_table(value)
   local result = {}
   for key, field in pairs(value or {}) do
@@ -253,7 +240,7 @@ function pipeline(event)
   })
   local result = spawn_codex_sync(core.judgment_codex_opts(
     core.build_intake_prompt(candidate.proposal_id, gate.current, content_fetch),
-    judgment_worktree("intake", candidate.dedup_key)
+    core.judgment_worktree("intake", candidate.dedup_key)
   ))
   if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
     local stderr = type(result) == "table" and result.stderr or "nil result"
