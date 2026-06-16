@@ -136,6 +136,7 @@ pub(crate) fn dispatch() -> ResolvedDispatch {
         env_profile: BTreeMap::new(),
         codex_config_toml: None,
         ornn: None,
+        journal: None,
         mint_nonce: SecretString::from("controller-nonce-abc".to_string()),
     }
 }
