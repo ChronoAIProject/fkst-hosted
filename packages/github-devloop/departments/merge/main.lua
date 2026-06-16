@@ -620,7 +620,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
 
-  local rollup_green, rollup_reason = core.evaluate_ci_status_gate(current_pr, {
+  local rollup_green, rollup_reason, check_runs = core.evaluate_ci_status_gate(current_pr, {
     repo = repo,
     dept = "merge",
     proposal_id = merge_ready.proposal_id,
@@ -628,16 +628,18 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   if not rollup_green then
     if not core.is_ci_red_reason(rollup_reason) then
       if rollup_reason == "missing-status-rollup" then
-        local dispatched, dispatch_reason = core.dispatch_ci_selfheal_once(
+        local healed, heal_reason = core.ci_selfheal_once(
           repo,
           merge_ready.pr_number,
           current_pr,
-          merge_ready.proposal_id
+          merge_ready.proposal_id,
+          nil,
+          check_runs
         )
-        if dispatched then
-          log_gate(merge_ready, "dry-run", "ci-dispatch-selfheal-dispatched; waiting for checks")
+        if healed then
+          log_gate(merge_ready, "dry-run", "ci-selfheal-triggered; waiting for checks")
         else
-          log_gate(merge_ready, "dry-run", dispatch_reason)
+          log_gate(merge_ready, "dry-run", heal_reason)
         end
       else
         log_gate(merge_ready, "dry-run", rollup_reason)
