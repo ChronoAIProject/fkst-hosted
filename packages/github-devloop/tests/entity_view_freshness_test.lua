@@ -43,7 +43,7 @@ local function comments_rest_command(repo, number)
     .. "'"
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or "")
     :gsub("\\", "\\\\")
     :gsub('"', '\\"')
@@ -55,9 +55,9 @@ local function json_string(value)
 end
 
 local function seed_cached_view(repo, kind, number, stdout, updated_at, producer)
-  cache_set(core.entity_view_cache_key(repo, kind, number), '{"updated_at":"' .. json_string(updated_at)
-    .. '","producer":"' .. json_string(producer or "seed")
-    .. '","stdout":"' .. json_string(stdout)
+  cache_set(core.entity_view_cache_key(repo, kind, number), '{"updated_at":"' .. encode_json_string(updated_at)
+    .. '","producer":"' .. encode_json_string(producer or "seed")
+    .. '","stdout":"' .. encode_json_string(stdout)
     .. '"}')
 end
 

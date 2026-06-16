@@ -44,8 +44,8 @@ local function run_scan(run_opts)
   }, run_opts or opts("pr-freshness-scan"))
 end
 
-local function json_string(value)
-  return h.json_string(value)
+local function encode_json_string(value)
+  return h.encode_json_string(value)
 end
 
 local function render_comments(comments)
@@ -61,7 +61,7 @@ local function mock_pr_list(is_draft)
     stdout = string.format(
       '[[{"number":7,"headRefOid":"%s","headRefName":"%s","baseRefName":"integration/dev","state":"OPEN","isDraft":%s}]]\n',
       branch_sha,
-      json_string(branch),
+      encode_json_string(branch),
       is_draft and "true" or "false"
     ),
     stderr = "",
@@ -84,14 +84,14 @@ local function mock_pr_view(state, comments, extra)
   t.mock_command("gh pr view '7'", {
     stdout = string.format(
       '{"headRefName":"%s","headRefOid":"%s","baseRefName":"integration/dev","state":"%s","updatedAt":"2026-06-03T02:03:04Z","isDraft":%s,"headRepository":{"nameWithOwner":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}],"labels":[],"comments":[%s]}\n',
-      json_string(fields.head or branch),
-      json_string(fields.head_sha or branch_sha),
-      json_string(fields.state or "OPEN"),
+      encode_json_string(fields.head or branch),
+      encode_json_string(fields.head_sha or branch_sha),
+      encode_json_string(fields.state or "OPEN"),
       fields.is_draft and "true" or "false",
-      json_string(head_repo),
+      encode_json_string(head_repo),
       fields.cross_repo and "true" or "false",
-      json_string(fields.mergeable or "MERGEABLE"),
-      json_string(fields.merge_state_status or "CLEAN"),
+      encode_json_string(fields.mergeable or "MERGEABLE"),
+      encode_json_string(fields.merge_state_status or "CLEAN"),
       render_comments(comments or pr_comments(state))
     ),
     stderr = "",

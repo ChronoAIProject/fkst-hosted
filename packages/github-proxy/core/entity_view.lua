@@ -1,6 +1,11 @@
 local S = {}
+local github_view = require("std.github_view")
 
 function S.install(M)
+local parse_view_updated_at = github_view.parse_view_updated_at
+local parse_updated_at_stdout = github_view.parse_updated_at_stdout
+local json_string = github_view.json_string
+
 local max_cache_key_segment_len = 120
 
 local function sanitize_cache_segment(value, allow_slash)
@@ -69,27 +74,6 @@ local function fetch_entity_updated_at(repo, kind, number)
   return M.github().entity_updated_at(repo, kind, number, 30)
 end
 
-local function parse_view_updated_at(stdout)
-  local ok, decoded = pcall(json.decode, stdout or "")
-  if not ok or type(decoded) ~= "table" then
-    return nil
-  end
-  local updated_at = decoded.updatedAt or decoded.updated_at
-  if updated_at == nil or tostring(updated_at) == "" then
-    return nil
-  end
-  return tostring(updated_at)
-end
-
-local function parse_updated_at_stdout(stdout)
-  local text = tostring(stdout or "")
-  text = text:gsub("^%s+", ""):gsub("%s+$", "")
-  if text == "" then
-    return nil
-  end
-  return text
-end
-
 local function decode_cached_view(encoded)
   local ok, decoded = pcall(json.decode, encoded or "")
   if not ok or type(decoded) ~= "table" then
@@ -99,21 +83,6 @@ local function decode_cached_view(encoded)
     return nil
   end
   return decoded
-end
-
-local function json_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\")
-  text = text:gsub('"', '\\"')
-  text = text:gsub("\b", "\\b")
-  text = text:gsub("\f", "\\f")
-  text = text:gsub("\n", "\\n")
-  text = text:gsub("\r", "\\r")
-  text = text:gsub("\t", "\\t")
-  text = text:gsub("[%z\1-\31]", function(char)
-    return string.format("\\u%04X", string.byte(char))
-  end)
-  return '"' .. text .. '"'
 end
 
 local function encode_cached_view(stdout, producer)

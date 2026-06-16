@@ -14,7 +14,7 @@ local function source_ref()
   }
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value)
     :gsub("\\", "\\\\")
     :gsub('"', '\\"')
@@ -24,7 +24,7 @@ end
 local function render_comment(body)
   return string.format(
     '{"body":"%s","author":{"login":"fkst-test-bot"},"createdAt":"2026-06-03T01:00:00Z"}',
-    json_string(body or "")
+    encode_json_string(body or "")
   )
 end
 
@@ -39,11 +39,11 @@ end
 local function issue_view_json(labels, comments, state)
   local rendered_labels = {}
   for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+    table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   return string.format(
     '{"title":"Implement dependency cascade","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
-    json_string(state or "OPEN"),
+    encode_json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
   )
@@ -52,11 +52,11 @@ end
 local function observe_issue_state_json(labels, comments, state)
   local rendered_labels = {}
   for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+    table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   return string.format(
     '{"state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
-    json_string(state or "OPEN"),
+    encode_json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
   )
@@ -70,9 +70,9 @@ local function blocked_by_json(nodes)
     table.insert(rendered, string.format(
       '{"number":%s,"state":"%s","stateReason":"%s","repository":{"nameWithOwner":"%s"}}',
       tostring(node.number),
-      json_string(node.state or "OPEN"),
-      json_string(state_reason),
-      json_string(node.repo or repo)
+      encode_json_string(node.state or "OPEN"),
+      encode_json_string(state_reason),
+      encode_json_string(node.repo or repo)
     ))
   end
   return '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":'
@@ -172,8 +172,8 @@ local function mock_blocker_pr(issue_number, pr_number, link, comments)
     core.pr_origin_marker(link.proposal_id, issue_number, link.branch, link.impl_version, link.base_branch),
   }
   t.mock_command(core.gh_pr_view_observe_cmd(repo, pr_number), {
-    stdout = '{"headRefName":"' .. json_string(link.branch)
-      .. '","headRefOid":"abc123","baseRefName":"' .. json_string(link.base_branch)
+    stdout = '{"headRefName":"' .. encode_json_string(link.branch)
+      .. '","headRefOid":"abc123","baseRefName":"' .. encode_json_string(link.base_branch)
       .. '","state":"MERGED","comments":[' .. issue_comments_json(rendered_comments) .. ']}\n',
     stderr = "",
     exit_code = 0,
@@ -239,8 +239,8 @@ local function mock_liveness_issue_list(items)
     table.insert(rendered, string.format(
       '{"number":%d,"state":"%s","updated_at":"%s"}',
       tonumber(item.number),
-      json_string(item.state or "open"),
-      json_string(item.updated_at or "")
+      encode_json_string(item.state or "open"),
+      encode_json_string(item.updated_at or "")
     ))
   end
   t.mock_command(core.gh_issue_list_observe_cmd(repo), {
@@ -256,8 +256,8 @@ local function mock_liveness_pr_list(items)
     table.insert(rendered, string.format(
       '{"number":%d,"state":"%s","updated_at":"%s"}',
       tonumber(item.number),
-      json_string(item.state or "open"),
-      json_string(item.updated_at or "")
+      encode_json_string(item.state or "open"),
+      encode_json_string(item.updated_at or "")
     ))
   end
   t.mock_command(core.gh_pr_list_observe_cmd(repo), {

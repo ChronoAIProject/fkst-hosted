@@ -8,8 +8,8 @@ local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 
-local function json_string(value)
-  return h.json_string(value)
+local function encode_json_string(value)
+  return h.encode_json_string(value)
 end
 
 local function run_liveness_scan(name)
