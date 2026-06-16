@@ -1,4 +1,5 @@
 local M = {}
+local payload_validator = require("std.payload")
 local strings = require("std.strings")
 
 function M.persistence_class()
@@ -24,16 +25,8 @@ local function has_bounded_source_ref(source_ref)
     and is_bounded_string(source_ref.ref, max_key_len)
 end
 
-local function require_field(payload, name)
-  local value = payload[name]
-  if value == nil or value == "" then
-    error("autochrono: missing " .. name)
-  end
-  return value
-end
-
 local function require_bounded_field(payload, name, limit)
-  local value = require_field(payload, name)
+  local value = payload_validator.require_field(payload, name, "autochrono")
   if not is_bounded_string(tostring(value), limit) then
     error("autochrono: invalid " .. name)
   end
@@ -160,7 +153,7 @@ function M.require_issue_fields(issue)
     title = require_bounded_field(issue, "title", max_title_len),
     url = require_bounded_field(issue, "url", max_key_len),
     updated_at = require_bounded_field(issue, "updated_at", max_key_len),
-    source_ref = M.normalize_source_ref(require_field(issue, "source_ref")),
+    source_ref = M.normalize_source_ref(payload_validator.require_field(issue, "source_ref", "autochrono")),
   }
 end
 

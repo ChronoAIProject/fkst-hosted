@@ -1,19 +1,15 @@
 local M = {}
+local payload_validator = require("std.payload")
+
+local require_field = payload_validator.require_field
+local error_context = "github-autochrono glue"
 
 function M.persistence_class()
   return "composed_judgment_pipeline"
 end
 
-local function require_field(payload, name)
-  local value = payload[name]
-  if value == nil or value == "" then
-    error("github-autochrono glue: missing " .. name)
-  end
-  return value
-end
-
 local function require_source_ref(payload)
-  local source_ref = require_field(payload, "source_ref")
+  local source_ref = require_field(payload, "source_ref", error_context)
   if type(source_ref) ~= "table" or source_ref.kind == nil or source_ref.ref == nil then
     error("github-autochrono glue: invalid source_ref")
   end
@@ -33,14 +29,14 @@ function M.entity_to_issue(payload)
 
   return {
     schema = "autochrono.issue.v1",
-    repo = require_field(payload, "repo"),
-    issue_number = require_field(payload, "number"),
-    title = require_field(payload, "title"),
-    url = require_field(payload, "url"),
-    state = require_field(payload, "state"),
-    updated_at = require_field(payload, "updated_at"),
+    repo = require_field(payload, "repo", error_context),
+    issue_number = require_field(payload, "number", error_context),
+    title = require_field(payload, "title", error_context),
+    url = require_field(payload, "url", error_context),
+    state = require_field(payload, "state", error_context),
+    updated_at = require_field(payload, "updated_at", error_context),
     source_ref = require_source_ref(payload),
-    dedup_key = require_field(payload, "dedup_key"),
+    dedup_key = require_field(payload, "dedup_key", error_context),
   }
 end
 
@@ -54,10 +50,10 @@ function M.reply_to_comment_request(payload)
 
   return {
     schema = "github-proxy.v1",
-    repo = require_field(payload, "repo"),
-    issue_number = require_field(payload, "issue_number"),
-    body = require_field(payload, "body"),
-    dedup_key = require_field(payload, "dedup_key"),
+    repo = require_field(payload, "repo", error_context),
+    issue_number = require_field(payload, "issue_number", error_context),
+    body = require_field(payload, "body", error_context),
+    dedup_key = require_field(payload, "dedup_key", error_context),
     source_ref = require_source_ref(payload),
   }
 end
