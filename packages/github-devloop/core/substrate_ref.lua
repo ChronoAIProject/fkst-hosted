@@ -40,9 +40,13 @@ local function read_runtime_root()
   return root:gsub("/+$", "")
 end
 
+function M.git_show_substrate_ref_pin_cmd()
+  return "git show " .. M._shell_single_quote("HEAD:" .. substrate_ref_path)
+end
+
 local function read_pin()
-  local text = file.read(substrate_ref_path)
-  local pin = M._trim(text)
+  local result = run_cmd(M.git_show_substrate_ref_pin_cmd(), 30, "git show substrate-ref pin")
+  local pin = M._trim(result.stdout)
   if not M._is_git_sha(pin) then
     error("github-devloop: invalid .fkst/substrate-ref pin")
   end
