@@ -37,15 +37,16 @@ function pipeline(event)
       error("github-devloop: gh rollup PR view failed: " .. tostring(viewed.stderr))
     end
     local pr = core.parse_pr_view_merge(viewed.stdout)
-    local expected = {
-      repo = payload.repo,
-      head_sha = payload.head_sha,
-      head_branch = payload.integration_branch,
-      base_branch = payload.upstream_branch,
-    }
-    local identity_ok, identity_reason = core.pr_identity_matches(pr, expected)
-    if not identity_ok then
-      log_skip(payload, identity_reason)
+    if tostring(pr.head_ref_name or "") ~= tostring(payload.integration_branch or "") then
+      log_skip(payload, "head-branch-mismatch")
+      return
+    end
+    if tostring(pr.base_ref_name or "") ~= tostring(payload.upstream_branch or "") then
+      log_skip(payload, "base-branch-mismatch")
+      return
+    end
+    if not core.is_same_repo_pr_head(pr, payload.repo) then
+      log_skip(payload, "foreign-head-repository")
       return
     end
     local gate_ok, gate_reason = core.evaluate_ci_merge_gate(pr, {
@@ -66,6 +67,8 @@ function pipeline(event)
       base_branch = payload.upstream_branch,
       dept = "rollup_merge",
       proposal_id = "rollup",
+      accept_current_head = true,
+      match_head_retry_attempts = 3,
     })
     if not merged then
       log_skip(payload, reason)

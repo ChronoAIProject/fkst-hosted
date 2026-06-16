@@ -173,64 +173,103 @@ function M.is_merged_pr(pr)
   return tostring(pr and pr.state or ""):upper() == "MERGED" and tostring(pr and pr.merged_at or "") ~= ""
 end
 
-function M.run_verified_pr_merge(request)
-  local repo = tostring(request and request.repo or "")
-  local pr_number = request and request.pr_number
-  local expected = {
+function M.is_match_head_modified_error(stderr)
+  return tostring(stderr or ""):find("Head branch was modified", 1, true) ~= nil
+end
+
+local function merge_attempt_limit(request)
+  local attempts = tonumber(request and request.match_head_retry_attempts or 1) or 1
+  attempts = math.floor(attempts)
+  if attempts < 1 then
+    return 1
+  end
+  return attempts
+end
+
+local function expected_pr_identity(request, repo, head_sha)
+  return {
     repo = repo,
-    head_sha = request and request.head_sha,
+    head_sha = head_sha,
     head_branch = request and request.head_branch,
     base_branch = request and request.base_branch,
   }
+end
 
-  local pr_recheck = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
-  if pr_recheck.exit_code ~= 0 then
-    error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
-  end
-  local rechecked_pr = M.parse_pr_view_merge(pr_recheck.stdout)
-  local identity_ok, identity_reason = M.pr_identity_matches(rechecked_pr, expected)
-  if not identity_ok then
-    return false, identity_reason, rechecked_pr
-  end
-  if type(request.validate_rechecked_pr) == "function" then
-    local validate_ok, validate_reason = request.validate_rechecked_pr(rechecked_pr)
-    if not validate_ok then
-      return false, validate_reason or "pr-validation-failed", rechecked_pr
+function M.run_verified_pr_merge(request)
+  local repo = tostring(request and request.repo or "")
+  local pr_number = request and request.pr_number
+  local max_attempts = merge_attempt_limit(request)
+  for attempt = 1, max_attempts do
+    local pr_recheck = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
+    if pr_recheck.exit_code ~= 0 then
+      error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
+    end
+    local rechecked_pr = M.parse_pr_view_merge(pr_recheck.stdout)
+    local merge_head_sha = request and request.head_sha
+    if request and request.accept_current_head == true then
+      merge_head_sha = rechecked_pr.head_sha
+      if not M.is_safe_head_sha(merge_head_sha) then
+        return false, "invalid-current-head-sha", rechecked_pr
+      end
+    end
+    local expected = expected_pr_identity(request, repo, merge_head_sha)
+    local identity_ok, identity_reason = M.pr_identity_matches(rechecked_pr, expected)
+    if not identity_ok then
+      return false, identity_reason, rechecked_pr
+    end
+    if type(request.validate_rechecked_pr) == "function" then
+      local validate_ok, validate_reason = request.validate_rechecked_pr(rechecked_pr)
+      if not validate_ok then
+        return false, validate_reason or "pr-validation-failed", rechecked_pr
+      end
+    end
+    local gate_ok, gate_reason = M.evaluate_ci_merge_gate(rechecked_pr, {
+      repo = repo,
+      dept = request.dept or "merge",
+      proposal_id = request.proposal_id,
+    })
+    if not gate_ok then
+      return false, gate_reason, rechecked_pr
+    end
+    if type(request.before_merge) == "function" then
+      request.before_merge(rechecked_pr)
+    end
+
+    local merge_result = M.gh_exec({ cmd = M.gh_pr_merge_cmd(repo, pr_number, merge_head_sha), timeout = 120 })
+    if merge_result.exit_code ~= 0 then
+      if attempt < max_attempts and M.is_match_head_modified_error(merge_result.stderr) then
+        M.log_line("info", tostring(request.dept or "merge"), tostring(request.proposal_id or "merge"), "MATCH_HEAD_RETRY", {
+          "repo=" .. tostring(repo),
+          "pr=" .. tostring(pr_number),
+          "head_sha=" .. tostring(merge_head_sha),
+          "attempt=" .. tostring(attempt),
+          "max_attempts=" .. tostring(max_attempts),
+          "reason=head-branch-modified",
+        })
+      else
+        error("github-devloop: gh pr merge failed: " .. tostring(merge_result.stderr))
+      end
+    else
+      M.invalidate_entity_after_write(repo, "pr", pr_number)
+
+      local merged_view = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
+      if merged_view.exit_code ~= 0 then
+        error("github-devloop: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
+      end
+      local merged_pr = M.parse_pr_view_merge(merged_view.stdout)
+      if not M.is_merged_pr(merged_pr) then
+        return false, "merge-confirmation-pending", merged_pr
+      end
+      if tostring(merged_pr.head_ref_name or "") ~= tostring(expected.head_branch or "")
+        or tostring(merged_pr.head_sha or "") ~= tostring(expected.head_sha or "")
+        or tostring(merged_pr.base_ref_name or "") ~= tostring(expected.base_branch or "")
+        or not M.is_same_repo_pr_head(merged_pr, repo) then
+        return false, "merge-confirmation-mismatch", merged_pr
+      end
+      return true, "merged", merged_pr
     end
   end
-  local gate_ok, gate_reason = M.evaluate_ci_merge_gate(rechecked_pr, {
-    repo = repo,
-    dept = request.dept or "merge",
-    proposal_id = request.proposal_id,
-  })
-  if not gate_ok then
-    return false, gate_reason, rechecked_pr
-  end
-  if type(request.before_merge) == "function" then
-    request.before_merge(rechecked_pr)
-  end
-
-  local merge_result = M.gh_exec({ cmd = M.gh_pr_merge_cmd(repo, pr_number, request.head_sha), timeout = 120 })
-  if merge_result.exit_code ~= 0 then
-    error("github-devloop: gh pr merge failed: " .. tostring(merge_result.stderr))
-  end
-  M.invalidate_entity_after_write(repo, "pr", pr_number)
-
-  local merged_view = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
-  if merged_view.exit_code ~= 0 then
-    error("github-devloop: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
-  end
-  local merged_pr = M.parse_pr_view_merge(merged_view.stdout)
-  if not M.is_merged_pr(merged_pr) then
-    return false, "merge-confirmation-pending", merged_pr
-  end
-  if tostring(merged_pr.head_ref_name or "") ~= tostring(expected.head_branch or "")
-    or tostring(merged_pr.head_sha or "") ~= tostring(expected.head_sha or "")
-    or tostring(merged_pr.base_ref_name or "") ~= tostring(expected.base_branch or "")
-    or not M.is_same_repo_pr_head(merged_pr, repo) then
-    return false, "merge-confirmation-mismatch", merged_pr
-  end
-  return true, "merged", merged_pr
+  error("github-devloop: gh pr merge failed: Head branch was modified after bounded retry")
 end
 end
 
