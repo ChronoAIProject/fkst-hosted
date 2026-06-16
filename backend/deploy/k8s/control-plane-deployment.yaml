@@ -1,4 +1,14 @@
-# fkst-hosted-api: 3 replicas, safe-takeover RollingUpdate.
+# fkst-control-plane: the controller deployable (public REST API). 3 replicas,
+# safe-takeover RollingUpdate.
+#
+# TRANSITIONAL (issue #145 → #136): engine execution still lives in the
+# control-plane crate today, so this Deployment still spawns engine children and
+# therefore (a) runs from the engine-laden image — build `fkst-control-plane:dev`
+# from `--target worker-runtime` until #136 — and (b) keeps the `runtime`+`tmp`
+# emptyDir volumes below. When #136 moves engine execution onto the worker:
+# switch this image to `--target control-plane-runtime` (slim) and drop the
+# `runtime` volume + its mount. Also: the database-free pivot (#135) collapses
+# this to a SINGLE authoritative controller replica; until then it stays at 3.
 #
 # Cross-pod execution is serialized by the distribution layer's MongoDB lease +
 # fencing token, NOT by the deployment strategy: at most one pod holds a given
@@ -15,11 +25,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fkst-hosted-api
+  name: fkst-control-plane
   namespace: fkst-hosted
   labels:
-    app.kubernetes.io/name: fkst-hosted-api
-    app.kubernetes.io/component: api
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/component: control-plane
     app.kubernetes.io/part-of: fkst-hosted
 spec:
   replicas: 3
@@ -32,12 +42,12 @@ spec:
   # label additions never force a Deployment recreate.
   selector:
     matchLabels:
-      app.kubernetes.io/name: fkst-hosted-api
+      app.kubernetes.io/name: fkst-control-plane
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: fkst-hosted-api
-        app.kubernetes.io/component: api
+        app.kubernetes.io/name: fkst-control-plane
+        app.kubernetes.io/component: control-plane
         app.kubernetes.io/part-of: fkst-hosted
     spec:
       # Docker-link-style service env injection MUST stay off: the Service is
@@ -60,7 +70,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
                 labelSelector:
                   matchLabels:
-                    app.kubernetes.io/name: fkst-hosted-api
+                    app.kubernetes.io/name: fkst-control-plane
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -93,8 +103,10 @@ spec:
               cpu: 100m
               memory: 32Mi
       containers:
-        - name: fkst-hosted-api
-          image: fkst-hosted:dev # tag managed by kustomization.yaml images
+        - name: fkst-control-plane
+          # tag managed by kustomization.yaml images. TRANSITIONAL: build this
+          # from `--target worker-runtime` (engine-laden) until #136 — see header.
+          image: fkst-control-plane:dev
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -112,9 +124,9 @@ spec:
                   fieldPath: metadata.name
           envFrom:
             - configMapRef:
-                name: fkst-hosted-config
+                name: fkst-control-plane-config
             - secretRef:
-                name: fkst-hosted-secret
+                name: fkst-control-plane-secret
           # Belt-and-suspenders drain: sleep before SIGTERM so the Service /
           # endpoints controller deregisters this pod (readiness still passing
           # at this instant) and in-flight requests stop arriving BEFORE the

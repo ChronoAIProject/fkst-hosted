@@ -1,5 +1,6 @@
-# PodDisruptionBudget for fkst-hosted-api.
+# PodDisruptionBudget for the CONTROL-PLANE (issue #145).
 #
+# (The worker fleet gets its own elasticity/drain policy in #140; no PDB here.)
 # Keeps at least 2 pods available during VOLUNTARY disruptions (node drains,
 # kubectl rollout, cluster upgrades) so the API never drops below 2-pod
 # capacity while one pod is being recycled. With the 3..5 operating range this
@@ -12,14 +13,14 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: fkst-hosted-api
+  name: fkst-control-plane
   namespace: fkst-hosted
   labels:
-    app.kubernetes.io/name: fkst-hosted-api
-    app.kubernetes.io/component: api
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/component: control-plane
     app.kubernetes.io/part-of: fkst-hosted
 spec:
   minAvailable: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: fkst-hosted-api
+      app.kubernetes.io/name: fkst-control-plane
