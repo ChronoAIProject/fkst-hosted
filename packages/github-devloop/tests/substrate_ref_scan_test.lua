@@ -1,7 +1,7 @@
 local t = fkst.test
 local core = require("core")
 
-local current_pin = "216cac9681bf43d7166472d7597a684cd987b0d1"
+local current_pin = "cccccccccccccccccccccccccccccccccccccccc"
 local target_sha = "1234567890abcdef1234567890abcdef12345678"
 local base_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 local old_branch_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -68,6 +68,14 @@ end
 local function mock_substrate_head(sha)
   t.mock_command("git ls-remote 'https://github.com/ChronoAIProject/fkst-substrate.git' 'refs/heads/dev'", {
     stdout = tostring(sha) .. "\trefs/heads/dev\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_current_pin(sha)
+  t.mock_command(core.git_show_substrate_ref_pin_cmd(), {
+    stdout = tostring(sha) .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -249,6 +257,7 @@ end
 return {
   test_current_pin_performs_no_github_or_git_writes = function()
     mock_env("")
+    mock_current_pin(current_pin)
     mock_substrate_head(current_pin)
 
     local result = run_scan(opts("substrate-current"))
@@ -262,6 +271,7 @@ return {
 
   test_dry_run_plans_singleton_bump_without_writes = function()
     mock_env("")
+    mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
     mock_no_existing_pr()
 
@@ -276,6 +286,7 @@ return {
 
   test_real_mode_creates_single_bump_pr_for_new_dev_head = function()
     mock_env("1")
+    mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
     mock_no_existing_pr()
     mock_branch_missing()
@@ -294,6 +305,7 @@ return {
 
   test_real_mode_updates_existing_bump_pr_branch_without_creating_second_pr = function()
     mock_env("1")
+    mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
     mock_existing_pr()
     mock_branch_present()
@@ -312,6 +324,7 @@ return {
 
   test_real_mode_rechecks_pr_under_lock_before_create = function()
     mock_env("1")
+    mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
     mock_existing_pr()
     mock_branch_missing()
@@ -330,6 +343,7 @@ return {
 
   test_real_mode_skips_push_when_bump_branch_already_targets_dev_head = function()
     mock_env("1")
+    mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
     mock_existing_pr()
     mock_branch_present()
@@ -345,6 +359,7 @@ return {
 
   test_real_mode_removes_stale_checked_out_bump_branch_worktree_before_update = function()
     mock_env("1")
+    mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
     mock_existing_pr()
     mock_branch_present()
