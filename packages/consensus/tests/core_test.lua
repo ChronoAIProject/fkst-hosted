@@ -4,6 +4,10 @@ local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 local gap_label = "⟦FKST:GAP⟧"
 local history_directive = "Before judging, use the producer-provided context manifest below as the complete prior history of this proposal"
+local prompt_preamble_language_en = "Write all output in English; quote code identifiers and cited originals verbatim."
+local prompt_preamble_language_zh = "Write all prose output in Simplified Chinese; quote code identifiers and cited originals verbatim."
+local prompt_preamble_judgment_harness = "Before judging, identify the established theory or industry best practice governing this problem class; treat unjustified deviation from established practice as grounds for rejection or narrowing; require proof that existing practice does not apply before accepting novelty."
+local prompt_preamble_history = "Before judging, use the producer-provided context manifest below as the complete prior history of this proposal; earlier rounds recorded there are your memory. Judge what changed; do not re-litigate settled points."
 
 local function answer(verdict, reply)
   return verdict_label .. " " .. verdict .. "\n" .. reply_label .. " " .. reply
@@ -65,7 +69,52 @@ local function assert_no_history_directive(prompt)
   t.is_nil(prompt:find(history_directive, 1, true))
 end
 
+local function with_real_consensus_catalog(fn)
+  local original_t = _G.t
+  local catalog = require("locales.en")
+  _G.t = function(key)
+    local value = catalog[key]
+    if value == nil then
+      error("missing real catalog key: " .. tostring(key))
+    end
+    return value
+  end
+
+  local ok, err = pcall(fn)
+  _G.t = original_t
+  if not ok then
+    error(err, 0)
+  end
+end
+
+local function expected_prompt(language_line, include_history)
+  local lines = {
+    language_line,
+    prompt_preamble_judgment_harness,
+  }
+  if include_history then
+    table.insert(lines, prompt_preamble_history)
+  end
+  return table.concat(lines, "\n")
+end
+
 return {
+  test_prompt_preamble_real_catalog_output_is_invariant = function()
+    with_real_consensus_catalog(function()
+      t.eq(core.prompt_preamble(proposal(), function(_cmd)
+        return { stdout = "en", stderr = "", exit_code = 0 }
+      end), expected_prompt(prompt_preamble_language_en, true))
+
+      t.eq(core.prompt_preamble(proposal(), function(_cmd)
+        return { stdout = "zh", stderr = "", exit_code = 0 }
+      end), expected_prompt(prompt_preamble_language_zh, true))
+
+      t.eq(core.prompt_preamble(proposal_without_content_fetch(), function(_cmd)
+        return { stdout = "fr", stderr = "", exit_code = 0 }
+      end), expected_prompt(prompt_preamble_language_en, false))
+    end)
+  end,
+
   test_prompt_preamble_language_env = function()
     t.eq(core.read_env_command("FKST_OUTPUT_LANG"), 'printf %s "$FKST_OUTPUT_LANG"')
     t.eq(core.output_language(function(_cmd)
