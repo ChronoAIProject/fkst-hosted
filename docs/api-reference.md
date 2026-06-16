@@ -16,7 +16,7 @@ shapes, and examples. For a high-level overview of the project, see the
 - [Sessions](#sessions)
 - [Goals](#goals)
 - [GitHub issues hub](#github-issues-hub)
-- [Vault (env variables & secrets)](#vault-env-variables--secrets)
+- [Inline secrets & variables](#inline-secrets--variables)
 - [Appendix: data types & limits](#appendix-data-types--limits)
 
 ---
@@ -92,9 +92,6 @@ bypasses both layers.
 | `fkst:github:read` | `GET /github/accounts`, `/github/issues`, issue/comment reads |
 | `fkst:github:write` | `POST`/`PATCH` of issues and comments |
 | `fkst:catalog:read` | all `GET /catalog/*` |
-| `fkst:vault:read` | `GET /vault/entries` |
-| `fkst:vault:write` | `PUT /vault/entries` |
-| `fkst:vault:delete` | `DELETE /vault/entries/{id}` |
 | `fkst:admin` | everything (bypass) |
 
 **Layer 2 — ownership / org (the object layer).** After the permission check,
@@ -200,15 +197,15 @@ pending → validating → running → stopping → stopped
 ```
 
 > **Injected environment.** When a session starts, the engine run receives the
-> caller's resolved [vault](#vault-env-variables--secrets) environment for the
-> session's scope — owner-wide (`global`) entries for a package session, plus
-> the target repo's entries (repo overrides global on a key collision) for a
-> goal-triggered one. Secret values are injected in memory only: the session
-> document persists just a non-secret scope pointer, so a pod failover
-> re-resolves the same profile from the vault (picking up any rotated secret),
-> and a decrypt failure fails the start rather than running without the secret.
-> Platform-reserved keys (`FKST_*`, `GITHUB_TOKEN`, the host allow-list) are
-> always dropped. There is no new endpoint — this is automatic.
+> caller's resolved [inline-secret](#inline-secrets--variables) environment for
+> the session's scope — owner-wide (`global`) entries overlaid by the target
+> repo's entries (repo overrides global on a key collision). Values are supplied
+> inline at goal trigger and injected in memory only: the session document
+> persists just a non-secret scope pointer, so a same-process failover re-injects
+> the controller-held values (a controller **restart** loses them — re-trigger to
+> re-supply). Platform-reserved keys (`FKST_*`, `GITHUB_TOKEN`, the host
+> allow-list) are always dropped. There is no separate endpoint — the secrets
+> ride the goal-trigger body.
 
 > **NyxID session identity.** When NyxID is configured, the engine run also
 > receives a per-session NyxID identity: at start, fkst-hosted mints one
@@ -224,18 +221,18 @@ pending → validating → running → stopping → stopped
 > `chrono-llm` service (OpenAI Responses API), authenticated as the session user
 > with the injected `NYXID_ACCESS_TOKEN` — so inference runs and is billed as
 > that user, with no setup. You can **override** the provider entirely through
-> the [vault](#vault-env-variables--secrets) (precedence: raw > structured >
-> default), again with no new endpoint:
+> the goal-trigger [`secrets`](#post-apiv1goalsidtrigger--trigger-a-goal) array
+> (precedence: raw > structured > default), again with no separate endpoint:
 >
-> - **Structured** — set the `variable`s `CODEX_BASE_URL`, `CODEX_MODEL`,
->   `CODEX_WIRE_API` (typically `responses`), and `CODEX_ENV_KEY`, plus a
->   `secret` whose key equals your `CODEX_ENV_KEY` value (the API key codex
->   sends as `Authorization: Bearer`). fkst-hosted renders an
+> - **Structured** — supply the inline `variable`s `CODEX_BASE_URL`,
+>   `CODEX_MODEL`, `CODEX_WIRE_API` (typically `responses`), and `CODEX_ENV_KEY`,
+>   plus an inline `secret` whose key equals your `CODEX_ENV_KEY` value (the API
+>   key codex sends as `Authorization: Bearer`). fkst-hosted renders an
 >   OpenAI-compatible provider pointing codex at your endpoint. All four
 >   variables must be present, or the default is used.
-> - **Raw** — set the `variable` `CODEX_CONFIG_TOML` to a full codex
+> - **Raw** — supply the inline `variable` `CODEX_CONFIG_TOML` as a full codex
 >   `config.toml`; it is written verbatim. (Your API key still rides the
->   `env_key` named inside it, stored as a separate vault secret.)
+>   `env_key` named inside it, supplied as a separate inline secret.)
 >
 > The provider API key is never embedded in the rendered config and never
 > logged. The chrono-llm default requires the user to have connected
@@ -488,6 +485,7 @@ Spawns a new session for the goal against a GitHub repository.
 | `repo` | `{ owner, name }` | no | **existing** mode only — overrides the goal's stored repo for this run |
 | `create` | `CreateRepoSpec` | for `create_new` | Required in `create_new` mode; forbidden in `existing` mode |
 | `ornn_skills` | array | no | Ornn skills/skillsets to inject — see [Pinning Ornn skills](#pinning-ornn-skills) |
+| `secrets` | array of `InlineSecret` | no | [Inline secrets/variables](#inline-secrets--variables) injected into this run's engine env (in memory only). See limits |
 
 `CreateRepoSpec`:
 
@@ -497,6 +495,14 @@ Spawns a new session for the goal against a GitHub repository.
 | `private` | boolean | no | Defaults to `true` |
 | `description` | string | no | |
 | `org_login` | string | no | Create under this org; otherwise under the authenticated user |
+
+`InlineSecret`:
+
+| Field | Type | Required | Notes |
+|-------|------|:--------:|-------|
+| `key` | string | yes | Env-var name; `^[A-Za-z_][A-Za-z0-9_]*$`; not a [reserved key](#inline-secret-limits) |
+| `value` | string | yes | ≤ the value-size cap; never logged or returned |
+| `kind` | `"secret"` \| `"variable"` | no | Defaults to `secret` |
 
 **Responses**
 
@@ -513,13 +519,14 @@ Spawns a new session for the goal against a GitHub repository.
 | `403` | Not permitted, or a listed package is no longer usable |
 | `404` | Goal not found |
 | `409` | The goal is already triggered or running |
-| `422` | No repo to use, package missing, or the GitHub App is not installed |
+| `422` | No repo to use, package missing, the GitHub App is not installed, or an inline secret has a reserved/invalid/oversized key |
 
 ```sh
-# Trigger against the stored (or overridden) repo
+# Trigger against the stored (or overridden) repo, with an inline secret
 curl -X POST "$FKST_API/api/v1/goals/a1b2…/trigger" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{ "repo": { "owner": "acme", "name": "billing" } }'
+  -d '{ "repo": { "owner": "acme", "name": "billing" },
+        "secrets": [ { "key": "OPENAI_API_KEY", "value": "sk-…" } ] }'
 
 # Create a brand-new repo, then trigger against it
 curl -X POST "$FKST_API/api/v1/goals/a1b2…/trigger" \
@@ -799,133 +806,26 @@ curl -X POST "$FKST_API/api/v1/github/repos/acme/billing/issues/7/comments" \
 
 ---
 
-## Vault (env variables & secrets)
+## Inline secrets & variables
 
-The **vault** is a fkst-hosted-owned, encrypted-at-rest key–value store for the
-environment **variables** (non-secret config) and **secrets** an engine run
-needs. Each entry has a `kind`, an env-var `key`, and a `scope` — either
-owner-wide (`global`) or a specific GitHub repo. Entries are owned by the caller
-and enforced by the same owner/org authorization as the rest of the API.
+Secrets and non-secret env **variables** for an engine run are supplied **inline
+when you trigger a goal** (in the trigger request body) and held by the
+controller **in memory only** — there is no persistent vault and no secret CRUD
+(the former `/api/v1/vault/entries` endpoints were removed in the database-free
+pivot). Each entry has an env-var `key`, a `value`, and a `kind` (`secret` — the
+default — or `variable`). They are scoped to the goal's repo, injected into the
+engine env at session spawn (the same injection point as before), and **dropped
+from memory when the session terminates**.
 
-> **Secrets are write-only.** A `secret` value is accepted on `PUT` and is
-> **never** returned by any read — not in the `PUT` response and not in `GET`.
-> A read shows only a display-only `masked_hint` (`"…last4"`). A `variable`
-> value, being non-secret config, **is** returned. Secret values are
-> envelope-encrypted (AES-256-GCM) at rest and never stored in plaintext.
+> **In-memory only.** Inline secrets live in the controller process. They survive
+> a **worker** loss (the controller re-dispatches the session and re-injects the
+> held values) but **not** a controller restart — a goal re-triggered after a
+> restart must re-supply them. Nothing is written to a datastore; values are
+> never logged (only key names + a count) and are never returned by any endpoint.
 
-**Common data shapes**
-
-```jsonc
-// Scope (request + response): exactly one of global / repo
-{ "global": true }                 // owner-wide
-{ "repo": "acme/site" }            // a specific repo
-
-// EntryView (response): a secret omits `value`; a variable includes it
-{
-  "id": "f0e1d2c3-…",
-  "key": "OPENAI_API_KEY",
-  "kind": "secret",                // or "variable"
-  "scope": { "global": true },
-  "masked_hint": "…cret",          // secrets only; display-only
-  "value": "debug",                // variables only; omitted for secrets
-  "updated_at": "2026-06-16T12:00:00Z"
-}
-```
-
-See [vault limits](#vault-limits) for the value-size and per-scope caps.
-
----
-
-### `GET /api/v1/vault/entries` — list entries in a scope
-
-Returns the caller's entries in a scope (key-sorted). **Secret values are never
-included**; variable values are.
-
-- **Permission:** `fkst:vault:read`; returns only your own entries.
-
-**Query parameters**
-
-| Param | Values | Notes |
-|-------|--------|-------|
-| `scope` | `global` (default), `repo` | The scope to list |
-| `repo` | `owner/name` | Required when `scope=repo` |
-
-```sh
-curl -H "Authorization: Bearer $TOKEN" \
-  "$FKST_API/api/v1/vault/entries?scope=global"
-# [ { "id": "...", "key": "OPENAI_API_KEY", "kind": "secret",
-#     "scope": { "global": true }, "masked_hint": "…cret",
-#     "updated_at": "2026-06-16T12:00:00Z" } ]
-```
-
----
-
-### `PUT /api/v1/vault/entries` — create or update an entry
-
-Upsert an entry by `(owner, scope, key)`. A `secret` value is encrypted and
-stored with a masked hint; a `variable` value is stored as plaintext config.
-
-- **Permission:** `fkst:vault:write`. If `org_id` is supplied, the caller must be
-  an **org Member or Admin** (else `403`); the entry is still owned by the caller.
-- **Headers:** `Content-Type: application/json`.
-
-**Request body**
-
-| Field | Type | Required | Notes |
-|-------|------|:--------:|-------|
-| `scope` | object | yes | Exactly one of `{ "global": true }` or `{ "repo": "owner/name" }` |
-| `key` | string | yes | Env-var name; must match `^[A-Za-z_][A-Za-z0-9_]*$` |
-| `kind` | string | yes | `secret` or `variable` |
-| `value` | string | yes | ≤ the value-size cap; a `secret` is encrypted at rest |
-| `org_id` | string | no | Attach to an org (caller must be a writer) |
-
-**Responses**
-
-| Status | Meaning |
-|--------|---------|
-| `200 OK` | Upserted. Body is the redacted `EntryView` (no secret value) |
-| `400` | Malformed body or scope (not exactly one of global/repo) |
-| `403` | `org_id` given but caller is not an org writer |
-| `422` | Invalid key name, a **reserved** platform key (`FKST_*`, `GITHUB_TOKEN`, allow-listed host vars), an oversized value, or the per-scope entry cap exceeded |
-| `500` | Vault key provider not configured (a deploy-time misconfiguration) |
-
-```sh
-curl -X PUT "$FKST_API/api/v1/vault/entries" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{
-    "scope": { "global": true },
-    "key": "OPENAI_API_KEY",
-    "kind": "secret",
-    "value": "sk-…"
-  }'
-# 200 -> { "id": "...", "key": "OPENAI_API_KEY", "kind": "secret",
-#          "scope": { "global": true }, "masked_hint": "…",
-#          "updated_at": "..." }   // note: no `value`
-```
-
----
-
-### `DELETE /api/v1/vault/entries/{id}` — delete an entry
-
-Remove an entry by its UUID.
-
-- **Permission:** `fkst:vault:delete`; you must also own (or be an org admin of)
-  the entry.
-
-**Responses**
-
-| Status | Meaning |
-|--------|---------|
-| `204 No Content` | Deleted |
-| `400` | `{id}` is not a valid UUID |
-| `403` | The entry exists but you cannot manage it |
-| `404` | No such entry |
-
-```sh
-curl -X DELETE "$FKST_API/api/v1/vault/entries/f0e1d2c3-…" \
-  -H "Authorization: Bearer $TOKEN"
-# 204 No Content
-```
+See the [goal trigger](#post-apiv1goalsidtrigger--trigger-a-goal) endpoint's
+`secrets` field for the wire shape, and [inline-secret limits](#inline-secret-limits)
+for the value-size and per-scope caps.
 
 ---
 
@@ -938,7 +838,7 @@ curl -X DELETE "$FKST_API/api/v1/vault/entries/f0e1d2c3-…" \
 | Session status | `pending`, `validating`, `running`, `stopping`, `stopped`, `failed` |
 | Goal status | `not_started`, `triggered`, `running`, `stopped`, `failed` |
 | GitHub repo mode (goal trigger) | `existing`, `create_new` |
-| Vault entry kind | `variable`, `secret` |
+| Inline secret kind | `variable`, `secret` |
 
 ### Package layout (repo-scoped)
 
@@ -963,7 +863,7 @@ package by its directory **basename**.
 | Repo owner | `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$` |
 | Repo name | `^[A-Za-z0-9._-]{1,100}$` |
 
-### Vault limits
+### Inline-secret limits
 
 | Limit | Value |
 |-------|-------|
@@ -971,5 +871,5 @@ package by its directory **basename**.
 | Reserved keys (rejected with `422`) | any `FKST_*`, `GITHUB_TOKEN`, `FKST_GITHUB_TOKEN_FILE`, `FKST_GOAL_FILE`, and the allow-listed host vars (`PATH`, `HOME`, `CODEX_HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `TZ`, `SSL_CERT_FILE`, `SSL_CERT_DIR`) |
 | Single value | ≤ 64 KiB (default; `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`) |
 | Entries per scope | ≤ 100 (default; `FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP`) |
-| Scope | `global` (owner-wide) or `repo:<owner>/<name>` |
-| Secret encryption | AES-256-GCM envelope (per-secret DEK wrapped by a KEK); secrets never returned, logged, or stored in plaintext |
+| Scope | the goal's repo (`repo:<owner>/<name>`), overlaying the owner-wide `global` scope |
+| Storage | in-memory only (controller process); never persisted, returned, or logged (only key names + a count) |
