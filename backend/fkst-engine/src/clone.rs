@@ -25,11 +25,11 @@ use secrecy::SecretString;
 use tempfile::TempDir;
 use tokio::process::Command;
 
-use crate::engine::error::RunnerError;
-use crate::engine::goal_token::{git_config_entries, write_token_file, HELPER_SCRIPT_NAME};
-use crate::engine::materialize::materialize_helper_script;
-use crate::engine::util::is_valid_name;
-use crate::models::RepoRef;
+use crate::error::RunnerError;
+use crate::goal_token::{git_config_entries, write_token_file, HELPER_SCRIPT_NAME};
+use crate::materialize::materialize_helper_script;
+use crate::util::is_valid_name;
+use fkst_shared::models::RepoRef;
 
 /// Reserved package basename the substrate engine owns; a repo package may never
 /// claim it.
@@ -253,14 +253,14 @@ fn resolve_package_roots(
 pub const CLONE_HELPER_SCRIPT_NAME: &str = HELPER_SCRIPT_NAME;
 
 /// Read every file under a resolved package root into the canonical
-/// [`crate::engine::materialize::PackageFile`] shape (relative `path` + verbatim
+/// [`crate::materialize::PackageFile`] shape (relative `path` + verbatim
 /// `content`), for the journaling content fingerprint (#25 redo). Paths are
 /// recorded relative to `package_root` with `/` separators (the engine
 /// convention). Non-UTF-8 files are decoded lossily — the fingerprint only needs
 /// to be a stable function of the bytes, not a faithful round-trip. Errors
 /// reading an individual entry are logged and skipped so a single unreadable
 /// file never fails the spawn (the engine's conformance is the real gate).
-pub fn read_package_files(package_root: &Path) -> Vec<crate::engine::materialize::PackageFile> {
+pub fn read_package_files(package_root: &Path) -> Vec<crate::materialize::PackageFile> {
     let mut files = Vec::new();
     collect_files(package_root, package_root, &mut files);
     files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -270,7 +270,7 @@ pub fn read_package_files(package_root: &Path) -> Vec<crate::engine::materialize
 /// Depth-first walk collecting regular files as `PackageFile`s. Symlinks are not
 /// followed (the resolved root was already containment-checked; following links
 /// here would be a needless escape vector for a read).
-fn collect_files(base: &Path, dir: &Path, out: &mut Vec<crate::engine::materialize::PackageFile>) {
+fn collect_files(base: &Path, dir: &Path, out: &mut Vec<crate::materialize::PackageFile>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
@@ -301,7 +301,7 @@ fn collect_files(base: &Path, dir: &Path, out: &mut Vec<crate::engine::materiali
                     continue;
                 }
             };
-            out.push(crate::engine::materialize::PackageFile { path: rel, content });
+            out.push(crate::materialize::PackageFile { path: rel, content });
         }
     }
 }

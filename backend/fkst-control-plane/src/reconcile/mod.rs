@@ -80,12 +80,10 @@ use std::time::{Duration, SystemTime};
 pub use config::ReconcileConfig;
 
 use crate::engine::EngineConfig;
-
-/// Runtime-dir prefix — the ONLY class the sweep deletes. A runtime dir's path
-/// is persisted on `SessionDoc.runtime_dir`, so it is fully fenceable against
-/// the live set. (Kept in sync with [`crate::engine::runner`] — this module
-/// only READS that naming convention, it never changes it.)
-pub(crate) const RUNTIME_DIR_PREFIX: &str = "fkst-rt-";
+// The runtime-dir prefix + age helper are engine-side facts now owned by the
+// `fkst-engine` crate (issue #151); this module only READS them, it never
+// redefines them.
+use crate::engine::{dir_age, RUNTIME_DIR_PREFIX};
 
 /// Package-dir prefix — scanned and counted but **never deleted**: the package
 /// dir path is not persisted on the session doc, so it cannot be fenced, and
@@ -282,13 +280,6 @@ pub fn sweep_orphan_runtime_dirs(
     }
 
     report
-}
-
-/// Age of `path` relative to `now`, derived from its mtime. A future mtime
-/// (clock skew) yields a zero age (treated as "fresh"), never a panic.
-pub(crate) fn dir_age(path: &Path, now: SystemTime) -> Result<Duration, std::io::Error> {
-    let mtime = fs::metadata(path)?.modified()?;
-    Ok(now.duration_since(mtime).unwrap_or(Duration::ZERO))
 }
 
 /// Build the OS-TRUTH live fencing set — the canonical+lexical paths of every

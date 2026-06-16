@@ -37,9 +37,9 @@ use secrecy::{ExposeSecret, SecretString};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
 
-use crate::engine::config::{is_reserved_env_key, ENGINE_ENV_ALLOWLIST};
-use crate::engine::error::{truncate_output_lossy, RunnerError};
-use crate::engine::goal_token::{git_config_entries, MINT_NONCE_ENV};
+use crate::config::{is_reserved_env_key, ENGINE_ENV_ALLOWLIST};
+use crate::error::{truncate_output_lossy, RunnerError};
+use crate::goal_token::{git_config_entries, MINT_NONCE_ENV};
 
 /// Byte cap of the shared output ring buffer (64 KiB) that merges the
 /// child's stdout and stderr. The drain tasks run for the child's lifetime so
