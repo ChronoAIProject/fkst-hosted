@@ -184,24 +184,20 @@ async fn main() -> ExitCode {
     //     scope). Runtime dirs are fenced against live sessions' runtime_dir
     //     values and an mtime safety threshold. Package dirs (fkst-pkg-*) are
     //     NOT deleted — their path is not persisted, so they cannot be fenced
-    //     (counted as skipped_unfenceable). FAIL-OPEN: a sweep error logs WARN
-    //     and never blocks startup — cleaning is best-effort, unlike the
-    //     fail-closed config/index steps above.
-    match reconcile_orphans(&db, &reconcile_engine_config, &reconcile_config).await {
-        Ok(report) => tracing::info!(
-            scanned = report.scanned,
-            swept = report.swept_count(),
-            skipped_live = report.skipped_live,
-            skipped_too_new = report.skipped_too_new,
-            skipped_unfenceable = report.skipped_unfenceable,
-            errors = report.error_count(),
-            "orphan temp-dir reconciliation completed"
-        ),
-        Err(error) => tracing::warn!(
-            error = %error,
-            "orphan temp-dir reconciliation failed (non-fatal, continuing startup)"
-        ),
-    }
+    //     (counted as skipped_unfenceable). The live fence is now OS truth
+    //     (#136): live = owner pid alive & leads its group & breadcrumb present
+    //     — no Mongo query. FAIL-OPEN + infallible: an unreadable temp_root just
+    //     yields an empty sweep; cleaning is best-effort.
+    let report = reconcile_orphans(&reconcile_engine_config, &reconcile_config);
+    tracing::info!(
+        scanned = report.scanned,
+        swept = report.swept_count(),
+        skipped_live = report.skipped_live,
+        skipped_too_new = report.skipped_too_new,
+        skipped_unfenceable = report.skipped_unfenceable,
+        errors = report.error_count(),
+        "orphan temp-dir reconciliation completed"
+    );
 
     // 4g. Spawn the takeover reaper, cancelled on shutdown.
     let reaper_shutdown = CancellationToken::new();

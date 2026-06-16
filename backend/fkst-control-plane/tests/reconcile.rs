@@ -1,227 +1,145 @@
-//! Integration test for the boot-time orphan temp-dir reconciliation
-//! (issue #26, reduced scope): a real testcontainers Mongo + a real temp_root
-//! with planted `fkst-rt-*` / `fkst-pkg-*` dirs + seeded sessions.
+//! Integration test for the boot-time orphan temp-dir reconciliation, now
+//! fenced by OS TRUTH (issue #136): a real temp_root with planted `fkst-rt-*` /
+//! `fkst-pkg-*` dirs, where "live" means a present owner breadcrumb whose owner
+//! process is still alive & leads its own group — NOT a Mongo `sessions` query.
 //!
-//! Self-skips when Docker is unavailable so `cargo test` stays green on
-//! runners without a Docker daemon (the established pattern).
+//! No datastore: these tests need no Docker / Mongo and always run.
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::breadcrumb::{write_owner_breadcrumb, OwnerBreadcrumb};
+use fkst_control_plane::engine::is_pid_alive;
 use fkst_control_plane::engine::EngineConfig;
-use fkst_control_plane::models::{SessionDoc, SessionStatus};
 use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::mongo::Mongo;
-
-/// True when a Docker daemon answers `docker info`.
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-/// Mongo image tag — pinned to the same major as the sibling suites.
-const MONGO_TAG: &str = "7";
-
-/// Start an ephemeral Mongo and build a connected `Db` over it.
-async fn mongo_db() -> (ContainerAsync<Mongo>, Db) {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
-    (container, db)
-}
 
 /// Plant a `fkst-*` dir under `base` with a marker file, aged `age_secs` old.
 fn plant_dir(base: &Path, name: &str, age_secs: u64) -> PathBuf {
     let path = base.join(name);
     fs::create_dir(&path).expect("create planted dir");
     fs::write(path.join("marker"), b"x").expect("marker");
-    let when = SystemTime::now() - Duration::from_secs(age_secs);
-    let ft = filetime::FileTime::from_system_time(when);
-    filetime::set_file_mtime(&path, ft).expect("set mtime");
+    age(&path, age_secs);
     path
 }
 
-/// Build a session document with the given status and runtime_dir.
-fn session(status: SessionStatus, runtime_dir: Option<&Path>) -> SessionDoc {
-    SessionDoc {
-        id: bson::Uuid::new(),
-        package_name: "demo".to_string(),
-        status,
-        pod_id: Some("pod-test".to_string()),
-        fencing_token: Some(1),
-        pid: Some(1234),
-        runtime_dir: runtime_dir.map(|p| p.to_string_lossy().to_string()),
-        error: None,
-        run_key: None,
-        owner_user_id: None,
-        org_id: None,
-        package_names: vec![],
+/// Set a dir's mtime to `age_secs` in the past (call AFTER any file writes,
+/// which would otherwise bump the dir mtime back to now).
+fn age(path: &Path, age_secs: u64) {
+    let when = SystemTime::now() - Duration::from_secs(age_secs);
+    let ft = filetime::FileTime::from_system_time(when);
+    filetime::set_file_mtime(path, ft).expect("set mtime");
+}
+
+/// Spawn a real `sleep` child leading its own process group; returns (pid, child).
+/// The child is held so the caller can kill it at the end of the test.
+async fn spawn_grouped_sleeper() -> (i32, tokio::process::Child) {
+    let child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg("sleep 30")
+        .process_group(0)
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn sleeper");
+    let pid = child.id().expect("pid") as i32;
+    (pid, child)
+}
+
+fn owner_for(pid: i32) -> OwnerBreadcrumb {
+    OwnerBreadcrumb {
+        session_id: "live-sess".to_string(),
+        pid,
+        pgid: pid,
         goal_id: None,
-        repo: None,
-        env_scope: None,
-        triggered_by: None,
-        nyxid_key_id: None,
-        nyxid_key_prefix: None,
-        ornn_skills: None,
-        created_at: bson::DateTime::now(),
-        started_at: Some(bson::DateTime::now()),
-        stopped_at: None,
+        run_nonce: "live-nonce".to_string(),
+        worker_id: "w".to_string(),
     }
 }
 
-#[tokio::test]
-async fn boot_sweep_removes_orphans_and_spares_live_and_fresh_dirs() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
-    let (_container, db) = mongo_db().await;
-    db.ensure_indexes().await.expect("ensure indexes");
+fn config(root: &Path) -> (EngineConfig, ReconcileConfig) {
+    (
+        EngineConfig {
+            temp_root: root.to_path_buf(),
+            ..EngineConfig::default()
+        },
+        ReconcileConfig {
+            min_age: Duration::from_secs(300),
+            dry_run: false,
+        },
+    )
+}
 
+#[tokio::test]
+async fn boot_sweep_spares_live_owner_and_sweeps_orphans() {
     let temp_root = tempfile::tempdir().expect("temp_root");
     let root = temp_root.path();
 
-    // 1. A running session whose runtime_dir points at a planted dir -> must
-    //    survive (fenced by the live set even though it is old).
-    let live_dir = plant_dir(root, "fkst-rt-live", 600);
-    db.sessions()
-        .insert_one(session(SessionStatus::Running, Some(&live_dir)))
-        .await
-        .expect("insert running session");
+    // 1. A LIVE-owner runtime dir (breadcrumb -> a real alive process) -> spared
+    //    by the live fence even though it is old.
+    let (live_pid, mut live_child) = spawn_grouped_sleeper().await;
+    let live_dir = root.join("fkst-rt-live");
+    fs::create_dir(&live_dir).unwrap();
+    write_owner_breadcrumb(&live_dir, &owner_for(live_pid)).unwrap();
+    age(&live_dir, 600); // age AFTER the breadcrumb write
+    assert!(is_pid_alive(live_pid));
 
-    // 2. A stopped session whose runtime_dir points at a planted dir -> that
-    //    dir is an orphan (terminal session) -> swept.
-    let stopped_dir = plant_dir(root, "fkst-rt-stopped", 600);
-    db.sessions()
-        .insert_one(session(SessionStatus::Stopped, Some(&stopped_dir)))
-        .await
-        .expect("insert stopped session");
+    // 2. A runtime dir with NO breadcrumb -> orphan -> swept (old enough).
+    let no_bc_rt = plant_dir(root, "fkst-rt-orphan", 600);
 
-    // 3. A runtime dir with NO session at all -> swept (fenceable, orphan).
-    let no_session_rt = plant_dir(root, "fkst-rt-orphan", 600);
+    // 3. A PACKAGE dir -> unfenceable, NEVER deleted.
+    let pkg = plant_dir(root, "fkst-pkg-demo-orphan", 600);
 
-    // 4. A PACKAGE dir with NO session at all -> survives: package dirs are
-    //    unfenceable (their path is not persisted) and are NEVER deleted.
-    let no_session_pkg = plant_dir(root, "fkst-pkg-demo-orphan", 600);
+    // 4. A too-new runtime orphan -> spared by the mtime fence.
+    let fresh = plant_dir(root, "fkst-rt-fresh", 5);
 
-    // 5. A too-new runtime dir with no session -> survives (mtime fence).
-    let fresh_dir = plant_dir(root, "fkst-rt-fresh", 5);
-
-    // 6. A non-fkst dir -> never even scanned, always survives.
+    // 5. A non-fkst dir -> never scanned.
     let unrelated = root.join("unrelated");
-    fs::create_dir(&unrelated).expect("unrelated dir");
+    fs::create_dir(&unrelated).unwrap();
 
-    let engine_config = EngineConfig {
-        temp_root: root.to_path_buf(),
-        ..EngineConfig::default()
-    };
-    let reconcile_config = ReconcileConfig {
-        min_age: Duration::from_secs(300),
-        dry_run: false,
-    };
+    let (engine_config, reconcile_config) = config(root);
+    let report = reconcile_orphans(&engine_config, &reconcile_config);
 
-    let report = reconcile_orphans(&db, &engine_config, &reconcile_config)
-        .await
-        .expect("reconcile pass");
-
-    // Counts: scanned the 5 fkst-* dirs; swept the 2 genuine RUNTIME orphans;
-    // spared the live runtime dir, the too-new one, and the package dir.
-    assert_eq!(report.scanned, 5, "five fkst-* dirs scanned");
-    assert_eq!(report.swept_count(), 2, "two genuine runtime orphans swept");
+    assert_eq!(report.scanned, 4, "four fkst-* dirs scanned");
+    assert_eq!(report.swept_count(), 1, "one genuine runtime orphan swept");
     assert_eq!(
         report.skipped_live, 1,
-        "the running session's runtime dir is spared"
+        "the live-owner runtime dir is spared"
     );
     assert_eq!(report.skipped_too_new, 1, "the fresh runtime dir is spared");
-    assert_eq!(
-        report.skipped_unfenceable, 1,
-        "the unfenceable package dir is spared"
-    );
-    assert!(report.errors.is_empty(), "no per-entry errors");
+    assert_eq!(report.skipped_unfenceable, 1, "the package dir is spared");
+    assert!(report.errors.is_empty());
 
-    // Disk reality matches the report.
-    assert!(live_dir.exists(), "live session's runtime dir survives");
-    assert!(fresh_dir.exists(), "too-new runtime dir survives");
-    assert!(no_session_pkg.exists(), "unfenceable package dir survives");
+    assert!(live_dir.exists(), "live-owner runtime dir survives");
+    assert!(fresh.exists(), "too-new runtime dir survives");
+    assert!(pkg.exists(), "unfenceable package dir survives");
     assert!(unrelated.exists(), "non-fkst dir untouched");
-    assert!(!stopped_dir.exists(), "stopped session's runtime dir swept");
-    assert!(!no_session_rt.exists(), "session-less runtime orphan swept");
+    assert!(!no_bc_rt.exists(), "breadcrumb-less runtime orphan swept");
 
     let swept: HashSet<PathBuf> = report.swept.into_iter().collect();
-    assert!(swept.contains(&stopped_dir));
-    assert!(swept.contains(&no_session_rt));
+    assert!(swept.contains(&no_bc_rt));
+
+    let _ = live_child.start_kill();
 }
 
 #[tokio::test]
 async fn boot_sweep_is_idempotent_on_a_clean_root() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
-    let (_container, db) = mongo_db().await;
-    db.ensure_indexes().await.expect("ensure indexes");
-
     let temp_root = tempfile::tempdir().expect("temp_root");
     let orphan = plant_dir(temp_root.path(), "fkst-rt-orphan", 600);
+    let (engine_config, reconcile_config) = config(temp_root.path());
 
-    let engine_config = EngineConfig {
-        temp_root: temp_root.path().to_path_buf(),
-        ..EngineConfig::default()
-    };
-    let reconcile_config = ReconcileConfig {
-        min_age: Duration::from_secs(300),
-        dry_run: false,
-    };
-
-    let first = reconcile_orphans(&db, &engine_config, &reconcile_config)
-        .await
-        .expect("first pass");
+    let first = reconcile_orphans(&engine_config, &reconcile_config);
     assert_eq!(first.swept_count(), 1);
     assert!(!orphan.exists());
 
-    // Second pass over the now-clean root: nothing to do.
-    let second = reconcile_orphans(&db, &engine_config, &reconcile_config)
-        .await
-        .expect("second pass");
+    let second = reconcile_orphans(&engine_config, &reconcile_config);
     assert_eq!(second.scanned, 0, "clean root has nothing to scan");
     assert_eq!(second.swept_count(), 0, "second pass is a no-op");
 }
 
 #[tokio::test]
 async fn boot_sweep_dry_run_records_but_deletes_nothing() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
-    let (_container, db) = mongo_db().await;
-    db.ensure_indexes().await.expect("ensure indexes");
-
     let temp_root = tempfile::tempdir().expect("temp_root");
-    // A runtime orphan (the swept class) plus a package dir (never swept).
     let rt_orphan = plant_dir(temp_root.path(), "fkst-rt-dry", 600);
     let pkg_orphan = plant_dir(temp_root.path(), "fkst-pkg-demo-dry", 600);
 
@@ -234,17 +152,15 @@ async fn boot_sweep_dry_run_records_but_deletes_nothing() {
         dry_run: true,
     };
 
-    let report = reconcile_orphans(&db, &engine_config, &reconcile_config)
-        .await
-        .expect("dry-run pass");
+    let report = reconcile_orphans(&engine_config, &reconcile_config);
     assert_eq!(
         report.swept_count(),
         1,
-        "dry-run records the would-sweep runtime orphan"
+        "dry-run records the would-sweep orphan"
     );
     assert_eq!(
         report.skipped_unfenceable, 1,
-        "the package dir is never a sweep candidate"
+        "the package dir is never a candidate"
     );
     assert!(
         rt_orphan.exists(),
