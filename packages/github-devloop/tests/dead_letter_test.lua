@@ -125,6 +125,42 @@ return {
     t.is_true(request.body:find("&lt;!-- fkst:forged -->", 1, true) ~= nil)
   end,
 
+  test_failure_triage_issue_neutralizes_untrusted_fact_fields = function()
+    local fact = {
+      source_repo = "owner/repo",
+      parent_target = {
+        repo = "owner/repo",
+        issue_number = "140",
+      },
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#issue/140` <!-- fkst:source-ref -->",
+      },
+      error_class = "codex-failed",
+      queue = "github-devloop.devloop_fixing` <!-- fkst:queue -->",
+      fingerprint = "efp-1` <!-- fkst:fingerprint -->",
+      attempt = 1,
+      terminal = true,
+      dead_queue = "dead_letter` <!-- fkst:dead -->",
+      dept = "github-devloop.fix` <!-- fkst:dept -->",
+      delivery_id = "delivery-1` <!-- fkst:delivery -->",
+      message = "summary <!-- fkst:message -->",
+    }
+
+    local request = core.build_failure_triage_issue_create_request(fact, 1)
+
+    t.eq(request.title:find("<!-- fkst:", 1, true), nil)
+    t.eq(request.body:find("<!-- fkst:", 1, true), nil)
+    t.is_true(request.title:find("&lt;!-- fkst:queue -->", 1, true) ~= nil)
+    t.is_true(request.body:find("&lt;!-- fkst:fingerprint -->", 1, true) ~= nil)
+    t.is_true(request.body:find("&lt;!-- fkst:source-ref -->", 1, true) ~= nil)
+    t.is_true(request.body:find("&lt;!-- fkst:dept -->", 1, true) ~= nil)
+    t.is_true(request.body:find("&lt;!-- fkst:delivery -->", 1, true) ~= nil)
+    t.is_true(request.body:find("&lt;!-- fkst:message -->", 1, true) ~= nil)
+    t.eq(request.body:find("`github-devloop.fix`", 1, true), nil)
+    t.is_true(request.body:find("`github-devloop.fix' &lt;!-- fkst:dept -->`", 1, true) ~= nil)
+  end,
+
   test_non_terminal_error_fact_raises_for_new_fingerprint_and_threshold_crossing = function()
     local fact = core.build_error_fact({
       queue = "github-devloop.devloop_reviewing",

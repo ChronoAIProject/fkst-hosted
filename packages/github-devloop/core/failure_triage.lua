@@ -140,8 +140,26 @@ local function claim_threshold(repo, fingerprint, window_key)
   return true
 end
 
+local function display_text(value, limit)
+  local text = M.neutralize_untrusted_comment_text(M._one_line(value))
+  text = text:gsub("`", "'"):gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then
+    text = "unknown"
+  end
+  if limit ~= nil and #text > limit then
+    text = M.truncate_utf8(text, limit)
+  end
+  return text
+end
+
+local function display_source_ref(source_ref)
+  local value = tostring(source_ref and source_ref.kind or "") .. ":" .. tostring(source_ref and source_ref.ref or "")
+  return display_text(value, M._max_key_len * 2 + 1)
+end
+
 local function title(fact)
-  local result = "Investigate L2 failure: " .. tostring(fact.error_class) .. " in " .. tostring(fact.queue)
+  local result = "Investigate L2 failure: " .. display_text(fact.error_class, M._max_key_len)
+    .. " in " .. display_text(fact.queue, M._max_key_len)
   if #result > M._max_title_len then
     result = M.truncate_utf8(result, M._max_title_len)
   end
@@ -153,18 +171,18 @@ local function body(fact, count)
     "L2 failure triage filed this issue from an existing structured dead-letter fact.",
     "",
     "Contract facts:",
-    "- `error_class`: `" .. tostring(fact.error_class) .. "`",
-    "- `fingerprint`: `" .. tostring(fact.fingerprint) .. "`",
-    "- `source_ref`: `" .. tostring(fact.source_ref.kind) .. ":" .. tostring(fact.source_ref.ref) .. "`",
-    "- `attempt`: `" .. tostring(fact.attempt) .. "`",
-    "- `terminal`: `" .. tostring(fact.terminal) .. "`",
+    "- `error_class`: `" .. display_text(fact.error_class, M._max_key_len) .. "`",
+    "- `fingerprint`: `" .. display_text(fact.fingerprint, M._max_key_len) .. "`",
+    "- `source_ref`: `" .. display_source_ref(fact.source_ref) .. "`",
+    "- `attempt`: `" .. display_text(fact.attempt, M._max_key_len) .. "`",
+    "- `terminal`: `" .. display_text(fact.terminal, M._max_key_len) .. "`",
     "",
     "Delivery context:",
-    "- `queue`: `" .. tostring(fact.queue) .. "`",
-    "- `dead_queue`: `" .. tostring(fact.dead_queue) .. "`",
-    "- `dept`: `" .. tostring(fact.dept) .. "`",
-    "- `delivery_id`: `" .. tostring(fact.delivery_id) .. "`",
-    "- `observed_count`: `" .. tostring(count) .. "`",
+    "- `queue`: `" .. display_text(fact.queue, M._max_key_len) .. "`",
+    "- `dead_queue`: `" .. display_text(fact.dead_queue, M._max_key_len) .. "`",
+    "- `dept`: `" .. display_text(fact.dept, M._max_key_len) .. "`",
+    "- `delivery_id`: `" .. display_text(fact.delivery_id, M._max_key_len) .. "`",
+    "- `observed_count`: `" .. display_text(count, M._max_key_len) .. "`",
     "",
     "Requested outcome:",
     "- Diagnose the structural cause behind this failure fingerprint.",
