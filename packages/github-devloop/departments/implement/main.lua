@@ -183,51 +183,6 @@ local function handle_implementing_version_mismatch(repo, issue_number, current,
     .. tostring(state and state.version or ""))
 end
 
-local function implementing_takeover_guard(current, proposal_id, dedup_key)
-  local attempt = core.latest_implement_attempt_fact(current.comments, proposal_id, dedup_key)
-  if attempt ~= nil then
-    local started = tonumber(attempt.started_at)
-    if started == nil or now() - started < 7200 then
-      return false, "implement attempt is still inside the liveness budget"
-    end
-    return true, "expired implement attempt exceeded liveness budget"
-  end
-
-  if core.implementing_fact(current.comments, proposal_id, dedup_key) == nil then
-    return false, "no implementing owner fact is visible"
-  end
-  local marker_updated_at = core.version_updated_at(dedup_key)
-  local marker_seconds = core.iso_timestamp_epoch_seconds(marker_updated_at)
-  if marker_seconds == nil or now() - marker_seconds < 7200 then
-    return false, "implementing owner marker is still inside the liveness budget"
-  end
-  return true, "orphaned implementing owner marker exceeded liveness budget without an attempt marker"
-end
-
-local function implementing_recovery_ready(ready, state, current)
-  if type(state) ~= "table" or state.state ~= "implementing" then
-    return nil, nil
-  end
-  local current_version = tostring(state.version or "")
-  if current_version == "" then
-    return nil, nil
-  end
-  local replay_version = core.build_devloop_ready_payload({
-    proposal_id = ready.proposal_id,
-    dedup_key = current_version,
-    source_ref = ready.source_ref,
-    impl_retry_attempt = core.implementation_retry_attempt(current_version),
-  }).dedup_key
-  if tostring(ready.dedup_key or "") ~= replay_version then
-    return nil, nil
-  end
-  local allowed, reason = implementing_takeover_guard(current, ready.proposal_id, current_version)
-  if not allowed then
-    return nil, reason, true
-  end
-  return ready_for_implementation_version(ready, current_version), reason, true
-end
-
 local function implementing_mismatch_is_durable(current, proposal_id, state)
   local version = state and state.version
   return core.latest_implement_attempt_fact(current and current.comments, proposal_id, version) ~= nil
@@ -659,16 +614,6 @@ local function process_ready_event(event)
     local branch = core.implement_branch(repo, issue_number, branch_version)
 
     if state.state == "implementing" then
-      local recovery_ready, recovery_reason, recovery_matched = implementing_recovery_ready(ready, state, current)
-      if recovery_ready ~= nil then
-        marker_ready = recovery_ready
-        branch_version = core.implementation_base_version(marker_ready.dedup_key)
-        branch = core.implement_branch(repo, issue_number, branch_version)
-        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(liveness-redrive)", recovery_reason)
-      elseif recovery_matched then
-        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "skip-stale(liveness-budget)", recovery_reason)
-        return
-      end
       if tostring(state.version or "") ~= tostring(marker_ready.dedup_key or "") then
         if not implementing_mismatch_is_durable(current, ready.proposal_id, state) then
           core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "implementing state marker has no durable progress fact")
