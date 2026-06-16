@@ -33,7 +33,7 @@ use std::time::SystemTime;
 
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::engine::error::RunnerError;
+use crate::error::RunnerError;
 
 /// File name of the rotatable token file inside the runtime dir.
 pub const TOKEN_FILE_NAME: &str = "github-token";

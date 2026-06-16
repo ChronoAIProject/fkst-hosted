@@ -6,6 +6,10 @@ edition.workspace = true
 [dependencies]
 # Role-neutral models + transport clients shared with the worker (issue #145).
 fkst-shared = { path = "../fkst-shared" }
+# The engine integration (the session runner), extracted from this crate so the
+# worker can drive it too (issue #151). `crate::engine` is now a re-export of
+# this crate; links neither `mongodb` nor `axum`.
+fkst-engine = { path = "../fkst-engine" }
 async-trait = "0.1"
 axum = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "fs"] }

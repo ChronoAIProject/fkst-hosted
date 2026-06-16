@@ -12,7 +12,11 @@ pub mod config;
 pub mod controller;
 pub mod db;
 pub mod distribution;
-pub mod engine;
+// The engine integration was extracted to the `fkst-engine` crate (issue #151)
+// so both the control-plane and the worker can drive it. Re-exported here under
+// the same `engine` name so every existing `crate::engine::*` /
+// `fkst_control_plane::engine::*` path keeps resolving unchanged.
+pub use fkst_engine as engine;
 pub mod error;
 pub mod github_app;
 pub mod github_hub;

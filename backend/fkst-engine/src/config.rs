@@ -1,14 +1,26 @@
 //! Engine runner configuration loaded from `FKST_HOSTED_ENGINE_*` variables.
 //!
-//! Mirrors the [`crate::config`] pattern: a single envy pass over an explicit
-//! key/value snapshot (`from_vars` is the testable seam), serde defaults for
-//! every key, and loud rejection of dangerous zero timeouts.
+//! A single envy pass over an explicit key/value snapshot (`from_vars` is the
+//! testable seam), serde defaults for every key, and loud rejection of
+//! dangerous zero timeouts.
 
 use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use crate::error::AppError;
+/// Error raised while loading [`EngineConfig`] from the environment.
+///
+/// The engine crate is role-neutral (it links neither the control-plane's
+/// `AppError` nor `axum`), so the config-load path carries its own minimal
+/// error. Callers map it onto their own error envelope (the control-plane's
+/// `From<EngineConfigError> for AppError` renders it as a 500 config error).
+#[derive(Debug, thiserror::Error)]
+pub enum EngineConfigError {
+    /// The configuration could not be parsed, or a value is out of range
+    /// (e.g. a zero timeout). The message names the offending env var.
+    #[error("{0}")]
+    Invalid(String),
+}
 
 /// Prefix shared by every engine-runner configuration environment variable.
 const ENV_PREFIX: &str = "FKST_HOSTED_ENGINE_";
@@ -134,13 +146,13 @@ impl EngineConfig {
     /// Deserialize an `EngineConfig` from environment-style key/value pairs.
     ///
     /// Testable seam: unit tests feed explicit pairs instead of mutating the
-    /// process environment (mirrors [`crate::config::Config::from_vars`]).
+    /// process environment.
     pub fn from_vars(
         vars: impl IntoIterator<Item = (String, String)>,
-    ) -> Result<EngineConfig, AppError> {
+    ) -> Result<EngineConfig, EngineConfigError> {
         let config: EngineConfig = envy::prefixed(ENV_PREFIX)
             .from_iter(vars)
-            .map_err(|e| AppError::Config(e.to_string()))?;
+            .map_err(|e| EngineConfigError::Invalid(e.to_string()))?;
 
         // A zero grace would jump straight to SIGKILL and a zero timeout
         // would fail every conformance run / ready-wait instantly — total
@@ -162,7 +174,9 @@ impl EngineConfig {
             ),
         ] {
             if value == 0 {
-                return Err(AppError::Config(format!("{var} must be at least 1")));
+                return Err(EngineConfigError::Invalid(format!(
+                    "{var} must be at least 1"
+                )));
             }
         }
 
@@ -170,7 +184,7 @@ impl EngineConfig {
     }
 
     /// Load the configuration from the process environment.
-    pub fn load_from_env() -> Result<EngineConfig, AppError> {
+    pub fn load_from_env() -> Result<EngineConfig, EngineConfigError> {
         Self::from_vars(std::env::vars())
     }
 }
@@ -345,7 +359,7 @@ mod tests {
     fn zero_stop_grace_is_a_config_error_naming_the_env_var() {
         let err = EngineConfig::from_vars(vars(&[("FKST_HOSTED_ENGINE_STOP_GRACE_SECS", "0")]))
             .expect_err("zero grace must fail");
-        assert!(matches!(err, AppError::Config(_)));
+        assert!(matches!(err, EngineConfigError::Invalid(_)));
         assert!(err
             .to_string()
             .contains("FKST_HOSTED_ENGINE_STOP_GRACE_SECS"));
@@ -358,7 +372,7 @@ mod tests {
             "0",
         )]))
         .expect_err("zero timeout must fail");
-        assert!(matches!(err, AppError::Config(_)));
+        assert!(matches!(err, EngineConfigError::Invalid(_)));
         assert!(err
             .to_string()
             .contains("FKST_HOSTED_ENGINE_CONFORMANCE_TIMEOUT_SECS"));
@@ -368,7 +382,7 @@ mod tests {
     fn zero_ready_timeout_is_a_config_error_naming_the_env_var() {
         let err = EngineConfig::from_vars(vars(&[("FKST_HOSTED_ENGINE_READY_TIMEOUT_SECS", "0")]))
             .expect_err("zero timeout must fail");
-        assert!(matches!(err, AppError::Config(_)));
+        assert!(matches!(err, EngineConfigError::Invalid(_)));
         assert!(err
             .to_string()
             .contains("FKST_HOSTED_ENGINE_READY_TIMEOUT_SECS"));
@@ -381,7 +395,7 @@ mod tests {
             "0",
         )]))
         .expect_err("zero refresh must fail");
-        assert!(matches!(err, AppError::Config(_)));
+        assert!(matches!(err, EngineConfigError::Invalid(_)));
         assert!(err
             .to_string()
             .contains("FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS"));
@@ -391,7 +405,7 @@ mod tests {
     fn non_numeric_timeout_is_a_config_error() {
         let err = EngineConfig::from_vars(vars(&[("FKST_HOSTED_ENGINE_STOP_GRACE_SECS", "soon")]))
             .expect_err("non-numeric grace must fail");
-        assert!(matches!(err, AppError::Config(_)));
+        assert!(matches!(err, EngineConfigError::Invalid(_)));
     }
 
     #[test]

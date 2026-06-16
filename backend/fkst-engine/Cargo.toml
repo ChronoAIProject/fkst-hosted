@@ -1,0 +1,43 @@
+# fkst-engine: the session-runner engine integration extracted from the
+# control-plane (issue #151, Phase 1). It turns a stored fkst package into a
+# live `fkst-framework` process and back, strictly via the engine's CLI
+# contract (issue #17 spike).
+#
+# It is role-neutral so BOTH `fkst-control-plane` and `fkst-worker` can link it.
+# It deliberately depends on NEITHER `mongodb` NOR `axum`: those omissions are
+# the compiler-enforced boundary that keeps the worker database-free even once
+# it drives the engine (a later phase). `cargo tree -p fkst-engine` must show
+# neither.
+[package]
+name = "fkst-engine"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "fkst_engine"
+
+[dependencies]
+# Role-neutral domain models (RepoRef) shared with both deployables (#145).
+fkst-shared = { path = "../fkst-shared" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `bson` renders the breadcrumb RFC3339 timestamps (DateTime). It is a
+# standalone crate, independent of the `mongodb` driver — keeping the driver
+# out is what keeps the engine (and thus the worker) database-free.
+bson = "2"
+thiserror = "1"
+tracing = "0.1"
+regex = "1"
+secrecy = "0.10"
+envy = "0.4"
+nix = { version = "0.29", features = ["signal", "process"] }
+# `rand` (0.8) sources the runtime nonces (goal-token mint challenge).
+rand = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "sync", "io-util", "fs"] }
+tempfile = "3"
+
+[dev-dependencies]
+# The inline `#[cfg(test)]` suites drive async runner/process tests and set file
+# mtimes; `tempfile` is already a normal dep (the runner materializes temp dirs
+# at runtime), so it is not repeated here.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

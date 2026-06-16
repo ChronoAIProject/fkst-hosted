@@ -164,14 +164,16 @@ RUN test -x /cli-dist/nyxid \
 # ---- server build stage: builds the WHOLE workspace (both bins) ----
 FROM rust:${RUST_VERSION}-bookworm AS server-builder
 WORKDIR /app
-# 1) cache the dependency graph first (all three crate manifests + lockfile +
+# 1) cache the dependency graph first (all four crate manifests + lockfile +
 #    stub sources). The stubs compile, so this warm build must succeed.
 COPY backend/Cargo.toml backend/Cargo.lock ./
 COPY backend/fkst-shared/Cargo.toml fkst-shared/Cargo.toml
+COPY backend/fkst-engine/Cargo.toml fkst-engine/Cargo.toml
 COPY backend/fkst-control-plane/Cargo.toml fkst-control-plane/Cargo.toml
 COPY backend/fkst-worker/Cargo.toml fkst-worker/Cargo.toml
-RUN mkdir -p fkst-shared/src fkst-control-plane/src fkst-worker/src \
+RUN mkdir -p fkst-shared/src fkst-engine/src fkst-control-plane/src fkst-worker/src \
     && echo '' > fkst-shared/src/lib.rs \
+    && echo '' > fkst-engine/src/lib.rs \
     && echo 'fn main() {}' > fkst-control-plane/src/main.rs \
     && echo '' > fkst-control-plane/src/lib.rs \
     && echo 'fn main() {}' > fkst-worker/src/main.rs \
@@ -181,7 +183,7 @@ RUN mkdir -p fkst-shared/src fkst-control-plane/src fkst-worker/src \
 # touch: the copied sources keep their (older) context mtimes, so without it
 # cargo's mtime-based freshness check would keep the stub-built binaries.
 COPY backend/ ./
-RUN touch fkst-shared/src/lib.rs \
+RUN touch fkst-shared/src/lib.rs fkst-engine/src/lib.rs \
         fkst-control-plane/src/main.rs fkst-control-plane/src/lib.rs \
         fkst-worker/src/main.rs fkst-worker/src/lib.rs \
     && cargo build --release --locked --workspace

@@ -23,6 +23,11 @@ path = "src/main.rs"
 # the worker links. fkst-shared pulls `bson` but NOT the `mongodb` driver, so
 # the worker stays database-free.
 fkst-shared = { path = "../fkst-shared" }
+# The engine integration (the session runner). Wired in a later phase (#151);
+# the dependency is declared now to prove the boundary holds — `fkst-engine`
+# links neither `mongodb` nor `fkst-control-plane`, so the worker stays
+# database-free even once it drives the engine.
+fkst-engine = { path = "../fkst-engine" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "time", "sync"] }
 tokio-util = "0.7"
 tracing = "0.1"
