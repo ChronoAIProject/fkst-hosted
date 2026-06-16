@@ -61,15 +61,3 @@ packages/github-devloop/departments/observability/dashboard.lua:
   - gh dashboard
 packages/github-devloop/departments/observability/reaper.lua:
   - gh orphan
-packages/github-proxy/core/claims.lua:
-  - gh issue
-packages/github-proxy/core/entity_view.lua:
-  - gh api
-packages/github-proxy/core/github_graphql.lua:
-  - gh api
-packages/github-proxy/core/issue_create.lua:
-  - gh issue
-packages/github-proxy/core/rest_view.lua:
-  - gh api
-packages/github-proxy/departments/github_poll/main.lua:
-  - gh

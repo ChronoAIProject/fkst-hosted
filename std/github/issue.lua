@@ -54,6 +54,15 @@ local function gh_issue_rest_argv(repo, issue_number)
   return { "gh", "api", "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) }
 end
 
+local function gh_graphql_argv(query, fields)
+  local argv = { "gh", "api", "graphql", "-f", "query=" .. tostring(query) }
+  for key, value in pairs(fields or {}) do
+    table.insert(argv, "-f")
+    table.insert(argv, tostring(key) .. "=" .. tostring(value))
+  end
+  return argv
+end
+
 local function gh_issue_comments_rest_argv(repo, issue_number)
   return {
     "gh",
@@ -61,6 +70,19 @@ local function gh_issue_comments_rest_argv(repo, issue_number)
     "--paginate",
     "--slurp",
     "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100",
+  }
+end
+
+local function gh_issue_edit_assignee_argv(repo, issue_number, flag, login)
+  return {
+    "gh",
+    "issue",
+    "edit",
+    tostring(issue_number),
+    "--repo",
+    tostring(repo),
+    flag,
+    tostring(login),
   }
 end
 
@@ -391,6 +413,41 @@ function M.install(handle)
     local out = handle._exec(gh_issue_view_full_argv(repo, number), timeout, "gh issue view")
     cache_successful_issue_view(key, out.stdout, options.consumer or "")
     return M.normalize_issue(out.stdout, source_ref)
+  end
+
+  function handle.issue_rest_view(repo, issue_number, timeout)
+    return handle._exec(gh_issue_rest_argv(repo, issue_number), timeout, "gh issue REST view")
+  end
+
+  function handle.issue_updated_at(repo, issue_number, timeout)
+    return handle._exec(gh_issue_updated_at_argv(repo, issue_number), timeout, "gh issue updated_at")
+  end
+
+  function handle.entity_updated_at(repo, kind, number, timeout)
+    if kind == "pr" then
+      return handle.pr_updated_at(repo, number, timeout)
+    end
+    return handle.issue_updated_at(repo, number, timeout)
+  end
+
+  function handle.issue_assign(repo, issue_number, login, timeout)
+    return handle._exec(
+      gh_issue_edit_assignee_argv(repo, issue_number, "--add-assignee", login),
+      timeout,
+      "gh issue assign"
+    )
+  end
+
+  function handle.issue_unassign(repo, issue_number, login, timeout)
+    return handle._exec(
+      gh_issue_edit_assignee_argv(repo, issue_number, "--remove-assignee", login),
+      timeout,
+      "gh issue unassign"
+    )
+  end
+
+  function handle.graphql(query, fields, timeout)
+    return handle._exec(gh_graphql_argv(query, fields), timeout, "gh GraphQL")
   end
 end
 

@@ -55,8 +55,8 @@ local function has_arg_pair(rendered, flag, value)
 end
 
 local function assert_pr_rest_view_fetch(pr_number)
-  t.eq(count_calls(core.gh_pr_rest_view_cmd("owner/x", pr_number)), 1)
-  t.is_true(count_calls(core.gh_issue_comments_api_cmd("owner/x", pr_number)) >= 1)
+  t.eq(count_calls("gh api repos/owner/x/pulls/" .. tostring(pr_number)), 1)
+  t.is_true(count_calls("gh api --paginate --slurp repos/owner/x/issues/" .. tostring(pr_number) .. "/comments?per_page=100") >= 1)
 end
 
 return {
@@ -247,7 +247,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
+    t.mock_command("gh api repos/owner/x/issues/42 --jq .updated_at // .updatedAt // \"\"", {
       stdout = "2026-06-03T01:02:03Z\n",
       stderr = "",
       exit_code = 0,

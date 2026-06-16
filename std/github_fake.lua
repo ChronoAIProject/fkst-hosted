@@ -40,6 +40,56 @@ function M.new(model)
   end
   require("std.github.entities").install(handle)
   require("std.github.comments").install(handle)
+  function handle.issue_rest_view(repo, issue_number, timeout)
+    return handle._exec({ "gh", "api", "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) }, timeout, "gh issue REST view")
+  end
+  function handle.issue_updated_at(repo, issue_number, timeout)
+    return handle._exec({
+      "gh",
+      "api",
+      "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number),
+      "--jq",
+      ".updated_at // .updatedAt // \"\"",
+    }, timeout, "gh issue updated_at")
+  end
+  function handle.entity_updated_at(repo, kind, number, timeout)
+    if kind == "pr" then
+      return handle.pr_updated_at(repo, number, timeout)
+    end
+    return handle.issue_updated_at(repo, number, timeout)
+  end
+  function handle.issue_assign(repo, issue_number, login, timeout)
+    return handle._exec({
+      "gh",
+      "issue",
+      "edit",
+      tostring(issue_number),
+      "--repo",
+      tostring(repo),
+      "--add-assignee",
+      tostring(login),
+    }, timeout, "gh issue assign")
+  end
+  function handle.issue_unassign(repo, issue_number, login, timeout)
+    return handle._exec({
+      "gh",
+      "issue",
+      "edit",
+      tostring(issue_number),
+      "--repo",
+      tostring(repo),
+      "--remove-assignee",
+      tostring(login),
+    }, timeout, "gh issue unassign")
+  end
+  function handle.graphql(query, fields, timeout)
+    local argv = { "gh", "api", "graphql", "-f", "query=" .. tostring(query) }
+    for key, value in pairs(fields or {}) do
+      table.insert(argv, "-f")
+      table.insert(argv, tostring(key) .. "=" .. tostring(value))
+    end
+    return handle._exec(argv, timeout, "gh GraphQL")
+  end
   return handle
 end
 

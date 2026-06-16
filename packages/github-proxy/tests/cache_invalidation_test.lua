@@ -11,12 +11,12 @@ local count_calls = h.count_calls
 require("tests.entity_view_probe_helpers")
 
 local function mock_issue_view(title)
-  t.mock_command(core.gh_issue_view_entity_cmd("owner/x", 42), {
+  t.mock_command("gh api repos/owner/x/issues/42", {
     stdout = '{"title":"' .. tostring(title) .. '","body":"","state":"open","labels":[],"assignees":[],"updated_at":"2026-06-03T01:02:03Z"}\n',
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.gh_issue_comments_api_cmd("owner/x", 42), {
+  t.mock_command("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100", {
     stdout = "[[]]\n",
     stderr = "",
     exit_code = 0,
@@ -93,7 +93,7 @@ return {
     })
 
     mock_issue_view("Before")
-    t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
+    t.mock_command("gh api repos/owner/x/issues/42 --jq .updated_at // .updatedAt // \"\"", {
       stdout = "2026-06-03T01:02:03Z\n",
       stderr = "",
       exit_code = 0,
@@ -113,13 +113,13 @@ return {
     local after = run_entity_view_probe(run_opts, "second")
     t.eq(after.exit_code, 0)
     t.is_true(after.stdout:find('"After"', 1, true) ~= nil)
-    t.eq(count_calls(core.gh_issue_view_entity_cmd("owner/x", 42)), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
   end,
 
   test_marker_bearing_fetch_bypasses_proxy_entity_view_cache = function()
     local run_opts = opts("proxy-marker-fresh")
     mock_issue_view("Before")
-    t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
+    t.mock_command("gh api repos/owner/x/issues/42 --jq .updated_at // .updatedAt // \"\"", {
       stdout = "2026-06-03T01:02:03Z\n",
       stderr = "",
       exit_code = 0,
@@ -131,14 +131,14 @@ return {
     local marker_read = run_entity_view_probe(run_opts, "marker-reader-2", true)
     t.eq(marker_read.exit_code, 0)
     t.is_true(marker_read.stdout:find('"After"', 1, true) ~= nil)
-    t.eq(count_calls(core.gh_issue_view_entity_cmd("owner/x", 42)), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
     t.is_true(run_opts.env.FKST_RUNTIME_ROOT ~= nil)
   end,
 
   test_named_marker_issue_fetch_bypasses_proxy_entity_view_cache = function()
     local run_opts = opts("proxy-named-marker-fresh")
     mock_issue_view("Before")
-    t.mock_command(core.gh_entity_updated_at_cmd("owner/x", "issue", 42), {
+    t.mock_command("gh api repos/owner/x/issues/42 --jq .updated_at // .updatedAt // \"\"", {
       stdout = "2026-06-03T01:02:03Z\n",
       stderr = "",
       exit_code = 0,
@@ -151,6 +151,6 @@ return {
     local marker_read = run_entity_view_probe(run_opts, "state-reader", false, true)
     t.eq(marker_read.exit_code, 0)
     t.is_true(marker_read.stdout:find('"After"', 1, true) ~= nil)
-    t.eq(count_calls(core.gh_issue_view_entity_cmd("owner/x", 42)), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/42"), 2)
   end,
 }

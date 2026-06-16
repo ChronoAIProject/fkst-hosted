@@ -32,6 +32,58 @@ local function pr_view_argv(repo, pr_number)
   return { "gh", "api", "repos/" .. tostring(repo) .. "/pulls/" .. tostring(pr_number) }
 end
 
+local function entity_updated_at_argv(repo, kind, number)
+  local path_kind = kind == "pr" and "pulls" or "issues"
+  return {
+    "gh",
+    "api",
+    "repos/" .. tostring(repo) .. "/" .. path_kind .. "/" .. tostring(number),
+    "--jq",
+    ".updated_at // .updatedAt // \"\"",
+  }
+end
+
+local function issue_search_argv(repo, query, fields)
+  return {
+    "gh",
+    "issue",
+    "list",
+    "--repo",
+    tostring(repo),
+    "--state",
+    "all",
+    "--limit",
+    "100",
+    "--search",
+    tostring(query),
+    "--json",
+    tostring(fields),
+  }
+end
+
+local function issue_create_argv(repo, title, body_file, labels, assignees)
+  local argv = {
+    "gh",
+    "issue",
+    "create",
+    "--repo",
+    tostring(repo),
+    "--title",
+    tostring(title),
+    "--body-file",
+    tostring(body_file),
+  }
+  for _, label in ipairs(labels or {}) do
+    table.insert(argv, "--label")
+    table.insert(argv, tostring(label))
+  end
+  for _, assignee in ipairs(assignees or {}) do
+    table.insert(argv, "--assignee")
+    table.insert(argv, tostring(assignee))
+  end
+  return argv
+end
+
 local function pr_create_argv(repo, branch, base_branch, title, body_file)
   local argv = { "gh", "pr", "create", "--repo", tostring(repo), "--head", tostring(branch) }
   if base_branch ~= nil then
@@ -81,6 +133,22 @@ function M.install(handle)
 
   function handle.pr_view(repo, pr_number, timeout)
     return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST head repository/headRefOid/state")
+  end
+
+  function handle.pr_rest_view(repo, pr_number, timeout)
+    return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST view")
+  end
+
+  function handle.pr_updated_at(repo, pr_number, timeout)
+    return handle._exec(entity_updated_at_argv(repo, "pr", pr_number), timeout, "gh PR updated_at")
+  end
+
+  function handle.issue_search(repo, query, fields, timeout)
+    return handle._exec(issue_search_argv(repo, query, fields), timeout, "gh issue search")
+  end
+
+  function handle.issue_create(repo, title, body_file, labels, assignees, timeout)
+    return handle._exec(issue_create_argv(repo, title, body_file, labels, assignees), timeout, "gh issue create")
   end
 
   function handle.pr_create(repo, branch, base_branch, title, body_file, timeout)

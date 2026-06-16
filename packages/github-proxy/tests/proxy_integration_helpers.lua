@@ -343,7 +343,7 @@ local function mock_pr_head_state(head_sha, state, head_repo, is_cross_repositor
   local repo = head_repo or "owner/x"
   local base_repo = is_cross_repository == true and "owner/x" or repo
   local number = pr_number or 7
-  t.mock_command(core.gh_pr_rest_view_cmd("owner/x", number), {
+  t.mock_command("gh api repos/owner/x/pulls/" .. tostring(number), {
     stdout = string.format(
       '{"head":{"ref":"devloop-owner-x-42-01HY","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","repo":{"full_name":"%s","owner":{"login":"owner"}}},"state":"%s","merged":%s,"updated_at":"2026-06-03T02:03:04Z"}\n',
       head_sha or "abc123",
@@ -357,7 +357,7 @@ local function mock_pr_head_state(head_sha, state, head_repo, is_cross_repositor
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.gh_issue_comments_api_cmd("owner/x", number), {
+  t.mock_command("gh api --paginate --slurp repos/owner/x/issues/" .. tostring(number) .. "/comments?per_page=100", {
     stdout = "[[" .. render_rest_comments(comments or {}) .. "]]\n",
     stderr = "",
     exit_code = 0,

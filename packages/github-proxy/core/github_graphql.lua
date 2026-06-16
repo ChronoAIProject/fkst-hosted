@@ -1,7 +1,7 @@
 local S = {}
 
 local command_templates = {
-  graphql_query = "gh api graphql -f query=",
+  graphql_query = "GitHub GraphQL query",
 }
 
 local queries = {
@@ -22,6 +22,10 @@ end
 function S.install(M)
   M.github_graphql_command_templates = command_templates
   M.github_graphql_queries = queries
+
+  function M.github_graphql(query, fields, timeout)
+    return M.github().graphql(query, fields, timeout or 30)
+  end
 
   function M.render_github_graphql_query(name, fields)
     local template = queries[name]

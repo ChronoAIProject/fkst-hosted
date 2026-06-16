@@ -1,10 +1,6 @@
 local S = {}
 
 function S.install(M)
-local function shell_single_quote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
-
 local function json_string(value)
   local text = tostring(value or "")
   text = text:gsub("\\", "\\\\")
@@ -165,17 +161,34 @@ local function repo_owner_login(repo)
   return name_with_owner and name_with_owner:match("^([^/]+)/") or nil
 end
 
+function M.github_issue_rest_view(repo, issue_number, timeout)
+  return M.github().issue_rest_view(repo, issue_number, timeout or 30)
+end
+
 function M.gh_issue_rest_view_cmd(repo, issue_number)
-  return "gh api " .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+  return function(timeout)
+    return M.github_issue_rest_view(repo, issue_number, timeout)
+  end
+end
+
+function M.github_pr_rest_view(repo, pr_number, timeout)
+  return M.github().pr_rest_view(repo, pr_number, timeout or 30)
 end
 
 function M.gh_pr_rest_view_cmd(repo, pr_number)
-  return "gh api " .. shell_single_quote("repos/" .. tostring(repo) .. "/pulls/" .. tostring(pr_number))
+  return function(timeout)
+    return M.github_pr_rest_view(repo, pr_number, timeout)
+  end
+end
+
+function M.github_issue_comments_api(repo, issue_number, timeout)
+  return M.github().issue_comments(repo, issue_number, timeout or 30)
 end
 
 function M.gh_issue_comments_api_cmd(repo, issue_number)
-  return "gh api --paginate --slurp "
-    .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
+  return function(timeout)
+    return M.github_issue_comments_api(repo, issue_number, timeout)
+  end
 end
 
 function M.rest_comments_to_view_json(comments_stdout)
@@ -240,14 +253,12 @@ function M.rest_pr_to_view_json(pr_stdout, comments_stdout)
 end
 
 function M.fetch_rest_issue_view(repo, issue_number)
-  local issue = M.gh_exec(M.gh_issue_rest_view_cmd(repo, issue_number), 30, "gh issue REST view")
-  if issue.exit_code ~= 0 then
-    return issue
-  end
-  local comments = M.gh_exec(M.gh_issue_comments_api_cmd(repo, issue_number), 30, "gh issue comments")
-  if comments.exit_code ~= 0 then
-    return comments
-  end
+  local issue = M.gh_exec(function(timeout)
+    return M.github_issue_rest_view(repo, issue_number, timeout)
+  end, 30, "GitHub issue REST view")
+  local comments = M.gh_exec(function(timeout)
+    return M.github_issue_comments_api(repo, issue_number, timeout)
+  end, 30, "GitHub issue comments")
   local ok, view_json = pcall(M.rest_issue_to_view_json, issue.stdout, comments.stdout)
   if not ok then
     return {
@@ -264,14 +275,12 @@ function M.fetch_rest_issue_view(repo, issue_number)
 end
 
 function M.fetch_rest_pr_view(repo, pr_number)
-  local pr = M.gh_exec(M.gh_pr_rest_view_cmd(repo, pr_number), 30, "gh PR REST view")
-  if pr.exit_code ~= 0 then
-    return pr
-  end
-  local comments = M.gh_exec(M.gh_issue_comments_api_cmd(repo, pr_number), 30, "gh PR comments")
-  if comments.exit_code ~= 0 then
-    return comments
-  end
+  local pr = M.gh_exec(function(timeout)
+    return M.github_pr_rest_view(repo, pr_number, timeout)
+  end, 30, "GitHub PR REST view")
+  local comments = M.gh_exec(function(timeout)
+    return M.github_issue_comments_api(repo, pr_number, timeout)
+  end, 30, "GitHub PR comments")
   local ok, view_json = pcall(M.rest_pr_to_view_json, pr.stdout, comments.stdout)
   if not ok then
     return {

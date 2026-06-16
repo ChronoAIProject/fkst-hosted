@@ -1,10 +1,6 @@
 local S = {}
 
 function S.install(M)
-local function shell_single_quote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
-
 local function assignee_login(assignee)
   if type(assignee) == "table" then
     if assignee.login ~= nil then
@@ -37,16 +33,12 @@ function M.gh_issue_view_assignees_cmd(repo, issue_number)
   return M.gh_issue_rest_view_cmd(repo, issue_number)
 end
 
-function M.gh_issue_assign_cmd(repo, issue_number, login)
-  return "gh issue edit " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --add-assignee " .. shell_single_quote(login)
+function M.github_issue_assign(repo, issue_number, login, timeout)
+  return M.github().issue_assign(repo, issue_number, login, timeout or 30)
 end
 
-function M.gh_issue_unassign_cmd(repo, issue_number, login)
-  return "gh issue edit " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --remove-assignee " .. shell_single_quote(login)
+function M.github_issue_unassign(repo, issue_number, login, timeout)
+  return M.github().issue_unassign(repo, issue_number, login, timeout or 30)
 end
 
 function M.parse_issue_assignees(stdout)
@@ -55,7 +47,7 @@ function M.parse_issue_assignees(stdout)
 end
 
 function M.issue_claim_held_by_self(repo, issue_number, login)
-  local view = M.gh_exec(M.gh_issue_view_assignees_cmd(repo, issue_number), 30, "gh issue REST assignees")
+  local view = M.gh_exec(M.gh_issue_view_assignees_cmd(repo, issue_number), 30, "GitHub issue REST assignees")
   local logins = M.parse_issue_assignees(view.stdout)
   return #logins == 1 and logins[1] == tostring(login or "")
 end

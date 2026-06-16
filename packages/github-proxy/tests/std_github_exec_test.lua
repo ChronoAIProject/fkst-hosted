@@ -164,10 +164,24 @@ return {
     handle.pr_list_head("owner/repo", "feature/a", "dev", 13)
     handle.pr_view("owner/repo", 7, 14)
     handle.pr_create("owner/repo", "feature/a", "dev", "Fix title", "/tmp/body.md", 15)
-    handle.label_list("owner/repo", 16)
-    handle.label_create("owner/repo", "fkst-dev:ready", "0E8A16", 17)
-    handle.issue_edit_labels("owner/repo", 42, { "fkst-dev:ready" }, { "fkst-dev:thinking" }, 18)
-    handle.pr_edit_labels("owner/repo", 7, { "review" }, { "draft" }, 19)
+    handle.issue_rest_view("owner/repo", 42, 16)
+    handle.pr_rest_view("owner/repo", 7, 17)
+    handle.entity_updated_at("owner/repo", "issue", 42, 18)
+    handle.entity_updated_at("owner/repo", "pr", 7, 19)
+    handle.issue_search(
+      "owner/repo",
+      "<!-- fkst:github-proxy:issue-create:dedup/1 -->",
+      "number,title,state,author,body,url",
+      20
+    )
+    handle.issue_create("owner/repo", "Issue title", "/tmp/body.md", { "bug", "ops" }, { "bot-user" }, 21)
+    handle.issue_assign("owner/repo", 42, "bot-user", 22)
+    handle.issue_unassign("owner/repo", 42, "bot-user", 23)
+    handle.graphql("query { viewer { login } }", nil, 24)
+    handle.label_list("owner/repo", 25)
+    handle.label_create("owner/repo", "fkst-dev:ready", "0E8A16", 26)
+    handle.issue_edit_labels("owner/repo", 42, { "fkst-dev:ready" }, { "fkst-dev:thinking" }, 27)
+    handle.pr_edit_labels("owner/repo", 7, { "review" }, { "draft" }, 28)
 
     assert_argv_equal(
       calls[1].argv,
@@ -192,21 +206,66 @@ return {
     )
     assert_argv_equal(
       calls[6].argv,
+      { "gh", "api", "repos/owner/repo/issues/42" },
+      "issue_rest_view"
+    )
+    assert_argv_equal(
+      calls[7].argv,
+      { "gh", "api", "repos/owner/repo/pulls/7" },
+      "pr_rest_view"
+    )
+    assert_argv_equal(
+      calls[8].argv,
+      { "gh", "api", "repos/owner/repo/issues/42", "--jq", ".updated_at // .updatedAt // \"\"" },
+      "issue_updated_at"
+    )
+    assert_argv_equal(
+      calls[9].argv,
+      { "gh", "api", "repos/owner/repo/pulls/7", "--jq", ".updated_at // .updatedAt // \"\"" },
+      "pr_updated_at"
+    )
+    assert_argv_equal(
+      calls[10].argv,
+      { "gh", "issue", "list", "--repo", "owner/repo", "--state", "all", "--limit", "100", "--search", "<!-- fkst:github-proxy:issue-create:dedup/1 -->", "--json", "number,title,state,author,body,url" },
+      "issue_search"
+    )
+    assert_argv_equal(
+      calls[11].argv,
+      { "gh", "issue", "create", "--repo", "owner/repo", "--title", "Issue title", "--body-file", "/tmp/body.md", "--label", "bug", "--label", "ops", "--assignee", "bot-user" },
+      "issue_create"
+    )
+    assert_argv_equal(
+      calls[12].argv,
+      { "gh", "issue", "edit", "42", "--repo", "owner/repo", "--add-assignee", "bot-user" },
+      "issue_assign"
+    )
+    assert_argv_equal(
+      calls[13].argv,
+      { "gh", "issue", "edit", "42", "--repo", "owner/repo", "--remove-assignee", "bot-user" },
+      "issue_unassign"
+    )
+    assert_argv_equal(
+      calls[14].argv,
+      { "gh", "api", "graphql", "-f", "query=query { viewer { login } }" },
+      "graphql"
+    )
+    assert_argv_equal(
+      calls[15].argv,
       { "gh", "label", "list", "--repo", "owner/repo", "--limit", "1000", "--json", "name" },
       "label_list"
     )
     assert_argv_equal(
-      calls[7].argv,
+      calls[16].argv,
       { "gh", "label", "create", "fkst-dev:ready", "--repo", "owner/repo", "--color", "0E8A16" },
       "label_create"
     )
     assert_argv_equal(
-      calls[8].argv,
+      calls[17].argv,
       { "gh", "issue", "edit", "42", "--repo", "owner/repo", "--add-label", "fkst-dev:ready", "--remove-label", "fkst-dev:thinking" },
       "issue_edit_labels"
     )
     assert_argv_equal(
-      calls[9].argv,
+      calls[18].argv,
       { "gh", "pr", "edit", "7", "--repo", "owner/repo", "--add-label", "review", "--remove-label", "draft" },
       "pr_edit_labels"
     )

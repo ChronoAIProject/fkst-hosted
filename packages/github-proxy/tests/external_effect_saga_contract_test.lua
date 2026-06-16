@@ -50,14 +50,14 @@ return {
     local condition = find_post_condition(block, "peer-blocked-by-edge")
 
     conformance.assert_external_effect_post_condition(condition, {
-      command = core.gh_add_blocked_by_cmd("I_blocked", "I_blocking"),
+      query = core.github_graphql_queries.add_blocked_by,
     })
 
-    local malformed = core.gh_add_blocked_by_cmd("I_blocked", "I_blocking")
+    local malformed = core.github_graphql_queries.add_blocked_by
       :gsub("issueId:%$b", "blockedIssueId:$b")
     local ok, err = pcall(function()
       conformance.assert_external_effect_post_condition(condition, {
-        command = malformed,
+        query = malformed,
       })
     end)
 

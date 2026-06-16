@@ -48,7 +48,7 @@ local function mock_blocked_comments(comments)
 end
 
 local function mock_blocked_by(nodes)
-  t.mock_command(core.gh_issue_blocked_by_cmd("owner/x", 42), {
+  t.mock_command("gh api graphql -f query=", {
     stdout = blocked_by_json(nodes or {}),
     stderr = "",
     exit_code = 0,
@@ -56,12 +56,12 @@ local function mock_blocked_by(nodes)
 end
 
 local function mock_node_ids()
-  t.mock_command(core.gh_issue_node_id_cmd("owner/x", 42), {
+  t.mock_command("gh api repos/owner/x/issues/42", {
     stdout = '{"node_id":"I_blocked"}\n',
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.gh_issue_node_id_cmd("owner/x", 99), {
+  t.mock_command("gh api repos/owner/x/issues/99", {
     stdout = '{"node_id":"I_blocking"}\n',
     stderr = "",
     exit_code = 0,
@@ -69,7 +69,7 @@ local function mock_node_ids()
 end
 
 local function mock_add_blocked_by()
-  t.mock_command(core.gh_add_blocked_by_cmd("I_blocked", "I_blocking"), {
+  t.mock_command("gh api graphql -f query=", {
     stdout = '{"data":{"addBlockedBy":{"clientMutationId":null}}}\n',
     stderr = "",
     exit_code = 0,
@@ -153,7 +153,7 @@ return {
     mock_write_env("1")
     mock_bot_env()
     mock_blocked_comments({})
-    t.mock_command(core.gh_issue_blocked_by_cmd("owner/x", 42), {
+    t.mock_command("gh api graphql -f query=", {
       stdout = '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":1,"pageInfo":{"hasNextPage":false},"nodes":[',
       stderr = "",
       exit_code = 0,
@@ -185,7 +185,7 @@ return {
     local operations = core.github_graphql_queries
 
     t.eq(type(operations), "table")
-    t.eq(core.github_graphql_command_templates.graphql_query, "gh api graphql -f query=")
+    t.eq(core.github_graphql_command_templates.graphql_query, "GitHub GraphQL query")
     t.eq(type(operations.blocked_by), "string")
     t.eq(type(operations.add_blocked_by), "string")
     t.eq(operations.blocked_by:find("blockedBy(first:50)", 1, true) ~= nil, true)
@@ -201,12 +201,9 @@ return {
   end,
 
   -- Contract test pinned to GitHub's real AddBlockedByInput schema (issueId +
-  -- blockingIssueId). The behavior tests above mock the command via
-  -- gh_add_blocked_by_cmd itself, so they cannot catch a wrong GraphQL field
-  -- name -- the mock always matches whatever the code emits. This asserts the
-  -- named mutation contract, which is what actually failed in production: the
-  -- input used 'blockedIssueId' (rejected by GitHub), so every block silently
-  -- failed.
+  -- blockingIssueId). This asserts the named mutation contract, which is what
+  -- actually failed in production: the input used 'blockedIssueId' (rejected by
+  -- GitHub), so every block silently failed.
   test_add_blocked_by_mutation_uses_valid_schema_fields = function()
     local query = core.github_graphql_queries.add_blocked_by
 

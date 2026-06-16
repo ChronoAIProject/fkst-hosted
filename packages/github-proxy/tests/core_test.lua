@@ -6,6 +6,7 @@ local raw_mock_command = t.mock_command
 local function normalize_rendered_command(command)
   local rendered = tostring(command or "")
   rendered = rendered:gsub("'([^']*)'", "%1")
+  rendered = rendered:gsub('"([^"]*)"', "%1")
   rendered = rendered:gsub("body=@", "body=")
   rendered = rendered:gsub("%s+", " ")
   return rendered
@@ -14,6 +15,9 @@ end
 local function mock_command(command, response)
   raw_mock_command(command, response)
   local normalized = normalize_rendered_command(command)
+  if normalized:find("^gh api %-%-paginate %-%-slurp ") ~= nil and normalized:find("[?&]", 1, false) ~= nil then
+    raw_mock_command((normalized:gsub("^(gh api %-%-paginate %-%-slurp )", "%1'")), response)
+  end
   if normalized ~= command then
     raw_mock_command(normalized, response)
   end
@@ -127,14 +131,8 @@ return {
   test_entity_view_cache_key = function()
     local key = core.entity_view_cache_key("owner/repo", "issue", 12, "2026-06-03T01:02:03Z")
     t.eq(key, "github-proxy/view/owner/repo/issue/12/2026-06-03T01-02-03Z")
-    t.eq(
-      core.gh_issue_view_entity_cmd("owner/repo", 12),
-      "gh api 'repos/owner/repo/issues/12'"
-    )
-    t.eq(
-      core.gh_pr_view_entity_cmd("owner/repo", 7),
-      "gh api 'repos/owner/repo/pulls/7'"
-    )
+    t.eq(type(core.gh_issue_view_entity_cmd("owner/repo", 12)), "function")
+    t.eq(type(core.gh_pr_view_entity_cmd("owner/repo", 7)), "function")
   end,
 
   test_rest_issue_view_adapter_maps_gh_view_shape = function()
@@ -165,12 +163,12 @@ return {
   end,
 
   test_rest_issue_view_fails_closed_on_malformed_success_stdout = function()
-    mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
+    mock_command("gh api repos/owner/repo/issues/3", {
       stdout = '{"title":',
       stderr = "",
       exit_code = 0,
     })
-    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
+    mock_command("gh api --paginate --slurp repos/owner/repo/issues/3/comments?per_page=100", {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -183,12 +181,12 @@ return {
   end,
 
   test_rest_issue_view_fails_closed_on_empty_success_stdout = function()
-    mock_command(core.gh_issue_rest_view_cmd("owner/repo", 3), {
+    mock_command("gh api repos/owner/repo/issues/3", {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 3), {
+    mock_command("gh api --paginate --slurp repos/owner/repo/issues/3/comments?per_page=100", {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -201,12 +199,12 @@ return {
   end,
 
   test_rest_pr_view_fails_closed_on_malformed_success_stdout = function()
-    mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
+    mock_command("gh api repos/owner/repo/pulls/7", {
       stdout = "not json",
       stderr = "",
       exit_code = 0,
     })
-    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
+    mock_command("gh api --paginate --slurp repos/owner/repo/issues/7/comments?per_page=100", {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -219,12 +217,12 @@ return {
   end,
 
   test_rest_pr_view_fails_closed_on_empty_success_stdout = function()
-    mock_command(core.gh_pr_rest_view_cmd("owner/repo", 7), {
+    mock_command("gh api repos/owner/repo/pulls/7", {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 7), {
+    mock_command("gh api --paginate --slurp repos/owner/repo/issues/7/comments?per_page=100", {
       stdout = "[]",
       stderr = "",
       exit_code = 0,
@@ -237,12 +235,12 @@ return {
   end,
 
   test_rest_issue_view_empty_comments_stdout_uses_empty_comments_fallback = function()
-    mock_command(core.gh_issue_rest_view_cmd("owner/repo", 4), {
+    mock_command("gh api repos/owner/repo/issues/4", {
       stdout = '{"title":"Issue","body":"Body","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[],"assignees":[]}',
       stderr = "",
       exit_code = 0,
     })
-    mock_command(core.gh_issue_comments_api_cmd("owner/repo", 4), {
+    mock_command("gh api --paginate --slurp repos/owner/repo/issues/4/comments?per_page=100", {
       stdout = "",
       stderr = "",
       exit_code = 0,

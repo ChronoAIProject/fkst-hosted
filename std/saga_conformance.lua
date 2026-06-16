@@ -299,7 +299,7 @@ local function require_fragment(text, fragment, message)
 end
 
 local function assert_graphql_add_blocked_by(condition, evidence)
-  local command = tostring(evidence and evidence.command or "")
+  local command = tostring(evidence and (evidence.query or evidence.command) or "")
   require_fragment(
     command,
     "addBlockedBy",

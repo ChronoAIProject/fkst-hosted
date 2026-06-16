@@ -9,8 +9,8 @@ M.spec = {
 }
 
 local entity_types = {
-  { type = "issue", read = core.github_issue_list },
-  { type = "pr", read = core.github_pr_list },
+  { type = "issue", read = function(repo, timeout) return core.github().issue_list(repo, timeout) end },
+  { type = "pr", read = function(repo, timeout) return core.github().pr_list(repo, timeout) end },
 }
 
 local function replay_sort_key(entity)
@@ -111,7 +111,7 @@ local function poll_entities(repo, event, fresh_changes, replay_candidates)
   for _, entity_type in ipairs(entity_types) do
     local ok, result_or_err = core.gh_exec_result(function(timeout)
       return entity_type.read(repo, timeout)
-    end, 30, "gh " .. entity_type.type .. " list")
+    end, 30, "GitHub " .. entity_type.type .. " list")
     if not ok then
       core.log_error_fact("warn", "github_poll", "FAILURE", result_or_err.class, event and event.queue, result_or_err.message, {
         source_ref = event and event.source_ref,
