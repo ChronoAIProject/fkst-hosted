@@ -1,0 +1,15 @@
+# fkst-shared: role-neutral library shared by BOTH the control-plane and the
+# worker deployables (part of the database-free control-plane/worker split,
+# issue #145). It holds wire/domain models and the transport clients that both
+# roles call. It deliberately depends on `bson` (for the document shapes) but
+# NEVER on the `mongodb` driver or `axum`, so the worker — which links this
+# crate — stays free of the database driver (the compiler-enforced boundary).
+[package]
+name = "fkst-shared"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "fkst_shared"
+
+[dependencies]

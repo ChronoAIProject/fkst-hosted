@@ -915,6 +915,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "fkst-shared"
+version = "0.0.0"
+
+[[package]]
+name = "fkst-worker"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

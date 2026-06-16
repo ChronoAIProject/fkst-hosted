@@ -1,5 +1,10 @@
 [workspace]
-members = ["fkst-hosted-api"]
+# The control-plane/worker split (issue #145) introduces three crates:
+#   fkst-shared        — role-neutral library (both roles link it)
+#   fkst-hosted-api    — TEMPORARY: today's monolith; renamed to
+#                        `fkst-control-plane` in this PR's final commit
+#   fkst-worker        — the worker deployable (a skeleton until #136/#140)
+members = ["fkst-hosted-api", "fkst-shared", "fkst-worker"]
 resolver = "2"
 
 [workspace.package]
