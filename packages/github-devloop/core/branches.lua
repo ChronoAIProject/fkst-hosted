@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
 local function require_safe_branch(name, branch)
@@ -410,7 +411,7 @@ function M.branch_sync_worktree_path(runtime_root, repo, upstream, integration, 
   if #slug > 90 then
     slug = slug:sub(1, 90):gsub("%-+$", "")
   end
-  local suffix = M._decimal_checksum(
+  local suffix = decimal_checksum(
     require_safe_repo(repo)
       .. "#"
       .. require_safe_branch("upstream branch", upstream)
@@ -423,7 +424,7 @@ function M.branch_sync_worktree_path(runtime_root, repo, upstream, integration, 
 end
 
 function M.branch_sync_message_file(runtime_root, repo, upstream, integration, upstream_sha, integration_sha)
-  local suffix = M._decimal_checksum(
+  local suffix = decimal_checksum(
     require_safe_repo(repo)
       .. "#"
       .. require_safe_branch("upstream branch", upstream)
@@ -439,7 +440,7 @@ function M.branch_sync_message_file(runtime_root, repo, upstream, integration, u
 end
 
 function M.pr_freshness_message_file(runtime_root, repo, branch, integration, branch_parent, integration_sha)
-  local suffix = M._decimal_checksum(
+  local suffix = decimal_checksum(
     require_safe_repo(repo)
       .. "#"
       .. require_safe_branch("managed branch", branch)

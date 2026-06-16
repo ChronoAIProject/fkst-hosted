@@ -1,4 +1,6 @@
 local S = {}
+local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
 local max_error_class_len = 80
@@ -168,7 +170,7 @@ function M.error_fact_fingerprint(fields)
     "message=" .. normalize_fingerprint_text(fields.message or fields.error or ""),
     "context=" .. normalize_fingerprint_text(normalized_context(fields.context)),
   }, "\n")
-  return "efp-" .. M._decimal_checksum(material)
+  return "efp-" .. decimal_checksum(material)
 end
 
 function M.build_error_fact(opts)

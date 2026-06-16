@@ -1,5 +1,6 @@
 local common = require("departments.observability.common")
 local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 local M = {}
 
@@ -289,7 +290,7 @@ function core.render_observability_dashboard(args)
   table.insert(lines, "- generated-at: " .. generated_at)
 
   local stable = table.concat(lines, "\n")
-  local hash = core._decimal_checksum(stable:gsub("%- generated%-at: [^\n]+", "- generated-at: <generated>"))
+  local hash = decimal_checksum(stable:gsub("%- generated%-at: [^\n]+", "- generated-at: <generated>"))
   local marker = dashboard_marker(hash, generated_at)
   local body = stable .. "\n\n" .. marker .. "\n"
   if #body > max_dashboard_body_len then

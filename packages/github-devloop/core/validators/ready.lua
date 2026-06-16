@@ -1,3 +1,5 @@
+local source_refs = require("std.source_ref")
+
 return function(M)
 function M.is_supported_ready(payload)
   return type(payload) == "table"
@@ -18,6 +20,6 @@ function M.is_supported_ready(payload)
         and tonumber(payload.impl_retry_attempt) >= 1
         and tonumber(payload.impl_retry_attempt) == math.floor(tonumber(payload.impl_retry_attempt))
         and tonumber(payload.impl_retry_attempt) <= M._max_impl_retry_attempts))
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 end

@@ -2,6 +2,7 @@ local S = {}
 
 function S.install(M)
 local error_facts = require("std.error_facts")
+local source_refs = require("std.source_ref")
 local strings = require("std.strings")
 
 local max_key_len = 200
@@ -136,16 +137,8 @@ end
 
 local one_line = error_facts.one_line
 
-local function decimal_checksum(value)
-  local hash = 2166136261
-  local text = tostring(value or "")
-  for i = 1, #text do
-    hash = (hash * 16777619 + text:byte(i)) % 4294967291
-  end
-  return string.format("%010d", hash)
-end
-
 local is_bounded_string = strings.is_bounded_string
+local decimal_checksum = strings.decimal_checksum
 
 local function sdk_truncate_utf8(value, limit)
   if type(truncate_utf8) ~= "function" then
@@ -214,12 +207,6 @@ end
 local function is_positive_pr_number(value)
   local number = tonumber(value)
   return number ~= nil and number >= 1 and number % 1 == 0 and number <= 2147483647
-end
-
-local function has_bounded_source_ref(source_ref)
-  return type(source_ref) == "table"
-    and is_bounded_string(source_ref.kind, max_key_len)
-    and is_bounded_string(source_ref.ref, max_key_len)
 end
 
 function M.configure_trusted_bot_login(login)
@@ -727,6 +714,19 @@ function M.judgment_worktree_path(runtime_root, role, identity)
   return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
 end
 
+function M.judgment_worktree(role, identity)
+  local runtime = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+  if runtime.exit_code ~= 0 then
+    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
+  end
+  local worktree = M.judgment_worktree_path(runtime.stdout, role, identity)
+  local mkdir = exec_sync({ cmd = M.mkdir_p_cmd(worktree), timeout = 30 })
+  if mkdir.exit_code ~= 0 then
+    error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
+  end
+  return worktree
+end
+
 function M.judgment_codex_opts(prompt, worktree)
   return {
     prompt = prompt,
@@ -842,7 +842,7 @@ function M.neutralize_untrusted_comment_text(text)
 end
 
 function M.normalize_source_ref(source_ref)
-  if not has_bounded_source_ref(source_ref) then
+  if not source_refs.has_bounded_source_ref(source_ref, max_key_len) then
     error("github-devloop: invalid source_ref")
   end
   return {
@@ -927,7 +927,6 @@ M._shell_single_quote = shell_single_quote
 M._trim = trim
 M._neutralize_fkst_markers = neutralize_fkst_markers
 M._one_line = one_line
-M._decimal_checksum = decimal_checksum
 M._is_bounded_string = is_bounded_string
 M.truncate_utf8 = sdk_truncate_utf8
 M._has_value = has_value
@@ -937,7 +936,6 @@ M._is_path_safe_key = is_path_safe_key
 M._is_git_ref_safe = is_git_ref_safe
 M._is_git_sha = is_git_sha
 M._is_positive_pr_number = is_positive_pr_number
-M._has_bounded_source_ref = has_bounded_source_ref
 M._dedup_key = dedup_key
 end
 

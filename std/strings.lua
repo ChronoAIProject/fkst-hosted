@@ -9,6 +9,15 @@ function S.is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end
 
+function S.decimal_checksum(value)
+  local hash = 2166136261
+  local text = tostring(value or "")
+  for i = 1, #text do
+    hash = (hash * 16777619 + text:byte(i)) % 4294967291
+  end
+  return string.format("%010d", hash)
+end
+
 function S.is_path_safe_key(value, limit)
   if not S.is_bounded_string(value, limit) then
     return false

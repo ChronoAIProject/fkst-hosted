@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
 local max_sync_conflict_attempts = 3
@@ -24,7 +25,7 @@ local function conflict_fingerprint(conflict, unmerged_stdout)
     local normalized = M._normalize_error_fact_text(unmerged_stdout or "")
     table.insert(material, "unmerged=" .. normalized)
   end
-  return "sync-conflict-" .. M._decimal_checksum(table.concat(material, "\n"))
+  return "sync-conflict-" .. decimal_checksum(table.concat(material, "\n"))
 end
 
 function M.max_sync_conflict_attempts()
@@ -39,7 +40,7 @@ function M.sync_conflict_attempt_key(conflict, fingerprint)
     .. safe_branch_segment(conflict.integration_branch)
     .. "/"
     .. tostring(fingerprint or "")
-  local suffix = M._decimal_checksum(readable)
+  local suffix = decimal_checksum(readable)
   local key = "github-devloop/sync-conflict-attempt/"
     .. M.safe_repo(conflict.repo)
     .. "/"
