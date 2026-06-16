@@ -182,14 +182,33 @@ return {
     local source_a = core.source_ref_digest(source_ref)
     local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
     local drift_version = base_version .. "/drifted"
+    local boundary_question = "Same boundary"
+    local boundary_angles = angles()
     local comments = {
-      trusted(core.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", "Question 6", angles())),
-      trusted(core.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Question 8", angles())),
+      trusted(core.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
+      trusted(core.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", boundary_question, boundary_angles)),
       trusted(core.converge_round_marker("github-devloop/issue/owner/repo/99", drift_version, source_b, 13, drift_version .. "/loop/13", "Other", angles())),
     }
     local filtered = core.converge_round_facts(comments, proposal_id, base_version, source_a)
     t.eq(core.max_converge_round(filtered), 6)
     t.eq(core.converge_budget_round(comments, proposal_id), 8)
+    t.eq(core.converge_boundary_budget_round(comments, proposal_id, boundary_question, boundary_angles), 8)
+  end,
+
+  test_converge_boundary_budget_round_ignores_changed_question_verdict_boundary = function()
+    local source_a = core.source_ref_digest(source_ref)
+    local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
+    local drift_version = base_version .. "/drifted"
+    local boundary_question = "Current boundary"
+    local boundary_angles = angles()
+    local comments = {
+      trusted(core.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
+      trusted(core.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Different boundary", {
+        { angle = "minimal", verdict = "approve", digest = "different" },
+      })),
+    }
+    t.eq(core.converge_budget_round(comments, proposal_id), 8)
+    t.eq(core.converge_boundary_budget_round(comments, proposal_id, boundary_question, boundary_angles), 6)
   end,
 
   test_review_converge_facts_are_bound_to_issue_version_and_head = function()

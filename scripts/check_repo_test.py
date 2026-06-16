@@ -477,18 +477,29 @@ class ConvergenceBudgetGuardTest(unittest.TestCase):
         source = """
 local facts = core.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
 local round = math.max(payload.round, core.max_converge_round(facts))
+local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests))
+local hit_round_cap = budget_round >= core.max_converge_rounds()
+"""
+        violations = self.violations(source)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("convergence round counter must derive from stable boundary-preserving core.converge_round_facts_for_proposal_boundary() facts", violations[0])
+
+    def test_flags_loop_budget_without_boundary_preserving_budget(self) -> None:
+        source = """
+local facts = core.converge_round_facts_for_proposal_boundary(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests)
+local round = math.max(payload.round, core.max_converge_round(facts))
 local budget_round = math.max(round, core.converge_budget_round(current.comments, proposal_id))
 local hit_round_cap = budget_round >= core.max_converge_rounds()
 """
         violations = self.violations(source)
         self.assertEqual(len(violations), 1)
-        self.assertIn("convergence round counter must derive from stable core.converge_round_facts_for_proposal() facts", violations[0])
+        self.assertIn("convergence cap must use boundary-preserving core.converge_boundary_budget_round() budget", violations[0])
 
-    def test_allows_loop_budget_with_stable_proposal_round_facts(self) -> None:
+    def test_allows_loop_budget_with_stable_boundary_preserving_round_facts(self) -> None:
         source = """
-local facts = core.converge_round_facts_for_proposal(current.comments, proposal_id)
+local facts = core.converge_round_facts_for_proposal_boundary(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests)
 local round = math.max(payload.round, core.max_converge_round(facts))
-local budget_round = math.max(round, core.converge_budget_round(current.comments, proposal_id))
+local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests))
 local hit_round_cap = budget_round >= core.max_converge_rounds()
 """
         self.assertEqual(self.violations(source), [])
