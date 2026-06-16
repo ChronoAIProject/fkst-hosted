@@ -29,7 +29,7 @@ pub mod util;
 
 pub use adopt::{os_truth_live_set, scan_and_adopt, AdoptReport};
 pub use breadcrumb::{ExitBreadcrumb, OwnerBreadcrumb};
-pub use clone::{clone_repo_packages, ClonedRepo};
+pub use clone::{clone_repo_packages, is_valid_package_name, ClonedRepo, RESERVED_PACKAGE_NAME};
 pub use config::{EngineConfig, EngineConfigError};
 pub use error::RunnerError;
 pub use goal_token::{
@@ -37,7 +37,7 @@ pub use goal_token::{
     write_token_file, GitConfigEntry, HELPER_SCRIPT_NAME, MINT_NONCE_ENV, MINT_REQUEST_SUFFIX,
     NONCE_FILE_NAME, TOKEN_FILE_NAME,
 };
-pub use materialize::{materialize_helper_script, PreparedPackage};
+pub use materialize::{is_department_main, materialize_helper_script, PreparedPackage};
 pub use process::{is_pid_alive, GoalEnv};
 pub use runner::{GoalContext, LiveStatus, RunningSession, SessionRunner, StartSpec};
 pub use runtime::{dir_age, RUNTIME_DIR_PREFIX};

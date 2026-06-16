@@ -91,7 +91,58 @@ struct TestApp {
     issue_api: Arc<RecordingIssueApi>,
 }
 
+/// A scripted Ornn transport for the pre-flight (#179) gate test: FIFO replies
+/// keyed by a path substring, mirroring the in-crate `ornn` fakes.
+struct FakeOrnnTransport {
+    replies: Mutex<Vec<(String, u16, Value)>>,
+}
+
+impl FakeOrnnTransport {
+    fn new(replies: Vec<(&str, u16, Value)>) -> Self {
+        Self {
+            replies: Mutex::new(
+                replies
+                    .into_iter()
+                    .map(|(n, s, b)| (n.to_string(), s, b))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl fkst_control_plane::ornn::OrnnTransport for FakeOrnnTransport {
+    async fn proxy_get(
+        &self,
+        path: &str,
+        _query: &[(&str, &str)],
+        _user_token: &secrecy::SecretString,
+    ) -> Result<fkst_control_plane::nyxid::ProxyResponse, AppError> {
+        let mut queue = self.replies.lock().unwrap();
+        let idx = queue
+            .iter()
+            .position(|(needle, _, _)| path.contains(needle.as_str()))
+            .unwrap_or_else(|| panic!("no fake ornn reply for {path}"));
+        let (_, status, body) = queue.remove(idx);
+        Ok(fkst_control_plane::nyxid::ProxyResponse {
+            status: axum::http::StatusCode::from_u16(status).unwrap(),
+            headers: axum::http::HeaderMap::new(),
+            body: serde_json::to_vec(&body).unwrap(),
+        })
+    }
+
+    async fn download_direct(&self, _url: &str) -> Result<Vec<u8>, AppError> {
+        unreachable!("preflight never downloads")
+    }
+}
+
 async fn app() -> TestApp {
+    app_with_ornn(None).await
+}
+
+/// Build the test app, optionally wiring a fake [`OrnnClient`] so the submit
+/// pre-flight (#179) Ornn-availability gate can be exercised end-to-end.
+async fn app_with_ornn(ornn: Option<fkst_control_plane::ornn::OrnnClient>) -> TestApp {
     let container = Mongo::default()
         .with_tag(MONGO_TAG)
         .start()
@@ -126,7 +177,7 @@ async fn app() -> TestApp {
         github_app_webhook_secret: None,
         goals,
         vault,
-        ornn: None,
+        ornn,
     })
     .expect("router");
 
@@ -261,5 +312,52 @@ async fn issue_source_malformed_url_is_422() {
         status,
         StatusCode::UNPROCESSABLE_ENTITY,
         "a /pull/ url is not a valid issue ref: {response_body}"
+    );
+}
+
+/// Submit-time pre-flight gate (#179): an inline submission whose Ornn pin is
+/// available only at a DIFFERENT version is rejected with an aggregated 422 that
+/// names the bad pin — the gate runs before `create_for_goal`, so the session
+/// spawn is never reached (the response is the 422, never the 202). With
+/// `github_app: None` the package check is skipped, isolating the Ornn gate.
+#[tokio::test]
+async fn submit_with_unavailable_ornn_version_is_gated_with_422() {
+    if !docker_available() {
+        eprintln!("SKIP: docker unavailable");
+        return;
+    }
+    // The catalog only offers `fmt@2.0`; the submission pins `fmt@1.0`.
+    let transport = Arc::new(FakeOrnnTransport::new(vec![(
+        "/skills/fmt/versions",
+        200,
+        json!({ "data": { "items": [ { "version": "2.0" } ] } }),
+    )]));
+    let ornn = fkst_control_plane::ornn::OrnnClient::new(transport);
+    let app = app_with_ornn(Some(ornn)).await;
+
+    let body = json!({
+        "source": "inline",
+        "goal": "do the thing",
+        "repo": { "owner": "acme", "name": "site" },
+        "package_names": ["pkg-a"],
+        "ornn_skills": [{ "kind": "skill", "name": "fmt", "version": "1.0" }]
+    });
+
+    let (status, response_body) = post_submit(&app.router, &body).await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "an unavailable pin version must gate the submission with a 422 (not a 202): \
+         {response_body}"
+    );
+    let resp: Value = serde_json::from_str(&response_body).expect("json");
+    assert_eq!(resp["error"], "submission_invalid");
+    assert_eq!(resp["ornn"][0]["name"], "fmt", "names the bad pin");
+    assert_eq!(resp["ornn"][0]["version"], "1.0");
+    // The response is the gate's 422, never the success body — proving the spawn
+    // (`create_for_goal`) below the gate was never reached.
+    assert!(
+        resp.get("session_id").is_none(),
+        "a gated submission must not carry a session id"
     );
 }

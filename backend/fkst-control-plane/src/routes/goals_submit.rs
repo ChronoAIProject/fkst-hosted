@@ -32,6 +32,7 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use secrecy::SecretString;
 
@@ -49,7 +50,7 @@ use crate::sessions::GoalTriggerInfo;
 use crate::state::AppState;
 use crate::vault::{EnvKind, EnvScopeRef};
 
-use super::goals::{goal_ownership, InlineSecretInput};
+use super::goals::{goal_ownership, run_submit_preflight, InlineSecretInput};
 use super::goals_submit_dto::{
     IssueRef, RepoSpecBody, SubmitSessionRequest, SubmitSessionResponse,
 };
@@ -74,7 +75,7 @@ pub async fn submit(
     State(state): State<AppState>,
     ctx: AuthContext,
     AppJson(request): AppJson<SubmitSessionRequest>,
-) -> Result<(StatusCode, Json<SubmitSessionResponse>), AppError> {
+) -> Result<Response, AppError> {
     // 1. Action layer: BOTH create and trigger are required (this one call does
     //    both). Admin bypasses each.
     require_permission(&ctx, permissions::GOAL_CREATE)?;
@@ -119,15 +120,25 @@ pub async fn submit(
     //    parser, inline pins from the body) before any session is placed.
     crate::ornn::validate_pins(&ornn_skills)?;
 
-    // 6. Pre-flight validation seam (#179): package-correctness + Ornn
-    //    availability must run HERE before `create_for_goal`. #179 is not yet
-    //    merged — leave an observable seam rather than silently proceeding.
-    // TODO(#179 pre-flight): call the package-correctness + Ornn-availability
-    // validation here before create_for_goal; do NOT skip.
-    tracing::warn!(
-        goal_id = %goal.id,
-        "pre-flight validation seam: #179 not yet wired"
-    );
+    // 6. Pre-flight validation (#179): package correctness (Contents API, no
+    //    clone) + Ornn availability, BEFORE `create_for_goal` and before any
+    //    inline secret is stored. On failure this returns ONE aggregated 422
+    //    listing every problem (never first-fail). Both sources currently seed an
+    //    EMPTY issue-format set: the issue source already 422'd in
+    //    `resolve_issue_source` if the body failed to parse, and the inline source
+    //    has no issue-format class — so by here only package/Ornn faults remain.
+    if let Err(response) = run_submit_preflight(
+        &state,
+        &ctx,
+        &repo,
+        &goal.package_names,
+        &ornn_skills,
+        Vec::new(),
+    )
+    .await
+    {
+        return Ok(response);
+    }
 
     // 7. Inline secrets/variables: held in the controller's in-memory vault for
     //    this session's repo scope (exactly as `trigger` does). Never logged.
@@ -181,7 +192,8 @@ pub async fn submit(
             goal_status: result.goal_status,
             session_status: "pending",
         }),
-    ))
+    )
+        .into_response())
 }
 
 /// The resolved-source outcome shared by both arms before orchestration.

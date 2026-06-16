@@ -129,6 +129,31 @@ impl OrnnTransport for NyxIdProxyTransport {
     }
 }
 
+/// A transport that always reports the registry unavailable. Backs
+/// [`OrnnClient::disabled`]; never reached on the paths that use it (the caller
+/// guarantees an empty pin set), but fails cleanly if it ever is.
+struct DisabledTransport;
+
+#[async_trait]
+impl OrnnTransport for DisabledTransport {
+    async fn proxy_get(
+        &self,
+        _path: &str,
+        _query: &[(&str, &str)],
+        _user_token: &SecretString,
+    ) -> Result<ProxyResponse, AppError> {
+        Err(AppError::Unavailable(
+            "ornn registry not configured".to_string(),
+        ))
+    }
+
+    async fn download_direct(&self, _presigned_url: &str) -> Result<Vec<u8>, AppError> {
+        Err(AppError::Unavailable(
+            "ornn registry not configured".to_string(),
+        ))
+    }
+}
+
 /// Conflict raised when one skill `name` resolves to two different versions
 /// across the user's selection (a hard failure — never silently pick one).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +197,16 @@ impl OrnnClient {
     pub fn with_nyxid(nyxid: NyxIdClient, slug: &str) -> Result<Self, AppError> {
         let transport = NyxIdProxyTransport::new(nyxid, slug)?;
         Ok(Self::new(Arc::new(transport)))
+    }
+
+    /// A client whose transport always errors `Unavailable`. Used ONLY where an
+    /// `&OrnnClient` is structurally required but is guaranteed unused — e.g.
+    /// submit pre-flight (#179) with NO pins and no configured Ornn: the
+    /// availability check short-circuits on the empty pin set before any
+    /// transport call, so this client's methods are never invoked. Calling it
+    /// nonetheless yields a clean `Unavailable` rather than a panic.
+    pub fn disabled() -> Self {
+        Self::new(Arc::new(DisabledTransport))
     }
 
     /// Decode a proxy JSON body's `{ data: <T> }` envelope, surfacing Ornn's

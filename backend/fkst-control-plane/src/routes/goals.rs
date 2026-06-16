@@ -17,6 +17,7 @@
 
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use bson::doc;
@@ -28,9 +29,10 @@ use crate::authz::permissions::{self, require_permission};
 use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::goals::{
-    validate_goal_fields, CreateRepoSpec, GoalDoc, GoalStatus, RepoRef, MAX_GOAL_DESCRIPTION_BYTES,
-    MAX_GOAL_TITLE_CHARS,
+    validate_goal_fields, validate_submission, CreateRepoSpec, FieldError, GoalDoc, GoalStatus,
+    RepoRef, MAX_GOAL_DESCRIPTION_BYTES, MAX_GOAL_TITLE_CHARS,
 };
+use crate::ornn::OrnnSkillPin;
 use crate::routes::extract::AppJson;
 use crate::routes::rfc3339;
 use crate::sessions::GoalTriggerInfo;
@@ -653,6 +655,79 @@ async fn delete_one(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Run the synchronous submit-time pre-flight (#179) and, on failure, yield the
+/// ready-to-return response. Shared by BOTH the legacy `trigger` handler and the
+/// unified `submit` handler so the gate is identical on both paths.
+///
+/// Resolves the dependencies from `state` and degrades safely when one is
+/// unconfigured:
+/// - **GitHub App absent** → the Contents-based package check cannot run, so only
+///   the Ornn-availability class runs (the engine's spawn-time
+///   `.fkst/packages/<name>/` resolution remains the package backstop, #115).
+/// - **Ornn client absent** → availability is unverifiable, so it is a 503 *only
+///   when there are pins*; with no pins the availability check is a no-op and a
+///   throwaway client fills the unused parameter.
+///
+/// On success returns `Ok(())`; on failure returns `Err(Response)` carrying either
+/// the aggregated [`crate::goals::SubmissionErrors`] 422 (EVERY failure at once)
+/// or the 503. Read-only: it spawns no session and mutates nothing.
+/// `ctx.user_access_token` is forwarded to Ornn (visibility-honoring) and never
+/// logged; the goal prompt is never read or echoed.
+pub(super) async fn run_submit_preflight(
+    state: &AppState,
+    ctx: &AuthContext,
+    repo: &RepoRef,
+    package_names: &[String],
+    ornn_skills: &[OrnnSkillPin],
+    issue_format_errors: Vec<FieldError>,
+) -> Result<(), Response> {
+    // Resolve the Ornn client: required only when there are pins to verify.
+    let ornn_owned;
+    let ornn = match state.ornn.as_ref() {
+        Some(client) => client,
+        None if ornn_skills.is_empty() => {
+            ornn_owned = crate::ornn::OrnnClient::disabled();
+            &ornn_owned
+        }
+        None => {
+            return Err(AppError::Unavailable(
+                "ornn registry not configured; cannot verify skill pins".to_string(),
+            )
+            .into_response());
+        }
+    };
+
+    match state.github_app.as_ref() {
+        Some(github_app) => validate_submission(
+            ctx,
+            github_app,
+            repo,
+            package_names,
+            ornn_skills,
+            issue_format_errors,
+            ornn,
+        )
+        .await
+        .map_err(IntoResponse::into_response),
+        None => {
+            // No App configured: skip the Contents package check (the engine
+            // re-validates at spawn, #115) and run only the Ornn class.
+            tracing::warn!(
+                "submit pre-flight: github app not configured; \
+                 skipping package-correctness check (engine validates at spawn)"
+            );
+            crate::goals::preflight::validate_ornn_availability(
+                ctx,
+                ornn_skills,
+                issue_format_errors,
+                ornn,
+            )
+            .await
+            .map_err(IntoResponse::into_response)
+        }
+    }
+}
+
 /// `POST /api/v1/goals/{id}/trigger`: trigger a goal, creating a new session.
 /// Returns 202 on success.
 ///
@@ -667,7 +742,7 @@ async fn trigger(
     ctx: AuthContext,
     Path(id): Path<String>,
     AppJson(body): AppJson<TriggerRequest>,
-) -> Result<(StatusCode, Json<TriggerResponse>), AppError> {
+) -> Result<Response, AppError> {
     // Action layer: may the caller trigger goals at all? The owner/org-writer
     // object check still runs below per the specific goal.
     require_permission(&ctx, permissions::GOAL_TRIGGER)?;
@@ -910,6 +985,24 @@ async fn trigger(
         .await
         .map_err(AppError::from)?;
 
+    // Submit-time pre-flight (#179): package correctness + Ornn availability,
+    // BEFORE any session is placed and before any secret is stored. On failure
+    // this returns one aggregated 422 listing EVERY problem (never first-fail);
+    // the trigger path is not issue-sourced, so it seeds no issue-format errors.
+    let preflight_pins = body.ornn_skills.clone().unwrap_or_default();
+    if let Err(response) = run_submit_preflight(
+        &state,
+        &ctx,
+        &effective_repo,
+        &goal.package_names,
+        &preflight_pins,
+        Vec::new(),
+    )
+    .await
+    {
+        return Ok(response);
+    }
+
     // Inline secrets (#138): hold the trigger-supplied secrets/variables in the
     // controller's in-memory vault for this session's repo scope BEFORE creating
     // the session, so the driver resolves them into the engine env at spawn. A
@@ -965,7 +1058,8 @@ async fn trigger(
             goal_status: result.goal_status,
             session_status: "pending",
         }),
-    ))
+    )
+        .into_response())
 }
 
 /// Build the actionable "install the App" hint (#108) for a freshly-created
@@ -1384,5 +1478,48 @@ mod tests {
             "personal repo must not invoke an org owner: {msg}"
         );
         assert!(msg.contains("octocat"), "names the owner: {msg}");
+    }
+
+    /// The submit-time pre-flight gate (#179): when the validator reports a bad
+    /// package, the handler maps the [`crate::goals::SubmissionErrors`] through
+    /// the SAME `into_response()` path `run_submit_preflight`'s callers use, so
+    /// the request returns **422** (and the session spawn below it is never
+    /// reached). This asserts that response-mapping contract Docker-free; the
+    /// aggregation logic + the create-for-goal-never-reached end-to-end behaviour
+    /// are covered in `goals::preflight`'s unit tests and the Docker-gated
+    /// `goals_submit_api` integration suite.
+    #[tokio::test]
+    async fn preflight_submission_errors_map_to_422_gate_response() {
+        use crate::goals::{PackageError, PinError, SubmissionErrors};
+
+        let errors = SubmissionErrors {
+            issue_format: Vec::new(),
+            packages: vec![PackageError {
+                name: "alpha".to_string(),
+                reason: "missing .fkst/packages/alpha".to_string(),
+            }],
+            ornn: vec![PinError {
+                kind: "skill".to_string(),
+                name: "ghost".to_string(),
+                version: "1.0".to_string(),
+                reason: "not found in the Ornn catalog".to_string(),
+            }],
+        };
+        // The handler returns `Ok(errors.into_response())` on the gate failure.
+        let response = errors.into_response();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "a bad package must gate the submission with a 422"
+        );
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("collect body");
+        let body: serde_json::Value = serde_json::from_slice(&bytes).expect("json body");
+        assert_eq!(body["error"], "submission_invalid");
+        // BOTH the package and the ornn failure are enumerated (never first-fail).
+        assert_eq!(body["packages"][0]["name"], "alpha");
+        assert_eq!(body["ornn"][0]["name"], "ghost");
     }
 }

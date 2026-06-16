@@ -110,7 +110,13 @@ impl PreparedPackage {
 }
 
 /// True for an anchored `departments/<name>/main.lua` engine entry.
-fn is_department_main(path: &str) -> bool {
+///
+/// `pub` so submit-time pre-flight (#179) can apply the SAME entry-file rule the
+/// engine's conformance pre-flight enforces, by reference, instead of
+/// re-deriving the `departments/<name>/main.lua` path shape. Pure re-export: the
+/// predicate's behavior and its use in [`PreparedPackage::validate`] are
+/// unchanged.
+pub fn is_department_main(path: &str) -> bool {
     let mut parts = path.split('/');
     matches!(
         (parts.next(), parts.next(), parts.next(), parts.next()),

@@ -208,6 +208,9 @@ impl From<crate::github_app::GithubAppError> for AppError {
             GithubAppError::InstallationGone { owner_repo } => AppError::Unprocessable(format!(
                 "github app installation vanished for {owner_repo}"
             )),
+            GithubAppError::NotFound { owner_repo, path } => {
+                AppError::NotFound(format!("{owner_repo}: contents path not found: {path}"))
+            }
             GithubAppError::TokenRequestRejected(detail) => {
                 tracing::error!(detail = %detail, "github token request rejected");
                 AppError::Unprocessable("github token request rejected".to_string())
