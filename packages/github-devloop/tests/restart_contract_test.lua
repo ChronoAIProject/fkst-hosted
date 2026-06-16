@@ -112,21 +112,9 @@ return {
   end,
 
   test_executable_restart_table_covers_non_terminal_states = function()
-    local expected = {
-      "thinking",
-      "ready",
-      "implementing",
-      "impl-failed",
-      "pr-open",
-      "reviewing",
-      "merge-ready",
-      "merging",
-      "fixing",
-      "review-meta",
-      "blocked",
-      "merged",
-    }
+    local expected = { "thinking", "ready", "implementing", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged" }
     local by_state = table_by_state()
+    t.eq(#core.liveness_contract_errors(), 0)
     for _, state in ipairs(expected) do
       local row = by_state[state]
       t.is_true(row ~= nil)
@@ -137,6 +125,8 @@ return {
         t.is_true(type(row.driving_queue) == "string" and row.driving_queue ~= "")
         t.is_true(type(row.output_obligation) == "table")
         t.is_true(type(row.budget) == "table")
+        t.is_true(type(row.budget.receiver_max_work_justification) == "string")
+        t.is_true(row.budget.receiver_max_work_justification ~= "")
         t.is_true(type(row.liveness_contract) == "table")
         t.is_true(type(row.on_timeout) == "table")
         t.is_true(type(row.payload_builder) == "function")
@@ -168,6 +158,8 @@ return {
       if row.terminal == false then
         t.is_true(row.output_obligation ~= nil)
         t.is_true(tonumber(row.budget.minutes) > 0)
+        t.is_true(type(row.budget.receiver_max_work_justification) == "string")
+        t.is_true(row.budget.receiver_max_work_justification ~= "")
         t.is_true(type(row.liveness_contract) == "table")
         t.eq(row.on_timeout.action, "redrive")
         t.eq(row.on_timeout.queue, row.driving_queue)
@@ -306,6 +298,15 @@ return {
     t.eq(#errors, 1)
     t.is_true(errors[1]:find("ready", 1, true) ~= nil)
     t.is_true(errors[1]:find("liveness_contract", 1, true) ~= nil)
+  end,
+
+  test_liveness_contract_rejects_budget_without_receiver_max_work_justification = function()
+    local rows = copy_rows(core.restart_transition_table())
+    rows_by_state(rows).ready.budget.receiver_max_work_justification = nil
+    local errors = core.liveness_contract_errors(rows)
+    t.eq(#errors, 1)
+    t.is_true(errors[1]:find("ready", 1, true) ~= nil)
+    t.is_true(errors[1]:find("receiver_max_work_justification", 1, true) ~= nil)
   end,
 
   test_liveness_contract_rejects_under_budget_receiver_bound = function()

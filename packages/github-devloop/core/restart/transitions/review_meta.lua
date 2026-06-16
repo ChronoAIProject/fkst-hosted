@@ -11,7 +11,7 @@ return function(M, h)
     to_states = { "fixing", "blocked" },
     driving_queue = "devloop_review_meta",
     output_obligation = obligation({ "review-meta:v1", "state:v1 fixing", "state:v1 blocked" }, { "fixing", "blocked" }),
-    budget = budget(90),
+    budget = budget(90, "The review-meta receiver is bounded by a 60 minute codex decision attempt plus the standard 30 minute watchdog margin."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
       receiver_bound_minutes = 60,

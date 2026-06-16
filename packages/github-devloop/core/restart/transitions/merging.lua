@@ -11,7 +11,7 @@ return function(M, h)
     to_states = { "merged", "fixing", "blocked" },
     driving_queue = "devloop_merge_ready",
     output_obligation = obligation({ "merged:v1", "state:v1 fixing", "state:v1 blocked" }, { "merged", "fixing", "blocked" }),
-    budget = budget(390),
+    budget = budget(390, "The merging receiver is bounded by 30 minutes of merge work plus a 360 minute external CI wait window."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
       receiver_bound_minutes = 30,

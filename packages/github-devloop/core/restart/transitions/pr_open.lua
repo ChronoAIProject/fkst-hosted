@@ -11,7 +11,7 @@ return function(M, h)
     to_states = { "reviewing" },
     driving_queue = "devloop_reviewing",
     output_obligation = obligation({ "state:v1 reviewing", "devloop_reviewing" }, { "reviewing" }),
-    budget = budget(30),
+    budget = budget(30, "No long receiver work is expected; the row uses the standard 30 minute watchdog margin after PR creation."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
       receiver_bound_minutes = 0,
