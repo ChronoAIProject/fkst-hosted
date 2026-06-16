@@ -886,6 +886,7 @@ dependencies = [
  "envy",
  "filetime",
  "fkst-shared",
+ "fkst-worker",
  "hmac",
  "http-body-util",
  "jsonwebtoken",
