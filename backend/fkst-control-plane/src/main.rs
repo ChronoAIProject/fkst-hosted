@@ -14,7 +14,6 @@ use fkst_control_plane::distribution::{
 };
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
-use fkst_control_plane::journal::store::MongoProgressStore;
 use fkst_control_plane::journal::JournalConfig;
 use fkst_control_plane::leases::LeaseStore;
 use fkst_control_plane::nyxid::NyxIdClient;
@@ -81,16 +80,9 @@ async fn main() -> ExitCode {
     }
     tracing::info!("indexes ensured");
 
-    // 4a. Ensure the journal-collection indexes (idempotent; fail-closed on
-    //     error) — `session_progress` + `run_journals`, incl. the unique
-    //     partial `sp_run_idem_uniq` idempotency index.
-    if let Err(error) =
-        fkst_control_plane::journal::index::ensure_journal_indexes(&db.database).await
-    {
-        tracing::error!(error = %error, "failed to ensure journal indexes");
-        return ExitCode::FAILURE;
-    }
-    tracing::info!("journal indexes ensured");
+    // 4a. The committed GitHub journal file is the SOLE machine-truth (#139):
+    //     the two Mongo journaling collections and their indexes were removed,
+    //     so there is no journal-index step here.
 
     // 4b. Goals are now GitHub-Issue + in-memory backed (#137); there is no
     //     goals collection / index step. The GoalIssueStore is built below,
@@ -158,13 +150,10 @@ async fn main() -> ExitCode {
         engine_config,
         distributor.clone(),
     );
-    // Session-progress journaling (issue #25): Mongo floor always on;
-    // GitHub sync per the FKST_JOURNAL_* config (absent repo/token degrades
-    // to Mongo-only with a warn from the journaler).
-    sessions.enable_journaling(
-        JournalConfig::from_config(&config),
-        MongoProgressStore::new(&db.database),
-    );
+    // Session-progress journaling (issue #25): the committed GitHub file is
+    // the sole machine-truth (#139). GitHub sync per the FKST_JOURNAL_* config
+    // (absent repo/token degrades to no-durable-floor with a warn).
+    sessions.enable_journaling(JournalConfig::from_config(&config));
 
     match distributor.fail_orphans_at_boot().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),

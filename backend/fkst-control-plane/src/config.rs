@@ -65,8 +65,16 @@ mod defaults {
         false
     }
 
+    pub(super) fn journal_activity_comment_enabled() -> bool {
+        true
+    }
+
     pub(super) fn journal_cas_max_retries() -> u32 {
         5
+    }
+
+    pub(super) fn journal_bootstrap_read_retries() -> u32 {
+        3
     }
 
     pub(super) fn journal_github_branch() -> String {
@@ -229,8 +237,12 @@ struct JournalVars {
     journal_github_enabled: bool,
     #[serde(default = "defaults::journal_issue_comments")]
     journal_issue_comments: bool,
+    #[serde(default = "defaults::journal_activity_comment_enabled")]
+    journal_activity_comment_enabled: bool,
     #[serde(default = "defaults::journal_cas_max_retries")]
     journal_cas_max_retries: u32,
+    #[serde(default = "defaults::journal_bootstrap_read_retries")]
+    journal_bootstrap_read_retries: u32,
     #[serde(default = "defaults::journal_github_branch")]
     journal_github_branch: String,
     #[serde(default)]
@@ -290,9 +302,16 @@ pub struct Config {
     /// Enable the optional issue-comment mirroring (dormant by default).
     /// Env: `FKST_JOURNAL_ISSUE_COMMENTS`. Default false.
     pub journal_issue_comments: bool,
+    /// Enable the rolling activity comment on the flush cadence (#139).
+    /// Env: `FKST_JOURNAL_ACTIVITY_COMMENT_ENABLED`. Default true.
+    pub journal_activity_comment_enabled: bool,
     /// Max optimistic-concurrency retries on the GitHub Contents write per
     /// flush. Env: `FKST_JOURNAL_CAS_MAX_RETRIES`. Default 5.
     pub journal_cas_max_retries: u32,
+    /// Bootstrap eventual-consistency retries: how many times the redo
+    /// skip-set load re-reads the committed file after a 404 before concluding
+    /// "fresh run". Env: `FKST_JOURNAL_BOOTSTRAP_READ_RETRIES`. Default 3.
+    pub journal_bootstrap_read_retries: u32,
     /// Branch the journal file lives on.
     /// Env: `FKST_JOURNAL_GITHUB_BRANCH`. Default "main".
     pub journal_github_branch: String,
@@ -387,7 +406,15 @@ impl fmt::Debug for Config {
             .field("journal_flush_max_batch", &self.journal_flush_max_batch)
             .field("journal_github_enabled", &self.journal_github_enabled)
             .field("journal_issue_comments", &self.journal_issue_comments)
+            .field(
+                "journal_activity_comment_enabled",
+                &self.journal_activity_comment_enabled,
+            )
             .field("journal_cas_max_retries", &self.journal_cas_max_retries)
+            .field(
+                "journal_bootstrap_read_retries",
+                &self.journal_bootstrap_read_retries,
+            )
             .field("journal_github_branch", &self.journal_github_branch)
             .field("journal_github_repo", &self.journal_github_repo)
             .field("raised_identity_pointers", &self.raised_identity_pointers)
@@ -443,7 +470,9 @@ impl Default for Config {
             journal_flush_max_batch: defaults::journal_flush_max_batch(),
             journal_github_enabled: defaults::journal_github_enabled(),
             journal_issue_comments: defaults::journal_issue_comments(),
+            journal_activity_comment_enabled: defaults::journal_activity_comment_enabled(),
             journal_cas_max_retries: defaults::journal_cas_max_retries(),
+            journal_bootstrap_read_retries: defaults::journal_bootstrap_read_retries(),
             journal_github_branch: defaults::journal_github_branch(),
             journal_github_repo: None,
             raised_identity_pointers: defaults::raised_identity_pointers(),
@@ -664,7 +693,9 @@ impl Config {
             journal_flush_max_batch: journal.journal_flush_max_batch,
             journal_github_enabled: journal.journal_github_enabled,
             journal_issue_comments: journal.journal_issue_comments,
+            journal_activity_comment_enabled: journal.journal_activity_comment_enabled,
             journal_cas_max_retries: journal.journal_cas_max_retries,
+            journal_bootstrap_read_retries: journal.journal_bootstrap_read_retries,
             journal_github_branch: journal.journal_github_branch,
             journal_github_repo: journal.journal_github_repo,
             raised_identity_pointers: journal.raised_identity_pointers,
@@ -881,7 +912,9 @@ mod tests {
         assert_eq!(config.journal_flush_max_batch, 50);
         assert!(config.journal_github_enabled);
         assert!(!config.journal_issue_comments);
+        assert!(config.journal_activity_comment_enabled);
         assert_eq!(config.journal_cas_max_retries, 5);
+        assert_eq!(config.journal_bootstrap_read_retries, 3);
         assert_eq!(config.journal_github_branch, "main");
         assert_eq!(config.journal_github_repo, None);
         assert_eq!(
@@ -901,7 +934,9 @@ mod tests {
             ("FKST_JOURNAL_FLUSH_MAX_BATCH", "10"),
             ("FKST_JOURNAL_GITHUB_ENABLED", "false"),
             ("FKST_JOURNAL_ISSUE_COMMENTS", "true"),
+            ("FKST_JOURNAL_ACTIVITY_COMMENT_ENABLED", "false"),
             ("FKST_JOURNAL_CAS_MAX_RETRIES", "9"),
+            ("FKST_JOURNAL_BOOTSTRAP_READ_RETRIES", "7"),
             ("FKST_JOURNAL_GITHUB_BRANCH", "journal"),
             ("FKST_JOURNAL_GITHUB_REPO", "acme/pkg-repo"),
             ("FKST_RAISED_IDENTITY_POINTERS", "/dept,/evt"),
@@ -912,7 +947,9 @@ mod tests {
         assert_eq!(config.journal_flush_max_batch, 10);
         assert!(!config.journal_github_enabled);
         assert!(config.journal_issue_comments);
+        assert!(!config.journal_activity_comment_enabled);
         assert_eq!(config.journal_cas_max_retries, 9);
+        assert_eq!(config.journal_bootstrap_read_retries, 7);
         assert_eq!(config.journal_github_branch, "journal");
         assert_eq!(config.journal_github_repo.as_deref(), Some("acme/pkg-repo"));
         assert_eq!(config.raised_identity_pointers, "/dept,/evt");

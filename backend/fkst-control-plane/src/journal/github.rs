@@ -13,22 +13,22 @@
 //!   failure ([`JournalError::GithubAuth`]), like 401.
 
 use std::fmt;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::journal::github_http::{classify_status, http_err, REQUEST_TIMEOUT};
 use crate::journal::model::{ProgressRecord, PROGRESS_RECORD_SCHEMA};
 use crate::journal::JournalError;
 
-/// Default GitHub REST API base (overridable for tests / GHE).
-pub const DEFAULT_API_BASE: &str = "https://api.github.com";
-
-/// Request timeout for every GitHub call.
-const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+// Re-export the shared HTTP plumbing so external paths
+// (`crate::journal::github::{DEFAULT_API_BASE, is_rate_limited, reset_seconds}`)
+// used by `github_hub/service.rs` and `config.rs` stay unchanged after the
+// split. The rate-limit helpers are crate-internal; the API base is public.
+pub use crate::journal::github_http::DEFAULT_API_BASE;
+pub(crate) use crate::journal::github_http::{is_rate_limited, reset_seconds};
 
 /// A Contents-API blob sha used for optimistic concurrency.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,9 +37,11 @@ pub struct FileSha(pub String);
 /// Outcome of reading the remote progress record.
 #[derive(Debug, Clone)]
 pub enum RemoteRecord {
-    /// Parsed, schema-supported record.
+    /// Parsed, schema-supported record. `record` is boxed to keep this variant
+    /// from dwarfing the others (the record grew run-head pointer fields in
+    /// #139, tripping clippy's `large_enum_variant`).
     Valid {
-        record: ProgressRecord,
+        record: Box<ProgressRecord>,
         sha: FileSha,
     },
     /// Present but unparseable / structurally wrong: never overwrite blindly.
@@ -67,69 +69,6 @@ impl fmt::Debug for ProgressRepo {
             .field("branch", &self.branch)
             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
             .finish()
-    }
-}
-
-/// Reduce a reqwest error to a credential-free string (reqwest never embeds
-/// request headers in its messages; this keeps that invariant explicit).
-fn http_err(context: &str, err: reqwest::Error) -> JournalError {
-    JournalError::Http(format!("{context}: {err}"))
-}
-
-/// Seconds until the rate-limit reset, from `retry-after` (delta seconds) or
-/// `x-ratelimit-reset` (epoch seconds). Defaults to 60s when unparseable.
-///
-/// Crate-visible so the github-hub upstream classifier reuses the same
-/// header parsing as the journal client.
-pub(crate) fn reset_seconds(headers: &HeaderMap) -> u64 {
-    if let Some(retry_after) = headers
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-    {
-        return retry_after;
-    }
-    if let Some(reset_epoch) = headers
-        .get("x-ratelimit-reset")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-    {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        return reset_epoch.saturating_sub(now);
-    }
-    60
-}
-
-/// True when a 403 carries rate-limit evidence (exhausted quota or an
-/// explicit retry hint) rather than an auth refusal.
-///
-/// Crate-visible so the github-hub upstream classifier reuses the same
-/// rate-limit detection as the journal client.
-pub(crate) fn is_rate_limited(headers: &HeaderMap) -> bool {
-    let remaining_zero = headers
-        .get("x-ratelimit-remaining")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.trim() == "0")
-        .unwrap_or(false);
-    remaining_zero || headers.contains_key("retry-after")
-}
-
-/// Map auth/rate-limit statuses to their dedicated variants; `None` for
-/// everything else.
-fn classify_status(status: StatusCode, headers: &HeaderMap) -> Option<JournalError> {
-    match status {
-        StatusCode::UNAUTHORIZED => Some(JournalError::GithubAuth),
-        StatusCode::FORBIDDEN => {
-            if is_rate_limited(headers) {
-                Some(JournalError::GithubRateLimited(reset_seconds(headers)))
-            } else {
-                Some(JournalError::GithubAuth)
-            }
-        }
-        _ => None,
     }
 }
 
@@ -168,12 +107,26 @@ impl ProgressRepo {
         &self.repo
     }
 
+    /// The configured API base. Crate-visible so the sibling
+    /// [`crate::journal::comments`] module can build its endpoint URLs.
+    pub(crate) fn api_base(&self) -> &str {
+        &self.api_base
+    }
+
+    /// The shared HTTP client. Crate-visible so the sibling
+    /// [`crate::journal::comments`] module can issue requests on it.
+    pub(crate) fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+
     fn contents_url(&self, path: &str) -> String {
         format!("{}/repos/{}/contents/{}", self.api_base, self.repo, path)
     }
 
     /// Apply shared headers (Accept + optional bearer token) to a request.
-    fn decorate(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    /// Crate-visible so the sibling [`crate::journal::comments`] module reuses
+    /// the same auth decoration.
+    pub(crate) fn decorate(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         let request = request.header("accept", "application/vnd.github+json");
         match &self.token {
             Some(token) => request.bearer_auth(token.expose_secret()),
@@ -235,7 +188,10 @@ impl ProgressRepo {
             return Ok(Some(RemoteRecord::NewerSchema { schema, sha }));
         }
         match serde_json::from_value::<ProgressRecord>(value) {
-            Ok(record) => Ok(Some(RemoteRecord::Valid { record, sha })),
+            Ok(record) => Ok(Some(RemoteRecord::Valid {
+                record: Box::new(record),
+                sha,
+            })),
             Err(_) => Ok(Some(RemoteRecord::Corrupt { sha })),
         }
     }
@@ -298,62 +254,6 @@ impl ProgressRepo {
                 Err(JournalError::Http(format!("contents PUT status {status}")))
             }
         }
-    }
-
-    /// Create or update the human-readable summary comment on `issue`.
-    /// Returns the comment id. Dormant in v1: callers gate this on
-    /// `FKST_JOURNAL_ISSUE_COMMENTS` and a known issue number.
-    pub async fn upsert_issue_comment(
-        &self,
-        issue: u64,
-        comment_id: Option<u64>,
-        body: &str,
-    ) -> Result<u64, JournalError> {
-        if let Some(id) = comment_id {
-            let url = format!("{}/repos/{}/issues/comments/{id}", self.api_base, self.repo);
-            let response = self
-                .decorate(self.client.patch(url))
-                .json(&serde_json::json!({ "body": body }))
-                .send()
-                .await
-                .map_err(|e| http_err("comment PATCH", e))?;
-            let status = response.status();
-            if status.is_success() {
-                return Ok(id);
-            }
-            if status != StatusCode::NOT_FOUND {
-                if let Some(err) = classify_status(status, response.headers()) {
-                    return Err(err);
-                }
-                return Err(JournalError::Http(format!("comment PATCH status {status}")));
-            }
-            // 404: the comment vanished — fall through to create.
-        }
-
-        let url = format!(
-            "{}/repos/{}/issues/{issue}/comments",
-            self.api_base, self.repo
-        );
-        let response = self
-            .decorate(self.client.post(url))
-            .json(&serde_json::json!({ "body": body }))
-            .send()
-            .await
-            .map_err(|e| http_err("comment POST", e))?;
-        let status = response.status();
-        if let Some(err) = classify_status(status, response.headers()) {
-            return Err(err);
-        }
-        if !status.is_success() {
-            return Err(JournalError::Http(format!("comment POST status {status}")));
-        }
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| http_err("comment POST body", e))?;
-        body.get("id")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| JournalError::Http("comment POST: missing id".to_string()))
     }
 }
 
@@ -427,7 +327,7 @@ mod tests {
                 record: parsed,
                 sha,
             }) => {
-                assert_eq!(parsed, record);
+                assert_eq!(*parsed, record);
                 assert_eq!(sha, FileSha("abc".to_string()));
             }
             other => panic!("expected Valid, got {other:?}"),
@@ -568,118 +468,6 @@ mod tests {
             .await
             .expect_err("404 must fail");
         assert!(matches!(err, JournalError::RemoteMissing), "got {err:?}");
-    }
-
-    // ---- 401/403 disambiguation -----------------------------------------------
-
-    #[tokio::test]
-    async fn forbidden_with_rate_headers_is_rate_limited() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(403)
-                    .insert_header("x-ratelimit-remaining", "0")
-                    .insert_header("retry-after", "30"),
-            )
-            .mount(&server)
-            .await;
-        let err = repo(&server.uri(), true)
-            .get_record("j.json")
-            .await
-            .expect_err("403 must fail");
-        match err {
-            JournalError::GithubRateLimited(secs) => assert_eq!(secs, 30),
-            other => panic!("expected GithubRateLimited, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn forbidden_without_rate_headers_and_401_are_auth_failures() {
-        for status in [401, 403] {
-            let server = MockServer::start().await;
-            Mock::given(method("PUT"))
-                .respond_with(ResponseTemplate::new(status))
-                .mount(&server)
-                .await;
-            let err = repo(&server.uri(), true)
-                .put_record("j.json", &sample_record(), None, "journal")
-                .await
-                .expect_err("auth must fail");
-            assert!(
-                matches!(err, JournalError::GithubAuth),
-                "status {status}: got {err:?}"
-            );
-        }
-    }
-
-    // ---- issue comments ----------------------------------------------------------
-
-    #[tokio::test]
-    async fn upsert_comment_creates_then_updates() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/repos/owner/name/issues/12/comments"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"id": 77})))
-            .mount(&server)
-            .await;
-        Mock::given(method("PATCH"))
-            .and(path("/repos/owner/name/issues/comments/77"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": 77})))
-            .mount(&server)
-            .await;
-
-        let repo = repo(&server.uri(), true);
-        let created = repo
-            .upsert_issue_comment(12, None, "summary")
-            .await
-            .expect("create");
-        assert_eq!(created, 77);
-        let updated = repo
-            .upsert_issue_comment(12, Some(77), "summary v2")
-            .await
-            .expect("update");
-        assert_eq!(updated, 77);
-    }
-
-    // ---- secret hygiene -------------------------------------------------------------
-
-    #[tokio::test]
-    async fn no_error_variant_or_debug_ever_contains_the_token() {
-        // Drive a real failing request so reqwest-derived errors are covered.
-        let unreachable = ProgressRepo::new(
-            "http://127.0.0.1:1",
-            "owner/name",
-            "main",
-            Some(SecretString::from(TOKEN.to_string())),
-        )
-        .expect("client");
-        let live_err = unreachable
-            .get_record("j.json")
-            .await
-            .expect_err("unreachable");
-
-        let errors: Vec<JournalError> = vec![
-            live_err,
-            JournalError::CasExhausted(5),
-            JournalError::CasConflict,
-            JournalError::RemoteMissing,
-            JournalError::Fenced { got: 1, known: 2 },
-            JournalError::GithubAuth,
-            JournalError::GithubRateLimited(30),
-            JournalError::UnsupportedSchema("x@2".to_string()),
-            JournalError::Http("contents PUT status 500".to_string()),
-            JournalError::Other(anyhow::anyhow!("wrapped context")),
-        ];
-        for err in &errors {
-            let display = format!("{err}");
-            let debug = format!("{err:?}");
-            assert!(!display.contains(TOKEN), "Display leaked: {display}");
-            assert!(!debug.contains(TOKEN), "Debug leaked: {debug}");
-        }
-
-        let repo_debug = format!("{unreachable:?}");
-        assert!(!repo_debug.contains(TOKEN), "repo Debug leaked");
-        assert!(repo_debug.contains("<redacted>"));
     }
 
     #[test]

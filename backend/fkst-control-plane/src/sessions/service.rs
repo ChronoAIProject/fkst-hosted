@@ -50,7 +50,6 @@ use crate::github_app::GithubAppTokens;
 use crate::goals::{GoalIssueStore, GoalStatus, RepoRef};
 use crate::journal::model::LogRef;
 use crate::journal::parse::{parse_raised_line, ParsedLine};
-use crate::journal::store::MongoProgressStore;
 use crate::journal::{
     package_fingerprint, JournalConfig, Journaler, LifecycleEvent, ProgressSignal, SessionCtx,
     Transition,
@@ -265,7 +264,6 @@ struct NyxidSetup {
 /// Journaling wiring shared by every driver this service spawns.
 struct JournalSetup {
     config: JournalConfig,
-    store: MongoProgressStore,
 }
 
 /// Goal support wiring shared by every driver this service spawns.
@@ -275,7 +273,7 @@ struct GoalSupport {
 }
 
 /// The concrete journaler type drivers hold.
-type ServiceJournaler = Journaler<MongoProgressStore>;
+type ServiceJournaler = Journaler;
 
 /// Clonable orchestration service: create / get / stop sessions and drive
 /// their engine processes on this pod.
@@ -374,14 +372,9 @@ impl SessionService {
     /// Enable session-progress journaling (issue #25) for every driver this
     /// service spawns. Call once at startup, before any session is created;
     /// a second call is a logged no-op.
-    pub fn enable_journaling(&self, config: JournalConfig, store: MongoProgressStore) {
+    pub fn enable_journaling(&self, config: JournalConfig) {
         let github = config.github_enabled && config.github_repo.is_some();
-        if self
-            .inner
-            .journal
-            .set(JournalSetup { config, store })
-            .is_err()
-        {
+        if self.inner.journal.set(JournalSetup { config }).is_err() {
             tracing::warn!("journaling already enabled; ignoring the second call");
             return;
         }
@@ -2597,9 +2590,10 @@ fn is_github_auth_failure(raw: &[u8]) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Build and bootstrap the per-session journaler: compute the package
-/// fingerprint, start the journaler (run head upsert + GitHub client),
+/// fingerprint, start the journaler (resolve `run_key` + GitHub client),
 /// stamp `run_key` onto the sessions doc, and load the redo skip-set from
-/// GitHub truth. `None` when journaling is not enabled or bootstrap failed.
+/// the committed GitHub file (the sole machine-truth, #139). `None` when
+/// journaling is not enabled or bootstrap failed.
 async fn start_journaler(
     inner: &Arc<Inner>,
     id: bson::Uuid,
@@ -2616,8 +2610,7 @@ async fn start_journaler(
         pod_id: inner.pod_id.clone(),
         fencing_token: fencing_token.unwrap_or(0),
     };
-    let mut journaler = match Journaler::start(ctx, setup.config.clone(), setup.store.clone()).await
-    {
+    let mut journaler = match Journaler::start(ctx, setup.config.clone()).await {
         Ok(journaler) => journaler,
         Err(error) => {
             tracing::error!(
@@ -2636,8 +2629,8 @@ async fn start_journaler(
             "run_key stamp failed; journaling continues"
         );
     }
-    // Redo bootstrap: GitHub completed[] -> skip-set + local mirror,
-    // fail-open to safe re-execution on any unreachability.
+    // Redo bootstrap: committed completed[] -> in-RAM skip-set, fail-open to
+    // safe re-execution on any unreachability.
     match journaler.load_skip_set().await {
         Ok(skip) => {
             tracing::info!(
