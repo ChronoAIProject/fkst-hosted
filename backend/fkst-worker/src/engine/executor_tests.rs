@@ -217,7 +217,12 @@ async fn execute_dispatch_spawns_engine_and_writes_session_files() {
 
     // The CODEX_HOME guard exists, config.toml was rendered, the ornn skill
     // installed, and the AGENTS.md append landed.
-    let codex_dir = session._codex_home.as_ref().expect("codex home").path();
+    let codex_dir = session
+        .guards
+        ._codex_home
+        .as_ref()
+        .expect("codex home")
+        .path();
     assert!(
         codex_dir.join("config.toml").is_file(),
         "config.toml present"
@@ -259,7 +264,7 @@ async fn execute_dispatch_without_codex_or_ornn_skips_codex_home() {
         .expect("dispatch executes");
 
     assert!(
-        session._codex_home.is_none(),
+        session.guards._codex_home.is_none(),
         "no codex home without config or ornn"
     );
     assert_eq!(session.running.status(), fkst_engine::LiveStatus::Running);

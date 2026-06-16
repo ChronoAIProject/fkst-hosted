@@ -5,22 +5,27 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 use fkst_engine::EngineConfig;
 use fkst_shared::protocol::{
-    check_protocol_version, ControlMessage, Draining, Heartbeat, HeartbeatResponse, LifecycleState,
-    PullRequest, PullResponse, RegisterRequest, RegisterResponse, Released, ResolvedDispatch,
-    INTERNAL_AUTH_HEADER, PROTOCOL_VERSION,
+    check_protocol_version, ControlMessage, CredentialRefreshRequest, CredentialRefreshResponse,
+    Draining, Heartbeat, HeartbeatResponse, LifecycleState, PullRequest, PullResponse,
+    RefreshReason, RegisterRequest, RegisterResponse, Released, SessionStatus, StatusReport,
+    TerminalExit, INTERNAL_AUTH_HEADER, PROTOCOL_VERSION,
 };
 
 use crate::config::WorkerConfig;
-use crate::engine::{execute_dispatch, ExecutedSession};
+
+#[path = "agent_sessions.rs"]
+mod sessions;
 
 /// Errors talking to the controller. Transport / 5xx are transient (retried);
 /// 4xx / auth / version / decode are fatal config-or-protocol problems.
@@ -51,6 +56,32 @@ impl AgentError {
     }
 }
 
+/// A session this worker is actively driving: the stop signal the supervise loop
+/// observes, plus the loop's join handle. The supervise loop OWNS the
+/// `RunningSession`, the on-disk guards, and the refresh servicer; the registry
+/// holds only the control surface (flip `stop` to command a stop) so the lock is
+/// never held across the loop's work.
+pub(crate) struct LiveSession {
+    /// Flipped to `true` to command the supervise loop to stop the engine, send
+    /// a Released, and exit.
+    stop: watch::Sender<bool>,
+    /// The supervise task; joined on a commanded stop so the agent's
+    /// `StopSession` arm awaits the loop's drain (stop + Released).
+    handle: JoinHandle<()>,
+}
+
+impl LiveSession {
+    /// Bundle the supervise loop's stop signal + join handle for the registry.
+    pub(crate) fn new(stop: watch::Sender<bool>, handle: JoinHandle<()>) -> Self {
+        Self { stop, handle }
+    }
+
+    /// Split into the stop signal + join handle for the commanded-stop drain.
+    pub(crate) fn into_parts(self) -> (watch::Sender<bool>, JoinHandle<()>) {
+        (self.stop, self.handle)
+    }
+}
+
 /// Registry client over the internal protocol.
 pub struct WorkerAgent {
     http: reqwest::Client,
@@ -66,13 +97,13 @@ pub struct WorkerAgent {
     /// `ResolvedDispatch` arrives — which the controller never sends until the
     /// activation increment, so this stays unused in prod (the arm is dormant).
     engine_config: EngineConfig,
-    /// In-memory registry of the sessions this worker currently runs, keyed by
-    /// session id. The `ResolvedDispatch` arm inserts a spawned
-    /// [`ExecutedSession`]; the heartbeat reports the keys as
-    /// `running_sessions`. The lock is sync and is NEVER held across an await.
-    /// The supervise loop that drains it lands in the next increment; for now an
-    /// entry lives until the worker exits.
-    sessions: Mutex<HashMap<String, ExecutedSession>>,
+    /// In-memory registry of the sessions this worker currently drives, keyed by
+    /// session id. The `ResolvedDispatch` arm (and the startup re-adopt) inserts
+    /// a [`LiveSession`] once the supervise loop is spawned; the heartbeat
+    /// reports the keys as `running_sessions`; a `StopSession` flips the stop
+    /// signal, awaits the loop's drain, and removes the entry. The lock is sync
+    /// and is NEVER held across an await.
+    sessions: Mutex<HashMap<String, LiveSession>>,
 }
 
 impl WorkerAgent {
@@ -251,8 +282,15 @@ impl WorkerAgent {
 
     /// Send one heartbeat and act on any piggybacked control messages. The
     /// reported `running_sessions` are the keys of the in-memory session registry
-    /// (the sessions this worker currently runs).
-    pub async fn heartbeat(&self, state: LifecycleState) -> Result<HeartbeatResponse, AgentError> {
+    /// (the sessions this worker currently drives).
+    ///
+    /// Takes `self: &Arc<Self>` because a dispatch spawns a supervise loop that
+    /// holds an `Arc<WorkerAgent>` for the duration of the session (it calls
+    /// `refresh_credential` / `report_status` / `release` / `engine_runner`).
+    pub async fn heartbeat(
+        self: &Arc<Self>,
+        state: LifecycleState,
+    ) -> Result<HeartbeatResponse, AgentError> {
         let hb = Heartbeat {
             worker_id: self.worker_id.clone(),
             protocol_version: PROTOCOL_VERSION,
@@ -264,69 +302,18 @@ impl WorkerAgent {
         for ctrl in &resp.control {
             match ctrl {
                 ControlMessage::StopSession { session_id, reason } => {
-                    // No supervise/stop loop yet (#151 increment 4 only spawns);
-                    // the no-op handoff still completes the protocol round-trip
-                    // with a Released.
-                    tracing::info!(session_id = %session_id, reason = %reason, "StopSession received; releasing (no stop loop yet)");
-                    if let Err(e) = self.release(session_id).await {
-                        tracing::warn!(error = %e, session_id = %session_id, "failed to send Released");
-                    }
+                    tracing::info!(session_id = %session_id, reason = %reason, "StopSession received");
+                    self.stop_session(session_id).await;
                 }
                 ControlMessage::ResolvedDispatch(dispatch) => {
-                    // #151 increment 4: spawn + register the engine. DORMANT in
-                    // prod — the controller never emits this until the activation
-                    // increment, so this is reachable only in tests today.
+                    // #151: spawn + supervise the engine. DORMANT in prod — the
+                    // controller never emits this until the activation increment,
+                    // so this is reachable only in tests today.
                     self.handle_resolved_dispatch(dispatch).await;
                 }
             }
         }
         Ok(resp)
-    }
-
-    /// Spawn the engine for a resolved dispatch and register the running session
-    /// (#151). A spawn failure is logged LOUDLY (never a secret) and swallowed —
-    /// a single bad dispatch must NOT crash the worker. Idempotent: a dispatch
-    /// for a session already registered is ignored (the controller's claim is the
-    /// authoritative dedupe).
-    async fn handle_resolved_dispatch(&self, dispatch: &ResolvedDispatch) {
-        let session_id = dispatch.session_id.clone();
-        if self
-            .sessions
-            .lock()
-            .expect("session registry poisoned")
-            .contains_key(&session_id)
-        {
-            tracing::debug!(session_id = %session_id, "dispatch for an already-running session; ignoring");
-            return;
-        }
-        // `execute_dispatch` is awaited to completion (the lock is NOT held across
-        // it); the spawned session is registered afterwards.
-        match execute_dispatch(&self.engine_config, dispatch, &self.http).await {
-            Ok(session) => {
-                let pid = session.running.pid;
-                self.sessions
-                    .lock()
-                    .expect("session registry poisoned")
-                    .insert(session_id.clone(), session);
-                tracing::info!(session_id = %session_id, pid, "engine spawned and session registered");
-            }
-            Err(error) => {
-                // The error never carries a secret (see ExecError); log it loudly
-                // and keep serving — the worker stays up.
-                tracing::error!(session_id = %session_id, error = %error, "failed to execute dispatch; session NOT registered");
-            }
-        }
-    }
-
-    /// The session ids this worker currently runs (the heartbeat report). The
-    /// lock is taken briefly and never held across an await.
-    fn running_session_ids(&self) -> Vec<String> {
-        self.sessions
-            .lock()
-            .expect("session registry poisoned")
-            .keys()
-            .cloned()
-            .collect()
     }
 
     /// Pull work from the controller (empty until #135).
@@ -366,12 +353,119 @@ impl WorkerAgent {
         Ok(())
     }
 
+    /// Ask the controller to mint a fresh GitHub installation token for a running
+    /// session (#151). The worker holds no App key, so EVERY fresh token comes
+    /// from this fence-stamped RPC. `fencing_id` is the claim's current fence the
+    /// controller checks: a stale fence is refused with `credentials: None` (the
+    /// caller self-fences), an uninstalled App answers `gone: true` (the caller
+    /// fails the session). The token in the answer is a `SecretString` (never
+    /// logged); only the supervise loop's token writer exposes it.
+    pub async fn refresh_credential(
+        &self,
+        session_id: &str,
+        fencing_id: i64,
+        repo_ref: &str,
+        reason: RefreshReason,
+    ) -> Result<CredentialRefreshResponse, AgentError> {
+        let req = CredentialRefreshRequest {
+            worker_id: self.worker_id.clone(),
+            protocol_version: PROTOCOL_VERSION,
+            session_id: session_id.to_string(),
+            fencing_id,
+            repo_ref: repo_ref.to_string(),
+            reason,
+        };
+        self.post_json("/internal/v1/credential-refresh", &req)
+            .await
+    }
+
+    /// Report a session's lifecycle status to the controller (#151). Fence-
+    /// stamped: a superseded worker's report is a controller-side no-op (it
+    /// cannot overwrite the claim's status). `terminal` carries the exit only on
+    /// a terminal status (Stopped/Failed). Best-effort at the call site: a failed
+    /// report is logged and retried by the supervise loop on its next tick.
+    pub async fn report_status(
+        &self,
+        session_id: &str,
+        fencing_id: i64,
+        status: SessionStatus,
+        terminal: Option<TerminalExit>,
+    ) -> Result<(), AgentError> {
+        let report = StatusReport {
+            worker_id: self.worker_id.clone(),
+            protocol_version: PROTOCOL_VERSION,
+            session_id: session_id.to_string(),
+            fencing_id,
+            status,
+            terminal,
+            timestamp_unix_ms: now_unix_ms(),
+        };
+        let _: serde_json::Value = self
+            .post_json("/internal/v1/status-report", &report)
+            .await?;
+        Ok(())
+    }
+
     pub fn worker_id(&self) -> &str {
         &self.worker_id
     }
 
     pub fn capacity(&self) -> u32 {
         self.capacity
+    }
+
+    // --- session-registry accessors (used by the `sessions` child module) -----
+
+    /// The session ids this worker currently drives (the heartbeat report). The
+    /// lock is taken briefly and never held across an await.
+    pub(crate) fn running_session_ids(&self) -> Vec<String> {
+        self.sessions
+            .lock()
+            .expect("session registry poisoned")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Whether a session id is already in the registry (the at-most-one-loop
+    /// dedupe). The lock is taken briefly and never held across an await.
+    pub(crate) fn is_driving(&self, session_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .expect("session registry poisoned")
+            .contains_key(session_id)
+    }
+
+    /// Insert a freshly-spawned [`LiveSession`] into the registry.
+    pub(crate) fn insert_live_session(&self, session_id: String, live: LiveSession) {
+        self.sessions
+            .lock()
+            .expect("session registry poisoned")
+            .insert(session_id, live);
+    }
+
+    /// Remove + return a session's [`LiveSession`] (the commanded-stop drain).
+    pub(crate) fn take_live_session(&self, session_id: &str) -> Option<LiveSession> {
+        self.sessions
+            .lock()
+            .expect("session registry poisoned")
+            .remove(session_id)
+    }
+
+    /// The worker's engine config (the dispatch + re-adopt paths read it).
+    pub(crate) fn engine_config(&self) -> &EngineConfig {
+        &self.engine_config
+    }
+
+    /// The configured engine temp root — the re-adopt scan root.
+    pub(crate) fn engine_temp_root_path(&self) -> &std::path::Path {
+        self.engine_config.temp_root.as_path()
+    }
+
+    /// The shared HTTP client (the dispatch path reuses it for the presigned
+    /// ornn-zip fetch, so a worker keeps one connection pool).
+    pub(crate) fn http_client(&self) -> &reqwest::Client {
+        &self.http
     }
 }
 
