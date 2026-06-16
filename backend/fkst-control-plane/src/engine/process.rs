@@ -115,12 +115,13 @@ pub const STDOUT_CHANNEL_CAPACITY: usize = 1024;
 /// Per-stream byte cap when collecting conformance output (pre-truncation).
 const CONFORMANCE_CAPTURE_LIMIT: u64 = 256 * 1024;
 
-/// Poll interval for reap loops.
-const REAP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Poll interval for reap loops. `pub(crate)` so the adopted-session stop path
+/// (#136, `engine/runner.rs`) reuses the same cadence as `reap_with_grace`.
+pub(crate) const REAP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Bounded number of polls after SIGKILL before declaring the group
-/// unreapable (20 x 100 ms = 2 s).
-const SIGKILL_REAP_POLLS: u32 = 20;
+/// unreapable (20 x 100 ms = 2 s). `pub(crate)` for the adopted-stop reuse.
+pub(crate) const SIGKILL_REAP_POLLS: u32 = 20;
 
 /// Bounded, shared, append-only merge of a child's stdout AND stderr. Cheap
 /// to clone (an `Arc` handle); each drain task appends, readers snapshot. Both

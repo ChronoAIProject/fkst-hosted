@@ -77,19 +77,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use bson::doc;
-
 pub use config::ReconcileConfig;
 
-use crate::db::Db;
 use crate::engine::EngineConfig;
-use crate::error::AppError;
 
 /// Runtime-dir prefix — the ONLY class the sweep deletes. A runtime dir's path
 /// is persisted on `SessionDoc.runtime_dir`, so it is fully fenceable against
 /// the live set. (Kept in sync with [`crate::engine::runner`] — this module
 /// only READS that naming convention, it never changes it.)
-const RUNTIME_DIR_PREFIX: &str = "fkst-rt-";
+pub(crate) const RUNTIME_DIR_PREFIX: &str = "fkst-rt-";
 
 /// Package-dir prefix — scanned and counted but **never deleted**: the package
 /// dir path is not persisted on the session doc, so it cannot be fenced, and
@@ -290,28 +286,25 @@ pub fn sweep_orphan_runtime_dirs(
 
 /// Age of `path` relative to `now`, derived from its mtime. A future mtime
 /// (clock skew) yields a zero age (treated as "fresh"), never a panic.
-fn dir_age(path: &Path, now: SystemTime) -> Result<Duration, std::io::Error> {
+pub(crate) fn dir_age(path: &Path, now: SystemTime) -> Result<Duration, std::io::Error> {
     let mtime = fs::metadata(path)?.modified()?;
     Ok(now.duration_since(mtime).unwrap_or(Duration::ZERO))
 }
 
-/// Async wrapper: query the `sessions` collection for the `runtime_dir` values
-/// of non-terminal sessions (status NOT in `[stopped, failed]`, `runtime_dir`
-/// not null), build the canonical live fencing set scoped to THIS
-/// `temp_root`, capture `now`, and call the pure [`sweep_orphan_runtime_dirs`].
+/// Build the OS-TRUTH live fencing set — the canonical+lexical paths of every
+/// `fkst-rt-*` dir whose owner breadcrumb is present and whose owner is still
+/// alive & leads its own group (#136) — capture `now`, and call the pure
+/// [`sweep_orphan_runtime_dirs`]. This REPLACES the old Mongo `live_runtime_dirs`
+/// query: a worker's runtime truth is the OS itself (live processes + on-disk
+/// breadcrumbs), never a database document.
 ///
-/// Pod-scoping is unnecessary for this LOCAL temp-dir class: each pod has its
-/// own filesystem and only ever sees its own temp dirs. The live set is still
-/// defensively filtered to `runtime_dir` values that live under `temp_root`,
-/// so an unrelated path can never widen (or, via a non-canonicalizable entry,
-/// distort) the fence.
-pub async fn reconcile_orphans(
-    db: &Db,
-    engine_config: &EngineConfig,
-    cfg: &ReconcileConfig,
-) -> Result<SweepReport, AppError> {
+/// Pod-scoping is unnecessary for this LOCAL temp-dir class: each pod/worker has
+/// its own filesystem and only ever sees its own temp dirs. The sweep is
+/// fail-open and infallible (a missing/un-readable temp_root yields an empty
+/// live set + an empty report), so no `Result`.
+pub fn reconcile_orphans(engine_config: &EngineConfig, cfg: &ReconcileConfig) -> SweepReport {
     let temp_root = engine_config.temp_root.as_path();
-    let live_runtime_dirs = live_runtime_dirs(db, temp_root).await?;
+    let live_runtime_dirs = crate::engine::os_truth_live_set(temp_root);
 
     tracing::info!(
         temp_root = %temp_root.display(),
@@ -335,62 +328,7 @@ pub async fn reconcile_orphans(
         dry_run = cfg.dry_run,
         "reconcile.done"
     );
-    Ok(report)
-}
-
-/// Build the live fencing set: the canonical `runtime_dir` paths of every
-/// non-terminal session, restricted to those that live under `temp_root`.
-async fn live_runtime_dirs(db: &Db, temp_root: &Path) -> Result<HashSet<PathBuf>, AppError> {
-    use mongodb::options::FindOptions;
-
-    // Non-terminal == status NOT in {stopped, failed}; runtime_dir present.
-    let filter = doc! {
-        "status": { "$nin": ["stopped", "failed"] },
-        "runtime_dir": { "$ne": bson::Bson::Null },
-    };
-    let options = FindOptions::builder()
-        .projection(doc! { "runtime_dir": 1, "_id": 0 })
-        .build();
-
-    // Project only runtime_dir; deserialize into a tiny shape so the query is
-    // robust to the full SessionDoc evolving.
-    #[derive(serde::Deserialize)]
-    struct RuntimeDirOnly {
-        runtime_dir: Option<String>,
-    }
-
-    let coll = db.collection::<RuntimeDirOnly>(crate::db::SESSIONS);
-    let mut cursor = coll
-        .find(filter)
-        .with_options(options)
-        .await
-        .map_err(AppError::Mongo)?;
-
-    let canonical_root = temp_root.canonicalize().ok();
-    let mut live = HashSet::new();
-    while cursor.advance().await.map_err(AppError::Mongo)? {
-        let row: RuntimeDirOnly = cursor.deserialize_current().map_err(AppError::Mongo)?;
-        let Some(runtime_dir) = row.runtime_dir else {
-            continue;
-        };
-        let path = PathBuf::from(&runtime_dir);
-
-        // Defensive scoping: only keep dirs that live under THIS temp_root.
-        // Compare canonical-to-canonical when the root canonicalizes; fall
-        // back to a lexical prefix check otherwise.
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-        let under_root = match &canonical_root {
-            Some(root) => canonical.starts_with(root) || path.starts_with(temp_root),
-            None => path.starts_with(temp_root),
-        };
-        if under_root {
-            // Insert BOTH the canonical and lexical forms so the sweeper's
-            // membership check matches regardless of which it computes.
-            live.insert(canonical);
-            live.insert(path);
-        }
-    }
-    Ok(live)
+    report
 }
 
 #[cfg(test)]
