@@ -5,6 +5,8 @@ pub mod extract;
 pub mod github;
 pub mod github_app_webhook;
 pub mod goals;
+pub mod goals_submit;
+pub mod goals_submit_dto;
 pub mod health;
 pub mod sessions;
 

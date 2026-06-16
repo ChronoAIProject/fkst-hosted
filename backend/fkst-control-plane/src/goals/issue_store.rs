@@ -569,6 +569,67 @@ impl GoalIssueStore {
             .get(&goal_id)
             .and_then(|e| e.doc.active_session_id)
     }
+
+    /// The GitHub issue number bound to a goal (controller memory), or `None`
+    /// for an unknown goal or a memory-only goal whose issue is not yet
+    /// materialized. The submit handler (#178) reads this back after `insert`
+    /// to compose the response's `issue_number`/`issue_url`.
+    pub async fn issue_number(&self, goal_id: bson::Uuid) -> Option<u64> {
+        self.lock().get(&goal_id).and_then(|e| e.issue_number)
+    }
+
+    /// Adopt an existing GitHub issue as a goal (#178, issue-source submit path).
+    ///
+    /// Unlike [`Self::insert`], this NEVER calls `create_issue`: the issue the
+    /// user authored already exists. It (a) records the goal in the authoritative
+    /// map bound to the externally-supplied `issue_number`, and (b) stamps the
+    /// server marker (so reconciliation can find it) + the goal label onto that
+    /// issue via a single `patch_issue` (`body`/`labels` only; title and state
+    /// are left as the author set them).
+    ///
+    /// Secret hygiene: the patched body is the same non-sensitive
+    /// `issue_body(goal)` (summary + marker) the server writes everywhere — it
+    /// does NOT echo the (secret) prompt back, even though for an adopted issue
+    /// the user's ORIGINAL body still carries their authored Goal section by
+    /// design (the submit handler documents that divergence).
+    pub async fn adopt_issue(
+        &self,
+        goal: &GoalDoc,
+        repo: &RepoRef,
+        issue_number: u64,
+    ) -> Result<(), AppError> {
+        // In-memory state is authoritative; record it (bound to the existing
+        // issue number) before the best-effort durable mirror write.
+        self.lock().insert(
+            goal.id,
+            GoalEntry {
+                doc: goal.clone(),
+                issue_number: Some(issue_number),
+            },
+        );
+        // TODO(milestone-#5 label-lifecycle): use the canonical fkst-goal const
+        // + transitions (this stamps the placeholder `GOAL_LABEL` alongside the
+        // status label until that sibling issue lands).
+        self.issues
+            .patch_issue(
+                repo,
+                issue_number,
+                IssuePatch {
+                    title: None,
+                    body: Some(issue_body(goal)),
+                    labels: Some(labels_for(goal.status)),
+                    state: None,
+                },
+            )
+            .await?;
+        tracing::info!(
+            goal_id = %goal.id,
+            issue = issue_number,
+            repo = %format!("{}/{}", repo.owner, repo.name),
+            "goal adopted onto existing issue"
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -665,6 +726,45 @@ mod tests {
             "prompt never in the issue body"
         );
         assert!(parse_marker(body).is_ok(), "body carries a valid marker");
+    }
+
+    #[tokio::test]
+    async fn adopt_issue_patches_without_creating_and_stamps_label() {
+        let fake = Arc::new(FakeIssueApi::default());
+        let store = store_with(fake.clone());
+        let g = goal(Some(repo()));
+
+        store.adopt_issue(&g, &repo(), 42).await.unwrap();
+
+        // No issue is created on the adopt path — the issue already exists.
+        assert!(
+            fake.created.lock().unwrap().is_empty(),
+            "adopt_issue must NOT call create_issue"
+        );
+        // Exactly one patch, against the supplied number, carrying the goal label
+        // and NOT echoing the secret prompt. Scope the lock so it is dropped
+        // before the awaits below (no MutexGuard held across `.await`).
+        {
+            let patched = fake.patched.lock().unwrap();
+            assert_eq!(patched.len(), 1, "exactly one patch_issue");
+            let (number, patch) = &patched[0];
+            assert_eq!(*number, 42, "patches the adopted issue number");
+            let labels = patch.labels.as_ref().expect("labels stamped");
+            assert!(
+                labels.contains(&GOAL_LABEL.to_string()),
+                "adopt stamps the goal label: {labels:?}"
+            );
+            let body = patch.body.as_ref().expect("body set");
+            assert!(
+                !body.contains("SECRET-PROMPT"),
+                "the server-written body never carries the prompt"
+            );
+            assert!(parse_marker(body).is_ok(), "body carries a valid marker");
+        }
+
+        // The goal is now bound to the adopted issue number in memory.
+        assert_eq!(store.issue_number(g.id).await, Some(42));
+        assert!(store.get(g.id).await.unwrap().is_some());
     }
 
     #[tokio::test]
