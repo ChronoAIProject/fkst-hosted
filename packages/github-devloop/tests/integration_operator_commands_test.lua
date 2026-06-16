@@ -392,10 +392,11 @@ return {
 
   test_issue_reimplement_command_reenters_impl_failed = function()
     local event = reached()
+    local ready_version = core.build_devloop_ready_payload(event).dedup_key
     local command = trusted_issue_command("reimplement", "IC_issue_reimplement")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:impl-failed" }, "OPEN", {
-      core.state_marker(event.proposal_id, "impl-failed", event.dedup_key),
-      core.impl_failure_marker(event.proposal_id, event.dedup_key, "codex-failed"),
+      core.state_marker(event.proposal_id, "impl-failed", ready_version),
+      core.impl_failure_marker(event.proposal_id, ready_version, "codex-failed"),
       command,
     })
 
@@ -407,6 +408,7 @@ return {
     t.is_true(command_response.payload.body:find('command="reimplement"', 1, true) ~= nil)
     t.is_true(ready_raise ~= nil)
     t.eq(ready_raise.payload.proposal_id, event.proposal_id)
+    t.eq(ready_raise.payload.dedup_key, ready_version)
     t.eq(ready_raise.payload.impl_retry_attempt, 2)
   end,
 }

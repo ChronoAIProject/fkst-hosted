@@ -170,6 +170,18 @@ return {
     t.is_true(row.version_identity:find("ready_payload_inner_version", 1, true) ~= nil)
   end,
 
+  test_impl_failed_restart_row_replays_ready_with_frozen_version_identity = function()
+    local row = table_by_state()["impl-failed"]
+    t.eq(row.driving_queue, "devloop_ready")
+    t.eq(row.on_timeout.queue, "devloop_ready")
+    t.eq(row.kickoff, "devloop_ready")
+    t.eq(row.effects.kinds[1], "devloop_ready")
+    t.eq(row.payload_builder, core.build_devloop_ready_payload)
+    t.eq(row.payload_fields.proposal_id, "marker:state.proposal")
+    t.eq(row.payload_fields.dedup_key, "marker:impl-failure.dedup")
+    t.is_true(row.version_identity:find("ready_payload_inner_version", 1, true) ~= nil)
+  end,
+
   test_reentry_commands_are_supported_by_operator_parser = function()
     for _, row in ipairs(core.restart_transition_table()) do
       for _, command_name in ipairs(row.reentry_commands or {}) do
