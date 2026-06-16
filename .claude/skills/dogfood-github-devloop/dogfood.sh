@@ -200,13 +200,26 @@ status_one() {
 
 doctor_one() {
   cfg "$1" || return 1
-  local p cur log panic; p=$(pidof_df); log=$(latest_log "$1")
-  git -C "$PKGSRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
-  cur=$([ "$(git -C "$PKGSRC" rev-parse HEAD 2>/dev/null)" = "$(git -C "$PKGSRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)" ] && echo current || echo "STALE→restart")
+  local p log panic pdev sdev procpkg proceng pv ev; p=$(pidof_df); log=$(latest_log "$1")
   panic=$(grep -ac panicked "$log" 2>/dev/null); panic=${panic:-0}
-  printf '  %-9s %s | code %s (%s) | panic %s\n' "$1" \
-    "$([ -n "$p" ] && echo "RUNNING pid $p up $(ps -o etime= -p $p 2>/dev/null|tr -d ' ')" || echo 'STOPPED')" \
-    "$cur" "$(git -C "$PKGSRC" rev-parse --short HEAD 2>/dev/null)" "$panic"
+  if [ -z "$p" ]; then printf '  %-9s STOPPED (target %s)\n' "$1" "$REPO"; return 0; fi
+  git -C "$PKGSRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
+  pdev=$(git -C "$PKGSRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)
+  sdev=$(git -C "$SUBSTRATE_SRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)
+  # Authoritative freshness = the code the RUNNING process loaded at startup (logged code_provenance
+  # PKG_VERS/ENGINE_VER), NOT the worktree/BIN file — those can be updated without reloading the
+  # process. A sync-without-restart leaves the process stale while the worktree looks current; only
+  # the logged provenance catches it. Restart is the ONLY thing that reloads.
+  procpkg=$(grep -aoE 'PKG_VERS=[^ ]*github-devloop@[a-f0-9]+' "$log" 2>/dev/null | grep -oE 'github-devloop@[a-f0-9]+' | tail -1 | cut -d@ -f2)
+  proceng=$(grep -aoE 'ENGINE_VER=[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d= -f2)
+  if   [ -z "$procpkg" ]; then pv="pkg=?"
+  elif [ "${pdev:0:${#procpkg}}" = "$procpkg" ]; then pv="pkg-current"
+  else pv="PKG-STALE→restart(${procpkg:0:8}≠${pdev:0:8})"; fi
+  if   [ -z "$proceng" ]; then ev="engine=?"
+  elif [ "${sdev:0:${#proceng}}" = "$proceng" ]; then ev="engine-current"
+  else ev="ENGINE-STALE→restart(${proceng:0:8}≠${sdev:0:8})"; fi
+  printf '  %-9s RUNNING pid %s up %s | %s %s | worktree %s | panic %s\n' "$1" "$p" \
+    "$(ps -o etime= -p $p 2>/dev/null|tr -d ' ')" "$pv" "$ev" "$(git -C "$PKGSRC" rev-parse --short HEAD 2>/dev/null)" "$panic"
 }
 
 cmd_doctor() {
