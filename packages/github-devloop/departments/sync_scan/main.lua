@@ -33,6 +33,14 @@ local function fetch_branch(branch)
   run_git(core.git_fetch_branch_cmd("origin", branch), 60, "git branch fetch")
 end
 
+local function fetch_branches(repo, branches)
+  core.with_repo_ref_store_lock(repo, function()
+    for _, branch in ipairs(branches) do
+      fetch_branch(branch)
+    end
+  end)
+end
+
 local function remote_head(branch)
   local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "git remote branch head")
   local head = trim_stdout(result)
@@ -132,7 +140,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   end
 
   core.assert_trusted_bot_configured()
-  fetch_branch(integration)
+  fetch_branches(repo, { integration })
   local rechecked_integration_sha = remote_head(integration)
   if rechecked_integration_sha ~= integration_sha then
     core.log_cas_decision("sync_scan", "branch-sync", {
@@ -147,7 +155,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
     error("github-devloop: unsafe branch sync merge head")
   end
   run_git(core.git_push_worktree_branch_update_cmd(worktree, integration), 120, "git branch sync push")
-  fetch_branch(integration)
+  fetch_branches(repo, { integration })
   local pushed_head = remote_head(integration)
   if pushed_head ~= merge_head then
     error("github-devloop: branch sync push verification failed")
@@ -170,7 +178,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   end
 
   core.assert_trusted_bot_configured()
-  fetch_branch(integration)
+  fetch_branches(repo, { integration })
   local rechecked_integration_sha = remote_head(integration)
   if rechecked_integration_sha ~= integration_sha then
     core.log_cas_decision("sync_scan", "branch-sync", {
@@ -189,7 +197,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   end
 
   run_git(core.git_push_branch_force_with_lease_cmd(integration, upstream_sha, integration_sha), 120, "git branch sync converge")
-  fetch_branch(integration)
+  fetch_branches(repo, { integration })
   local pushed_head = remote_head(integration)
   if pushed_head ~= upstream_sha then
     error("github-devloop: branch sync converge verification failed")
@@ -217,8 +225,7 @@ function pipeline(event)
   end
 
   with_lock(core.branch_sync_lock_key(repo, branches.upstream, branches.integration), function()
-    fetch_branch(branches.upstream)
-    fetch_branch(branches.integration)
+    fetch_branches(repo, { branches.upstream, branches.integration })
     local upstream_sha = remote_head(branches.upstream)
     local integration_sha = remote_head(branches.integration)
 
