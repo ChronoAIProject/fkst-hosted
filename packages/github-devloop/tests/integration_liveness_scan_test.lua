@@ -335,6 +335,7 @@ return {
   test_liveness_scan_requeues_every_non_terminal_issue_marker_state = function()
     local issues = {}
     local expected = {}
+    local terminal = {}
     local number = 100
     for _, row in ipairs(core.restart_transition_table()) do
       number = number + 1
@@ -349,6 +350,8 @@ return {
       })
       if row.terminal == false then
         expected[number] = state
+      else
+        terminal[number] = state
       end
     end
     mock_repo()
@@ -361,17 +364,8 @@ return {
     for issue_number, state in pairs(expected) do
       t.eq(raised[issue_number], true, "non-terminal issue marker state not sweep-reachable: " .. tostring(state))
     end
-    for _, row in ipairs(core.restart_transition_table()) do
-      if row.terminal == true then
-        for _, item in ipairs(issues) do
-          if item.number ~= nil
-            and core.current_state({
-              { body = core.state_marker(core.proposal_id(repo, item.number), row.from_state, version), author_login = "fkst-test-bot" },
-            }, core.proposal_id(repo, item.number)).state == row.from_state then
-            t.eq(raised[item.number], nil, "terminal issue marker state was requeued: " .. tostring(row.from_state))
-          end
-        end
-      end
+    for issue_number, state in pairs(terminal) do
+      t.eq(raised[issue_number], nil, "terminal issue marker state was requeued: " .. tostring(state))
     end
   end,
 
