@@ -275,17 +275,23 @@ return {
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
   end,
 
-  test_observe_pr_fixing_self_heal_fails_closed_when_pr_closed = function()
+  test_observe_pr_fixing_self_heal_redrives_ready_when_pr_closed = function()
     local impl_version = reviewing().version
     local fix_version = core.next_fix_version(impl_version)
-    local review_id = core.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     h.mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
     }, "devloop-owner-repo-42-01HY", "def456", "CLOSED")
+    mock_issue_result_view({ "fkst-dev:fixing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
+    })
 
     local result = run_observe_pr(pr_event(), opts("review-v2-fixing-self-heal-pr-closed"))
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    local ready = find_raise(result.raises, "devloop_ready")
+    t.is_true(ready ~= nil)
+    t.eq(ready.payload.proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(ready.payload.dedup_key, "ready/" .. core.orphaned_pr_ready_version({ version = fix_version }))
   end,
 }

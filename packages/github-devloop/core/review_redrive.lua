@@ -6,6 +6,9 @@ local max_review_redrive_rounds = 3
 function M.review_redrive_version(state, pr)
   local version = tostring(state and state.version or "")
   local state_name = tostring(state and state.state or "")
+  if state_name ~= "pr-open" and state_name ~= "reviewing" then
+    return version
+  end
   if M.version_timeout_round(version, state_name) <= 0 then
     return version
   end
