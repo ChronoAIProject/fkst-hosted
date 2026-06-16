@@ -11,11 +11,12 @@
 //! This is purely the web edge: wire DTOs, UUID parsing, authz checks, and
 //! status mapping. Validation logic lives in the goals domain module.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use bson::doc;
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthContext;
@@ -30,6 +31,7 @@ use crate::routes::extract::AppJson;
 use crate::routes::rfc3339;
 use crate::sessions::GoalTriggerInfo;
 use crate::state::AppState;
+use crate::vault::{EnvKind, EnvScopeRef};
 
 /// Statuses that allow mutation of package_names, repo, and deletion.
 const MUTABLE_STATUSES: [GoalStatus; 3] = [
@@ -154,6 +156,43 @@ pub struct TriggerRequest {
     /// codex (issue #114). Each `{kind, name, version}`; boundary-validated.
     #[serde(default)]
     pub ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
+    /// Inline secrets/variables to inject into the triggered session's engine
+    /// env (#138). Held by the controller in memory ONLY (never persisted) for
+    /// this session's repo scope; the driver resolves them into the env at
+    /// spawn. `None`/empty => no inline env. Each `value` is redacted in logs.
+    #[serde(default)]
+    pub secrets: Option<Vec<InlineSecretInput>>,
+}
+
+/// One inline secret/variable supplied in the trigger body (#138). `value` is
+/// redacted in `Debug` so a secret never renders through `{:?}`; `kind` defaults
+/// to `secret`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InlineSecretInput {
+    /// Env-var name (validated by the vault: rule + reserved-key denylist).
+    pub key: String,
+    /// The value. Moved into a zeroizing `SecretString` before it leaves here.
+    pub value: String,
+    /// `secret` (default) or `variable`.
+    #[serde(default = "default_secret_kind")]
+    pub kind: EnvKind,
+}
+
+impl std::fmt::Debug for InlineSecretInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InlineSecretInput")
+            .field("key", &self.key)
+            .field("value", &"<redacted>")
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
+/// Inline entries default to `secret` (the safe default — treated as sensitive
+/// unless explicitly tagged `variable`).
+fn default_secret_kind() -> EnvKind {
+    EnvKind::Secret
 }
 
 /// Request-body specification for creating a new GitHub repo during trigger.
@@ -859,6 +898,24 @@ async fn trigger(
         .await
         .map_err(AppError::from)?;
 
+    // Inline secrets (#138): hold the trigger-supplied secrets/variables in the
+    // controller's in-memory vault for this session's repo scope BEFORE creating
+    // the session, so the driver resolves them into the engine env at spawn. A
+    // reserved/invalid/oversized key fails the trigger (422) before any session
+    // is placed. Never log a value — `set_inline` logs key names + count only.
+    if let Some(inputs) = body.secrets {
+        if !inputs.is_empty() {
+            let scope = EnvScopeRef::repo(&effective_repo.owner, &effective_repo.name);
+            let entries: Vec<(String, EnvKind, SecretString)> = inputs
+                .into_iter()
+                .map(|input| (input.key, input.kind, SecretString::from(input.value)))
+                .collect();
+            state
+                .vault
+                .set_inline(&goal.owner_user_id, &scope, entries)?;
+        }
+    }
+
     // Steps 4-8: Delegate to SessionService::create_for_goal.
     let trigger_info = GoalTriggerInfo {
         goal_id: goal.id,
@@ -1003,11 +1060,19 @@ async fn create_new_repo(
 // ---- Router ---------------------------------------------------------------
 
 /// Goal routes, nested under `/api/v1`.
+/// Wire-size cap for the trigger body (#138): it now carries inline secrets, so
+/// bound it against a runaway payload. Mirrors the 256 KiB guard the removed
+/// vault CRUD used.
+const MAX_TRIGGER_BODY_BYTES: usize = 256 * 1024;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/goals", get(list).post(create))
         .route("/goals/:id", get(get_one).patch(update).delete(delete_one))
-        .route("/goals/:id/trigger", post(trigger))
+        .route(
+            "/goals/:id/trigger",
+            post(trigger).layer(DefaultBodyLimit::max(MAX_TRIGGER_BODY_BYTES)),
+        )
 }
 
 #[cfg(test)]
@@ -1067,6 +1132,40 @@ mod tests {
         assert!(req.repo.is_none());
         assert_eq!(req.repo_mode, RepoMode::Existing);
         assert!(req.create.is_none());
+        assert!(req.secrets.is_none());
+    }
+
+    #[test]
+    fn trigger_request_inline_secret_defaults_to_secret_kind() {
+        let req: TriggerRequest =
+            serde_json::from_str(r#"{"secrets":[{"key":"OPENAI_API_KEY","value":"sk-x"}]}"#)
+                .expect("with secrets");
+        let secrets = req.secrets.expect("secrets present");
+        assert_eq!(secrets.len(), 1);
+        assert_eq!(secrets[0].key, "OPENAI_API_KEY");
+        assert_eq!(secrets[0].kind, EnvKind::Secret);
+    }
+
+    #[test]
+    fn trigger_request_inline_variable_kind_parses() {
+        let req: TriggerRequest = serde_json::from_str(
+            r#"{"secrets":[{"key":"CODEX_MODEL","value":"gpt-5-codex","kind":"variable"}]}"#,
+        )
+        .expect("with variable");
+        assert_eq!(req.secrets.expect("secrets")[0].kind, EnvKind::Variable);
+    }
+
+    #[test]
+    fn inline_secret_input_debug_redacts_value() {
+        let input = InlineSecretInput {
+            key: "OPENAI_API_KEY".to_string(),
+            value: "sk-leaky".to_string(),
+            kind: EnvKind::Secret,
+        };
+        let rendered = format!("{input:?}");
+        assert!(!rendered.contains("sk-leaky"), "value leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(rendered.contains("OPENAI_API_KEY"), "key should be visible");
     }
 
     #[test]
