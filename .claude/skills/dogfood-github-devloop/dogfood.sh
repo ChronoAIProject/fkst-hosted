@@ -17,7 +17,10 @@
 #   ./dogfood.sh bin                           ensure engine BIN == substrate origin/dev; rebuild if stale (no restart)
 #   ./dogfood.sh start   [name|all]            launch (ensures BIN fresh first)
 #   ./dogfood.sh stop    [name|all]            SIGKILL (releases the redb lock)
-#   ./dogfood.sh restart [name|all]            BIN-fresh + sync worktrees to origin/dev + SIGKILL + relaunch
+#   ./dogfood.sh restart [name|all]            BIN-fresh + sync worktrees to origin/dev + SIGKILL + relaunch (unconditional)
+#   ./dogfood.sh sync    [name|all]            auto-deploy: ff pinned operator checkouts to dev, rebuild BIN,
+#                                              and restart ONLY supervises whose running code is a real
+#                                              package/engine change (skill/docs-only skew is left running)
 #   ./dogfood.sh logs    [name] [lines]        tail the latest log (default packages, 40 lines)
 #
 # Two invariants this script encodes so each dogfood wake is a few clean calls, not ad-hoc bash:
@@ -198,29 +201,46 @@ status_one() {
   printf '[%s] RUNNING pid %s up %s panic=%s | host@%s pkgs@%s | %s\n' "$1" "$p" "$et" "$panic" "$hv" "$pv" "$last"
 }
 
-doctor_one() {
-  cfg "$1" || return 1
-  local p log panic pdev sdev procpkg proceng pv ev; p=$(pidof_df); log=$(latest_log "$1")
-  panic=$(grep -ac panicked "$log" 2>/dev/null); panic=${panic:-0}
-  if [ -z "$p" ]; then printf '  %-9s STOPPED (target %s)\n' "$1" "$REPO"; return 0; fi
+# _proc_stale <name> -> freshness verdict of the RUNNING process vs origin/dev. Authoritative =
+# the code the process loaded at startup (logged code_provenance PKG_VERS/ENGINE_VER), NOT the
+# worktree/BIN file (those can be updated without reloading the process — only a restart reloads).
+# Echoes: stopped | current | skew (dev moved, non-package files only) | pkg-stale | engine-stale.
+# Side effect: fetches origin/$UPSTREAM_BRANCH for $PKGSRC and $SUBSTRATE_SRC.
+_proc_stale() {
+  cfg "$1" || { echo unknown; return; }
+  local p log procpkg proceng pdev sdev; p=$(pidof_df); log=$(latest_log "$1")
+  [ -z "$p" ] && { echo stopped; return; }
   git -C "$PKGSRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
+  git -C "$SUBSTRATE_SRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
   pdev=$(git -C "$PKGSRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)
   sdev=$(git -C "$SUBSTRATE_SRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)
-  # Authoritative freshness = the code the RUNNING process loaded at startup (logged code_provenance
-  # PKG_VERS/ENGINE_VER), NOT the worktree/BIN file — those can be updated without reloading the
-  # process. A sync-without-restart leaves the process stale while the worktree looks current; only
-  # the logged provenance catches it. Restart is the ONLY thing that reloads.
   procpkg=$(grep -aoE 'PKG_VERS=[^ ]*github-devloop@[a-f0-9]+' "$log" 2>/dev/null | grep -oE 'github-devloop@[a-f0-9]+' | tail -1 | cut -d@ -f2)
   proceng=$(grep -aoE 'ENGINE_VER=[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d= -f2)
-  if   [ -z "$procpkg" ]; then pv="pkg=?"
-  elif [ "${pdev:0:${#procpkg}}" = "$procpkg" ]; then pv="pkg-current"
-  elif [ -z "$(git -C "$PKGSRC" diff "$procpkg" "$pdev" -- packages/ 2>/dev/null)" ]; then pv="pkg-skew(non-package, no restart)"
-  else pv="PKG-STALE→restart(${procpkg:0:8}≠${pdev:0:8})"; fi
-  if   [ -z "$proceng" ]; then ev="engine=?"
-  elif [ "${sdev:0:${#proceng}}" = "$proceng" ]; then ev="engine-current"
-  else ev="ENGINE-STALE→restart(${proceng:0:8}≠${sdev:0:8})"; fi
-  printf '  %-9s RUNNING pid %s up %s | %s %s | worktree %s | panic %s\n' "$1" "$p" \
-    "$(ps -o etime= -p $p 2>/dev/null|tr -d ' ')" "$pv" "$ev" "$(git -C "$PKGSRC" rev-parse --short HEAD 2>/dev/null)" "$panic"
+  if [ -n "$proceng" ] && [ "${sdev:0:${#proceng}}" != "$proceng" ]; then echo engine-stale; return; fi
+  if [ -n "$procpkg" ] && [ "${pdev:0:${#procpkg}}" != "$procpkg" ]; then
+    if [ -n "$(git -C "$PKGSRC" diff "$procpkg" "$pdev" -- packages/ 2>/dev/null)" ]; then echo pkg-stale; else echo skew; fi
+    return
+  fi
+  echo current
+}
+
+doctor_one() {
+  cfg "$1" || return 1
+  local p log panic st procpkg proceng verdict; p=$(pidof_df); log=$(latest_log "$1")
+  panic=$(grep -ac panicked "$log" 2>/dev/null); panic=${panic:-0}
+  if [ -z "$p" ]; then printf '  %-9s STOPPED (target %s)\n' "$1" "$REPO"; return 0; fi
+  st=$(_proc_stale "$1")   # also fetches origin/dev for $PKGSRC + $SUBSTRATE_SRC
+  procpkg=$(grep -aoE 'github-devloop@[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d@ -f2)
+  proceng=$(grep -aoE 'ENGINE_VER=[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d= -f2)
+  case "$st" in
+    current)      verdict="pkg-current engine-current" ;;
+    skew)         verdict="pkg-skew(non-package, no restart) engine-current" ;;
+    pkg-stale)    verdict="PKG-STALE→restart(${procpkg:0:8}≠$(git -C "$PKGSRC" rev-parse --short "origin/$UPSTREAM_BRANCH" 2>/dev/null))" ;;
+    engine-stale) verdict="ENGINE-STALE→restart(${proceng:0:8}≠$(git -C "$SUBSTRATE_SRC" rev-parse --short "origin/$UPSTREAM_BRANCH" 2>/dev/null))" ;;
+    *)            verdict="$st" ;;
+  esac
+  printf '  %-9s RUNNING pid %s up %s | %s | worktree %s | panic %s\n' "$1" "$p" \
+    "$(ps -o etime= -p $p 2>/dev/null|tr -d ' ')" "$verdict" "$(git -C "$PKGSRC" rev-parse --short HEAD 2>/dev/null)" "$panic"
 }
 
 cmd_doctor() {
@@ -228,6 +248,50 @@ cmd_doctor() {
   echo "supervises:"
   for n in $(expand "${1:-all}"); do doctor_one "$n"; done
   echo "graphql: $(gh api rate_limit --jq '.resources.graphql.remaining' 2>/dev/null||echo ?)/5000"
+}
+
+# _sync_checkout <dir>: fast-forward a pinned operator checkout to origin/$UPSTREAM_BRANCH. Only
+# touches a CLEAN checkout whose HEAD is an ancestor of origin/dev (a behind-but-on-the-dev-line
+# mirror); refuses a dirty tree or a feature-branch/diverged checkout (those are worktrees doing
+# work — never reset them). A pinned operator checkout must stay a clean dev mirror; make changes
+# in a worktree (see SKILL.md).
+_sync_checkout() {
+  local co="$1" before after
+  { [ -n "$co" ] && git -C "$co" rev-parse --git-dir >/dev/null 2>&1; } || { echo "  ${co:-?}: not a git checkout (skip)"; return; }
+  git -C "$co" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
+  before=$(git -C "$co" rev-parse --short HEAD 2>/dev/null)
+  if [ -n "$(git -C "$co" status --porcelain 2>/dev/null)" ]; then
+    echo "  $co: DIRTY — not synced (a pinned checkout must be clean; make changes in a worktree)"; return
+  fi
+  if ! git -C "$co" merge-base --is-ancestor HEAD "origin/$UPSTREAM_BRANCH" 2>/dev/null; then
+    echo "  $co: $before not an ancestor of origin/$UPSTREAM_BRANCH — skip (feature branch / diverged; not a pinned dev mirror)"; return
+  fi
+  git -C "$co" reset --hard "origin/$UPSTREAM_BRANCH" -q 2>/dev/null
+  after=$(git -C "$co" rev-parse --short HEAD 2>/dev/null)
+  [ "$before" = "$after" ] && echo "  $co: current ($after)" || echo "  $co: $before -> $after"
+}
+
+# cmd_sync: keep everything current in one call. Fast-forward the pinned operator checkouts (the one
+# this skill+dogfood.sh load from, and the substrate BIN source) to origin/dev, rebuild the BIN if
+# the engine moved, then AUTO-RESTART only the supervises whose RUNNING code is a real package or
+# engine change (pkg-stale/engine-stale). Skill/docs-only skew and already-current processes are
+# left running — a restart would only churn in-flight codex for no code change.
+cmd_sync() {
+  echo "operator checkouts -> origin/$UPSTREAM_BRANCH:"
+  _sync_checkout "$(git -C "$_self_dir" rev-parse --show-toplevel 2>/dev/null)"  # repo this skill lives in
+  _sync_checkout "$SUBSTRATE_SRC"                                                # engine BIN source
+  echo "engine BIN:"; bin_ensure_fresh | sed 's/^/  /'
+  echo "supervises (auto-restart only on real code change):"
+  local n st
+  for n in $(expand "${1:-all}"); do
+    cfg "$n" || continue
+    st=$(_proc_stale "$n")
+    case "$st" in
+      pkg-stale|engine-stale) echo "  $n: $st -> auto-restart"; restart_one "$n" | sed 's/^/    /' ;;
+      stopped)                echo "  $n: stopped (use 'start' to launch)" ;;
+      *)                      echo "  $n: $st (no restart needed)" ;;
+    esac
+  done
 }
 
 board_one() { # $1 name, $2 stale_hours
@@ -291,10 +355,11 @@ case "$cmd" in
   start)   bin_ensure_fresh; for n in $(expand "${arg2:-all}"); do start_one   "$n"; done ;;
   stop)    for n in $(expand "${arg2:-all}"); do stop_one "$n"; done ;;
   restart) bin_ensure_fresh; for n in $(expand "${arg2:-all}"); do restart_one "$n"; done ;;
+  sync)    cmd_sync "$arg2" ;;
   status)  for n in $(expand "${arg2:-all}"); do status_one "$n"; done ;;
   doctor)  cmd_doctor "${arg2:-all}" ;;
   config)  cmd_config ;;
   board)   cmd_board "$arg2" "$arg3" ;;
   logs)    f=$(latest_log "${arg2:-packages}"); echo "$f"; tail -"${arg3:-40}" "$f" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' ;;
-  *) echo "usage: $0 {status|doctor|config|board|bin|start|stop|restart|logs} [packages|substrate|website|all] [stale_h|lines]"; exit 1 ;;
+  *) echo "usage: $0 {status|doctor|config|board|bin|start|stop|restart|sync|logs} [packages|substrate|website|all] [stale_h|lines]"; exit 1 ;;
 esac
