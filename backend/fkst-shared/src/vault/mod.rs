@@ -1,14 +1,15 @@
 //! Vault role-neutral data model (issue #145 extraction).
 //!
-//! Only the persisted shapes live in the shared crate: the `VaultEntry`, the
-//! `EnvKind` distinction, the envelope `EncryptedBlob`, the `EnvScopeRef`
-//! pointer, the in-memory `ResolvedEntry`, and the redacting helpers. The
-//! encrypting service, the AES-256-GCM crypto, and the Mongo repo stay
-//! control-plane — the worker gets only a read-only resolve seam and NEVER
-//! holds the KEK.
+//! Only the secret-free value objects live in the shared crate: the [`EnvKind`]
+//! distinction, the [`EnvScopeRef`] scope pointer, the in-memory
+//! [`ResolvedEntry`] consumers receive, and the env-var-key rule. The in-memory
+//! secret store (`VaultService`) stays control-plane — the worker gets only a
+//! read-only resolve seam and NEVER holds secret material.
+//!
+//! Database-free pivot (#138): the persisted `VaultEntry`, the envelope
+//! `EncryptedBlob`, and the at-rest crypto were removed — secrets are in-memory
+//! only and reach the worker over the TLS controller↔worker channel.
 
 pub mod model;
 
-pub use model::{
-    EncryptedBlob, EnvKind, EnvScopeRef, RepoRef, ResolvedEntry, VaultEntry, ENVELOPE_ALG,
-};
+pub use model::{EnvKind, EnvScopeRef, RepoRef, ResolvedEntry};

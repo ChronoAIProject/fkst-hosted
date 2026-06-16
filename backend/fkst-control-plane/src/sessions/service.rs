@@ -140,6 +140,9 @@ const MINT_REQUEST_POLL: Duration = Duration::from_millis(200);
 struct GoalDrive {
     goal_id: bson::Uuid,
     repo: RepoRef,
+    /// The goal owner (#138): the inline-secret scope key is `(owner, repo)`, so
+    /// the driver teardown clears exactly the scope the trigger handler set.
+    owner_user_id: String,
     /// The goal's package names, resolved at spawn against the cloned repo's
     /// `<repo>/.fkst/packages/<name>/` (#115). Threaded from the SessionDoc so a
     /// failover rebuild re-resolves the identical set.
@@ -182,6 +185,15 @@ struct Inner {
     /// spawn and removed by the owning driver task on every exit path. The
     /// lock is sync and never held across an await.
     registry: Mutex<HashMap<bson::Uuid, watch::Sender<bool>>>,
+    /// Controller-held user access tokens, keyed by session id (#138). Inserted
+    /// at `create_for_goal` when the trigger carried a token, re-supplied to the
+    /// failover driver by [`SessionService::ensure_driver`] so a same-process
+    /// worker loss can re-mint the per-session NyxID key, and removed on the
+    /// session's terminal exit. Lost on a controller restart — which is exactly
+    /// the documented "survive worker loss, NOT controller loss" boundary. The
+    /// token is a zeroizing `SecretString`; the lock is sync, never held across
+    /// an await.
+    session_tokens: Mutex<HashMap<bson::Uuid, SecretString>>,
     /// Pod identity stamped onto sessions this pod drives. With
     /// distribution this is the distributor's pod id; without, the advisory
     /// `HOSTNAME` (or `null`).
@@ -306,6 +318,7 @@ impl SessionService {
                 repo,
                 runner: SessionRunner::new(engine),
                 registry: Mutex::new(HashMap::new()),
+                session_tokens: Mutex::new(HashMap::new()),
                 pod_id,
                 shutdown_bound,
                 distribution,
@@ -318,6 +331,32 @@ impl SessionService {
                 controller: OnceLock::new(),
             }),
         }
+    }
+
+    /// Hold the triggering user's access token in controller memory for
+    /// `session_id` (#138). A same-process failover re-supplies it (see
+    /// [`Self::held_token`]) so the driver can re-mint the per-session NyxID key;
+    /// it is forgotten on the session's terminal exit and lost on a controller
+    /// restart (the "survive worker loss, NOT controller loss" boundary).
+    pub fn hold_session_token(&self, session_id: bson::Uuid, token: SecretString) {
+        self.inner
+            .session_tokens
+            .lock()
+            .expect("session token store poisoned")
+            .insert(session_id, token);
+    }
+
+    /// The controller-held token for `session_id`, if this process still holds it
+    /// (#138). Used by the failover [`Self::ensure_driver`] to decide whether the
+    /// per-session NyxID key can be re-minted (`Some`) or the session must
+    /// escalate (`None`, after a controller restart).
+    pub(crate) fn held_token(&self, session_id: bson::Uuid) -> Option<SecretString> {
+        self.inner
+            .session_tokens
+            .lock()
+            .expect("session token store poisoned")
+            .get(&session_id)
+            .cloned()
     }
 
     /// Enable controller-backed placement (issue #135): new sessions are placed
@@ -522,6 +561,15 @@ impl SessionService {
                 )
                 .await;
             return Err(insert_err);
+        }
+
+        // Hold the triggering user's token in controller memory (#138), keyed by
+        // session id, BEFORE placement so a near-instant failover takeover finds
+        // it. The failover driver re-mints the per-session NyxID key with it; it
+        // is cleared on the session's terminal exit, and lost on a controller
+        // restart (the documented "worker loss, not controller loss" boundary).
+        if let Some(token) = &raw_token {
+            self.hold_session_token(session.id, token.clone());
         }
 
         // Step 6: Place via the controller authority (#135) when enabled, else
@@ -816,6 +864,7 @@ impl SessionService {
             GoalDrive {
                 goal_id,
                 repo,
+                owner_user_id: session.owner_user_id.clone().unwrap_or_default(),
                 // Resolved against the cloned repo at spawn (#115). Threaded from
                 // the SessionDoc so a failover rebuild re-resolves the same set.
                 package_names: session.effective_package_names(),
@@ -906,11 +955,15 @@ impl SessionService {
 #[async_trait]
 impl DriverHost for SessionService {
     async fn ensure_driver(&self, session: &SessionDoc) {
-        // The reaper rebuilds from SessionDoc alone — no user token in hand.
-        // `None` makes the driver take the failover branch (#111): re-mint is
-        // impossible without a live token, so a session that previously had a
-        // NyxID key ESCALATES rather than running with broken auth.
-        self.spawn_driver(session, None);
+        // Failover (#138): re-supply the controller-held user token if this
+        // process still has it (a same-process worker loss), so the driver can
+        // re-mint the per-session NyxID key (B4). It is absent only after a
+        // controller restart (or a takeover by a DIFFERENT pod that never held
+        // it) — then `None` makes B4 ESCALATE a session that previously minted a
+        // key rather than running with broken auth. This is the documented
+        // "survive worker loss, NOT controller loss" guarantee.
+        let token = self.held_token(session.id);
+        self.spawn_driver(session, token);
     }
 }
 
@@ -1011,7 +1064,27 @@ async fn drive(
     }
 
     if !release {
+        // Lease LOST: a takeover pod owns the document now. Do NOT clear this
+        // pod's in-memory token/secret state here — clearing happens only on a
+        // genuine terminal exit (below), so a same-process re-dispatch can still
+        // find the held token.
         return;
+    }
+
+    // Genuine terminal exit (#138): drop the controller-held token and the inline
+    // secrets for this session's scope so secret material does not linger in
+    // memory beyond the run. The token map is keyed by session id; the inline
+    // secrets are keyed by `(owner, repo)` (a goal session only).
+    inner
+        .session_tokens
+        .lock()
+        .expect("session token store poisoned")
+        .remove(&id);
+    if let (Some(vault), Some(gi)) = (inner.vault.get(), &goal_info) {
+        vault.clear_inline(
+            &gi.owner_user_id,
+            &EnvScopeRef::repo(&gi.repo.owner, &gi.repo.name),
+        );
     }
     if let (Some(distributor), Some(token)) = (&inner.distribution, fencing_token) {
         // Use lease_key for the release: for goal sessions the lease key is
@@ -1258,11 +1331,16 @@ async fn drive_inner(
     // the env_profile so the engine's `nyxid` CLI and codex provider act as that
     // user. Only runs when provisioning is wired (production); skipped for
     // legacy tests / minimal runs. A mint failure FAILS the start — a run must
-    // never proceed without the credential its consumers expect. On a failover
-    // rebuild (raw_token is None) for a session that previously had a key, the
-    // token cannot be re-minted (no live user token on the rebuild pod), so per
-    // the ESCALATE-ONLY v1 policy the session is failed rather than run with
-    // broken auth.
+    // never proceed without the credential its consumers expect.
+    //
+    // The token source (#138): at trigger it is the forwarded user token; on a
+    // failover rebuild it is the controller-held token re-supplied by
+    // `ensure_driver` from the in-memory `session_tokens` map (a same-process
+    // worker loss). `raw_token` is `None` only when the controller no longer
+    // holds it — a controller RESTART, or a takeover by a different pod that
+    // never held it — and there a session that previously minted a key ESCALATES
+    // to Failed rather than running with broken auth (the documented "survive
+    // worker loss, NOT controller loss" boundary).
     if let Some(setup) = inner.nyxid.get() {
         match &raw_token {
             Some(token) => {
@@ -1326,9 +1404,10 @@ async fn drive_inner(
             }
             None => {
                 if session_doc.nyxid_key_id.is_some() {
-                    // ESCALATE: a failover rebuild with no user token cannot
-                    // re-establish the NyxID session identity. Never run with
-                    // broken auth.
+                    // ESCALATE: the controller no longer holds this session's
+                    // token (a controller restart, or a takeover by a pod that
+                    // never held it), so the NyxID session identity cannot be
+                    // re-established (#138). Never run with broken auth.
                     tracing::error!(
                         session_id = %id,
                         "cannot re-establish nyxid session token on failover; no user access token available"
@@ -2940,6 +3019,7 @@ mod tests {
                 owner: "acme".to_string(),
                 name: "site".to_string(),
             },
+            owner_user_id: "user-1".to_string(),
             package_names: vec!["demo".to_string()],
             // Non-empty so the path is not short-circuited by the
             // "runtime dir not yet established" guard.
@@ -3082,5 +3162,56 @@ mod tests {
             service_mint_request(&service.inner, &mut drive).await,
             MintOutcome::Skipped
         );
+    }
+
+    // ---- failover: controller-held session token (#138) -----------------------
+    //
+    // These exercise the deterministic seam that drives the failover NyxID
+    // re-mint decision: `ensure_driver` re-supplies `held_token(id)` to the
+    // driver, and B4 re-mints when that is `Some` or ESCALATES when it is `None`.
+    // (The full B4 mint/escalate fork itself is pre-existing #111 logic, covered
+    // by `nyxid_token`'s provision tests; a full-drive test cannot reach B4 in a
+    // fake-repo harness because `clone_repo_packages` runs — and fails — first.)
+
+    #[tokio::test]
+    async fn failover_reuses_controller_held_token_to_remint() {
+        // A token held at trigger is re-supplied to the failover driver, so the
+        // per-session NyxID key CAN be re-minted (B4's `Some(token)` arm).
+        let service = no_goal_support_service().await;
+        let id = bson::Uuid::new();
+        let token = SecretString::from("user-access-token".to_string());
+        service.hold_session_token(id, token.clone());
+        let held = service.held_token(id).expect("token must be held");
+        assert_eq!(held.expose_secret(), "user-access-token");
+    }
+
+    #[tokio::test]
+    async fn failover_without_token_after_controller_restart_escalates() {
+        // A fresh service models a controller restart: it never held this
+        // session's token, so the failover driver gets `None` and B4 ESCALATES a
+        // session that previously minted a key rather than running broken auth.
+        let service = no_goal_support_service().await;
+        let id = bson::Uuid::new();
+        assert!(
+            service.held_token(id).is_none(),
+            "a restarted controller holds no token; the failover must escalate"
+        );
+    }
+
+    #[tokio::test]
+    async fn holding_then_forgetting_a_token_round_trips() {
+        // The token is dropped on terminal exit; after that a failover sees None.
+        let service = no_goal_support_service().await;
+        let id = bson::Uuid::new();
+        service.hold_session_token(id, SecretString::from("tok".to_string()));
+        assert!(service.held_token(id).is_some());
+        // The teardown path removes the entry from the same map.
+        service
+            .inner
+            .session_tokens
+            .lock()
+            .expect("token store")
+            .remove(&id);
+        assert!(service.held_token(id).is_none());
     }
 }

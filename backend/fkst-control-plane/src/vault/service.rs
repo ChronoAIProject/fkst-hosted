@@ -1,39 +1,23 @@
-//! Vault service: the orchestration layer over [`VaultRepo`] and a
-//! [`KeyProvider`]. Owns the write-side validation (key rule, reserved-key
-//! denylist, value/entry caps), the encrypt-on-write / decrypt-on-read of
-//! secrets, and the consumer-facing read/resolve API ([`Self::list_for_scope`]).
+//! Vault service: the in-memory store of inline secrets (database-free pivot,
+//! #138). Secrets are supplied inline at goal trigger, held here by the
+//! controller as zeroizing `SecretString`s keyed by `(owner_user_id,
+//! scope_key)`, and resolved into a per-session env profile at spawn — exactly
+//! the [`Self::list_for_scope`] contract `#102`'s consumers already use.
 //!
-//! Validation lives here (not in the HTTP edge) so the rules apply to every
-//! caller — the management API today and any future internal writer. Secret
-//! values are encrypted before they reach Mongo and only ever decrypted into a
-//! `SecretString`; they are never logged and never returned over HTTP.
+//! There is no persistence and no at-rest crypto: secrets live only in this
+//! process map and reach the worker over the TLS controller↔worker channel.
+//! Validation (key rule, reserved-key denylist, value/entry caps) lives here so
+//! it applies to every writer. Values are never logged and never returned over
+//! HTTP — only key NAMES and counts are ever logged.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, RwLock};
 
-use secrecy::SecretString;
-use zeroize::Zeroizing;
+use secrecy::{ExposeSecret, SecretString};
 
-use super::crypto::{self, KeyProvider};
-use super::model::{
-    masked_hint, validate_key, EncryptedBlob, EnvKind, EnvScopeRef, ResolvedEntry, VaultEntry,
-};
-use super::repo::VaultRepo;
+use super::model::{validate_key, EnvKind, EnvScopeRef, ResolvedEntry};
 use crate::engine::config::is_reserved_env_key;
 use crate::error::AppError;
-
-/// A validated write request handed to [`VaultService::upsert`]. The HTTP edge
-/// builds this from its DTO; the value is held in a `Zeroizing` buffer so it is
-/// wiped after the service has encrypted/stored it.
-pub struct WriteRequest {
-    pub owner_user_id: String,
-    pub org_id: Option<String>,
-    pub scope: EnvScopeRef,
-    pub key: String,
-    pub kind: EnvKind,
-    /// The raw value. Wiped on drop so a plaintext secret does not linger.
-    pub value: Zeroizing<String>,
-}
 
 /// Per-scope limits, sourced from config. Defaults applied by `crate::config`.
 #[derive(Debug, Clone, Copy)]
@@ -55,221 +39,167 @@ impl Default for VaultLimits {
     }
 }
 
-/// Clonable handle to the vault service: a `VaultRepo` plus the (shared,
-/// swappable) `KeyProvider`. Lives in `AppState`.
+/// One inline entry held in memory: its kind (variable vs secret) and the
+/// zeroizing value. `Debug` is hand-written to redact the value so a secret can
+/// never render through `{:?}`.
+#[derive(Clone)]
+struct InlineEntry {
+    kind: EnvKind,
+    value: SecretString,
+}
+
+impl std::fmt::Debug for InlineEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InlineEntry")
+            .field("kind", &self.kind)
+            .field("value", &"<redacted>")
+            .finish()
+    }
+}
+
+/// In-memory map key: `(owner_user_id, scope.scope_key())`.
+type ScopeKey = (String, String);
+
+/// Clonable handle to the in-memory secret store. Lives in `AppState` and is
+/// shared with the session driver (it is `Arc`-backed, so a clone shares the
+/// same map). The single controller authority is the only writer, so a
+/// scope-replace under the lock has no TOCTOU concern.
 #[derive(Clone)]
 pub struct VaultService {
-    repo: VaultRepo,
-    keys: Arc<dyn KeyProvider>,
+    entries: Arc<RwLock<HashMap<ScopeKey, BTreeMap<String, InlineEntry>>>>,
     limits: VaultLimits,
 }
 
 impl std::fmt::Debug for VaultService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // The repo and key provider hold no renderable secret state, but keep
-        // the output terse and value-free.
+        // Never render values; the scope count is a safe, value-free summary.
+        let scopes = self.entries.read().map(|m| m.len()).unwrap_or(0);
         f.debug_struct("VaultService")
-            .field("key_id", &self.keys.key_id())
+            .field("scopes", &scopes)
             .field("limits", &self.limits)
             .finish()
     }
 }
 
 impl VaultService {
-    /// Build the service from its dependencies.
-    pub fn new(repo: VaultRepo, keys: Arc<dyn KeyProvider>, limits: VaultLimits) -> Self {
-        Self { repo, keys, limits }
-    }
-
-    /// Convenience constructor over the default local KEK provider, the shipped
-    /// at-rest backend: bind a fresh [`VaultRepo`] to `db` and key it with a
-    /// base64-encoded 32-byte master key. Returns a config error if the key is
-    /// not valid base64-encoded 32 bytes (fail closed).
-    pub fn with_local_key(
-        db: &mongodb::Database,
-        master_key_b64: &str,
-        limits: VaultLimits,
-    ) -> Result<Self, AppError> {
-        let provider = super::crypto::LocalKeyProvider::from_base64(master_key_b64)?;
-        Ok(Self::new(VaultRepo::new(db), Arc::new(provider), limits))
-    }
-
-    /// The underlying repository (for index creation at boot).
-    pub fn repo(&self) -> &VaultRepo {
-        &self.repo
-    }
-
-    /// Validate a write against the key rule, the reserved-key denylist, and
-    /// the value-size cap. Returns the `422` reason on failure. Shared by the
-    /// upsert path; broken out so the rules are unit-testable without a DB.
-    fn validate_write(&self, req: &WriteRequest) -> Result<(), AppError> {
-        validate_key(&req.key).map_err(AppError::Unprocessable)?;
-        // Reserved keys are platform-owned (single source of truth in
-        // `engine::config`): a user must never set one (it would shadow a
-        // platform var or an allow-listed host var in an engine run).
-        if is_reserved_env_key(&req.key) {
-            return Err(AppError::Unprocessable(format!(
-                "env var key is reserved by the platform and cannot be set: {}",
-                req.key
-            )));
+    /// Build an empty in-memory store with the configured caps.
+    pub fn new(limits: VaultLimits) -> Self {
+        Self {
+            entries: Arc::new(RwLock::new(HashMap::new())),
+            limits,
         }
-        if req.value.len() > self.limits.value_byte_cap {
-            return Err(AppError::Unprocessable(format!(
-                "value exceeds the {}-byte cap",
-                self.limits.value_byte_cap
-            )));
-        }
-        Ok(())
     }
 
-    /// Create or update an entry. Encrypts a `secret` value (storing only the
-    /// envelope + masked hint) or stores a `variable` value as plaintext. The
-    /// per-scope entry cap is enforced before an insert grows the scope; an
-    /// update of an existing key never trips the cap.
+    /// Replace the inline entries for `(owner_user_id, scope)`. Validates every
+    /// key (rule + reserved denylist), each value against the byte cap, and the
+    /// scope's entry count against the per-scope cap BEFORE mutating, so a
+    /// rejected write leaves the prior scope untouched. The single controller
+    /// authority is the only writer, so replacing the scope map is race-free.
     ///
-    /// Returns the stored [`VaultEntry`] (the HTTP edge redacts it).
-    pub async fn upsert(&self, req: WriteRequest) -> Result<VaultEntry, AppError> {
-        self.validate_write(&req)?;
-
-        // Cap check: only a NEW key in this scope consumes a slot. Counting +
-        // the conditional check is a benign TOCTOU at this scale (the unique
-        // index still prevents duplicate keys); the cap is a soft guard against
-        // runaway growth, not a hard concurrency invariant.
-        let existing = self
-            .repo
-            .list_by_scope(&req.owner_user_id, &req.scope)
-            .await?;
-        let is_new_key = !existing.iter().any(|e| e.key == req.key);
-        if is_new_key && existing.len() >= self.limits.entries_per_scope_cap {
-            return Err(AppError::Unprocessable(format!(
-                "scope already holds the maximum of {} entries",
-                self.limits.entries_per_scope_cap
-            )));
-        }
-
-        let (value_plain, value_enc, hint) = match req.kind {
-            EnvKind::Variable => (Some(req.value.to_string()), None, None),
-            EnvKind::Secret => {
-                let blob = crypto::encrypt(self.keys.as_ref(), req.value.as_bytes())?;
-                (None, Some(blob), Some(masked_hint(&req.value)))
-            }
-        };
-
-        let now = bson::DateTime::now();
-        let entry = VaultEntry {
-            id: bson::Uuid::new(),
-            owner_user_id: req.owner_user_id,
-            org_id: req.org_id,
-            scope_key: req.scope.scope_key(),
-            scope: req.scope,
-            key: req.key,
-            kind: req.kind,
-            value_plain,
-            value_enc,
-            masked_hint: hint,
-            created_at: now,
-            updated_at: now,
-            created_by: String::new(), // set below from owner (single principal in v1)
-        };
-        // `created_by` mirrors the owner; the field exists for a future
-        // org-shared write path where writer != owner.
-        let entry = VaultEntry {
-            created_by: entry.owner_user_id.clone(),
-            ..entry
-        };
-
-        let stored = self.repo.upsert(entry).await?;
-        tracing::info!(
-            owner = %stored.owner_user_id,
-            scope_key = %stored.scope_key,
-            key = %stored.key,
-            kind = ?stored.kind,
-            "vault entry upserted"
-        );
-        Ok(stored)
-    }
-
-    /// Fetch one entry by id without an owner filter (for the HTTP authz path,
-    /// which needs the entry's ownership fields before deciding).
-    pub async fn get(&self, id: bson::Uuid) -> Result<Option<VaultEntry>, AppError> {
-        self.repo.get(id).await
-    }
-
-    /// List an owner's entries in a scope (redacted at the HTTP edge — this
-    /// returns the raw stored documents, secrets still encrypted).
-    pub async fn list_in_scope(
+    /// Logs key NAMES + count only — never a value.
+    pub fn set_inline(
         &self,
         owner_user_id: &str,
         scope: &EnvScopeRef,
-    ) -> Result<Vec<VaultEntry>, AppError> {
-        self.repo.list_by_scope(owner_user_id, scope).await
-    }
-
-    /// Delete an entry by id, scoped to its owner. `Ok(false)` when absent.
-    pub async fn delete(&self, id: bson::Uuid, owner_user_id: &str) -> Result<bool, AppError> {
-        let deleted = self.repo.delete_owned(id, owner_user_id).await?;
-        if deleted {
-            tracing::info!(owner = %owner_user_id, id = %id, "vault entry deleted");
+        entries: Vec<(String, EnvKind, SecretString)>,
+    ) -> Result<(), AppError> {
+        if entries.len() > self.limits.entries_per_scope_cap {
+            return Err(AppError::Unprocessable(format!(
+                "scope exceeds the maximum of {} entries",
+                self.limits.entries_per_scope_cap
+            )));
         }
-        Ok(deleted)
+        let mut built: BTreeMap<String, InlineEntry> = BTreeMap::new();
+        for (key, kind, value) in entries {
+            validate_key(&key).map_err(AppError::Unprocessable)?;
+            // Reserved keys are platform-owned (single source of truth in
+            // `engine::config`): a user must never set one (it would shadow a
+            // platform var or an allow-listed host var in an engine run).
+            if is_reserved_env_key(&key) {
+                return Err(AppError::Unprocessable(format!(
+                    "env var key is reserved by the platform and cannot be set: {key}"
+                )));
+            }
+            if value.expose_secret().len() > self.limits.value_byte_cap {
+                return Err(AppError::Unprocessable(format!(
+                    "value for {key} exceeds the {}-byte cap",
+                    self.limits.value_byte_cap
+                )));
+            }
+            built.insert(key, InlineEntry { kind, value });
+        }
+        let names: Vec<&str> = built.keys().map(String::as_str).collect();
+        tracing::info!(
+            owner = %owner_user_id,
+            scope_key = %scope.scope_key(),
+            count = built.len(),
+            keys = %names.join(","),
+            "inline secrets set for scope"
+        );
+        self.entries
+            .write()
+            .expect("vault store poisoned")
+            .insert((owner_user_id.to_string(), scope.scope_key()), built);
+        Ok(())
     }
 
-    /// Decrypt a single stored secret blob (helper for consumers that already
-    /// hold an entry). Variables are not encrypted, so this is secret-only.
-    pub fn decrypt(&self, blob: &EncryptedBlob) -> Result<SecretString, AppError> {
-        crypto::decrypt(self.keys.as_ref(), blob)
+    /// Drop a scope's inline secrets (called from the driver teardown on a
+    /// genuine terminal exit) so secret material does not linger in memory
+    /// beyond the run.
+    pub fn clear_inline(&self, owner_user_id: &str, scope: &EnvScopeRef) {
+        let removed = self
+            .entries
+            .write()
+            .expect("vault store poisoned")
+            .remove(&(owner_user_id.to_string(), scope.scope_key()))
+            .is_some();
+        if removed {
+            tracing::debug!(
+                owner = %owner_user_id,
+                scope_key = %scope.scope_key(),
+                "inline secrets cleared for scope"
+            );
+        }
     }
 
-    /// Resolve the effective env for a session: every entry the owner has at
-    /// `global` scope, overlaid by `scope.repo`'s entries (repo wins on a key
-    /// collision), each decrypted (secret) or passed through (variable), with
-    /// exactly one [`ResolvedEntry`] per key.
+    /// Resolve the effective env for a session: every inline entry the owner has
+    /// at `global` scope, overlaid by `scope.repo`'s entries (repo wins on a key
+    /// collision), with exactly one [`ResolvedEntry`] per key, key-sorted.
     ///
-    /// This is the API #102 consumes to build a per-session env profile. It is
-    /// NEVER serialized over HTTP — the returned `SecretString`s carry decrypted
-    /// values in memory only.
-    ///
-    /// Ordered merge: (1) collect global entries into a key→entry map; (2) if a
-    /// repo is given, overlay that repo's entries into the same map (repo
-    /// replaces global for the same key); (3) materialize one resolved entry per
-    /// key. A `BTreeMap` keeps the output deterministic (key-sorted).
+    /// This is the API #102 consumes to build a per-session env profile; it is
+    /// NEVER serialized over HTTP. It is `async` only to preserve the callers'
+    /// `.await`; the body does no I/O (a bounded read under the sync lock, the
+    /// lock dropped before returning — never held across an await).
     pub async fn list_for_scope(
         &self,
         owner_user_id: &str,
         _org_id: Option<&str>,
         scope: &EnvScopeRef,
     ) -> Result<Vec<ResolvedEntry>, AppError> {
-        // 1. Global layer.
-        let mut merged: BTreeMap<String, VaultEntry> = BTreeMap::new();
-        for entry in self
-            .repo
-            .list_by_scope(owner_user_id, &EnvScopeRef::global())
-            .await?
-        {
-            merged.insert(entry.key.clone(), entry);
-        }
-
-        // 2. Repo overlay (repo wins on collision).
-        if scope.repo.is_some() {
-            for entry in self.repo.list_by_scope(owner_user_id, scope).await? {
-                merged.insert(entry.key.clone(), entry);
-            }
-        }
-
-        // 3. Decrypt / pass through, one resolved entry per key.
-        let mut resolved = Vec::with_capacity(merged.len());
-        for (key, entry) in merged {
-            let value = match entry.kind {
-                EnvKind::Variable => SecretString::from(entry.value_plain.unwrap_or_default()),
-                EnvKind::Secret => {
-                    let blob = entry.value_enc.ok_or_else(|| {
-                        AppError::Unprocessable(format!("secret entry {key} has no ciphertext"))
-                    })?;
-                    self.decrypt(&blob)?
+        let resolved = {
+            let store = self.entries.read().expect("vault store poisoned");
+            // 1. Global layer.
+            let mut merged: BTreeMap<String, SecretString> = BTreeMap::new();
+            let global_key = (owner_user_id.to_string(), EnvScopeRef::global().scope_key());
+            if let Some(scope_map) = store.get(&global_key) {
+                for (key, entry) in scope_map {
+                    merged.insert(key.clone(), entry.value.clone());
                 }
-            };
-            resolved.push(ResolvedEntry { key, value });
-        }
+            }
+            // 2. Repo overlay (repo wins on collision).
+            if scope.repo.is_some() {
+                let repo_key = (owner_user_id.to_string(), scope.scope_key());
+                if let Some(scope_map) = store.get(&repo_key) {
+                    for (key, entry) in scope_map {
+                        merged.insert(key.clone(), entry.value.clone());
+                    }
+                }
+            }
+            merged
+                .into_iter()
+                .map(|(key, value)| ResolvedEntry { key, value })
+                .collect::<Vec<_>>()
+        };
         tracing::debug!(
             owner = %owner_user_id,
             scope_key = %scope.scope_key(),
@@ -283,14 +213,6 @@ impl VaultService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::crypto::LocalKeyProvider;
-    use base64::engine::general_purpose::STANDARD as BASE64;
-    use base64::Engine as _;
-    use secrecy::ExposeSecret;
-
-    fn test_provider() -> Arc<dyn KeyProvider> {
-        Arc::new(LocalKeyProvider::from_base64(&BASE64.encode([3u8; 32])).expect("provider"))
-    }
 
     fn limits() -> VaultLimits {
         VaultLimits {
@@ -299,82 +221,131 @@ mod tests {
         }
     }
 
-    fn req(kind: EnvKind, key: &str, value: &str) -> WriteRequest {
-        WriteRequest {
-            owner_user_id: "u1".to_string(),
-            org_id: None,
-            scope: EnvScopeRef::global(),
-            key: key.to_string(),
-            kind,
-            value: Zeroizing::new(value.to_string()),
-        }
+    fn secret(s: &str) -> SecretString {
+        SecretString::from(s.to_string())
     }
 
-    // `validate_write` is a method on the service but needs no DB; build a
-    // service over an UNCONNECTED collection handle (the driver connects
-    // lazily, and these tests never issue a DB op) for the pure validation
-    // tests.
-    async fn validation_service() -> VaultService {
-        let db = mongodb::Client::with_uri_str("mongodb://localhost:27017")
-            .await
-            .expect("client")
-            .database("vault_unit_test");
-        VaultService::new(VaultRepo::new(&db), test_provider(), limits())
+    fn entry(key: &str, value: &str) -> (String, EnvKind, SecretString) {
+        (key.to_string(), EnvKind::Secret, secret(value))
     }
 
     #[tokio::test]
-    async fn validate_rejects_invalid_key() {
-        let svc = validation_service().await;
-        let err = svc
-            .validate_write(&req(EnvKind::Variable, "1bad", "v"))
-            .expect_err("must reject");
-        assert!(matches!(err, AppError::Unprocessable(_)), "got {err:?}");
+    async fn set_inline_then_list_resolves_in_order() {
+        let svc = VaultService::new(limits());
+        // Global layer: A, B. Repo overlay: B (wins), C.
+        svc.set_inline(
+            "u1",
+            &EnvScopeRef::global(),
+            vec![entry("A_KEY", "ga"), entry("B_KEY", "gb")],
+        )
+        .unwrap();
+        let repo = EnvScopeRef::repo("acme", "site");
+        svc.set_inline(
+            "u1",
+            &repo,
+            vec![entry("B_KEY", "rb"), entry("C_KEY", "rc")],
+        )
+        .unwrap();
+
+        let resolved = svc.list_for_scope("u1", None, &repo).await.unwrap();
+        let kv: Vec<(String, String)> = resolved
+            .iter()
+            .map(|e| (e.key.clone(), e.value.expose_secret().to_string()))
+            .collect();
+        // Key-sorted, repo wins B_KEY.
+        assert_eq!(
+            kv,
+            vec![
+                ("A_KEY".to_string(), "ga".to_string()),
+                ("B_KEY".to_string(), "rb".to_string()),
+                ("C_KEY".to_string(), "rc".to_string()),
+            ]
+        );
     }
 
     #[tokio::test]
-    async fn validate_rejects_reserved_keys() {
-        let svc = validation_service().await;
-        for key in ["FKST_FOO", "GITHUB_TOKEN", "PATH"] {
+    async fn set_inline_rejects_reserved_key() {
+        let svc = VaultService::new(limits());
+        for key in ["GITHUB_TOKEN", "PATH", "FKST_FOO"] {
             let err = svc
-                .validate_write(&req(EnvKind::Secret, key, "v"))
+                .set_inline("u1", &EnvScopeRef::global(), vec![entry(key, "v")])
                 .expect_err("reserved must reject");
             assert!(matches!(err, AppError::Unprocessable(_)), "{key}: {err:?}");
         }
     }
 
     #[tokio::test]
-    async fn validate_rejects_oversized_value() {
-        let db = mongodb::Client::with_uri_str("mongodb://localhost:27017")
-            .await
-            .expect("client")
-            .database("vault_unit_test");
-        let svc = VaultService::new(
-            VaultRepo::new(&db),
-            test_provider(),
-            VaultLimits {
-                value_byte_cap: 8,
-                entries_per_scope_cap: 100,
-            },
-        );
+    async fn set_inline_rejects_invalid_key() {
+        let svc = VaultService::new(limits());
         let err = svc
-            .validate_write(&req(EnvKind::Secret, "K", "0123456789"))
+            .set_inline("u1", &EnvScopeRef::global(), vec![entry("1bad", "v")])
+            .expect_err("invalid key must reject");
+        assert!(matches!(err, AppError::Unprocessable(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn set_inline_enforces_value_cap() {
+        let svc = VaultService::new(VaultLimits {
+            value_byte_cap: 8,
+            entries_per_scope_cap: 100,
+        });
+        let err = svc
+            .set_inline("u1", &EnvScopeRef::global(), vec![entry("K", "0123456789")])
             .expect_err("oversized must reject");
         assert!(matches!(err, AppError::Unprocessable(_)), "got {err:?}");
     }
 
     #[tokio::test]
-    async fn validate_accepts_ordinary_key_and_value() {
-        let svc = validation_service().await;
+    async fn set_inline_enforces_entries_per_scope_cap() {
+        let svc = VaultService::new(VaultLimits {
+            value_byte_cap: 64 * 1024,
+            entries_per_scope_cap: 2,
+        });
+        let err = svc
+            .set_inline(
+                "u1",
+                &EnvScopeRef::global(),
+                vec![entry("A", "1"), entry("B", "2"), entry("C", "3")],
+            )
+            .expect_err("too many entries must reject");
+        assert!(matches!(err, AppError::Unprocessable(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn clear_inline_drops_the_scope() {
+        let svc = VaultService::new(limits());
+        let repo = EnvScopeRef::repo("acme", "site");
+        svc.set_inline("u1", &repo, vec![entry("K", "v")]).unwrap();
+        assert_eq!(
+            svc.list_for_scope("u1", None, &repo).await.unwrap().len(),
+            1
+        );
+        svc.clear_inline("u1", &repo);
         assert!(svc
-            .validate_write(&req(EnvKind::Secret, "OPENAI_API_KEY", "sk-x"))
-            .is_ok());
+            .list_for_scope("u1", None, &repo)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_for_scope_is_empty_for_unknown_owner() {
+        let svc = VaultService::new(limits());
+        let resolved = svc
+            .list_for_scope("nobody", None, &EnvScopeRef::global())
+            .await
+            .unwrap();
+        assert!(resolved.is_empty());
     }
 
     #[test]
-    fn decrypt_round_trips_through_service_helper() {
-        let svc_keys = test_provider();
-        let blob = crypto::encrypt(svc_keys.as_ref(), b"hello").expect("encrypt");
-        let recovered = crypto::decrypt(svc_keys.as_ref(), &blob).expect("decrypt");
-        assert_eq!(recovered.expose_secret(), "hello");
+    fn inline_entry_debug_redacts_value() {
+        let entry = InlineEntry {
+            kind: EnvKind::Secret,
+            value: secret("sk-leaky"),
+        };
+        let rendered = format!("{entry:?}");
+        assert!(!rendered.contains("sk-leaky"), "value leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"));
     }
 }
