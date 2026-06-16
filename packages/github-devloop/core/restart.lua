@@ -46,8 +46,11 @@ local function effect(kinds, completeness, completeness_derivation)
   }
 end
 
-local function budget(minutes)
-  return { minutes = minutes }
+local function budget(minutes, receiver_max_work_justification)
+  return {
+    minutes = minutes,
+    receiver_max_work_justification = receiver_max_work_justification,
+  }
 end
 
 local function timeout(queue)
@@ -79,6 +82,64 @@ local transition_table = registry.load_indexed_array("core.restart.transitions.i
 local audit_by_state = {}
 for _, row in ipairs(transition_table) do
   audit_by_state[row.from_state] = row
+end
+
+function M.restart_reachable_lifecycle_states()
+  local seen = {}
+  local function add(state)
+    if type(state) == "string" and state ~= "" and state ~= "unmanaged" then
+      seen[state] = true
+    end
+  end
+  for state, _ in pairs(M._label_by_state or {}) do
+    add(state)
+  end
+  for _, state in ipairs(M._state_order or {}) do
+    add(state)
+  end
+  for state, _ in pairs(M._state_stage_rank or {}) do
+    add(state)
+  end
+  for state, next_states in pairs(M._state_graph or {}) do
+    add(state)
+    for _, next_state in ipairs(next_states or {}) do
+      add(next_state)
+    end
+  end
+  local states = {}
+  for state, _ in pairs(seen) do
+    table.insert(states, state)
+  end
+  table.sort(states)
+  return states
+end
+
+function M.restart_totality_errors(rows)
+  local errors = {}
+  local table_rows = rows or transition_table
+  local reachable = {}
+  for _, state in ipairs(M.restart_reachable_lifecycle_states()) do
+    reachable[state] = true
+  end
+  local seen = {}
+  for _, row in ipairs(table_rows or {}) do
+    local state = row and row.from_state
+    if type(state) ~= "string" or state == "" then
+      table.insert(errors, "restart_transition_table: row missing from_state")
+    elseif reachable[state] ~= true then
+      table.insert(errors, tostring(state) .. ": restart row is not a reachable lifecycle state")
+    elseif seen[state] == true then
+      table.insert(errors, tostring(state) .. ": duplicate restart_transition_table row")
+    else
+      seen[state] = true
+    end
+  end
+  for state, _ in pairs(reachable) do
+    if seen[state] ~= true then
+      table.insert(errors, tostring(state) .. ": reachable lifecycle state is missing a restart_transition_table row")
+    end
+  end
+  return errors
 end
 
 function M.restart_completeness_audit()

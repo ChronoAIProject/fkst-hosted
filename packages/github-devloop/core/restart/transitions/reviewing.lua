@@ -11,7 +11,7 @@ return function(M, h)
     to_states = { "merge-ready", "fixing", "review-meta", "blocked" },
     driving_queue = "devloop_reviewing",
     output_obligation = obligation({ "review-result:v1", "review-converge-round:v1", "state:v1 blocked" }, { "merge-ready", "fixing", "review-meta", "blocked", "reviewing" }),
-    budget = budget(150),
+    budget = budget(150, "The long review receiver is supervised by review-converge-round heartbeats; this budget only bounds stale heartbeat redrive."),
     liveness_contract = liveness({
       mode = "live-defer",
       signal = {

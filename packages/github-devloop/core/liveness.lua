@@ -12,6 +12,8 @@ local function valid_budget(row)
   return type(row.budget) == "table"
     and tonumber(row.budget.minutes) ~= nil
     and tonumber(row.budget.minutes) > 0
+    and type(row.budget.receiver_max_work_justification) == "string"
+    and row.budget.receiver_max_work_justification ~= ""
 end
 
 local function valid_timeout(row)
@@ -226,7 +228,7 @@ function M.liveness_contract_errors(rows)
         table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare output_obligation")
       end
       if not valid_budget(row) then
-        table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare a positive budget")
+        table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare a positive budget with receiver_max_work_justification")
       end
       if not valid_timeout(row) then
         table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare redrive on_timeout for its driving queue plus force-terminate on_escalate to blocked")
