@@ -269,7 +269,8 @@ local issue_view_selectors = {
   "title,labels,comments,state,assignees",
 }
 
-local pr_origin_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,mergeable,mergeStateStatus"
+local pr_origin_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
+local pr_origin_legacy_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_head_selector = "headRefName"
 local pr_fix_selector = "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
 local pr_merge_selector = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
@@ -277,6 +278,7 @@ local pr_merge_without_rollup_selector = "headRefName,headRefOid,baseRefName,bas
 local pr_freshness_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 local pr_context_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"
 M.pr_origin_selector = pr_origin_selector
+M.pr_origin_legacy_selector = pr_origin_legacy_selector
 M.pr_head_selector = pr_head_selector
 M.pr_fix_selector = pr_fix_selector
 M.pr_merge_selector = pr_merge_selector
@@ -433,7 +435,7 @@ function M.mock_pr_view_selector(t, fields, selector, times)
   register_view_commands(t, {
     pr_view_command(repo, number, selector),
   }, M.pr_view_stdout(f), times or 1)
-  if selector == pr_origin_selector then
+  if selector == pr_origin_selector or selector == pr_origin_legacy_selector then
     register_view_commands(t, {
       pr_rest_command(repo, number),
     }, pr_rest_stdout(f), times or 1)
@@ -479,6 +481,7 @@ function M.mock_pr_read_forms(t, fields)
     local stdout = M.pr_view_stdout(f)
     local commands = {
       pr_view_command(repo, number, pr_origin_selector),
+      pr_view_command(repo, number, pr_origin_legacy_selector),
       pr_view_command(repo, number, "headRefName,headRefOid,baseRefName,state,comments"),
       pr_view_command(repo, number, pr_fix_selector),
       pr_view_command(repo, number, "headRefName"),
@@ -486,6 +489,7 @@ function M.mock_pr_read_forms(t, fields)
       pr_view_command(repo, number, pr_freshness_selector),
     }
     if f.register_origin_view == false then
+      table.remove(commands, 1)
       table.remove(commands, 1)
     end
     register_view_commands(t, commands, stdout, times)
