@@ -172,23 +172,29 @@ return {
     t.eq(count_calls("merge-base --is-ancestor"), 1)
   end,
 
-  test_open_pr_entity_change_refuses_non_descendant_head = function()
+  test_open_pr_entity_change_marks_non_descendant_head_impl_failed = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local proposal_id = "github-devloop/issue/owner/repo/42"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
+      core.state_marker(proposal_id, "implementing", impl_version),
+      core.implementing_marker(proposal_id, impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
     mock_branch_exists("devloop-owner-repo-42-01HY", "def456")
     mock_branch_head_descends(false)
     mock_bot_env()
-    mock_write_env("1")
 
     local result = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-non-descendant-head", {
       FKST_GITHUB_WRITE = "1",
     }))
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 2)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment.payload.body:find(core.state_marker(proposal_id, "impl-failed", impl_version), 1, true) ~= nil)
+    t.is_true(comment.payload.body:find(core.impl_failure_marker(proposal_id, impl_version, "non-descendant-head"), 1, true) ~= nil)
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.eq(label.payload.add_labels[1], "fkst-dev:impl-failed")
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_open_request"), nil)
     t.eq(count_calls("show-ref --verify --quiet"), 1)
     t.eq(count_calls("rev-parse --verify"), 1)
     t.eq(count_calls("merge-base --is-ancestor"), 1)
