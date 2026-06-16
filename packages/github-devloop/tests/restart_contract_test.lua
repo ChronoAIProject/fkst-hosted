@@ -112,9 +112,9 @@ return {
   end,
 
   test_executable_restart_table_covers_non_terminal_states = function()
-    local expected = core.restart_reachable_lifecycle_states()
+    local expected = { "thinking", "ready", "implementing", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged" }
     local by_state = table_by_state()
-    t.eq(#core.restart_totality_errors(), 0)
+    t.eq(#core.liveness_contract_errors(), 0)
     for _, state in ipairs(expected) do
       local row = by_state[state]
       t.is_true(row ~= nil)

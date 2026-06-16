@@ -37,7 +37,7 @@ return {
         table.insert(filtered, row)
       end
     end
-    local errors = core.restart_totality_errors(filtered)
+    local errors = core.liveness_contract_errors(filtered)
     t.eq(#errors, 1)
     t.is_true(errors[1]:find("ready", 1, true) ~= nil)
     t.is_true(errors[1]:find("missing", 1, true) ~= nil)
@@ -49,7 +49,7 @@ return {
     local unknown = copy_rows({ by_state(rows).ready })[1]
     unknown.from_state = "new-state"
     table.insert(rows, unknown)
-    local errors = core.restart_totality_errors(rows)
+    local errors = core.liveness_contract_errors(rows)
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("ready", 1, true) ~= nil)
     t.is_true(joined:find("duplicate", 1, true) ~= nil)

@@ -16,6 +16,53 @@ local function valid_budget(row)
     and row.budget.receiver_max_work_justification ~= ""
 end
 
+local function reachable_lifecycle_states(M)
+  local seen = {}
+  local function add(state)
+    if type(state) == "string" and state ~= "" and state ~= "unmanaged" then
+      seen[state] = true
+    end
+  end
+  for state, _ in pairs(M._label_by_state or {}) do
+    add(state)
+  end
+  for _, state in ipairs(M._state_order or {}) do
+    add(state)
+  end
+  for state, _ in pairs(M._state_stage_rank or {}) do
+    add(state)
+  end
+  for state, next_states in pairs(M._state_graph or {}) do
+    add(state)
+    for _, next_state in ipairs(next_states or {}) do
+      add(next_state)
+    end
+  end
+  return seen
+end
+
+local function validate_restart_totality(M, rows, errors)
+  local reachable = reachable_lifecycle_states(M)
+  local seen = {}
+  for _, row in ipairs(rows or {}) do
+    local state = row and row.from_state
+    if type(state) ~= "string" or state == "" then
+      table.insert(errors, "restart_transition_table: row missing from_state")
+    elseif reachable[state] ~= true then
+      table.insert(errors, tostring(state) .. ": restart row is not a reachable lifecycle state")
+    elseif seen[state] == true then
+      table.insert(errors, tostring(state) .. ": duplicate restart_transition_table row")
+    else
+      seen[state] = true
+    end
+  end
+  for state, _ in pairs(reachable) do
+    if seen[state] ~= true then
+      table.insert(errors, tostring(state) .. ": reachable lifecycle state is missing a restart_transition_table row")
+    end
+  end
+end
+
 local function valid_timeout(row)
   if type(row.on_timeout) ~= "table" then
     return false
@@ -212,7 +259,9 @@ end
 
 function M.liveness_contract_errors(rows)
   local errors = {}
-  for _, row in ipairs(rows or M.restart_transition_table()) do
+  local table_rows = rows or M.restart_transition_table()
+  validate_restart_totality(M, table_rows, errors)
+  for _, row in ipairs(table_rows) do
     if type(row.from_state) ~= "string" or row.from_state == "" then
       table.insert(errors, "row: missing from_state")
     end
