@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FKST — Goal #152</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:oklch(16% 0.011 250);--raise:oklch(20% 0.012 250);--raise-2:oklch(23% 0.013 250);
+    --line:oklch(26% 0.012 250);--line-2:oklch(33% 0.013 250);
+    --fg:oklch(97% 0.005 240);--dim:oklch(72% 0.014 245);--faint:oklch(58% 0.014 245);--ghost:oklch(46% 0.012 245);
+    --amber:oklch(81% 0.15 80);--green:oklch(74% 0.13 158);--red:oklch(67% 0.18 18);--gold:oklch(80% 0.10 85);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;--ui:"IBM Plex Sans",system-ui,sans-serif;--display:"Space Grotesk","IBM Plex Sans",sans-serif;
+  }
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .screen{width:100%;min-height:980px}
+  .wrap{max-width:1440px;margin:0 auto;padding:0 24px}
+  .eyebrow{font:600 11px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ghost)}
+
+  .hd{display:flex;align-items:center;gap:16px;height:62px;border-bottom:1px solid var(--line)}
+  /* sticky top: header + toolbar stick together; toolbar condenses on scroll */
+  .hd{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .toolbar{position:sticky;top:61px;z-index:39;background:var(--bg)}
+  html.scrolled .toolbar{min-height:44px;padding:6px 0}
+  html.scrolled .toolbar .eyebrow{display:none}
+  .logo{font-family:var(--display);font-weight:700;font-size:19px;color:var(--fg);text-decoration:none;line-height:1;display:inline-block;white-space:nowrap;flex:none}
+  .logo .kk{position:relative;display:inline-block}
+  .logo .kk .knode{position:absolute;left:.04em;top:.36em;width:.205em;height:.205em;border-radius:50%;background:var(--amber);box-shadow:0 0 0 .05em var(--bg)}
+  .crumb{color:var(--ghost);font-size:13.5px}.crumb b{color:var(--dim);font-weight:500;font-family:var(--mono);font-size:13px}
+  a,button{transition:background .12s ease,color .12s ease,border-color .12s ease}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:6px}
+  .nav{display:flex;gap:2px}
+  .nav a{font-size:13.5px;color:var(--faint);text-decoration:none;padding:7px 12px;border-radius:8px}
+  .nav a:hover{color:var(--dim);background:color-mix(in oklab,var(--raise) 55%,transparent)}
+  .nav a.on{color:var(--fg);background:var(--raise)}.nav a.on:hover{background:var(--raise-2)}
+  .fr{margin-left:auto;display:flex;gap:18px;font-family:var(--mono);font-size:11.5px;color:var(--ghost)}.fr b{color:var(--faint);font-weight:500}.fr .dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;vertical-align:middle}
+  .avatar{flex:none;width:30px;height:30px;border-radius:50%;background:var(--raise-2);border:1px solid var(--line-2);color:var(--dim);font:600 11px var(--ui);letter-spacing:.02em;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.avatar:hover{border-color:var(--faint);color:var(--fg)}.avatar.on{border-color:var(--amber);color:var(--amber)}
+
+  /* state pill */
+  .pill{display:inline-flex;align-items:center;gap:7px;font:600 11px var(--ui);letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:7px;border:1px solid var(--line-2);color:var(--dim);background:var(--raise)}
+  .pill .d{width:7px;height:7px;border-radius:50%;background:var(--green)}
+  .meta{font-family:var(--mono);font-size:11.5px;color:var(--ghost)}.meta b{color:var(--faint);font-weight:500}
+
+  /* TIER 1 — decision header */
+  .ghead{padding:26px 0 22px;border-bottom:1px solid var(--line)}
+  .back{font-family:var(--mono);font-size:11.5px;color:var(--ghost);text-decoration:none}
+  .gtitle{display:flex;align-items:baseline;gap:11px;margin:10px 0 12px}
+  .gtitle h1{font-family:var(--display);font-weight:600;font-size:23px;letter-spacing:-.01em;margin:0}
+  .gtitle .num{font-family:var(--mono);font-size:14px;color:var(--faint)}
+  .grow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .decide{margin-top:18px;display:flex;align-items:center;gap:18px;background:var(--raise);border:1px solid var(--line);border-left:3px solid var(--red);border-radius:12px;padding:15px 18px}
+  .decide .lead{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--red)}
+  .decide .what{flex:1;min-width:0}
+  .decide .what .t{font-weight:600;font-size:15px}
+  .decide .what .s{font-family:var(--mono);font-size:11.5px;color:var(--ghost);margin-top:3px}
+  .btn{font:500 13px var(--ui);border:1px solid var(--line-2);background:var(--raise-2);color:var(--dim);border-radius:9px;padding:9px 16px;cursor:pointer}
+  .btn:hover{background:color-mix(in oklab,var(--raise-2) 60%,var(--line-2));border-color:var(--faint);color:var(--fg)}   /* neutral brighten, not amber */
+  .btn:active{filter:brightness(.95)}
+  .btn.red{border-color:color-mix(in oklab,var(--red) 55%,var(--line));color:var(--red);background:transparent;font-weight:600}
+  .btn.red:hover{background:color-mix(in oklab,var(--red) 13%,transparent);border-color:var(--red);color:var(--red)}
+
+  /* ---- "+ New goal" trigger (primary) + its create-goal form modal ---- */
+  .newgoal{font:600 12.5px var(--ui);color:oklch(22% 0.04 80);background:var(--amber);border:0;border-radius:9px;padding:7px 14px;cursor:pointer;flex:none}
+  .newgoal:hover{filter:brightness(1.06)}
+  .ngf{display:flex;flex-direction:column;gap:14px;padding:18px 22px}
+  .ngrow{display:flex;flex-direction:column;gap:6px}
+  .nglab{font:600 10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--ghost)}
+  .nginp,.ngsel,.ngta{background:var(--raise-2);border:1px solid var(--line-2);border-radius:9px;color:var(--fg);font:400 13px var(--ui);padding:9px 12px;outline:0;width:100%}
+  .nginp:focus,.ngta:focus,.ngsel:focus{border-color:var(--faint)}
+  .ngta{min-height:84px;resize:vertical;line-height:1.5}
+  .ngnote{font-family:var(--mono);font-size:11px;color:var(--ghost);line-height:1.6;background:var(--raise-2);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
+  .ngnote b{color:var(--faint);font-weight:500}
+  .ngcreate{font:600 12.5px var(--ui);color:oklch(22% 0.04 80);background:var(--amber);border:0;border-radius:9px;padding:8px 15px;cursor:pointer}
+  .ngcreate:hover{filter:brightness(1.06)}
+  .ngpkgs{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .ngpkg{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;font-size:12.5px;color:var(--dim);background:var(--raise-2);border-top:1px solid var(--line)}
+  .ngpkg:first-child{border-top:0}
+  .ngpkg .t{font-family:var(--mono);font-size:10px;color:var(--ghost);margin-left:8px}
+  .ngsub{font-family:var(--mono);font-size:10.5px;color:var(--ghost);margin-top:7px;line-height:1.55}
+  .ngsub a{color:var(--faint);text-decoration:underline;text-underline-offset:2px}
+
+  /* the .sw toggle (shared chrome pattern) — used by the new-goal package list */
+  .sw{width:30px;height:18px;border-radius:10px;background:var(--line-2);position:relative;transition:background .14s;flex:none}
+  .sw i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--faint);transition:left .14s,background .14s}
+  .sw.on{background:color-mix(in oklab,var(--amber) 55%,var(--line))} .sw.on i{left:14px;background:var(--amber)}
+
+  /* issue/new-goal modal overlay + sheet (shared chrome pattern) */
+  .ovl{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:6vh 20px;background:color-mix(in oklab,#000 58%,transparent);overflow:auto}
+  .ovl[hidden]{display:none}
+  .sheet{position:relative;width:100%;max-width:760px;background:var(--raise);border:1px solid var(--line-2);border-radius:16px;box-shadow:0 24px 60px -22px rgba(0,0,0,.6)}
+  .sheet .x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--raise-2);color:var(--faint);font-size:17px;line-height:1;cursor:pointer}
+  .sheet .x:hover{color:var(--fg);border-color:var(--faint)}
+  .m-hd{padding:20px 22px 16px;border-bottom:1px solid var(--line)}
+  .m-tt{display:flex;align-items:baseline;gap:10px;margin:0 0 9px;flex-wrap:wrap}
+  .m-tt h2{font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:-.01em;margin:0;color:var(--fg)}
+  .m-meta{font-family:var(--mono);font-size:11.5px;color:var(--ghost)} .m-meta b{color:var(--faint);font-weight:500}
+  .m-act{display:flex;align-items:center;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .m-act .m-act-l{margin-right:auto;display:flex;gap:10px}
+  .sheet .m-act .btn{font:500 12.5px var(--ui);border:1px solid var(--line-2);background:var(--raise-2);color:var(--dim);border-radius:9px;padding:8px 14px;cursor:pointer;text-decoration:none}
+  .sheet .m-act .btn:hover{border-color:var(--faint);color:var(--fg)}
+
+  /* body grid */
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) 348px;gap:34px;padding:26px 0 40px;align-items:start}
+  .grid>div{min-width:0}
+
+  /* timeline */
+  .tl{position:relative;margin-top:16px;padding-left:26px}
+  .tl::before{content:"";position:absolute;left:6px;top:5px;bottom:8px;width:1px;background:var(--line-2)}
+  .ev{position:relative;margin-bottom:20px}
+  .ev .node{position:absolute;left:-26px;top:3px;width:11px;height:11px;border-radius:50%;background:var(--line-2);border:2px solid var(--bg)}
+  .ev .hd{display:flex;align-items:center;gap:9px}
+  .ev .nm{font-weight:600;font-size:13.5px}
+  .ev .ts{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+  .ev .body{font-family:var(--mono);font-size:11.5px;color:var(--dim);margin-top:5px;line-height:1.55}
+  .ev .marker{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--ghost);background:#0c0f14;border:1px solid var(--line);border-radius:7px;padding:8px 10px;line-height:1.5;word-break:break-all}
+  .ev .trust{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:6px}
+  .ev .trust .c{color:var(--green)}
+  .ev.skip{opacity:.5} .ev.skip .nm{font-weight:500}
+  .chip{font:600 10px var(--mono);padding:2px 7px;border-radius:5px;border:1px solid}
+  .chip.approve{color:var(--green);border-color:color-mix(in oklab,var(--green) 40%,var(--line))}
+  .chip.converge{color:var(--gold);border-color:color-mix(in oklab,var(--gold) 40%,var(--line))}
+  .now{font:600 9.5px var(--mono);color:var(--red);border:1px solid color-mix(in oklab,var(--red) 45%,var(--line));border-radius:5px;padding:2px 7px}
+
+  /* side panels */
+  .panel{background:var(--raise);border:1px solid var(--line);border-radius:13px;margin-bottom:16px;overflow:hidden}
+  .panel .ph{padding:11px 14px;border-bottom:1px solid var(--line);font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);display:flex;align-items:center;justify-content:space-between}
+  .panel .pc{padding:13px 14px;display:flex;flex-direction:column;gap:11px}
+  .gate{display:flex;align-items:center;gap:10px;font-size:12.5px}
+  .gate .mk{font-family:var(--mono);width:14px;text-align:center}
+  .gate .ok{color:var(--green)} .gate .pend{color:var(--ghost)}
+  .panel .verdict{font-family:var(--mono);font-size:11px;color:var(--green);border-top:1px dashed var(--line-2);padding-top:10px}
+  .angle{display:flex;align-items:center;gap:9px;font-size:12.5px}
+  .angle .a{width:78px;font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  .v{font:600 9.5px var(--mono);padding:2px 7px;border-radius:5px}
+  .v.app{color:var(--green);border:1px solid color-mix(in oklab,var(--green) 40%,var(--line))}
+  .v.abs{color:var(--faint);border:1px solid var(--line-2)}
+  .angle .dg{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ghost)}
+  .judge{font-family:var(--mono);font-size:11px;color:var(--dim);border-top:1px dashed var(--line-2);padding-top:10px;line-height:1.55}
+  .judge b{color:var(--green)}
+  .drow{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .st{font:600 9.5px var(--mono);padding:2px 7px;border-radius:5px}
+  .st.ack{color:var(--green);border:1px solid color-mix(in oklab,var(--green) 40%,var(--line))}
+  .st.lease{color:var(--amber);border:1px solid color-mix(in oklab,var(--amber) 40%,var(--line))}
+  .run{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .run .e{color:var(--green)}
+  .diag{font-family:var(--mono);font-size:10px;color:var(--ghost)}
+
+  .foot{padding:16px 0 30px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--ghost);display:flex;gap:22px}
+  .foot b{color:var(--faint);font-weight:500}
+
+  /* ============ responsive — capped at 1280, fluid below ============ */
+  @media(max-width:980px){ .grid{grid-template-columns:minmax(0,1fr);gap:26px} }
+  @media(max-width:780px){
+    .hd{height:auto;flex-wrap:wrap;gap:10px 12px;padding:12px 0}
+    .crumb,.fr{display:none}
+    .nav{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .decide{flex-wrap:wrap;gap:12px}
+    .decide .lead{order:1} .decide .what{order:2;flex:1 1 100%}
+    .decide .btn{order:3;flex:1}
+    .gtitle{flex-wrap:wrap;gap:6px} .gtitle h1{font-size:20px}
+    .grow{gap:8px 12px}
+  }
+  @media(max-width:480px){ .wrap{padding:0 16px} .gtitle h1{font-size:18px} }
+
+  /* GitHub status chip (octocat + health dot) */
+  .frq{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:var(--raise);color:var(--faint)}
+  .frq:hover{color:var(--dim);border-color:var(--line-2)}
+  .frq .d{position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-radius:50%;background:var(--green);border:1.5px solid var(--raise)}
+
+  /* scrolled: section pipe appears LEFT of the GitHub chip */
+  .hpipe{flex:none;width:1px;height:18px;background:var(--line-2);align-self:center;margin:0 2px;display:none}
+  html.scrolled .hpipe{display:block}
+</style></head>
+<body>
+<section class="screen"><div class="wrap">
+
+  <div class="hd">
+    <a class="logo" href="#">F<span class="kk">K<i class="knode"></i></span>ST</a>
+    <div class="nav"><a href="overview.html">Overview</a><a class="on" href="goals.html">Goals</a><a href="packages.html">Packages</a></div>
+    <span class="hpipe"></span>
+    <div class="fr"><span class="frq" title="GitHub — synced 30s ago"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><i class="d"></i></span></div>
+    <a class="avatar" href="settings.html" title="Account & settings">CT</a>
+  </div>
+
+  <!-- TIER 1 -->
+  <div class="ghead">
+    <div class="grow" style="justify-content:space-between">
+      <a class="back" href="#">← Ship · pipeline</a>
+      <button class="newgoal" id="newgoalbtn">+ New goal</button>
+    </div>
+    <div class="gtitle"><h1>Composed conformance for github-autochrono</h1><span class="num">#152 · PR #29</span></div>
+    <div class="grow">
+      <span class="pill"><span class="d"></span> merge-ready</span>
+      <span class="meta">= max trusted <b>state:v1</b> · labels are hints</span>
+      <span class="meta">version <b>2026-06-11T00-12Z</b></span>
+      <span class="meta">head <b>3c1a9f</b></span>
+      <span class="meta">branch <b>fkst/cand-152-…</b></span>
+      <span class="meta">blocks <b>#242</b></span>
+    </div>
+    <div class="decide">
+      <span class="lead">Real · autonomous</span>
+      <div class="what">
+        <div class="t">Merges PR #29 into the <span class="mono">integration</span> branch — autonomously, the moment the merge delivery is due (seconds)</div>
+        <div class="s">REAL posture · CI green · review approved · head-bound · runs <span style="color:var(--dim)">gh pr merge --merge --match-head-commit 3c1a9f</span> · a later <span style="color:var(--dim)">rollup PR</span> carries integration → dev · you usually see this already merged. No per-goal pause exists — to stop it, flip global write to DRY-RUN or mutate this PR on GitHub.</div>
+      </div>
+      <button class="btn red">Global write → DRY-RUN</button>
+      <button class="btn">Close PR #29 ↗</button>
+      <button class="btn">Open PR ↗</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- TIER 2 — lifecycle -->
+    <div>
+      <div class="eyebrow">Lifecycle · current state = MAX trusted state:v1 marker by (version, stage_rank) · fkst-dev labels are hints</div>
+      <div class="tl">
+        <div class="ev"><span class="node"></span>
+          <div class="hd"><span class="nm">thinking</span><span class="ts">00:41Z · 41m ago</span></div>
+          <div class="body">intake: fkst-dev:enabled → re-derived issue → consensus.proposal raised</div>
+        </div>
+        <div class="ev"><span class="node" style="background:var(--gold)"></span>
+          <div class="hd"><span class="nm">converge · round 1</span><span class="chip converge">converge</span><span class="ts">00:46Z</span></div>
+          <div class="body">converge mode (no reject): 2 approve / 1 abstain · consensus_converge → meta-judge narrowed the question → re-asked at round 2</div>
+        </div>
+        <div class="ev"><span class="node" style="background:var(--green)"></span>
+          <div class="hd"><span class="nm">ready</span><span class="chip approve">approve</span><span class="ts">00:52Z</span></div>
+          <div class="body">consensus reached · devloop_ready</div>
+          <div class="marker">&lt;!-- fkst:github-devloop:state:v1 proposal="…/152" state="ready" version="…00-52Z" stage_rank="500" --&gt;</div>
+          <div class="trust"><span class="c">✓ authored by fkst-devloop-bot</span> · trusted (matches <span class="mono">FKST_GITHUB_BOT_LOGIN</span>) · version-CAS applied</div>
+        </div>
+        <div class="ev"><span class="node"></span>
+          <div class="hd"><span class="nm">implementing → pr-open</span><span class="ts">00:58Z</span></div>
+          <div class="body">setup_worktree devloop-152 · codex committed · PR #29 opened · pr-origin:v1 backpointer</div>
+        </div>
+        <div class="ev skip"><span class="node"></span>
+          <div class="hd"><span class="nm">stale replay skipped</span><span class="ts">01:03Z</span></div>
+          <div class="body">incoming version older than current marker → CAS skip-stale · no transition (a late poll, ignored)</div>
+        </div>
+        <div class="ev"><span class="node" style="background:var(--gold)"></span>
+          <div class="hd"><span class="nm">reviewing · review-loop 2</span><span class="chip converge">converge → reached</span><span class="ts">01:08Z</span></div>
+          <div class="body">PR-diff review consensus over head 3c1a9f · round 1 converged, round 2 reached approve</div>
+        </div>
+        <div class="ev"><span class="node" style="background:var(--red)"></span>
+          <div class="hd"><span class="nm">merge-ready</span><span class="now">● NOW · REAL</span><span class="ts">just now</span></div>
+          <div class="body">review-result:v1 approve → merge-ready:v1 (head-bound) · devloop_merge_ready delivery raised → merges into integration on next dispatch (~seconds)</div>
+          <div class="marker">&lt;!-- fkst:github-devloop:merge-ready:v1 proposal="…/152" pr="29" head_sha="3c1a9f" review_proposal="…" --&gt;</div>
+          <div class="trust"><span class="c">✓ fkst-devloop-bot</span> · head-bound to 3c1a9f</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- side panels -->
+    <div>
+      <div class="panel"><div class="ph">Merge gate <span style="color:var(--green)">passing</span></div>
+        <div class="pc">
+          <div class="gate"><span class="mk ok">✓</span> trusted <span class="mono" style="color:var(--dim)">review-result:v1 approve</span></div>
+          <div class="gate"><span class="mk ok">✓</span> head-bound <span class="mono" style="color:var(--dim)">merge-ready:v1</span></div>
+          <div class="gate"><span class="mk ok">✓</span> CI green <span class="mono" style="color:var(--ghost)">statusCheckRollup</span></div>
+          <div class="gate"><span class="mk ok">✓</span> mergeable · same-repo head</div>
+          <div class="gate"><span class="mk ok">✓</span> FKST_GITHUB_WRITE = REAL</div>
+          <div class="verdict">all gates pass → merges PR #29 into the integration branch on next delivery dispatch</div>
+        </div>
+      </div>
+
+      <div class="panel"><div class="ph">PR-diff review · round 2</div>
+        <div class="pc">
+          <div class="angle"><span class="a">minimal</span><span class="v app">approve</span><span class="dg">dg a3f-12</span></div>
+          <div class="angle"><span class="a">structural</span><span class="v app">approve</span><span class="dg">dg 7c1-44</span></div>
+          <div class="angle"><span class="a">delete</span><span class="v abs">abstain</span><span class="dg">dg 0b9-08</span></div>
+          <div class="judge">meta-judge → <b>reached: approve</b> — "diff matches the issue; conformance union covers github-autochrono." Angles are peer-invisible; full replies in the run log.</div>
+        </div>
+      </div>
+
+      <div class="panel"><div class="ph">Deliveries · redb</div>
+        <div class="pc">
+          <div class="drow"><span class="st ack">ACK</span> review_result · gen 5 · done</div>
+          <div class="drow"><span class="st lease">LEASED</span> merge · gen 1 · 0:51 left</div>
+          <div class="diag">source.reference fkst-substrate#pr/29</div>
+        </div>
+      </div>
+
+      <div class="panel"><div class="ph">Runs · codex <span class="diag">diagnostic</span></div>
+        <div class="pc">
+          <div class="run"><span class="e">exit 0</span> review angle×3 · 44s · permits 3</div>
+          <div class="run"><span class="e">exit 0</span> meta-judge · 17s</div>
+          <div class="diag">framework-child + codex logs · not a status source</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>state as of <b>18s ago</b> · merge gate from redb <b>9s ago</b> · poll-derived</span>
+    <span>every transition re-derived from GitHub on each tick</span>
+  </div>
+
+</div></section>
+
+<!-- new-goal modal — seed a goal (creates a GitHub issue + fkst-dev:enabled) -->
+<div class="ovl" id="ngovl" hidden>
+  <div class="sheet" style="max-width:560px" role="dialog" aria-modal="true" aria-labelledby="ng-h">
+    <button class="x" aria-label="Close" data-ngx>×</button>
+    <div class="m-hd">
+      <div class="m-tt"><h2 id="ng-h">New goal</h2></div>
+      <div class="m-meta">seed a GitHub issue the engine picks up on the next poll</div>
+    </div>
+    <div class="ngf">
+      <div class="ngrow"><span class="nglab">Repository</span>
+        <select class="ngsel"><option>ChronoAIProject/fkst-substrate</option><option>ChronoAIProject/fkst-packages</option></select></div>
+      <div class="ngrow"><span class="nglab">Title</span>
+        <input class="nginp" placeholder="e.g. Add retry backoff to the DLQ requeue path"></div>
+      <div class="ngrow"><span class="nglab">Description</span>
+        <textarea class="ngta" placeholder="What should change, and why. The engine reads the full issue + comments at intake."></textarea></div>
+      <div class="ngrow"><span class="nglab">Deployment package graph · read-only</span>
+        <div class="ngpkgs">
+          <div class="ngpkg"><span>github-devloop<span class="t">goal engine · composed root</span></span><span class="t">FKST_PACKAGE_ROOTS</span></div>
+          <div class="ngpkg"><span>github-proxy<span class="t">GitHub I/O</span></span><span class="t">dep · composed.deps</span></div>
+          <div class="ngpkg"><span>consensus<span class="t">multi-angle verdict</span></span><span class="t">dep · composed.deps</span></div>
+        </div>
+        <div class="ngsub">every goal is processed by this graph — fixed at <b>supervise startup</b>, never per-goal · <a href="packages.html">View packages →</a></div></div>
+      <div class="ngnote">Creates a GitHub issue labeled <b>fkst-dev:enabled</b> via NyxID. The engine's next <b>~5-min poll</b> raises it → <b>intake_judge</b> decides if it's auto-developable → it enters the <b>Design</b> stage. A real GitHub write on your account (via NyxID) — not an engine write, so it works in DRY-RUN too.</div>
+    </div>
+    <div class="m-act">
+      <div class="m-act-l"></div>
+      <button class="btn" data-ngx>Cancel</button>
+      <button class="ngcreate">Create issue &amp; enable</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    var btn=document.getElementById('newgoalbtn'), ng=document.getElementById('ngovl');
+    function o(){ng.hidden=false;document.body.style.overflow='hidden';}
+    function c(){ng.hidden=true;document.body.style.overflow='';}
+    btn.addEventListener('click',o);
+    ng.addEventListener('click',function(e){if(e.target===ng)c();});
+    ng.querySelectorAll('[data-ngx]').forEach(function(b){b.addEventListener('click',c);});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!ng.hidden)c();});
+  })();
+</script>
+<script>
+/* hysteresis band: condense once past 140, expand only back under 40 — no flicker at the boundary */
+(function(){var on=false;function upd(){var y=window.scrollY||0;if(!on&&y>140){on=true;document.documentElement.classList.add("scrolled");}else if(on&&y<40){on=false;document.documentElement.classList.remove("scrolled");}}addEventListener("scroll",upd,{passive:true});upd();})();
+</script>
+</body></html>

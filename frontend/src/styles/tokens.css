@@ -1,0 +1,29 @@
+:root {
+  /* Color tokens - oklch verbatim from design.md §2 */
+  --bg: oklch(16% 0.011 250);
+  --raise: oklch(20% 0.012 250);
+  --raise-2: oklch(23% 0.013 250);
+  --line: oklch(26% 0.012 250);
+  --line-2: oklch(33% 0.013 250);
+  --fg: oklch(97% 0.005 240);
+  --dim: oklch(72% 0.014 245);
+  --faint: oklch(58% 0.014 245);
+  --ghost: oklch(46% 0.012 245);
+
+  /* Accent + semaphore (used sparingly) */
+  --amber: oklch(81% 0.15 80);
+  --green: oklch(74% 0.13 158);
+  --red: oklch(67% 0.18 18);
+  --gold: oklch(80% 0.10 85);
+
+  /* Text on amber fills */
+  --amber-ink: oklch(22% 0.04 80);
+
+  /* Font-stack variables (no system-ui anywhere) */
+  --display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --ui: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --mono: 'IBM Plex Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* Note: IBM Plex Sans 450 ('Text') is substituted with 500 because @fontsource does not package 450 */
+  /* Tint recipe: color-mix(in oklab, var(--token) N%, var(--line)/transparent) — never a second opaque color token. */
+}

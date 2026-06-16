@@ -60,6 +60,10 @@ occupies host port 27017, change the **host** side of the mapping (e.g.
 MONGODB_URI="mongodb://localhost:27018" cargo run -p fkst-hosted-api
 ```
 
+### Local development & auth
+
+For details on setting up authentication and GitHub App credentials during local development vs production (using Profile templates and the environment variable matrix), see the **[Authentication & GitHub Integration Guide](../docs/auth-integration.md)**.
+
 ## Configuration (environment variables)
 
 All configuration is read from the environment at startup (`src/config.rs` is

@@ -8,6 +8,8 @@ node_modules/
 # Secrets and credentials — never commit these
 .env
 .env.*
+!frontend/.env.example
+!backend/.env.example
 *.pem
 *.key
 credentials.json
@@ -22,3 +24,4 @@ backend/deploy/k8s/secret.*.local.yaml
 
 # /auto engine working state
 .auto/
+.gstack/
