@@ -126,6 +126,22 @@ fn tmp_sibling(token_path: &Path) -> PathBuf {
     PathBuf::from(tmp)
 }
 
+/// Generate a 32-hex-char (128-bit) per-session JIT mint nonce. Random,
+/// unguessable, and known only to a session's helper (via env) and its driver
+/// poller (via the `0600` nonce file) — so only that session's own git child
+/// can trigger its own re-mint (#107). `rand` is already an engine dependency.
+///
+/// This is the SINGLE source of truth for the nonce scheme: the engine's runner
+/// generates the per-session nonce here, and the controller's dispatch resolver
+/// (#151) reuses it verbatim so a resolved dispatch carries a nonce shaped
+/// exactly like the one the in-process path produces.
+pub fn generate_mint_nonce() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Write the per-session mint nonce file (`0600`). Returns the nonce string the
 /// caller must also set as [`MINT_NONCE_ENV`] on the engine process so the helper
 /// can present it back to the driver's poller.

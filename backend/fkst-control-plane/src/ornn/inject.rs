@@ -237,13 +237,26 @@ pub fn append_instructions(
     Ok(())
 }
 
+/// Render the fenced marker block a skillset's instructions occupy in
+/// `AGENTS.md`: `<!-- ornn-skillset:<name> BEGIN -->\n<instructions>\n<!-- … END -->`.
+///
+/// The single source of truth for the block format, reused by
+/// [`upsert_marker_block`] (the in-process install path) and by the controller's
+/// `resolve_plan` (#151), so a resolved dispatch's `agents_md_appends` carries
+/// the IDENTICAL block bytes the in-process injector would write.
+pub fn render_marker_block(skillset_name: &str, instructions: &str) -> String {
+    let begin = format!("<!-- {MARKER_PREFIX}{skillset_name} BEGIN -->");
+    let end = format!("<!-- {MARKER_PREFIX}{skillset_name} END -->");
+    format!("{begin}\n{instructions}\n{end}")
+}
+
 /// Pure marker-block upsert: replace an existing `ornn-skillset:<name>` block
 /// or append a fresh one. Split out so the dedupe-on-repin logic is testable
 /// without filesystem access.
 fn upsert_marker_block(existing: &str, skillset_name: &str, instructions: &str) -> String {
     let begin = format!("<!-- {MARKER_PREFIX}{skillset_name} BEGIN -->");
     let end = format!("<!-- {MARKER_PREFIX}{skillset_name} END -->");
-    let block = format!("{begin}\n{instructions}\n{end}");
+    let block = render_marker_block(skillset_name, instructions);
 
     if let (Some(begin_at), Some(end_at)) = (existing.find(&begin), existing.find(&end)) {
         // Replace the existing block (from the BEGIN marker through the END

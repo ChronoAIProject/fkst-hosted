@@ -705,7 +705,7 @@ impl SessionRunner {
             // Per-session JIT mint nonce: written 0600 next to the token and
             // handed to the helper via FKST_GITHUB_MINT_NONCE so it can
             // authenticate a re-mint request to the driver's poller.
-            let mint_nonce = generate_mint_nonce();
+            let mint_nonce = crate::goal_token::generate_mint_nonce();
             crate::goal_token::write_nonce_file(&runtime_dir, &mint_nonce)?;
 
             // The token + nonce stay SecretString into GoalEnv (#109/#107);
@@ -783,7 +783,7 @@ impl SessionRunner {
             pid,
             pgid: pid,
             goal_id: spec.goal.as_ref().map(|g| g.goal_id.to_string()),
-            run_nonce: generate_mint_nonce(),
+            run_nonce: crate::goal_token::generate_mint_nonce(),
             worker_id: spec.worker_id.clone(),
         };
         if let Err(err) = write_owner_breadcrumb(&runtime_dir, &owner_bc) {
@@ -914,17 +914,6 @@ async fn fail_startup(
     RunnerError::StartupFailed {
         stderr: format!("{reason}\n{tail}"),
     }
-}
-
-/// A 32-hex-char (128-bit) per-session JIT mint nonce. Random, unguessable, and
-/// known only to this session's helper (via env) and its driver poller (via the
-/// 0600 nonce file) — so only that session's own git child can trigger its own
-/// re-mint (#107). `rand` is already a dependency (vault DEK/nonce).
-fn generate_mint_nonce() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Keep the NEWEST `cap` bytes of `text`, cutting at a char boundary (the
