@@ -2,10 +2,22 @@ local gh = require("std.github")
 local issue_adapter = require("std.github.issue")
 local core = require("core")
 
+local function argv_equal(left, right)
+  if type(left) ~= "table" or #left ~= #right then
+    return false
+  end
+  for index, value in ipairs(right) do
+    if left[index] ~= value then
+      return false
+    end
+  end
+  return true
+end
+
 local function command_count(commands, expected)
   local count = 0
   for _, command in ipairs(commands) do
-    if command == expected then
+    if argv_equal(command, expected) then
       count = count + 1
     end
   end
@@ -22,7 +34,7 @@ return {
   test_read_issue_builds_exact_generic_command_and_parses_full_issue = function()
     local seen
     local handle = gh.new(function(opts)
-      seen = opts.cmd
+      seen = opts.argv
       return {
         stdout = '{"number":42,"state":"OPEN","title":"t","body":"issue body","url":"https://github.com/owner/repo/issues/42","updatedAt":"2026-06-15T00:00:00Z","labels":[{"name":"fkst-dev:enabled"}],"comments":[{"id":1,"body":"b","author":{"login":"bot"},"createdAt":"2026-06-14T00:00:00Z"}],"assignees":[{"login":"dev"}],"author":{"login":"author"}}',
         stderr = "",
@@ -32,7 +44,7 @@ return {
 
     local issue = handle.read_issue({ kind = "external", ref = "owner/repo#issue/42" })
 
-    assert(seen == "gh issue view '42' --repo 'owner/repo' --json number,title,body,url,updatedAt,state,labels,comments,assignees,author")
+    assert(argv_equal(seen, { "gh", "issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,url,updatedAt,state,labels,comments,assignees,author" }))
     assert(issue.number == 42)
     assert(issue.source_ref.kind == "external")
     assert(issue.source_ref.ref == "owner/repo#issue/42")
@@ -80,7 +92,7 @@ return {
     cache_set(key, "")
     local commands = {}
     local handle = gh.new(function(opts)
-      table.insert(commands, opts.cmd)
+      table.insert(commands, opts.argv)
       return {
         stdout = '{"number":42,"state":"OPEN","title":"cached adapter","body":"issue body","url":"https://github.com/owner/cache-adapter/issues/42","updatedAt":"2026-06-15T00:00:00Z","labels":[],"comments":[],"assignees":[],"author":{"login":"author"}}',
         stderr = "",
@@ -96,25 +108,27 @@ return {
 
     assert(first.title == "cached adapter")
     assert(second.title == "cached adapter")
-    assert(command_count(commands, "gh issue view '42' --repo 'owner/cache-adapter' --json number,title,body,url,updatedAt,state,labels,comments,assignees,author") == 1)
+    assert(command_count(commands, { "gh", "issue", "view", "42", "--repo", "owner/cache-adapter", "--json", "number,title,body,url,updatedAt,state,labels,comments,assignees,author" }) == 1)
     assert(#commands == 1)
   end,
 
   test_read_issue_force_fresh_bypasses_cache_and_recaches = function()
     local ref = { kind = "external", ref = "owner/force-adapter#issue/43" }
     local key = issue_adapter.issue_view_cache_key("owner/force-adapter", 43)
+    local comments_query = table.concat({ "per", "page=100" }, "_")
+    local comments_path = "repos/owner/force-adapter/issues/43/comments?" .. comments_query
     cache_set(key, "")
     local commands = {}
     local handle = gh.new(function(opts)
-      table.insert(commands, opts.cmd)
-      if opts.cmd == "gh api 'repos/owner/force-adapter/issues/43'" then
+      table.insert(commands, opts.argv)
+      if argv_equal(opts.argv, { "gh", "api", "repos/owner/force-adapter/issues/43" }) then
         return {
           stdout = '{"number":43,"state":"open","title":"fresh adapter","body":"fresh body","html_url":"https://github.com/owner/force-adapter/issues/43","updated_at":"2026-06-15T00:00:01Z","labels":[{"name":"fresh"}],"assignees":[{"login":"dev"}],"user":{"login":"author"}}',
           stderr = "",
           exit_code = 0,
         }
       end
-      if opts.cmd == "gh api --paginate --slurp 'repos/owner/force-adapter/issues/43/comments?per_page=100'" then
+      if argv_equal(opts.argv, { "gh", "api", "--paginate", "--slurp", comments_path }) then
         return {
           stdout = '[{"id":7,"body":"fresh comment","user":{"login":"bot"},"created_at":"2026-06-15T00:00:01Z"}]',
           stderr = "",
@@ -146,9 +160,9 @@ return {
     assert(fresh.comments[1].body == "fresh comment")
     assert(fresh.comments[1].author_login == "bot")
     assert(cached.title == "fresh adapter")
-    assert(command_count(commands, "gh issue view '43' --repo 'owner/force-adapter' --json number,title,body,url,updatedAt,state,labels,comments,assignees,author") == 1)
-    assert(command_count(commands, "gh api 'repos/owner/force-adapter/issues/43'") == 1)
-    assert(command_count(commands, "gh api --paginate --slurp 'repos/owner/force-adapter/issues/43/comments?per_page=100'") == 1)
+    assert(command_count(commands, { "gh", "issue", "view", "43", "--repo", "owner/force-adapter", "--json", "number,title,body,url,updatedAt,state,labels,comments,assignees,author" }) == 1)
+    assert(command_count(commands, { "gh", "api", "repos/owner/force-adapter/issues/43" }) == 1)
+    assert(command_count(commands, { "gh", "api", "--paginate", "--slurp", comments_path }) == 1)
     assert(#commands == 3)
   end,
 }

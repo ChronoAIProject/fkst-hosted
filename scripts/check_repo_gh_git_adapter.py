@@ -325,10 +325,7 @@ def skip_leading_options(words: list[str], index: int) -> int:
     return index
 
 
-def command_head(command: str | None) -> str | None:
-    if command is None:
-        return None
-    words = split_shell_words(normalize_shell_prefix(command))
+def command_head_for_words(words: list[str]) -> str | None:
     if not words:
         return None
     tool = words[0].rsplit("/", 1)[-1]
@@ -343,6 +340,12 @@ def command_head(command: str | None) -> str | None:
     if first.startswith("-"):
         return tool
     return " ".join([tool, first])
+
+
+def command_head(command: str | None) -> str | None:
+    if command is None:
+        return None
+    return command_head_for_words(split_shell_words(normalize_shell_prefix(command)))
 
 
 def normalized_command_head(command: str | None) -> str | None:
@@ -454,11 +457,111 @@ def is_exec_wrapper_context_literal(contexts: list[CallContext], literal_start: 
     return is_exec_wrapper_call_name(call.name) and argument_index_at(call, literal_start) > 0
 
 
+def is_exec_argv_call_name(name: str | None) -> bool:
+    if name is None:
+        return False
+    parts = name.replace(":", ".").split(".")
+    return parts[-1] == "exec_argv"
+
+
 def is_excluded_literal(contexts: list[CallContext], literal_start: int) -> bool:
     return (
         is_message_literal(contexts, literal_start)
         or is_exec_wrapper_context_literal(contexts, literal_start)
     )
+
+
+def matching_table_close(mask: str, open_brace: int) -> int | None:
+    depth = 0
+    cursor = open_brace
+    while cursor < len(mask):
+        char = mask[cursor]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return cursor
+        cursor += 1
+    return None
+
+
+def argv_table_bounds_for_literal(mask: str, literal_start: int) -> tuple[int, int] | None:
+    prefix = mask[:literal_start]
+    match = re.search(r"argv\s*=\s*\{\s*$", prefix)
+    if match is None:
+        return None
+    open_brace = prefix.rfind("{", match.start(), match.end())
+    if open_brace < 0:
+        return None
+    close_brace = matching_table_close(mask, open_brace)
+    if close_brace is None or close_brace <= literal_start:
+        return None
+    return open_brace, close_brace
+
+
+def skip_table_operand(mask: str, cursor: int, table_end: int) -> int:
+    depth = 0
+    while cursor < table_end:
+        char = mask[cursor]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}" and depth > 0:
+            depth -= 1
+        elif depth == 0 and char == ",":
+            return cursor
+        cursor += 1
+    return cursor
+
+
+def argv_words_from_table(
+    source: str,
+    mask: str,
+    open_brace: int,
+    close_brace: int,
+    literals_by_start: dict[int, LuaStringLiteral],
+) -> list[str]:
+    words: list[str] = []
+    cursor = open_brace + 1
+    while cursor < close_brace:
+        while cursor < close_brace and source[cursor].isspace():
+            cursor += 1
+        if cursor >= close_brace:
+            break
+        literal = literals_by_start.get(cursor)
+        if literal is not None:
+            words.append(literal.content)
+            cursor = literal.end
+        else:
+            end = skip_table_operand(mask, cursor, close_brace)
+            if mask[cursor:end].strip():
+                words.append(PLACEHOLDER)
+            cursor = end
+        while cursor < close_brace and source[cursor].isspace():
+            cursor += 1
+        if cursor < close_brace and source[cursor] == ",":
+            cursor += 1
+    return words
+
+
+def exec_argv_head_for_literal(
+    source: str,
+    mask: str,
+    contexts: list[CallContext],
+    literal: LuaStringLiteral,
+    literals_by_start: dict[int, LuaStringLiteral],
+) -> str | None:
+    call = nearest_call(contexts, literal.start)
+    if call is None or not is_exec_argv_call_name(call.name):
+        return None
+    bounds = argv_table_bounds_for_literal(mask, literal.start)
+    if bounds is None:
+        return None
+    open_brace, close_brace = bounds
+    words = argv_words_from_table(source, mask, open_brace, close_brace, literals_by_start)
+    if not words or words[0] != literal.content:
+        return None
+    return command_head_for_words(words)
 
 
 def command_heads(source: str) -> set[str]:
@@ -472,9 +575,11 @@ def command_heads(source: str) -> set[str]:
         if prior_literal_in_concat(source, literal, previous_literals):
             previous_literals.append(literal)
             continue
-        head = normalized_command_head(
-            command_prefix_for_literal(source, mask, literal, literals_by_start)
-        )
+        head = exec_argv_head_for_literal(source, mask, contexts, literal, literals_by_start)
+        if head is None:
+            head = normalized_command_head(
+                command_prefix_for_literal(source, mask, literal, literals_by_start)
+            )
         if head is not None:
             if not is_excluded_literal(contexts, literal.start):
                 heads.add(head)
