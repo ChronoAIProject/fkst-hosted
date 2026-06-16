@@ -10,6 +10,7 @@ function M.new(exec)
   end
   require("std.github.issue").install(handle)
   require("std.github.entities").install(handle)
+  require("std.github.comments").install(handle)
   return handle
 end
 

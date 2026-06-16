@@ -63,10 +63,14 @@ function pipeline(event)
     kind = "issue",
     number = payload.issue_number,
     number_field = "issue_number",
-    view_comments_cmd = core.gh_issue_view_comments_cmd,
-    comment_create_cmd = core.gh_issue_comment_create_cmd,
-    view_label = "gh issue REST comments",
-    comment_label = "gh issue comment",
+    view_comments = function(github, repo, number, timeout)
+      return github.issue_comments(repo, number, timeout)
+    end,
+    comment_create = function(github, repo, number, body_file, timeout)
+      return github.issue_comment_create(repo, number, body_file, timeout)
+    end,
+    view_label = "GitHub issue REST comments",
+    comment_label = "GitHub issue comment",
   })
   if written ~= nil and written.id ~= nil then
     raise("github_comment_written", {

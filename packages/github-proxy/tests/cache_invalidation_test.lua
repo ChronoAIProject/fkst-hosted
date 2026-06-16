@@ -16,7 +16,7 @@ local function mock_issue_view(title)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.gh_issue_view_comments_cmd("owner/x", 42), {
+  t.mock_command(core.gh_issue_comments_api_cmd("owner/x", 42), {
     stdout = "[[]]\n",
     stderr = "",
     exit_code = 0,

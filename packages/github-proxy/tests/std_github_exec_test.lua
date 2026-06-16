@@ -217,6 +217,64 @@ return {
     end
   end,
 
+  test_github_comment_methods_build_argv = function()
+    local calls = {}
+    local handle = gh.new(function(opts)
+      table.insert(calls, opts)
+      return { stdout = "ok", stderr = "", exit_code = 0 }
+    end)
+
+    handle.issue_comments("owner/repo", 42, 31)
+    handle.pr_comments("owner/repo", 7, 32)
+    handle.issue_comment_create("owner/repo", 42, "/tmp/body.md", 33)
+    handle.pr_comment_create("owner/repo", 7, "/tmp/body.md", 34)
+    handle.comment_update("owner/repo", 123456, "/tmp/body.md", 35)
+    handle.issue_comment("owner/repo", 42, "/tmp/body.md", 36)
+    handle.pr_comment("owner/repo", 7, "/tmp/body.md", 37)
+
+    assert_argv_equal(
+      calls[1].argv,
+      { "gh", "api", "--paginate", "--slurp", "repos/owner/repo/issues/42/comments?per_page=100" },
+      "issue_comments"
+    )
+    assert_argv_equal(
+      calls[2].argv,
+      { "gh", "api", "--paginate", "--slurp", "repos/owner/repo/issues/7/comments?per_page=100" },
+      "pr_comments"
+    )
+    assert_argv_equal(
+      calls[3].argv,
+      { "gh", "api", "--method", "POST", "repos/owner/repo/issues/42/comments", "--field", "body=@/tmp/body.md" },
+      "issue_comment_create"
+    )
+    assert_argv_equal(
+      calls[4].argv,
+      { "gh", "api", "--method", "POST", "repos/owner/repo/issues/7/comments", "--field", "body=@/tmp/body.md" },
+      "pr_comment_create"
+    )
+    assert_argv_equal(
+      calls[5].argv,
+      { "gh", "api", "--method", "PATCH", "repos/owner/repo/issues/comments/123456", "--field", "body=@/tmp/body.md" },
+      "comment_update"
+    )
+    assert_argv_equal(
+      calls[6].argv,
+      { "gh", "issue", "comment", "42", "--repo", "owner/repo", "--body-file", "/tmp/body.md" },
+      "issue_comment"
+    )
+    assert_argv_equal(
+      calls[7].argv,
+      { "gh", "pr", "comment", "7", "--repo", "owner/repo", "--body-file", "/tmp/body.md" },
+      "pr_comment"
+    )
+    for index, call in ipairs(calls) do
+      assert(call.argv[1] == "gh", "comment method must build gh argv for call " .. tostring(index))
+      assert(call.timeout == index + 30, "comment method timeout mismatch for call " .. tostring(index))
+      assert(call.cmd == nil, "comment method must not pass cmd")
+      assert(call.rate_pool == nil, "comment method must not pass rate_pool")
+    end
+  end,
+
   test_git_methods_build_argv = function()
     local calls = {}
     local handle = git.new(function(opts)

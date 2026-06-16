@@ -39,6 +39,7 @@ function M.new(model)
     return copy(issue.normalize_issue(fixture, source_ref))
   end
   require("std.github.entities").install(handle)
+  require("std.github.comments").install(handle)
   return handle
 end
 

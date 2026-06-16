@@ -4,10 +4,6 @@ function S.install(M)
 local max_runtime_id_len = 180
 local stale_comment_target_error_class = "stale-comment-target"
 
-local function shell_single_quote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
-
 local function safe_runtime_segment(value)
   local safe = tostring(value or ""):gsub("[^%w._-]", "_")
   safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
@@ -191,7 +187,9 @@ local function is_gh_not_found(result)
 end
 
 local function load_comments(M, target, repo)
-  local view = M.gh_exec(target.view_comments_cmd(repo, target.number), 30, target.view_label)
+  local view = M.gh_exec(function(timeout)
+    return target.view_comments(M.github(), repo, target.number, timeout)
+  end, 30, target.view_label)
   return M.parse_issue_comments(view.stdout)
 end
 
@@ -206,7 +204,9 @@ local function parse_rest_comments(stdout)
 end
 
 local function load_rest_comments(M, target, repo)
-  local view = M.gh_exec(M.gh_issue_comments_api_cmd(repo, target.number), 30, "gh issue comments")
+  local view = M.gh_exec(function(timeout)
+    return target.view_comments(M.github(), repo, target.number, timeout)
+  end, 30, "GitHub issue comments")
   return parse_rest_comments(view.stdout)
 end
 
@@ -215,39 +215,68 @@ local function trusted_rest_comment_with_fragment(M, repo, target, fragment, bot
   return M.trusted_comment_with_fragment(comments, fragment, bot_login)
 end
 
+function M.gh_pr_comment(repo, pr_number, body_file, timeout)
+  return M.github().pr_comment(repo, pr_number, body_file, timeout or 30)
+end
+
 function M.gh_pr_comment_cmd(repo, pr_number, body_file)
-  return "gh pr comment " .. shell_single_quote(pr_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --body-file " .. shell_single_quote(body_file)
+  return function(timeout)
+    return M.gh_pr_comment(repo, pr_number, body_file, timeout)
+  end
+end
+
+function M.gh_pr_view_comments(repo, pr_number, timeout)
+  return M.github().pr_comments(repo, pr_number, timeout or 30)
 end
 
 function M.gh_pr_view_comments_cmd(repo, pr_number)
-  return M.gh_issue_comments_api_cmd(repo, pr_number)
+  return function(timeout)
+    return M.gh_pr_view_comments(repo, pr_number, timeout)
+  end
+end
+
+function M.gh_issue_view_comments(repo, issue_number, timeout)
+  return M.github().issue_comments(repo, issue_number, timeout or 30)
 end
 
 function M.gh_issue_view_comments_cmd(repo, issue_number)
-  return M.gh_issue_comments_api_cmd(repo, issue_number)
+  return function(timeout)
+    return M.gh_issue_view_comments(repo, issue_number, timeout)
+  end
+end
+
+function M.gh_issue_comment(repo, issue_number, body_file, timeout)
+  return M.github().issue_comment(repo, issue_number, body_file, timeout or 30)
 end
 
 function M.gh_issue_comment_cmd(repo, issue_number, body_file)
-  return "gh issue comment " .. shell_single_quote(issue_number)
-    .. " --repo " .. shell_single_quote(repo)
-    .. " --body-file " .. shell_single_quote(body_file)
+  return function(timeout)
+    return M.gh_issue_comment(repo, issue_number, body_file, timeout)
+  end
+end
+
+function M.gh_issue_comment_create(repo, issue_number, body_file, timeout)
+  return M.github().issue_comment_create(repo, issue_number, body_file, timeout or 30)
 end
 
 function M.gh_issue_comment_create_cmd(repo, issue_number, body_file)
-  return "gh api --method POST "
-    .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments")
-    .. " --field body=@" .. shell_single_quote(body_file)
+  return function(timeout)
+    return M.gh_issue_comment_create(repo, issue_number, body_file, timeout)
+  end
+end
+
+function M.gh_pr_comment_create(repo, pr_number, body_file, timeout)
+  return M.github().pr_comment_create(repo, pr_number, body_file, timeout or 30)
+end
+
+function M.gh_comment_edit(repo, comment_id_value, body_file, timeout)
+  return M.github().comment_update(repo, comment_id_value, body_file, timeout or 30)
 end
 
 function M.gh_comment_edit_cmd(repo, comment_id_value, body_file)
-  if comment_id_value == nil or tostring(comment_id_value) == "" then
-    error("github-proxy: invalid comment id")
+  return function(timeout)
+    return M.gh_comment_edit(repo, comment_id_value, body_file, timeout)
   end
-  return "gh api --method PATCH "
-    .. shell_single_quote("repos/" .. tostring(repo) .. "/issues/comments/" .. tostring(comment_id_value))
-    .. " --field body=@" .. shell_single_quote(body_file)
 end
 
 local function edit_existing_comment(M, repo, target, path, existing, replace_marker, bot_login)
@@ -255,7 +284,9 @@ local function edit_existing_comment(M, repo, target, path, existing, replace_ma
     return false, "missing-id"
   end
 
-  local ok, err = M.gh_exec_result(M.gh_comment_edit_cmd(repo, existing.id, path), 30, "gh comment edit")
+  local ok, err = M.gh_exec_result(function(timeout)
+    return M.gh_comment_edit(repo, existing.id, path, timeout)
+  end, 30, "GitHub comment edit")
   if ok then
     return true, nil, existing
   end
@@ -264,20 +295,22 @@ local function edit_existing_comment(M, repo, target, path, existing, replace_ma
     error(err.message)
   end
 
-  log.warn("github-proxy: gh comment edit returned 404; re-reading comments before classification")
+  log.warn("github-proxy: GitHub comment edit returned 404; re-reading comments before classification")
   local comments = load_comments(M, target, repo)
   local refreshed = M.trusted_comment_with_fragment(comments, replace_marker, bot_login)
   if refreshed == nil or refreshed.id == nil then
-    log.warn("github-proxy: gh comment edit target is stale: error_class=" .. stale_comment_target_error_class)
+    log.warn("github-proxy: GitHub comment edit target is stale: error_class=" .. stale_comment_target_error_class)
     return false, stale_comment_target_error_class
   end
 
-  local refreshed_ok, refreshed_err = M.gh_exec_result(M.gh_comment_edit_cmd(repo, refreshed.id, path), 30, "gh comment edit")
+  local refreshed_ok, refreshed_err = M.gh_exec_result(function(timeout)
+    return M.gh_comment_edit(repo, refreshed.id, path, timeout)
+  end, 30, "GitHub comment edit")
   if refreshed_ok then
     return true, nil, refreshed
   end
   if is_gh_not_found(refreshed_err.result) then
-    log.warn("github-proxy: refreshed gh comment edit target is stale: error_class=" .. stale_comment_target_error_class)
+    log.warn("github-proxy: refreshed GitHub comment edit target is stale: error_class=" .. stale_comment_target_error_class)
     return false, stale_comment_target_error_class
   end
   error(refreshed_err.message)
@@ -359,7 +392,9 @@ function M.write_comment_request(payload, target)
     elseif existing ~= nil then
       log.warn("github-proxy: replace marker comment missing id; creating a fresh comment")
     end
-    local created = M.gh_exec(target.comment_create_cmd(repo, target.number, path), 30, target.comment_label)
+    local created = M.gh_exec(function(timeout)
+      return target.comment_create(M.github(), repo, target.number, path, timeout)
+    end, 30, target.comment_label)
     local written = parse_written_comment(created.stdout)
     if written == nil then
       error("github-proxy: comment create did not return a valid comment id")
