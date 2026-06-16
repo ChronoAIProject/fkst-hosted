@@ -12,7 +12,7 @@ return function(M, h)
     driving_queue = "devloop_ready",
     output_obligation = obligation({ "operator reready/reimplement command", "state:v1 implementing" }, { "implementing", "impl-failed" }),
     reentry_commands = { "reready", "reimplement" },
-    budget = budget(1440),
+    budget = budget(1440, "No receiver work is expected; the row waits up to 1410 minutes for operator reentry before the 30 minute watchdog margin."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
       receiver_bound_minutes = 0,

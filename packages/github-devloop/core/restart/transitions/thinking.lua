@@ -11,7 +11,7 @@ return function(M, h)
     to_states = { "ready", "blocked" },
     driving_queue = "consensus.proposal",
     output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "blocked", "thinking" }),
-    budget = budget(150),
+    budget = budget(150, "The long consensus receiver is supervised by converge-round heartbeats; this budget only bounds stale heartbeat redrive."),
     liveness_contract = liveness({
       mode = "live-defer",
       signal = {

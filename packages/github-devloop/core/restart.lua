@@ -46,8 +46,11 @@ local function effect(kinds, completeness, completeness_derivation)
   }
 end
 
-local function budget(minutes)
-  return { minutes = minutes }
+local function budget(minutes, receiver_max_work_justification)
+  return {
+    minutes = minutes,
+    receiver_max_work_justification = receiver_max_work_justification,
+  }
 end
 
 local function timeout(queue)

@@ -11,7 +11,7 @@ return function(M, h)
     to_states = { "pr-open", "impl-failed" },
     driving_queue = "devloop_ready",
     output_obligation = obligation({ "state:v1 pr-open", "state:v1 impl-failed" }, { "pr-open", "impl-failed" }),
-    budget = budget(45),
+    budget = budget(45, "The long implementation receiver is supervised by implement-attempt heartbeats; this budget only bounds stale heartbeat redrive."),
     liveness_contract = liveness({
       mode = "live-defer",
       signal = {
