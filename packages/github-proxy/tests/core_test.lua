@@ -23,6 +23,31 @@ local function mock_command(command, response)
   end
 end
 
+local function package_root()
+  local source = package.searchpath("tests.core_test", package.path)
+  return source:match("(.+)/tests/core_test%.lua$")
+end
+
+local function read_file(path)
+  local handle = assert(io.open(path, "r"))
+  local body = handle:read("*a")
+  handle:close()
+  return body
+end
+
+local function count_literal(text, needle)
+  local count = 0
+  local start = 1
+  while true do
+    local found = text:find(needle, start, true)
+    if found == nil then
+      return count
+    end
+    count = count + 1
+    start = found + #needle
+  end
+end
+
 return {
   test_env_command_whitelist = function()
 	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
@@ -121,6 +146,78 @@ return {
         return { stdout = "1.5", stderr = "", exit_code = 0 }
       end)
     end)
+  end,
+
+  test_strip_bot_login_suffix_normalizes_app_author_logins = function()
+    t.eq(core.strip_bot_login_suffix("fkst-test-bot[bot]"), "fkst-test-bot")
+    t.eq(core.strip_bot_login_suffix("fkst-test-bot"), "fkst-test-bot")
+    t.is_nil(core.strip_bot_login_suffix(nil))
+  end,
+
+  test_is_positive_integer_accepts_only_bounded_positive_integers = function()
+    t.eq(core.is_positive_integer(1), true)
+    t.eq(core.is_positive_integer("2147483647"), true)
+    t.eq(core.is_positive_integer(0), false)
+    t.eq(core.is_positive_integer(-1), false)
+    t.eq(core.is_positive_integer(1.5), false)
+    t.eq(core.is_positive_integer("2147483648"), false)
+  end,
+
+  test_core_submodules_use_injected_shared_helpers = function()
+    local helpers = {
+      strip_bot_login_suffix = core.strip_bot_login_suffix,
+      is_positive_integer = core.is_positive_integer,
+    }
+
+    local comment_target = {}
+    require("core.comment").install(comment_target, helpers)
+    t.eq(comment_target._comment_author_login({
+      author = { login = "fkst-test-bot[bot]" },
+    }), "fkst-test-bot")
+
+    local blocked_by_target = {
+      render_github_graphql_query = function(_, values)
+        return "issue:" .. tostring(values.issue_number)
+      end,
+      github_graphql = function()
+        return { stdout = "{}", stderr = "", exit_code = 0 }
+      end,
+    }
+    require("core.blocked_by").install(blocked_by_target, helpers)
+    t.eq(blocked_by_target.validate_issue_blocked_by_payload({
+      schema = "github-proxy.issue-blocked-by.v1",
+      repo = "owner/repo",
+      blocked_issue_number = "1",
+      blocking_issue_number = "2",
+      dedup_key = "dedup",
+      source_ref = { kind = "external", ref = "owner/repo#issue/1" },
+    }), true)
+
+    local issue_create_target = {}
+    require("core.issue_create").install(issue_create_target, helpers)
+    t.eq(issue_create_target.validate_issue_create_payload({
+      schema = "github-proxy.issue-create.v1",
+      repo = "owner/repo",
+      title = "Title",
+      body = "Body",
+      dedup_key = "dedup",
+      parent_comment_target = {
+        repo = "owner/repo",
+        pr_number = "3",
+      },
+      source_ref = { kind = "external", ref = "owner/repo#issue/1" },
+    }), true)
+  end,
+
+  test_core_shared_helper_surface_is_the_narrowest_owner_boundary = function()
+    local root = package_root()
+    local source = read_file(root .. "/core.lua")
+
+    t.eq(count_literal(source, "function M.strip_bot_login_suffix("), 1)
+    t.eq(count_literal(source, "function M.is_positive_integer("), 1)
+    t.is_true(source:find('surface_proof = "package-root-nearest-stable-owner"', 1, true) ~= nil)
+    t.is_true(source:find('std_status = "no-existing-std-helper"', 1, true) ~= nil)
+    t.is_true(source:find('collapse_status = "multi-call-site-behavioral-reuse"', 1, true) ~= nil)
   end,
 
   test_entity_cache_key = function()
