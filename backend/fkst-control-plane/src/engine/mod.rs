@@ -11,6 +11,7 @@
 //! The runner is Mongo-agnostic and pure: callers load the package document,
 //! build a [`PreparedPackage`], and persist whatever the runner returns.
 
+pub mod breadcrumb;
 pub mod clone;
 pub mod config;
 pub mod error;
@@ -21,6 +22,7 @@ pub mod process;
 pub mod runner;
 pub mod util;
 
+pub use breadcrumb::{ExitBreadcrumb, OwnerBreadcrumb};
 pub use clone::{clone_repo_packages, ClonedRepo};
 pub use config::EngineConfig;
 pub use error::RunnerError;
