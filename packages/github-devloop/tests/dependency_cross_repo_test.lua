@@ -6,7 +6,7 @@ local repo = "owner/repo"
 local sibling_repo = "owner/substrate"
 local foreign_repo = "other/repo"
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value)
     :gsub("\\", "\\\\")
     :gsub('"', '\\"')
@@ -19,8 +19,8 @@ local function render_comment(comment)
   end
   return string.format(
     '{"body":"%s","author":{"login":"%s"},"createdAt":"2026-06-03T01:00:00Z"}',
-    json_string(comment.body or ""),
-    json_string(comment.author_login or "fkst-test-bot")
+    encode_json_string(comment.body or ""),
+    encode_json_string(comment.author_login or "fkst-test-bot")
   )
 end
 
@@ -38,9 +38,9 @@ local function blocked_by_json(nodes)
     table.insert(rendered, string.format(
       '{"number":%s,"state":"%s","stateReason":"%s","repository":{"nameWithOwner":"%s"}}',
       tostring(node.number),
-      json_string(node.state or "OPEN"),
-      json_string(node.state_reason or node.stateReason or ""),
-      json_string(node.repo or repo)
+      encode_json_string(node.state or "OPEN"),
+      encode_json_string(node.state_reason or node.stateReason or ""),
+      encode_json_string(node.repo or repo)
     ))
   end
   return '{"data":{"repository":{"issue":{"blockedBy":{"nodes":[' .. table.concat(rendered, ",") .. ']}}}}}\n'
@@ -80,8 +80,8 @@ end
 
 local function mock_repo_blocker_pr(target_repo, pr_number, link, comments)
   t.mock_command(core.gh_pr_view_observe_cmd(target_repo, pr_number), {
-    stdout = '{"headRefName":"' .. json_string(link.branch)
-      .. '","headRefOid":"abc123","baseRefName":"' .. json_string(link.base_branch)
+    stdout = '{"headRefName":"' .. encode_json_string(link.branch)
+      .. '","headRefOid":"abc123","baseRefName":"' .. encode_json_string(link.base_branch)
       .. '","state":"MERGED","comments":[' .. issue_comments_json(comments) .. ']}\n',
     stderr = "",
     exit_code = 0,

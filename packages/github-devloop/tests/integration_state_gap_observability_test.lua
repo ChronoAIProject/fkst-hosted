@@ -52,16 +52,16 @@ local function mock_env()
   end
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
 
 local function render_comment(body, author, created_at)
   return string.format(
     '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
-    json_string(body),
-    json_string(author or "fkst-test-bot"),
-    json_string(created_at or "2026-06-03T01:02:03Z")
+    encode_json_string(body),
+    encode_json_string(author or "fkst-test-bot"),
+    encode_json_string(created_at or "2026-06-03T01:02:03Z")
   )
 end
 

@@ -24,14 +24,14 @@ local function mock_probe_proof(value)
   })
 end
 
-local function json_string(value)
-  return h.json_string(value)
+local function encode_json_string(value)
+  return h.encode_json_string(value)
 end
 
-local function labels_json(labels)
+local function encode_labels_json(labels)
   local rendered = {}
   for _, label in ipairs(labels or {}) do
-    table.insert(rendered, string.format('{"name":"%s"}', json_string(label)))
+    table.insert(rendered, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   return table.concat(rendered, ",")
 end
@@ -50,10 +50,10 @@ local function issue_probe_json(issues)
     table.insert(rendered, string.format(
       '{"number":%d,"title":"%s","created_at":"%s","updated_at":"%s","labels":[%s],"assignees":[%s]}',
       issue.number,
-      json_string(issue.title or "Issue"),
-      json_string(issue.created_at or "2026-06-03T01:00:00Z"),
-      json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
-      labels_json(issue.labels or {}),
+      encode_json_string(issue.title or "Issue"),
+      encode_json_string(issue.created_at or "2026-06-03T01:00:00Z"),
+      encode_json_string(issue.updated_at or "2026-06-03T01:02:03Z"),
+      encode_labels_json(issue.labels or {}),
       issue.assignees_json or '{"login":"fkst-test-bot"}'
     ))
   end

@@ -62,7 +62,7 @@ local function pr_list_json(count)
   return "[" .. table.concat(items, ",") .. "]"
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
 
@@ -71,13 +71,13 @@ local function closed_issue_list_json(items)
   for _, item in ipairs(items or {}) do
     local labels = {}
     for _, label in ipairs(item.labels or {}) do
-      table.insert(labels, '{"name":"' .. json_string(label) .. '"}')
+      table.insert(labels, '{"name":"' .. encode_json_string(label) .. '"}')
     end
     table.insert(rendered, string.format(
       '{"number":%d,"title":"%s","closedAt":"%s","labels":[%s]}',
       item.number,
-      json_string(item.title or "Closed issue"),
-      json_string(item.closed_at or "2026-06-01T01:02:03Z"),
+      encode_json_string(item.title or "Closed issue"),
+      encode_json_string(item.closed_at or "2026-06-01T01:02:03Z"),
       table.concat(labels, ",")
     ))
   end
@@ -123,7 +123,7 @@ end
 local function mock_board_title(title, repo)
   repo = repo or "owner/repo"
   entity_read_mocks.mock_issue_board_digest_list_raw(t, repo, {
-    stdout = '[{"number":1,"title":"' .. json_string(title) .. '","labels":[{"name":"fkst-dev:thinking"}]}]',
+    stdout = '[{"number":1,"title":"' .. encode_json_string(title) .. '","labels":[{"name":"fkst-dev:thinking"}]}]',
   })
   entity_read_mocks.mock_pr_board_digest_list_raw(t, repo, {
     stdout = "[]",

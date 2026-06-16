@@ -2,21 +2,9 @@ local S = {}
 
 function S.install(M)
 local strings = require("std.strings")
+local github_view = require("std.github_view")
 
-local function json_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\")
-  text = text:gsub('"', '\\"')
-  text = text:gsub("\b", "\\b")
-  text = text:gsub("\f", "\\f")
-  text = text:gsub("\n", "\\n")
-  text = text:gsub("\r", "\\r")
-  text = text:gsub("\t", "\\t")
-  text = text:gsub("[%z\1-\31]", function(char)
-    return string.format("\\u%04X", string.byte(char))
-  end)
-  return '"' .. text .. '"'
-end
+local json_string = github_view.json_string
 
 local function normalize_poll_key(value)
   local text = tostring(value or "")
