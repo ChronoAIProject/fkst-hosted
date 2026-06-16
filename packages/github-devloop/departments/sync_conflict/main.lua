@@ -4,7 +4,7 @@ local M = {}
 
 M.spec = {
   consumes = { "devloop_sync_conflict" },
-  produces = {},
+  produces = { "github-proxy.github_issue_create_request" },
   stall_window = "10m",
 }
 
@@ -87,10 +87,27 @@ end
 local function require_clean_resolution(worktree)
   local unmerged = run_git(core.git_unmerged_paths_cmd(worktree), 30, "git unmerged path check")
   if tostring(unmerged.stdout or "") ~= "" then
-    error("github-devloop: sync conflict remains unresolved")
+    return false, tostring(unmerged.stdout or "")
   end
   run_git(core.git_diff_check_cmd(worktree), 30, "git diff check")
   run_git(core.git_diff_cached_check_cmd(worktree), 30, "git cached diff check")
+  return true, ""
+end
+
+local function raise_sync_conflict_escalation(conflict, fingerprint, attempt, reason, unmerged_stdout)
+  local request = core.build_sync_conflict_escalation_request(
+    conflict,
+    fingerprint,
+    attempt,
+    reason,
+    unmerged_stdout
+  )
+  core.log_raise("sync_conflict", "branch-sync", "github-proxy.github_issue_create_request", request)
+  core.log_error_fact("error", "sync_conflict", "branch-sync", "SYNC_CONFLICT_TERMINAL", "sync-conflict-unresolved", "devloop_sync_conflict", reason, {
+    source_ref = conflict.source_ref,
+    attempt = attempt,
+    terminal = true,
+  })
 end
 
 local function commit_resolution(worktree, runtime, conflict)
@@ -200,6 +217,18 @@ function pipeline(event)
       if tostring(unmerged.stdout or "") == "" then
         error("github-devloop: sync conflict merge failed without unmerged paths")
       end
+      local active_fingerprint = core.sync_conflict_fingerprint(active_conflict, tostring(unmerged.stdout or ""))
+      local prior_attempts = core.sync_conflict_attempt_count(active_conflict, active_fingerprint)
+      if prior_attempts >= core.max_sync_conflict_attempts() then
+        raise_sync_conflict_escalation(
+          active_conflict,
+          active_fingerprint,
+          prior_attempts,
+          "sync conflict retry budget already exhausted before codex",
+          tostring(unmerged.stdout or "")
+        )
+        return
+      end
 
       core.log_codex_start("sync_conflict", "branch-sync", "sync-conflict")
       local result = spawn_codex_sync({
@@ -215,9 +244,27 @@ function pipeline(event)
         })
         error("github-devloop: sync conflict codex failed: " .. tostring(stderr))
       end
+      local resolved, remaining_unmerged = require_clean_resolution(worktree)
+      if not resolved then
+        local fingerprint = core.sync_conflict_fingerprint(active_conflict, remaining_unmerged)
+        local previous_attempts = core.sync_conflict_attempt_count(active_conflict, fingerprint)
+        local attempt = previous_attempts + 1
+        core.record_sync_conflict_attempt(active_conflict, fingerprint, attempt)
+        local reason = "sync conflict remains unresolved after codex completed"
+        core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, reason, {
+          queue = event.queue,
+          source_ref = conflict.source_ref,
+          attempt = attempt,
+          terminal = attempt >= core.max_sync_conflict_attempts(),
+          error_class = "sync-conflict-unresolved",
+        })
+        if attempt >= core.max_sync_conflict_attempts() then
+          raise_sync_conflict_escalation(active_conflict, fingerprint, attempt, reason, remaining_unmerged)
+          return
+        end
+        error("github-devloop: sync-conflict-unresolved: " .. reason)
+      end
       core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, "result=completed", nil)
-
-      require_clean_resolution(worktree)
       commit_resolution(worktree, runtime, active_conflict)
       push_if_real(active_conflict, worktree)
     end)

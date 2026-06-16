@@ -6,6 +6,7 @@ Repository state:
 - Do not clone, checkout another branch, create branches, or modify any repository outside this worktree.
 - A merge from the upstream branch into the integration branch has already been started and has conflicts.
 - Resolve every conflict to a correct, buildable merged state that preserves both sides' intent.
+- Before reporting completion, run `git ls-files -u` in this worktree. `result=completed` is valid only when it prints no unmerged entries.
 - Do not stage files.
 - Do not commit.
 - Do not push.
@@ -25,5 +26,5 @@ Branch sync:
 - Upstream head: {{upstream_sha}}
 - Integration parent: {{integration_sha}}
 
-Resolve the merge completely. Leave no conflict markers. Keep source comments, strings, and identifiers in English.]]
+Resolve the merge completely. Leave no conflict markers or unmerged index entries. Keep source comments, strings, and identifiers in English.]]
 }
