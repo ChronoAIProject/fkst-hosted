@@ -71,6 +71,30 @@ function M.liveness_terminal_states(rows)
   return terminals
 end
 
+function M.issue_marker_liveness_sweep_states(rows)
+  local states = {}
+  for _, row in ipairs(rows or M.restart_transition_table()) do
+    if row.terminal == false then
+      states[row.from_state] = true
+    end
+  end
+  return states
+end
+
+function M.issue_marker_liveness_sweep_contract_errors(rows, sweep_states)
+  local errors = {}
+  local declared_states = sweep_states or M.issue_marker_liveness_sweep_states(rows)
+  for _, row in ipairs(rows or M.restart_transition_table()) do
+    if row.terminal == false and declared_states[row.from_state] ~= true then
+      table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal issue-marker state is not reachable by liveness sweep")
+    end
+    if row.terminal == true and declared_states[row.from_state] == true then
+      table.insert(errors, tostring(row.from_state or "?") .. ": terminal issue-marker state must not be re-driven by liveness sweep")
+    end
+  end
+  return errors
+end
+
 function M.liveness_budget_minutes(state_name)
   local row = M.restart_transition_row(state_name)
   return row and row.budget and tonumber(row.budget.minutes) or nil

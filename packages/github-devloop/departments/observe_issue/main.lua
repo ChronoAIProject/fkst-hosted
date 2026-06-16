@@ -23,19 +23,7 @@ M.spec = {
   stall_window = "30s",
 }
 
-local observe_replay_states = {
-  thinking = true,
-  ready = true,
-  implementing = true,
-  ["pr-open"] = true,
-  reviewing = true,
-  fixing = true,
-  ["review-meta"] = true,
-  ["merge-ready"] = true,
-  merging = true,
-  blocked = true,
-  ["impl-failed"] = true,
-}
+local observe_replay_states = core.issue_marker_liveness_sweep_states()
 
 local function issue_label_state(snapshot_state, issue_state)
   if issue_state ~= nil

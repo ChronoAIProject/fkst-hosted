@@ -158,6 +158,34 @@ return {
     end
   end,
 
+  test_non_terminal_issue_marker_states_are_liveness_sweep_reachable = function()
+    local errors = core.issue_marker_liveness_sweep_contract_errors()
+    t.eq(#errors, 0)
+    local sweep_states = core.issue_marker_liveness_sweep_states()
+    for _, row in ipairs(core.restart_transition_table()) do
+      if row.terminal == false then
+        t.eq(sweep_states[row.from_state], true)
+      else
+        t.eq(sweep_states[row.from_state], nil)
+      end
+    end
+    local liveness_scan = file.read("packages/github-devloop/departments/liveness_scan/main.lua")
+    local observe_issue = file.read("packages/github-devloop/departments/observe_issue/main.lua")
+    t.is_true(liveness_scan:find("core.restart_transition_row", 1, true) ~= nil)
+    t.is_true(liveness_scan:find("should_reinject_state", 1, true) ~= nil)
+    t.is_true(observe_issue:find("core.issue_marker_liveness_sweep_states()", 1, true) ~= nil)
+    t.is_true(observe_issue:find("maybe_reconcile_issue_local_orphaned_pr", 1, true) ~= nil)
+  end,
+
+  test_issue_marker_liveness_sweep_contract_rejects_missing_non_terminal_state = function()
+    local sweep_states = core.issue_marker_liveness_sweep_states()
+    sweep_states["pr-open"] = nil
+    local errors = core.issue_marker_liveness_sweep_contract_errors(nil, sweep_states)
+    t.eq(#errors, 1)
+    t.is_true(errors[1]:find("pr-open", 1, true) ~= nil)
+    t.is_true(errors[1]:find("liveness sweep", 1, true) ~= nil)
+  end,
+
   test_implementing_restart_row_replays_ready_with_frozen_version_identity = function()
     local row = table_by_state().implementing
     t.eq(row.driving_queue, "devloop_ready")
