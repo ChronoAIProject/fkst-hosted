@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::controller::{InternalAuth, WorkerRegistry};
+use fkst_control_plane::controller::{ControllerHandle, InternalAuth, WorkerRegistry};
 use fkst_control_plane::db::{redact_mongodb_uri, Db};
 use fkst_control_plane::distribution::{
     DistributionConfig, Distributor, DriverHost, SelfOnlyHealth,
@@ -126,6 +126,12 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The per-pod/worker max-load cap the in-process distributor uses for
+    // placement (`FKST_PLACEMENT_MAX_LOAD`, 0 = uncapped). Captured before the
+    // distributor moves `distribution_config` in; the controller's placement
+    // honours the SAME semantics (#151 i7b), so dispatch mode caps workers at
+    // the identical value rather than inventing a second knob.
+    let dispatch_max_load = distribution_config.max_load;
 
     // 4e. Lease store + its indexes (idempotent; fail-closed on error), then
     //     the distributor over the self-only health view.
@@ -382,9 +388,11 @@ async fn main() -> ExitCode {
     }
 
     // Capture the internal worker-protocol config before `config` moves into
-    // AppState (issue #134).
+    // AppState (issue #134). `dispatch_mode_enabled` (#151 i7b) is captured the
+    // same way: it gates whether the controller is enabled below.
     let internal_auth_token = config.internal_auth_token.clone();
     let worker_liveness_ttl_secs = config.worker_liveness_ttl_secs;
+    let dispatch_mode_enabled = config.dispatch_mode_enabled;
 
     let app = match build_router(AppState {
         config,
@@ -447,6 +455,24 @@ async fn main() -> ExitCode {
                 route_prefix = "/internal/v1",
                 "internal worker protocol enabled"
             );
+            // Dispatch mode (#151 i7b, default OFF): only when the operator opts
+            // in AND the internal protocol is enabled (we are inside that arm) do
+            // we enable controller-backed placement. The handle MUST share the
+            // SAME registry + claims that `mount_internal` uses — so a dispatch
+            // queued here is drained by the heartbeat handler, and the fence the
+            // worker echoes is checked against the live claim map — hence the
+            // clones BEFORE `registry` moves into `mount_internal`. When OFF the
+            // controller stays None and goal sessions run the byte-identical
+            // in-process distributor path.
+            if dispatch_mode_enabled {
+                let controller_handle =
+                    ControllerHandle::new(claims.clone(), registry.clone(), dispatch_max_load);
+                sessions.enable_controller(controller_handle);
+                tracing::info!(
+                    max_load = dispatch_max_load,
+                    "dispatch mode ENABLED: goal sessions are dispatched to workers"
+                );
+            }
             (
                 mount_internal(
                     app,

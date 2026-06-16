@@ -597,9 +597,9 @@ impl SessionService {
             let lease_key = session.lease_key();
             match handle.place(&lease_key, session.id, session.goal_id).await {
                 Ok(placement) => {
-                    // The chosen worker pulls + runs the engine (#136). Stamp the
-                    // owner worker (as pod_id) + the fence so the worker's driver
-                    // writes are guarded; no local spawn (the worker runs it).
+                    // The chosen worker pulls + runs the engine. Stamp the owner
+                    // worker (as pod_id) + the fence so the worker's driver writes
+                    // are guarded; no local spawn (the worker runs it).
                     let _ = self
                         .inner
                         .repo
@@ -612,13 +612,75 @@ impl SessionService {
                             },
                         )
                         .await;
-                    tracing::info!(
-                        session_id = %session.id,
-                        goal_id = %trigger.goal_id,
-                        worker_id = %placement.worker_id,
-                        fencing_id = placement.fencing_id,
-                        "goal session placed on a worker via the controller (engine runs in #136)"
-                    );
+                    // Resolve the fully self-contained dispatch from the SAME wiring
+                    // the in-process driver uses, then queue it to the placed worker
+                    // (delivered on its next heartbeat). NEVER log the dispatch — it
+                    // carries SecretStrings; `DispatchError` carries none, so logging
+                    // it is safe.
+                    match super::dispatch::resolve_dispatch(
+                        &self.inner,
+                        &session,
+                        raw_token.as_ref(),
+                        &placement.worker_id,
+                        placement.fencing_id,
+                    )
+                    .await
+                    {
+                        Ok(dispatch) => {
+                            handle
+                                .enqueue_dispatch(
+                                    &placement.worker_id,
+                                    fkst_shared::protocol::ControlMessage::ResolvedDispatch(
+                                        Box::new(dispatch),
+                                    ),
+                                )
+                                .await;
+                            tracing::info!(
+                                session_id = %session.id,
+                                goal_id = %trigger.goal_id,
+                                worker_id = %placement.worker_id,
+                                fencing_id = placement.fencing_id,
+                                "dispatch resolved + queued to worker (delivered on next heartbeat)"
+                            );
+                        }
+                        Err(error) => {
+                            // Resolution failed (token mint / env / nyxid / codex /
+                            // ornn): fail the just-inserted pending doc loudly and
+                            // compensate the goal CAS, mirroring the AlreadyRunning
+                            // arm. The detail is logged (safe; no secret); the API
+                            // response carries only a generic 503 so no internal
+                            // detail leaks to the caller.
+                            tracing::error!(
+                                session_id = %session.id,
+                                error = %error,
+                                "dispatch resolution failed; failing the session"
+                            );
+                            let _ = self
+                                .inner
+                                .repo
+                                .transition(
+                                    session.id,
+                                    &[SessionStatus::Pending],
+                                    doc! {
+                                        "status": status_bson(SessionStatus::Failed),
+                                        "error": "failed to resolve session dispatch",
+                                        "stopped_at": bson::DateTime::now(),
+                                    },
+                                )
+                                .await;
+                            let _ = goals
+                                .transition_status(
+                                    trigger.goal_id,
+                                    &[GoalStatus::Triggered],
+                                    trigger.prior_status,
+                                    true,
+                                )
+                                .await;
+                            return Err(AppError::Unavailable(
+                                "failed to resolve session dispatch".to_string(),
+                            ));
+                        }
+                    }
                 }
                 Err(ControllerPlacementError::AlreadyRunning(_)) => {
                     // Conflict: same convergence as the distributor path — fail

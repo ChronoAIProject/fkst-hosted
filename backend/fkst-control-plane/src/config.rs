@@ -107,6 +107,14 @@ mod defaults {
         30
     }
 
+    /// Dispatch mode is OFF by default (#151 i7b): the in-process distributor
+    /// path stays the live behaviour until an operator opts in. When false the
+    /// controller is never enabled, so goal sessions run the byte-identical
+    /// pre-#151 in-process spawn.
+    pub(super) fn dispatch_mode_enabled() -> bool {
+        false
+    }
+
     pub(super) fn nyxid_github_proxy_slug() -> String {
         // NyxID `main`/v0.7.0 seeds its GitHub OAuth proxy under slug
         // `api-github` (`backend/src/services/provider_service.rs`,
@@ -223,6 +231,12 @@ struct MongoVars {
     /// `FKST_WORKER_LIVENESS_TTL_SECS`. Default 30; must be > 0.
     #[serde(default = "defaults::worker_liveness_ttl_secs")]
     fkst_worker_liveness_ttl_secs: u64,
+    /// Dispatch-mode master switch (#151 i7b). Env `FKST_DISPATCH_MODE`. When
+    /// `true` AND the internal protocol is enabled, goal sessions are placed +
+    /// dispatched to a worker (delivered on the worker's next heartbeat) instead
+    /// of spawning the engine in-process. Default false (the in-process path).
+    #[serde(default = "defaults::dispatch_mode_enabled")]
+    fkst_dispatch_mode: bool,
 }
 
 /// `FKST_JOURNAL_*` / `FKST_RAISED_*` variables (journaling settings; envy
@@ -385,6 +399,13 @@ pub struct Config {
     /// Liveness TTL (seconds) for the in-memory worker registry (#134). Env:
     /// `FKST_WORKER_LIVENESS_TTL_SECS`. Default 30; zero rejected.
     pub worker_liveness_ttl_secs: u64,
+    /// Dispatch-mode master switch (#151 i7b). Env: `FKST_DISPATCH_MODE`.
+    /// Default false. When `true` AND the internal protocol is enabled, goal
+    /// sessions are placed + dispatched to a worker (delivered on the worker's
+    /// next heartbeat) instead of spawning the engine in-process; the controller
+    /// stays disabled (and behaviour stays byte-identical to pre-#151) when
+    /// false. Non-secret routing flag.
+    pub dispatch_mode_enabled: bool,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -452,6 +473,8 @@ impl fmt::Debug for Config {
                 &self.internal_auth_token.as_ref().map(|_| "<redacted>"),
             )
             .field("worker_liveness_ttl_secs", &self.worker_liveness_ttl_secs)
+            // Non-secret feature flag — show it.
+            .field("dispatch_mode_enabled", &self.dispatch_mode_enabled)
             .finish()
     }
 }
@@ -493,6 +516,7 @@ impl Default for Config {
             chrono_llm_base_url: defaults::chrono_llm_base_url(),
             internal_auth_token: None,
             worker_liveness_ttl_secs: defaults::worker_liveness_ttl_secs(),
+            dispatch_mode_enabled: defaults::dispatch_mode_enabled(),
         }
     }
 }
@@ -716,6 +740,7 @@ impl Config {
             chrono_llm_base_url: http.chrono_llm_base_url,
             internal_auth_token: mongo.fkst_internal_auth_token.map(SecretString::from),
             worker_liveness_ttl_secs: mongo.fkst_worker_liveness_ttl_secs,
+            dispatch_mode_enabled: mongo.fkst_dispatch_mode,
         })
     }
 
@@ -1025,6 +1050,32 @@ mod tests {
         assert!(
             err.to_string().contains("FKST_WORKER_LIVENESS_TTL_SECS"),
             "error must name the var"
+        );
+    }
+
+    #[test]
+    fn dispatch_mode_defaults_to_off() {
+        // Unset => OFF: the controller stays disabled and the in-process path
+        // is the live behaviour (the byte-identical pre-#151 guarantee, i7b).
+        let config = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
+            .expect("default dispatch-mode config");
+        assert!(
+            !config.dispatch_mode_enabled,
+            "FKST_DISPATCH_MODE must default to false"
+        );
+    }
+
+    #[test]
+    fn dispatch_mode_is_overridable_via_env() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_DISPATCH_MODE", "true"),
+        ]))
+        .expect("dispatch-mode override config");
+        assert!(
+            config.dispatch_mode_enabled,
+            "FKST_DISPATCH_MODE=true must enable dispatch mode"
         );
     }
 
