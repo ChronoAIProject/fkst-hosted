@@ -245,6 +245,50 @@ pub struct OrnnPlan {
     pub skills: Vec<OrnnSkillRef>,
 }
 
+/// The controller-resolved journaling plan a [`ResolvedDispatch`] carries (#151).
+/// These are the PROCESS-level `fkst_journal::JournalConfig` fields (identical
+/// for every session) the worker reconstructs a `JournalConfig` from; the
+/// per-session identity (`SessionCtx`) the worker derives locally from the
+/// dispatch + the cloned package. A `None` plan on the dispatch means journaling
+/// is disabled for the run and the worker writes no progress record — so the
+/// controller ships a plan ONLY when GitHub journaling is fully configured
+/// (enabled + a repo + a token).
+///
+/// `github_token` is the PROCESS journal-repo token (the hosting app's own
+/// `GITHUB_TOKEN` against the fixed journal repo) — NOT the per-session goal or
+/// installation token, and NOT involved in the goal-token reactive refresh. It
+/// is a `SecretString`: serialization is its only exposure, never `Debug`/logs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JournalPlan {
+    /// Max debounce before a flush, in milliseconds (reconstructs
+    /// `JournalConfig::flush_interval`).
+    pub flush_interval_ms: u64,
+    /// Flush early once this many new completions are buffered.
+    pub flush_max_batch: usize,
+    /// Mirror completions to a GitHub issue comment (dormant by default).
+    pub issue_comments: bool,
+    /// Roll a single activity comment on the flush cadence (#139).
+    pub activity_comment_enabled: bool,
+    /// Max optimistic-concurrency retries per flush.
+    pub cas_max_retries: u32,
+    /// Bootstrap eventual-consistency re-reads after a 404 on `load_skip_set`.
+    pub bootstrap_read_retries: u32,
+    /// Branch the journal file lives on.
+    pub github_branch: String,
+    /// `owner/name` of the journal repo (always present in a shipped plan).
+    pub github_repo: String,
+    /// GitHub REST API base (tests point this at a mock server).
+    pub github_api_base: String,
+    /// JSON pointers forming event identity.
+    pub identity_pointers: Vec<String>,
+    /// Max stdout line length parsed; longer lines are malformed.
+    pub max_line_bytes: usize,
+    /// The PROCESS journal-repo token (never the goal/install token).
+    #[serde(with = "secret_string")]
+    pub github_token: SecretString,
+}
+
 /// A fully-resolved session dispatch (#151). The controller has already minted
 /// the first installation token, merged the vault + NyxID env into
 /// `env_profile`, rendered the codex config, and resolved the Ornn plan — the
@@ -271,6 +315,9 @@ pub struct ResolvedDispatch {
     /// Rendered codex `config.toml` bytes, or `None` when codex is unconfigured.
     pub codex_config_toml: Option<String>,
     pub ornn: Option<OrnnPlan>,
+    /// The resolved journaling plan, or `None` when journaling is disabled for
+    /// this run (the worker then writes no progress record).
+    pub journal: Option<JournalPlan>,
     /// The mint-request nonce the engine's credential helper presents; the
     /// worker writes it to `<runtime_dir>/.mint-nonce`.
     #[serde(with = "secret_string")]
@@ -508,6 +555,20 @@ mod tests {
                     source: OrnnSource::PresignedUrl("https://store/x.zip".into()),
                 }],
             }),
+            journal: Some(JournalPlan {
+                flush_interval_ms: 2000,
+                flush_max_batch: 50,
+                issue_comments: false,
+                activity_comment_enabled: true,
+                cas_max_retries: 5,
+                bootstrap_read_retries: 3,
+                github_branch: "main".into(),
+                github_repo: "acme/journal".into(),
+                github_api_base: "https://api.github.com".into(),
+                identity_pointers: vec!["/department".into(), "/source".into()],
+                max_line_bytes: 1_048_576,
+                github_token: SecretString::from("ghp_journal_repo_token"),
+            }),
             mint_nonce: SecretString::from("nonce-abc"),
         }
     }
@@ -598,6 +659,7 @@ mod tests {
             "sk-secret-val",
             "SECRET-PROMPT-BODY",
             "nonce-abc",
+            "ghp_journal_repo_token",
         ] {
             assert!(!rendered.contains(leak), "secret leaked in Debug: {leak}");
         }
@@ -605,6 +667,7 @@ mod tests {
         let json = serde_json::to_string(&dispatch).unwrap();
         assert!(json.contains("ghs_installation_token_xyz"));
         assert!(json.contains("sk-secret-val"));
+        assert!(json.contains("ghp_journal_repo_token"));
         // And the deserialized value recovers them intact.
         let back: ResolvedDispatch = serde_json::from_str(&json).unwrap();
         assert_eq!(
@@ -619,6 +682,10 @@ mod tests {
             "sk-secret-val"
         );
         assert_eq!(back.goal.description.expose_secret(), "SECRET-PROMPT-BODY");
+        assert_eq!(
+            back.journal.unwrap().github_token.expose_secret(),
+            "ghp_journal_repo_token"
+        );
     }
 
     /// Unknown fields are rejected at the trust boundary on the new types too.

@@ -212,6 +212,10 @@ pub(super) async fn resolve_dispatch(
         env_profile,
         codex_config_toml,
         ornn,
+        // Populated in #151 increment 6b (the controller projects its process
+        // `JournalConfig` into a `JournalPlan`); `None` keeps the dispatch
+        // journaling-free until then.
+        journal: None,
         mint_nonce,
     })
 }

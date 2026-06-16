@@ -147,6 +147,7 @@ fn dispatch_with(env: BTreeMap<String, SecretString>, ornn: Option<OrnnPlan>) ->
         env_profile: env,
         codex_config_toml: Some("[model_providers.chrono]\nname = \"chrono\"\n".into()),
         ornn,
+        journal: None,
         mint_nonce: SecretString::from("controller-nonce-abc".to_string()),
     }
 }

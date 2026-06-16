@@ -120,6 +120,7 @@ async fn heartbeat_swallows_a_failing_dispatch_and_stays_up() {
         env_profile: Default::default(),
         codex_config_toml: None,
         ornn: None,
+        journal: None,
         mint_nonce: SecretString::from("n".to_string()),
     };
 
