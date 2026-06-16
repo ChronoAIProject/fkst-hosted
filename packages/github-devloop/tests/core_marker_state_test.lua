@@ -250,6 +250,22 @@ return {
     t.eq(core.version_loop_round(base .. "/fix/1"), 0)
   end,
 
+  test_consensus_loop_result_orders_after_answered_intake_marker = function()
+    local intake_version = "github-devloop/issue/owner/repo/42/intake/2485289059"
+    local consensus_version = "consensus:" .. intake_version .. "/loop/5"
+    local current = {
+      state = "thinking",
+      version = intake_version,
+    }
+
+    t.eq(core.versioned_transition_status(current, { "thinking" }, "ready", consensus_version), "apply")
+    t.eq(core.compare_state_marker_order(current, "ready", consensus_version), -1)
+    t.eq(core.current_state({
+      core.state_marker("github-devloop/issue/owner/repo/42", "thinking", intake_version),
+      core.state_marker("github-devloop/issue/owner/repo/42", "ready", consensus_version),
+    }, "github-devloop/issue/owner/repo/42").state, "ready")
+  end,
+
   test_fixing_version_matches_link_normalized_lineage = function()
     local base = "ready/consensus-github-devloop/issue/owner/repo/42/185/2026-06-10T13-45-26Z"
     local issue_version = base .. "/fix/1/fix/2/fix/3/fix/4/fix/5"

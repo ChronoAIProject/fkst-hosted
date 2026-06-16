@@ -23,9 +23,7 @@ return {
     local current_digest = core.source_ref_digest(event.source_ref)
     local drift_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?drift=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.converge_round_marker(event.proposal_id, drift_version, drift_digest, cap, drift_version .. "/loop/" .. tostring(cap), "Question " .. tostring(cap) .. " drifted", {
-        { angle = "minimal", verdict = "abstain", digest = "digest-" .. tostring(cap) },
-      }),
+      core.converge_round_marker(event.proposal_id, drift_version, drift_digest, cap, drift_version .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
     })
 
     local result = run_loop(event, opts("loop-budget-drift-cap"))
@@ -33,10 +31,70 @@ return {
     t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
     t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
-    t.is_true(result.raises[1].payload.body:find('round="6"', 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
     t.eq(result.raises[2].queue, "devloop_reconcile")
     local reconcile_raise = find_raise(result.raises, "devloop_reconcile").payload
-    t.eq(reconcile_raise.round, 6)
-    t.eq(reconcile_raise.dedup_key, "reconcile:" .. base_version .. "/loop/6")
+    t.eq(reconcile_raise.round, cap)
+    t.eq(reconcile_raise.dedup_key, "reconcile:" .. base_version .. "/loop/" .. tostring(cap))
+  end,
+
+  test_loop_round_cap_uses_stable_proposal_facts_for_current_round_when_key_drifts = function()
+    local cap = core.max_converge_rounds()
+    local old_base = "consensus:github-devloop/issue/owner/repo/42/intake/old"
+    local current_base = "consensus:github-devloop/issue/owner/repo/42/intake/current"
+    local event = unresolved({
+      dedup_key = current_base .. "/loop/6",
+      round = 6,
+      source_ref = { kind = "external", ref = "owner/repo#issue/42?current=1" },
+      narrowed_question = "Question 6 current lineage",
+      angle_digests = {
+        { angle = "minimal", verdict = "abstain", digest = "digest-6" },
+      },
+    })
+    local old_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
+    mock_issue_loop({ "fkst-dev:thinking" }, {
+      core.converge_round_marker(event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
+    })
+
+    local result = run_loop(event, opts("loop-stable-proposal-facts-cap"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
+    t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
+    t.eq(result.raises[2].queue, "devloop_reconcile")
+    local reconcile_raise = find_raise(result.raises, "devloop_reconcile").payload
+    t.eq(reconcile_raise.round, cap)
+    t.eq(reconcile_raise.dedup_key, "reconcile:" .. current_base .. "/loop/" .. tostring(cap))
+  end,
+
+  test_loop_round_cap_preserves_question_verdict_boundary_when_key_drifts = function()
+    local cap = core.max_converge_rounds()
+    local old_base = "consensus:github-devloop/issue/owner/repo/42/intake/old"
+    local current_base = "consensus:github-devloop/issue/owner/repo/42/intake/current"
+    local event = unresolved({
+      dedup_key = current_base .. "/loop/6",
+      round = 6,
+      source_ref = { kind = "external", ref = "owner/repo#issue/42?current=1" },
+      narrowed_question = "Current question boundary",
+      angle_digests = {
+        { angle = "minimal", verdict = "abstain", digest = "current-digest" },
+      },
+    })
+    local old_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
+    mock_issue_loop({ "fkst-dev:thinking" }, {
+      core.converge_round_marker(event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), "Unrelated old question", {
+        { angle = "minimal", verdict = "approve", digest = "old-digest" },
+      }),
+    })
+
+    local result = run_loop(event, opts("loop-boundary-preserved-across-proposal-facts"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 2)
+    t.eq(result.raises[1].queue, "consensus.proposal")
+    t.eq(result.raises[1].payload.dedup_key, "github-devloop/issue/owner/repo/42/intake/current/loop/7")
+    t.eq(find_raise(result.raises, "devloop_reconcile"), nil)
+    t.eq(result.raises[2].queue, "github-proxy.github_issue_comment_request")
+    t.is_true(result.raises[2].payload.body:find('round="6"', 1, true) ~= nil)
   end,
 }

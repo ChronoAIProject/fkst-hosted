@@ -274,6 +274,11 @@ end
 -- Normalize a transition version to its stable lineage base.
 M.strip_transition_version_suffixes = strip_transition_version_suffixes
 
+local function comparable_transition_base(version)
+  local text = strip_transition_version_suffixes(version)
+  return text:match("^consensus:(.+)$") or text
+end
+
 local function strip_latest_fix_version_suffix(version)
   return tostring(version or "")
     :gsub("/fix/%d+$", "")
@@ -311,8 +316,8 @@ local function compare_transition_versions(incoming_version, current_version)
   if current_version == nil then
     return 1
   end
-  local incoming_base = M.strip_transition_version_suffixes(incoming_version)
-  local current_base = M.strip_transition_version_suffixes(current_version)
+  local incoming_base = comparable_transition_base(incoming_version)
+  local current_base = comparable_transition_base(current_version)
   if versions_equivalent(incoming_base, current_base) then
     return compare_same_base_transition_versions(incoming_version, current_version)
   end
@@ -344,9 +349,7 @@ local function compare_state_marker(a, b)
   if a == nil then
     return true
   end
-  local a_key = version_sort_key(a.version, a.stage_rank)
-  local b_key = version_sort_key(b.version, b.stage_rank)
-  local version_order = compare_version_keys(b_key, a_key)
+  local version_order = compare_transition_versions(b.version, a.version)
   if version_order ~= 0 then
     return version_order > 0
   end
@@ -354,6 +357,8 @@ local function compare_state_marker(a, b)
     and ((a.state == "ready" and b.state == "blocked") or (a.state == "blocked" and b.state == "ready")) then
     return b.state == "blocked"
   end
+  local a_key = version_sort_key(a.version, a.stage_rank)
+  local b_key = version_sort_key(b.version, b.stage_rank)
   if b_key.stage_rank ~= a_key.stage_rank then
     return b_key.stage_rank > a_key.stage_rank
   end

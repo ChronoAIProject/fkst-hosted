@@ -71,7 +71,7 @@ function pipeline(event)
 
     local base_version = core.converge_base_version(unresolved.dedup_key)
     local sr_digest = core.source_ref_digest(unresolved.source_ref)
-    local facts = core.converge_round_facts(current.comments, unresolved.proposal_id, base_version, sr_digest)
+    local facts = core.converge_round_facts_for_proposal_boundary(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests)
     local round = math.max(tonumber(unresolved.round) or 0, core.max_converge_round(facts))
     if core.has_converge_round_marker(current.comments, unresolved.proposal_id, base_version, sr_digest, round) then
       core.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", "skip-idempotent(converge round marker already visible)", "converge round marker for incoming round is already visible")
@@ -89,7 +89,7 @@ function pipeline(event)
     )
     local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)
     local facts_with_current = append_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
-    local budget_round = math.max(round, core.converge_budget_round(current.comments, unresolved.proposal_id))
+    local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
     local hit_round_cap = budget_round >= core.max_converge_rounds()
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
       local reconcile = core.build_devloop_reconcile_payload(unresolved, round, base_version)
