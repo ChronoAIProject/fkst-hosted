@@ -375,21 +375,25 @@ function M.output_language(exec)
   return "en"
 end
 
-function M.prompt_preamble(proposal, exec)
-  local language_line = "Write all output in English; quote code identifiers and cited originals verbatim."
-  if M.output_language(exec) == "zh" then
-    language_line = "Write all prose output in Simplified Chinese; quote code identifiers and cited originals verbatim."
+local function locale_text(key, vars)
+  if type(t) ~= "function" then
+    error("consensus: i18n catalog primitive t is unavailable")
   end
+  return t(key, vars)
+end
+
+function M.prompt_preamble(proposal, exec)
+  local language_line = locale_text("consensus.prompt_preamble.language." .. M.output_language(exec))
 
   -- Slots supersede GitHub issues #142 and #145: env-driven language selection plus
   -- harness-first judgment are fixed context, not verdict/parser protocol.
   local lines = {
     language_line,
-    "Before judging, identify the established theory or industry best practice governing this problem class; treat unjustified deviation from established practice as grounds for rejection or narrowing; require proof that existing practice does not apply before accepting novelty.",
+    locale_text("consensus.prompt_preamble.judgment_harness"),
   }
 
   if has_content_fetch(proposal) then
-    table.insert(lines, "Before judging, use the producer-provided context manifest below as the complete prior history of this proposal; earlier rounds recorded there are your memory. Judge what changed; do not re-litigate settled points.")
+    table.insert(lines, locale_text("consensus.prompt_preamble.history"))
   end
 
   return table.concat(lines, "\n")
