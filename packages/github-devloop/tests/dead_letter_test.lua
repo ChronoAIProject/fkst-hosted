@@ -1,6 +1,8 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local run_id = tostring({}):gsub("[^%w._-]", "_")
+local runtime_roots = {}
 
 local function package_root()
   local source = package.searchpath("tests.dead_letter_test", package.path)
@@ -8,9 +10,12 @@ local function package_root()
 end
 
 local function run_opts(name)
+  if runtime_roots[name] == nil then
+    runtime_roots[name] = "/tmp/fkst-packages-test/github-devloop/dead-letter-" .. run_id .. "/" .. tostring(name)
+  end
   return {
     env = {
-      FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/github-devloop/" .. tostring(now()) .. "/" .. tostring(name),
+      FKST_RUNTIME_ROOT = runtime_roots[name],
       FKST_GITHUB_REPO = "owner/repo",
       FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
       FKST_GITHUB_WRITE = "",
