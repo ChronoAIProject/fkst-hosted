@@ -417,8 +417,12 @@ end
 
 local function run_open_pr(payload, run_opts)
   mock_branch_config_env()
+  local queue = "github-proxy.github_entity_changed"
+  if type(payload) == "table" and payload.schema == "github-devloop.open-pr.v1" then
+    queue = "devloop_open_pr"
+  end
   return t.run_department("departments/open_pr/main.lua", {
-    queue = "github-proxy.github_entity_changed",
+    queue = queue,
     payload = payload,
   }, run_opts)
 end

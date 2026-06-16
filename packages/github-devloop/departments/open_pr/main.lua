@@ -6,13 +6,15 @@ M.spec = {
   consumes = { "devloop_open_pr", "github-proxy.github_entity_changed" },
   produces = {
     "github-proxy.github_pr_open_request",
+    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_label_request",
   },
   stall_window = "2m",
 }
 
 local function open_pr_context(event)
   local payload = event.payload or {}
-  if core.is_supported_open_pr(payload) then
+  if core.event_queue_matches(event, "devloop_open_pr") and core.is_supported_open_pr(payload) then
     return {
       source = "direct",
       repo = payload.repo,
@@ -26,7 +28,7 @@ local function open_pr_context(event)
       source_ref = payload.source_ref,
     }
   end
-  if core.is_supported_issue(payload) then
+  if core.event_queue_matches(event, "github-proxy.github_entity_changed") and core.is_supported_issue(payload) then
     return {
       source = "poll",
       repo = payload.repo,
@@ -37,6 +39,26 @@ local function open_pr_context(event)
     }
   end
   return nil
+end
+
+local function impl_failed_ready(input, fact, state)
+  return {
+    proposal_id = input.proposal_id,
+    dedup_key = state.version,
+    source_ref = input.source_ref or fact.source_ref,
+  }
+end
+
+local function raise_impl_failed(repo, issue_number, ready, reason, detail)
+  local comment_request = core.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail)
+  local label_request = core.build_impl_failed_label_request(repo, issue_number, ready, reason)
+  local add_labels, remove_labels = core.state_label_changes("impl-failed")
+  core.log_apply("open_pr", ready.proposal_id, "impl-failed", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_label_request",
+  })
+  core.log_raise("open_pr", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  core.log_raise("open_pr", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
 function pipeline(event)
@@ -126,7 +148,14 @@ function pipeline(event)
     if head_sha ~= fact.head_sha then
       local ancestry = exec_sync({ cmd = core.git_is_ancestor_cmd(fact.head_sha, head_sha), timeout = 30 })
       if ancestry.exit_code ~= 0 then
-        core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-foreign(head)", "branch head is not descended from implementing fact")
+        core.log_cas_decision("open_pr", proposal_id, state, "implementing", "impl-failed", "applied(non-descendant-head)", "branch head is not descended from implementing fact")
+        raise_impl_failed(
+          input.repo,
+          input.issue_number,
+          impl_failed_ready(input, fact, state),
+          "non-descendant-head",
+          "The implementation branch head is not descended from the trusted implementing fact head, so open_pr cannot safely create a PR from it."
+        )
         return
       end
     end
