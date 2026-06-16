@@ -27,6 +27,7 @@ pub use fkst_shared::ornn::types;
 
 use std::path::Path;
 
+use fkst_shared::protocol::{OrnnPlan, OrnnSkillRef, OrnnSource};
 use secrecy::SecretString;
 
 use crate::error::AppError;
@@ -80,6 +81,71 @@ pub async fn inject_pins(
     }
 
     Ok(())
+}
+
+/// Resolve `pins` into a serializable [`OrnnPlan`] WITHOUT installing anything
+/// (#151): the RESOLVE half of [`inject_pins`], split out so the controller can
+/// hand a worker a self-contained plan the worker installs itself.
+///
+/// For each resolved leaf skill this runs ONLY hop 1 (`skill_detail`, proxied as
+/// the user) to obtain the time-limited presigned package URL; it does NOT run
+/// hop 2 (the direct zip download) — the worker fetches the bytes directly,
+/// egress-free, exactly as the in-process hop-2 download does. Each skill's
+/// [`OrnnSource`] is therefore [`OrnnSource::PresignedUrl`]. The skillset master
+/// prompts become `agents_md_appends`, each rendered through
+/// [`inject::render_marker_block`] so a worker writing them into a fresh
+/// `AGENTS.md` reproduces the IDENTICAL block bytes [`inject_pins`] would write.
+///
+/// `user_token` is the session's NyxID token (#111) — exposed only to the proxy
+/// calls, NEVER logged. Any Ornn `404`/`403` or resolve/detail failure
+/// propagates as an `AppError` (the caller fails the start loudly). An empty
+/// `pins` yields an empty plan (no skills, no appends), mirroring the
+/// `inject_pins` no-op so a session with no pins is unchanged.
+///
+/// The presigned URL inside each [`OrnnSkillRef`] is SENSITIVE; it is never
+/// logged here (only the resolved node/skillset counts are).
+pub async fn resolve_plan(
+    client: &OrnnClient,
+    user_token: &SecretString,
+    pins: &[OrnnSkillPin],
+) -> Result<OrnnPlan, AppError> {
+    if pins.is_empty() {
+        return Ok(OrnnPlan {
+            agents_md_appends: Vec::new(),
+            skills: Vec::new(),
+        });
+    }
+
+    let resolved = client.resolve_pins(user_token, pins).await?;
+    tracing::info!(
+        node_count = resolved.nodes.len(),
+        skillset_count = resolved.skillset_instructions.len(),
+        "resolved ornn pins into a dispatch plan"
+    );
+
+    let mut skills = Vec::with_capacity(resolved.nodes.len());
+    for node in &resolved.nodes {
+        // Hop 1 (proxied): fetch the per-skill presigned package URL as the
+        // user. The worker performs hop 2 (the direct, auth-free download).
+        let detail = client
+            .skill_detail(user_token, &node.name, &node.version)
+            .await?;
+        skills.push(OrnnSkillRef {
+            name: node.name.clone(),
+            source: OrnnSource::PresignedUrl(detail.presigned_package_url),
+        });
+    }
+
+    let agents_md_appends = resolved
+        .skillset_instructions
+        .iter()
+        .map(|(name, instructions)| inject::render_marker_block(name, instructions))
+        .collect();
+
+    Ok(OrnnPlan {
+        agents_md_appends,
+        skills,
+    })
 }
 
 /// Validate one pin at the trust boundary (trigger request): `name` matches
@@ -349,6 +415,93 @@ mod tests {
         let agents = std::fs::read_to_string(home.path().join("AGENTS.md")).unwrap();
         assert!(agents.contains("ornn-skillset:research BEGIN"));
         assert!(agents.contains("Master prompt."));
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_builds_presigned_skills_and_agents_md_appends() {
+        // Same fake topology as the inject test, but resolve_plan only runs
+        // hop 1 (no zip download), so the plan carries presigned URLs verbatim.
+        let fake = Arc::new(FakeTransport::new(one_file_zip()));
+        fake.push(
+            "/skillsets/research/closure",
+            200,
+            serde_json::json!({
+                "data": { "instructions": "Master prompt.",
+                          "items": [ { "name": "web", "version": "1.0" } ] }
+            }),
+        );
+        fake.push(
+            "/skills/web",
+            200,
+            serde_json::json!({ "data": { "name": "web", "version": "1.0",
+                "presignedPackageUrl": "https://storage/web.zip?sig=w" } }),
+        );
+        fake.push(
+            "/skills/fmt",
+            200,
+            serde_json::json!({ "data": { "name": "fmt", "version": "2.0",
+                "presignedPackageUrl": "https://storage/fmt.zip?sig=f" } }),
+        );
+
+        let client = OrnnClient::new(fake);
+        let pins = vec![
+            pin(OrnnPinKind::Skillset, "research", "3.0"),
+            pin(OrnnPinKind::Skill, "fmt", "2.0"),
+        ];
+        let token = SecretString::from("tok".to_string());
+        let plan = resolve_plan(&client, &token, &pins).await.expect("resolve");
+
+        // Both leaf skills are present, each sourced from its presigned URL —
+        // never an inlined zip (the worker fetches hop 2 itself, egress-free).
+        let by_name: std::collections::HashMap<&str, &OrnnSource> = plan
+            .skills
+            .iter()
+            .map(|s| (s.name.as_str(), &s.source))
+            .collect();
+        assert_eq!(plan.skills.len(), 2);
+        assert_eq!(
+            by_name.get("web"),
+            Some(&&OrnnSource::PresignedUrl(
+                "https://storage/web.zip?sig=w".to_string()
+            ))
+        );
+        assert_eq!(
+            by_name.get("fmt"),
+            Some(&&OrnnSource::PresignedUrl(
+                "https://storage/fmt.zip?sig=f".to_string()
+            ))
+        );
+
+        // The skillset master prompt is rendered as the same fenced marker block
+        // the in-process injector writes into AGENTS.md.
+        assert_eq!(plan.agents_md_appends.len(), 1);
+        let block = &plan.agents_md_appends[0];
+        assert!(block.contains("<!-- ornn-skillset:research BEGIN -->"));
+        assert!(block.contains("Master prompt."));
+        assert!(block.contains("<!-- ornn-skillset:research END -->"));
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_is_an_empty_plan_for_empty_pins() {
+        let fake = Arc::new(FakeTransport::new(vec![]));
+        let client = OrnnClient::new(fake);
+        let token = SecretString::from("tok".to_string());
+        let plan = resolve_plan(&client, &token, &[]).await.expect("noop");
+        assert!(plan.skills.is_empty());
+        assert!(plan.agents_md_appends.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_aborts_loudly_on_a_404_pin() {
+        let fake = Arc::new(FakeTransport::new(one_file_zip()));
+        fake.push("/skills/ghost", 404, serde_json::json!({}));
+        let client = OrnnClient::new(fake);
+        let pins = vec![pin(OrnnPinKind::Skill, "ghost", "1.0")];
+        let token = SecretString::from("tok".to_string());
+        let err = resolve_plan(&client, &token, &pins)
+            .await
+            .expect_err("404 aborts");
+        assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
     }
 
     #[tokio::test]

@@ -32,8 +32,8 @@ pub use clone::{clone_repo_packages, ClonedRepo};
 pub use config::{EngineConfig, EngineConfigError};
 pub use error::RunnerError;
 pub use goal_token::{
-    git_config_entries, write_token_file, GitConfigEntry, HELPER_SCRIPT_NAME, MINT_NONCE_ENV,
-    MINT_REQUEST_SUFFIX, NONCE_FILE_NAME, TOKEN_FILE_NAME,
+    generate_mint_nonce, git_config_entries, write_token_file, GitConfigEntry, HELPER_SCRIPT_NAME,
+    MINT_NONCE_ENV, MINT_REQUEST_SUFFIX, NONCE_FILE_NAME, TOKEN_FILE_NAME,
 };
 pub use materialize::{materialize_helper_script, PreparedPackage};
 pub use process::{is_pid_alive, GoalEnv};

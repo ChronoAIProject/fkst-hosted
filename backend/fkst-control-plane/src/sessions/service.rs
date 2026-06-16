@@ -176,8 +176,10 @@ impl GoalDrive {
     }
 }
 
-/// Shared internals behind the clonable service handle.
-struct Inner {
+/// Shared internals behind the clonable service handle. `pub(super)` so the
+/// sibling `dispatch` module's resolver (#151) can read the same wiring the
+/// in-process driver does, reusing one set of resolution helpers.
+pub(super) struct Inner {
     repo: SessionRepo,
     runner: SessionRunner,
     /// Per-session stop signal; entries are inserted by the entry-guarded
@@ -209,7 +211,7 @@ struct Inner {
     /// Goal support layer (issue #63), enabled once at startup via
     /// [`SessionService::enable_goal_support`]. Set before any session is
     /// created; a second call is a logged no-op.
-    goal_support: OnceLock<GoalSupport>,
+    pub(super) goal_support: OnceLock<GoalSupport>,
     /// Per-session env vault (issue #102), enabled once at startup via
     /// [`SessionService::enable_vault`]. Unset => the driver resolves an EMPTY
     /// env profile (legacy tests / minimal runs behave exactly as pre-#102);
@@ -220,7 +222,7 @@ struct Inner {
     /// skips token provisioning entirely (legacy tests / minimal runs behave
     /// exactly as pre-#111). When set it carries the NyxID client and the
     /// origin (the NyxID issuer base URL) injected as `NYXID_URL`.
-    nyxid: OnceLock<NyxidSetup>,
+    pub(super) nyxid: OnceLock<NyxidSetup>,
     /// Per-session codex LLM-provider config (issue #112), enabled once at
     /// startup via [`SessionService::enable_codex`]. Unset => the driver does
     /// NOT render a per-session CODEX_HOME (legacy tests / minimal runs behave
@@ -234,7 +236,7 @@ struct Inner {
     /// set it carries the [`OrnnClient`]; injection ALSO requires a per-session
     /// CODEX_HOME (#112) and the session's NyxID token (#111) — without either,
     /// there is nowhere to install or no identity to fetch as, so it is skipped.
-    ornn: OnceLock<OrnnClient>,
+    pub(super) ornn: OnceLock<OrnnClient>,
     /// Controller-backed placement authority (issue #135), enabled once via
     /// [`SessionService::enable_controller`]. Unset => placement goes through
     /// the Mongo `distribution` path (the live path until #143). When set,
@@ -255,10 +257,10 @@ struct CodexSetup {
 }
 
 /// NyxID token provisioning wiring shared by every driver this service spawns.
-struct NyxidSetup {
-    client: NyxIdClient,
+pub(super) struct NyxidSetup {
+    pub(super) client: NyxIdClient,
     /// The NyxID origin the engine talks to, injected as `NYXID_URL`.
-    origin: String,
+    pub(super) origin: String,
 }
 
 /// Journaling wiring shared by every driver this service spawns.
@@ -267,9 +269,9 @@ struct JournalSetup {
 }
 
 /// Goal support wiring shared by every driver this service spawns.
-struct GoalSupport {
-    goals: GoalIssueStore,
-    github_app: GithubAppTokens,
+pub(super) struct GoalSupport {
+    pub(super) goals: GoalIssueStore,
+    pub(super) github_app: GithubAppTokens,
 }
 
 /// The concrete journaler type drivers hold.
@@ -467,6 +469,30 @@ impl SessionService {
     /// The repository handle (startup hooks: orphan sweep).
     pub fn repo(&self) -> &SessionRepo {
         &self.inner.repo
+    }
+
+    /// Resolve a fully self-contained worker dispatch for `session` (#151).
+    ///
+    /// DORMANT in this increment: the live placement path still spawns the
+    /// in-process driver (`drive_inner`). This resolves — from the SAME wiring
+    /// and the SAME resolution helpers the in-process driver uses — the merged
+    /// env profile, the first GitHub-App token, the rendered codex config, the
+    /// resolved Ornn plan, and the mint nonce, into a serializable
+    /// [`fkst_shared::protocol::ResolvedDispatch`]. The activation increment
+    /// will call this instead of spawning the in-process driver.
+    ///
+    /// `raw_token` is the triggering user's access token (threaded as the
+    /// driver threads it); `worker_id` / `fencing_id` stamp the claim's fence
+    /// onto the dispatch. Never logs a secret.
+    pub async fn resolve_dispatch(
+        &self,
+        session: &SessionDoc,
+        raw_token: Option<&SecretString>,
+        worker_id: &str,
+        fencing_id: i64,
+    ) -> Result<fkst_shared::protocol::ResolvedDispatch, super::dispatch::DispatchError> {
+        super::dispatch::resolve_dispatch(&self.inner, session, raw_token, worker_id, fencing_id)
+            .await
     }
 
     /// Fetch one session document (pure status projection).
@@ -2045,7 +2071,7 @@ async fn drive_inner(
 /// (the vault write-validator already rejects them at write time). A decrypt
 /// error propagates as `Err` so the caller fails the start rather than running
 /// a session missing its secrets.
-async fn resolve_env_profile(
+pub(super) async fn resolve_env_profile(
     inner: &Arc<Inner>,
     session: &SessionDoc,
 ) -> Result<BTreeMap<String, SecretString>, AppError> {
@@ -2063,28 +2089,22 @@ async fn resolve_env_profile(
     Ok(profile_from_resolved(session.id, resolved))
 }
 
-/// Prepare a per-session CODEX_HOME for the engine's codex provider (#112).
+/// Resolve the session's LLM-provider layer from the vault and render the codex
+/// `config.toml` STRING — the render half shared by [`prepare_codex_home`] (the
+/// in-process driver, which then writes it to a `0700` CODEX_HOME) and the
+/// dispatch resolver (#151, which serializes it for the worker to write).
 ///
 /// Returns `Ok(None)` when codex config OR the vault is not wired (legacy tests
-/// / minimal runs) — the caller then leaves CODEX_HOME unset and the behaviour
-/// is byte-identical to pre-#112. Otherwise it:
-/// 1. resolves the provider LAYER from the vault (default chrono-llm, with
-///    RAW/STRUCTURED overrides), surfacing the missing-chrono-llm 422;
-/// 2. renders the codex `config.toml` for that layer (operator-pinned chrono-llm
-///    DEFAULT model/base_url from config);
-/// 3. creates a fresh `fkst-codex-*` dir (0700) under the engine temp root and
-///    writes `config.toml` (0600).
-///
-/// Returns the held [`tempfile::TempDir`] guard (the caller keeps it for the
-/// session's lifetime) plus the canonicalized dir path to set as CODEX_HOME.
-/// The rendered toml never contains a provider key (the key rides `env_key`),
-/// and no vault value is logged.
-async fn prepare_codex_home(
+/// / minimal runs) — the same skip condition `drive_inner`'s B5 uses, so the
+/// behaviour is byte-identical. A render/resolve failure (e.g. the missing
+/// chrono-llm 422) propagates as `Err`. No vault value is logged, and the
+/// rendered toml never contains a provider key (the key rides `env_key`).
+pub(super) async fn render_session_codex_config(
     inner: &Arc<Inner>,
     session: &SessionDoc,
-) -> Result<Option<(tempfile::TempDir, PathBuf)>, AppError> {
+) -> Result<Option<String>, AppError> {
     let (Some(codex), Some(vault)) = (inner.codex.get(), inner.vault.get()) else {
-        // Codex config or the vault is not wired: skip CODEX_HOME entirely.
+        // Codex config or the vault is not wired: nothing to render.
         return Ok(None);
     };
 
@@ -2109,6 +2129,33 @@ async fn prepare_codex_home(
         &codex.codex_model,
         &codex.chrono_llm_base_url,
     )?;
+    Ok(Some(config_toml))
+}
+
+/// Prepare a per-session CODEX_HOME for the engine's codex provider (#112).
+///
+/// Returns `Ok(None)` when codex config OR the vault is not wired (legacy tests
+/// / minimal runs) — the caller then leaves CODEX_HOME unset and the behaviour
+/// is byte-identical to pre-#112. Otherwise it:
+/// 1. resolves the provider LAYER + renders the codex `config.toml` (via the
+///    shared [`render_session_codex_config`]);
+/// 2. creates a fresh `fkst-codex-*` dir (0700) under the engine temp root and
+///    writes `config.toml` (0600).
+///
+/// Returns the held [`tempfile::TempDir`] guard (the caller keeps it for the
+/// session's lifetime) plus the canonicalized dir path to set as CODEX_HOME.
+/// The rendered toml never contains a provider key (the key rides `env_key`),
+/// and no vault value is logged.
+async fn prepare_codex_home(
+    inner: &Arc<Inner>,
+    session: &SessionDoc,
+) -> Result<Option<(tempfile::TempDir, PathBuf)>, AppError> {
+    // Resolve + render the config.toml the same way the dispatch resolver does
+    // (single source of truth — see `render_session_codex_config`). `None` means
+    // codex/vault is unwired, so CODEX_HOME is skipped entirely (legacy posture).
+    let Some(config_toml) = render_session_codex_config(inner, session).await? else {
+        return Ok(None);
+    };
 
     // 0700 dir under the engine temp root (same filesystem as the runtime dirs).
     let guard = tempfile::Builder::new()
