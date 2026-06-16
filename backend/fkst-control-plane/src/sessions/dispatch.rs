@@ -33,11 +33,12 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fkst_shared::protocol::{CloneSpec, DispatchGoal, OrnnPlan, ResolvedDispatch};
+use fkst_shared::protocol::{CloneSpec, DispatchGoal, JournalPlan, OrnnPlan, ResolvedDispatch};
 use secrecy::SecretString;
 
 use super::nyxid_token;
 use super::service::{render_session_codex_config, resolve_env_profile, Inner};
+use crate::journal::JournalConfig;
 use crate::models::SessionDoc;
 
 /// The `git_ref` a freshly-dispatched session clones at. A plain in-process
@@ -212,11 +213,49 @@ pub(super) async fn resolve_dispatch(
         env_profile,
         codex_config_toml,
         ornn,
-        // Populated in #151 increment 6b (the controller projects its process
-        // `JournalConfig` into a `JournalPlan`); `None` keeps the dispatch
-        // journaling-free until then.
-        journal: None,
+        // The controller's process journaling config, projected into the wire
+        // plan the worker reconstructs a `JournalConfig` from. `None` when
+        // journaling is off or its GitHub coordinates are incomplete — exactly
+        // the cases where the in-process journaler writes no durable record.
+        journal: inner
+            .journal
+            .get()
+            .and_then(|setup| journal_plan(&setup.config)),
         mint_nonce,
+    })
+}
+
+/// Project the controller's process [`JournalConfig`] into the wire
+/// [`JournalPlan`] the dispatch carries. Returns `Some` ONLY when journaling
+/// would write a durable record — GitHub enabled with BOTH a repo and a token —
+/// which is byte-for-byte the gate the journaler itself applies
+/// (`fkst_journal::Journaler::start`): with no repo/token it keeps no durable
+/// floor, so shipping `None` makes the worker skip journaling for the SAME
+/// configs the in-process driver produces nothing durable for. The
+/// `flush_interval` `Duration` becomes whole milliseconds (the unit the app
+/// `Config` carries it in). The journal-repo token is cloned as a
+/// `SecretString` — it never renders in `Debug`/logs.
+fn journal_plan(config: &JournalConfig) -> Option<JournalPlan> {
+    if !config.github_enabled {
+        return None;
+    }
+    let (repo, token) = match (&config.github_repo, &config.github_token) {
+        (Some(repo), Some(token)) => (repo.clone(), token.clone()),
+        _ => return None,
+    };
+    Some(JournalPlan {
+        flush_interval_ms: config.flush_interval.as_millis() as u64,
+        flush_max_batch: config.flush_max_batch,
+        issue_comments: config.issue_comments,
+        activity_comment_enabled: config.activity_comment_enabled,
+        cas_max_retries: config.cas_max_retries,
+        bootstrap_read_retries: config.bootstrap_read_retries,
+        github_branch: config.github_branch.clone(),
+        github_repo: repo,
+        github_api_base: config.github_api_base.clone(),
+        identity_pointers: config.identity_pointers.clone(),
+        max_line_bytes: config.max_line_bytes,
+        github_token: token,
     })
 }
 
@@ -265,3 +304,41 @@ fn system_time_to_unix_ms(when: SystemTime) -> Result<i64, DispatchError> {
 #[cfg(test)]
 #[path = "dispatch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod journal_plan_tests {
+    use super::*;
+    use secrecy::ExposeSecret;
+    use std::time::Duration;
+
+    #[test]
+    fn ships_a_plan_only_for_complete_github_config() {
+        let base = JournalConfig {
+            github_enabled: true,
+            github_repo: Some("acme/journal".to_string()),
+            github_token: Some(SecretString::from("ghp_tok")),
+            flush_interval: Duration::from_millis(1500),
+            ..JournalConfig::default()
+        };
+        // Complete config → a plan with faithfully mapped fields (ms/repo/token).
+        let plan = journal_plan(&base).expect("complete config ships a plan");
+        assert_eq!(plan.flush_interval_ms, 1500);
+        assert_eq!(plan.github_repo, "acme/journal");
+        assert_eq!(plan.github_token.expose_secret(), "ghp_tok");
+        // Disabled, or any missing GitHub coordinate → no plan (no durable
+        // floor), matching the journaler's own start gate.
+        let off = |c: JournalConfig| journal_plan(&c).is_none();
+        assert!(off(JournalConfig {
+            github_enabled: false,
+            ..base.clone()
+        }));
+        assert!(off(JournalConfig {
+            github_repo: None,
+            ..base.clone()
+        }));
+        assert!(off(JournalConfig {
+            github_token: None,
+            ..base
+        }));
+    }
+}

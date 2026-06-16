@@ -207,7 +207,7 @@ pub(super) struct Inner {
     /// [`SessionService::enable_journaling`]. Unset => journaling is off
     /// (legacy tests / minimal runs); the driver behaves identically either
     /// way — journaling NEVER changes session disposition.
-    journal: OnceLock<JournalSetup>,
+    pub(super) journal: OnceLock<JournalSetup>,
     /// Goal support layer (issue #63), enabled once at startup via
     /// [`SessionService::enable_goal_support`]. Set before any session is
     /// created; a second call is a logged no-op.
@@ -264,8 +264,8 @@ pub(super) struct NyxidSetup {
 }
 
 /// Journaling wiring shared by every driver this service spawns.
-struct JournalSetup {
-    config: JournalConfig,
+pub(super) struct JournalSetup {
+    pub(super) config: JournalConfig,
 }
 
 /// Goal support wiring shared by every driver this service spawns.
