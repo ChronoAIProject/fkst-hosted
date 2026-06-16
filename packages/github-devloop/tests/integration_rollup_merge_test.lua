@@ -47,12 +47,9 @@ local function mock_pr(head_sha, base, rollup_state, rollup_conclusion, mergeabl
   })
 end
 
-local function mock_merge_command()
-  t.mock_command("gh pr merge '9' --repo 'owner/repo' --merge --match-head-commit 'def456'", {
-    stdout = "merged\n",
-    stderr = "",
-    exit_code = 0,
-  })
+local function mock_merge_command(head_sha, result)
+  local command_result = result or { stdout = "merged\n", stderr = "", exit_code = 0 }
+  t.mock_command("gh pr merge '9' --repo 'owner/repo' --merge --match-head-commit '" .. tostring(head_sha or "def456") .. "'", command_result)
 end
 
 local function mock_successful_merge()
@@ -102,12 +99,50 @@ return {
     t.eq(h.count_calls("gh pr merge"), 0)
   end,
 
-  test_rollup_merge_head_mismatch_never_merges = function()
+  test_rollup_merge_uses_fresh_current_head_for_match_commit = function()
     mock_write_mode("1")
+    mock_pr("def456")
     mock_pr("aaaa1111")
-    local result = run_merge(event(), opts("rollup-merge-head-mismatch", "1"))
+    mock_merge_command("aaaa1111")
+    mock_pr("aaaa1111", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "MERGED", "2026-06-03T02:03:04Z")
+    local result = run_merge(event(), opts("rollup-merge-fresh-head", "1"))
     t.eq(result.exit_code, 0)
-    t.eq(h.count_calls("gh pr merge"), 0)
+    t.eq(h.count_calls("gh pr merge"), 1)
+    t.is_true(h.has_call("--match-head-commit 'aaaa1111'"))
+    t.eq(h.count_calls("--match-head-commit 'def456'"), 0)
+  end,
+
+  test_rollup_merge_retries_head_modified_with_fresh_head = function()
+    mock_write_mode("1")
+    mock_pr("def456")
+    mock_pr("def456")
+    mock_merge_command("def456", {
+      stdout = "",
+      stderr = "GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)",
+      exit_code = 1,
+    })
+    mock_pr("aaaa1111")
+    mock_merge_command("aaaa1111")
+    mock_pr("aaaa1111", "dev", "COMPLETED", "SUCCESS", "MERGEABLE", "CLEAN", "MERGED", "2026-06-03T02:03:04Z")
+    local result = run_merge(event(), opts("rollup-merge-head-modified-retry", "1"))
+    t.eq(result.exit_code, 0)
+    t.eq(h.count_calls("gh pr merge"), 2)
+    t.eq(h.count_calls("--match-head-commit 'def456'"), 1)
+    t.eq(h.count_calls("--match-head-commit 'aaaa1111'"), 1)
+  end,
+
+  test_rollup_merge_does_not_retry_other_merge_errors = function()
+    mock_write_mode("1")
+    mock_pr("def456")
+    mock_pr("def456")
+    mock_merge_command("def456", {
+      stdout = "",
+      stderr = "GraphQL: Repository rule violation",
+      exit_code = 1,
+    })
+    local result = run_merge(event(), opts("rollup-merge-non-head-error", "1"))
+    t.is_true(result.exit_code ~= 0)
+    t.eq(h.count_calls("gh pr merge"), 1)
   end,
 
   test_rollup_merge_base_mismatch_never_merges = function()
