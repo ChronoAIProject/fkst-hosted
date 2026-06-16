@@ -169,10 +169,22 @@ function M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
   return issues, merged
 end
 
+local function age_minutes(timestamp, now_seconds)
+  local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+  if seconds == nil then
+    return nil
+  end
+  local age = (tonumber(now_seconds) or now()) - seconds
+  if age < 0 then
+    return nil
+  end
+  return math.floor(age / 60)
+end
+
 local function newest_recent_merge(merged, now_seconds)
   local newest = nil
   for _, issue in ipairs(merged or {}) do
-    local age = M.age_minutes(issue.closed_at, now_seconds)
+    local age = age_minutes(issue.closed_at, now_seconds)
     if age ~= nil and (newest == nil or age < newest.age_minutes) then
       newest = {
         issue = issue,

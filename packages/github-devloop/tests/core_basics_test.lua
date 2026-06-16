@@ -76,21 +76,9 @@ return {
     t.eq(spec.rate_pool.burst, nil)
     t.eq(spec.rate_pool.refill_per_hour, nil)
   end,
-  test_core_shared_age_minutes = function()
-    local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T01:05:30Z")
-
-    t.eq(core.age_minutes("2026-06-03T01:02:03Z", now_seconds), 3)
-    t.is_nil(core.age_minutes("2026-06-03T01:06:00Z", now_seconds))
-    t.is_nil(core.age_minutes(nil, now_seconds))
-    t.is_nil(core.age_minutes("not-a-timestamp", now_seconds))
-  end,
-  test_core_shared_valid_round = function()
-    t.eq(core.valid_round("0"), 0)
-    t.eq(core.valid_round(100000), 100000)
-    t.is_nil(core.valid_round("-1"))
-    t.is_nil(core.valid_round("1.5"))
-    t.is_nil(core.valid_round("100001"))
-    t.is_nil(core.valid_round(nil))
+  test_core_shared_surface_keeps_two_copy_helpers_local = function()
+    t.is_nil(core.age_minutes)
+    t.is_nil(core.valid_round)
   end,
   test_core_shared_judgment_worktree_reads_runtime_root_and_mkdirs = function()
     local worktree = core.judgment_worktree_path("/tmp/fkst-runtime\n", "review-meta", "dedup/key")

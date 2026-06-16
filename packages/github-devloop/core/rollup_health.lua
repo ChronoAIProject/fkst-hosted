@@ -24,6 +24,18 @@ local function format_timestamp(seconds)
   return os.date("!%Y-%m-%dT%H:%M:%SZ", tonumber(seconds) or now())
 end
 
+local function age_minutes(timestamp, now_seconds)
+  local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+  if seconds == nil then
+    return nil
+  end
+  local age = (tonumber(now_seconds) or now()) - seconds
+  if age < 0 then
+    return nil
+  end
+  return math.floor(age / 60)
+end
+
 local function failed_check_timestamp(entry)
   if type(entry) ~= "table" then
     return nil
@@ -183,7 +195,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
   end
 
   local red_started_at = rollup_red_started_at(pr)
-  local age = M.age_minutes(red_started_at, current_seconds)
+  local age = age_minutes(red_started_at, current_seconds)
   if age == nil then
     log.info("github-devloop dept=rollup_scan tag=ROLLUP_HEALTH action=no-op reason=age-unknown")
     return { action = "no-op", reason = "age-unknown" }

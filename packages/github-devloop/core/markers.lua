@@ -1,7 +1,16 @@
 local S = {}
 local strings = require("std.strings")
 
+local max_round = 100000
 local max_attr_len = 240
+
+local function valid_round(value)
+  local n = tonumber(value)
+  if n == nil or n < 0 or n ~= math.floor(n) or n > max_round then
+    return nil
+  end
+  return n
+end
 
 local function marker_attr(marker, name)
   return marker:match(name .. '="([^"]*)"')
@@ -53,7 +62,7 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
       comment_created_at = M._comment_created_at(comment),
     }
     if decision == "reject" then
-      local marker_fix_round = M.valid_round(marker_attr(marker, "fix_round"))
+      local marker_fix_round = valid_round(marker_attr(marker, "fix_round"))
       if marker_fix_round == nil or marker_fix_round ~= M.version_fix_round(issue_version) then
         return nil
       end
@@ -100,7 +109,7 @@ function M.fix_reflection_marker(issue_proposal_id, dedup_key, verdict, version,
   if verdict ~= "checkpoint" and verdict ~= "continue" and verdict ~= "spec-gap" then
     error("github-devloop: invalid fix reflection verdict")
   end
-  local n = M.valid_round(fix_round)
+  local n = valid_round(fix_round)
   if n == nil then
     error("github-devloop: invalid fix reflection round")
   end
@@ -236,7 +245,7 @@ function M.review_result_marker(review_proposal_id, issue_proposal_id, decision,
   local gap_field = ""
   if decision == "reject" then
     if fix_round ~= nil then
-      local n = M.valid_round(fix_round)
+      local n = valid_round(fix_round)
       if n == nil then
         error("github-devloop: invalid review reject fix round")
       end

@@ -3,6 +3,7 @@ local S = {}
 local max_digest_len = 64
 local max_attr_len = 240
 local max_question_len = 2000
+local max_round = 100000
 
 local function normalize_text(value)
   return tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
@@ -80,6 +81,14 @@ local function decode_angle_replay(value)
   return items
 end
 
+local function valid_round(value)
+  local n = tonumber(value)
+  if n == nil or n < 0 or n ~= math.floor(n) or n > max_round then
+    return nil
+  end
+  return n
+end
+
 function sorted_angle_items(angle_digests)
   local items = {}
   if type(angle_digests) ~= "table" then
@@ -124,7 +133,7 @@ local function converge_record_map(M, comments, kind, matches)
   local marker_pattern = "<!%-%- fkst:github%-devloop:" .. kind .. ":v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local round = M.valid_round(attr(marker, "round"))
+      local round = valid_round(attr(marker, "round"))
       local question = attr(marker, "question")
       local verdicts = attr(marker, "verdicts")
       local dedup = attr(marker, "dedup")
@@ -236,7 +245,7 @@ function M.is_supported_reconcile(payload)
     and inner_dedup ~= nil
     and M._is_path_safe_key(inner_dedup, M._max_dedup_len)
     and M._has_bounded_source_ref(payload.source_ref)
-    and M.valid_round(payload.round) ~= nil
+    and valid_round(payload.round) ~= nil
 end
 
 function M.build_devloop_review_reconcile_payload(unresolved, round, issue_proposal_id, issue_version, head_sha)
@@ -289,7 +298,7 @@ function M.build_devloop_timeout_reconcile_payload(row, state, proposal_id, sour
 end
 
 function M.timeout_attempt_marker(proposal_id, issue_version, state_name, round, source_ref)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil or n <= 0 then
     error("github-devloop: invalid timeout attempt round")
   end
@@ -325,7 +334,7 @@ function M.build_timeout_attempt_comment_request(target, proposal_id, state, row
 end
 
 function M.decompose_exhausted_marker(proposal_id, issue_version, round, source_ref)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil or n <= 0 then
     error("github-devloop: invalid decompose exhausted round")
   end
@@ -364,7 +373,7 @@ function M.review_reconcile_state_version(issue_version, round)
 end
 
 function M.reconcile_terminal_state_version(current_version, round)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid reconcile round")
   end
@@ -376,7 +385,7 @@ function M.reconcile_terminal_state_version(current_version, round)
 end
 
 function M.review_reconcile_terminal_state_version(current_version, round)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review reconcile round")
   end
@@ -407,7 +416,7 @@ function M.is_supported_review_reconcile(payload)
     and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
     and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
     and M._is_git_sha(payload.head_sha)
-    and M.valid_round(payload.round) ~= nil
+    and valid_round(payload.round) ~= nil
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "review-reconcile:" .. tostring(payload.issue_version) .. "/review-loop/" .. tostring(payload.round)
     and M._has_bounded_source_ref(payload.source_ref)
@@ -426,7 +435,7 @@ function M.is_supported_fix_reconcile(payload)
     and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
     and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
     and M._is_git_sha(payload.head_sha)
-    and M.valid_round(payload.round) ~= nil
+    and valid_round(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.issue_version)
     and M._is_positive_pr_number(payload.pr_number)
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
@@ -447,14 +456,14 @@ function M.is_supported_timeout_reconcile(payload)
     and row.terminal == false
     and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
     and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
-    and M.valid_round(payload.round) ~= nil
+    and valid_round(payload.round) ~= nil
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "timeout-reconcile:" .. tostring(payload.issue_version) .. "/timeout-reconcile/" .. tostring(payload.state) .. "/" .. tostring(payload.round)
     and M._has_bounded_source_ref(payload.source_ref)
 end
 
 function M.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid converge round")
   end
@@ -476,7 +485,7 @@ function M.reconcile_state_version(base_version, round)
 end
 
 function M.reconcile_marker(proposal_id, base_version, round, action)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid reconcile round")
   end
@@ -492,7 +501,7 @@ function M.reconcile_marker(proposal_id, base_version, round, action)
 end
 
 function M.review_reconcile_marker(issue_proposal_id, issue_version, round, action)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review reconcile round")
   end
@@ -508,7 +517,7 @@ function M.review_reconcile_marker(issue_proposal_id, issue_version, round, acti
 end
 
 function M.fix_reconcile_marker(proposal_id, issue_version, action)
-  local n = M.valid_round(M.version_fix_round(issue_version))
+  local n = valid_round(M.version_fix_round(issue_version))
   if n == nil then
     error("github-devloop: invalid fix reconcile round")
   end
@@ -524,7 +533,7 @@ function M.fix_reconcile_marker(proposal_id, issue_version, action)
 end
 
 function M.timeout_reconcile_marker(proposal_id, issue_version, state_name, round, action, fields)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid timeout reconcile round")
   end
@@ -554,7 +563,7 @@ function M.timeout_reconcile_marker(proposal_id, issue_version, state_name, roun
 end
 
 function M.review_converge_round_marker(review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review converge round")
   end
@@ -643,7 +652,7 @@ function M.max_converge_round(facts)
     return max_seen
   end
   for _, fact in ipairs(facts) do
-    local round = M.valid_round(type(fact) == "table" and fact.round or nil)
+    local round = valid_round(type(fact) == "table" and fact.round or nil)
     if round ~= nil and round > max_seen then
       max_seen = round
     end
@@ -652,7 +661,7 @@ function M.max_converge_round(facts)
 end
 
 function M.has_converge_round_marker(comments, proposal_id, base_version, source_ref_digest, round)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     return false
   end
@@ -665,7 +674,7 @@ function M.has_converge_round_marker(comments, proposal_id, base_version, source
 end
 
 function M.has_reconcile_marker(comments, proposal_id, base_version, round)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil or type(comments) ~= "table" then
     return false
   end
@@ -675,7 +684,7 @@ function M.has_reconcile_marker(comments, proposal_id, base_version, round)
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == version
-        and M.valid_round(attr(marker, "round")) == n then
+        and valid_round(attr(marker, "round")) == n then
         return true
       end
     end
@@ -684,7 +693,7 @@ function M.has_reconcile_marker(comments, proposal_id, base_version, round)
 end
 
 function M.has_review_reconcile_marker(comments, issue_proposal_id, issue_version, round)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil or type(comments) ~= "table" then
     return false
   end
@@ -694,7 +703,7 @@ function M.has_review_reconcile_marker(comments, issue_proposal_id, issue_versio
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(issue_proposal_id)
         and attr(marker, "version") == version
-        and M.valid_round(attr(marker, "round")) == n then
+        and valid_round(attr(marker, "round")) == n then
         return true
       end
     end
@@ -703,7 +712,7 @@ function M.has_review_reconcile_marker(comments, issue_proposal_id, issue_versio
 end
 
 function M.has_fix_reconcile_marker(comments, proposal_id, issue_version)
-  local n = M.valid_round(M.version_fix_round(issue_version))
+  local n = valid_round(M.version_fix_round(issue_version))
   if n == nil or type(comments) ~= "table" then
     return false
   end
@@ -712,7 +721,7 @@ function M.has_fix_reconcile_marker(comments, proposal_id, issue_version)
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == tostring(issue_version)
-        and M.valid_round(attr(marker, "round")) == n then
+        and valid_round(attr(marker, "round")) == n then
         return true
       end
     end
@@ -721,7 +730,7 @@ function M.has_fix_reconcile_marker(comments, proposal_id, issue_version)
 end
 
 function M.has_timeout_reconcile_marker(comments, proposal_id, issue_version, state_name, round)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil or type(comments) ~= "table" then
     return false
   end
@@ -732,7 +741,7 @@ function M.has_timeout_reconcile_marker(comments, proposal_id, issue_version, st
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == version
         and attr(marker, "state") == tostring(state_name)
-        and M.valid_round(attr(marker, "round")) == n then
+        and valid_round(attr(marker, "round")) == n then
         return true
       end
     end
@@ -752,7 +761,7 @@ function M.timeout_attempt_round(comments, proposal_id, issue_version, state_nam
       if attr(marker, "proposal") == tostring(proposal_id)
         and M.strip_transition_version_suffixes(attr(marker, "version")) == lineage_version
         and attr(marker, "state") == tostring(state_name) then
-        local round = M.valid_round(attr(marker, "round"))
+        local round = valid_round(attr(marker, "round"))
         if round ~= nil and round > max_seen then
           max_seen = round
         end
@@ -780,7 +789,7 @@ function M.has_decompose_exhausted_marker(comments, proposal_id, issue_version)
 end
 
 function M.has_review_converge_round_marker(comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round)
-  local n = M.valid_round(round)
+  local n = valid_round(round)
   if n == nil then
     return false
   end
@@ -793,7 +802,7 @@ function M.has_review_converge_round_marker(comments, review_proposal_id, issue_
 end
 
 function M.is_true_stall(facts, current_round)
-  local round = M.valid_round(current_round)
+  local round = valid_round(current_round)
   if round == nil or round < 3 or type(facts) ~= "table" then
     return false
   end
@@ -801,7 +810,7 @@ function M.is_true_stall(facts, current_round)
   local by_round = {}
   for _, fact in ipairs(facts) do
     if type(fact) == "table" then
-      local fact_round = M.valid_round(fact.round)
+      local fact_round = valid_round(fact.round)
       if fact_round ~= nil then
         by_round[fact_round] = fact
       end
