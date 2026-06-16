@@ -290,18 +290,15 @@ local function substrate_review_dedup()
   })
 end
 
+local substrate_backing_issue_comment
+
 local function substrate_lifecycle_comment()
   local proposal_id = core.proposal_id("owner/repo", backing_issue_number)
   local version = "substrate-ref-bump/" .. pr_head_sha
   local review_proposal = substrate_review_proposal()
   local review_dedup = substrate_review_dedup()
   return table.concat({
-    '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. core._dedup_key({
-      "substrate-ref-bump",
-      "backing-issue",
-      core.safe_repo("owner/repo"),
-      "27",
-    }) .. '" issue="' .. backing_issue_number .. '" -->',
+    substrate_backing_issue_comment(),
     core.pr_origin_marker(proposal_id, backing_issue_number, "chore/substrate-ref-bump", version, "dev"),
     core.state_marker(proposal_id, "merge-ready", version),
     core.review_result_marker(review_proposal, proposal_id, "approve", review_dedup),
@@ -309,7 +306,16 @@ local function substrate_lifecycle_comment()
   }, "\n")
 end
 
-local function substrate_backing_issue_comment()
+substrate_backing_issue_comment = function()
+  return '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. core._dedup_key({
+    "substrate-ref-bump",
+    "backing-issue",
+    core.safe_repo("owner/repo"),
+    "chore/substrate-ref-bump",
+  }) .. '" issue="' .. backing_issue_number .. '" -->'
+end
+
+local function legacy_substrate_backing_issue_comment()
   return '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. core._dedup_key({
     "substrate-ref-bump",
     "backing-issue",
@@ -427,7 +433,16 @@ return {
     local create_raise = result.raises[1]
     t.eq(create_raise.queue, "github-proxy.github_issue_create_request")
     t.eq(create_raise.payload.parent_comment_target.pr_number, 27)
+    t.eq(create_raise.payload.dedup_key, core._dedup_key({
+      "substrate-ref-bump",
+      "backing-issue",
+      core.safe_repo("owner/repo"),
+      "chore/substrate-ref-bump",
+    }))
     t.is_true(create_raise.payload.body:find("PR: #27", 1, true) ~= nil)
+    t.is_true(create_raise.payload.body:find("Authoritative owner:", 1, true) ~= nil)
+    t.is_true(create_raise.payload.body:find("Ledger de-duplication:", 1, true) ~= nil)
+    t.is_true(create_raise.payload.body:find("Recurrence waiver:", 1, true) ~= nil)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 
@@ -455,6 +470,29 @@ return {
     t.is_true(result.raises[1].payload.body:find('proposal="' .. core.proposal_id("owner/repo", backing_issue_number) .. '"', 1, true) ~= nil)
     t.is_true(result.raises[1].payload.body:find('issue="' .. tostring(backing_issue_number) .. '"', 1, true) ~= nil)
     t.is_true(result.raises[1].payload.body:find('state="merge-ready"', 1, true) ~= nil)
+  end,
+
+  test_real_mode_honors_legacy_pr_number_backing_issue_ledger = function()
+    mock_env("1")
+    mock_current_pin(current_pin)
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin_missing()
+    mock_base_head()
+    mock_runtime_root("substrate-legacy-ledger")
+    mock_no_checked_out_bump_branch()
+    mock_worktree_commands(true)
+    mock_bump_pr_view(legacy_substrate_backing_issue_comment())
+    mock_bump_diff()
+
+    local result = run_scan(opts("substrate-legacy-ledger", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr create"), 0)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
+    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
+    t.is_true(result.raises[1].payload.body:find('proposal="' .. core.proposal_id("owner/repo", backing_issue_number) .. '"', 1, true) ~= nil)
   end,
 
   test_real_mode_rechecks_pr_under_lock_before_create = function()

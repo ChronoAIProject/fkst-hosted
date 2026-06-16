@@ -323,7 +323,16 @@ local function mechanical_review_dedup_key(repo, pr_number_value, head_sha)
   })
 end
 
-local function backing_issue_dedup_key(repo, pr_number_value)
+local function backing_issue_dedup_key(repo)
+  return M._dedup_key({
+    "substrate-ref-bump",
+    "backing-issue",
+    M.safe_repo(repo),
+    bump_branch,
+  })
+end
+
+local function legacy_backing_issue_dedup_key(repo, pr_number_value)
   return M._dedup_key({
     "substrate-ref-bump",
     "backing-issue",
@@ -332,11 +341,20 @@ local function backing_issue_dedup_key(repo, pr_number_value)
   })
 end
 
-local function backing_issue_number(pr, dedup_key)
+local function backing_issue_number(pr, dedup_keys)
+  local wanted = {}
+  if type(dedup_keys) == "table" then
+    for _, dedup_key in ipairs(dedup_keys) do
+      wanted[tostring(dedup_key)] = true
+    end
+  else
+    wanted[tostring(dedup_keys)] = true
+  end
   for _, comment in ipairs(M._trusted_marker_comments(pr and pr.comments or {})) do
     local body = M._comment_body(comment)
     for marker in body:gmatch("<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->") do
-      if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
+      local marker_dedup = marker:match('dedup="([^"]+)"')
+      if wanted[tostring(marker_dedup)] then
         local number = pr_number(marker:match('issue="(%d+)"'))
         if number ~= nil then
           return number
@@ -385,6 +403,10 @@ local function backing_issue_create_request(repo, pr, current_pin, target_sha, d
     "Base: `" .. tostring(pr.base_ref_name) .. "`",
     "Previous pin: `" .. tostring(current_pin) .. "`",
     "Target pin: `" .. tostring(target_sha) .. "`",
+    "",
+    "Authoritative owner: this backing issue is the only `github-devloop` lifecycle owner for the recurring `substrate-ref-bump` automation class.",
+    "Ledger de-duplication: the parent PR comment stream records exactly one `github-proxy.issue-created` fact keyed by the bump branch, so repeated scanner deliveries and replacement PR numbers converge to this issue instead of opening sibling lifecycle issues.",
+    "Recurrence waiver: prior `fkst-substrate` pin bump PRs and their backing issues are normal recurrences of the same scheduled dependency-pin automation, not separate class-fix requests; this issue is the class owner for the current bump.",
     "",
     "This issue owns the normal `github-devloop` lifecycle for the bump PR. The scanner only advances the PR after the trusted parent ledger records this issue number.",
   }, "\n")
@@ -440,8 +462,9 @@ local function ensure_bump_lifecycle(repo, base_branch, existing, current_pin, t
     })
     return nil
   end
-  local issue_dedup = backing_issue_dedup_key(repo, number)
-  local issue_number = backing_issue_number(pr, issue_dedup)
+  local issue_dedup = backing_issue_dedup_key(repo)
+  local legacy_issue_dedup = legacy_backing_issue_dedup_key(repo, number)
+  local issue_number = backing_issue_number(pr, { issue_dedup, legacy_issue_dedup })
   if issue_number == nil then
     local request = backing_issue_create_request(repo, pr, current_pin, target_sha, issue_dedup)
     log_scan("backing-issue-requested", {

@@ -154,7 +154,7 @@ return {
     t.eq(count_calls("gh issue create"), 0)
   end,
 
-  test_issue_create_request_parent_intent_marker_skips_create = function()
+  test_issue_create_request_parent_intent_marker_resumes_create = function()
     local payload = event().payload
     mock_write_env("1")
     mock_bot_env()
@@ -166,6 +166,7 @@ return {
     })
     mock_issue_create_search("[]\n")
     mock_issue_create()
+    mock_parent_pr_comment_write()
 
     local result = t.run_department("departments/github_issue_create/main.lua", {
       queue = "github_issue_create_request",
@@ -176,9 +177,39 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
-    t.eq(count_calls("gh pr comment"), 0)
-    t.eq(count_calls("gh issue list"), 0)
+    t.eq(count_calls("gh issue list"), 1)
+    t.eq(count_calls("gh issue create"), 1)
+    t.eq(count_calls("fkst-github-proxy-created"), 1)
+  end,
+
+  test_issue_create_request_parent_intent_reconciles_existing_issue_marker = function()
+    local payload = event().payload
+    mock_write_env("1")
+    mock_bot_env()
+    mock_parent_pr_comments({
+      {
+        body = core.issue_create_intent_marker(payload.dedup_key),
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_issue_create_search(string.format(
+      '[{"number":99,"title":"Existing","state":"OPEN","body":"already created\\n%s","author":{"login":"fkst-test-bot"}}]\n',
+      h.json_string(core.issue_create_marker(payload.dedup_key))
+    ))
+    mock_issue_create()
+    mock_parent_pr_comment_write()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("issue-create-parent-intent-reconcile", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
+    t.eq(count_calls("fkst-github-proxy-created"), 1)
   end,
 
   test_issue_create_request_real_write_calls_gh_issue_create = function()
@@ -194,6 +225,7 @@ return {
         author_login = "fkst-test-bot",
       },
     })
+    mock_issue_create_search("[]\n")
     mock_issue_create()
     mock_parent_pr_comment_write()
     mock_parent_pr_comment_write()
@@ -207,7 +239,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 2)
-    t.eq(count_calls("gh issue list"), 0)
+    t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 1)
     t.eq(count_calls("--assignee 'fkst-test-bot'"), 1)
     t.eq(count_calls("gh pr comment"), 2)
@@ -234,6 +266,7 @@ return {
         author_login = "fkst-test-bot",
       },
     })
+    mock_issue_create_search("[]\n")
     mock_issue_create()
     mock_parent_issue_comment_write()
 
@@ -251,6 +284,7 @@ return {
     t.eq(raised.payload.blocked_issue_number, 42)
     t.eq(raised.payload.blocking_issue_number, 99)
     t.eq(raised.payload.dedup_key, payload.post_create_blocked_by.dedup_key)
+    t.eq(count_calls("gh issue list"), 1)
   end,
 
   test_issue_create_request_raises_blocked_by_from_existing_created_marker = function()
@@ -298,6 +332,7 @@ return {
         author_login = "fkst-test-bot",
       },
     })
+    mock_issue_create_search("[]\n")
     mock_issue_create()
     mock_parent_pr_comment_write()
     mock_parent_pr_comment_write()
@@ -310,6 +345,7 @@ return {
     }))
 
     t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 1)
     t.eq(count_calls("gh pr comment"), 2)
     t.eq(count_calls("fkst-github-proxy-intent"), 1)
@@ -336,6 +372,7 @@ return {
         author_login = "fkst-test-bot",
       },
     })
+    mock_issue_create_search("[]\n")
     mock_issue_create()
     mock_parent_pr_comment_write()
     mock_parent_pr_comment_write()
@@ -364,7 +401,7 @@ return {
     }, run_opts)
     t.eq(second.exit_code, 0)
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 3)
-    t.eq(count_calls("gh issue list"), 0)
+    t.eq(count_calls("gh issue list"), 2)
     t.eq(count_calls("gh issue create"), 1)
   end,
 
