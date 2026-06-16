@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { NyxIDClient, LoginRedirectOptions, OAuthUserInfo, NyxIDTokenSet } from './nyxid-client';
 import { authRequired, registerAuthErrorListener } from './token';
+import { clearPersistedCache } from '../persist/persister';
 
 export interface AuthSession {
   isAuthenticated: boolean;
@@ -87,6 +88,9 @@ export function NyxIDProvider({
     setAuthError(null);
     client.clearSession();
     setAccessToken(null);
+    // Wipe the persisted query cache so one identity's cached goal/GitHub
+    // reads never bleed into the next session (ARCHITECTURE.md §8).
+    void clearPersistedCache();
   }, [client]);
 
   const handleRedirectCallback = useCallback(async (url?: string) => {

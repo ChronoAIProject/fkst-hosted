@@ -1,6 +1,8 @@
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import '@testing-library/jest-dom';
+// jsdom has no IndexedDB; the TanStack Query persister (idb-keyval) needs it.
+import 'fake-indexeddb/auto';
 
 // Fix for React Router + JSDOM AbortSignal / Request conflict in Node 18+
 // Modern Node fetch/Request expects native AbortSignal instances.

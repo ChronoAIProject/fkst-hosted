@@ -21,7 +21,7 @@
 | Framework / Vite / TS-strict / Tailwind+oklch / Radix / React Router | §2 | As designed | ✅ |
 | **Server state = TanStack Query** | §2, §43 | **All** data access is via TanStack hooks (`src/lib/hooks/*` use `useQuery`/`useMutation`/`useQueryClient`); screens consume hooks. Plain `fetch` exists **only** as the transport in `src/lib/api/client.ts` (`request<T>`/`requestVoid`) that the `queryFn` calls — **no raw fetch in screens/effects**. | ✅ |
 | **Poll cadence (`refetchInterval`)** | §51 — ~5-min on GitHub/goals planes; fast on sessions; short on health | `useSessions` (2s while non-terminal, stops on terminal) ✅ and `useHealth` (30s) ✅. **`useGoals` / `useGitHubIssues` / `usePackages` have NO `refetchInterval` — they fetch once.** The ~5-min poll cadence on the goals/GitHub/packages planes is **not yet implemented**. | ⚠️ |
-| **Cross-session persistence** (`persistQueryClient` + IndexedDB via `idb-keyval`) | §2, §4, §8 | **Not implemented** — `idb-keyval` is not a dependency; no `persistQueryClient`. State is **in-memory per tab** (cut in the v1-basic PM-PLAN). Boot does not hydrate last-known reads. | ⚠️ |
+| **Cross-session persistence** (`persistQueryClient` + IndexedDB via `idb-keyval`) | §2, §4, §8 | **Implemented** — `PersistQueryClientProvider` + an idb-keyval async persister (`src/lib/persist/persister.ts`). Only **successful GET reads** are dehydrated (no mutations/errors/`unknown`), `maxAge` 24h, `buster`-versioned, `gcTime` ≥ maxAge, **wiped on sign-out**. Boot hydrates last-known reads, then revalidates. (`fake-indexeddb` polyfills the test env.) | ✅ |
 | Forms (React Hook Form + Zod) | §2, §10 | New-goal modal + Add-package modal use RHF + Zod. | ✅ |
 | Client/UI state (designed: Zustand) | §2 | UI-only state uses **React local state + a session-registry React context** (per-tab `Map<package, sessionId>`), **not Zustand**. No server data in any store. | 🟡 |
 | **Hosted backend plane (v1)** | §3 Plane 2 (doc lists only health/packages/sessions) | **Fully wired, beyond the doc's table:** health; packages list/get/create + **update/delete/archive/generate/shares**; sessions create/get/stop; **and the entire Goals API — list/get/create/update/delete/trigger** (`src/lib/api/goals.ts`). Verified live against a local backend + Mongo. | ✅ |
@@ -32,8 +32,10 @@
 
 **Open conformance gaps to review (designed but not built):**
 1. **Poll cadence** — add `refetchInterval`/`staleTime` (~5 min) to `useGoals`/`useGitHubIssues`/`usePackages` so the goals/GitHub planes are poll-derived per §51 (sessions/health already are).
-2. **Persistence** — add `idb-keyval` + `persistQueryClient` (dehydrate allow-list = successful GET reads only, `as-of`-stamped, `maxAge`-evicted, `buster`-versioned, identity-scoped + sign-out wipe) per §4/§8.
-3. **UI store** — decide whether the session-registry context + local state is sufficient, or adopt Zustand as designed.
+2. **UI store** — decide whether the session-registry context + local state is sufficient, or adopt Zustand as designed.
+3. **`useArchiveReplace`** (PUT zip-replace of a package) is defined + tested but not yet surfaced in the UI — the only one of the 29 API operations without a UI consumer (create-from-zip `useArchiveCreate` is wired).
+
+**Resolved since first audit:** cross-session persistence (§4/§8) is now implemented (`src/lib/persist/persister.ts`). The API back-check confirms **all 29 documented endpoints have a client fn + hook, and 28/29 are consumed in the UI** (the exception is `useArchiveReplace`, item 3).
 
 These are intentional follow-ups, not silently skipped — each is a small, well-scoped change on top of the current TanStack layer.
 

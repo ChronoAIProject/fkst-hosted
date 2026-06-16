@@ -1,5 +1,7 @@
 import { createBrowserRouter, Navigate, RouterProvider, useParams, useSearchParams, useOutletContext } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import { queryPersister, PERSIST_MAX_AGE, PERSIST_BUSTER } from '../lib/persist/persister';
 import { Shell, ShellOutletContext } from './shell';
 import { SessionRegistryProvider } from '../lib/hooks/session-registry';
 import { Toaster } from '../components/primitives/toaster';
@@ -16,6 +18,9 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: false,
+      // gcTime must be >= the persist maxAge, else restored entries are
+      // garbage-collected before the UI can read them (ARCHITECTURE.md §8).
+      gcTime: PERSIST_MAX_AGE,
     },
   },
 });
@@ -190,11 +195,24 @@ export function App() {
   }));
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        persister: queryPersister,
+        maxAge: PERSIST_MAX_AGE,
+        buster: PERSIST_BUSTER,
+        dehydrateOptions: {
+          // Only successful GET reads are persisted — never mutations,
+          // errors, or `unknown` placeholders (ARCHITECTURE.md §8).
+          shouldDehydrateQuery: (query) => query.state.status === 'success',
+          shouldDehydrateMutation: () => false,
+        },
+      }}
+    >
       <SessionRegistryProvider>
         <RouterProvider router={router} future={{ v7_startTransition: true }} />
         <Toaster />
       </SessionRegistryProvider>
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   );
 }
