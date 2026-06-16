@@ -7,6 +7,10 @@
 //! - `PATCH  /api/v1/goals/{id}`        — partial update (200)
 //! - `DELETE /api/v1/goals/{id}`        — delete (204)
 //! - `POST   /api/v1/goals/{id}/trigger` — trigger a goal (202)
+//! - `POST   /api/v1/goals/submit`       — start a session from a GitHub issue
+//!   or inline args (202) — implemented in the sibling [`super::goals_submit`]
+//!   module (this file is already large; #178 split the new handler out to keep
+//!   each source file under the project's line budget).
 //!
 //! This is purely the web edge: wire DTOs, UUID parsing, authz checks, and
 //! status mapping. Validation logic lives in the goals domain module.
@@ -262,7 +266,7 @@ fn parse_goal_uuid(id: &str) -> Result<bson::Uuid, AppError> {
 /// `owner_user_id` is a non-Option `String`, so this ALWAYS feeds `Some(..)`:
 /// an issue-backed goal is never ownerless, so `allows` rule-4 (ownerless ->
 /// allow) is unreachable for goals (it stays only for legacy/session paths).
-fn goal_ownership(doc: &GoalDoc) -> Ownership<'_> {
+pub(crate) fn goal_ownership(doc: &GoalDoc) -> Ownership<'_> {
     Ownership {
         owner_user_id: Some(&doc.owner_user_id),
         org_id: doc.org_id.as_deref(),
@@ -1080,6 +1084,15 @@ pub fn router() -> Router<AppState> {
         .route(
             "/goals/:id/trigger",
             post(trigger).layer(DefaultBodyLimit::max(MAX_TRIGGER_BODY_BYTES)),
+        )
+        // #178: the unified submit endpoint. Lives in the goals router (it wraps
+        // the goal lifecycle, not just the session lifecycle) and reuses the
+        // trigger body limit (it carries the same inline secrets). The handler +
+        // DTOs are in the sibling `goals_submit` module to keep this file under
+        // the line budget.
+        .route(
+            "/goals/submit",
+            post(super::goals_submit::submit).layer(DefaultBodyLimit::max(MAX_TRIGGER_BODY_BYTES)),
         )
 }
 
