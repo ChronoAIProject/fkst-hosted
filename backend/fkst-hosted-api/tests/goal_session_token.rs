@@ -279,7 +279,7 @@ async fn goal_session_mints_github_token_at_startup() {
                 prior_status: GoalStatus::NotStarted,
                 ornn_skills: None,
             },
-            SecretString::from("test-raw-token".to_string()),
+            Some(SecretString::from("test-raw-token".to_string())),
         )
         .await
         .expect("create_for_goal");

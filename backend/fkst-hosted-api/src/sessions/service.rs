@@ -434,7 +434,10 @@ impl SessionService {
         &self,
         goals: &GoalRepo,
         trigger: GoalTriggerInfo,
-        raw_token: SecretString,
+        // The triggering user's forwarded access token, or `None` in "headers
+        // mode" (no bearer forwarded by the proxy). When `None`, the driver
+        // skips per-session NyxID provisioning (#111) and behaves as pre-#111.
+        raw_token: Option<SecretString>,
     ) -> Result<GoalTriggerResult, AppError> {
         let now = bson::DateTime::now();
 
@@ -512,7 +515,7 @@ impl SessionService {
                     let mut owned = session.clone();
                     owned.pod_id = Some(placement.pod_id);
                     owned.fencing_token = Some(placement.fencing_token);
-                    self.spawn_driver(&owned, Some(raw_token.clone()));
+                    self.spawn_driver(&owned, raw_token.clone());
                 }
                 Ok(_placement) => {
                     // Another pod was chosen; its reaper picks it up.
@@ -573,7 +576,7 @@ impl SessionService {
             }
         } else {
             // Single-pod posture: spawn the driver inline.
-            self.spawn_driver(&session, Some(raw_token.clone()));
+            self.spawn_driver(&session, raw_token.clone());
         }
 
         // Step 7: Set active_session_id on goal (CAS guarded to triggered).

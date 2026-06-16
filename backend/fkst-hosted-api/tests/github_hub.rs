@@ -1,17 +1,19 @@
 //! GitHub-issues-hub integration tests against the REAL `build_router(AppState)`.
 //!
-//! A single wiremock `MockServer` plays BOTH the NyxID JWKS endpoint (so the
-//! JWT middleware verifies the inbound bearer and populates `raw_token`) AND
-//! NyxID itself (the RFC 8693 token-exchange, the connections listing, and the
-//! GitHub credential-injection proxy). This exercises the real
+//! Auth is proxy-trusted (#113): each request carries a NyxID-injected
+//! `X-NyxID-Identity-Token` (decoded, not verified) granting `fkst:admin` so it
+//! clears the per-route `fkst:github:*` action gate, PLUS the user's
+//! `Authorization: Bearer` (captured as `user_access_token`) which the proxy
+//! seam exchanges. A single wiremock `MockServer` plays NyxID itself — the
+//! RFC 8693 token-exchange, the connections listing, and the GitHub
+//! credential-injection proxy — so the real
 //! `NyxIdGithubProxy::from_context` → `exchange_token` → `proxy_github_for`
-//! path; no part of the proxy seam is mocked away.
+//! path is exercised end-to-end; no part of the proxy seam is mocked away.
 //!
 //! Each test gets a fresh Mongo container (testcontainers) and self-skips when
 //! Docker is unavailable so `cargo test` stays green without a daemon.
 
-use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
@@ -28,11 +30,6 @@ use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
 use http_body_util::BodyExt;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
-use rand::rngs::OsRng;
-use rsa::pkcs8::{EncodePrivateKey, LineEnding};
-use rsa::traits::PublicKeyParts;
-use rsa::RsaPrivateKey;
 use secrecy::SecretString;
 use serde_json::{json, Value};
 use testcontainers::runners::AsyncRunner;
@@ -45,9 +42,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 mod support;
 
 const MONGO_TAG: &str = "7";
-const ISSUER: &str = "nyxid";
-const AUDIENCE: &str = "fkst-test";
-const KID: &str = "test-key-1";
+
+/// Header carrying the proxy-injected identity JWT.
+const HEADER_IDENTITY_TOKEN: &str = "X-NyxID-Identity-Token";
 
 /// GitHub-proxy base path the wiremock matchers expect, built from the default
 /// slug so the integration suite tracks the production path shape after the
@@ -72,94 +69,40 @@ fn docker_available() -> bool {
         .unwrap_or(false)
 }
 
-// ---- RS256 keypair (once per test binary) ----
+// ---- Identity / bearer helpers ----
 
-struct TestKeys {
-    encoding_key: EncodingKey,
-    n: String,
-    e: String,
-}
+/// The user's `Authorization: Bearer` token captured as `user_access_token` and
+/// fed to the RFC 8693 exchange. Any string works (the proxy is trusted; the
+/// exchange mock returns the delegated token regardless of the input value).
+const USER_ACCESS_TOKEN: &str = "user-inbound-token";
 
-static TEST_KEYS: OnceLock<TestKeys> = OnceLock::new();
-
-fn test_keys() -> &'static TestKeys {
-    TEST_KEYS.get_or_init(|| {
-        let mut rng = OsRng;
-        let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("generate RSA keypair");
-        let private_pem = private_key
-            .to_pkcs8_pem(LineEnding::LF)
-            .expect("private PEM");
-        let encoding_key = EncodingKey::from_rsa_pem(private_pem.as_bytes()).expect("encoding key");
-        let public_key = private_key.to_public_key();
-        let n = URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be());
-        let e = URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
-        TestKeys { encoding_key, n, e }
-    })
-}
-
-#[derive(serde::Serialize)]
-struct Claims {
-    sub: String,
-    iss: String,
-    aud: String,
-    exp: u64,
-    iat: u64,
-    token_type: String,
-    scope: String,
-}
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time")
-        .as_secs()
-}
-
-/// Mint a valid RS256 access token for the protected routes.
-fn valid_token() -> String {
-    let now = now_secs();
-    let claims = Claims {
-        sub: "user-42".to_string(),
-        iss: ISSUER.to_string(),
-        aud: AUDIENCE.to_string(),
-        exp: now + 3600,
-        iat: now,
-        token_type: "access".to_string(),
-        scope: "read write".to_string(),
-    };
-    let mut header = Header::new(Algorithm::RS256);
-    header.kid = Some(KID.to_string());
-    jsonwebtoken::encode(&header, &claims, &test_keys().encoding_key).expect("sign token")
-}
-
-fn jwks_body() -> Value {
-    let keys = test_keys();
-    json!({
-        "keys": [{
-            "kty": "RSA", "kid": KID, "alg": "RS256", "use": "sig",
-            "n": keys.n, "e": keys.e
-        }]
-    })
+/// A proxy-injected identity token (decode-only; signature never checked). It
+/// grants `fkst:admin` so every `fkst:github:*` action gate passes — these
+/// tests target the proxy seam, not the RBAC matrix (covered elsewhere).
+fn admin_identity_token() -> String {
+    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","typ":"JWT"}"#);
+    let body = URL_SAFE_NO_PAD.encode(
+        json!({ "sub": "user-42", "permissions": ["fkst:admin"] })
+            .to_string()
+            .as_bytes(),
+    );
+    // The signature segment is arbitrary and never verified.
+    format!("{header}.{body}.unverified-signature")
 }
 
 // ---- App harness ----
 
 struct TestApp {
     _container: testcontainers::ContainerAsync<Mongo>,
-    /// Held so the wiremock server (NyxID + JWKS) stays up for the test.
+    /// Held so the wiremock server (NyxID) stays up for the test.
     _server: MockServer,
     router: axum::Router,
 }
 
-/// Build the full app with auth ENABLED (JWKS + NyxID both on `server`) and a
-/// real `NyxIdClient` wired into the authorizer pointed at the same server.
+/// Build the full app with auth ENABLED (proxy-trusted identity) and a real
+/// `NyxIdClient` wired into the authorizer, pointed at `server` (which plays
+/// NyxID's exchange / connections / proxy endpoints).
 async fn app(server: MockServer) -> TestApp {
-    // The JWKS the middleware verifies the inbound token against.
-    Mock::given(method("GET"))
-        .and(path("/.well-known/jwks.json"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(jwks_body()))
-        .mount(&server)
-        .await;
     // RFC 8693 token exchange — returns a delegated bearer the proxy will use.
     Mock::given(method("POST"))
         .and(path("/oauth/token"))
@@ -201,9 +144,6 @@ async fn app(server: MockServer) -> TestApp {
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
             base_url: server.uri(),
-            issuer: ISSUER.to_string(),
-            audience: AUDIENCE.to_string(),
-            jwks_cache_ttl: Duration::from_secs(300),
         }),
         authz: Authorizer::new(Some(nyxid)),
         github_app: None,
@@ -253,7 +193,8 @@ async fn get(router: &axum::Router, p: &str) -> (StatusCode, HeaderMap, Value) {
         .clone()
         .oneshot(
             Request::get(p)
-                .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
+                .header(HEADER_IDENTITY_TOKEN, admin_identity_token())
+                .header(header::AUTHORIZATION, format!("Bearer {USER_ACCESS_TOKEN}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -272,7 +213,8 @@ async fn send_json(
         .method(verb)
         .uri(p)
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()));
+        .header(HEADER_IDENTITY_TOKEN, admin_identity_token())
+        .header(header::AUTHORIZATION, format!("Bearer {USER_ACCESS_TOKEN}"));
     let response = router
         .clone()
         .oneshot(builder.body(Body::from(body.to_string())).expect("request"))

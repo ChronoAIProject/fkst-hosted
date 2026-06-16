@@ -1,6 +1,5 @@
 //! Router composition with the cross-cutting tower-http middleware stack.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::{Method, StatusCode};
@@ -13,7 +12,6 @@ use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::middleware;
-use crate::auth::verify::Verifier;
 use crate::auth::AuthMode;
 use crate::error::AppError;
 use crate::routes;
@@ -37,10 +35,10 @@ fn cors_layer() -> CorsLayer {
 /// Build the application router.
 ///
 /// When authentication is enabled, all `/api/v1/*` routes (except health) are
-/// wrapped with the JWT verification middleware. Health endpoints (`/health`
-/// and `/api/v1/health`) remain public by construction.
-///
-/// Returns `Err` if the verifier cannot be built (e.g. malformed JWKS URL).
+/// wrapped with the proxy-trusted identity middleware (issue #113): it reads the
+/// NyxID-injected identity headers — it does NOT verify a user token or fetch
+/// JWKS. Health endpoints (`/health` and `/api/v1/health`) remain public by
+/// construction.
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let timeout = Duration::from_secs(state.config.request_timeout_secs);
 
@@ -52,14 +50,11 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
 
     let api_routes = match &state.auth_mode {
         AuthMode::Enabled(settings) => {
-            let verifier = Arc::new(Verifier::new(settings));
             tracing::info!(
                 base_url = %settings.base_url,
-                issuer = %settings.issuer,
-                audience = %settings.audience,
-                "JWT authentication enabled"
+                "proxy-trusted identity enforced (decode-only; no JWKS, no user-token verify)"
             );
-            middleware::protect(api_routes, verifier)
+            middleware::protect(api_routes)
         }
         AuthMode::Disabled => {
             tracing::warn!("AUTHENTICATION DISABLED — all /api/v1 routes are open");

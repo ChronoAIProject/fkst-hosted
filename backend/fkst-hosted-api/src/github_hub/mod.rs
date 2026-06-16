@@ -110,8 +110,12 @@ impl NyxIdGithubProxy {
         let nyxid = authz
             .nyxid()
             .ok_or_else(|| AppError::Unavailable("credential proxy not configured".to_string()))?;
+        // The GitHub proxy acts AS the caller, so it needs the forwarded user
+        // token. In "headers mode" (no bearer forwarded) the exchange cannot run
+        // -> 401 (clear, no degraded path is meaningful for GitHub access).
+        let user_token = ctx.require_user_token()?;
         let delegated = nyxid
-            .exchange_token(&ctx.raw_token)
+            .exchange_token(user_token)
             .await
             .map_err(crate::goals::CreateRepoError::from)?;
         Ok(NyxIdGithubProxy {

@@ -18,6 +18,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::auth::AuthContext;
+use crate::authz::permissions::{self, require_permission};
 use crate::error::AppError;
 use crate::github_hub::fanout::{aggregate_issues, AggregateParams};
 use crate::github_hub::service::{
@@ -156,6 +157,7 @@ async fn accounts(
     State(state): State<AppState>,
     ctx: AuthContext,
 ) -> Result<Json<Vec<AccountView>>, AppError> {
+    require_permission(&ctx, permissions::GITHUB_READ)?;
     let proxy = build_proxy(&state, &ctx).await?;
     let accounts = list_accounts(&proxy).await?;
     Ok(Json(accounts))
@@ -167,6 +169,7 @@ async fn issues(
     ctx: AuthContext,
     Query(query): Query<IssuesQuery>,
 ) -> Result<Json<IssuesEnvelope>, AppError> {
+    require_permission(&ctx, permissions::GITHUB_READ)?;
     let proxy = Arc::new(build_proxy(&state, &ctx).await?);
     let params = AggregateParams {
         accounts: query.accounts.as_deref().map(split_csv),
@@ -219,6 +222,7 @@ async fn create_issue_handler(
     Path((owner, repo)): Path<(String, String)>,
     AppJson(req): AppJson<CreateIssueBody>,
 ) -> Result<Response, AppError> {
+    require_permission(&ctx, permissions::GITHUB_WRITE)?;
     let repo_ref = RepoRef::new(&owner, &repo)?;
     if req.title.trim().is_empty() {
         return Err(AppError::Validation(
@@ -254,6 +258,7 @@ async fn patch_issue_handler(
     Path((owner, repo, number)): Path<(String, String, String)>,
     AppJson(req): AppJson<PatchIssueBody>,
 ) -> Result<Json<IssueView>, AppError> {
+    require_permission(&ctx, permissions::GITHUB_WRITE)?;
     let repo_ref = RepoRef::new(&owner, &repo)?;
     let number = parse_number(&number)?;
     let proxy = build_proxy(&state, &ctx).await?;
@@ -269,6 +274,7 @@ async fn get_issue_handler(
     Path((owner, repo, number)): Path<(String, String, String)>,
     Query(query): Query<AccountQuery>,
 ) -> Result<Json<IssueView>, AppError> {
+    require_permission(&ctx, permissions::GITHUB_READ)?;
     let repo_ref = RepoRef::new(&owner, &repo)?;
     let number = parse_number(&number)?;
     let proxy = build_proxy(&state, &ctx).await?;
@@ -283,6 +289,7 @@ async fn list_comments_handler(
     Path((owner, repo, number)): Path<(String, String, String)>,
     Query(query): Query<CommentsQuery>,
 ) -> Result<Json<Vec<CommentView>>, AppError> {
+    require_permission(&ctx, permissions::GITHUB_READ)?;
     let repo_ref = RepoRef::new(&owner, &repo)?;
     let number = parse_number(&number)?;
     let proxy = build_proxy(&state, &ctx).await?;
@@ -305,6 +312,7 @@ async fn create_comment_handler(
     Path((owner, repo, number)): Path<(String, String, String)>,
     AppJson(req): AppJson<CreateCommentBody>,
 ) -> Result<(StatusCode, Json<CommentView>), AppError> {
+    require_permission(&ctx, permissions::GITHUB_WRITE)?;
     let repo_ref = RepoRef::new(&owner, &repo)?;
     let number = parse_number(&number)?;
     if req.body.trim().is_empty() {

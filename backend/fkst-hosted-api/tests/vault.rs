@@ -8,6 +8,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL;
 use base64::Engine as _;
 use fkst_hosted_api::auth::AuthMode;
 use fkst_hosted_api::authz::Authorizer;
@@ -356,6 +357,39 @@ fn router(db: Db, vault: VaultService) -> axum::Router {
     .expect("router")
 }
 
+/// Build a router with proxy-trusted auth ENABLED, so a request can carry an
+/// identity token with a SPECIFIC (non-admin) permission set — needed to test
+/// the two-layer model where the action layer passes but the object layer
+/// (ownership) denies.
+fn router_auth_enabled(db: Db, vault: VaultService) -> axum::Router {
+    let goals = GoalRepo::new(&db.database);
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    build_router(AppState {
+        config: Config::default(),
+        db,
+        sessions,
+        auth_mode: AuthMode::Enabled(fkst_hosted_api::auth::NyxIdAuthSettings {
+            base_url: "https://nyxid.example.test".to_string(),
+        }),
+        authz: Authorizer::disabled(),
+        github_app: None,
+        github_app_webhook_secret: None,
+        goals,
+        vault,
+        ornn: None,
+    })
+    .expect("router")
+}
+
+/// A proxy-injected identity token granting exactly `permissions`, for the
+/// given `sub`. Decode-only; the signature segment is never verified.
+fn identity_header(sub: &str, permissions: &[&str]) -> String {
+    let header = BASE64_URL.encode(br#"{"alg":"RS256","typ":"JWT"}"#);
+    let payload = serde_json::json!({ "sub": sub, "permissions": permissions });
+    let body = BASE64_URL.encode(payload.to_string().as_bytes());
+    format!("{header}.{body}.unverified-signature")
+}
+
 async fn send(router: &axum::Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {
     let response = router.clone().oneshot(req).await.expect("response");
     let status = response.status();
@@ -609,13 +643,18 @@ async fn http_delete_of_another_owner_entry_is_403() {
         ))
         .await
         .expect("seed");
-    let app = router(db, vault);
-
-    // Auth is disabled => the dev context (`dev-local`) is the caller, not the
-    // owner. The Manage-tier authz must forbid deleting another owner's entry.
+    // Two-layer model: the caller HAS the `fkst:vault:delete` action permission
+    // (action layer passes) but is NOT the owner and not an admin, so the
+    // object layer (Manage-tier ownership) must forbid. Auth is enabled so a
+    // specific, non-admin permission set can be injected.
+    let app = router_auth_enabled(db, vault);
     let response = app
         .oneshot(
             Request::delete(format!("/api/v1/vault/entries/{}", stored.id))
+                .header(
+                    "X-NyxID-Identity-Token",
+                    identity_header("not-the-owner", &["fkst:vault:delete"]),
+                )
                 .body(Body::empty())
                 .expect("req"),
         )

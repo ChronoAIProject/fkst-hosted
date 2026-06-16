@@ -156,23 +156,18 @@ struct ErrorEnvelope {
     message: String,
 }
 
-/// Map auth-domain errors onto the unified type:
-/// - client errors (missing/malformed/invalid token) -> 401 Unauthorized
-/// - JWKS outage -> 503 Unavailable (inner detail logged only)
+/// Map auth-domain errors onto the unified type.
+///
+/// fkst-hosted does not authenticate users (the NyxID proxy does, #113), so the
+/// only auth-domain failure is a missing proxy-injected identity — a 401 that is
+/// only reachable when the proxy is misconfigured or absent in front of the
+/// service.
 impl From<crate::auth::AuthError> for AppError {
     fn from(err: crate::auth::AuthError) -> Self {
         use crate::auth::AuthError;
         match err {
-            AuthError::MissingToken => AppError::Unauthorized("missing bearer token".to_string()),
-            AuthError::MalformedHeader => {
-                AppError::Unauthorized("malformed authorization header".to_string())
-            }
-            AuthError::InvalidToken(reason) => {
-                AppError::Unauthorized(format!("invalid token: {reason}"))
-            }
-            AuthError::JwksUnavailable(detail) => {
-                tracing::error!(error = %detail, "JWKS fetch failed");
-                AppError::Unavailable("authentication service unavailable".to_string())
+            AuthError::MissingIdentity => {
+                AppError::Unauthorized("missing proxy-injected identity".to_string())
             }
         }
     }
@@ -409,23 +404,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auth_error_missing_token_maps_to_401() {
-        let err: AppError = crate::auth::AuthError::MissingToken.into();
+    async fn auth_error_missing_identity_maps_to_401() {
+        let err: AppError = crate::auth::AuthError::MissingIdentity.into();
         let (status, body, _headers) = render(err).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"], "unauthorized");
-    }
-
-    #[tokio::test]
-    async fn auth_error_jwks_unavailable_maps_to_503() {
-        let err: AppError =
-            crate::auth::AuthError::JwksUnavailable("connection refused".to_string()).into();
-        let (status, body, _headers) = render(err).await;
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(body["error"], "unavailable");
-        assert_eq!(body["message"], "authentication service unavailable");
-        // Inner detail must not leak to client.
-        assert!(!body.to_string().contains("connection refused"));
+        assert_eq!(body["message"], "missing proxy-injected identity");
     }
 
     #[tokio::test]

@@ -18,6 +18,7 @@ use axum::{Json, Router};
 use serde::Serialize;
 
 use crate::auth::AuthContext;
+use crate::authz::permissions::{self, require_permission};
 use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::models::{SessionDoc, SessionStatus};
@@ -119,6 +120,9 @@ async fn get_one(
     ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<Json<SessionView>, AppError> {
+    // Action layer: may the caller read sessions at all? Object layer (owner /
+    // org) is then enforced below per the specific session.
+    require_permission(&ctx, permissions::SESSION_READ)?;
     let id = parse_session_id(&id)?;
     match state.sessions.get(id).await? {
         Some(session) => {
@@ -141,6 +145,9 @@ async fn stop(
     ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<StopResponse>), AppError> {
+    // Action layer: may the caller stop sessions at all? Object layer (owner /
+    // org writer) is then enforced below per the specific session.
+    require_permission(&ctx, permissions::SESSION_STOP)?;
     let id = parse_session_id(&id)?;
     // Fetch the session for authorization.
     let session = state.sessions.get(id).await?;

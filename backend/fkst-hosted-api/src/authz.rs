@@ -1,18 +1,41 @@
-//! Resource authorization: pure policy (`allows`) + async facade (`Authorizer`).
+//! Resource authorization — the OBJECT layer of the two-layer model.
 //!
-//! Policy rules (ordered):
-//! 1. `fkst:admin` scope -> allow everything
+//! fkst-hosted authorizes in two ordered layers (issue #113):
+//!
+//! 1. **Action layer** ([`permissions::require_permission`]): may the caller
+//!    perform this *class* of action at all? Gated by the `fkst:*` permission
+//!    strings NyxID assigned (exact-string inclusion; no local role→permission
+//!    matrix). Handlers run this FIRST, at entry.
+//! 2. **Object layer (this module):** may the caller act on this *specific*
+//!    resource? Ownership / org-role visibility, checked AFTER the action layer.
+//!
+//! Both must pass. This module is unchanged in spirit from before #113 — it
+//! still enforces ownership and org-role visibility — but the admin bypass now
+//! reads the `fkst:admin` *permission* (NyxID-assigned), not a token *scope*.
+//!
+//! Object-layer policy rules (ordered):
+//! 1. `fkst:admin` permission -> allow everything
 //! 2. owner_user_id == caller -> allow everything
 //! 3. org member: Viewer -> Read; Member -> Read+Write; Admin -> all
 //! 4. owner_user_id == None (legacy pre-auth doc) -> allow everything
 //!
 //! The async facade (`Authorizer`) only calls NyxID when the pure checks
 //! don't already decide, so owner-path requests stay fast and keep working
-//! during a NyxID outage.
+//! during a NyxID outage. Org-role lookups use the caller's FORWARDED user
+//! access token and FAIL SOFT when it is absent (mirrors Ornn): reads degrade
+//! to non-member, and writes that need a role cannot be authorized.
 //!
 //! Package-share predicates were removed with the package store (#115): packages
 //! are now repo-scoped, so package access is governed by the goal repo's GitHub
 //! permissions, not a `package_shares` collection.
+//!
+//! Behavioural note for operators: org Members were previously granted Write
+//! directly by rule 3. Under #113 the *action* (e.g. `fkst:goal:trigger`) comes
+//! from NyxID's `permissions[]`; the org-membership *object* check below stays.
+//! NyxID must assign org Admin → all `fkst:*`, Member → read + write + trigger,
+//! Viewer → read to preserve current behaviour.
+
+pub mod permissions;
 
 use crate::auth::AuthContext;
 use crate::error::AppError;
@@ -33,9 +56,6 @@ pub struct Ownership<'a> {
     pub org_id: Option<&'a str>,
 }
 
-/// Operator escape-hatch scope.
-pub const ADMIN_SCOPE: &str = "fkst:admin";
-
 /// Pure authorization check: no IO, no side effects.
 ///
 /// Returns `true` when `ctx` is allowed to perform `action` on `res`
@@ -46,8 +66,8 @@ pub fn allows(
     org_role: Option<OrgRole>,
     action: Action,
 ) -> bool {
-    // Rule 1: admin scope bypasses everything.
-    if ctx.has_scope(ADMIN_SCOPE) {
+    // Rule 1: admin permission bypasses everything.
+    if ctx.has_permission(permissions::ADMIN) {
         return true;
     }
     // Rule 2: owner has full access.
@@ -113,7 +133,7 @@ impl Authorizer {
         id: &str,
     ) -> Result<(), AppError> {
         // Fast-path pure checks that don't need NyxID.
-        if ctx.has_scope(ADMIN_SCOPE) {
+        if ctx.has_permission(permissions::ADMIN) {
             return Ok(());
         }
         if let Some(owner) = res.owner_user_id {
@@ -162,11 +182,25 @@ impl Authorizer {
 
     /// Return the org ids visible to `ctx`. Empty when NyxID is not
     /// configured (owner-only mode).
+    ///
+    /// The org listing is authenticated with the caller's FORWARDED user access
+    /// token. When that token is absent ("headers mode" / no bearer forwarded),
+    /// the lookup cannot run, so it FAILS SOFT to an empty list (mirrors Ornn's
+    /// `nyxidOrgLookupMiddleware`): the caller is treated as a member of no org,
+    /// so read visibility degrades to their own resources only — never a hard
+    /// error on a read path.
     pub async fn visible_org_ids(&self, ctx: &AuthContext) -> Result<Vec<String>, AppError> {
         let Some(client) = &self.nyxid else {
             return Ok(Vec::new());
         };
-        match client.user_orgs(&ctx.user_id, &ctx.raw_token).await {
+        let Some(user_token) = ctx.user_access_token.as_ref() else {
+            tracing::debug!(
+                user_id = %ctx.user_id,
+                "no forwarded user token; org visibility degrades to non-member"
+            );
+            return Ok(Vec::new());
+        };
+        match client.user_orgs(&ctx.user_id, user_token).await {
             Ok(orgs) => Ok(orgs.into_iter().map(|o| o.id).collect()),
             Err(error) => {
                 tracing::error!(
@@ -188,8 +222,8 @@ impl Authorizer {
         ctx: &AuthContext,
         org_id: &str,
     ) -> Result<(), AppError> {
-        // Admin scope bypasses.
-        if ctx.has_scope(ADMIN_SCOPE) {
+        // Admin permission bypasses.
+        if ctx.has_permission(permissions::ADMIN) {
             return Ok(());
         }
         let role = match &self.nyxid {
@@ -224,17 +258,15 @@ mod tests {
     use crate::auth::AuthContext;
     use secrecy::SecretString;
 
-    fn ctx(user: &str, scopes: &[&str]) -> AuthContext {
+    fn ctx(user: &str, permissions: &[&str]) -> AuthContext {
         AuthContext {
             user_id: user.to_string(),
-            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+            email: String::new(),
+            display_name: user.to_string(),
             roles: vec![],
+            permissions: permissions.iter().map(|s| s.to_string()).collect(),
             groups: vec![],
-            permissions: vec![],
-            session_id: None,
-            is_service_account: false,
-            delegation: None,
-            raw_token: SecretString::new("".into()),
+            user_access_token: Some(SecretString::new("".into())),
         }
     }
 
@@ -311,15 +343,27 @@ mod tests {
         assert!(allows(&ctx, res, None, Action::Manage));
     }
 
-    // ---- admin scope bypass ----
+    // ---- admin permission bypass ----
 
     #[test]
-    fn admin_scope_bypasses() {
-        let ctx = ctx("ops", &["fkst:admin"]);
+    fn admin_permission_bypasses() {
+        // The admin escape hatch is now a NyxID-assigned PERMISSION.
+        let ctx = ctx("ops", &[permissions::ADMIN]);
         let res = own(Some("alice"), Some("org-1"));
         assert!(allows(&ctx, res, None, Action::Read));
         assert!(allows(&ctx, res, None, Action::Write));
         assert!(allows(&ctx, res, None, Action::Manage));
+    }
+
+    #[test]
+    fn non_admin_permission_does_not_bypass() {
+        // A non-admin caller with no ownership/org role is denied a stranger's
+        // resource regardless of which other permissions they hold: the object
+        // layer is independent of the action-layer permission set.
+        let ctx = ctx("ops", &["fkst:goal:read", "fkst:goal:create"]);
+        let res = own(Some("alice"), Some("org-1"));
+        assert!(!allows(&ctx, res, None, Action::Read));
+        assert!(!allows(&ctx, res, None, Action::Write));
     }
 
     // ---- error mapping tests via Authorizer facade ----

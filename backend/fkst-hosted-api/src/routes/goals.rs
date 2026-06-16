@@ -19,6 +19,7 @@ use bson::doc;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthContext;
+use crate::authz::permissions::{self, require_permission};
 use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::goals::{
@@ -235,6 +236,8 @@ async fn create(
     ctx: AuthContext,
     AppJson(request): AppJson<CreateGoalRequest>,
 ) -> Result<(StatusCode, [(HeaderName, HeaderValue); 1], Json<GoalView>), AppError> {
+    // Action layer: may the caller create goals at all?
+    require_permission(&ctx, permissions::GOAL_CREATE)?;
     // Org membership check (if org_id provided).
     if let Some(ref org_id) = request.org_id {
         state.authz.require_org_writer(&ctx, org_id).await?;
@@ -304,6 +307,9 @@ async fn list(
     ctx: AuthContext,
     Query(query): Query<ListGoalsQuery>,
 ) -> Result<Json<Vec<GoalView>>, AppError> {
+    // Action layer: may the caller read goals at all? The result is then scoped
+    // to the goals they own / can see (object layer) by the query below.
+    require_permission(&ctx, permissions::GOAL_READ)?;
     let org_ids = state.authz.visible_org_ids(&ctx).await?;
 
     let status: Option<GoalStatus> = match query.status.as_deref() {
@@ -338,6 +344,8 @@ async fn get_one(
     ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<Json<GoalView>, AppError> {
+    // Action layer: may the caller read goals at all? Object layer below.
+    require_permission(&ctx, permissions::GOAL_READ)?;
     let uuid = parse_goal_uuid(&id)?;
     let mut goal = state
         .goals
@@ -421,6 +429,8 @@ async fn update(
     Path(id): Path<String>,
     AppJson(body): AppJson<PatchGoalRequest>,
 ) -> Result<Json<GoalView>, AppError> {
+    // Action layer: may the caller update goals at all? Object layer below.
+    require_permission(&ctx, permissions::GOAL_UPDATE)?;
     let uuid = parse_goal_uuid(&id)?;
 
     // Fetch existing for authz check.
@@ -581,6 +591,8 @@ async fn delete_one(
     ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<StatusCode, AppError> {
+    // Action layer: may the caller delete goals at all? Object layer below.
+    require_permission(&ctx, permissions::GOAL_DELETE)?;
     let uuid = parse_goal_uuid(&id)?;
 
     // Fetch existing for authz check.
@@ -624,6 +636,9 @@ async fn trigger(
     Path(id): Path<String>,
     AppJson(body): AppJson<TriggerRequest>,
 ) -> Result<(StatusCode, Json<TriggerResponse>), AppError> {
+    // Action layer: may the caller trigger goals at all? The owner/org-writer
+    // object check still runs below per the specific goal.
+    require_permission(&ctx, permissions::GOAL_TRIGGER)?;
     let uuid = parse_goal_uuid(&id)?;
 
     // Cross-field validation for repo_mode.
@@ -671,7 +686,7 @@ async fn trigger(
         // action). For non-owners with an org, we need to check org membership
         // at member+ level.
         if ownership.owner_user_id != Some(ctx.user_id.as_str())
-            && !ctx.has_scope(crate::authz::ADMIN_SCOPE)
+            && !ctx.has_permission(crate::authz::permissions::ADMIN)
         {
             if let Some(ref org_id) = goal.org_id {
                 state.authz.require_org_writer(&ctx, org_id).await?;
@@ -885,9 +900,13 @@ async fn trigger(
         ornn_skills: body.ornn_skills.clone(),
     };
 
+    // Forward the caller's user access token (when present) so the driver can
+    // mint the per-session NyxID agent key on their behalf (#111). In "headers
+    // mode" (no bearer forwarded) it is `None` and the driver skips per-session
+    // provisioning, behaving exactly as pre-#111.
     let result = state
         .sessions
-        .create_for_goal(&state.goals, trigger_info, ctx.raw_token.clone())
+        .create_for_goal(&state.goals, trigger_info, ctx.user_access_token.clone())
         .await?;
 
     tracing::info!(
@@ -973,8 +992,11 @@ async fn create_new_repo(
         )
     })?;
 
-    // Exchange the user's inbound token for a delegated token.
-    let delegated = nyxid.exchange_token(&ctx.raw_token).await.map_err(|e| {
+    // Exchange the user's inbound token for a delegated token. Creating a repo
+    // acts AS the caller against GitHub, so the forwarded user token is required;
+    // in "headers mode" (no bearer forwarded) the exchange cannot run -> 401.
+    let user_token = ctx.require_user_token()?;
+    let delegated = nyxid.exchange_token(user_token).await.map_err(|e| {
         // Map NyxID errors to CreateRepoError, then AppError.
         crate::goals::CreateRepoError::from(e)
     })?;

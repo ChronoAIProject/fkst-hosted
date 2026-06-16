@@ -19,6 +19,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthContext;
+use crate::authz::permissions::{self, require_permission};
 use crate::error::AppError;
 use crate::ornn::client::OrnnClient;
 use crate::ornn::types::{SearchPage, VersionRow};
@@ -170,11 +171,11 @@ async fn list_skills(
     ctx: AuthContext,
     Query(query): Query<CatalogQuery>,
 ) -> Result<Json<CatalogResponse>, AppError> {
+    require_permission(&ctx, permissions::CATALOG_READ)?;
     let client = require_ornn(&state)?;
+    let token = ctx.require_user_token()?;
     let params = skill_scope_params(&query)?;
-    let page = client
-        .skill_search(&ctx.raw_token, &as_pairs(&params))
-        .await?;
+    let page = client.skill_search(token, &as_pairs(&params)).await?;
     tracing::debug!(count = page.items.len(), "catalog skills listed");
     Ok(Json(into_skills_response(page)))
 }
@@ -185,11 +186,11 @@ async fn list_skillsets(
     ctx: AuthContext,
     Query(query): Query<CatalogQuery>,
 ) -> Result<Json<CatalogResponse>, AppError> {
+    require_permission(&ctx, permissions::CATALOG_READ)?;
     let client = require_ornn(&state)?;
+    let token = ctx.require_user_token()?;
     let params = skillset_scope_params(&query)?;
-    let page = client
-        .skillset_search(&ctx.raw_token, &as_pairs(&params))
-        .await?;
+    let page = client.skillset_search(token, &as_pairs(&params)).await?;
     tracing::debug!(count = page.items.len(), "catalog skillsets listed");
     Ok(Json(into_skillsets_response(page)))
 }
@@ -200,9 +201,11 @@ async fn skill_versions(
     ctx: AuthContext,
     Path(name): Path<String>,
 ) -> Result<Json<VersionsResponse>, AppError> {
+    require_permission(&ctx, permissions::CATALOG_READ)?;
     validate_catalog_name(&name)?;
     let client = require_ornn(&state)?;
-    let versions = client.skill_versions(&ctx.raw_token, &name).await?;
+    let token = ctx.require_user_token()?;
+    let versions = client.skill_versions(token, &name).await?;
     Ok(Json(VersionsResponse {
         data: VersionsData { name, versions },
     }))
@@ -214,9 +217,11 @@ async fn skillset_versions(
     ctx: AuthContext,
     Path(name): Path<String>,
 ) -> Result<Json<VersionsResponse>, AppError> {
+    require_permission(&ctx, permissions::CATALOG_READ)?;
     validate_catalog_name(&name)?;
     let client = require_ornn(&state)?;
-    let versions = client.skillset_versions(&ctx.raw_token, &name).await?;
+    let token = ctx.require_user_token()?;
+    let versions = client.skillset_versions(token, &name).await?;
     Ok(Json(VersionsResponse {
         data: VersionsData { name, versions },
     }))

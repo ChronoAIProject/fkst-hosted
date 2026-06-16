@@ -88,14 +88,6 @@ mod defaults {
         true
     }
 
-    pub(super) fn auth_issuer() -> String {
-        "nyxid".to_string()
-    }
-
-    pub(super) fn auth_jwks_cache_ttl_secs() -> u64 {
-        300
-    }
-
     pub(super) fn nyxid_org_cache_ttl_secs() -> u64 {
         30
     }
@@ -250,12 +242,6 @@ struct AuthVars {
     auth_enabled: bool,
     #[serde(default)]
     auth_nyxid_base_url: Option<String>,
-    #[serde(default = "defaults::auth_issuer")]
-    auth_issuer: String,
-    #[serde(default)]
-    auth_audience: Option<String>,
-    #[serde(default = "defaults::auth_jwks_cache_ttl_secs")]
-    auth_jwks_cache_ttl_secs: u64,
     #[serde(default = "defaults::nyxid_org_cache_ttl_secs")]
     nyxid_org_cache_ttl_secs: u64,
     #[serde(default = "defaults::nyxid_github_proxy_slug")]
@@ -567,11 +553,6 @@ impl Config {
         let auth: AuthVars = envy::prefixed(JOURNAL_ENV_PREFIX)
             .from_iter(vars.iter().cloned())
             .map_err(|e| AppError::Config(e.to_string()))?;
-        if auth.auth_jwks_cache_ttl_secs == 0 {
-            return Err(AppError::Config(
-                "FKST_AUTH_JWKS_CACHE_TTL_SECS must be at least 1".to_string(),
-            ));
-        }
         if auth.nyxid_org_cache_ttl_secs == 0 {
             return Err(AppError::Config(
                 "FKST_NYXID_ORG_CACHE_TTL_SECS must be at least 1".to_string(),
@@ -595,13 +576,10 @@ impl Config {
                     ));
                 }
             };
-            let audience = auth.auth_audience.unwrap_or_else(|| base_url.clone());
-            AuthMode::Enabled(NyxIdAuthSettings {
-                base_url,
-                issuer: auth.auth_issuer,
-                audience,
-                jwks_cache_ttl: std::time::Duration::from_secs(auth.auth_jwks_cache_ttl_secs),
-            })
+            // No JWKS / issuer / audience: fkst-hosted trusts the proxy and never
+            // verifies a user token (#113). `base_url` is the NyxID issuer host,
+            // used by the org-lookup client and per-session token provisioning.
+            AuthMode::Enabled(NyxIdAuthSettings { base_url })
         } else {
             AuthMode::Disabled
         };
@@ -1014,52 +992,33 @@ mod tests {
         .expect("enabled with base URL");
         match config.auth {
             AuthMode::Enabled(ref settings) => {
-                // Trailing slash must be trimmed.
+                // Trailing slash must be trimmed. No issuer/audience/JWKS: the
+                // proxy is trusted (#113) and no user token is ever verified.
                 assert_eq!(settings.base_url, "https://nyxid.example.com");
-                assert_eq!(settings.issuer, "nyxid");
-                // Audience defaults to base_url (after trim).
-                assert_eq!(settings.audience, "https://nyxid.example.com");
-                assert_eq!(settings.jwks_cache_ttl, std::time::Duration::from_secs(300));
             }
             AuthMode::Disabled => panic!("expected Enabled, got Disabled"),
         }
     }
 
     #[test]
-    fn auth_issuer_and_audience_are_overridable() {
+    fn legacy_jwks_issuer_audience_env_vars_are_ignored() {
+        // The old verification settings no longer exist; supplying them must be
+        // harmless (envy ignores unknown vars) — `base_url` is all that matters.
         let config = Config::from_vars(vars(&[
             URI,
             ("FKST_AUTH_ENABLED", "true"),
             ("FKST_AUTH_NYXID_BASE_URL", "https://nyxid.example.com"),
-            ("FKST_AUTH_ISSUER", "custom-issuer"),
-            ("FKST_AUTH_AUDIENCE", "my-audience"),
-            ("FKST_AUTH_JWKS_CACHE_TTL_SECS", "600"),
+            ("FKST_AUTH_ISSUER", "ignored"),
+            ("FKST_AUTH_AUDIENCE", "ignored"),
+            ("FKST_AUTH_JWKS_CACHE_TTL_SECS", "0"),
         ]))
-        .expect("auth overrides");
+        .expect("legacy verification vars are ignored, not errors");
         match config.auth {
             AuthMode::Enabled(ref settings) => {
-                assert_eq!(settings.issuer, "custom-issuer");
-                assert_eq!(settings.audience, "my-audience");
-                assert_eq!(settings.jwks_cache_ttl, std::time::Duration::from_secs(600));
+                assert_eq!(settings.base_url, "https://nyxid.example.com");
             }
             AuthMode::Disabled => panic!("expected Enabled"),
         }
-    }
-
-    #[test]
-    fn zero_jwks_cache_ttl_is_a_config_error_naming_the_variable() {
-        let err = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "true"),
-            ("FKST_AUTH_NYXID_BASE_URL", "https://nyxid.example.com"),
-            ("FKST_AUTH_JWKS_CACHE_TTL_SECS", "0"),
-        ]))
-        .expect_err("zero JWKS cache TTL must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("FKST_AUTH_JWKS_CACHE_TTL_SECS"),
-            "error must name the variable, got: {err}"
-        );
     }
 
     // ---- NyxID client credential tests ----------------------------------------
