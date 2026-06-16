@@ -15,12 +15,15 @@ function M.prompt_preamble(exec)
     language_line = "Write all prose output in Simplified Chinese; quote code identifiers and cited originals verbatim."
   end
 
-  -- Slots supersede GitHub issues #142 and #145: env-driven language selection plus
-  -- harness-first judgment are fixed context, not verdict/parser protocol.
-  return table.concat({
-    language_line,
-    "Before judging, identify the established theory or industry best practice governing this problem class; treat unjustified deviation from established practice as grounds for rejection or narrowing; require proof that existing practice does not apply before accepting novelty.",
-  }, "\n")
+  return language_line
+end
+
+function M.judge_harness_clause()
+  return "Before judging, identify the established theory or industry best practice governing this problem class; treat unjustified deviation from established practice as grounds for rejection or narrowing; require proof that existing practice does not apply before accepting novelty."
+end
+
+function M.actor_harness_clause()
+  return "Before acting, identify the established theory or industry best practice governing this change and anchor the implementation in it and in the agreed framing; if the requested change would require an unjustified deviation from established practice, or if required facts or safe execution bounds are unavailable, surface that blocker explicitly instead of silently improvising or claiming success."
 end
 
 function M.review_observation_boundary_clause()
@@ -31,12 +34,27 @@ function M.short_review_observation_boundary_clause()
   return "Review boundary: CI/mergeability/head-binding are later merge-gate facts; do not demand them in review."
 end
 
+function M.execution_boundary_clause(source_phrase)
+  return table.concat({
+    "Execution boundary:",
+    "- You are running in an empty runtime scratch directory, not a repository checkout.",
+    "- Do not clone, checkout, fetch with git, create branches, or modify any repository.",
+    "- " .. tostring(source_phrase or ""),
+  }, "\n")
+end
+
 local function github_entity_history_line()
   return "Before judging, read the local context files named below. They may be large, so read them in segments as needed. They contain the complete fetched GitHub history for this delivery; prior review verdicts, fix notes, and convergence rounds recorded there are your memory of earlier rounds. Judge what changed relative to them; do not re-litigate settled points."
 end
 
 function M.render_prompt_template(template, vars, exec, opts)
+  local role = type(opts) == "table" and opts.role or "judge"
   local lines = { M.prompt_preamble(exec) }
+  if role == "actor" then
+    table.insert(lines, M.actor_harness_clause())
+  else
+    table.insert(lines, M.judge_harness_clause())
+  end
   if type(opts) == "table" and opts.entity_history == true then
     table.insert(lines, github_entity_history_line())
   end
@@ -118,7 +136,7 @@ function M.build_implement_prompt(proposal_id, current, framing, content_manifes
     title = M.neutralize_untrusted_prompt_text(current.title),
     test_command = M.test_command(),
     content_fetch_block = local_context_block(M, content_manifest),
-  }, nil, { entity_history = true })
+  }, nil, { role = "actor", entity_history = true })
 end
 
 function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_manifest, merge_context)
@@ -135,7 +153,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     content_fetch_block = local_context_block(M, content_manifest),
     review_feedback = M.neutralize_untrusted_prompt_text(review_reason),
     review_observation_boundary = M.review_observation_boundary_clause(),
-  }, nil, { entity_history = true })
+  }, nil, { role = "actor", entity_history = true })
 end
 
 function M.build_sync_conflict_prompt(conflict)
@@ -146,7 +164,7 @@ function M.build_sync_conflict_prompt(conflict)
     integration_branch = M.neutralize_untrusted_prompt_text(conflict.integration_branch),
     upstream_sha = M.neutralize_untrusted_prompt_text(conflict.upstream_sha),
     integration_sha = M.neutralize_untrusted_prompt_text(conflict.integration_sha),
-  })
+  }, nil, { role = "actor" })
 end
 
 function M.build_review_meta_prompt(review_meta, current_issue, content_manifest)
@@ -166,6 +184,7 @@ function M.build_review_meta_prompt(review_meta, current_issue, content_manifest
     content_fetch_block = local_context_block(M, content_manifest),
     comments = M.neutralize_untrusted_prompt_text(comments),
     review_observation_boundary = M.review_observation_boundary_clause(),
+    execution_boundary = M.execution_boundary_clause("Read GitHub context only from the local files named below."),
   }, nil, { entity_history = true })
 end
 
@@ -179,6 +198,7 @@ function M.build_intake_prompt(proposal_id, current, content_manifest)
     title = M.quote_untrusted_prompt_text(current.title),
     body = M.quote_untrusted_prompt_text(current.body),
     comments = M.quote_untrusted_prompt_text(comments),
+    execution_boundary = M.execution_boundary_clause("Judge only from the local context files and issue data provided in this prompt."),
   }, nil, { entity_history = true })
 end
 
@@ -190,6 +210,7 @@ function M.build_decompose_prompt(decompose, current_issue, content_manifest)
     round = M.neutralize_untrusted_prompt_text(decompose.round),
     title = M.quote_untrusted_prompt_text(current_issue.title),
     content_fetch_block = local_context_block(M, content_manifest),
+    execution_boundary = M.execution_boundary_clause("Read GitHub context only from the local files named below."),
   }, nil, { entity_history = true })
 end
 

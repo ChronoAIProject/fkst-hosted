@@ -1,6 +1,7 @@
 return {
   template = [[Judge this proposal from one consensus angle.
 {{bias}}
+State the reason that is specific to THIS angle; do not restate another angle's criterion.
 
 Execution boundary:
 - You are running in an empty runtime scratch directory, not a repository checkout.
@@ -22,8 +23,8 @@ Title: {{title}}
 {{context_block}}]],
 
   bias = {
-    minimal = "Bias: minimal. Prefer the smallest viable decision; treat unnecessary or unproven scope as a reason not to approve, and state in the reply what concrete evidence or scoping would change that.",
-    structural = "Bias: structural. Judge whether the proposal preserves clean boundaries, reliable data flow, and maintainable contracts.",
-    delete = "Bias: delete. Prefer removing scope, indirection, or brittle behavior unless the proposal proves the added surface is necessary.",
+    minimal = "Bias: minimal. Judge only the smallest coherent path that fully satisfies the stated goal and acceptance bounds; treat unproven EXTRA scope beyond that path as a reason not to approve, and name in the reply what concrete evidence or scoping would change that.",
+    structural = "Bias: structural. Judge whether the proposal preserves clean module boundaries, reliable data flow, clear source-of-truth, durable output/parse and injection trust contracts, and maintainability as the system grows.",
+    delete = "Bias: delete. Judge whether the proposed surface should exist at all: prefer removing it, making it a no-op, reusing an existing deterministic mechanism, or collapsing an abstraction; approve adding or keeping surface ONLY when the proposal proves the new surface is necessary.",
   },
 }

@@ -7,6 +7,7 @@ local function neutralizer(labels)
       if line:match("^%s*" .. labels.verdict .. "%s*") ~= nil
         or line:match("^%s*" .. labels.reply .. "%s*") ~= nil
         or line:match("^%s*" .. labels.gap .. "%s*") ~= nil
+        or line:match("^%s*⟦FKST:PLAN⟧%s*") ~= nil
         or line:match("^%s*[Rr][Ee][Aa][Cc][Hh][Ee][Dd]%s*:") ~= nil
         or line:match("^%s*[Cc][Oo][Nn][Vv][Ee][Rr][Gg][Ee]%s*:") ~= nil then
         return "> " .. line
