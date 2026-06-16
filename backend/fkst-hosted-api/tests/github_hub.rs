@@ -24,7 +24,6 @@ use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::nyxid::{NyxIdClient, DEFAULT_GITHUB_PROXY_SLUG};
-use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -183,14 +182,8 @@ async fn app(server: MockServer) -> TestApp {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
 
     let nyxid = NyxIdClient::new(
         &server.uri(),
@@ -205,8 +198,6 @@ async fn app(server: MockServer) -> TestApp {
     let router = build_router(AppState {
         config,
         db,
-        packages,
-        shares,
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
             base_url: server.uri(),
@@ -218,8 +209,6 @@ async fn app(server: MockServer) -> TestApp {
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })

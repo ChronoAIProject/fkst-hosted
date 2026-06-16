@@ -21,11 +21,11 @@ mod support;
 use std::path::Path;
 use std::time::Duration;
 
+use fkst_hosted_api::engine::materialize::PackageFile;
 use fkst_hosted_api::engine::process::signal_group;
 use fkst_hosted_api::engine::{
-    EngineConfig, LiveStatus, PreparedPackage, RunnerError, SessionRunner,
+    EngineConfig, LiveStatus, PreparedPackage, RunnerError, SessionRunner, StartSpec,
 };
-use fkst_hosted_api::packages::PackageFile;
 use nix::sys::signal::Signal;
 use nix::unistd::Pid;
 use support::require_engine;
@@ -83,6 +83,24 @@ fn fkst_entries(temp_root: &Path) -> usize {
         .count()
 }
 
+/// Lay the spike's minimal package on disk under a fake repo's
+/// `<repo>/.fkst/packages/<name>/` (issue #115), mirroring what the driver's
+/// clone step produces. Returns the temp repo root; the caller passes
+/// `--project-root <repo>` + `--package-root <repo>/.fkst/packages/<name>` via a
+/// repo-scoped [`StartSpec`].
+fn write_fixture_repo(name: &str) -> tempfile::TempDir {
+    let repo = tempfile::tempdir().expect("repo dir");
+    let pkg = repo.path().join(".fkst").join("packages").join(name);
+    std::fs::create_dir_all(pkg.join("departments").join("hello")).expect("mkdir dept");
+    std::fs::create_dir_all(pkg.join("raisers")).expect("mkdir raisers");
+    for file in minimal_package().files {
+        let target = pkg.join(&file.path);
+        std::fs::create_dir_all(target.parent().unwrap()).expect("mkdir parent");
+        std::fs::write(&target, file.content).expect("write package file");
+    }
+    repo
+}
+
 async fn wait_until(mut predicate: impl FnMut() -> bool, max_ms: u64) -> bool {
     let mut waited = 0;
     while waited < max_ms {
@@ -136,6 +154,49 @@ async fn happy_path_ready_running_logs_stop_and_clean() {
     assert_eq!(signal_group(pid, Signal::SIGTERM), Err(nix::Error::ESRCH));
     assert!(!session.package_dir.exists());
     assert!(!session.runtime_dir.exists());
+    assert_eq!(fkst_entries(temp_root.path()), 0, "no leaked fkst-* dirs");
+}
+
+/// Issue #115: the runner loads packages straight from a repo's
+/// `<repo>/.fkst/packages/<name>/` (the driver's clone output) — no Mongo store,
+/// no materialize copy — by pointing `--project-root` at the repo and
+/// `--package-root` at the package dir. Reaching `Running` against the real
+/// engine proves the repo-scoped load path end-to-end.
+#[tokio::test]
+async fn repo_scoped_package_starts_against_the_real_engine() {
+    let bin = require_engine!();
+    let temp_root = tempfile::tempdir().expect("temp root");
+    let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+    let repo = write_fixture_repo("repo-demo");
+    let package_root = repo.path().join(".fkst").join("packages").join("repo-demo");
+
+    let spec = StartSpec {
+        // Repo-scoped: `packages` stays empty; the dirs already exist on disk.
+        packages: Vec::new(),
+        goal: None,
+        env_profile: std::collections::BTreeMap::new(),
+        codex_home: None,
+        project_root: Some(repo.path().to_path_buf()),
+        package_roots: vec![package_root.clone()],
+    };
+    let mut session = runner
+        .start_with_spec(&spec)
+        .await
+        .expect("real engine must start a repo-scoped package");
+
+    assert_eq!(runner.status(&mut session), LiveStatus::Running);
+    let stderr = session.engine_stderr();
+    assert!(stderr.contains("event runtime running"), "{stderr}");
+
+    runner.stop(&mut session).await.expect("stop");
+    assert_eq!(runner.status(&mut session), LiveStatus::Stopped);
+    // The runner must NOT delete the repo dir (the driver owns the clone): only
+    // its own runtime temp dirs are cleaned.
+    assert!(
+        package_root.is_dir(),
+        "runner must not remove the driver-owned repo package dir"
+    );
     assert_eq!(fkst_entries(temp_root.path()), 0, "no leaked fkst-* dirs");
 }
 

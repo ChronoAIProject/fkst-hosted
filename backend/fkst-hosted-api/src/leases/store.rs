@@ -99,9 +99,8 @@ fn code_is_dup(code: i32) -> bool {
 }
 
 /// True when the driver error is a duplicate-key (`_id` collision) failure.
-/// Mirrors `crate::packages::error::is_duplicate_key`: the single-write path
-/// plus defensive `BulkWrite` / `Command` arms (driver versions differ in how
-/// they report the failure).
+/// Covers the single-write path plus defensive `BulkWrite` / `Command` arms
+/// (driver versions differ in how they report the failure).
 fn is_dup_key(err: &mongodb::error::Error) -> bool {
     match &*err.kind {
         ErrorKind::Write(WriteFailure::WriteError(write_error)) => code_is_dup(write_error.code),

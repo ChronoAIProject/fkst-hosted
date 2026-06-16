@@ -16,10 +16,24 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
+use serde::{Deserialize, Serialize};
+
 use crate::engine::error::RunnerError;
 use crate::engine::goal_token::{CREDENTIAL_HELPER_SCRIPT, HELPER_SCRIPT_NAME};
-use crate::packages::model::PackageFile;
-use crate::packages::{is_valid_name, Package};
+use crate::engine::util::is_valid_name;
+
+/// One file of a package: a relative `path` and its verbatim `content`. Files
+/// are an array (not a map) because BSON keys cannot contain dots while file
+/// paths do; array order is preserved and round-tripped verbatim.
+///
+/// This is the canonical engine-input file shape. It lives here (with
+/// [`PreparedPackage`]) rather than in a domain store so the engine plumbing and
+/// the journaling fingerprint never depend on a store module.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PackageFile {
+    pub path: String,
+    pub content: String,
+}
 
 /// Owner-only rwx for the executable credential-helper script.
 const HELPER_SCRIPT_MODE: u32 = 0o700;
@@ -30,29 +44,20 @@ const HELPER_SCRIPT_MODE: u32 = 0o700;
 /// written by [`write_fkst_env`] with the configured HostFacts.
 const RESERVED_HOST_PATHS: [&str; 2] = ["composed.deps", "fkst.env"];
 
-/// Validated runner input, derived from the stored package document. The
-/// runner stays Mongo-agnostic: the caller loads the [`Package`] and converts
-/// it (the `From` impl below) or builds one by hand.
+/// Validated runner input: an in-memory package the runner materializes into a
+/// plain on-disk tree (the classic, store-free path used by tests / minimal
+/// runs). Repo-scoped goal sessions (#115) bypass this and point the engine at
+/// the cloned `<repo>/.fkst/packages/<name>` dirs directly, so the runner stays
+/// agnostic to where a package's bytes come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedPackage {
     /// Package identity (`[A-Za-z0-9_-]+`), used in the temp-dir prefix.
     pub package_name: String,
     /// Files written verbatim under the package root. Duplicate paths are
-    /// last-writer-wins (documented; upstream package validation already
-    /// rejects duplicates at the API edge).
+    /// last-writer-wins (documented).
     pub files: Vec<PackageFile>,
     /// Rendered into `composed.deps` (one per line); no file when empty.
     pub composed_deps: Vec<String>,
-}
-
-impl From<Package> for PreparedPackage {
-    fn from(package: Package) -> Self {
-        Self {
-            package_name: package.name,
-            files: package.files,
-            composed_deps: package.composed_deps,
-        }
-    }
 }
 
 impl PreparedPackage {
@@ -430,25 +435,6 @@ mod tests {
         pkg.files.clear();
         let _ = pkg.validate();
         assert_eq!(count_entries(base.path()), 0);
-    }
-
-    // ---- From<Package> -------------------------------------------------------
-
-    #[test]
-    fn prepared_package_derives_from_stored_package() {
-        let stored = Package {
-            name: "demo".to_string(),
-            files: vec![file("departments/hello/main.lua", "x")],
-            composed_deps: vec!["dep-a".to_string()],
-            owner_user_id: None,
-            org_id: None,
-            created_at: bson::DateTime::from_millis(0),
-            updated_at: bson::DateTime::from_millis(0),
-        };
-        let prepared = PreparedPackage::from(stored);
-        assert_eq!(prepared.package_name, "demo");
-        assert_eq!(prepared.files.len(), 1);
-        assert_eq!(prepared.composed_deps, vec!["dep-a".to_string()]);
     }
 
     // ---- safe_join -----------------------------------------------------------

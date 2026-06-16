@@ -14,10 +14,7 @@ use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::journal::store::MongoProgressStore;
 use fkst_hosted_api::journal::JournalConfig;
 use fkst_hosted_api::leases::LeaseStore;
-use fkst_hosted_api::llm::gateway::NyxLlmGateway;
-use fkst_hosted_api::llm::{LlmConfig, LlmGateway};
 use fkst_hosted_api::nyxid::NyxIdClient;
-use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
@@ -92,24 +89,7 @@ async fn main() -> ExitCode {
     }
     tracing::info!("journal indexes ensured");
 
-    // 4b. Ensure the packages-collection indexes via the domain repository's
-    //     own startup hook (idempotent; fail-closed on error). The same
-    //     repository instance then joins AppState for the HTTP handlers.
-    let packages = PackageRepository::new(&db.database);
-    if let Err(error) = packages.ensure_indexes().await {
-        tracing::error!(error = %error, "failed to ensure packages indexes");
-        return ExitCode::FAILURE;
-    }
-
-    // 4b-bis. Ensure the package_shares-collection indexes (idempotent;
-    //         fail-closed on error). Share-aware policy checks depend on these.
-    let shares = ShareRepo::new(&db.database);
-    if let Err(error) = shares.ensure_indexes().await {
-        tracing::error!(error = %error, "failed to ensure package_shares indexes");
-        return ExitCode::FAILURE;
-    }
-
-    // 4b-ter. Ensure the goals-collection indexes (idempotent; fail-closed on
+    // 4b. Ensure the goals-collection indexes (idempotent; fail-closed on
     //          error). Goal CRUD and list queries depend on these.
     let goals = GoalRepo::new(&db.database);
     if let Err(error) = goals.ensure_indexes().await {
@@ -144,10 +124,6 @@ async fn main() -> ExitCode {
         }
     };
     let reconcile_engine_config = engine_config.clone();
-    // The generate endpoint's conformance dry-run reaches the engine plumbing
-    // through AppState; clone the config here because `engine_config` is moved
-    // into the session service below.
-    let state_engine_config = engine_config.clone();
 
     // 4d. Load the distribution configuration (fail-closed: a bad cadence
     //     or pod identity must never reach the lease layer).
@@ -179,7 +155,6 @@ async fn main() -> ExitCode {
     //     stale "running" state.
     let sessions = SessionService::with_distribution(
         SessionRepo::new(&db),
-        packages.clone(),
         engine_config,
         distributor.clone(),
     );
@@ -268,50 +243,10 @@ async fn main() -> ExitCode {
         _ => None,
     };
 
-    // The Authorizer is given the (optional) NyxID client and the ShareRepo for
-    // share-aware policy checks.
-    let authz = Authorizer::with_shares(nyxid_client.clone(), shares.clone());
-
-    // Build the LLM gateway for package generation. When the gateway URL is set
-    // (config has already verified the credentials + model are present), the
-    // NyxID client MUST exist (auth enabled with service credentials); a missing
-    // one is a fail-closed startup error. When the URL is unset, generation is
-    // disabled and the endpoint answers 503.
-    let llm: Option<Arc<dyn LlmGateway>> = match &config.llm_gateway_url {
-        Some(url) => {
-            let client = match &nyxid_client {
-                Some(client) => client.clone(),
-                None => {
-                    tracing::error!(
-                        "FKST_HOSTED_LLM_GATEWAY_URL set but NyxID service client unavailable \
-                         (auth must be enabled with NYXID_CLIENT_ID/SECRET)"
-                    );
-                    return ExitCode::FAILURE;
-                }
-            };
-            let model = config.llm_model.clone().unwrap_or_default();
-            let llm_config = LlmConfig {
-                gateway_url: url.clone(),
-                model,
-                timeout: std::time::Duration::from_secs(config.llm_timeout_secs),
-                max_output_bytes: config.llm_max_output_bytes,
-            };
-            match NyxLlmGateway::new(client, llm_config) {
-                Ok(gateway) => {
-                    tracing::info!("llm package generation enabled");
-                    Some(Arc::new(gateway))
-                }
-                Err(error) => {
-                    tracing::error!(error = %error, "failed to build llm gateway");
-                    return ExitCode::FAILURE;
-                }
-            }
-        }
-        None => {
-            tracing::info!("llm package generation disabled (FKST_HOSTED_LLM_GATEWAY_URL not set)");
-            None
-        }
-    };
+    // The Authorizer is given the (optional) NyxID client. Share-aware package
+    // policy was removed with the package store (#115); ownership/org checks
+    // remain.
+    let authz = Authorizer::new(nyxid_client.clone());
 
     // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must
     //     never reach a live session). The token service is built WITH the
@@ -471,16 +406,12 @@ async fn main() -> ExitCode {
     let app = match build_router(AppState {
         config,
         db,
-        packages,
-        shares,
         sessions: sessions.clone(),
         auth_mode,
         authz,
         github_app,
         github_app_webhook_secret,
         goals,
-        engine: state_engine_config,
-        llm,
         vault,
         ornn: ornn_client,
     }) {

@@ -143,353 +143,13 @@ curl "$FKST_API/health"
 
 ---
 
-## Packages
-
-A **package** is the unit the fkst engine runs: a `name` plus a list of lua
-`files` and an optional list of `composed_deps`. A package must contain at least
-one **engine entry file**:
-
-- a department entry — `departments/<name>/main.lua`, or
-- a raiser entry — `raisers/<name>.lua`.
-
-**Common data shapes**
-
-```jsonc
-// PackageFile
-{ "path": "departments/billing/main.lua", "content": "return {}" }
-
-// Package (response body for GET / PUT)
-{
-  "name": "billing-pipeline",
-  "files": [ { "path": "...", "content": "..." } ],
-  "composed_deps": [],
-  "owner_user_id": "user-123",   // null for legacy packages
-  "org_id": null,                // null for personal packages
-  "created_at": "2026-06-15T12:00:00Z",
-  "updated_at": "2026-06-15T12:00:00Z"
-}
-```
-
-See [size limits](#appendix-data-types--limits) for the exact constraints on
-names, files, and dependencies.
-
----
-
-### `POST /api/v1/packages` — create a package
-
-Create a package from JSON.
-
-- **Permission:** any authenticated caller. If `org_id` is supplied, the caller
-  must be an **org Member or Admin** of that org (else `403`).
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
-
-**Request body**
-
-| Field | Type | Required | Notes |
-|-------|------|:--------:|-------|
-| `name` | string | yes | Must match `^[A-Za-z0-9_-]+$` |
-| `files` | array of `PackageFile` | yes | ≥ 1, must include an engine entry file |
-| `composed_deps` | array of string | no | Defaults to `[]` |
-| `org_id` | string | no | Attach to an org instead of owning personally |
-
-**Responses**
-
-| Status | Meaning |
-|--------|---------|
-| `201 Created` | Created. Body `{ "name": "<name>" }`; `Location: /api/v1/packages/<name>` header |
-| `400` | Invalid name, files, or validation failure |
-| `409` | A package with that name already exists |
-
-```sh
-curl -X POST "$FKST_API/api/v1/packages" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{
-    "name": "billing-pipeline",
-    "files": [ { "path": "departments/billing/main.lua", "content": "return {}" } ],
-    "composed_deps": []
-  }'
-# 201 -> { "name": "billing-pipeline" }
-```
-
----
-
-### `GET /api/v1/packages` — list package names
-
-Returns a flat, ascending JSON array of package names.
-
-- **Permission:** authenticated. Returns packages you can see (owned, your orgs',
-  and legacy) plus packages shared with you. An empty store returns `[]`.
-- **Headers:** `Authorization: Bearer …`.
-
-**Query parameters**
-
-| Param | Values | Notes |
-|-------|--------|-------|
-| `filter` | `shared` | When `shared`, returns **only** package names shared with you |
-
-```sh
-curl -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/packages"
-# ["audit-log","billing-pipeline"]
-
-curl -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/packages?filter=shared"
-# ["billing-pipeline"]
-```
-
----
-
-### `GET /api/v1/packages/{name}` — fetch a package
-
-- **Permission:** **Read** — owner, any role in the package's org, a `read`/`use`
-  share, admin scope, or a legacy package. A package you can't read returns
-  `404` (anti-enumeration).
-- **Headers:** `Authorization: Bearer …`.
-
-**Path parameters:** `name` — the package name (`^[A-Za-z0-9_-]+$`).
-
-**Responses:** `200 OK` with a `Package` body; `400` invalid name; `404` not
-found / not visible.
-
-```sh
-curl -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/packages/billing-pipeline"
-```
-
----
-
-### `PUT /api/v1/packages/{name}` — replace a package's contents
-
-Atomically replaces `files` and `composed_deps`. The name, `created_at`, and
-ownership are untouched.
-
-- **Permission:** **Write** — owner, org Member/Admin, or admin scope.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
-
-**Request body**
-
-| Field | Type | Required |
-|-------|------|:--------:|
-| `files` | array of `PackageFile` | yes |
-| `composed_deps` | array of string | no (defaults `[]`) |
-
-**Responses:** `200 OK` with the updated `Package`; `400` validation; `403`
-not permitted; `404` not found.
-
-> **Snapshot semantics:** sessions materialize a package's files **at start**.
-> A `PUT` therefore affects only sessions started **after** it — already-running
-> sessions are unaffected.
-
-```sh
-curl -X PUT "$FKST_API/api/v1/packages/billing-pipeline" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{ "files": [ { "path": "departments/billing/main.lua", "content": "return {}" } ], "composed_deps": [] }'
-```
-
----
-
-### `DELETE /api/v1/packages/{name}` — delete a package
-
-- **Permission:** **Manage** — owner, org Admin, or admin scope.
-- **Headers:** `Authorization: Bearer …`.
-
-**Responses**
-
-| Status | Meaning |
-|--------|---------|
-| `204 No Content` | Deleted. All of the package's shares are cascade-removed |
-| `403` | Not permitted |
-| `404` | Not found |
-| `409` | The package has an active session or a live lease — stop it first |
-
-```sh
-curl -X DELETE -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/packages/billing-pipeline"
-```
-
----
-
-### `POST /api/v1/packages/{name}/archive` — create from a zip
-
-Create a package by uploading a zip archive as **raw bytes** (not multipart).
-
-- **Permission:** any authenticated caller (the package is owned by you;
-  attaching to an org is not supported on this path).
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/zip`.
-
-**Body:** raw `application/zip` bytes.
-
-**Zip rules**
-
-- Up to 256 file entries, plus one optional root `composed.deps`.
-- Per-file content ≤ 1 MiB; total decoded content ≤ 12 MiB; all content UTF-8.
-- A root `composed.deps` file is parsed into `composed_deps` (not stored as a file).
-- A root `fkst.env` file is **rejected** (host-owned).
-- Path rules match JSON create (no `..`, `/`-prefixed, backslash, or control chars).
-
-**Responses:** `201 Created` with `{ "name": "<name>" }` and a `Location`
-header; `400` invalid zip/validation; `409` name already exists.
-
-```sh
-curl -X POST "$FKST_API/api/v1/packages/billing-pipeline/archive" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/zip" \
-  --data-binary @billing-pipeline.zip
-```
-
----
-
-### `PUT /api/v1/packages/{name}/archive` — replace from a zip
-
-Same body and zip rules as the archive create.
-
-- **Permission:** **Write** — owner, org Member/Admin, or admin scope.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/zip`.
-- **Responses:** `200 OK` with the updated `Package`; `400`; `403`; `404`.
-- Snapshot semantics apply (see `PUT .../packages/{name}`).
-
----
-
-## Package generation
-
-### `POST /api/v1/packages/generate` — generate a package with AI
-
-Generate a validated fkst package draft from a natural-language description via
-NyxID's LLM gateway, and optionally save it as your own package.
-
-- **Permission:** any authenticated caller. With `save: true`, the draft is
-  created as **your own** package.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
-- **Availability:** requires the LLM gateway to be configured on the deployment;
-  otherwise the endpoint returns `503`.
-
-**Request body**
-
-| Field | Type | Required | Notes |
-|-------|------|:--------:|-------|
-| `description` | string | yes | 1–8192 bytes |
-| `name` | string | no | Must match `^[A-Za-z0-9_-]+$`; a unique `gen-<hex>` name is minted when absent |
-| `save` | boolean | no | When `true`, persist the draft if it validates and conformance did not fail |
-
-**Responses**
-
-`200 OK` whenever generation runs — **even if the draft fails validation or
-conformance** (the verdict is in the body):
-
-```json
-{
-  "package": { "name": "gen-1a2b3c4d", "files": [ /* PackageFile[] */ ], "composed_deps": [] },
-  "validation": { "ok": true, "errors": [] },
-  "conformance": { "status": "ok", "errors": [], "skipped_reason": null },
-  "saved": true,
-  "save_error": null,
-  "attempts": 1
-}
-```
-
-- `validation.ok` — passes the same gate every uploaded package passes. On
-  failure, one corrective retry (with the errors fed back to the model) is made.
-- `conformance.status` — `ok` | `failed` | `skipped` (with `skipped_reason` when
-  the engine dry-run could not run, e.g. raiser-only draft or exhausted budget).
-- `saved` / `save_error` — when `save: true`, whether it was persisted, or why not.
-- `attempts` — `1` or `2`.
-
-| Status | Meaning |
-|--------|---------|
-| `200` | Generation ran (inspect `validation`/`conformance`) |
-| `400` | Empty/oversize description, or an invalid explicit `name` |
-| `409` | `save: true` collided with an existing package name |
-| `503` | Generation not configured, or the gateway is unreachable |
-
-**Privacy:** the model is reached through NyxID's gateway with a service-account
-bearer; fkst-hosted never sees a raw provider key. The LLM has no tool access.
-Your description, the prompts, and the raw model output are never logged.
-
-```sh
-curl -X POST "$FKST_API/api/v1/packages/generate" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{ "description": "a department that greets every tick event", "save": true }'
-```
-
----
-
-## Package sharing
-
-Grant other users or organizations access to a package you manage. All share
-endpoints require **Manage** permission on the package (owner, org Admin, or
-admin scope).
-
-**Data shape**
-
-```jsonc
-// ShareView
-{
-  "id": "8f1c…",                 // share id (UUID)
-  "package_name": "billing-pipeline",
-  "grantee_kind": "user",        // "user" | "org"
-  "grantee_id": "user-456",      // NyxID user id or org id
-  "level": "use",                // "read" | "use"
-  "granted_by": "user-123",
-  "created_at": "2026-06-15T12:00:00Z"
-}
-```
-
----
-
-### `POST /api/v1/packages/{name}/shares` — create a share
-
-- **Permission:** Manage on the package.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
-
-**Request body**
-
-| Field | Type | Required | Notes |
-|-------|------|:--------:|-------|
-| `grantee_kind` | `"user"` \| `"org"` | yes | |
-| `grantee_id` | string | yes | NyxID user id (must exist) or org id (must exist, and you must be a member) |
-| `level` | `"read"` \| `"use"` | yes | `read` = view; `use` = view + run sessions |
-
-**Responses**
-
-| Status | Meaning |
-|--------|---------|
-| `201 Created` | The created `ShareView` |
-| `400` | Sharing with yourself, or an unknown user |
-| `403` | Not a member of the target org |
-| `409` | A share already exists for that grantee |
-
-```sh
-curl -X POST "$FKST_API/api/v1/packages/billing-pipeline/shares" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{ "grantee_kind": "user", "grantee_id": "user-456", "level": "use" }'
-```
-
----
-
-### `GET /api/v1/packages/{name}/shares` — list shares
-
-- **Permission:** Manage on the package.
-- **Responses:** `200 OK` with an array of `ShareView`.
-
-```sh
-curl -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/packages/billing-pipeline/shares"
-```
-
----
-
-### `DELETE /api/v1/packages/{name}/shares/{share_id}` — revoke a share
-
-- **Permission:** Manage on the package.
-- **Path parameters:** `name`, `share_id` (UUID; the share must belong to the
-  named package).
-- **Responses:** `204 No Content`; `400` invalid share id; `404` share not found.
-
-```sh
-curl -X DELETE -H "Authorization: Bearer $TOKEN" \
-  "$FKST_API/api/v1/packages/billing-pipeline/shares/8f1c…"
-```
-
----
-
 ## Sessions
 
-A **session** runs a package on the fkst engine. You start one, poll its status,
-and stop it. Status lifecycle:
+A **session** runs your repo's packages on the fkst engine. Sessions are created
+exclusively by **triggering a goal** (`POST /api/v1/goals/{id}/trigger`): the
+trigger clones the goal's repo, loads the named packages from
+`<repo>/.fkst/packages/`, and starts the engine. You then poll the session's
+status and stop it through the endpoints below. Status lifecycle:
 
 ```
 pending → validating → running → stopping → stopped
@@ -564,43 +224,10 @@ pending → validating → running → stopping → stopped
 
 ---
 
-### `POST /api/v1/sessions` — start a session
+### Pinning Ornn skills
 
-- **Permission:** **use**-level access to the package — owner, org Member/Admin,
-  a `use`-level share, or admin scope. A `read`-only share **cannot** start a
-  session.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
-
-**Request body**
-
-| Field | Type | Required | Notes |
-|-------|------|:--------:|-------|
-| `package_name` | string | yes | `^[A-Za-z0-9_-]+$`, ≤ 128 bytes |
-| `ornn_skills` | array | no | Ornn skills/skillsets to inject — see [Pinning Ornn skills](#pinning-ornn-skills) |
-
-**Responses**
-
-| Status | Meaning |
-|--------|---------|
-| `201 Created` | `{ "id": "<uuid>", "status": "pending" }`; `Location: /api/v1/sessions/<id>` |
-| `400` | Invalid package name or invalid `ornn_skills` pin (name/version grammar) |
-| `403` | No `use` access to the package |
-| `404` | Package not found |
-| `409` | Another live session already holds this package |
-| `422` | Conflicting `ornn_skills` versions (same skill pinned at two versions) |
-
-```sh
-curl -X POST "$FKST_API/api/v1/sessions" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{ "package_name": "billing-pipeline",
-        "ornn_skills": [ { "kind": "skillset", "name": "web-research", "version": "2.0" } ] }'
-# 201 -> { "id": "f4e2c0a1-…", "status": "pending" }
-```
-
-#### Pinning Ornn skills
-
-Both `POST /api/v1/sessions` and `POST /api/v1/goals/{id}/trigger` accept an
-optional `ornn_skills` array. Each pin is a concrete `{ kind, name, version }`:
+`POST /api/v1/goals/{id}/trigger` accepts an optional `ornn_skills` array. Each
+pin is a concrete `{ kind, name, version }`:
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -1250,23 +877,20 @@ curl -X DELETE "$FKST_API/api/v1/vault/entries/f0e1d2c3-…" \
 |------|--------------------|
 | Session status | `pending`, `validating`, `running`, `stopping`, `stopped`, `failed` |
 | Goal status | `not_started`, `triggered`, `running`, `stopped`, `failed` |
-| Share grantee kind | `user`, `org` |
-| Share level | `read`, `use` |
-| Conformance status | `ok`, `failed`, `skipped` |
 | GitHub repo mode (goal trigger) | `existing`, `create_new` |
 | Vault entry kind | `variable`, `secret` |
 
-### Package limits
+### Package layout (repo-scoped)
 
-| Limit | Value |
-|-------|-------|
-| Package name | `^[A-Za-z0-9_-]+$` |
-| Files per package | 256 |
-| Single file path length | 512 bytes |
-| Single file content | 1 MiB |
-| Total content | 12 MiB |
-| `composed_deps` entries | 256, each ≤ 256 bytes (no newline/NUL) |
-| File paths | forward-slash only; no absolute paths, `..`, backslash, or control chars; all content UTF-8 |
+Packages are **repo-scoped**: they live in the user's GitHub repo under
+`<repo>/.fkst/packages/<name>/` and are loaded at session spawn from the cloned
+repo (there is no package store or package HTTP API). The engine identifies a
+package by its directory **basename**.
+
+| Rule | Value |
+|------|-------|
+| Package name (directory basename) | `^[A-Za-z0-9_-]+$`, and not the reserved `host` |
+| Location | `<repo>/.fkst/packages/<name>/` |
 | Engine entry (required) | at least one `departments/<name>/main.lua` or `raisers/<name>.lua` |
 
 ### Goal limits
@@ -1275,16 +899,9 @@ curl -X DELETE "$FKST_API/api/v1/vault/entries/f0e1d2c3-…" \
 |-------|-------|
 | Title | 1–200 characters |
 | Description | 1–16384 bytes |
-| Packages per goal | 1–16 |
+| Packages per goal | 1–16 (each name format-validated; resolved against the repo at spawn) |
 | Repo owner | `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$` |
 | Repo name | `^[A-Za-z0-9._-]{1,100}$` |
-
-### Generation limits
-
-| Limit | Value |
-|-------|-------|
-| Description | 1–8192 bytes |
-| Generated name (when given) | `^[A-Za-z0-9_-]+$` |
 
 ### Vault limits
 

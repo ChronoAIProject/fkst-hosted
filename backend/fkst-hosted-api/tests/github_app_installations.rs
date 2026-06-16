@@ -32,7 +32,6 @@ use fkst_hosted_api::goals::GoalRepo;
 use fkst_hosted_api::models::{
     AccountType, GithubInstallationDoc, RepoRef, RepositorySelection, SessionStatus,
 };
-use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -277,14 +276,8 @@ async fn resolve_reads_persistence_before_api_and_survives_restart() {
 /// persistence + eviction + session-fail path.
 fn router_with_webhook(db: Db) -> (axum::Router, SessionRepo) {
     let session_repo = SessionRepo::new(&db);
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        session_repo.clone(),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    let sessions = SessionService::new(session_repo.clone(), EngineConfig::default());
     let github_app = GithubAppTokens::with_api_and_store(
         &app_config(Some(WEBHOOK_SECRET)),
         Arc::new(FakeApi::default()),
@@ -295,16 +288,12 @@ fn router_with_webhook(db: Db) -> (axum::Router, SessionRepo) {
     let router = build_router(AppState {
         config: Config::default(),
         db,
-        packages,
-        shares,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: Some(github_app),
         github_app_webhook_secret: Some(SecretString::from(WEBHOOK_SECRET)),
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })

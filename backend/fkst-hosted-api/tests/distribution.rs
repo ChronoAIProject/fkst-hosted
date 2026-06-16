@@ -21,7 +21,6 @@ use fkst_hosted_api::distribution::{
 };
 use fkst_hosted_api::leases::{AcquireOutcome, LeaseStore, PoolConfig, PoolError};
 use fkst_hosted_api::models::{LeaseDoc, SessionDoc, SessionStatus};
-use fkst_hosted_api::packages::{Package, PackageFile, PACKAGES_COLLECTION};
 use fkst_hosted_api::sessions::repo::ORPHANED_ERROR;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
@@ -178,25 +177,6 @@ async fn insert_session(db: &Db, session: &SessionDoc) {
         .expect("insert session");
 }
 
-async fn insert_package(db: &Db, name: &str) {
-    let package = Package {
-        name: name.to_string(),
-        files: vec![PackageFile {
-            path: "departments/hello/main.lua".to_string(),
-            content: "return {}".to_string(),
-        }],
-        composed_deps: vec![],
-        owner_user_id: None,
-        org_id: None,
-        created_at: bson::DateTime::now(),
-        updated_at: bson::DateTime::now(),
-    };
-    db.collection::<Package>(PACKAGES_COLLECTION)
-        .insert_one(package)
-        .await
-        .expect("insert package");
-}
-
 async fn raw_lease(db: &Db, package: &str) -> Option<LeaseDoc> {
     db.leases()
         .find_one(doc! { "_id": package })
@@ -238,7 +218,6 @@ async fn seed_owned_session(
     holder: &str,
     status: SessionStatus,
 ) -> (SessionDoc, LeaseDoc) {
-    insert_package(db, package).await;
     let mut session = session_doc(package, status);
     let lease = match store(db, holder)
         .acquire(package, session.id)
@@ -263,7 +242,6 @@ async fn place_assigns_least_loaded() {
         return;
     }
     let (_container, db) = mongo_db().await;
-    insert_package(&db, "pkg").await;
     let session = session_doc("pkg", SessionStatus::Pending);
     insert_session(&db, &session).await;
 
@@ -364,7 +342,6 @@ async fn concurrent_places_for_one_package_yield_one_winner() {
         return;
     }
     let (_container, db) = mongo_db().await;
-    insert_package(&db, "pkg").await;
     let session_1 = session_doc("pkg", SessionStatus::Pending);
     let session_2 = session_doc("pkg", SessionStatus::Pending);
     insert_session(&db, &session_1).await;
@@ -425,7 +402,6 @@ async fn place_idempotent() {
         return;
     }
     let (_container, db) = mongo_db().await;
-    insert_package(&db, "pkg").await;
     let session = session_doc("pkg", SessionStatus::Pending);
     insert_session(&db, &session).await;
 
@@ -448,7 +424,6 @@ async fn place_no_capacity() {
         return;
     }
     let (_container, db) = mongo_db().await;
-    insert_package(&db, "pkg").await;
     let session = session_doc("pkg", SessionStatus::Pending);
     insert_session(&db, &session).await;
 
@@ -633,40 +608,6 @@ async fn takeover_session_went_terminal() {
     );
     let stored = raw_session(&db, session.id).await;
     assert_eq!(stored.status, SessionStatus::Failed, "terminal state kept");
-}
-
-#[tokio::test]
-async fn takeover_package_deleted() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
-    let (_container, db) = mongo_db().await;
-    let (session, _lease) =
-        seed_owned_session(&db, "pkg", "pod-dead", SessionStatus::Running).await;
-    force_expires_at(&db, "pkg", past()).await;
-
-    // Delete the package out from under the active session.
-    db.collection::<Package>(PACKAGES_COLLECTION)
-        .delete_one(doc! { "_id": "pkg" })
-        .await
-        .expect("delete package");
-
-    let dist = distributor(&db, "pod-b", vec![pod_load("pod-b", 0)], 0);
-    let won = dist.reap_and_takeover(&NoopHost).await.expect("reap");
-    assert!(won.is_empty(), "a deleted package is never redone");
-
-    let stored = raw_session(&db, session.id).await;
-    assert_eq!(stored.status, SessionStatus::Failed);
-    let error = stored.error.expect("descriptive error persisted");
-    assert!(
-        error.contains("pkg") && error.contains("deleted while session active"),
-        "got: {error}"
-    );
-    assert!(
-        raw_lease(&db, "pkg").await.is_none(),
-        "the lease must be released (no infinite redo)"
-    );
 }
 
 #[tokio::test]

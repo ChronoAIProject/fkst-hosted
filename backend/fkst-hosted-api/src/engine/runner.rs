@@ -94,6 +94,18 @@ pub struct StartSpec {
     /// creates or removes it. `None` for classic / minimal runs, which keeps
     /// the pre-#112 behaviour byte-identical.
     pub codex_home: Option<PathBuf>,
+    /// Repo-scoped package source (issue #115). When `Some`, the runner does NOT
+    /// materialize `packages` into temp dirs: it points `--project-root` at this
+    /// cloned-repo working tree and `--package-root` at each
+    /// [`Self::package_roots`] entry (already-existing `<repo>/.fkst/packages/<name>`
+    /// dirs the DRIVER owns and cleans). `packages` is then ignored for the
+    /// on-disk tree (it may stay empty). `None` keeps the classic materialize
+    /// path (used by tests / minimal runs). The driver holds the clone's TempDir
+    /// guards for the session lifetime, mirroring the `codex_home` ownership.
+    pub project_root: Option<PathBuf>,
+    /// Canonicalized `<repo>/.fkst/packages/<name>` dirs, one per package, in
+    /// order. Only consulted when [`Self::project_root`] is `Some`.
+    pub package_roots: Vec<PathBuf>,
 }
 
 /// Live handle for one engine process, held by the caller for the session's
@@ -285,6 +297,13 @@ impl SessionRunner {
         &self.config.temp_root
     }
 
+    /// The configured `fkst-framework` binary path. The driver passes it to the
+    /// repo-clone step (#115) so the clone's credential helper can be wired with
+    /// the same engine context the in-session git uses.
+    pub fn framework_bin(&self) -> &Path {
+        &self.config.framework_bin
+    }
+
     /// Delegate: [`RunningSession::status`].
     pub fn status(&self, session: &mut RunningSession) -> LiveStatus {
         session.status()
@@ -307,6 +326,8 @@ impl SessionRunner {
             goal: None,
             env_profile: BTreeMap::new(),
             codex_home: None,
+            project_root: None,
+            package_roots: Vec::new(),
         };
         self.start_with_spec(&spec).await
     }
@@ -322,21 +343,60 @@ impl SessionRunner {
     ///
     /// Every failure path cleans all temp dirs before returning.
     pub async fn start_with_spec(&self, spec: &StartSpec) -> Result<RunningSession, RunnerError> {
-        // 1. Validate all packages — no temp dir is created on the reject path.
-        if spec.packages.is_empty() {
-            return Err(RunnerError::InvalidPackage(
-                "spec must contain at least one package".to_string(),
-            ));
-        }
-        for pkg in &spec.packages {
-            pkg.validate()?;
-        }
+        // Repo-scoped path (#115): the driver cloned the goal repo and resolved
+        // `<repo>/.fkst/packages/<name>` dirs, which it owns and cleans — so the
+        // runner points the engine at those dirs directly (no copy, no
+        // materialize). The classic path materializes `packages` into temp dirs.
+        let repo_scoped = spec.project_root.is_some();
 
-        // 2. Materialize each package into its own temp dir.
-        let package_guards = materialize_packages(&spec.packages, &self.config.temp_root)?;
-        for guard in &package_guards {
+        // 1. Determine the package roots + the project root.
+        //    - repo-scoped: pre-existing dirs the driver supplied;
+        //    - classic: materialize each PreparedPackage into its own temp dir,
+        //      with the FIRST materialized dir doubling as the project root.
+        let (package_guards, package_dirs, project_root): (Vec<TempDir>, Vec<PathBuf>, PathBuf) =
+            if let Some(project_root) = &spec.project_root {
+                if spec.package_roots.is_empty() {
+                    return Err(RunnerError::InvalidPackage(
+                        "repo-scoped spec must contain at least one package root".to_string(),
+                    ));
+                }
+                // The dirs already exist on disk (the clone); canonicalize for the
+                // safe argv + a stable project root. No guards: the driver holds
+                // the clone's TempDir guards for the session lifetime.
+                let project_root = project_root.canonicalize().map_err(RunnerError::Io)?;
+                let mut dirs = Vec::with_capacity(spec.package_roots.len());
+                for root in &spec.package_roots {
+                    dirs.push(root.canonicalize().map_err(RunnerError::Io)?);
+                }
+                (Vec::new(), dirs, project_root)
+            } else {
+                // Classic path: validate then materialize. No temp dir is created
+                // on the reject path.
+                if spec.packages.is_empty() {
+                    return Err(RunnerError::InvalidPackage(
+                        "spec must contain at least one package".to_string(),
+                    ));
+                }
+                for pkg in &spec.packages {
+                    pkg.validate()?;
+                }
+                let guards = materialize_packages(&spec.packages, &self.config.temp_root)?;
+                let mut dirs = Vec::with_capacity(guards.len());
+                for guard in &guards {
+                    dirs.push(guard.path().canonicalize().map_err(RunnerError::Io)?);
+                }
+                // The first materialized dir is the project root (classic CANON).
+                let project_root = dirs[0].clone();
+                (guards, dirs, project_root)
+            };
+
+        // 2. Write the host-owned 2-key `fkst.env` into every package root. For
+        //    repo-scoped dirs this lands in the throwaway clone (removed with the
+        //    session); the engine contract requires it for packages that use the
+        //    candidate-git SDK.
+        for dir in &package_dirs {
             write_fkst_env(
-                guard.path(),
+                dir,
                 &self.config.candidate_prefix,
                 &self.config.candidate_from_sep,
             )?;
@@ -349,11 +409,6 @@ impl SessionRunner {
             .map_err(RunnerError::Io)?;
         std::fs::create_dir(runtime_guard.path().join("durable")).map_err(RunnerError::Io)?;
 
-        // Canonicalize all package dirs.
-        let mut package_dirs: Vec<PathBuf> = Vec::with_capacity(package_guards.len());
-        for guard in &package_guards {
-            package_dirs.push(guard.path().canonicalize().map_err(RunnerError::Io)?);
-        }
         let runtime_dir = runtime_guard
             .path()
             .canonicalize()
@@ -414,8 +469,10 @@ impl SessionRunner {
         };
 
         // 5. Conformance pre-flight: run once per package root, sequential,
-        //    first failure aborts. The first root is the project root.
-        let project_root = &package_dirs[0];
+        //    first failure aborts. For repo-scoped packages this is the only
+        //    structural gate (the clone dir is untrusted user content not run
+        //    through PreparedPackage::validate); a malformed package fails it
+        //    loudly with a clear ConformanceFailed rather than running broken.
         for pkg_dir in &package_dirs {
             run_conformance(
                 &self.config.framework_bin,
@@ -434,7 +491,7 @@ impl SessionRunner {
         //    lifecycle, so the runner never creates or cleans it.
         let spawned = spawn_supervise(
             &self.config.framework_bin,
-            project_root,
+            &project_root,
             &package_dirs,
             &runtime_dir,
             &spec.env_profile,
@@ -533,8 +590,8 @@ impl SessionRunner {
 
         let package_dir = package_dirs[0].clone();
         tracing::info!(
-            package_count = spec.packages.len(),
-            package_name = %spec.packages[0].package_name,
+            package_count = package_dirs.len(),
+            repo_scoped,
             pid,
             runtime_dir = %runtime_dir.display(),
             has_goal = spec.goal.is_some(),
@@ -611,8 +668,8 @@ mod tests {
     use nix::unistd::Pid;
 
     use super::*;
+    use crate::engine::materialize::PackageFile;
     use crate::engine::process::signal_group;
-    use crate::packages::model::PackageFile;
 
     /// Conformance branch that passes; supervise body is per-test.
     fn engine_stub(dir: &Path, supervise_body: &str) -> PathBuf {
@@ -1435,6 +1492,8 @@ esac
             goal: None,
             env_profile: BTreeMap::new(),
             codex_home: None,
+            project_root: None,
+            package_roots: Vec::new(),
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1521,6 +1580,8 @@ esac
             goal: None,
             env_profile: BTreeMap::new(),
             codex_home: None,
+            project_root: None,
+            package_roots: Vec::new(),
         };
         let mut session = runner.start_with_spec(&spec).await.expect("start multi");
 
@@ -1576,6 +1637,8 @@ esac
             goal: None,
             env_profile: BTreeMap::new(),
             codex_home: None,
+            project_root: None,
+            package_roots: Vec::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(
@@ -1614,6 +1677,8 @@ esac
             goal: Some(goal),
             env_profile: BTreeMap::new(),
             codex_home: None,
+            project_root: None,
+            package_roots: Vec::new(),
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1725,6 +1790,8 @@ esac
             goal: None,
             env_profile: BTreeMap::new(),
             codex_home: None,
+            project_root: None,
+            package_roots: Vec::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));
@@ -1746,6 +1813,8 @@ esac
             goal: None,
             env_profile: BTreeMap::new(),
             codex_home: None,
+            project_root: None,
+            package_roots: Vec::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));

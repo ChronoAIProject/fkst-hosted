@@ -41,7 +41,7 @@ use tokio::sync::watch;
 use crate::distribution::{Distributor, DriverHost, PlacementError};
 use crate::engine::config::is_reserved_env_key;
 use crate::engine::{
-    EngineConfig, GoalContext, LiveStatus, PreparedPackage, RunnerError, RunningSession,
+    clone_repo_packages, EngineConfig, GoalContext, LiveStatus, RunnerError, RunningSession,
     SessionRunner, StartSpec,
 };
 use crate::error::AppError;
@@ -58,15 +58,10 @@ use crate::leases::RenewOutcome;
 use crate::models::{SessionDoc, SessionStatus};
 use crate::nyxid::NyxIdClient;
 use crate::ornn::OrnnClient;
-use crate::packages::{is_valid_name, PackageRepository};
 use crate::sessions::codex_provider::{self, AssumeConnected, ChronoLlmCheck};
 use crate::sessions::nyxid_token::{self, NyxidTokenHandle};
 use crate::sessions::repo::{status_bson, SessionRepo};
 use crate::vault::{EnvScopeRef, VaultService};
-
-/// Maximum stored byte length of a `package_name` (matches the packages
-/// domain bound).
-const MAX_PACKAGE_NAME_BYTES: usize = 128;
 
 /// Ownership information stamped onto a new session.
 pub struct SessionOwner {
@@ -144,6 +139,10 @@ const MINT_REQUEST_POLL: Duration = Duration::from_millis(200);
 struct GoalDrive {
     goal_id: bson::Uuid,
     repo: RepoRef,
+    /// The goal's package names, resolved at spawn against the cloned repo's
+    /// `<repo>/.fkst/packages/<name>/` (#115). Threaded from the SessionDoc so a
+    /// failover rebuild re-resolves the identical set.
+    package_names: Vec<String>,
     token_path: PathBuf,
     /// `<runtime_dir>` for this session, known once the engine starts. The JIT
     /// mint-request file (`<token_path>.request`) and the nonce file live under
@@ -161,10 +160,22 @@ struct GoalDrive {
     consecutive_failures: u32,
 }
 
+impl GoalDrive {
+    /// The package names to resolve against the cloned repo, falling back to the
+    /// single `package_name` for a (legacy) goal session whose doc carried no
+    /// `package_names` array.
+    fn package_names_or(&self, package_name: &str) -> Vec<String> {
+        if self.package_names.is_empty() {
+            vec![package_name.to_string()]
+        } else {
+            self.package_names.clone()
+        }
+    }
+}
+
 /// Shared internals behind the clonable service handle.
 struct Inner {
     repo: SessionRepo,
-    packages: PackageRepository,
     runner: SessionRunner,
     /// Per-session stop signal; entries are inserted by the entry-guarded
     /// spawn and removed by the owning driver task on every exit path. The
@@ -257,9 +268,9 @@ impl SessionService {
     /// `pod_id` is taken from `HOSTNAME` when present (the Kubernetes pod
     /// name); absent locally, the advisory field stays `null` until the
     /// first driver write.
-    pub fn new(repo: SessionRepo, packages: PackageRepository, engine: EngineConfig) -> Self {
+    pub fn new(repo: SessionRepo, engine: EngineConfig) -> Self {
         let pod_id = std::env::var("HOSTNAME").ok();
-        Self::build(repo, packages, engine, pod_id, None)
+        Self::build(repo, engine, pod_id, None)
     }
 
     /// Build the distributed service: create places sessions through the
@@ -267,17 +278,15 @@ impl SessionService {
     /// identity is the distributor's.
     pub fn with_distribution(
         repo: SessionRepo,
-        packages: PackageRepository,
         engine: EngineConfig,
         distributor: Distributor,
     ) -> Self {
         let pod_id = Some(distributor.pod_id().to_string());
-        Self::build(repo, packages, engine, pod_id, Some(distributor))
+        Self::build(repo, engine, pod_id, Some(distributor))
     }
 
     fn build(
         repo: SessionRepo,
-        packages: PackageRepository,
         engine: EngineConfig,
         pod_id: Option<String>,
         distribution: Option<Distributor>,
@@ -286,7 +295,6 @@ impl SessionService {
         Self {
             inner: Arc::new(Inner {
                 repo,
-                packages,
                 runner: SessionRunner::new(engine),
                 registry: Mutex::new(HashMap::new()),
                 pod_id,
@@ -405,146 +413,6 @@ impl SessionService {
     /// The repository handle (startup hooks: orphan sweep).
     pub fn repo(&self) -> &SessionRepo {
         &self.inner.repo
-    }
-
-    /// Create a session for `package_name` with the given ownership:
-    /// validate, check the package exists, insert the `pending` document,
-    /// then hand off — single-pod: spawn the driver inline; distributed:
-    /// place the session (the chosen pod's driver picks it up; a live lease
-    /// for another session is a `409`). Returns the created document
-    /// immediately (the driver advances it asynchronously).
-    ///
-    /// TOCTOU between route-level authorize and service-level create is
-    /// benign: the package is read again inside `exists` and the owner is
-    /// stamped from the caller's context, not re-read from the package.
-    pub async fn create(
-        &self,
-        package_name: &str,
-        owner: SessionOwner,
-        raw_token: SecretString,
-        ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
-    ) -> Result<SessionDoc, AppError> {
-        if !is_valid_name(package_name) || package_name.len() > MAX_PACKAGE_NAME_BYTES {
-            tracing::warn!(
-                package_name_bytes = package_name.len(),
-                "session create rejected: invalid package name"
-            );
-            return Err(AppError::Validation(
-                "invalid package name: must fully match [A-Za-z0-9_-]+ and be at most 128 bytes"
-                    .to_string(),
-            ));
-        }
-        if !self.inner.packages.exists(package_name).await? {
-            tracing::warn!(package_name = %package_name, "session create rejected: unknown package");
-            return Err(AppError::NotFound(format!(
-                "package not found: {package_name}"
-            )));
-        }
-
-        let session = SessionDoc {
-            id: bson::Uuid::new(),
-            package_name: package_name.to_string(),
-            status: SessionStatus::Pending,
-            pod_id: None,
-            fencing_token: None,
-            pid: None,
-            runtime_dir: None,
-            error: None,
-            run_key: None,
-            owner_user_id: Some(owner.owner_user_id),
-            org_id: owner.org_id,
-            package_names: vec![],
-            goal_id: None,
-            repo: None,
-            // Package sessions have no repo, so their env resolves from the
-            // owner-wide (global) vault scope (#102). The non-secret pointer is
-            // persisted so a failover rebuild re-resolves the same scope.
-            env_scope: Some(EnvScopeRef::global()),
-            triggered_by: None,
-            nyxid_key_id: None,
-            nyxid_key_prefix: None,
-            // Persisted (resolved, non-secret) so a failover rebuild re-injects
-            // the identical pin set (#114). Empty is normalized to `None`.
-            ornn_skills: ornn_skills.filter(|p| !p.is_empty()),
-            created_at: bson::DateTime::now(),
-            started_at: None,
-            stopped_at: None,
-        };
-        self.inner.repo.insert(&session).await?;
-
-        let Some(distributor) = self.inner.distribution.clone() else {
-            // Single-pod posture: spawn the detached driver inline, no lease.
-            // The user's raw token rides into the detached task transiently so
-            // the driver can mint the per-session NyxID key (#111).
-            self.spawn_driver(&session, Some(raw_token));
-            return Ok(session);
-        };
-
-        match distributor.place(package_name, session.id).await {
-            Ok(placement) if placement.pod_id == distributor.pod_id() => {
-                let mut owned = session.clone();
-                owned.pod_id = Some(placement.pod_id);
-                owned.fencing_token = Some(placement.fencing_token);
-                self.spawn_driver(&owned, Some(raw_token));
-                Ok(session)
-            }
-            Ok(placement) => {
-                // Another pod was chosen; its reaper picks the session up.
-                tracing::info!(
-                    session_id = %session.id,
-                    package_name = %package_name,
-                    pod_id = %placement.pod_id,
-                    "session placed on another pod"
-                );
-                Ok(session)
-            }
-            Err(PlacementError::AlreadyRunning(_)) => {
-                // Conflict: converge the just-inserted pending doc to failed
-                // so no zombie pending document lingers, then 409.
-                let _ = self
-                    .inner
-                    .repo
-                    .transition(
-                        session.id,
-                        &[SessionStatus::Pending],
-                        doc! {
-                            "status": status_bson(SessionStatus::Failed),
-                            "error": "package already has a live session",
-                            "stopped_at": bson::DateTime::now(),
-                        },
-                    )
-                    .await;
-                tracing::info!(
-                    session_id = %session.id,
-                    package_name = %package_name,
-                    "session create conflicts with a live lease"
-                );
-                Err(AppError::Conflict(format!(
-                    "package {package_name} already has a live session"
-                )))
-            }
-            Err(PlacementError::NoCapacity) => {
-                // Retriable: the session stays pending; the reaper retries
-                // placement on its next tick.
-                tracing::warn!(
-                    session_id = %session.id,
-                    package_name = %package_name,
-                    "no capacity at create; session stays pending for the reaper"
-                );
-                Ok(session)
-            }
-            Err(error) => {
-                // Transient infrastructure failure: the session stays
-                // pending and unassigned; the reaper retries placement.
-                tracing::error!(
-                    session_id = %session.id,
-                    package_name = %package_name,
-                    error = %error,
-                    "placement failed at create; session stays pending for the reaper"
-                );
-                Ok(session)
-            }
-        }
     }
 
     /// Fetch one session document (pure status projection).
@@ -860,6 +728,9 @@ impl SessionService {
             GoalDrive {
                 goal_id,
                 repo,
+                // Resolved against the cloned repo at spawn (#115). Threaded from
+                // the SessionDoc so a failover rebuild re-resolves the same set.
+                package_names: session.effective_package_names(),
                 // Token path: <runtime_dir>/github-token (set once the
                 // engine starts and the runtime dir is known; until then
                 // this placeholder is never written).
@@ -1146,39 +1017,104 @@ async fn drive_inner(
         }
     }
 
-    // (B) Load the package (it may have been deleted since create).
-    let package = match inner.packages.get(package_name).await {
-        Ok(Some(package)) => package,
-        Ok(None) => {
-            fail_session(
-                inner,
-                id,
-                &fence,
-                "package disappeared before start",
-                goal_info,
-            )
-            .await;
-            return true;
-        }
-        Err(error) => {
-            // The driver error (a Mongo failure) can carry internal
-            // topology/connection detail: log it, never persist it into the
-            // client-served `error` field.
-            tracing::error!(session_id = %id, error = %error, "driver failed to load package");
-            fail_session(inner, id, &fence, "failed to load package", goal_info).await;
+    // (B) Resolve the repo-scoped package source (#115). Every session is now a
+    // GOAL session: mint the GitHub App installation token, CLONE the goal repo
+    // into a per-session project root, and resolve its
+    // `<repo>/.fkst/packages/<name>` dirs — the repo-scoped source that replaced
+    // the Mongo package store. A clone/resolve failure fails the start with a
+    // clear error. The cloned repo's TempDir guards live in THIS frame
+    // (`_clone_guard`) so the working tree + the transient clone credential are
+    // removed on every exit path, mirroring how `_codex_home_guard` is held.
+    let Some(gi) = goal_info.as_mut() else {
+        // No goal repo => no package source since #115 (a session loads its
+        // packages from its goal repo). This can only be a stale pre-#115
+        // document a reaper picked up; fail it loudly rather than run with no
+        // packages — sessions are created exclusively via a goal trigger now.
+        tracing::error!(
+            session_id = %id,
+            "session has no goal repo; classic package sessions are unsupported since #115"
+        );
+        fail_session(
+            inner,
+            id,
+            &fence,
+            "session has no goal repo; sessions must be created via a goal trigger",
+            goal_info,
+        )
+        .await;
+        return true;
+    };
+    // Mint the token + build the GoalContext (the clone needs the freshly-minted
+    // App installation token; `token_for_repo` caches per (repo, perms), so this
+    // is the single mint the trigger preflight primed — not a second network
+    // call). This is the failover-safe rebuild point: it works from the
+    // SessionDoc + a fresh mint alone, needing no live user token.
+    let goal_ctx = match build_goal_context(inner, gi).await {
+        Ok(ctx) => ctx,
+        Err(reason) => {
+            tracing::error!(session_id = %id, reason = %reason, "failed to prepare goal context");
+            fail_session(inner, id, &fence, &reason, goal_info).await;
             return true;
         }
     };
+    // Clone the repo + resolve the named packages against `<repo>/.fkst/packages/`.
+    // The token rides into the credential helper (0600 file), never the clone
+    // argv — see engine::clone.
+    let names = gi.package_names_or(package_name);
+    let cloned = match clone_repo_packages(
+        inner.runner.temp_root(),
+        &goal_ctx.repo,
+        &goal_ctx.github_token,
+        &names,
+        inner.runner.framework_bin(),
+    )
+    .await
+    {
+        Ok(cloned) => cloned,
+        Err(error) => {
+            // The error is client-safe (repo ref / package name only; never the
+            // token); detail is logged inside clone.
+            let reason = describe_runner_error(&error);
+            tracing::error!(session_id = %id, error = %error, "failed to clone goal repo packages");
+            fail_session(inner, id, &fence, &reason, goal_info).await;
+            return true;
+        }
+    };
+    // Journaling content fingerprint (#25 redo keys on package content): derived
+    // from the FIRST resolved package dir (the run's primary package), with the
+    // goal's package_name anchoring run_key uniqueness. Repo-scoped, so editing
+    // a package in the repo yields a fresh run_key on the next run.
+    let fingerprint_files: Vec<crate::engine::materialize::PackageFile> = cloned
+        .package_roots
+        .first()
+        .map(|root| crate::engine::clone::read_package_files(root))
+        .unwrap_or_default();
+    // The engine argv inputs (consumed at step C). The TempDir guards stay in
+    // `_clone_guard` for the session lifetime — dropping it removes the working
+    // tree and the transient clone credential on every exit path.
+    let cloned_project_root = cloned.project_root.clone();
+    let cloned_package_roots = cloned.package_roots.clone();
+    let goal_ctx_early = Some(goal_ctx);
+    let _clone_guard = cloned;
 
     // (B2) Journaling bootstrap (issue #25): resolve run_key, stamp it on
     // the document, and load the GitHub skip-set BEFORE any package work.
     // Journaling is never load-bearing — every failure below is logged and
     // swallowed; session disposition is decided exclusively by the CAS
     // choke-points.
-    let mut journaler = start_journaler(inner, id, package_name, &package, fencing_token).await;
+    let mut journaler = start_journaler(
+        inner,
+        id,
+        package_name,
+        &fingerprint_files,
+        // Repo-scoped packages carry their composed deps as an in-repo
+        // `composed.deps` file (part of the fingerprinted content above), not a
+        // separate store field, so there is no extra dep list to fold in here.
+        &[],
+        fencing_token,
+    )
+    .await;
     journal_lifecycle(&mut journaler, Transition::Validating).await;
-
-    let prepared = PreparedPackage::from(package);
 
     // (B3) Resolve the per-session env profile from the vault BEFORE the engine
     // starts (#102). The full SessionDoc carries the owner/org/scope needed to
@@ -1436,48 +1372,29 @@ async fn drive_inner(
         }
     }
 
-    // (C0) For a goal session, mint the GitHub App installation token and build
-    // the GoalContext so the engine receives GITHUB_TOKEN + the 0600 token file
-    // + goal.json at t=0 (#106 — previously the token only arrived ~55 min in,
-    // if ever). Minting here (rather than threading the trigger-time preflight
-    // token across the detached driver boundary) unifies the initial start and
-    // the failover rebuild: both rebuild the GoalContext purely from the
-    // SessionDoc + a fresh mint, and `token_for_repo` caches per (repo, perms),
-    // so this is a cache hit after the trigger preflight — not a second network
-    // mint. A mint/goal-load failure FAILS the start: a goal run must never
-    // proceed without its credential.
-    let goal_ctx = match goal_info.as_mut() {
-        Some(gi) => match build_goal_context(inner, gi).await {
-            Ok(ctx) => Some(ctx),
-            Err(reason) => {
-                tracing::error!(session_id = %id, reason = %reason, "failed to prepare goal context");
-                journal_finish(
-                    &mut journaler,
-                    Transition::Failed {
-                        exit_code: None,
-                        error: reason.clone(),
-                    },
-                )
-                .await;
-                fail_session(inner, id, &fence, &reason, goal_info).await;
-                return true;
-            }
-        },
-        None => None,
-    };
+    // (C0) The GoalContext (the GitHub App token + goal.json inputs) was built at
+    // step (B), moved there so the repo clone could use the freshly-minted token
+    // (#115). The runner points the engine at the cloned repo:
+    // `--project-root <repo>` + `--package-root <repo>/.fkst/packages/<name>`.
+    let project_root = Some(cloned_project_root);
+    let package_roots = cloned_package_roots;
 
     // (C) Start the engine. This await runs to completion (never
-    // select-cancelled); a stop that raced in is honored right after. For a
-    // goal session `goal_ctx` is `Some(..)`, so `start_with_spec` writes the
-    // token file + goal.json and `spawn_supervise` sets the GitHub env vars
-    // before the engine runs.
+    // select-cancelled); a stop that raced in is honored right after.
+    // `goal_ctx` is `Some(..)`, so `start_with_spec` writes the token file +
+    // goal.json and `spawn_supervise` sets the GitHub env vars before the engine
+    // runs.
     let mut session = match inner
         .runner
         .start_with_spec(&StartSpec {
-            packages: vec![prepared],
-            goal: goal_ctx,
+            // Repo-scoped: the runner uses `project_root` + `package_roots`
+            // (below), not materialized packages, so this stays empty.
+            packages: Vec::new(),
+            goal: goal_ctx_early,
             env_profile,
             codex_home,
+            project_root,
+            package_roots,
         })
         .await
     {
@@ -2516,14 +2433,15 @@ async fn start_journaler(
     inner: &Arc<Inner>,
     id: bson::Uuid,
     package_name: &str,
-    package: &crate::packages::Package,
+    fingerprint_files: &[crate::engine::materialize::PackageFile],
+    fingerprint_deps: &[String],
     fencing_token: Option<i64>,
 ) -> Option<ServiceJournaler> {
     let setup = inner.journal.get()?;
     let ctx = SessionCtx {
         session_id: id.to_string(),
         package_name: package_name.to_string(),
-        package_fingerprint: package_fingerprint(&package.files, &package.composed_deps),
+        package_fingerprint: package_fingerprint(fingerprint_files, fingerprint_deps),
         pod_id: inner.pod_id.clone(),
         fencing_token: fencing_token.unwrap_or(0),
     };
@@ -2878,11 +2796,7 @@ mod tests {
                 .expect("client")
                 .database("sessions_unit_test"),
         };
-        let service = SessionService::new(
-            SessionRepo::new(&db),
-            PackageRepository::new(&db.database),
-            EngineConfig::default(),
-        );
+        let service = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
         let session = env_test_session();
         let profile = resolve_env_profile(&service.inner, &session)
             .await
@@ -2923,11 +2837,7 @@ mod tests {
                 .expect("client")
                 .database("sessions_unit_test"),
         };
-        SessionService::new(
-            SessionRepo::new(&db),
-            PackageRepository::new(&db.database),
-            EngineConfig::default(),
-        )
+        SessionService::new(SessionRepo::new(&db), EngineConfig::default())
     }
 
     fn goal_drive_with(minted_ago: Duration, last_attempt_ago: Duration) -> GoalDrive {
@@ -2938,6 +2848,7 @@ mod tests {
                 owner: "acme".to_string(),
                 name: "site".to_string(),
             },
+            package_names: vec!["demo".to_string()],
             // Non-empty so the path is not short-circuited by the
             // "runtime dir not yet established" guard.
             token_path: PathBuf::from("/run/session/github-token"),

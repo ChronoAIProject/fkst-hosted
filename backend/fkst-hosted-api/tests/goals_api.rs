@@ -13,7 +13,6 @@ use fkst_hosted_api::config::Config;
 use fkst_hosted_api::db::Db;
 use fkst_hosted_api::engine::EngineConfig;
 use fkst_hosted_api::goals::{GoalDoc, GoalRepo, GoalStatus, RepoRef, GOALS_COLLECTION};
-use fkst_hosted_api::packages::{PackageRepository, ShareRepo};
 use fkst_hosted_api::router::build_router;
 use fkst_hosted_api::sessions::{SessionRepo, SessionService};
 use fkst_hosted_api::state::AppState;
@@ -64,28 +63,19 @@ async fn app() -> TestApp {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let packages = PackageRepository::new(&db.database);
-    let shares = ShareRepo::new(&db.database);
     let goals = GoalRepo::new(&db.database);
-    let sessions = SessionService::new(
-        SessionRepo::new(&db),
-        packages.clone(),
-        EngineConfig::default(),
-    );
+    // Package validation is now format-only (#115); no PackageRepository needed.
+    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
         db: db.clone(),
-        packages,
-        shares,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
         goals,
-        engine: EngineConfig::default(),
-        llm: None,
         vault,
         ornn: None,
     })
@@ -173,31 +163,6 @@ async fn delete_path(router: &axum::Router, path: &str) -> (StatusCode, HeaderMa
     drain(response).await
 }
 
-/// Helper: create a minimal package via the API so goals can reference it.
-async fn create_package(router: &axum::Router, name: &str) {
-    let body = json!({
-        "name": name,
-        "files": [{"path": "departments/main/main.lua", "content": "return {}"}],
-    });
-    let (status, _, _) = post_pkg(router, &body).await;
-    assert_eq!(status, StatusCode::CREATED, "package create must succeed");
-}
-
-/// POST a JSON value to /api/v1/packages.
-async fn post_pkg(router: &axum::Router, body: &Value) -> (StatusCode, HeaderMap, String) {
-    let response = router
-        .clone()
-        .oneshot(
-            Request::post("/api/v1/packages")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(body.to_string()))
-                .expect("request builds"),
-        )
-        .await
-        .expect("router must respond");
-    drain(response).await
-}
-
 /// Seed a goal doc directly into the goals collection with a given status.
 async fn seed_goal_with_status(db: &Db, status: GoalStatus) -> bson::Uuid {
     let id = bson::Uuid::new();
@@ -223,44 +188,6 @@ async fn seed_goal_with_status(db: &Db, status: GoalStatus) -> bson::Uuid {
     id
 }
 
-/// Seed a package share at read level for the dev-user.
-async fn seed_read_share(db: &Db, package_name: &str) {
-    use fkst_hosted_api::packages::{GranteeKind, ShareDoc, ShareLevel};
-    let share = ShareDoc {
-        id: bson::Uuid::new(),
-        package_name: package_name.to_string(),
-        grantee_kind: GranteeKind::User,
-        grantee_id: "dev-user".to_string(),
-        level: ShareLevel::Read,
-        granted_by: "dev-user".to_string(),
-        created_at: bson::DateTime::now(),
-    };
-    db.database
-        .collection::<ShareDoc>("package_shares")
-        .insert_one(&share)
-        .await
-        .expect("seed share");
-}
-
-/// Seed a package share at use level for the dev-user.
-async fn seed_use_share(db: &Db, package_name: &str) {
-    use fkst_hosted_api::packages::{GranteeKind, ShareDoc, ShareLevel};
-    let share = ShareDoc {
-        id: bson::Uuid::new(),
-        package_name: package_name.to_string(),
-        grantee_kind: GranteeKind::User,
-        grantee_id: "dev-user".to_string(),
-        level: ShareLevel::Use,
-        granted_by: "dev-user".to_string(),
-        created_at: bson::DateTime::now(),
-    };
-    db.database
-        .collection::<ShareDoc>("package_shares")
-        .insert_one(&share)
-        .await
-        .expect("seed share");
-}
-
 // ---- Tests ---------------------------------------------------------------
 
 #[tokio::test]
@@ -270,8 +197,7 @@ async fn post_goal_creates_201_with_location_and_not_started() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "my-pkg").await;
-
+    // Package names are validated for FORMAT only (#115); no store seeding needed.
     let body = json!({
         "title": "Build a billing pipeline",
         "description": "Process all invoices",
@@ -308,40 +234,12 @@ async fn post_goal_creates_201_with_location_and_not_started() {
     assert_eq!(fetched["status"], "not_started");
 }
 
-#[tokio::test]
-async fn post_goal_with_inaccessible_package_is_403() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
-    let app = app().await;
-
-    // Create two packages owned by dev-user.
-    create_package(&app.router, "pkg-readable").await;
-    create_package(&app.router, "pkg-usable").await;
-
-    // Give dev-user only read-level share on pkg-readable.
-    seed_read_share(&app.db, "pkg-readable").await;
-    // Give dev-user use-level share on pkg-usable.
-    seed_use_share(&app.db, "pkg-usable").await;
-
-    // With auth disabled, dev-user is the owner of both packages, so
-    // can_use returns true. To test the read vs use distinction we need
-    // auth enabled. Instead, test that a non-existent package returns
-    // proper validation error.
-    let body = json!({
-        "title": "Goal with bad package",
-        "description": "desc",
-        "package_names": ["non-existent-pkg"],
-    });
-    let (status, _, response_body) = post_goal(&app.router, &body).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    let err: Value = serde_json::from_str(&response_body).expect("parse error");
-    assert!(err["message"]
-        .as_str()
-        .unwrap()
-        .contains("package not found"));
-}
+// post_goal_with_inaccessible_package_is_403 was deleted: the store-existence
+// pre-check and can_use_package authorization were removed by #115. Package
+// names are now validated for FORMAT only; existence is resolved at session
+// spawn against the repo's .fkst/packages/ tree, not a store. A well-formed
+// package name always passes goal creation, so the 400/403 assertion no longer
+// holds and its premise (the store lookup) is gone.
 
 #[tokio::test]
 async fn list_scopes_to_own_plus_org_and_filters_by_status() {
@@ -350,7 +248,7 @@ async fn list_scopes_to_own_plus_org_and_filters_by_status() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "list-pkg").await;
+    // Package names validated by format only; no store seeding required.
 
     // Create two goals.
     let body1 = json!({
@@ -398,7 +296,7 @@ async fn patch_updates_title_anytime_but_packages_conflict_when_running() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "patch-pkg").await;
+    // Package names validated by format only; no store seeding required.
 
     // Create a goal.
     let body = json!({
@@ -432,7 +330,7 @@ async fn patch_updates_title_anytime_but_packages_conflict_when_running() {
     );
 
     // Patch packages on running goal — should be 409.
-    create_package(&app.router, "other-pkg").await;
+    // Package name "other-pkg" is format-valid; no store entry needed (#115).
     let patch = json!({"package_names": ["other-pkg"]});
     let (status, _, conflict_body) =
         patch_path(&app.router, &format!("/api/v1/goals/{running_id}"), &patch).await;
@@ -452,7 +350,7 @@ async fn patch_repo_and_clear_repo_mutually_exclusive() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "repo-pkg").await;
+    // Package names validated by format only; no store seeding required.
 
     // Create a goal.
     let body = json!({
@@ -490,7 +388,7 @@ async fn delete_not_started_204_then_404() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "del-pkg").await;
+    // Package names validated by format only; no store seeding required.
 
     // Create a goal.
     let body = json!({
@@ -522,7 +420,6 @@ async fn delete_running_is_409() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "run-del-pkg").await;
 
     let running_id = seed_goal_with_status(&app.db, GoalStatus::Running).await;
 
@@ -662,7 +559,7 @@ async fn post_goal_with_repo_sets_repo() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "repo-test-pkg").await;
+    // Package names validated by format only; no store seeding required.
 
     let body = json!({
         "title": "Goal with repo",
@@ -685,7 +582,7 @@ async fn patch_clear_repo_works() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "clear-pkg").await;
+    // Package names validated by format only; no store seeding required.
 
     // Create with repo.
     let body = json!({
@@ -714,7 +611,7 @@ async fn pagination_limit_and_offset() {
         return;
     }
     let app = app().await;
-    create_package(&app.router, "page-pkg").await;
+    // Package names validated by format only; no store seeding required.
 
     // Create 3 goals.
     for i in 0..3 {

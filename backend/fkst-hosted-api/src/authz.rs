@@ -6,19 +6,17 @@
 //! 3. org member: Viewer -> Read; Member -> Read+Write; Admin -> all
 //! 4. owner_user_id == None (legacy pre-auth doc) -> allow everything
 //!
-//! Share-aware predicates (`can_read_package`, `can_use_package`) additionally
-//! consult the `package_shares` collection after the owner/org/legacy checks
-//! fail: a `read`- or `use`-level share grants read; only a `use`-level share
-//! grants use (required for session create).
-//!
 //! The async facade (`Authorizer`) only calls NyxID when the pure checks
 //! don't already decide, so owner-path requests stay fast and keep working
 //! during a NyxID outage.
+//!
+//! Package-share predicates were removed with the package store (#115): packages
+//! are now repo-scoped, so package access is governed by the goal repo's GitHub
+//! permissions, not a `package_shares` collection.
 
 use crate::auth::AuthContext;
 use crate::error::AppError;
 use crate::nyxid::{NyxIdClient, OrgRole};
-use crate::packages::ShareRepo;
 
 /// Action the caller is attempting on a resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,39 +75,17 @@ pub fn allows(
 #[derive(Clone)]
 pub struct Authorizer {
     nyxid: Option<NyxIdClient>,
-    shares: Option<ShareRepo>,
 }
 
 impl Authorizer {
-    /// Build an authorizer with an optional NyxID client and optional shares
-    /// repository.
+    /// Build an authorizer with an optional NyxID client.
     pub fn new(nyxid: Option<NyxIdClient>) -> Self {
-        Self {
-            nyxid,
-            shares: None,
-        }
-    }
-
-    /// Build an authorizer with NyxID client and shares repository.
-    pub fn with_shares(nyxid: Option<NyxIdClient>, shares: ShareRepo) -> Self {
-        Self {
-            nyxid,
-            shares: Some(shares),
-        }
+        Self { nyxid }
     }
 
     /// Authorizer without NyxID (owner-only policy, no org features).
     pub fn disabled() -> Self {
-        Self {
-            nyxid: None,
-            shares: None,
-        }
-    }
-
-    /// Attach the shares repository after construction (for test convenience
-    /// and staged wiring).
-    pub fn set_shares(&mut self, shares: ShareRepo) {
-        self.shares = Some(shares);
+        Self { nyxid: None }
     }
 
     /// Access the underlying NyxID client (later consumers: exchange,
@@ -239,130 +215,6 @@ impl Authorizer {
                 "insufficient permissions: org admin or member required".to_string(),
             )),
         }
-    }
-
-    /// Check whether `ctx` can read `package_name` (owner, org visibility, or
-    /// share grant at Read or Use level). The `package_owner` and `package_org`
-    /// come from the fetched Package document.
-    ///
-    /// Returns `true` when any access path grants read. Does NOT fail closed
-    /// on share-repo errors -- falls back to the owner/org/legacy checks only.
-    pub async fn can_read_package(
-        &self,
-        ctx: &AuthContext,
-        package_name: &str,
-        package_owner: Option<&str>,
-        package_org: Option<&str>,
-    ) -> bool {
-        // Fast paths: admin, owner, legacy.
-        if ctx.has_scope(ADMIN_SCOPE) {
-            return true;
-        }
-        if let Some(owner) = package_owner {
-            if owner == ctx.user_id {
-                return true;
-            }
-        } else {
-            // Legacy (no owner) -> allow.
-            return true;
-        }
-
-        // Org visibility check.
-        if let Some(org_id) = package_org {
-            if let Some(client) = &self.nyxid {
-                if let Ok(Some(_role)) = client.org_role(org_id, &ctx.user_id).await {
-                    return true;
-                }
-            }
-        }
-
-        // Share grant check.
-        if let Some(shares) = &self.shares {
-            let org_ids = self.visible_org_ids_raw(ctx).await;
-            match shares
-                .has_read_share(package_name, &ctx.user_id, &org_ids)
-                .await
-            {
-                Ok(true) => return true,
-                Ok(false) => {}
-                Err(error) => {
-                    tracing::warn!(
-                        package = package_name,
-                        error = %error,
-                        "share read check failed; falling back to owner/org"
-                    );
-                }
-            }
-        }
-
-        false
-    }
-
-    /// Check whether `ctx` can *use* `package_name` (required for session
-    /// create). Requires owner/org-write access OR a `use`-level share grant.
-    /// A `read`-level share does NOT grant use.
-    ///
-    /// Returns `true` when any access path grants use. Does NOT fail closed
-    /// on share-repo errors.
-    pub async fn can_use_package(
-        &self,
-        ctx: &AuthContext,
-        package_name: &str,
-        package_owner: Option<&str>,
-        package_org: Option<&str>,
-    ) -> bool {
-        // Fast paths: admin, owner, legacy.
-        if ctx.has_scope(ADMIN_SCOPE) {
-            return true;
-        }
-        if let Some(owner) = package_owner {
-            if owner == ctx.user_id {
-                return true;
-            }
-        } else {
-            // Legacy (no owner) -> allow.
-            return true;
-        }
-
-        // Org write access (member or admin).
-        if let Some(org_id) = package_org {
-            if let Some(client) = &self.nyxid {
-                if let Ok(Some(role)) = client.org_role(org_id, &ctx.user_id).await {
-                    match role {
-                        OrgRole::Admin | OrgRole::Member => return true,
-                        OrgRole::Viewer => {}
-                    }
-                }
-            }
-        }
-
-        // Use-level share grant check.
-        if let Some(shares) = &self.shares {
-            let org_ids = self.visible_org_ids_raw(ctx).await;
-            match shares
-                .has_use_share(package_name, &ctx.user_id, &org_ids)
-                .await
-            {
-                Ok(true) => return true,
-                Ok(false) => {}
-                Err(error) => {
-                    tracing::warn!(
-                        package = package_name,
-                        error = %error,
-                        "share use check failed; falling back to owner/org"
-                    );
-                }
-            }
-        }
-
-        false
-    }
-
-    /// Get visible org ids without error propagation (returns empty on
-    /// failure). For use inside the can_read/can_use predicates that should
-    /// not fail closed on org lookup errors.
-    async fn visible_org_ids_raw(&self, ctx: &AuthContext) -> Vec<String> {
-        self.visible_org_ids(ctx).await.unwrap_or_default()
     }
 }
 

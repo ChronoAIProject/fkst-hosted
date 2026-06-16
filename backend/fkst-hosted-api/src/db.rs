@@ -11,8 +11,7 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::models::{GithubInstallationDoc, LeaseDoc, SessionDoc};
 
-/// Collection names (single source of truth). The `packages` collection name
-/// is owned by `crate::packages::PACKAGES_COLLECTION`.
+/// Collection names (single source of truth).
 pub const SESSIONS: &str = "sessions";
 pub const LEASES: &str = "leases";
 /// The per-session secret/variable vault collection (issue #100).
@@ -23,8 +22,7 @@ pub const GITHUB_INSTALLATIONS: &str = "github_installations";
 
 /// Stable index names (deterministic idempotency; asserted by integration
 /// tests). No index is declared for `leases._id` — the implicit `_id` index
-/// already enforces uniqueness. (`packages` indexes are owned by
-/// `crate::packages`.)
+/// already enforces uniqueness.
 pub const IDX_SESSIONS_PACKAGE_NAME: &str = "sessions_package_name";
 pub const IDX_SESSIONS_STATUS: &str = "sessions_status";
 pub const IDX_SESSIONS_POD_ID: &str = "sessions_pod_id";

@@ -10,9 +10,9 @@ use bson::doc;
 use super::config::DistributionConfig;
 use super::health::{active_status_bson, HealthView, PodLoad};
 use crate::db::Db;
+use crate::engine::is_valid_name;
 use crate::leases::{AcquireOutcome, LeaseStore, PoolConfig, PoolError};
 use crate::models::LeaseDoc;
-use crate::packages::is_valid_name;
 
 /// Errors surfaced by placement and takeover. Contended placement
 /// (`AlreadyRunning`) and exhausted capacity (`NoCapacity`) are expected
