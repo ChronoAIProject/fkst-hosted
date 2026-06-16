@@ -22,7 +22,6 @@ use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_control_plane::router::{build_router, mount_internal};
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
-use secrecy::ExposeSecret;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
@@ -290,42 +289,20 @@ async fn main() -> ExitCode {
     //         (the authoritative read path still works, no GitHub mirror).
     let goals = GoalIssueStore::new(github_app.clone());
 
-    // 5a-ter. Build the vault service (issue #100). The vault is always-on: a
-    //         missing OR invalid master-key source is a fail-closed startup
-    //         error (mirrors the github_app PEM pattern), so the vault routes
-    //         never run without an at-rest encryption key. The base64 key was
-    //         resolved from FKST_HOSTED_VAULT_MASTER_KEY / _PATH by Config; here
-    //         it is decoded + length-validated into the KEK and the unique index
-    //         is ensured.
-    let Some(vault_key) = &config.vault_master_key else {
-        tracing::error!(
-            "vault master key not configured; set FKST_HOSTED_VAULT_MASTER_KEY or \
-             FKST_HOSTED_VAULT_MASTER_KEY_PATH (base64-encoded 32 bytes)"
-        );
-        return ExitCode::FAILURE;
-    };
-    let vault = match fkst_control_plane::vault::VaultService::with_local_key(
-        &db.database,
-        vault_key.expose_secret(),
-        fkst_control_plane::vault::VaultLimits {
+    // 5a-ter. Build the in-memory vault service (issue #100, database-free #138).
+    //         Secrets are supplied inline at goal trigger and held by the
+    //         controller in memory only — no at-rest key, no Mongo collection,
+    //         no index. The `FKST_HOSTED_VAULT_*` caps still bound a single
+    //         inline value's size and an owner's per-scope entry count.
+    let vault =
+        fkst_control_plane::vault::VaultService::new(fkst_control_plane::vault::VaultLimits {
             value_byte_cap: config.vault_value_byte_cap,
             entries_per_scope_cap: config.vault_entries_per_scope_cap,
-        },
-    ) {
-        Ok(vault) => vault,
-        Err(error) => {
-            tracing::error!(error = %error, "invalid vault master key");
-            return ExitCode::FAILURE;
-        }
-    };
-    if let Err(error) = vault.repo().ensure_indexes().await {
-        tracing::error!(error = %error, "failed to ensure vault indexes");
-        return ExitCode::FAILURE;
-    }
-    tracing::info!("vault enabled");
+        });
+    tracing::info!("vault enabled (in-memory)");
 
     // 5a-ter-bis. Wire the vault into the session driver (issue #102): every
-    //         driver this service spawns now resolves the session's vault
+    //         driver this service spawns resolves the session's inline-secret
     //         scope into an `env_profile` and injects it into the engine run.
     //         The VaultService is Clone (it joins AppState below too).
     sessions.enable_vault(vault.clone());

@@ -7,7 +7,6 @@ pub mod github_app_webhook;
 pub mod goals;
 pub mod health;
 pub mod sessions;
-pub mod vault;
 
 use crate::error::AppError;
 

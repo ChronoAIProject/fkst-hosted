@@ -164,16 +164,7 @@ struct HttpVars {
     /// zero rejected.
     #[serde(default = "defaults::llm_max_output_bytes")]
     llm_max_output_bytes: usize,
-    /// Vault KEK master key, base64-encoded 32 bytes (SECRET). One of this or
-    /// `_PATH` must be set (vault is always-on, fail-closed). Env:
-    /// `FKST_HOSTED_VAULT_MASTER_KEY`.
-    #[serde(default)]
-    vault_master_key: Option<String>,
-    /// Path to a file holding the base64 vault master key; mutually exclusive
-    /// with the inline key. Env: `FKST_HOSTED_VAULT_MASTER_KEY_PATH`.
-    #[serde(default)]
-    vault_master_key_path: Option<String>,
-    /// Max bytes for a single vault value. Env:
+    /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     #[serde(default = "defaults::vault_value_byte_cap")]
     vault_value_byte_cap: usize,
@@ -353,13 +344,7 @@ pub struct Config {
     /// draft is rejected (a retry budget guard against a runaway model).
     /// Env: `FKST_HOSTED_LLM_MAX_OUTPUT_BYTES`. Default 1 MiB, zero rejected.
     pub llm_max_output_bytes: usize,
-    /// Vault KEK master key (SECRET): the base64-encoded 32 bytes, resolved
-    /// from `FKST_HOSTED_VAULT_MASTER_KEY` or read from
-    /// `FKST_HOSTED_VAULT_MASTER_KEY_PATH`. `None` only in the `Config::default`
-    /// fixture (tests); production startup fails closed when the vault key
-    /// source is absent. Never logged (redacted from `Debug`).
-    pub vault_master_key: Option<SecretString>,
-    /// Max bytes for a single vault value. Env:
+    /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     pub vault_value_byte_cap: usize,
     /// Max vault entries an owner may hold per scope. Env:
@@ -426,10 +411,6 @@ impl fmt::Debug for Config {
             .field("llm_timeout_secs", &self.llm_timeout_secs)
             .field("llm_max_output_bytes", &self.llm_max_output_bytes)
             // The vault master key never reaches any Debug/log output.
-            .field(
-                "vault_master_key",
-                &self.vault_master_key.as_ref().map(|_| "<redacted>"),
-            )
             .field("vault_value_byte_cap", &self.vault_value_byte_cap)
             .field(
                 "vault_entries_per_scope_cap",
@@ -477,7 +458,6 @@ impl Default for Config {
             llm_model: None,
             llm_timeout_secs: defaults::llm_timeout_secs(),
             llm_max_output_bytes: defaults::llm_max_output_bytes(),
-            vault_master_key: None,
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             codex_model: defaults::codex_model(),
@@ -672,29 +652,6 @@ impl Config {
                 "FKST_HOSTED_CHRONO_LLM_BASE_URL must not be blank".to_string(),
             ));
         }
-        let vault_master_key = match (&http.vault_master_key, &http.vault_master_key_path) {
-            (Some(_), Some(_)) => {
-                return Err(AppError::Config(
-                    "both FKST_HOSTED_VAULT_MASTER_KEY and FKST_HOSTED_VAULT_MASTER_KEY_PATH set; \
-                     provide exactly one"
-                        .to_string(),
-                ));
-            }
-            (Some(inline), None) => Some(SecretString::from(inline.clone())),
-            (None, Some(path)) => {
-                let contents = std::fs::read_to_string(path).map_err(|e| {
-                    AppError::Config(format!(
-                        "FKST_HOSTED_VAULT_MASTER_KEY_PATH: failed to read {path}: {e}"
-                    ))
-                })?;
-                Some(SecretString::from(contents))
-            }
-            // No key source: leave None. Whether that is fatal is decided at
-            // boot (production: fail closed; the Disabled-auth local-dev path
-            // may run without the vault). Tests build Config directly.
-            (None, None) => None,
-        };
-
         Ok(Config {
             port: http.port,
             bind_addr: http.bind_addr,
@@ -722,7 +679,6 @@ impl Config {
             llm_model: http.llm_model,
             llm_timeout_secs: http.llm_timeout_secs,
             llm_max_output_bytes: http.llm_max_output_bytes,
-            vault_master_key,
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
@@ -1366,17 +1322,12 @@ mod tests {
 
     // ---- vault configuration tests --------------------------------------------
 
-    /// A valid base64-32-byte vault key for the tests below.
-    const VAULT_KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-
     #[test]
-    fn vault_caps_default_and_master_key_optional() {
+    fn vault_caps_default() {
         let config =
             Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert_eq!(config.vault_value_byte_cap, 65_536);
         assert_eq!(config.vault_entries_per_scope_cap, 100);
-        // No key source set => None at the config layer (boot decides fatality).
-        assert!(config.vault_master_key.is_none());
     }
 
     #[test]
@@ -1403,79 +1354,6 @@ mod tests {
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
         }
-    }
-
-    #[test]
-    fn vault_master_key_inline_is_read() {
-        let config = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_HOSTED_VAULT_MASTER_KEY", VAULT_KEY),
-        ]))
-        .expect("inline key");
-        assert!(config.vault_master_key.is_some());
-    }
-
-    #[test]
-    fn vault_master_key_never_appears_in_debug() {
-        let config = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_HOSTED_VAULT_MASTER_KEY", VAULT_KEY),
-        ]))
-        .expect("inline key");
-        let rendered = format!("{config:?}");
-        assert!(!rendered.contains(VAULT_KEY), "vault key leaked in debug");
-        assert!(rendered.contains("<redacted>"));
-    }
-
-    #[test]
-    fn vault_master_key_and_path_both_set_is_a_config_error() {
-        let err = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_HOSTED_VAULT_MASTER_KEY", VAULT_KEY),
-            ("FKST_HOSTED_VAULT_MASTER_KEY_PATH", "/some/path"),
-        ]))
-        .expect_err("both sources must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("FKST_HOSTED_VAULT_MASTER_KEY"),
-            "error must name the vault key vars, got: {err}"
-        );
-    }
-
-    #[test]
-    fn vault_master_key_path_reads_the_file() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("vault.key");
-        std::fs::write(&path, VAULT_KEY).expect("write key");
-        let config = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_HOSTED_VAULT_MASTER_KEY_PATH", path.to_str().unwrap()),
-        ]))
-        .expect("key from path");
-        assert!(config.vault_master_key.is_some());
-    }
-
-    #[test]
-    fn vault_master_key_path_missing_file_is_a_config_error() {
-        let err = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            (
-                "FKST_HOSTED_VAULT_MASTER_KEY_PATH",
-                "/nonexistent/vault.key",
-            ),
-        ]))
-        .expect_err("missing file must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string()
-                .contains("FKST_HOSTED_VAULT_MASTER_KEY_PATH"),
-            "error must name the path var, got: {err}"
-        );
     }
 
     // ---- codex chrono-llm DEFAULT configuration tests (#112) ------------------

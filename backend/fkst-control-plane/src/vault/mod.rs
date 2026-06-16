@@ -1,31 +1,28 @@
-//! Per-session secret & variable vault (issue #100).
+//! Per-session secret & variable vault (issue #100), database-free (#138).
 //!
-//! A fkst-hosted-owned, encrypted-at-rest key–value store for the env
-//! **variables** (non-secret) and **secrets** an engine run needs. The module
-//! splits into cohesive units:
-//! - [`model`] — the persisted `VaultEntry`, the `EnvKind` distinction, the
-//!   envelope `EncryptedBlob`, the `EnvScopeRef` pointer (consumed by #102), the
-//!   in-memory `ResolvedEntry`, and the redacting DTO helpers.
-//! - [`crypto`] — the `KeyProvider` swap seam and the envelope AES-256-GCM
-//!   encrypt/decrypt.
-//! - [`repo`] — MongoDB CRUD + the unique-per-scope index.
-//! - [`service`] — write-side validation, encrypt-on-write / decrypt-on-read,
-//!   and the consumer read/resolve API `list_for_scope`.
+//! A fkst-hosted-owned, **in-memory** key–value store for the env **variables**
+//! (non-secret) and **secrets** an engine run needs. Secrets are supplied inline
+//! at goal trigger, held by the controller, and resolved into the per-session
+//! env profile at spawn. The module splits into cohesive units:
+//! - [`model`] — the `EnvKind` distinction, the `EnvScopeRef` scope pointer, the
+//!   in-memory `ResolvedEntry`, and the env-var-key rule (in `fkst-shared`).
+//! - [`service`] — write-side validation (key rule, reserved-key denylist,
+//!   value/entry caps), the in-memory store, and the consumer read/resolve API
+//!   `list_for_scope`.
+//!
+//! At-rest envelope encryption was removed in the DB-free pivot (sa:db-free):
+//! secrets are in-memory only and reach the worker over the TLS controller↔worker
+//! channel. Re-introduce a `KeyProvider` seam here if at-transit-rest encryption
+//! is later required.
 //!
 //! Security contract: a secret value is never logged, never returned over HTTP,
-//! and never stored in plaintext. Secrets live in `secrecy` types that redact in
-//! `Debug` and zeroize on drop; plaintext and DEK buffers are wiped after use.
+//! and never persisted. Secrets live in `secrecy` types that redact in `Debug`
+//! and zeroize on drop.
 
-pub mod crypto;
 // `model` was extracted to `fkst-shared` (issue #145); re-export it so
-// `crate::vault::model::…` keeps resolving for the service, repo, and callers.
+// `crate::vault::model::…` keeps resolving for the service and callers.
 pub use fkst_shared::vault::model;
-pub mod repo;
 pub mod service;
 
-pub use crypto::{KeyProvider, KmsKeyProvider, LocalKeyProvider};
-pub use model::{
-    EncryptedBlob, EnvKind, EnvScopeRef, RepoRef, ResolvedEntry, VaultEntry, ENVELOPE_ALG,
-};
-pub use repo::VaultRepo;
-pub use service::{VaultLimits, VaultService, WriteRequest};
+pub use model::{EnvKind, EnvScopeRef, RepoRef, ResolvedEntry};
+pub use service::{VaultLimits, VaultService};

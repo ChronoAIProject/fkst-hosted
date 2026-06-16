@@ -38,9 +38,9 @@ pub struct AppState {
     /// Repository over the `goals` collection (domain layer owned by the goals
     /// module). Goal CRUD handlers go through this, never raw Mongo.
     pub goals: GoalIssueStore,
-    /// Per-session secret/variable vault (issue #100). Always present: the
-    /// `KeyProvider` is built fail-closed at boot, so the vault routes never
-    /// run without an at-rest encryption key.
+    /// Per-session secret/variable vault (issue #100), in-memory (#138).
+    /// Secrets are supplied inline at goal trigger and held by the controller
+    /// in memory only — no at-rest key and no persistence.
     pub vault: VaultService,
     /// Ornn skill-registry client for the catalog API (issue #114): `None` when
     /// NyxID is not configured (auth disabled / no service client) — the catalog

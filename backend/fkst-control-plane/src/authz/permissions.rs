@@ -54,12 +54,10 @@ pub const GITHUB_WRITE: &str = "fkst:github:write";
 /// Read the skill catalog — all `GET /api/v1/catalog/*` routes (#114).
 pub const CATALOG_READ: &str = "fkst:catalog:read";
 
-/// List/read vault entries — `GET /api/v1/vault/entries` (#100).
-pub const VAULT_READ: &str = "fkst:vault:read";
-/// Upsert a vault entry — `PUT /api/v1/vault/entries`.
-pub const VAULT_WRITE: &str = "fkst:vault:write";
-/// Delete a vault entry — `DELETE /api/v1/vault/entries/:id`.
-pub const VAULT_DELETE: &str = "fkst:vault:delete";
+// The persistent vault CRUD (`fkst:vault:*`) was removed in the DB-free pivot
+// (#138): secrets are supplied inline at goal trigger and held in memory only,
+// so there is no HTTP surface — and therefore no permission — for a persistent
+// secret store.
 
 /// Action-layer guard: require that `ctx` carries `perm` (or the admin
 /// permission, which bypasses).
@@ -117,7 +115,7 @@ mod tests {
         let ctx = ctx_with(&[ADMIN]);
         assert!(require_permission(&ctx, GOAL_DELETE).is_ok());
         assert!(require_permission(&ctx, GITHUB_WRITE).is_ok());
-        assert!(require_permission(&ctx, VAULT_DELETE).is_ok());
+        assert!(require_permission(&ctx, GOAL_TRIGGER).is_ok());
     }
 
     #[test]

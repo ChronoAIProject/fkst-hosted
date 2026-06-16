@@ -25,17 +25,12 @@ use std::sync::OnceLock;
 use fkst_control_plane::db::Db;
 use fkst_control_plane::vault::{VaultLimits, VaultService};
 
-/// Deterministic 32-byte vault KEK (base64) for integration tests. NOT a real
-/// secret — only ever used to satisfy the always-on vault wiring so the router
-/// builds. Issue #100 added a required `AppState.vault`.
-pub const TEST_VAULT_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-
-/// Build a `VaultService` over `db` keyed by the deterministic test KEK with the
-/// default per-scope limits. The key is valid base64-32-bytes, so this never
-/// fails.
-pub fn test_vault(db: &Db) -> VaultService {
-    VaultService::with_local_key(&db.database, TEST_VAULT_KEY_B64, VaultLimits::default())
-        .expect("test vault key is valid")
+/// Build the in-memory `VaultService` (#138) with the default per-scope limits.
+/// The `db` is accepted (and ignored) so every harness can call `test_vault(&db)`
+/// uniformly alongside the other `&db`-taking helpers; the vault no longer has a
+/// datastore.
+pub fn test_vault(_db: &Db) -> VaultService {
+    VaultService::new(VaultLimits::default())
 }
 
 /// Default binary location inside the engine image / engine-based pods.
