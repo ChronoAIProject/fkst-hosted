@@ -269,6 +269,18 @@ async fn main() -> ExitCode {
         }
     };
 
+    // 5a-bis-pre-pre. Build the session token minter for the controller's mid-run
+    //         credential-refresh channel (#151). Cloned from `github_app` BEFORE
+    //         it moves into AppState; `None` when the App is unconfigured (the
+    //         credential-refresh route then answers 503). This is the internal
+    //         router's `minter` argument below.
+    let session_minter: Option<
+        std::sync::Arc<dyn fkst_control_plane::controller::SessionTokenMinter>,
+    > = github_app.clone().map(|tokens| {
+        std::sync::Arc::new(fkst_control_plane::controller::GithubAppMinter::new(tokens))
+            as std::sync::Arc<dyn fkst_control_plane::controller::SessionTokenMinter>
+    });
+
     // 5a-bis-pre. Build the goal store (#137): goals are GitHub-Issue +
     //         in-memory backed. It mints the App installation token to write
     //         the goal issues; without the App configured it is in-memory only
@@ -425,6 +437,12 @@ async fn main() -> ExitCode {
                     }
                 }
             });
+            // The controller's claim authority for the mid-run worker channels
+            // (#151). A FRESH empty map: placement does not insert into it yet,
+            // so the credential-refresh / status-report routes are reachable but
+            // inert in prod (every fence check misses) — develop behaviour is
+            // byte-identical. A later increment wires placement into this map.
+            let claims = std::sync::Arc::new(fkst_control_plane::controller::ClaimMap::new());
             tracing::info!(
                 route_prefix = "/internal/v1",
                 "internal worker protocol enabled"
@@ -435,6 +453,8 @@ async fn main() -> ExitCode {
                     registry,
                     InternalAuth::new(token),
                     heartbeat_interval_secs,
+                    claims,
+                    session_minter,
                 ),
                 Some(handle),
             )

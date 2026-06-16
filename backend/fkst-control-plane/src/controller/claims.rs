@@ -211,6 +211,47 @@ impl ClaimMap {
         }
     }
 
+    /// Session-keyed fence check for the mid-run worker channels (#151): true
+    /// iff a claim exists for `session_id`, its status is active, AND its
+    /// `fencing_id` matches. A superseded worker (whose claim was reassigned and
+    /// re-fenced) fails this, so it is refused a fresh token / a status write.
+    /// Scans the map — the fleet (and so the map) is small.
+    pub fn fence_ok_for_session(&self, session_id: bson::Uuid, fencing_id: FencingId) -> bool {
+        self.inner
+            .lock()
+            .expect("claim map poisoned")
+            .values()
+            .any(|e| {
+                e.session_id == session_id && is_active(e.status) && e.fencing_id == fencing_id
+            })
+    }
+
+    /// Session-keyed variant of [`set_status`](Self::set_status) for the worker
+    /// status-report channel (#151): find the entry by `session_id`, then apply
+    /// the fence-guarded transition by its `lease_key`. Returns `false` on an
+    /// unknown session or a guard miss (stale fence / wrong `from`) — never a
+    /// mutation. The two map-lock acquisitions are safe: the second
+    /// (`set_status`) re-checks the fence under the lock, so a concurrent
+    /// reassignment between them still produces a fence-guarded no-op.
+    pub fn set_status_for_session(
+        &self,
+        session_id: bson::Uuid,
+        expected_fencing_id: FencingId,
+        from: &[ClaimStatus],
+        to: ClaimStatus,
+    ) -> bool {
+        let lease_key = {
+            let map = self.inner.lock().expect("claim map poisoned");
+            map.values()
+                .find(|e| e.session_id == session_id)
+                .map(|e| e.lease_key.clone())
+        };
+        match lease_key {
+            Some(key) => self.set_status(&key, expected_fencing_id, from, to),
+            None => false,
+        }
+    }
+
     pub fn get(&self, lease_key: &str) -> Option<ClaimEntry> {
         self.inner
             .lock()
@@ -276,145 +317,5 @@ impl ClaimMap {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn uuid() -> bson::Uuid {
-        bson::Uuid::new()
-    }
-
-    #[test]
-    fn claim_then_conflict_for_different_session() {
-        let m = ClaimMap::new();
-        let s1 = uuid();
-        m.claim("pkg", s1, None, "w1").unwrap();
-        let err = m.claim("pkg", uuid(), None, "w1").unwrap_err();
-        assert_eq!(err, ClaimError::AlreadyClaimed("pkg".to_string()));
-    }
-
-    #[test]
-    fn claim_idempotent_for_same_session() {
-        let m = ClaimMap::new();
-        let s1 = uuid();
-        let first = m.claim("pkg", s1, None, "w1").unwrap();
-        let again = m.claim("pkg", s1, None, "w1").unwrap();
-        assert_eq!(first, again);
-        assert_eq!(first.fencing_id, again.fencing_id, "no new fence on replay");
-    }
-
-    #[test]
-    fn claim_succeeds_after_release() {
-        let m = ClaimMap::new();
-        let s1 = uuid();
-        let e1 = m.claim("pkg", s1, None, "w1").unwrap();
-        assert!(m.release("pkg", e1.fencing_id));
-        // A different session can now claim the freed key.
-        assert!(m.claim("pkg", uuid(), None, "w1").is_ok());
-    }
-
-    #[test]
-    fn fencing_id_is_strictly_monotonic() {
-        let m = ClaimMap::new();
-        let mut last = 0;
-        for i in 0..5 {
-            let e = m.claim(&format!("pkg-{i}"), uuid(), None, "w1").unwrap();
-            assert!(e.fencing_id > last, "fence must strictly increase");
-            last = e.fencing_id;
-        }
-        let r = m.reassign("pkg-0", "w2").unwrap();
-        assert!(r.fencing_id > last);
-    }
-
-    #[test]
-    fn set_status_guard_miss_on_stale_fence() {
-        let m = ClaimMap::new();
-        let e = m.claim("pkg", uuid(), None, "w1").unwrap();
-        let stale_fence = e.fencing_id;
-        m.reassign("pkg", "w2").unwrap(); // bumps the fence
-                                          // A superseded worker writing with the pre-reassign fence is rejected.
-        assert!(!m.set_status(
-            "pkg",
-            stale_fence,
-            &[ClaimStatus::Pending],
-            ClaimStatus::Running
-        ));
-    }
-
-    #[test]
-    fn set_status_respects_from_set() {
-        let m = ClaimMap::new();
-        let e = m.claim("pkg", uuid(), None, "w1").unwrap();
-        // Wrong `from` set -> miss.
-        assert!(!m.set_status(
-            "pkg",
-            e.fencing_id,
-            &[ClaimStatus::Running],
-            ClaimStatus::Stopping
-        ));
-        // Correct `from` -> apply.
-        assert!(m.set_status(
-            "pkg",
-            e.fencing_id,
-            &[ClaimStatus::Pending],
-            ClaimStatus::Validating
-        ));
-        assert_eq!(m.get("pkg").unwrap().status, ClaimStatus::Validating);
-    }
-
-    #[test]
-    fn release_is_equality_pinned() {
-        let m = ClaimMap::new();
-        let e = m.claim("pkg", uuid(), None, "w1").unwrap();
-        assert!(
-            !m.release("pkg", e.fencing_id + 999),
-            "stale fence removes nothing"
-        );
-        assert!(m.get("pkg").is_some());
-    }
-
-    #[test]
-    fn reassign_bumps_fence_changes_owner_resets_status() {
-        let m = ClaimMap::new();
-        let e = m.claim("pkg", uuid(), None, "w1").unwrap();
-        m.set_status(
-            "pkg",
-            e.fencing_id,
-            &[ClaimStatus::Pending],
-            ClaimStatus::Running,
-        );
-        let r = m.reassign("pkg", "w2").unwrap();
-        assert!(r.fencing_id > e.fencing_id);
-        assert_eq!(r.owner_worker, "w2");
-        assert_eq!(r.status, ClaimStatus::Pending);
-    }
-
-    #[test]
-    fn owned_by_lists_only_active_entries_for_worker() {
-        let m = ClaimMap::new();
-        let a = m.claim("a", uuid(), None, "w1").unwrap();
-        m.claim("b", uuid(), None, "w1").unwrap();
-        m.claim("c", uuid(), None, "w2").unwrap();
-        // Make `a` terminal.
-        m.set_status(
-            "a",
-            a.fencing_id,
-            &[ClaimStatus::Pending],
-            ClaimStatus::Stopped,
-        );
-        let owned: Vec<String> = m.owned_by("w1").into_iter().map(|e| e.lease_key).collect();
-        assert_eq!(owned, vec!["b".to_string()]);
-        assert_eq!(m.active_load("w1"), 1);
-        assert_eq!(m.active_load("w2"), 1);
-    }
-
-    #[test]
-    fn seed_fencing_raises_floor_for_post_restart_redo() {
-        let m = ClaimMap::new();
-        m.seed_fencing(100);
-        let e = m.claim("pkg", uuid(), None, "w1").unwrap();
-        assert!(
-            e.fencing_id > 100,
-            "next fence must exceed the seeded floor"
-        );
-    }
-}
+#[path = "claims_tests.rs"]
+mod tests;
