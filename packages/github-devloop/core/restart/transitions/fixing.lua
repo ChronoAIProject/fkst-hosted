@@ -4,6 +4,7 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "fixing",
     terminal = false,
@@ -11,6 +12,10 @@ return function(M, h)
     driving_queue = "devloop_fixing",
     output_obligation = obligation({ "fix:v1", "state:v1 reviewing", "review-meta:v1" }, { "reviewing", "review-meta", "fixing" }),
     budget = budget(120),
+    liveness_contract = liveness({
+      mode = "row-budget-bounds-receiver",
+      receiver_bound_minutes = 60,
+    }),
     on_timeout = timeout("devloop_fixing"),
     payload_builder = M.build_devloop_fixing_payload,
     dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<reviewed_head_sha>",

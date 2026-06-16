@@ -4,6 +4,7 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "implementing",
     terminal = false,
@@ -11,6 +12,16 @@ return function(M, h)
     driving_queue = "devloop_ready",
     output_obligation = obligation({ "state:v1 pr-open", "state:v1 impl-failed" }, { "pr-open", "impl-failed" }),
     budget = budget(45),
+    liveness_contract = liveness({
+      mode = "live-defer",
+      signal = {
+        family = "implement-attempt",
+        producer = "implement-attempt",
+        surface = "issue-comment-stream",
+        version_form = "raw",
+        max_age_minutes = 120,
+      },
+    }),
     on_timeout = timeout("devloop_ready"),
     payload_builder = M.build_devloop_ready_payload,
     dedup_shape = "ready/<implementing_inner_version> with impl_retry_attempt=<implementation_retry_attempt(state.version)>",

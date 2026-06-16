@@ -92,7 +92,7 @@ return {
     t.eq(label.remove_labels[5], "fkst-dev:merge-ready")
     t.eq(label.remove_labels[6], "fkst-dev:fixing")
     t.eq(label.remove_labels[7], "fkst-dev:impl-failed")
-    t.is_true(#label.remove_labels >= 10)
+    t.eq(#label.remove_labels, 11)
     t.eq(label.issue_number, "42")
 
     t.eq(core.state_label_hint_matches({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "reviewing"), true)
@@ -128,7 +128,7 @@ return {
     t.eq(pr_reconcile.source_ref.ref, "owner/repo#pr/7")
     t.eq(pr_reconcile.add_labels[1], "fkst-dev:reviewing")
     t.eq(pr_reconcile.remove_labels[1], "fkst-dev:thinking")
-    t.is_true(#reconcile.remove_labels >= 10)
+    t.eq(#reconcile.remove_labels, 11)
     t.is_true(reconcile.dedup_key:find("reconcile/label/github-devloop/issue/owner/repo/42/reviewing", 1, true) ~= nil)
 
     local completed = reached({

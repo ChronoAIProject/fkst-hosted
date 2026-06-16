@@ -4,6 +4,7 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "ready",
     terminal = false,
@@ -11,6 +12,17 @@ return function(M, h)
     driving_queue = "devloop_ready",
     output_obligation = obligation({ "state:v1 implementing", "dependency-hold:v1" }, { "implementing", "ready" }),
     budget = budget(45),
+    liveness_contract = liveness({
+      mode = "live-defer",
+      signal = {
+        family = "dependency-wait",
+        resolver = "dependency-hold",
+        producer = "dependency-wait",
+        surface = "issue-comment-stream",
+        version_form = "raw",
+        max_age_minutes = 525600,
+      },
+    }),
     on_timeout = timeout("devloop_ready"),
     payload_builder = M.build_devloop_ready_payload,
     dedup_shape = "ready/<state.version>",

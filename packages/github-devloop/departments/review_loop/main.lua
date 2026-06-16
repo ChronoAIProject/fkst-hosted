@@ -144,10 +144,11 @@ function pipeline(event)
       core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", "skip-stale(reviewing-version)", "issue is not currently reviewing at this version")
       return
     end
+    local heartbeat_version = state.version
     local sr_digest = core.source_ref_digest(unresolved.source_ref)
-    local facts = core.review_converge_round_facts(current_pr.comments, unresolved.proposal_id, origin.proposal_id, review_version, reviewed_head_sha, sr_digest)
+    local facts = core.review_converge_round_facts(current_pr.comments, unresolved.proposal_id, origin.proposal_id, heartbeat_version, reviewed_head_sha, sr_digest)
     local round = math.max(tonumber(unresolved.round) or 0, core.max_converge_round(facts))
-    if core.has_review_converge_round_marker(current_pr.comments, unresolved.proposal_id, origin.proposal_id, review_version, reviewed_head_sha, sr_digest, round) then
+    if core.has_review_converge_round_marker(current_pr.comments, unresolved.proposal_id, origin.proposal_id, heartbeat_version, reviewed_head_sha, sr_digest, round) then
       core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review converge round marker already visible)", "review converge round marker for incoming round is already visible")
       return
     end
@@ -155,7 +156,7 @@ function pipeline(event)
     local marker_body = core.review_converge_round_marker(
       unresolved.proposal_id,
       origin.proposal_id,
-      review_version,
+      heartbeat_version,
       reviewed_head_sha,
       sr_digest,
       round,

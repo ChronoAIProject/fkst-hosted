@@ -48,6 +48,49 @@ local function mock_review_loop_state(impl_version)
   })
 end
 
+local function run_observe_pr_with_comments(comments)
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  entity_read_mocks.mock_issue_view_selector(t, {
+    repo = "owner/repo",
+    number = 42,
+    assignees = { "fkst-test-bot" },
+    author_login = "fkst-test-bot",
+  }, "assignees,author")
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = "owner/repo",
+    number = 7,
+    head = "devloop-owner-repo-42-01HY",
+    head_sha = "def456",
+    base_branch = "dev",
+    state = "OPEN",
+    comments = comments,
+    register_all_views = true,
+  })
+  return t.run_department("departments/observe_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = pr_event("2026-06-04T01:02:03Z"),
+  }, opts("review-v2-real-review-loop-heartbeat-consumer"))
+end
+
 return {
   test_review_loop_mixed_comment_abstain_converges_before_meta = function()
     local event = review_unresolved({
@@ -98,6 +141,64 @@ return {
     t.eq(#result.raises, 2)
     t.is_true(find_raise(result.raises, "consensus.proposal") ~= nil)
     t.eq(find_raise(result.raises, "devloop_review_meta"), nil)
+  end,
+
+  test_reviewing_liveness_defers_from_real_review_loop_heartbeat = function()
+    local raw_version = reviewing().version .. "/review-loop/1"
+    local event = review_unresolved({
+      proposal_id = core.pr_review_proposal_id("owner/repo", 7, raw_version, "def456"),
+      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, raw_version, "def456") .. "/review",
+      round = 1,
+      narrowed_question = "Does the loop still need review?",
+      angle_digests = {
+        { angle = "minimal", verdict = "approve", digest = "fresh heartbeat" },
+        { angle = "risk", verdict = "abstain", digest = "no issue" },
+      },
+    })
+    mock_review_loop_state(raw_version)
+
+    local produced = run_review_loop(event, opts("review-v2-real-review-loop-heartbeat-producer"))
+    t.eq(produced.exit_code, 0)
+    local heartbeat = find_raise(produced.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(heartbeat ~= nil)
+    t.is_true(tostring(heartbeat.payload.body or ""):find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
+    t.is_true(tostring(heartbeat.payload.body or ""):find('version="' .. core.safe_version_segment(raw_version) .. '"', 1, true) ~= nil)
+    t.eq(tostring(heartbeat.payload.body or ""):find('version="' .. raw_version .. '"', 1, true), nil)
+
+    local row = core.restart_transition_row("reviewing")
+    local signal = core.restart_row_liveness_signal(row, {
+      state = "reviewing",
+      version = raw_version,
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      marker_created_at = "2026-06-03T00:00:00Z",
+    }, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      source_ref = core.pr_source_ref("owner/repo", 7),
+      head_sha = "def456",
+      current = {
+        comments = {},
+      },
+      current_pr = {
+        comments = {
+          { body = heartbeat.payload.body, author_login = "fkst-test-bot", created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 60) },
+        },
+      },
+      now_seconds = now(),
+    }, now())
+    t.eq(signal.live, true)
+    t.eq(signal.family, "review-converge-round")
+    t.eq(signal.resolver, "review-converge-round")
+
+    local observed = run_observe_pr_with_comments({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", raw_version, "dev"),
+      { body = core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", raw_version), author_login = "fkst-test-bot", created_at = "2026-06-03T00:00:00Z" },
+      { body = heartbeat.payload.body, author_login = "fkst-test-bot", created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 60) },
+    })
+    t.eq(observed.exit_code, 0)
+    t.eq(find_raise(observed.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return tostring(payload and payload.body or ""):find("fkst:github-devloop:timeout-attempt:v1", 1, true) ~= nil
+    end), nil)
+    t.eq(find_raise(observed.raises, "devloop_timeout_reconcile"), nil)
   end,
 
   test_review_meta_fix_without_gap_blocks_fail_closed = function()

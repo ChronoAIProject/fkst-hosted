@@ -4,6 +4,7 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "pr-open",
     terminal = false,
@@ -11,6 +12,10 @@ return function(M, h)
     driving_queue = "devloop_reviewing",
     output_obligation = obligation({ "state:v1 reviewing", "devloop_reviewing" }, { "reviewing" }),
     budget = budget(30),
+    liveness_contract = liveness({
+      mode = "row-budget-bounds-receiver",
+      receiver_bound_minutes = 0,
+    }),
     on_timeout = timeout("devloop_reviewing"),
     payload_builder = M.build_devloop_reviewing_payload,
     dedup_shape = "reviewing/<proposal_id>/<impl_version>/<pr>",

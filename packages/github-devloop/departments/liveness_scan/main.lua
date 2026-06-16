@@ -8,7 +8,21 @@ local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/cursor/"
 
 M.spec = {
   consumes = { "devloop_liveness_tick" },
-  produces = { "github-proxy.github_entity_changed" },
+  produces = {
+    "github-proxy.github_entity_changed",
+    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
+    "consensus.proposal",
+    "devloop_ready",
+    "devloop_reviewing",
+    "devloop_fixing",
+    "devloop_review_meta",
+    "devloop_merge_ready",
+    "devloop_decompose",
+    "devloop_reconcile",
+    "devloop_review_reconcile",
+    "devloop_timeout_reconcile",
+  },
   fanout = { "devloop_liveness_tick" },
   stall_window = "30s",
 }
@@ -97,6 +111,30 @@ local function should_reinject_state(proposal_id, state)
   return true
 end
 
+local function issue_entity(repo, issue_number)
+  return {
+    repo = repo,
+    number = issue_number,
+    source_ref = core.issue_source_ref(repo, issue_number),
+  }
+end
+
+local function maybe_timeout_action(entity, state, facts)
+  local row = core.restart_transition_row(state and state.state)
+  if row == nil or row.terminal == true then
+    return nil
+  end
+  local proposal_id = facts.proposal_id or state.proposal_id
+  if core.restart_row_liveness_deferred(row, state, facts, facts.now_seconds or now()) then
+    core.log_cas_decision("liveness_scan", proposal_id, state, row.from_state, row.driving_queue, "skip-active-output-obligation", "receiver liveness contract signal is still fresh")
+    return nil
+  end
+  if core.maybe_timeout_redrive_from_table("liveness_scan", entity, state, row, facts) then
+    return "handled"
+  end
+  return nil
+end
+
 local function should_reinject_issue(repo, issue, limits, deadline)
   if not core.issue_ref_round_trips(repo, issue.number) then
     return false
@@ -123,7 +161,22 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     return false
   end
 
-  return should_reinject_state(proposal_id, core.current_entity_state(current.comments, proposal_id))
+  local state = core.current_entity_state(current.comments, proposal_id)
+  if not should_reinject_state(proposal_id, state) then
+    return false
+  end
+  local timeout_action = maybe_timeout_action(issue_entity(repo, issue.number), state, {
+    proposal_id = proposal_id,
+    current = current,
+    link = core.pr_link_fact(current.comments, proposal_id),
+    event_ts = issue.updated_at,
+    source_ref = core.issue_source_ref(repo, issue.number),
+    now_seconds = now(),
+  })
+  if timeout_action == "handled" then
+    return false
+  end
+  return true
 end
 
 local function should_reinject_pr(repo, pr, limits, deadline)
@@ -156,7 +209,39 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     return false
   end
 
-  return should_reinject_state(proposal_id, core.current_entity_state(current.comments, origin.proposal_id))
+  local state = core.current_entity_state(current.comments, origin.proposal_id)
+  if not should_reinject_state(proposal_id, state) then
+    return false
+  end
+  local entity = issue_entity(origin.repo, origin.issue_number)
+  local source_ref = core.pr_source_ref(repo, pr.number)
+  local timeout_action = maybe_timeout_action(entity, state, {
+    proposal_id = origin.proposal_id,
+    current = { comments = current.comments or {}, labels = current.labels or {} },
+    current_pr = current,
+    link = {
+      proposal_id = origin.proposal_id,
+      pr_number = pr.number,
+      branch = origin.branch,
+      impl_version = origin.impl_version,
+      base_branch = origin.base_branch,
+    },
+    snapshot = {
+      comments = current.comments or {},
+      prs = { { number = pr.number, current = current } },
+      state = state,
+    },
+    source_ref = source_ref,
+    head_sha = current.head_sha,
+    review_proposal_id = state.state == "reviewing" and core._is_git_sha(current.head_sha)
+      and core.pr_review_proposal_id(origin.repo, pr.number, state.version, current.head_sha)
+      or nil,
+    now_seconds = now(),
+  })
+  if timeout_action == "handled" then
+    return false
+  end
+  return true
 end
 
 local function list_open_issues(repo, timeout, poll_key)

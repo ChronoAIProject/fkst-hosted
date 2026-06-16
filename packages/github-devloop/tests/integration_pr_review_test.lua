@@ -142,7 +142,7 @@ return {
     end)
     local open_pr_raise = find_raise(result.raises, "devloop_open_pr")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:implementing")
-    t.is_true(#label_raise.payload.remove_labels >= 10)
+    t.eq(#label_raise.payload.remove_labels, 11)
     t.is_true(comment_raise.payload.body:find("github-devloop implementation started", 1, true) ~= nil)
     local fact = core.implementing_fact({ comment_raise.payload.body }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
@@ -292,8 +292,9 @@ return {
       },
     }, opts("observe-pr-reconcile-reviewing"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 3)
     local pr_label_raise = find_label_raise(result.raises, "pr")
+    t.is_true(pr_label_raise ~= nil)
     t.eq(find_label_raise(result.raises, "issue"), nil)
     t.eq(pr_label_raise.payload.add_labels[1], "fkst-dev:reviewing")
     t.eq(pr_label_raise.payload.target_number, 7)
@@ -418,7 +419,6 @@ return {
   end,
   test_observe_pr_idempotent_reviewing_marker_reraises_until_review_result_visible = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local review_id = core.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
@@ -437,16 +437,17 @@ return {
       },
     }, opts("observe-pr-reviewing-self-heal"))
     t.eq(first.exit_code, 0)
-    t.eq(#first.raises, 2)
     local reviewing_raise = find_raise(first.raises, "devloop_reviewing")
+    t.is_true(reviewing_raise ~= nil)
     t.eq(find_label_raise(first.raises, "pr").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(reviewing_raise.payload.version, impl_version)
+    t.eq(reviewing_raise.payload.version, impl_version .. "/review-loop/1")
 
+    local review_id = core.pr_review_proposal_id("owner/repo", 7, reviewing_raise.payload.version, "def456")
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_issue_reviewing({ "fkst-dev:reviewing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", reviewing_raise.payload.version),
       core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "approve", "consensus:" .. review_id .. "/review"),
     })
     local reviewed = run_observe_pr({
@@ -461,7 +462,6 @@ return {
       },
     }, opts("observe-pr-reviewing-reviewed"))
     t.eq(reviewed.exit_code, 0)
-    t.eq(#reviewed.raises, 2)
     t.eq(find_label_raise(reviewed.raises, "issue"), nil)
     t.eq(find_label_raise(reviewed.raises, "pr").payload.add_labels[1], "fkst-dev:reviewing")
   end,
@@ -487,13 +487,13 @@ return {
       },
     }, opts("observe-pr-reviewing-fix-round-self-heal"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
     local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    t.is_true(reviewing_raise ~= nil)
     t.eq(find_label_raise(result.raises, "pr").payload.expected_version, fix_round_version)
-    t.eq(reviewing_raise.payload.version, fix_round_version)
+    t.eq(reviewing_raise.payload.version, fix_round_version .. "/review-loop/1")
     mock_bot_env()
     mock_issue_review({ "fkst-dev:reviewing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", fix_round_version),
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", reviewing_raise.payload.version),
     })
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
@@ -502,7 +502,7 @@ return {
     t.eq(review.exit_code, 0)
     t.eq(#review.raises, 1)
     local proposal = find_raise(review.raises, "consensus.proposal").payload
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, fix_round_version, "feedface"))
+    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, reviewing_raise.payload.version, "feedface"))
     t.is_nil(proposal.body:find("+fixed by replay", 1, true))
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
   end,

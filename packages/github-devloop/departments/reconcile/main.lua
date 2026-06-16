@@ -26,9 +26,22 @@ local function emit_blocked_reconcile(kind, proposal_id, state, version, action,
   end
 end
 
-local function build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
-  local version = core.timeout_reconcile_state_version(reconcile.issue_version, reconcile.state, reconcile.round)
-  local marker = core.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action)
+local function timeout_reconcile_reason_body(fields)
+  local source_ref = type(fields.source_ref) == "table" and fields.source_ref or {}
+  return "reason_class=" .. tostring(fields.reason_class or "state-output-obligation-timeout")
+    .. "\nfrom_state=" .. tostring(fields.from_state or "")
+    .. "\nfrom_version=" .. tostring(fields.from_version or "")
+    .. "\nage_minutes=" .. tostring(fields.age_minutes or "")
+    .. "\nbudget_minutes=" .. tostring(fields.budget_minutes or "")
+    .. "\nattempt=" .. tostring(fields.attempt or "")
+    .. "\nattempt_limit=" .. tostring(fields.attempt_limit or "")
+    .. "\ndriving_queue=" .. tostring(fields.driving_queue or "")
+    .. "\nsource_ref.kind=" .. tostring(source_ref.kind or "")
+    .. "\nsource_ref.ref=" .. tostring(source_ref.ref or "")
+end
+
+local function build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, fields)
+  local marker = core.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
   local state_marker = core.state_marker(reconcile.proposal_id, "blocked", version)
   return {
     schema = "github-proxy.v1",
@@ -36,6 +49,7 @@ local function build_timeout_reconcile_comment_request(repo, issue_number, recon
     issue_number = issue_number,
     body = "github-devloop timeout reconcile action: " .. tostring(action)
       .. "\n\nReason:\n" .. tostring(reason or "")
+      .. "\n\nStructured WHY:\n" .. timeout_reconcile_reason_body(fields or {})
       .. "\n\n" .. state_marker .. "\n" .. marker
       .. "\n" .. "⟦AI:FKST⟧",
     dedup_key = core._dedup_key({
@@ -47,9 +61,8 @@ local function build_timeout_reconcile_comment_request(repo, issue_number, recon
   }
 end
 
-local function build_timeout_reconcile_pr_comment_request(repo, pr_number, reconcile, action, reason)
-  local version = core.timeout_reconcile_state_version(reconcile.issue_version, reconcile.state, reconcile.round)
-  local marker = core.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action)
+local function build_timeout_reconcile_pr_comment_request(repo, pr_number, reconcile, action, reason, version, fields)
+  local marker = core.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
   local state_marker = core.state_marker(reconcile.proposal_id, "blocked", version)
   return core.build_entity_comment_request({
     kind = "pr",
@@ -57,6 +70,7 @@ local function build_timeout_reconcile_pr_comment_request(repo, pr_number, recon
     number = pr_number,
   }, "github-devloop timeout reconcile action: " .. tostring(action)
     .. "\n\nReason:\n" .. tostring(reason or "")
+    .. "\n\nStructured WHY:\n" .. timeout_reconcile_reason_body(fields or {})
     .. "\n\n" .. state_marker .. "\n" .. marker
     .. "\n" .. "⟦AI:FKST⟧", core._dedup_key({
     "timeout-reconcile",
@@ -326,24 +340,85 @@ local function pipeline_timeout(event)
 
     core.log_forged_markers("reconcile", reconcile.proposal_id, comments)
     local state = core.current_entity_state(comments, reconcile.proposal_id)
-    local version = core.timeout_reconcile_state_version(reconcile.issue_version, reconcile.state, reconcile.round)
     if core.has_timeout_reconcile_marker(comments, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(timeout reconcile marker already visible)", "timeout reconcile result marker for incoming version is already visible")
       return
     end
-    if state.state ~= reconcile.state or tostring(state.version or "") ~= tostring(reconcile.issue_version) then
-      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(version-mismatch)", "timeout reconcile event does not match canonical state marker")
+    local live_row = core.restart_transition_row(state.state)
+    if state.state ~= nil and live_row ~= nil and live_row.terminal == true then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(already terminal)", "current marker is already terminal")
+      return
+    end
+    if state.state == nil then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "pending", "state marker not yet visible for timeout reconcile")
+      error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
+    end
+    if state.state ~= reconcile.state then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(state-advanced)", "current marker advanced beyond timeout reconcile state")
+      return
+    end
+    if core.strip_transition_version_suffixes(state.version) ~= core.strip_transition_version_suffixes(reconcile.issue_version) then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(lineage-mismatch)", "timeout reconcile event does not match canonical state marker lineage")
+      return
+    end
+
+    local row = core.restart_transition_row(reconcile.state)
+    local due, age_minutes = core.liveness_timeout_due(row, state, now())
+    local decision = core.liveness_timeout_decision_with_facts(row, state, {
+      proposal_id = reconcile.proposal_id,
+      current = { comments = comments },
+    }, now())
+    local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or nil
+    if not due or decision.action ~= "escalate" or tonumber(decision.attempt) < tonumber(reconcile.round) then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(no-longer-over-budget)", "current marker is no longer at timeout escalation threshold")
+      return
+    end
+    if reconcile.state == "blocked" then
+      if core.has_decompose_exhausted_marker(comments, reconcile.proposal_id, state.version) then
+        core.log_cas_decision("reconcile", reconcile.proposal_id, state, "blocked", "devloop_decompose", "skip-idempotent(decompose-exhausted)", "blocked decompose output obligation already reached terminal stop")
+        return
+      end
+      local target = pr_number ~= nil
+        and { kind = "pr", repo = repo, number = pr_number }
+        or { kind = "issue", repo = repo, number = issue_number }
+      local comment_request = core.build_decompose_exhausted_comment_request(target, reconcile.proposal_id, state, reconcile.source_ref, decision.attempt)
+      local queue = pr_number ~= nil and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request"
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, "blocked", "devloop_decompose", "applied(decompose-exhausted)", "blocked decompose output obligation exhausted")
+      core.log_apply("reconcile", reconcile.proposal_id, nil, nil, { add = {}, remove = {} }, { queue })
+      core.log_raise("reconcile", reconcile.proposal_id, queue, comment_request)
+      return
+    end
+
+    local version = core.timeout_reconcile_state_version(state.version, reconcile.state, decision.attempt)
+    local transition = core.versioned_transition_status(state, { reconcile.state }, "blocked", version)
+    if transition == "pending" then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", core.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")
+      error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
+    end
+    if transition == "idempotent" or transition == "stale" then
+      core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", core.cas_outcome(state, transition, version), "current marker cannot be timeout reconciled")
       return
     end
 
     local action = "drop"
-    local row = core.restart_transition_row(reconcile.state)
     local reason_prefix = row and row.on_timeout and row.on_timeout.on_escalate and row.on_timeout.on_escalate.reason
       or "state-output-obligation-timeout"
-    local reason = tostring(reason_prefix) .. "-after-" .. tostring(reconcile.round) .. "-attempts"
+    local reason = tostring(reason_prefix) .. "-after-" .. tostring(decision.attempt) .. "-attempts"
+    local why_fields = {
+      from_state = reconcile.state,
+      from_version = state.version,
+      terminal_version = version,
+      age_minutes = age_minutes,
+      budget_minutes = row and row.budget and tonumber(row.budget.minutes) or nil,
+      attempt = decision.attempt,
+      attempt_limit = limit,
+      driving_queue = row and row.driving_queue or nil,
+      reason_class = "state-output-obligation-timeout",
+      source_ref = core.normalize_source_ref(reconcile.source_ref),
+    }
     local comment_request = pr_number ~= nil
-      and build_timeout_reconcile_pr_comment_request(repo, pr_number, reconcile, action, reason)
-      or build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason)
+      and build_timeout_reconcile_pr_comment_request(repo, pr_number, reconcile, action, reason, version, why_fields)
+      or build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, why_fields)
     local label_request = core.build_state_label_request(repo, issue_number, "blocked", core._dedup_key({
       "timeout-reconcile",
       "label",

@@ -191,7 +191,13 @@ local function require_marker_fact(facts, family)
     return M.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
   if family == "implement-attempt" then
-    return M.latest_implement_attempt_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+    local attempt_version = facts.state.version
+    if facts.state.state == "implementing" then
+      attempt_version = tostring(attempt_version or "")
+        :gsub("/timeout/implementing/%d+$", "")
+        :gsub("%-timeout%-implementing%-%d+$", "")
+    end
+    return M.latest_implement_attempt_fact(facts.snapshot.comments, facts.proposal_id, attempt_version)
   end
   if family == "impl-failure" then
     return M.impl_failure_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
@@ -282,7 +288,15 @@ local function gather_required_facts(row, entity, state, provided)
 
   gathered.snapshot = gathered.snapshot or { comments = gathered.current and gathered.current.comments or {}, prs = {}, state = state }
   if gathered.current_pr ~= nil and gathered.link ~= nil then
-    for _, comment in ipairs(gathered.current_pr.comments or {}) do table.insert(gathered.snapshot.comments, comment) end
+    -- current_pr.comments may be the SAME table as snapshot.comments: callers
+    -- (e.g. the PR liveness sweep) pass current_pr === current and a snapshot
+    -- whose comments alias current.comments. Appending into a list while
+    -- iterating that same list with ipairs never terminates and allocates
+    -- unboundedly. When they alias, the PR comments are already present, so the
+    -- append is a no-op; only copy across when they are genuinely distinct lists.
+    if gathered.current_pr.comments ~= gathered.snapshot.comments then
+      for _, comment in ipairs(gathered.current_pr.comments or {}) do table.insert(gathered.snapshot.comments, comment) end
+    end
     table.insert(gathered.snapshot.prs, { number = gathered.link.pr_number, current = gathered.current_pr })
   end
 
@@ -309,6 +323,12 @@ function M.gather_replay_required_facts(row, entity, state, facts)
 end
 
 local function log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
+  if M._replay_skip_capture ~= nil then
+    M._replay_skip_capture.outcome = outcome
+    M._replay_skip_capture.reason = reason
+    M._replay_skip_capture.from_state = from_state
+    M._replay_skip_capture.to_state = to_state
+  end
   M.log_cas_decision(dept, proposal_id, state, from_state, to_state, outcome, reason)
   return false
 end
@@ -944,6 +964,19 @@ function M.replay_from_table(dept, entity, state, table_row, facts)
   if replay == nil then return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(replayer)", "restart transition table row is not replayable by this department") end
   local replay_facts = gather_required_facts(row, entity, state, facts or {})
   return replay(dept, entity, state, row, replay_facts)
+end
+
+function M.replay_from_table_classified(dept, entity, state, table_row, facts)
+  local capture = {}
+  local previous = M._replay_skip_capture
+  M._replay_skip_capture = capture
+  local ok, issued = pcall(function() return M.replay_from_table(dept, entity, state, table_row, facts) end)
+  M._replay_skip_capture = previous
+  if not ok then error(issued) end
+  if issued then
+    return { kind = "issued", issued = true }
+  end
+  return { kind = "stuck", issued = false, outcome = capture.outcome, reason = capture.reason }
 end
 end
 

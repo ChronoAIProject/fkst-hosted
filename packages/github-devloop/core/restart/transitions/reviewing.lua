@@ -4,13 +4,24 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "reviewing",
     terminal = false,
     to_states = { "merge-ready", "fixing", "review-meta", "blocked" },
     driving_queue = "devloop_reviewing",
     output_obligation = obligation({ "review-result:v1", "review-converge-round:v1", "state:v1 blocked" }, { "merge-ready", "fixing", "review-meta", "blocked", "reviewing" }),
-    budget = budget(120),
+    budget = budget(150),
+    liveness_contract = liveness({
+      mode = "live-defer",
+      signal = {
+        family = "review-converge-round",
+        producer = "review-converge-round",
+        surface = "pr-comment-stream",
+        version_form = "safe_version_segment",
+        max_age_minutes = 120,
+      },
+    }),
     on_timeout = timeout("devloop_reviewing"),
     payload_builder = M.build_devloop_reviewing_payload,
     dedup_shape = "reviewing/<proposal_id>/<state.version>/<pr>",

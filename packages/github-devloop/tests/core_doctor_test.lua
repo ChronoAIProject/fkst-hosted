@@ -54,7 +54,7 @@ return {
 
   test_core_doctor_classifies_stuck_past_budget = function()
     local current = entity({ "fkst-dev:enabled", "fkst-dev:thinking" }, {
-      state_comment("thinking", version, "2026-06-02T23:00:03Z"),
+      state_comment("thinking", version, "2026-06-02T22:00:03Z"),
     })
 
     local result = classify(current)

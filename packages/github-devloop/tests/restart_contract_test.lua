@@ -13,18 +13,20 @@ end
 
 local function copy_rows(rows)
   local copied = {}
+  local function copy_value(value)
+    if type(value) ~= "table" then
+      return value
+    end
+    local nested = {}
+    for nested_key, nested_value in pairs(value) do
+      nested[nested_key] = copy_value(nested_value)
+    end
+    return nested
+  end
   for index, row in ipairs(rows or {}) do
     local next_row = {}
     for key, value in pairs(row) do
-      if type(value) == "table" then
-        local nested = {}
-        for nested_key, nested_value in pairs(value) do
-          nested[nested_key] = nested_value
-        end
-        next_row[key] = nested
-      else
-        next_row[key] = value
-      end
+      next_row[key] = copy_value(value)
     end
     copied[index] = next_row
   end
@@ -90,6 +92,20 @@ local function allowed_extra_transition(state, next_state)
     or (state == "impl-failed" and next_state == "implementing")
 end
 
+local function capture_raises(fn)
+  local raised = {}
+  local original_log_raise = core.log_raise
+  core.log_raise = function(_, _, queue, payload)
+    table.insert(raised, { queue = queue, payload = payload })
+  end
+  local ok, err = pcall(fn, raised)
+  core.log_raise = original_log_raise
+  if not ok then
+    error(err)
+  end
+  return raised
+end
+
 return {
   test_persistence_class_is_declared = function()
     t.eq(core.persistence_class(), "saga")
@@ -121,6 +137,7 @@ return {
         t.is_true(type(row.driving_queue) == "string" and row.driving_queue ~= "")
         t.is_true(type(row.output_obligation) == "table")
         t.is_true(type(row.budget) == "table")
+        t.is_true(type(row.liveness_contract) == "table")
         t.is_true(type(row.on_timeout) == "table")
         t.is_true(type(row.payload_builder) == "function")
         t.is_true(type(row.dedup_shape) == "string" and row.dedup_shape ~= "")
@@ -151,6 +168,7 @@ return {
       if row.terminal == false then
         t.is_true(row.output_obligation ~= nil)
         t.is_true(tonumber(row.budget.minutes) > 0)
+        t.is_true(type(row.liveness_contract) == "table")
         t.eq(row.on_timeout.action, "redrive")
         t.eq(row.on_timeout.queue, row.driving_queue)
         t.is_true(row.on_timeout.queue ~= "none")
@@ -248,6 +266,93 @@ return {
     t.is_true(errors[1]:find("blocked", 1, true) ~= nil)
   end,
 
+  test_liveness_contract_declares_receiver_liveness_for_every_non_terminal_row = function()
+    local by_state = table_by_state()
+    local expected = {
+      thinking = { mode = "live-defer", family = "converge-round", max_age = 120, budget = 150 },
+      ready = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 45 },
+      implementing = { mode = "live-defer", family = "implement-attempt", max_age = 120, budget = 45 },
+      ["pr-open"] = { mode = "row-budget-bounds-receiver", receiver = 0, budget = 30 },
+      reviewing = { mode = "live-defer", family = "review-converge-round", max_age = 120, budget = 150 },
+      ["merge-ready"] = { mode = "row-budget-bounds-receiver", receiver = 30, external = 360, budget = 390 },
+      merging = { mode = "row-budget-bounds-receiver", receiver = 30, external = 360, budget = 390 },
+      fixing = { mode = "row-budget-bounds-receiver", receiver = 60, budget = 120 },
+      ["review-meta"] = { mode = "row-budget-bounds-receiver", receiver = 60, budget = 90 },
+      ["impl-failed"] = { mode = "row-budget-bounds-receiver", receiver = 0, external = 1410, budget = 1440 },
+      blocked = { mode = "row-budget-bounds-receiver", receiver = 0, external = 1410, budget = 1440 },
+    }
+    for state, spec in pairs(expected) do
+      local row = by_state[state]
+      t.is_true(row ~= nil, state)
+      t.eq(row.terminal, false)
+      t.eq(row.budget.minutes, spec.budget)
+      t.eq(row.liveness_contract.mode, spec.mode)
+      if spec.mode == "live-defer" then
+        t.eq(row.liveness_contract.signal.family, spec.family)
+        t.eq(row.liveness_contract.signal.resolver, spec.resolver)
+        t.eq(row.liveness_contract.signal.producer, spec.family)
+        t.eq(row.liveness_contract.signal.max_age_minutes, spec.max_age)
+      else
+        t.eq(row.liveness_contract.receiver_bound_minutes, spec.receiver)
+        t.eq(row.liveness_contract.external_wait_bound_minutes, spec.external)
+      end
+    end
+  end,
+
+  test_liveness_contract_rejects_non_terminal_without_receiver_liveness = function()
+    local rows = copy_rows(core.restart_transition_table())
+    rows_by_state(rows).ready.liveness_contract = nil
+    local errors = core.liveness_contract_errors(rows)
+    t.eq(#errors, 1)
+    t.is_true(errors[1]:find("ready", 1, true) ~= nil)
+    t.is_true(errors[1]:find("liveness_contract", 1, true) ~= nil)
+  end,
+
+  test_liveness_contract_rejects_under_budget_receiver_bound = function()
+    local rows = copy_rows(core.restart_transition_table())
+    local row = rows_by_state(rows)["merge-ready"]
+    row.budget.minutes = 360
+    local errors = core.liveness_contract_errors(rows)
+    t.eq(#errors, 1)
+    t.is_true(errors[1]:find("merge-ready", 1, true) ~= nil)
+    t.is_true(errors[1]:find("budget.minutes", 1, true) ~= nil)
+  end,
+
+  test_liveness_contract_rejects_live_defer_without_resolver_or_existing_family = function()
+    local rows = copy_rows(core.restart_transition_table())
+    local row = rows_by_state(rows).reviewing
+    row.liveness_contract.signal.family = "missing-family"
+    row.liveness_contract.signal.resolver = "missing-resolver"
+    row.liveness_contract.signal.max_age_minutes = nil
+    local errors = core.liveness_contract_errors(rows)
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("missing-family", 1, true) ~= nil)
+    t.is_true(joined:find("missing-resolver", 1, true) ~= nil)
+    t.is_true(joined:find("max_age_minutes", 1, true) ~= nil)
+    t.is_true(joined:find("resolver mismatch", 1, true) ~= nil)
+  end,
+
+  test_liveness_contract_rejects_live_defer_without_producer_binding = function()
+    local rows = copy_rows(core.restart_transition_table())
+    local row = rows_by_state(rows).reviewing
+    row.liveness_contract.signal.producer = nil
+    local errors = core.liveness_contract_errors(rows)
+    t.eq(#errors, 1)
+    t.is_true(errors[1]:find("reviewing", 1, true) ~= nil)
+    t.is_true(errors[1]:find("producer binding", 1, true) ~= nil)
+  end,
+
+  test_liveness_contract_rejects_live_defer_family_resolver_producer_mismatch = function()
+    local rows = copy_rows(core.restart_transition_table())
+    local row = rows_by_state(rows).reviewing
+    row.liveness_contract.signal.family = "converge-round"
+    row.liveness_contract.signal.producer = "review-converge-round"
+    local errors = core.liveness_contract_errors(rows)
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("producer binding family mismatch", 1, true) ~= nil)
+    t.is_true(joined:find("producer binding resolver mismatch", 1, true) ~= nil)
+  end,
+
   test_liveness_timeout_versions_preserve_lineage_and_attempts = function()
     local row = table_by_state()["impl-failed"]
     local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -270,7 +375,237 @@ return {
     t.eq(escalated.action, "escalate")
   end,
 
-  test_liveness_timeout_escalates_thinking_to_reconcile_event = function()
+  test_replay_timeout_classification_counts_declines_as_stuck = function()
+    local declined = {
+      "skip-idempotent(retry-limit)",
+      "skip-foreign(decomposed)",
+      "skip-foreign(pr-link)",
+      "skip-pending(no-attempt-marker)",
+      "skip-pending(attempt-live)",
+      "skip-stale(head-advanced)",
+    }
+    for _, outcome in ipairs(declined) do
+      local previous = core.replay_from_table
+      core.replay_from_table = function()
+        if core._replay_skip_capture ~= nil then
+          core._replay_skip_capture.outcome = outcome
+          core._replay_skip_capture.reason = "declined"
+        end
+        return false
+      end
+      local ok, classified = pcall(function()
+        return core.replay_from_table_classified("test", {}, { state = "ready" }, core.restart_transition_row("ready"), {})
+      end)
+      core.replay_from_table = previous
+      if not ok then error(classified) end
+      t.eq(classified.kind, "stuck")
+      t.eq(classified.outcome, outcome)
+    end
+  end,
+
+  test_live_thinking_converge_round_defers_timeout_count = function()
+    local row = table_by_state().thinking
+    local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local source_ref = core.issue_source_ref("owner/repo", 42)
+    local raised = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = source_ref,
+      }, {
+        state = "thinking",
+        version = version,
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T00:00:00Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        source_ref = source_ref,
+        current = {
+          comments = {
+            {
+              body = core.converge_round_marker("github-devloop/issue/owner/repo/42", version, core.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Still converging", {
+                { angle = "minimal", verdict = "continue", digest = "recent" },
+              }),
+              author_login = "fkst-test-bot",
+              created_at = "2026-06-04T00:30:00Z",
+            },
+          },
+        },
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, true)
+    end)
+    t.eq(#raised, 0)
+  end,
+
+  test_stale_thinking_converge_round_climbs_to_blocked_reconcile = function()
+    local row = table_by_state().thinking
+    local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local source_ref = core.issue_source_ref("owner/repo", 42)
+    local raised = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = source_ref,
+      }, {
+        state = "thinking",
+        version = version .. "/timeout/thinking/3",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T00:00:00Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        source_ref = source_ref,
+        current = {
+          comments = {
+            {
+              body = core.converge_round_marker("github-devloop/issue/owner/repo/42", version, core.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Stale convergence", {
+                { angle = "minimal", verdict = "continue", digest = "stale" },
+              }),
+              author_login = "fkst-test-bot",
+              created_at = "2026-06-03T00:00:00Z",
+            },
+          },
+        },
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, true)
+    end)
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "devloop_timeout_reconcile")
+    t.eq(raised[1].payload.state, "thinking")
+  end,
+
+  test_live_review_converge_round_defers_timeout_count = function()
+    local row = table_by_state().reviewing
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local head_sha = "def456"
+    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, head_sha)
+    local raised = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      }, {
+        state = "reviewing",
+        version = version,
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T00:00:00Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        source_ref = source_ref,
+        review_proposal_id = review_proposal_id,
+        head_sha = head_sha,
+        current = {
+          comments = {},
+        },
+        current_pr = {
+          comments = {
+            {
+              body = core.review_converge_round_marker(review_proposal_id, "github-devloop/issue/owner/repo/42", version, head_sha, core.source_ref_digest(source_ref), 1, "consensus:" .. review_proposal_id .. "/review/loop/1", "Still reviewing", {
+                { angle = "minimal", verdict = "continue", digest = "recent" },
+              }),
+              author_login = "fkst-test-bot",
+              created_at = "2026-06-04T00:30:00Z",
+            },
+          },
+        },
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, true)
+    end)
+    t.eq(#raised, 0)
+  end,
+
+  test_stale_review_converge_round_climbs_to_blocked_reconcile = function()
+    local row = table_by_state().reviewing
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local head_sha = "def456"
+    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, head_sha)
+    local raised = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      }, {
+        state = "reviewing",
+        version = version .. "/timeout/reviewing/3",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T00:00:00Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        source_ref = source_ref,
+        review_proposal_id = review_proposal_id,
+        head_sha = head_sha,
+        current = {
+          comments = {},
+        },
+        current_pr = {
+          comments = {
+            {
+              body = core.review_converge_round_marker(review_proposal_id, "github-devloop/issue/owner/repo/42", version, head_sha, core.source_ref_digest(source_ref), 1, "consensus:" .. review_proposal_id .. "/review/loop/1", "Stale review", {
+                { angle = "minimal", verdict = "continue", digest = "stale" },
+              }),
+              author_login = "fkst-test-bot",
+              created_at = "2026-06-03T00:00:00Z",
+            },
+          },
+        },
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, true)
+    end)
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "devloop_timeout_reconcile")
+    t.eq(raised[1].payload.state, "reviewing")
+  end,
+
+  test_merge_ready_within_ci_sla_waits_and_past_sla_climbs = function()
+    local row = table_by_state()["merge-ready"]
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local fresh = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      }, {
+        state = "merge-ready",
+        version = version,
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T20:00:00Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        source_ref = core.pr_source_ref("owner/repo", 7),
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, false)
+    end)
+    t.eq(#fresh, 0)
+
+    local stale = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = "owner/repo",
+        number = 42,
+        source_ref = core.issue_source_ref("owner/repo", 42),
+      }, {
+        state = "merge-ready",
+        version = version .. "/timeout/merge-ready/3",
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        marker_created_at = "2026-06-03T00:00:00Z",
+      }, row, {
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        source_ref = core.pr_source_ref("owner/repo", 7),
+        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+      })
+      t.eq(applied, true)
+    end)
+    t.eq(#stale, 1)
+    t.eq(stale[1].queue, "devloop_timeout_reconcile")
+    t.eq(stale[1].payload.state, "merge-ready")
+  end,
+
+  test_liveness_timeout_escalates_thinking_to_timeout_reconcile_event = function()
     local row = table_by_state().thinking
     local base = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local raised = {}
@@ -299,14 +634,15 @@ return {
       error(err)
     end
     t.eq(#raised, 1)
-    t.eq(raised[1].queue, "devloop_reconcile")
-    t.eq(raised[1].payload.schema, "github-devloop.reconcile.v1")
+    t.eq(raised[1].queue, "devloop_timeout_reconcile")
+    t.eq(raised[1].payload.schema, "github-devloop.timeout-reconcile.v1")
+    t.eq(raised[1].payload.state, "thinking")
+    t.eq(raised[1].payload.issue_version, base .. "/timeout/thinking/3")
     t.eq(raised[1].payload.round, 3)
-    t.eq(raised[1].payload.base_version, base)
-    t.eq(raised[1].payload.dedup_key, "reconcile:" .. base .. "/loop/3")
+    t.eq(raised[1].payload.dedup_key, "timeout-reconcile:" .. base .. "/timeout/thinking/3/timeout-reconcile/thinking/3")
   end,
 
-  test_liveness_timeout_escalates_reviewing_to_review_reconcile_event = function()
+  test_liveness_timeout_escalates_reviewing_to_timeout_reconcile_event = function()
     local row = table_by_state().reviewing
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local head_sha = "def456"
@@ -340,12 +676,11 @@ return {
       error(err)
     end
     t.eq(#raised, 1)
-    t.eq(raised[1].queue, "devloop_review_reconcile")
-    t.eq(raised[1].payload.schema, "github-devloop.review-reconcile.v1")
+    t.eq(raised[1].queue, "devloop_timeout_reconcile")
+    t.eq(raised[1].payload.schema, "github-devloop.timeout-reconcile.v1")
     t.eq(raised[1].payload.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(raised[1].payload.review_proposal_id, review_proposal_id)
-    t.eq(raised[1].payload.issue_version, core.safe_version_segment(version .. "/timeout/reviewing/3"))
-    t.eq(raised[1].payload.head_sha, head_sha)
+    t.eq(raised[1].payload.state, "reviewing")
+    t.eq(raised[1].payload.issue_version, version .. "/timeout/reviewing/3")
     t.eq(raised[1].payload.round, 3)
   end,
 
@@ -379,11 +714,14 @@ return {
           })
           t.eq(applied, true)
           t.eq(#raised, before + 1)
-          t.is_true(raised[#raised].queue == "devloop_reconcile"
-            or raised[#raised].queue == "devloop_review_reconcile"
-            or raised[#raised].queue == "devloop_timeout_reconcile")
-          t.eq(raised[#raised].queue == row.driving_queue, false)
-          t.eq(tostring(raised[#raised].payload.dedup_key or ""):find("/timeout/" .. row.from_state .. "/4", 1, true), nil)
+          if row.from_state == "blocked" then
+            t.eq(raised[#raised].queue, "github-proxy.github_issue_comment_request")
+            t.is_true(tostring(raised[#raised].payload.body or ""):find("fkst:github-devloop:decompose-exhausted:v1", 1, true) ~= nil)
+          else
+            t.eq(raised[#raised].queue, "devloop_timeout_reconcile")
+            t.eq(raised[#raised].queue == row.driving_queue, false)
+            t.eq(tostring(raised[#raised].payload.dedup_key or ""):find("/timeout/" .. row.from_state .. "/4", 1, true), nil)
+          end
         end
       end
     end)

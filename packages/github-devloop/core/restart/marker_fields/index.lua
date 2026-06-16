@@ -1,8 +1,11 @@
 return {
   { module = "converge_round", key = "converge-round" },
   { module = "decomposed", key = "decomposed" },
+  { module = "dependency_cycle", key = "dependency-cycle" },
   { module = "dependency_release", key = "dependency-release" },
+  { module = "dependency_unresolvable", key = "dependency-unresolvable" },
   { module = "dependency_void", key = "dependency-void" },
+  { module = "dependency_wait", key = "dependency-wait" },
   { module = "dependency_waiver", key = "dependency-waiver" },
   { module = "fix_reflection", key = "fix-reflection" },
   { module = "impl_failure", key = "impl-failure" },

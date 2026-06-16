@@ -4,13 +4,18 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "review-meta",
     terminal = false,
     to_states = { "fixing", "blocked" },
     driving_queue = "devloop_review_meta",
     output_obligation = obligation({ "review-meta:v1", "state:v1 fixing", "state:v1 blocked" }, { "fixing", "blocked" }),
-    budget = budget(60),
+    budget = budget(90),
+    liveness_contract = liveness({
+      mode = "row-budget-bounds-receiver",
+      receiver_bound_minutes = 60,
+    }),
     on_timeout = timeout("devloop_review_meta"),
     payload_builder = M.build_devloop_review_meta_payload,
     dedup_shape = "review-meta/<proposal_id>/<version>/<pr>/<n>/<review_dedup>",

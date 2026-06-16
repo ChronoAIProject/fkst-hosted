@@ -4,6 +4,7 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "blocked",
     terminal = false,
@@ -12,6 +13,11 @@ return function(M, h)
     output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator rereview/reintake command" }, { "blocked", "reviewing", "thinking" }),
     reentry_commands = { "rereview", "reintake" },
     budget = budget(1440),
+    liveness_contract = liveness({
+      mode = "row-budget-bounds-receiver",
+      receiver_bound_minutes = 0,
+      external_wait_bound_minutes = 1410,
+    }),
     on_timeout = timeout("devloop_decompose"),
     payload_builder = M.build_decompose_replay_payload,
     dedup_shape = "forward:decompose/<proposal_id>/<version>; replay:decompose/replay/<proposal_id>/<version>/<pr>/<expected_child_count>/<completed_child_count>",

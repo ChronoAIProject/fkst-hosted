@@ -286,6 +286,7 @@ local function maybe_liveness_timeout(origin, pr_number, current_pr, state, sour
     return false
   end
   local issue_source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref
+  local head_sha = current_pr and current_pr.head_sha
   return core.maybe_timeout_redrive_from_table("observe_pr", {
     repo = origin.repo,
     number = origin.issue_number,
@@ -303,7 +304,10 @@ local function maybe_liveness_timeout(origin, pr_number, current_pr, state, sour
       base_branch = origin.base_branch,
     },
     source_ref = source_ref,
-    head_sha = current_pr and current_pr.head_sha,
+    head_sha = head_sha,
+    review_proposal_id = state and state.state == "reviewing" and core._is_git_sha(head_sha)
+      and core.pr_review_proposal_id(origin.repo, pr_number, state.version, head_sha)
+      or nil,
   })
 end
 

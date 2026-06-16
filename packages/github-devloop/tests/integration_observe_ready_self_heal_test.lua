@@ -210,11 +210,13 @@ return {
       now = "2026-06-03T02:00:00Z",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 2)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
     t.eq(proposal.proposal_id, original.proposal_id)
-    t.eq(proposal.dedup_key, original.dedup_key .. "/replay/timeout/thinking/1")
+    t.eq(proposal.dedup_key, original.dedup_key .. "/replay")
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
+    local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(attempt ~= nil)
   end,
 
   test_observe_issue_reraises_ready_for_poll_self_heal = function()
@@ -300,12 +302,12 @@ return {
     t.eq(first.exit_code, 0)
     t.eq(#first.raises, 2)
     local first_comment = find_raise(first.raises, "github-proxy.github_pr_comment_request")
-    t.is_true(first_comment.payload.body:find(core.state_marker(event.proposal_id, "reviewing", ready_payload.dedup_key), 1, true) ~= nil)
     local first_reviewing = find_raise(first.raises, "devloop_reviewing")
+    t.is_true(first_comment.payload.body:find(core.state_marker(event.proposal_id, "reviewing", first_reviewing.payload.version), 1, true) ~= nil)
     t.eq(first_reviewing.payload.schema, "github-devloop.reviewing.v1")
     t.eq(first_reviewing.payload.proposal_id, event.proposal_id)
     t.eq(first_reviewing.payload.pr_number, 7)
-    t.eq(first_reviewing.payload.version, ready_payload.dedup_key)
+    t.eq(first_reviewing.payload.version, ready_payload.dedup_key .. "/review-loop/1")
     t.eq(first_reviewing.payload.source_ref.ref, "owner/repo#pr/7")
 
     mock_issue_review({ "fkst-dev:reviewing" }, {
@@ -315,7 +317,7 @@ return {
     t.eq(review.exit_code, 0)
     t.eq(#review.raises, 1)
     local proposal = find_raise(review.raises, "consensus.proposal").payload
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, ready_payload.dedup_key, "def456"))
+    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, first_reviewing.payload.version, "def456"))
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
     mock_linked_pr_state({}, nil, nil, 2)

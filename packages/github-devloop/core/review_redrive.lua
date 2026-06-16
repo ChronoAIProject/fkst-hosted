@@ -9,16 +9,14 @@ function M.review_redrive_version(state, pr)
   if state_name ~= "pr-open" and state_name ~= "reviewing" then
     return version
   end
-  if M.version_timeout_round(version, state_name) <= 0 then
+  local review_round = M.version_review_loop_round(version)
+  if review_round > 0 or review_round >= max_review_redrive_rounds then
     return version
   end
-  if M.liveness_timeout_due(M.restart_transition_row(state_name), state, now()) ~= true then
-    return version
-  end
-  local lineage_version = M.strip_transition_version_suffixes(version)
-  if M.version_review_loop_round(version) >= max_review_redrive_rounds then
-    return version
-  end
+  local escaped_state = state_name:gsub("%-", "%%-")
+  local lineage_version = version
+    :gsub("/timeout/" .. escaped_state .. "/%d+$", "")
+    :gsub("%-timeout%-" .. escaped_state .. "%-%d+$", "")
   local next_version = M.next_review_loop_version(lineage_version)
   local current_review_id = M.pr_review_proposal_id(pr.repo, pr.number, lineage_version, pr.head_sha)
   local next_review_id = M.pr_review_proposal_id(pr.repo, pr.number, next_version, pr.head_sha)

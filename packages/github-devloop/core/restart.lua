@@ -63,12 +63,17 @@ local function timeout(queue)
   }
 end
 
+local function liveness(contract)
+  return contract
+end
+
 local transition_table = registry.load_indexed_array("core.restart.transitions.index", "from_state", M, {
   fact = fact,
   obligation = obligation,
   effect = effect,
   budget = budget,
   timeout = timeout,
+  liveness = liveness,
 })
 
 local audit_by_state = {}
@@ -218,6 +223,7 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-converge%-round:v1.-%-%->"
+  local heartbeat_version = M.liveness_heartbeat_version(issue_version, M.liveness_signal_producer_contract("review-converge-round"))
   local best = nil
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
@@ -229,8 +235,8 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
       local _, pr_number, review_version = M.parse_pr_review_proposal_id(review_proposal)
       local repo = M.parse_proposal_id(issue_proposal_id)
       if marker_issue == tostring(issue_proposal_id)
-        and marker_version == tostring(issue_version)
-        and review_version == M.safe_version_segment(issue_version)
+        and marker_version == tostring(heartbeat_version)
+        and review_version == tostring(heartbeat_version)
         and repo ~= nil
         and M._is_positive_pr_number(pr_number)
         and M._is_path_safe_key(review_proposal, M._max_key_len)

@@ -4,6 +4,7 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "impl-failed",
     terminal = false,
@@ -12,6 +13,11 @@ return function(M, h)
     output_obligation = obligation({ "operator reready/reimplement command", "state:v1 implementing" }, { "implementing", "impl-failed" }),
     reentry_commands = { "reready", "reimplement" },
     budget = budget(1440),
+    liveness_contract = liveness({
+      mode = "row-budget-bounds-receiver",
+      receiver_bound_minutes = 0,
+      external_wait_bound_minutes = 1410,
+    }),
     on_timeout = timeout("devloop_ready"),
     payload_builder = M.build_devloop_ready_payload,
     dedup_shape = "ready/<impl-failure inner dedup> with impl_retry_attempt=<impl-failure.attempt+1>",

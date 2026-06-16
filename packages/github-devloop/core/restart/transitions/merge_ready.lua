@@ -4,13 +4,19 @@ return function(M, h)
   local effect = h.effect
   local budget = h.budget
   local timeout = h.timeout
+  local liveness = h.liveness
   return {
     from_state = "merge-ready",
     terminal = false,
     to_states = { "reviewing", "merging", "fixing", "blocked" },
     driving_queue = "devloop_merge_ready",
     output_obligation = obligation({ "state:v1 merging", "state:v1 reviewing", "state:v1 fixing", "state:v1 blocked" }, { "merging", "reviewing", "fixing", "blocked" }),
-    budget = budget(45),
+    budget = budget(390),
+    liveness_contract = liveness({
+      mode = "row-budget-bounds-receiver",
+      receiver_bound_minutes = 30,
+      external_wait_bound_minutes = 360,
+    }),
     on_timeout = timeout("devloop_merge_ready"),
     payload_builder = M.build_devloop_merge_ready_payload,
     dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>/<current_head>",
