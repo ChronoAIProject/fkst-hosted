@@ -175,6 +175,7 @@ RUN mkdir -p fkst-shared/src fkst-control-plane/src fkst-worker/src \
     && echo 'fn main() {}' > fkst-control-plane/src/main.rs \
     && echo '' > fkst-control-plane/src/lib.rs \
     && echo 'fn main() {}' > fkst-worker/src/main.rs \
+    && echo '' > fkst-worker/src/lib.rs \
     && cargo build --release --locked --workspace
 # 2) copy the real sources and build both binaries.
 # touch: the copied sources keep their (older) context mtimes, so without it
@@ -182,7 +183,7 @@ RUN mkdir -p fkst-shared/src fkst-control-plane/src fkst-worker/src \
 COPY backend/ ./
 RUN touch fkst-shared/src/lib.rs \
         fkst-control-plane/src/main.rs fkst-control-plane/src/lib.rs \
-        fkst-worker/src/main.rs \
+        fkst-worker/src/main.rs fkst-worker/src/lib.rs \
     && cargo build --release --locked --workspace
 RUN test -x /app/target/release/fkst-control-plane \
     || (echo "ERROR: fkst-control-plane binary not produced by the server build" && exit 1)
