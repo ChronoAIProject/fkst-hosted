@@ -10,6 +10,35 @@
 
 ---
 
+## 0. Implementation status — as-built (2026-06-16, PR #131)
+
+> **For review.** This section records what is **actually implemented** on `feat/frontend-init` (PR #131) versus the design in the rest of this document, so the deltas are reviewable in one place. The design below is the **target**; this section is the **current truth**. Legend: ✅ conformant · 🟡 partial · ⚠️ deviation (built differently than designed) · ⏳ deferred (designed, not built).
+>
+> The first three layers landed via a dual-review loop (codex + Claude) + PM verification: **(1)** the v1-basic console shells, **(2)** the NyxID PKCE auth module, **(3)** the **API-integration epic** that wired the v1 endpoints + the v2 GitHub plane (gated) + the GitHub-account connect flow.
+
+| Area | Design (this doc) | As-built | Status |
+|---|---|---|---|
+| Framework / Vite / TS-strict / Tailwind+oklch / Radix / React Router | §2 | As designed | ✅ |
+| **Server state = TanStack Query** | §2, §43 | **All** data access is via TanStack hooks (`src/lib/hooks/*` use `useQuery`/`useMutation`/`useQueryClient`); screens consume hooks. Plain `fetch` exists **only** as the transport in `src/lib/api/client.ts` (`request<T>`/`requestVoid`) that the `queryFn` calls — **no raw fetch in screens/effects**. | ✅ |
+| **Poll cadence (`refetchInterval`)** | §51 — ~5-min on GitHub/goals planes; fast on sessions; short on health | `useSessions` (2s while non-terminal, stops on terminal) ✅ and `useHealth` (30s) ✅. **`useGoals` / `useGitHubIssues` / `usePackages` have NO `refetchInterval` — they fetch once.** The ~5-min poll cadence on the goals/GitHub/packages planes is **not yet implemented**. | ⚠️ |
+| **Cross-session persistence** (`persistQueryClient` + IndexedDB via `idb-keyval`) | §2, §4, §8 | **Not implemented** — `idb-keyval` is not a dependency; no `persistQueryClient`. State is **in-memory per tab** (cut in the v1-basic PM-PLAN). Boot does not hydrate last-known reads. | ⚠️ |
+| Forms (React Hook Form + Zod) | §2, §10 | New-goal modal + Add-package modal use RHF + Zod. | ✅ |
+| Client/UI state (designed: Zustand) | §2 | UI-only state uses **React local state + a session-registry React context** (per-tab `Map<package, sessionId>`), **not Zustand**. No server data in any store. | 🟡 |
+| **Hosted backend plane (v1)** | §3 Plane 2 (doc lists only health/packages/sessions) | **Fully wired, beyond the doc's table:** health; packages list/get/create + **update/delete/archive/generate/shares**; sessions create/get/stop; **and the entire Goals API — list/get/create/update/delete/trigger** (`src/lib/api/goals.ts`). Verified live against a local backend + Mongo. | ✅ |
+| **GitHub plane (v2)** | §3 Plane 1 — "NyxID NOT integrated" | **Client + UI now built, gated on NyxID:** `github-issues` client + hooks, the **GitHub-account connect flow** (Settings `ConnectGitHub` CTA → `GET /github/accounts` list), and the accounts-gated **Issues view** + detail/comments. Degrades honestly when the proxy is absent (`503 "credential proxy not configured"`). No request fires without a connected account. So Plane 1 is **"built + gated," not "absent."** | 🟡 |
+| NyxID auth | §3, §11 | PKCE module + provider + `/auth/callback` + bearer-on-client + env-gated login gate (`VITE_AUTH_REQUIRED`) are **built**; not yet pointed at a live NyxID deployment. | 🟡 |
+| Honest gaps: lifecycle / merge-gate / redb / runs / consensus, Overview vitals / needs-you / stage pipeline, write posture | §4, §8 | Render as honest "not exposed by the v1 API" gaps — **no v1 endpoint exists**, so a loaded hosted goal never implies GitHub-marker/stage/gate/poll provenance. | ✅ |
+| Storybook (living design-system) | §2, §6, §9 | **149 stories across 37 component groups** (primitives, layout, status, screens, the new ConnectGitHub/Issues/hosted states). `storybook-static` is **gitignored** — run `npm run storybook` (dev → :6006) or build+serve over HTTP; opening `index.html` via `file://` shows an empty shell. | ✅ |
+
+**Open conformance gaps to review (designed but not built):**
+1. **Poll cadence** — add `refetchInterval`/`staleTime` (~5 min) to `useGoals`/`useGitHubIssues`/`usePackages` so the goals/GitHub planes are poll-derived per §51 (sessions/health already are).
+2. **Persistence** — add `idb-keyval` + `persistQueryClient` (dehydrate allow-list = successful GET reads only, `as-of`-stamped, `maxAge`-evicted, `buster`-versioned, identity-scoped + sign-out wipe) per §4/§8.
+3. **UI store** — decide whether the session-registry context + local state is sufficient, or adopt Zustand as designed.
+
+These are intentional follow-ups, not silently skipped — each is a small, well-scoped change on top of the current TanStack layer.
+
+---
+
 ## 1. Purpose, scope & v1 boundary
 
 **What the FE is.** A single-page React **mission-control console** for developers running autonomous, GitHub-issue-driven AI dev loops over a hosted engine. It lives at `frontend/` in this monorepo, alongside the existing Rust/Axum `backend/`. It is a windowed, poll-derived **observatory** with a narrow set of real write actions.
@@ -75,7 +104,7 @@
 ### Plane 1 — GitHub plane (TRUTH for goal state) · **v1 GAP**
 - **Path:** every GitHub read/write goes through `<METHOD> <NYXID_BASE>/api/v1/proxy/s/api-github/<github-path>` with `Authorization: Bearer <nyxid_token>`. Path/method/body are identical to the GitHub REST API. **The browser never holds a raw GitHub token** — NyxID injects it server-side. The client **must not** send a second `Authorization` header or any GitHub token in body/query.
 - **Owns:** issues/PRs, trusted `state:v1` comment markers (canonical goal state), `fkst-dev:*` labels (hints only), and the four legitimate GitHub mutations (open/comment/label/close/create-issue). Marker-trust and version-ordering run **client-side** (§4).
-- **v1 reality:** **NyxID is NOT integrated.** No auth, no proxy wiring. Therefore every GitHub-plane surface (goal list/board, lifecycle markers, fire/pause label actions, avatar identity, connected repos) renders as **"Sign in with NyxID" disabled + honest note**, or an empty/loading state — **never fabricated issues**.
+- **v1 reality:** **NyxID is NOT integrated.** No auth, no proxy wiring. Therefore every GitHub-plane surface (goal list/board, lifecycle markers, fire/pause label actions, avatar identity, connected repos) renders as **"Sign in with NyxID" disabled + honest note**, or an empty/loading state — **never fabricated issues**. *(As-built update — see §0: the NyxID PKCE module, the v2 `github-issues` client/hooks, the GitHub-account **connect flow**, and the accounts-gated **Issues view** are now **built and gated**; this paragraph describes the original v1 cut, and the surfaces still degrade honestly until a live NyxID proxy is wired.)*
 - **Migration path:** land NyxID (`@nyxids/oauth-react` PKCE login → token → proxy calls). Confirm the three open NyxID items in §11 first.
 
 ### Plane 2 — Hosted backend plane (this repo's Rust v1 API) · **PARTIAL, the only directly-called backend**
