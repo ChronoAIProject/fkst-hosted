@@ -192,8 +192,8 @@ return {
       t.eq(case[1]("owner/repo", 42), "gh issue view '42' --repo 'owner/repo' --json " .. case[2])
     end
     t.eq(
-      core.gh_workflow_dispatch_ci_cmd("owner/repo", "devloop-owner-repo-42-01HY"),
-      "gh workflow run 'ci.yml' --repo 'owner/repo' --ref 'devloop-owner-repo-42-01HY'"
+      core.gh_check_run_rerequest_cmd("owner/repo", 123),
+      "gh api --method POST 'repos/owner/repo/check-runs/123/rerequest'"
     )
     t.eq(
       core.gh_issue_list_decompose_children_cmd("owner/repo", "github-devloop/issue/owner/repo/42"),

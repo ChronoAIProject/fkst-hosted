@@ -14,12 +14,53 @@ local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 
-local dispatch_cmd = "gh workflow run 'ci.yml' --repo 'owner/repo' --ref 'devloop-owner-repo-42-01HY'"
 local check_runs_cmd = "gh api 'repos/owner/repo/commits/def456/check-runs'"
+local rerequest_cmd = "gh api --method POST 'repos/owner/repo/check-runs/123/rerequest'"
 
 local function mock_absent_check_runs()
   t.mock_command(check_runs_cmd, {
     stdout = '{"total_count":0,"check_runs":[]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_rerunnable_check_runs()
+  t.mock_command(check_runs_cmd, {
+    stdout = '{"total_count":1,"check_runs":[{"id":123,"name":"legacy-ci","status":"queued","conclusion":null,"head_sha":"def456"}]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_head_nudge_worktree(old_head, new_head)
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree add --detach", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("commit --allow-empty -m 'chore: nudge PR CI'", {
+    stdout = "[detached " .. tostring(new_head or "fedcba") .. "] chore: nudge PR CI\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("--force-with-lease='refs/heads/devloop-owner-repo-42-01HY:" .. tostring(old_head or "def456") .. "'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("rev-parse HEAD", {
+    stdout = tostring(new_head or "fedcba") .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -40,9 +81,9 @@ local function origin_marker(event)
 end
 
 return {
-  test_missing_status_dispatches_after_first_observed_grace_and_still_waits = function()
+  test_missing_status_rerequests_head_check_runs_after_first_observed_grace_and_still_waits = function()
     local event = merge_ready()
-    local run_opts = opts("merge-missing-status-dispatch", { FKST_GITHUB_WRITE = "1" })
+    local run_opts = opts("merge-missing-status-rerequest", { FKST_GITHUB_WRITE = "1" })
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -54,7 +95,7 @@ return {
     local first = run_merge(event, run_opts)
     t.eq(first.exit_code, 1)
     t.eq(#first.raises, 0)
-    t.eq(count_calls(dispatch_cmd), 0)
+    t.eq(count_calls(rerequest_cmd), 0)
     t.eq(count_calls("gh pr merge"), 0)
 
     local seeded = seed_cache(observed_key, now() - 301, run_opts)
@@ -65,9 +106,9 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, "[]")
-    mock_absent_check_runs()
-    t.mock_command(dispatch_cmd, {
-      stdout = "dispatched\n",
+    mock_rerunnable_check_runs()
+    t.mock_command(rerequest_cmd, {
+      stdout = "",
       stderr = "",
       exit_code = 0,
     })
@@ -75,7 +116,8 @@ return {
     local result = run_merge(event, run_opts)
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
-    t.eq(count_calls(dispatch_cmd), 1)
+    t.eq(count_calls(rerequest_cmd), 1)
+    t.eq(count_calls("gh workflow run"), 0)
     t.eq(count_calls("gh pr merge"), 0)
 
     mock_bot_env()
@@ -83,22 +125,41 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, "[]")
-    mock_absent_check_runs()
-    t.mock_command(dispatch_cmd, {
-      stdout = "dispatched\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_rerunnable_check_runs()
 
     local retry = run_merge(event, run_opts)
     t.eq(retry.exit_code, 1)
     t.eq(#retry.raises, 0)
-    t.eq(count_calls(dispatch_cmd), 1)
+    t.eq(count_calls(rerequest_cmd), 1)
     t.eq(count_calls(check_runs_cmd), 3)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 
-  test_pending_checks_do_not_dispatch_ci_selfheal = function()
+  test_missing_status_head_nudges_when_no_head_check_run_exists = function()
+    local event = merge_ready()
+    local run_opts = opts("merge-missing-status-head-nudge", { FKST_GITHUB_WRITE = "1" })
+    local observed_key = core.ci_missing_status_first_observed_key("owner/repo", event.pr_number, event.reviewed_head_sha)
+    local seeded = seed_cache(observed_key, now() - 301, run_opts)
+    t.eq(seeded.exit_code, 0)
+
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
+    mock_pr_merge_rollup({ origin_marker(event) }, "[]")
+    mock_absent_check_runs()
+    mock_head_nudge_worktree("def456", "fedcba")
+
+    local result = run_merge(event, run_opts)
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("commit --allow-empty -m 'chore: nudge PR CI'"), 1)
+    t.eq(count_calls("--force-with-lease='refs/heads/devloop-owner-repo-42-01HY:def456'"), 1)
+    t.eq(count_calls("gh workflow run"), 0)
+    t.eq(count_calls("gh pr merge"), 0)
+  end,
+
+  test_pending_checks_do_not_selfheal_ci = function()
     local event = merge_ready()
     mock_bot_env()
     mock_write_env("1")
