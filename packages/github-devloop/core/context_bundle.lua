@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
 local max_bundle_file_len = 10 * 1024 * 1024
@@ -29,7 +30,7 @@ local function bundle_segment(value, fallback)
     segment = fallback or "context"
   end
   if #segment > 120 then
-    local suffix = "-" .. M._decimal_checksum(value)
+    local suffix = "-" .. decimal_checksum(value)
     segment = segment:sub(1, 120 - #suffix):gsub("%-+$", "") .. suffix
   end
   if segment == "" then
@@ -48,7 +49,7 @@ local function bounded_cache_segment(value, fallback, limit, keep_slashes)
     segment = fallback or "context"
   end
   if #segment > limit then
-    local suffix = "-" .. M._decimal_checksum(value)
+    local suffix = "-" .. decimal_checksum(value)
     segment = M.truncate_utf8(segment, limit - #suffix):gsub("[/%-]+$", "") .. suffix
   end
   if segment == "" then

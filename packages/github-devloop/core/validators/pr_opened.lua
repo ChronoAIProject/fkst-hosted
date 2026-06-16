@@ -1,3 +1,5 @@
+local source_refs = require("std.source_ref")
+
 return function(M)
 function M.is_supported_pr_opened(payload)
   if type(payload) ~= "table"
@@ -8,7 +10,7 @@ function M.is_supported_pr_opened(payload)
     or not M._is_git_ref_safe(payload.branch)
     or not M._is_git_sha(payload.head_sha)
     or not M._is_git_ref_safe(payload.base_branch)
-    or not M._has_bounded_source_ref(payload.source_ref) then
+    or not source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len) then
     return false
   end
   local source_repo, source_pr = M.parse_pr_source_ref(payload.source_ref)

@@ -1,4 +1,7 @@
 local S = {}
+local source_refs = require("std.source_ref")
+local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
 local max_decompose_issues = 3
@@ -17,7 +20,7 @@ local function bounded_text(value, limit, fallback)
 end
 
 local function issue_fingerprint(decompose, index)
-  return M._decimal_checksum(table.concat({
+  return decimal_checksum(table.concat({
     tostring(decompose.proposal_id or ""),
     tostring(decompose.version or ""),
     tostring(decompose.pr_number or ""),
@@ -94,7 +97,7 @@ function M.is_supported_decompose(payload)
     and valid_replay_counts
     and ((not has_replay_counts and tostring(payload.dedup_key) == forward_dedup)
       or (has_replay_counts and tostring(payload.dedup_key) == replay_dedup))
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 
 function M.decomposed_marker(proposal_id, version, pr_number, count)

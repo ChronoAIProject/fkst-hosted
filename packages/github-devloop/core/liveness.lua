@@ -1,5 +1,6 @@
 local S = {}
 local registry = require("core.registry")
+local source_refs = require("std.source_ref")
 
 function S.install(M)
 local max_timeout_attempts = 3
@@ -614,7 +615,7 @@ end
 local function build_timeout_reconcile(row, entity, state, facts, decision)
   local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
-  if M._has_bounded_source_ref(source_ref)
+  if source_refs.has_bounded_source_ref(source_ref, M._max_key_len)
     and M._is_path_safe_key(proposal_id, M._max_key_len)
     and M._is_bounded_string(state and state.version, M._max_dedup_len) then
     return "devloop_timeout_reconcile", M.build_devloop_timeout_reconcile_payload(row, state, proposal_id, source_ref, decision.attempt)

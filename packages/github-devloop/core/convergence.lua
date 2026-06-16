@@ -1,4 +1,7 @@
 local S = {}
+local source_refs = require("std.source_ref")
+local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 local max_digest_len = 64
 local max_attr_len = 240
@@ -11,7 +14,7 @@ end
 
 local function digest(M, prefix, value)
   local text = tostring(value or "")
-  return tostring(prefix) .. "-" .. #text .. "-" .. M._decimal_checksum(text)
+  return tostring(prefix) .. "-" .. #text .. "-" .. decimal_checksum(text)
 end
 
 local function safe_attr(value, limit)
@@ -244,7 +247,7 @@ function M.is_supported_reconcile(payload)
     and tostring(payload.dedup_key) == "reconcile:" .. tostring(payload.base_version) .. "/loop/" .. tostring(payload.round)
     and inner_dedup ~= nil
     and M._is_path_safe_key(inner_dedup, M._max_dedup_len)
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
     and valid_round(payload.round) ~= nil
 end
 
@@ -419,7 +422,7 @@ function M.is_supported_review_reconcile(payload)
     and valid_round(payload.round) ~= nil
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "review-reconcile:" .. tostring(payload.issue_version) .. "/review-loop/" .. tostring(payload.round)
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 
 function M.is_supported_fix_reconcile(payload)
@@ -440,7 +443,7 @@ function M.is_supported_fix_reconcile(payload)
     and M._is_positive_pr_number(payload.pr_number)
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "fix-reconcile:" .. tostring(payload.issue_version)
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 
 function M.is_supported_timeout_reconcile(payload)
@@ -459,7 +462,7 @@ function M.is_supported_timeout_reconcile(payload)
     and valid_round(payload.round) ~= nil
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "timeout-reconcile:" .. tostring(payload.issue_version) .. "/timeout-reconcile/" .. tostring(payload.state) .. "/" .. tostring(payload.round)
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 
 function M.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
