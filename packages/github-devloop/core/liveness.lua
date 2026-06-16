@@ -20,8 +20,16 @@ local function valid_timeout(row)
   if row.on_timeout.action ~= "redrive" or row.on_timeout.queue ~= row.driving_queue then
     return false
   end
-  return tonumber(row.on_timeout.escalate_after_attempts) ~= nil
-    and tonumber(row.on_timeout.escalate_after_attempts) > 0
+  if tonumber(row.on_timeout.escalate_after_attempts) == nil
+    or tonumber(row.on_timeout.escalate_after_attempts) <= 0 then
+    return false
+  end
+  local terminal = row.on_timeout.on_escalate
+  return type(terminal) == "table"
+    and terminal.action == "force-terminate"
+    and terminal.terminal_state == "blocked"
+    and type(terminal.reason) == "string"
+    and terminal.reason ~= ""
 end
 
 function M.liveness_contract_errors(rows)
@@ -45,7 +53,7 @@ function M.liveness_contract_errors(rows)
         table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare a positive budget")
       end
       if not valid_timeout(row) then
-        table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare redrive on_timeout for its driving queue")
+        table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare redrive on_timeout for its driving queue plus force-terminate on_escalate to blocked")
       end
       if (type(row.to_states) ~= "table" or #row.to_states == 0)
         and (type(row.reentry_commands) ~= "table" or #row.reentry_commands == 0) then
@@ -155,10 +163,11 @@ end
 
 local function build_timeout_reconcile(row, entity, state, facts, decision)
   local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
+  local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
   if row.from_state == "thinking" and M._has_bounded_source_ref(source_ref) then
     local base_version = M.strip_transition_version_suffixes(state.version)
     return "devloop_reconcile", M.build_devloop_reconcile_payload({
-      proposal_id = state.proposal_id,
+      proposal_id = proposal_id,
       source_ref = source_ref,
     }, decision.attempt, base_version)
   end
@@ -176,13 +185,13 @@ local function build_timeout_reconcile(row, entity, state, facts, decision)
       return "devloop_review_reconcile", M.build_devloop_review_reconcile_payload({
         proposal_id = review_proposal_id,
         source_ref = source_ref,
-      }, decision.attempt, state.proposal_id, M.safe_version_segment(state.version), facts.head_sha)
+      }, decision.attempt, proposal_id, M.safe_version_segment(state.version), facts.head_sha)
     end
   end
   if M._has_bounded_source_ref(source_ref)
-    and M._is_path_safe_key(state and state.proposal_id, M._max_key_len)
+    and M._is_path_safe_key(proposal_id, M._max_key_len)
     and M._is_bounded_string(state and state.version, M._max_dedup_len) then
-    return "devloop_timeout_reconcile", M.build_devloop_timeout_reconcile_payload(row, state, state.proposal_id, source_ref, decision.attempt)
+    return "devloop_timeout_reconcile", M.build_devloop_timeout_reconcile_payload(row, state, proposal_id, source_ref, decision.attempt)
   end
   return nil, nil
 end

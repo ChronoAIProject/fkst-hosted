@@ -280,18 +280,31 @@ local function direct_opened_matches_origin(pr, origin, current_pr)
     and tostring(pr.base_branch or "") == tostring(origin.base_branch or "")
 end
 
-local function liveness_timeout_state(state)
+local function maybe_liveness_timeout(origin, pr_number, current_pr, state, source_ref, issue_current)
   local row = core.restart_transition_row(state and state.state)
   if row == nil or core.liveness_timeout_due(row, state, now()) ~= true then
-    return state
+    return false
   end
-  return {
-    state = state.state,
-    version = core.next_liveness_timeout_version(row, state),
-    proposal_id = state.proposal_id,
-    stage_rank = state.stage_rank,
-    marker_created_at = state.marker_created_at,
-  }
+  local issue_source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref
+  return core.maybe_timeout_redrive_from_table("observe_pr", {
+    repo = origin.repo,
+    number = origin.issue_number,
+    source_ref = issue_source_ref,
+    _replay_issue_comments = issue_current and issue_current.comments or nil,
+  }, state, row, {
+    proposal_id = origin.proposal_id,
+    current = { comments = issue_current and issue_current.comments or {} },
+    current_pr = current_pr,
+    link = {
+      proposal_id = origin.proposal_id,
+      pr_number = pr_number,
+      branch = origin.branch,
+      impl_version = origin.impl_version,
+      base_branch = origin.base_branch,
+    },
+    source_ref = source_ref,
+    head_sha = current_pr and current_pr.head_sha,
+  })
 end
 
 local conflict_redrive_states = {
@@ -511,7 +524,12 @@ function pipeline(event)
       return
     end
     if state.state ~= nil and state.state ~= "pr-open" then
-      local replay_state = pr.source == "poll" and raw.source == "liveness-scan" and liveness_timeout_state(state) or state
+      if pr.source == "poll"
+        and raw.source == "liveness-scan"
+        and maybe_liveness_timeout(origin, pr.number, current_pr, state, source_ref, issue_current) then
+        return
+      end
+      local replay_state = state
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
       local raised_current_state = raise_current_state(origin, pr.number, current_pr, replay_state, source_ref, issue_current)
       if raised_current_state then
