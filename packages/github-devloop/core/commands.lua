@@ -493,6 +493,15 @@ function M.gh_commit_check_runs_cmd(repo, head_sha)
   return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/commits/" .. tostring(head_sha) .. "/check-runs")
 end
 
+function M.gh_check_run_rerequest_cmd(repo, check_run_id)
+  local id = tostring(check_run_id or "")
+  if id == "" or id:find("[^0-9]") ~= nil then
+    error("github-devloop: invalid check-run id")
+  end
+  return "gh api --method POST "
+    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/check-runs/" .. id .. "/rerequest")
+end
+
 function M.gh_issue_comment_get_cmd(repo, comment_id)
   if not M.is_safe_comment_id(comment_id) then
     error("github-devloop: invalid comment id")
@@ -504,15 +513,6 @@ end
 function M.gh_pr_ready_cmd(repo, pr_number)
   return "gh pr ready " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)
-end
-
-function M.gh_workflow_dispatch_ci_cmd(repo, ref)
-  if not M._is_git_ref_safe(ref) then
-    error("github-devloop: invalid workflow dispatch ref")
-  end
-  return "gh workflow run " .. M._shell_single_quote("ci.yml")
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --ref " .. M._shell_single_quote(ref)
 end
 
 function M.gh_issue_comment_cmd(repo, issue_number, body_file)
@@ -574,6 +574,15 @@ function M.git_commit_cmd(worktree, message)
     error("github-devloop: invalid git commit message")
   end
   return "git -C " .. M._shell_single_quote(worktree) .. " commit -m " .. M._shell_single_quote(bounded_message)
+end
+
+function M.git_empty_commit_cmd(worktree, message)
+  local bounded_message = tostring(message or "")
+  if bounded_message == "" or #bounded_message > 200 then
+    error("github-devloop: invalid git commit message")
+  end
+  return "git -C " .. M._shell_single_quote(worktree)
+    .. " commit --allow-empty -m " .. M._shell_single_quote(bounded_message)
 end
 
 function M.git_current_branch_cmd(worktree)
