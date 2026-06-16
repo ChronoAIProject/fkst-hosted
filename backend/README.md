@@ -6,6 +6,12 @@ The **fkst-hosted** Rust backend is a three-crate Cargo workspace under
 behalf of users. This is the v1 scope; this README covers **local development**
 only.
 
+> **Kubernetes-only deployment.** The fkst deployables are deployed exclusively
+> on Kubernetes via the per-deployable `k8s_sample/` directories; `docker-compose`
+> is not used in this repo. Local development runs the crates directly with
+> `cargo run -p fkst-control-plane` / `cargo run -p fkst-worker` against a
+> developer-managed Mongo container (see the quickstart below).
+
 ## Prerequisites
 
 - **Rust** (stable toolchain — pinned by `rust-toolchain.toml`, which also pulls in `rustfmt` and `clippy`)
@@ -13,10 +19,13 @@ only.
 
 ## Local dev quickstart
 
-1. Start MongoDB 7 (data persists in the named volume `fkst_mongo_data`):
+1. Start MongoDB 7 from a developer-managed container (or, once it exists, the
+   sibling `k8s_sample/` mongodb manifest on a local cluster). Until #143
+   removes Mongo, a local container is the simplest source (data persists in
+   the named volume `fkst_mongo_data`):
 
    ```sh
-   docker compose -f backend/docker-compose.yml up -d
+   docker run -d --name fkst-mongo -p 27017:27017 -v fkst_mongo_data:/data/db mongo:7
    ```
 
 2. Run the control-plane (from `backend/`). `MONGODB_URI` is required — the
@@ -42,20 +51,20 @@ only.
    (`version` is the crate's `CARGO_PKG_VERSION`.)
 
 4. To see the degraded path, stop Mongo while the API is running
-   (`docker compose -f backend/docker-compose.yml stop`); both endpoints
-   then return `503 Service Unavailable`:
+   (`docker stop fkst-mongo`); both endpoints then return `503 Service
+   Unavailable`:
 
    ```json
    {"status":"degraded","mongo":"down","version":"0.0.0"}
    ```
 
-   Restart with `docker compose -f backend/docker-compose.yml start`.
+   Restart with `docker start fkst-mongo`.
 
 ### Host port 27017 already in use
 
-`backend/docker-compose.yml` maps `27017:27017`. If another Mongo already
+The local Mongo container maps `27017:27017`. If another Mongo already
 occupies host port 27017, change the **host** side of the mapping (e.g.
-`"27018:27017"`) and point the API at it:
+`-p 27018:27017`) and point the API at it:
 
 ```sh
 MONGODB_URI="mongodb://localhost:27018" cargo run -p fkst-control-plane
@@ -321,7 +330,6 @@ The backend is a Cargo workspace with three crates:
 ```
 backend/
 ├── Cargo.toml                  # cargo workspace (members: fkst-shared, fkst-control-plane, fkst-worker)
-├── docker-compose.yml          # local dev MongoDB 7 (named volume fkst_mongo_data)
 ├── engine.ref                  # pinned fkst-substrate commit SHA
 ├── rust-toolchain.toml         # stable + rustfmt + clippy
 ├── fkst-shared/
