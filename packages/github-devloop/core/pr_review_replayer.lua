@@ -207,6 +207,7 @@ function M.install_pr_review_replayers(replayers, tools)
   tools.terminal_linked_pr_action = function(dept, issue, state, proposal_id, link, pr, facts)
     return terminal_linked_pr_action(dept, issue, state, proposal_id, link, pr, facts, tools)
   end
+  M.terminal_linked_pr_action = tools.terminal_linked_pr_action
 end
 
 end

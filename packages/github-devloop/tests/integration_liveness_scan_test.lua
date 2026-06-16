@@ -165,6 +165,18 @@ local function assert_no_entity_change(result)
   t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
 end
 
+local function entity_change_issue_numbers(result)
+  local numbers = {}
+  for _, raised in ipairs(result.raises or {}) do
+    if raised.queue == "github-proxy.github_entity_changed"
+      and raised.payload ~= nil
+      and raised.payload.type == "issue" then
+      numbers[tonumber(raised.payload.number)] = true
+    end
+  end
+  return numbers
+end
+
 local function mock_missing_remote_branch(branch)
   t.mock_command("git fetch 'origin' '" .. tostring(branch) .. "'", {
     stdout = "",
@@ -318,6 +330,43 @@ return {
     mock_empty_pr_list()
 
     assert_no_entity_change(run_liveness_scan("liveness-scan-no-state"))
+  end,
+
+  test_liveness_scan_requeues_every_non_terminal_issue_marker_state = function()
+    local issues = {}
+    local expected = {}
+    local terminal = {}
+    local number = 100
+    for _, row in ipairs(core.restart_transition_table()) do
+      number = number + 1
+      local state = row.from_state
+      table.insert(issues, {
+        number = number,
+        state = "open",
+        updated_at = "2026-06-03T01:02:03Z",
+      })
+      mock_issue_state_number(number, { "fkst-dev:enabled", core.state_label(state) }, "OPEN", {
+        core.state_marker(core.proposal_id(repo, number), state, version),
+      })
+      if row.terminal == false then
+        expected[number] = state
+      else
+        terminal[number] = state
+      end
+    end
+    mock_repo()
+    mock_issue_list(issues)
+    mock_empty_pr_list()
+
+    local result = run_liveness_scan("liveness-scan-non-terminal-issue-marker-conformance")
+    t.eq(result.exit_code, 0)
+    local raised = entity_change_issue_numbers(result)
+    for issue_number, state in pairs(expected) do
+      t.eq(raised[issue_number], true, "non-terminal issue marker state not sweep-reachable: " .. tostring(state))
+    end
+    for issue_number, state in pairs(terminal) do
+      t.eq(raised[issue_number], nil, "terminal issue marker state was requeued: " .. tostring(state))
+    end
   end,
 
   test_liveness_scan_requeues_ready_dependency_hold = function()
