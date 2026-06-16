@@ -547,6 +547,67 @@ curl -X POST "$FKST_API/api/v1/goals/a1b2…/trigger" \
 
 ---
 
+## The `fkst-goal` issue template & parse contract
+
+A user can declare a goal by opening a GitHub issue from the **fkst goal** form
+(`.github/ISSUE_TEMPLATE/fkst-goal.yml`) instead of (or in addition to) the
+inline [trigger](#post-apiv1goalsidtrigger--trigger-a-goal) payload. This section
+defines the **canonical, machine-parseable contract** the backend keys on to
+extract the Goal, the package-name list, and the Ornn skill pins from a
+user-authored issue body. (The form ships here; the submit endpoint that consumes
+this contract — and the `fkst-goal` label — are sibling milestone-#5 issues.)
+
+The form has a stable title prefix `[fkst-goal]: ` and renders three sections as
+`### ` headings. The parser splits the body on the literal headings — **`### Goal`**,
+**`### Package Name List`**, **`### Ornn Skill List`** — and a section's content is
+every line after its heading up to the next `### ` heading (or end of body),
+trimmed. (The form's field labels are these exact strings; renaming a label
+without updating this contract breaks parsing.)
+
+| Section | Required | Rule |
+|---------|----------|------|
+| `### Goal` | yes | The entire trimmed text block, verbatim, becomes `GoalDoc.description` (the engine prompt). It is **secret downstream** — never echoed back into the server-rendered marker or summary. |
+| `### Package Name List` | yes | Split on newlines; trim; drop empty lines. Each remaining line is one package name, validated exactly as `validate_goal_fields` / `resolve_package_roots`: `^[A-Za-z0-9_-]+$`, count `1..=16`, no duplicates, `host` reserved. |
+| `### Ornn Skill List` | no | Split on newlines; trim; drop empty lines. Each remaining line must match `^(skill\|skillset):([a-z0-9][a-z0-9-]*)@(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`, mapping to `OrnnSkillPin{kind, name, version}`. Validation defers to `validate_pins` (name ≤ 64 bytes, `major.minor` only, same-name conflicting versions reject). An empty/absent section means zero pins. |
+
+**Malformed → `422 Unprocessable Entity`** (enforced by the sibling submit
+endpoint): a missing `### Goal` section or an empty Goal after trim; a
+missing/empty `### Package Name List`; any package line failing the
+regex/count/duplicate/reserved rule; any Ornn line not matching the pin grammar;
+or a duplicate `### ` heading. The response carries a field-scoped error so the
+author can self-correct.
+
+> ⚠️ Secrets, tokens, and environment variables are **never** read from the
+> issue — they are supplied only through the trigger API.
+
+### Worked example
+
+Issue body:
+
+```
+### Goal
+
+Build a CLI that summarizes a git repo's commit history into a weekly digest.
+
+### Package Name List
+
+repo-reader
+digest-writer
+
+### Ornn Skill List
+
+skill:git-log@1.0
+skillset:report-templates@2.3
+```
+
+Parsed result:
+
+- `description` = `"Build a CLI that summarizes a git repo's commit history into a weekly digest."`
+- `package_names` = `["repo-reader", "digest-writer"]`
+- pins = `[{kind: skill, name: "git-log", version: "1.0"}, {kind: skillset, name: "report-templates", version: "2.3"}]`
+
+---
+
 ## Skill catalog (Ornn)
 
 Browse the Ornn **skills / skillsets** you may attach to a session via
