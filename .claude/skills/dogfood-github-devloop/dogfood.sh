@@ -214,6 +214,7 @@ doctor_one() {
   proceng=$(grep -aoE 'ENGINE_VER=[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d= -f2)
   if   [ -z "$procpkg" ]; then pv="pkg=?"
   elif [ "${pdev:0:${#procpkg}}" = "$procpkg" ]; then pv="pkg-current"
+  elif [ -z "$(git -C "$PKGSRC" diff "$procpkg" "$pdev" -- packages/ 2>/dev/null)" ]; then pv="pkg-skew(non-package, no restart)"
   else pv="PKG-STALE→restart(${procpkg:0:8}≠${pdev:0:8})"; fi
   if   [ -z "$proceng" ]; then ev="engine=?"
   elif [ "${sdev:0:${#proceng}}" = "$proceng" ]; then ev="engine-current"
