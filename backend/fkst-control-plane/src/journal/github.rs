@@ -37,9 +37,11 @@ pub struct FileSha(pub String);
 /// Outcome of reading the remote progress record.
 #[derive(Debug, Clone)]
 pub enum RemoteRecord {
-    /// Parsed, schema-supported record.
+    /// Parsed, schema-supported record. `record` is boxed to keep this variant
+    /// from dwarfing the others (the record grew run-head pointer fields in
+    /// #139, tripping clippy's `large_enum_variant`).
     Valid {
-        record: ProgressRecord,
+        record: Box<ProgressRecord>,
         sha: FileSha,
     },
     /// Present but unparseable / structurally wrong: never overwrite blindly.
@@ -186,7 +188,10 @@ impl ProgressRepo {
             return Ok(Some(RemoteRecord::NewerSchema { schema, sha }));
         }
         match serde_json::from_value::<ProgressRecord>(value) {
-            Ok(record) => Ok(Some(RemoteRecord::Valid { record, sha })),
+            Ok(record) => Ok(Some(RemoteRecord::Valid {
+                record: Box::new(record),
+                sha,
+            })),
             Err(_) => Ok(Some(RemoteRecord::Corrupt { sha })),
         }
     }
@@ -322,7 +327,7 @@ mod tests {
                 record: parsed,
                 sha,
             }) => {
-                assert_eq!(parsed, record);
+                assert_eq!(*parsed, record);
                 assert_eq!(sha, FileSha("abc".to_string()));
             }
             other => panic!("expected Valid, got {other:?}"),

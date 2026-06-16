@@ -17,12 +17,19 @@ pub struct JournalConfig {
     pub flush_interval: Duration,
     /// Flush early when this many new completions are buffered.
     pub flush_max_batch: usize,
-    /// Master switch for GitHub journaling (Mongo journaling is always on).
+    /// Master switch for GitHub journaling (the committed file is the SOLE
+    /// machine-truth since #139; disabling it drops the durable floor).
     pub github_enabled: bool,
     /// Enable the optional issue-comment mirroring (dormant by default).
     pub issue_comments: bool,
+    /// Enable the rolling activity comment on the flush cadence (#139).
+    pub activity_comment_enabled: bool,
     /// Max optimistic-concurrency retries per flush.
     pub cas_max_retries: u32,
+    /// Bootstrap eventual-consistency retries: how many times `load_skip_set`
+    /// re-reads the committed file after a 404 before concluding "fresh run"
+    /// (the just-committed file may not yet be visible on a fresh redo).
+    pub bootstrap_read_retries: u32,
     /// Branch the journal file lives on.
     pub github_branch: String,
     /// `owner/name` of the journal repo; `None` disables GitHub journaling.
@@ -44,7 +51,9 @@ impl Default for JournalConfig {
             flush_max_batch: 50,
             github_enabled: true,
             issue_comments: false,
+            activity_comment_enabled: true,
             cas_max_retries: 5,
+            bootstrap_read_retries: 3,
             github_branch: "main".to_string(),
             github_repo: None,
             github_api_base: DEFAULT_API_BASE.to_string(),
@@ -63,7 +72,9 @@ impl fmt::Debug for JournalConfig {
             .field("flush_max_batch", &self.flush_max_batch)
             .field("github_enabled", &self.github_enabled)
             .field("issue_comments", &self.issue_comments)
+            .field("activity_comment_enabled", &self.activity_comment_enabled)
             .field("cas_max_retries", &self.cas_max_retries)
+            .field("bootstrap_read_retries", &self.bootstrap_read_retries)
             .field("github_branch", &self.github_branch)
             .field("github_repo", &self.github_repo)
             .field("github_api_base", &self.github_api_base)
@@ -102,7 +113,9 @@ impl JournalConfig {
             flush_max_batch: config.journal_flush_max_batch,
             github_enabled: config.journal_github_enabled,
             issue_comments: config.journal_issue_comments,
+            activity_comment_enabled: config.journal_activity_comment_enabled,
             cas_max_retries: config.journal_cas_max_retries,
+            bootstrap_read_retries: config.journal_bootstrap_read_retries,
             github_branch: config.journal_github_branch.clone(),
             github_repo: config.journal_github_repo.clone(),
             github_api_base: DEFAULT_API_BASE.to_string(),

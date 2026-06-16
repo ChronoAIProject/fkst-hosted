@@ -3,8 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::journal::model::{LifecycleDoc, LogRef};
-use crate::journal::parse;
+use crate::journal::model::LogRef;
 
 /// A session lifecycle transition (mirrors `sessions.status` plus the
 /// journal-only `malformed_raised` / `log_watermark` anomalies).
@@ -42,29 +41,6 @@ impl Transition {
             Transition::LogWatermark(_) => "log_watermark",
             Transition::MalformedRaised { .. } => "malformed_raised",
         }
-    }
-
-    /// BSON subdocument shape. Detail/error strings are excerpt-truncated so
-    /// a hostile payload can never bloat the journal.
-    pub(crate) fn to_doc(&self) -> LifecycleDoc {
-        let mut doc = LifecycleDoc {
-            transition: self.name().to_string(),
-            ..LifecycleDoc::default()
-        };
-        match self {
-            Transition::Spawned { pid } => doc.pid = Some(*pid),
-            Transition::Stopped { exit_code } => doc.exit_code = *exit_code,
-            Transition::Failed { exit_code, error } => {
-                doc.exit_code = *exit_code;
-                doc.error = Some(parse::truncate_excerpt(error));
-            }
-            Transition::LogWatermark(log_ref) => doc.log_ref = Some(log_ref.clone()),
-            Transition::MalformedRaised { detail } => {
-                doc.detail = Some(parse::truncate_excerpt(detail));
-            }
-            _ => {}
-        }
-        doc
     }
 }
 

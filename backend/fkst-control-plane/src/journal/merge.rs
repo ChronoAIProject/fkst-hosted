@@ -4,13 +4,30 @@
 
 use std::collections::HashMap;
 
-use crate::journal::model::{CompletedEntry, LifecycleEntry, ProgressRecord, WriterEntry};
+use crate::journal::model::{
+    CompletedEntry, LifecycleEntry, ProgressRecord, WriterEntry, UNVERIFIED_SHA,
+};
+
+/// The writer's current run-head pointers, folded through [`merge_record`] so
+/// they survive the CAS-merge inside the committed file (#139). A non-None
+/// value from the writer wins over the base; otherwise the base's value is
+/// preserved (a cold worker keeps the pointer it never learned).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HeadPointers {
+    pub issue_number: Option<i64>,
+    pub last_comment_id: Option<i64>,
+}
 
 /// Merge newly-observed completions/lifecycle/writer into the (possibly
 /// absent) remote record. Pure and replay-idempotent:
 /// - `completed[]` dedupes by `idem_key`, keeping the EARLIEST `at`;
 /// - `lifecycle[]` appends only entries not already present (exact match);
-/// - `writers[]` merges per `session_id` (min `first_at`, max `last_at`).
+/// - `writers[]` merges per `session_id` (min `first_at`, max `last_at`);
+/// - the run-head pointers (`issue_number`/`last_comment_id`) survive from the
+///   base unless this writer has a newer non-None value (writer wins);
+/// - `completed_count` mirrors `completed.len()`; `last_commit_sha` is set to
+///   [`UNVERIFIED_SHA`] in memory (the real sha is only known post-PUT and is
+///   not needed inside the file for CAS).
 #[allow(clippy::too_many_arguments)]
 pub fn merge_record(
     base: Option<&ProgressRecord>,
@@ -20,6 +37,7 @@ pub fn merge_record(
     new_completed: &[CompletedEntry],
     new_lifecycle: &[LifecycleEntry],
     writer: Option<&WriterEntry>,
+    pointers: HeadPointers,
     max_fencing_token: i64,
     updated_at: String,
 ) -> ProgressRecord {
@@ -76,7 +94,21 @@ pub fn merge_record(
         }
     }
 
+    // Run-head pointers: the writer's non-None value wins; otherwise keep the
+    // base's. A cold worker that never learned a pointer carries None and so
+    // preserves whatever the committed file already knows.
+    if pointers.issue_number.is_some() {
+        record.issue_number = pointers.issue_number;
+    }
+    if pointers.last_comment_id.is_some() {
+        record.last_comment_id = pointers.last_comment_id;
+    }
+
     record.max_fencing_token = record.max_fencing_token.max(max_fencing_token);
+    record.completed_count = record.completed.len() as i64;
+    // The real blob sha is only known after the PUT; inside the file the
+    // sentinel suffices (CAS uses the GitHub `sha` header, not this field).
+    record.last_commit_sha = Some(UNVERIFIED_SHA.to_string());
     record.updated_at = updated_at;
     record
 }
@@ -132,6 +164,7 @@ mod tests {
             new_completed,
             &[],
             None,
+            HeadPointers::default(),
             token,
             "2026-06-11T00:00:00Z".to_string(),
         )
@@ -191,6 +224,7 @@ mod tests {
             &[],
             std::slice::from_ref(&entry),
             Some(&writer),
+            HeadPointers::default(),
             1,
             "t2".to_string(),
         );
@@ -209,6 +243,7 @@ mod tests {
             &[],
             std::slice::from_ref(&entry),
             Some(&wider),
+            HeadPointers::default(),
             2,
             "t3".to_string(),
         );
@@ -226,5 +261,66 @@ mod tests {
         base.max_fencing_token = 7;
         assert_eq!(merged_with(Some(&base), &[], 3).max_fencing_token, 7);
         assert_eq!(merged_with(Some(&base), &[], 9).max_fencing_token, 9);
+    }
+
+    #[test]
+    fn merge_record_preserves_issue_pointers() {
+        // Base carries pointers; a writer with NONE must preserve them (a cold
+        // worker that never learned the issue/comment keeps the file's value).
+        let mut base = ProgressRecord::new("rk", "demo", "fp", "t0".to_string());
+        base.issue_number = Some(11);
+        base.last_comment_id = Some(99);
+        let preserved = merge_record(
+            Some(&base),
+            "rk",
+            "demo",
+            "fp",
+            &[],
+            &[],
+            None,
+            HeadPointers::default(),
+            0,
+            "t1".to_string(),
+        );
+        assert_eq!(preserved.issue_number, Some(11), "base issue survives");
+        assert_eq!(preserved.last_comment_id, Some(99), "base comment survives");
+
+        // The writer's non-None pointers win over the base.
+        let won = merge_record(
+            Some(&base),
+            "rk",
+            "demo",
+            "fp",
+            &[],
+            &[],
+            None,
+            HeadPointers {
+                issue_number: Some(11),
+                last_comment_id: Some(123),
+            },
+            0,
+            "t2".to_string(),
+        );
+        assert_eq!(won.issue_number, Some(11));
+        assert_eq!(won.last_comment_id, Some(123), "writer's comment id wins");
+
+        // completed_count mirrors the merged completed length; the in-file sha
+        // is the sentinel regardless of input.
+        let mut with_completed = base.clone();
+        with_completed.completed = vec![completed("k1", "t1")];
+        let counted = merge_record(
+            Some(&with_completed),
+            "rk",
+            "demo",
+            "fp",
+            &[completed("k2", "t2")],
+            &[],
+            None,
+            HeadPointers::default(),
+            0,
+            "t3".to_string(),
+        );
+        assert_eq!(counted.completed_count, 2);
+        assert_eq!(counted.last_commit_sha.as_deref(), Some(UNVERIFIED_SHA));
     }
 }
