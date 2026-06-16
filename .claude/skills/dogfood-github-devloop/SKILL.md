@@ -40,35 +40,27 @@ The memory files carry detail and incident history. This skill is the decision t
 
 ## Operating loop
 
-1. Run `github-devloop` supervise with real write posture, from a worktree checked out to the merged `dev`. It is a long-running foreground process — run it detached (background it and redirect output to a log) so the loop survives across turns.
+The operator tooling is **`dogfood.sh`** in this skill directory (`.claude/skills/dogfood-github-devloop/dogfood.sh`) — one DRY multi-tool that encodes the launch env, the restart-to-deploy invariant, the BIN-freshness rebuild, and the board sweep, so each wake is a few clean calls instead of ad-hoc bash. Commands: `status | doctor | config | board | bin | start | stop | restart | logs` (each takes `[packages|substrate|website|all]`).
 
-   `FKST_RUNTIME_ROOT` is clearable scratch — a fresh one each run is fine. `FKST_DURABLE_ROOT` is the redb **persistent** delivery store and is **NOT scratch** (per `CLAUDE.md`): **reuse a STABLE durable root across restarts** so in-flight persisted events resume. A *fresh* durable root throws the whole durable queue away and **strands mid-state issues** whose advancing event was sitting in the abandoned store (e.g. an issue stuck at `ready`/`implementing` that never re-triggers implement — observed: #62/#78). Use a fresh durable root ONLY for a deliberate clean-slate wipe, never for a normal restart-to-deploy. `<gh-login>` is the `gh auth` user, which is the trusted bot marker author.
+**Per-machine config (we run 3 repos across 2 machines).** The script is identical on every host; device-specific values — `DOGFOOD_ROOT` (worktree/scratch base), `BOT` (gh login), `INTEGRATION_BRANCH` (e.g. `integration` vs `integration-<device>`), `DOGFOOD_REPOS` (which repos this host drives), and the STABLE `DUR_*` durable roots — are sourced from `dogfood.config.sh` (gitignored, per-machine; copy `dogfood.config.example.sh`). Everything has a generic default (paths derive from `$DOGFOOD_ROOT`), precedence is env > config > default. Run `dogfood.sh config` to print what THIS host resolved (verify the `DUR_*` match the running supervises before a restart, or it strands in-flight events). A second machine just needs its own `dogfood.config.sh` (its `BOT`, `integration-<device>`, paths, durable roots) — no script edits.
 
-   **EXPORT `BIN` in the supervise environment** (not only `--framework-bin`). The spawned implement/fix codex runs `scripts/run.sh test` in its worktree to verify its own work passes CI before finishing; that resolution needs the engine BIN, which it inherits from the supervise process env (the codex worktree has no `.env` — it is gitignored). Launching bare (`"$BIN" supervise …` without `BIN=…` in the env) leaves the codex unable to run the suite, so the autonomous fix loop cannot close CI failures and every PR with a red check churns to `blocked`. `scripts/run.sh supervise` exports it for you; a direct launch must set `BIN=<engine-bin>` in the env list.
+1. **Run / restart** with `dogfood.sh restart [name|all]`. It ensures the engine BIN is fresh, syncs the worktree(s) to `origin/dev`, SIGKILLs the old supervise (releasing the redb lock), and relaunches detached with real write posture (`FKST_GITHUB_WRITE=1`), a fresh runtime scratch root, and the SAME stable durable root. Two invariants the script encodes (preserve them if you ever launch by hand):
 
-   ```sh
-   BIN=<engine-bin> \
-   FKST_GITHUB_REPO=<owner/repo> FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN=<gh-login> \
-   FKST_DEVLOOP_UPSTREAM_BRANCH=dev FKST_DEVLOOP_INTEGRATION_BRANCH=integration-<device> FKST_DEVLOOP_ROLLUP_MERGE=auto \
-   FKST_RUNTIME_ROOT=<fresh-scratch> FKST_DURABLE_ROOT=<STABLE, reused across restarts> \
-   "$BIN" supervise --project-root <worktree> \
-     --package-root <worktree>/packages/github-devloop --package-root <worktree>/packages/github-proxy --package-root <worktree>/packages/consensus \
-     --framework-bin "$BIN"
-   ```
-   `<device>` is this host's bot login, for example `integration-ElonSG` for `FKST_GITHUB_BOT_LOGIN=ElonSG`.
+   - **Restart-to-deploy** (per `CLAUDE.md`): `FKST_RUNTIME_ROOT` is scratch (fresh each launch); `FKST_DURABLE_ROOT` is the redb **persistent** store and is **REUSED across restarts** so in-flight persisted events resume. A *fresh* durable root throws the durable queue away and **strands mid-state issues** (stuck at `ready`/`implementing`, never re-triggered — #62/#78). Fresh it ONLY for a deliberate clean-slate wipe.
+   - **BIN export + freshness**: `BIN` is exported in the env (not only `--framework-bin`) so the spawned implement/fix codex can run `scripts/run.sh test` (its worktree has no `.env`). AND — a direct `BIN supervise` launch does **NOT** auto-build like `scripts/run.sh` does, so the BIN silently goes **stale** when substrate `dev` moves (an engine `.rs` fix merges); `dogfood.sh` rebuilds it from substrate `origin/dev` before every start/restart (detect stale = substrate `origin/dev` ahead OR any crate `.rs` newer than the BIN; `dogfood.sh bin` does it standalone). A supervise on a stale BIN silently re-runs already-fixed engine defects.
 
-2. **Keep the running code current.** The supervise loads `packages/` from the worktree at STARTUP — branch auto-sync (`sync_scan` ff'ing `dev`→`integration-<device>`) propagates branch CONTENT but does NOT reload a running process's code. So after ANY code change merges to `dev` (your out-of-band hotfix, or an autonomous rollup), sync the worktree to the latest remote `dev` and restart the supervise PROMPTLY, so it always runs the latest code. A supervise left running on stale code re-introduces already-fixed defects.
+2. **Keep the running code current.** The supervise loads `packages/` from the worktree at STARTUP; branch auto-sync propagates branch CONTENT but does NOT reload a running process. So after ANY merge to `dev` (your out-of-band hotfix or an autonomous rollup) — **and after any substrate engine merge** — restart PROMPTLY (`dogfood.sh restart`). `dogfood.sh doctor` flags both stale code and a stale BIN in one roll-up; treat either as a restart trigger.
 3. Watch it. Use "What to observe". If state keeps advancing, do NOT intervene - observe, and file issues only for real system defects.
 4. When it stalls, go to the Stall decision tree.
 
 ## What to observe
 
-**Every activation, FIRST sweep the full board — do not skip to logs.** Enumerate every open issue and every open PR, and for each map its current state marker / label / last transition. The goal is to catch, per item, two failure shapes the log alone hides:
+**Every activation, FIRST sweep the full board with `dogfood.sh board` — do not skip to logs.** It classifies every open issue/PR across both repos (`fkst-dev:<state>` label + per-PR CI + recency) into `✓ flowing` / `tracking` / `parked` vs `⚠ STUCK` / `STRANDED` / `CI-RED` / `NO-CI`. The label is a fast UI hint; for any item flagged `⚠`, cross-check its authoritative `state:v1` marker / the linked PR before acting (a `STUCK implementing` can be a live codex whose issue `updated_at` is just old). The goal is to catch, per item, two failure shapes the log alone hides:
 
 - **Stuck**: an item whose state has not advanced across passes (e.g. parked at `ready`/`reviewing`/`fixing`/`thinking` with no new marker), or an issue sitting with no state at all (intake never decided, or `decline`-dead-ended).
 - **Misbehaving**: an item that transitioned WRONG vs the expected state machine — a sound issue `decline`d or `blocked`, a review reject that should have been a converge, a PR that re-opened/churned, a redundant autonomous PR duplicating an out-of-band fix, a `+0/-0` rollup.
 
-Only after the board sweep, check the running process:
+Only after the board sweep, check the running process (`dogfood.sh doctor` rolls up supervise liveness + panic + code currency + BIN freshness + graphql in one line each):
 
 - Supervise alive + 0 panic.
 - State transitions advancing: consensus, review, implement, and merge activity; not only `github_poll`.
@@ -117,6 +109,23 @@ Use this path for both branch 3 and branch 4 in the Stall decision tree.
 
 - Close the resolved issue so intake does not redundantly re-process it (housekeeping — a resolved issue closes freely).
 - Close any redundant/superseded autonomous PR — PR-close follows the destructive-op guardrail: confirm first.
+
+### Re-entry by operator command (GitHub-surface, NOT state mutation)
+
+Trusted operator comments (first line `fkst: <cmd>`, authored by the bot login) re-enter a stuck item without hand-mutating state. Each has a precondition — using the wrong one is **refused, not forced** (and you must not force it):
+
+- `fkst: rereview` — re-runs consensus on a **stalled `thinking`** issue (requires the thinking to be stalled, not active); or re-triggers review on a `reviewing`/`blocked`/`review-meta` issue with an **OPEN** PR.
+- `fkst: reready` — re-triggers implement on an issue at `ready`.
+- `fkst: reimplement` — re-enters implement on an `impl-failed` issue.
+- `fkst: reintake` — re-runs intake; **refused if the issue has any active devloop state** (only for a declined/stateless issue).
+
+**Known re-entry GAPS — the old-instance-strand class. File/drive a SYSTEM issue; do NOT force a command past its precondition and do NOT hand-mutate the marker.** A fix prevents FUTURE failures but does not revive instances already frozen before it landed, and some frozen states have NO working operator re-entry at all:
+
+- `pr-open`-frozen with the backing PR gone → no command fits (#271/#606 → #760).
+- `thinking`/convergence-stalled with **version-desync** → `rereview` is applied but its replayed consensus result skip-stales (marker `intake/NNNN` vs proposal `<ts>/loop/N`), `reintake` refused (active state), `reready`/`reimplement` wrong-state (#542/#577).
+- `reviewing`/`fixing` PR that can never obtain CI → merge gate never satisfiable (substrate #84/#83 → #103).
+
+All the SAME class: a non-terminal marker no path advances, producing **zero error facts** (liveness-blind — the safety net sees nothing). The durable fix is framework-level, not another per-state patch: the liveness sweep must **force-terminate** ANY over-budget non-terminal state to `blocked`-with-WHY, mechanically conformance-enforced (carrier **#762**, wave under saga-mandatory **#375**). When you hit a fresh instance, drive that class issue rather than minting a new point-fix.
 
 ## Anti-patterns
 

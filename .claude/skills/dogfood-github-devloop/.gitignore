@@ -1,0 +1,4 @@
+# Per-machine dogfood config (each host keeps its own; the committed template is
+# dogfood.config.example.sh). Holds this host's paths, bot login, integration branch,
+# and stable durable roots.
+dogfood.config.sh
