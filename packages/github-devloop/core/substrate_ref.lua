@@ -23,6 +23,15 @@ local function run_cmd(cmd, timeout, label)
   return result
 end
 
+local function is_missing_substrate_ref_pin(result)
+  if result == nil or result.exit_code == 0 then
+    return false
+  end
+  local stderr = tostring(result.stderr or "")
+  return stderr:find("path '" .. substrate_ref_path .. "' does not exist in", 1, true) ~= nil
+    or stderr:find("path '" .. substrate_ref_path .. "' exists on disk, but not in", 1, true) ~= nil
+end
+
 local function run_gh(cmd, timeout, label)
   local result = M.gh_exec({ cmd = cmd, timeout = timeout or 30 })
   if result.exit_code ~= 0 then
@@ -45,7 +54,13 @@ function M.git_show_substrate_ref_pin_cmd()
 end
 
 local function read_pin()
-  local result = run_cmd(M.git_show_substrate_ref_pin_cmd(), 30, "git show substrate-ref pin")
+  local result = exec_sync({ cmd = M.git_show_substrate_ref_pin_cmd(), timeout = 30 })
+  if is_missing_substrate_ref_pin(result) then
+    return nil
+  end
+  if result.exit_code ~= 0 then
+    error("github-devloop: git show substrate-ref pin failed: " .. tostring(result.stderr))
+  end
   local pin = M._trim(result.stdout)
   if not M._is_git_sha(pin) then
     error("github-devloop: invalid .fkst/substrate-ref pin")
@@ -263,6 +278,14 @@ function M.substrate_ref_scan()
   end
 
   local current_pin = read_pin()
+  if current_pin == nil then
+    log_scan("no-substrate-pin", {
+      "repo=" .. repo,
+      "path=" .. substrate_ref_path,
+      "disposition=no-substrate-pin",
+    })
+    return { status = "no-substrate-pin", path = substrate_ref_path }
+  end
   local target_sha = fetch_substrate_dev_head()
   if current_pin == target_sha then
     log_scan("unchanged", {
