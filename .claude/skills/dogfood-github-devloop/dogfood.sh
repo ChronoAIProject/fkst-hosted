@@ -10,6 +10,13 @@
 #   substrate : target fkst-substrate  (host = substrate engine worktree, packages from a sibling fkst-packages clone)
 #   website   : target fkst-website    (host = website worktree + its own site-board package)
 #
+# Package layout: `.fkst/` is RUNTIME/build only (gitignored: runtime, durable, substrate-src, board
+# cache) — never committed code. Committed package source lives at repo-root `packages/<pkg>` in every
+# repo. The engine BIN + shared devloop trio are the PLATFORM (like GitHub runners + marketplace
+# actions); each target repo owns its CUSTOM packages in its own `packages/`. So --package-root is
+# `<repo>/packages/<pkg>`: the trio from the platform fkst-packages checkout (PKGSRC), a repo-local
+# custom package from the host (HOST). (The old `.fkst/packages` symlink is obsolete and unused.)
+#
 # Commands:
 #   ./dogfood.sh status  [name|all]            pid/uptime/code-version/panic per supervise
 #   ./dogfood.sh doctor  [name|all]            health roll-up: supervises + BIN freshness + code currency + graphql
@@ -17,7 +24,7 @@
 #   ./dogfood.sh bin                           ensure engine BIN == substrate origin/dev; rebuild if stale (no restart)
 #   ./dogfood.sh start   [name|all]            launch (ensures BIN fresh first)
 #   ./dogfood.sh stop    [name|all]            SIGKILL (releases the redb lock)
-#   ./dogfood.sh restart [name|all]            BIN-fresh + sync worktrees to origin/dev + SIGKILL + relaunch (unconditional)
+#   ./dogfood.sh restart [name|all]            BIN-fresh + sync run checkouts to origin/<integration> + SIGKILL + relaunch (unconditional)
 #   ./dogfood.sh sync    [name|all]            auto-deploy: ff pinned operator checkouts to dev, rebuild BIN,
 #                                              and restart ONLY supervises whose running code is a real
 #                                              package/engine change (skill/docs-only skew is left running)
@@ -56,23 +63,31 @@ ROLLUP_MERGE="${FKST_DEVLOOP_ROLLUP_MERGE:-${ROLLUP_MERGE:-auto}}"
 GH_ORG="${GH_ORG:-ChronoAIProject}"
 DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos this host drives ('all' / board default expand here)
 
-# cfg <name> -> REPO HOST PKGSRC DUR EXTRA. Worktree paths derive from $DOGFOOD_ROOT (uniform
-# layout across machines); stable durable roots default under it but are commonly PINNED per
-# machine (DUR_* in the config) to an existing redb store so restarts resume in-flight.
+# The shared devloop trio = the PLATFORM (like GitHub runners + marketplace actions), loaded from the
+# platform fkst-packages checkout's repo-root packages/. Each TARGET repo owns its CUSTOM packages in
+# its own repo-root packages/. So every --package-root is `<repo>/packages/<pkg>`: the trio from PKGSRC,
+# a repo-local custom package from HOST. `.fkst/` is runtime-only and is NOT a package-resolution path.
+DEVLOOP_PKGS="github-devloop github-proxy consensus"   # platform trio (same for every target, from PKGSRC)
+
+# cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
+# layout across machines); stable durable roots default under it but are commonly PINNED per machine
+# (DUR_* in the config) to an existing redb store so restarts resume in-flight. LOCAL_PKGS lists the
+# target's OWN packages (committed at the host repo's repo-root packages/), loaded from $HOST/packages/<pkg>.
 cfg() {
+  LOCAL_PKGS=""   # repo-local custom packages this target drives (committed in the host repo)
   case "$1" in
     packages)
       REPO="$GH_ORG/fkst-packages"
       HOST="$DOGFOOD_ROOT/pkgs-dogfood"; PKGSRC="$HOST"
-      DUR="${DUR_PACKAGES:-$DOGFOOD_ROOT/dogfood-durable-packages}"; EXTRA="" ;;
+      DUR="${DUR_PACKAGES:-$DOGFOOD_ROOT/dogfood-durable-packages}" ;;
     substrate)
       REPO="$GH_ORG/fkst-substrate"
       HOST="$DOGFOOD_ROOT/substrate-dogfood/sub"; PKGSRC="$DOGFOOD_ROOT/substrate-dogfood/pkgs"
-      DUR="${DUR_SUBSTRATE:-$DOGFOOD_ROOT/dogfood-durable-substrate}"; EXTRA="" ;;
+      DUR="${DUR_SUBSTRATE:-$DOGFOOD_ROOT/dogfood-durable-substrate}" ;;
     website)
       REPO="$GH_ORG/fkst-website"
       HOST="$DOGFOOD_ROOT/website-dogfood/site"; PKGSRC="$DOGFOOD_ROOT/website-dogfood/pkgs"
-      DUR="${DUR_WEBSITE:-$DOGFOOD_ROOT/dogfood-durable-website}"; EXTRA="$HOST/packages/site-board" ;;
+      DUR="${DUR_WEBSITE:-$DOGFOOD_ROOT/dogfood-durable-website}"; LOCAL_PKGS="site-board" ;;
     *) echo "unknown dogfood: $1 (packages|substrate|website)" >&2; return 1 ;;
   esac
 }
@@ -82,10 +97,18 @@ latest_log() { ls -t "$LOGDIR/${1}-sv-"*.log 2>/dev/null | head -1; }
 epoch_utc() { [ -z "${1:-}" ] && { echo 0; return; }; date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || echo 0; }
 expand() { [ "${1:-all}" = all ] && echo "$DOGFOOD_REPOS" || echo "$1"; }
 
-sync_to_dev() { # $1 worktree dir
+# Sync a dogfood RUN checkout (behavior PKGSRC + target HOST) to the machine's
+# INTEGRATION_BRANCH — the dogfood runs its own pre-rollup code (feature ->
+# integration-<device> -> rollup -> dev), so it is the live integration test of
+# this device's autonomous changes BEFORE they promote to dev. The rollup target
+# stays UPSTREAM_BRANCH (FKST_DEVLOOP_UPSTREAM_BRANCH=dev); only the engine BIN +
+# the pinned operator/skill checkouts stay on dev.
+sync_to_run_branch() { # $1 worktree dir
   git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || { echo "  ! $1 is not a git worktree"; return 1; }
-  git -C "$1" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
-  echo "  $1 -> $(git -C "$1" reset --hard "origin/$UPSTREAM_BRANCH" 2>&1 | tail -1)"
+  git -C "$1" fetch origin "$INTEGRATION_BRANCH" -q 2>/dev/null
+  # checkout -B (not reset --hard): leaves the checkout actually ON the integration branch
+  # tracking origin/<integration>, instead of pointing a stale local 'dev' ref at integration content.
+  echo "  $1 -> $(git -C "$1" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>&1 | tail -1; git -C "$1" rev-parse --short HEAD 2>/dev/null) ($INTEGRATION_BRANCH)"
 }
 
 # Engine BIN freshness. Stale = substrate origin/dev ahead of the build checkout, OR any
@@ -153,10 +176,11 @@ start_one() {
   if [ -n "$existing" ]; then echo "[$1] already running (pid $existing) — use restart"; return 0; fi
   local ts log rt; ts=$(date +%s); log="$LOGDIR/${1}-sv-${ts}.log"; rt="$LOGDIR/dogfood-rt-${1}.${ts}"
   clean_stale_runtime_worktrees "$1" "$rt"
-  local roots=( --package-root "$PKGSRC/packages/github-devloop"
-                --package-root "$PKGSRC/packages/github-proxy"
-                --package-root "$PKGSRC/packages/consensus" )
-  local e; for e in $EXTRA; do roots+=( --package-root "$e" ); done
+  # Package roots: the platform trio from PKGSRC's repo-root packages/, each repo-local custom package
+  # from the host repo's repo-root packages/. `.fkst/` stays runtime-only (not a package-resolution path).
+  local roots=() p
+  for p in $DEVLOOP_PKGS; do roots+=( --package-root "$PKGSRC/packages/$p" ); done
+  for p in $LOCAL_PKGS;   do roots+=( --package-root "$HOST/packages/$p" );   done
   BIN="$BIN" FKST_GITHUB_REPO="$REPO" FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN="$BOT" \
     FKST_DEVLOOP_UPSTREAM_BRANCH="$UPSTREAM_BRANCH" FKST_DEVLOOP_INTEGRATION_BRANCH="$INTEGRATION_BRANCH" \
     FKST_DEVLOOP_ROLLUP_MERGE="$ROLLUP_MERGE" \
@@ -181,9 +205,9 @@ stop_one() {
 
 restart_one() {
   cfg "$1" || return 1
-  echo "[$1] sync to origin/$UPSTREAM_BRANCH:"
-  sync_to_dev "$PKGSRC"
-  [ "$HOST" != "$PKGSRC" ] && sync_to_dev "$HOST"
+  echo "[$1] sync to origin/$INTEGRATION_BRANCH (run branch; rollup target stays $UPSTREAM_BRANCH):"
+  sync_to_run_branch "$PKGSRC"
+  [ "$HOST" != "$PKGSRC" ] && sync_to_run_branch "$HOST"
   stop_one "$1"; sleep 1
   start_one "$1"
 }
@@ -205,14 +229,16 @@ status_one() {
 # the code the process loaded at startup (logged code_provenance PKG_VERS/ENGINE_VER), NOT the
 # worktree/BIN file (those can be updated without reloading the process — only a restart reloads).
 # Echoes: stopped | current | skew (dev moved, non-package files only) | pkg-stale | engine-stale.
-# Side effect: fetches origin/$UPSTREAM_BRANCH for $PKGSRC and $SUBSTRATE_SRC.
+# PKG freshness is vs PKGSRC origin/$INTEGRATION_BRANCH (the run branch the dogfood loads);
+# ENGINE freshness is vs SUBSTRATE_SRC origin/$UPSTREAM_BRANCH (the BIN is built from dev).
+# Side effect: fetches origin/$INTEGRATION_BRANCH for $PKGSRC and origin/$UPSTREAM_BRANCH for $SUBSTRATE_SRC.
 _proc_stale() {
   cfg "$1" || { echo unknown; return; }
   local p log procpkg proceng pdev sdev; p=$(pidof_df); log=$(latest_log "$1")
   [ -z "$p" ] && { echo stopped; return; }
-  git -C "$PKGSRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
+  git -C "$PKGSRC" fetch origin "$INTEGRATION_BRANCH" -q 2>/dev/null
   git -C "$SUBSTRATE_SRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
-  pdev=$(git -C "$PKGSRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)
+  pdev=$(git -C "$PKGSRC" rev-parse "origin/$INTEGRATION_BRANCH" 2>/dev/null)
   sdev=$(git -C "$SUBSTRATE_SRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)
   procpkg=$(grep -aoE 'PKG_VERS=[^ ]*github-devloop@[a-f0-9]+' "$log" 2>/dev/null | grep -oE 'github-devloop@[a-f0-9]+' | tail -1 | cut -d@ -f2)
   proceng=$(grep -aoE 'ENGINE_VER=[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d= -f2)
@@ -235,7 +261,7 @@ doctor_one() {
   case "$st" in
     current)      verdict="pkg-current engine-current" ;;
     skew)         verdict="pkg-skew(non-package, no restart) engine-current" ;;
-    pkg-stale)    verdict="PKG-STALE→restart(${procpkg:0:8}≠$(git -C "$PKGSRC" rev-parse --short "origin/$UPSTREAM_BRANCH" 2>/dev/null))" ;;
+    pkg-stale)    verdict="PKG-STALE→restart(${procpkg:0:8}≠$(git -C "$PKGSRC" rev-parse --short "origin/$INTEGRATION_BRANCH" 2>/dev/null))" ;;
     engine-stale) verdict="ENGINE-STALE→restart(${proceng:0:8}≠$(git -C "$SUBSTRATE_SRC" rev-parse --short "origin/$UPSTREAM_BRANCH" 2>/dev/null))" ;;
     *)            verdict="$st" ;;
   esac
@@ -335,8 +361,9 @@ cmd_config() {
   printf '  %-18s %s\n' DOGFOOD_ROOT "$DOGFOOD_ROOT" SUBSTRATE_SRC "$SUBSTRATE_SRC" BIN "$BIN" \
     BOT "$BOT" GH_ORG "$GH_ORG" UPSTREAM_BRANCH "$UPSTREAM_BRANCH" INTEGRATION_BRANCH "$INTEGRATION_BRANCH" \
     ROLLUP_MERGE "$ROLLUP_MERGE" RATE_POOL "$RATE_POOL" LOGDIR "$LOGDIR" DOGFOOD_REPOS "$DOGFOOD_REPOS"
-  echo "per-repo (HOST | PKGSRC | DURABLE):"
-  local n; for n in $DOGFOOD_REPOS; do cfg "$n" && printf '  %-9s %s | %s | %s\n' "$n" "$HOST" "$PKGSRC" "$DUR"; done
+  echo "trio (platform, from each PKGSRC/packages): $DEVLOOP_PKGS"
+  echo "per-repo (HOST | PKGSRC | DURABLE | local pkgs):"
+  local n; for n in $DOGFOOD_REPOS; do cfg "$n" && printf '  %-9s %s | %s | %s | %s\n' "$n" "$HOST" "$PKGSRC" "$DUR" "${LOCAL_PKGS:--}"; done
 }
 
 cmd_board() {
