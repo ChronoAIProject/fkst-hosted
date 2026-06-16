@@ -1,14 +1,20 @@
 # fkst-control-plane: the controller deployable (public REST API). 3 replicas,
-# safe-takeover RollingUpdate.
+# safe-takeover RollingUpdate. SAMPLE manifest — every value here is an example;
+# the config loaders (backend/fkst-control-plane/src/config.rs et al.) are the
+# canonical source of truth for the env contract.
 #
-# TRANSITIONAL (issue #145 → #136): engine execution still lives in the
-# control-plane crate today, so this Deployment still spawns engine children and
-# therefore (a) runs from the engine-laden image — build `fkst-control-plane:dev`
-# from `--target worker-runtime` until #136 — and (b) keeps the `runtime`+`tmp`
-# emptyDir volumes below. When #136 moves engine execution onto the worker:
-# switch this image to `--target control-plane-runtime` (slim) and drop the
-# `runtime` volume + its mount. Also: the database-free pivot (#135) collapses
-# this to a SINGLE authoritative controller replica; until then it stays at 3.
+# TRANSITIONAL (until #151): engine execution still lives in the control-plane
+# crate today, so this Deployment still spawns engine children and therefore
+# (a) must run from the ENGINE-LADEN image — the `fkst-control-plane` image tag
+# below is a kustomize seam (kustomization.yaml `images:`); transitionally point
+# it at the engine-laden `fkst-worker` image (with a `command:` override to the
+# fkst-control-plane binary) since the slim `backend/fkst-control-plane/Dockerfile`
+# carries no engine — and (b) keeps the `runtime`+`tmp` emptyDir volumes below.
+# When #151 moves engine execution onto the worker: switch this image to the
+# slim `fkst-control-plane` image and drop the `runtime` volume + its mount, and
+# the `FKST_HOSTED_ENGINE_*` ConfigMap keys move to the worker. The database-free
+# pivot (#143/#144) collapses this to a SINGLE authoritative controller replica;
+# until then it stays at 3.
 #
 # Cross-pod execution is serialized by the distribution layer's MongoDB lease +
 # fencing token, NOT by the deployment strategy: at most one pod holds a given
@@ -79,10 +85,12 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 30
-      # The server is FAIL-CLOSED at startup (it pings Mongo and exits if the
-      # store is unreachable), so first-boot ordering would otherwise
-      # crash-loop the API while Mongo initializes. Waiting for the TCP port
-      # absorbs that ordering without weakening the fail-closed contract.
+      # TRANSITIONAL until #143 removes MongoDB: the server is FAIL-CLOSED at
+      # startup (it pings Mongo and exits if the store is unreachable), so
+      # first-boot ordering would otherwise crash-loop the API while Mongo
+      # initializes. Waiting for the TCP port absorbs that ordering without
+      # weakening the fail-closed contract. When #143 lands, this initContainer
+      # disappears together with the Mongo Service/StatefulSet.
       initContainers:
         - name: wait-for-mongodb
           image: busybox:1.37

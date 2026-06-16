@@ -7,10 +7,12 @@ behalf of users. This is the v1 scope; this README covers **local development**
 only.
 
 > **Kubernetes-only deployment.** The fkst deployables are deployed exclusively
-> on Kubernetes via the per-deployable `k8s_sample/` directories; `docker-compose`
-> is not used in this repo. Local development runs the crates directly with
-> `cargo run -p fkst-control-plane` / `cargo run -p fkst-worker` against a
-> developer-managed Mongo container (see the quickstart below).
+> on Kubernetes via the per-deployable `k8s_sample/` directories
+> ([`fkst-control-plane/k8s_sample/`](fkst-control-plane/k8s_sample/README.md)
+> and [`fkst-worker/k8s_sample/`](fkst-worker/k8s_sample/README.md));
+> `docker-compose` is not used in this repo. Local development runs the crates
+> directly with `cargo run -p fkst-control-plane` / `cargo run -p fkst-worker`
+> against a developer-managed Mongo container (see the quickstart below).
 
 ## Prerequisites
 
@@ -19,10 +21,11 @@ only.
 
 ## Local dev quickstart
 
-1. Start MongoDB 7 from a developer-managed container (or, once it exists, the
-   sibling `k8s_sample/` mongodb manifest on a local cluster). Until #143
-   removes Mongo, a local container is the simplest source (data persists in
-   the named volume `fkst_mongo_data`):
+1. Start MongoDB 7 from a developer-managed container (or the transitional
+   mongodb manifests in
+   [`fkst-control-plane/k8s_sample/`](fkst-control-plane/k8s_sample/README.md)
+   on a local cluster). Until #143 removes Mongo, a local container is the
+   simplest source (data persists in the named volume `fkst_mongo_data`):
 
    ```sh
    docker run -d --name fkst-mongo -p 27017:27017 -v fkst_mongo_data:/data/db mongo:7
@@ -405,3 +408,19 @@ docker build -f backend/fkst-control-plane/Dockerfile \
 > `fkst-control-plane` image builds cleanly but is not yet the controller's
 > production home. Once #151 lands, the controller switches to the slim
 > `fkst-control-plane` image and drops the volume.
+
+## Kubernetes deployment
+
+Each deployable ships its own **sample** Kubernetes manifests under its crate
+directory; these `k8s_sample/` dirs are the single source of k8s objects (every
+value is a SAMPLE — the config loaders are the source of truth):
+
+- [`fkst-control-plane/k8s_sample/`](fkst-control-plane/k8s_sample/README.md) —
+  Namespace, control-plane Deployment, the public ClusterIP Service (no
+  Ingress), ConfigMap + Secret template, PDB, and the transitional MongoDB pair.
+- [`fkst-worker/k8s_sample/`](fkst-worker/k8s_sample/README.md) — worker
+  Deployment (no public Service, worker-local `/health` probes), ConfigMap +
+  Secret template, and sample HPA + PDB.
+
+Create each dir's Secret first (it is excluded from `kustomization.yaml`), then
+`kubectl apply -k <dir>`. See each README for the create-the-Secret-first flow.

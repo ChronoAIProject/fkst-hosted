@@ -1,15 +1,20 @@
-# fkst-worker: the worker deployable of the control-plane/worker split (#145).
+# fkst-worker: the worker deployable of the control-plane/worker split.
+# SAMPLE manifest — every value here is an example; the worker config loader
+# (backend/fkst-worker/src/config.rs) is the canonical source of truth.
 #
-# At this stage the worker is a compiling SKELETON: it starts, logs its role,
-# and waits for SIGTERM. It exposes NO public Service — workers connect UP to
-# the controller over stable Service DNS and pull work (the registry client +
-# pull loop arrive in #134; engine execution in #136). So this Deployment has
-# no Service, no Ingress, and (until #134 adds the worker-local /health server)
-# no HTTP probes. Workers scale freely — the operating range is a follow-up
-# (#140 adds the HPA on a pending-work metric).
+# It exposes NO public Service — workers connect UP to the controller over
+# stable Service DNS (CONTROLLER_URL, from the ConfigMap) and pull work. It runs
+# a worker-LOCAL HTTP server on FKST_WORKER_PORT (8090) serving GET /health
+# (backend/fkst-worker/src/server.rs) — used by the probes below, NOT exposed
+# via any Service. The worker holds NO Mongo/DB/GitHub-App creds; the only
+# secret it needs is the shared controller<->worker bearer
+# FKST_INTERNAL_AUTH_TOKEN (from fkst-worker-secret). Per-session NyxID tokens
+# are injected at session time, not pod-level.
 #
 # It runs the engine-laden `fkst-worker` image and keeps the runtime+tmp
-# emptyDir volumes so it is ready to host engine child processes in #136.
+# emptyDir volumes so it can host engine child processes (live once #151 moves
+# engine execution onto the worker). Workers scale freely — the HPA + drain/PDB
+# topology is finalized by #144/#140; the hpa.yaml + pdb.yaml here are samples.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -60,8 +65,14 @@ spec:
         - name: fkst-worker
           image: fkst-worker:dev # tag managed by kustomization.yaml images
           imagePullPolicy: IfNotPresent
-          # Pod identity is an INTENTIONAL contract: the worker id defaults to the
-          # pod name (FKST_POD_ID), sourced explicitly from the downward API.
+          # Worker-local HTTP server (GET /health). NOT fronted by any Service —
+          # the named port exists only so the probes below can target it.
+          ports:
+            - name: http
+              containerPort: 8090 # = FKST_WORKER_PORT (ConfigMap)
+          # Pod identity is an INTENTIONAL contract: the worker id (= FKST_POD_ID,
+          # REQUIRED, fail-closed) is sourced explicitly from the downward API.
+          # FKST_ROLE is also image-baked; pinned here as defense-in-depth.
           env:
             - name: FKST_ROLE
               value: worker
@@ -69,12 +80,30 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-          # The worker does NOT connect to MongoDB. Its config (controller URL +
-          # internal-auth token, added in #134) comes from the worker-scoped
-          # ConfigMap/Secret. For the #145 skeleton only the log level applies.
+          # The worker does NOT connect to MongoDB. CONTROLLER_URL + the worker
+          # tunables come from fkst-worker-config; the REQUIRED, fail-closed
+          # shared bearer FKST_INTERNAL_AUTH_TOKEN comes from fkst-worker-secret.
           envFrom:
             - configMapRef:
                 name: fkst-worker-config
+            - secretRef:
+                name: fkst-worker-secret
+          # The worker-local /health server (server.rs) does no store I/O, so the
+          # probes are cheap and the worker is Ready as soon as it is listening.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -19,7 +19,8 @@
 # #151 moves engine execution onto the worker, the control-plane Deployment runs
 # from THIS engine-laden image (with a `command:` override pointing at the
 # fkst-control-plane binary, which the control-plane image carries). See
-# backend/deploy/k8s/README.md and backend/fkst-control-plane/Dockerfile.
+# backend/fkst-worker/k8s_sample/README.md and
+# backend/fkst-control-plane/Dockerfile.
 
 ARG RUST_VERSION=1
 # Operator-pinned codex CLI version (issue #112). A Feb-2026+ release: the

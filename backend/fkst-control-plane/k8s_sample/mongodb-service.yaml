@@ -1,3 +1,10 @@
+# ==========================================================================
+# TRANSITIONAL until #143 removes MongoDB. This Service (and the paired
+# mongodb-statefulset.yaml + the control-plane Deployment's wait-for-mongodb
+# initContainer) exist only while the control plane is DB-backed. When #143
+# lands the DB-free pivot, this whole Mongo pair is deleted mechanically.
+# ==========================================================================
+#
 # Headless governing Service for the mongodb StatefulSet: gives the pod the
 # stable DNS name mongodb-0.mongodb.fkst-hosted.svc.cluster.local that the
 # API's MONGODB_URI points at.
