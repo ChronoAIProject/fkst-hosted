@@ -10,11 +10,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::models::{SessionDoc, SessionStatus};
-use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::models::{SessionDoc, SessionStatus};
+use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::mongo::Mongo;

@@ -9,12 +9,12 @@
 use std::time::Duration;
 
 use bson::doc;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::{Db, IDX_LEASES_EXPIRES_AT};
-use fkst_hosted_api::leases::{
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::{Db, IDX_LEASES_EXPIRES_AT};
+use fkst_control_plane::leases::{
     AcquireOutcome, LeaseStore, PoolConfig, ReleaseOutcome, RenewOutcome, IDX_LEASES_HOLDER_POD,
 };
-use fkst_hosted_api::models::LeaseDoc;
+use fkst_control_plane::models::LeaseDoc;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::mongo::Mongo;

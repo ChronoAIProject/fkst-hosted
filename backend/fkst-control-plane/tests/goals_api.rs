@@ -7,15 +7,15 @@
 
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
-use fkst_hosted_api::auth::AuthMode;
-use fkst_hosted_api::authz::Authorizer;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::goals::{GoalDoc, GoalRepo, GoalStatus, RepoRef, GOALS_COLLECTION};
-use fkst_hosted_api::router::build_router;
-use fkst_hosted_api::sessions::{SessionRepo, SessionService};
-use fkst_hosted_api::state::AppState;
+use fkst_control_plane::auth::AuthMode;
+use fkst_control_plane::authz::Authorizer;
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::goals::{GoalDoc, GoalRepo, GoalStatus, RepoRef, GOALS_COLLECTION};
+use fkst_control_plane::router::build_router;
+use fkst_control_plane::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use testcontainers::runners::AsyncRunner;
@@ -494,7 +494,7 @@ async fn goal_doc_round_trips_and_statuses_serialize_snake_case() {
 #[tokio::test]
 async fn validation_matrix_rejects_invalid_goals() {
     // This test validates the pure validation function without Docker.
-    use fkst_hosted_api::goals::validate_goal_fields;
+    use fkst_control_plane::goals::validate_goal_fields;
 
     // Empty title.
     let err = validate_goal_fields("", "desc", &["p".to_string()], None).expect_err("empty title");
@@ -548,7 +548,7 @@ async fn validation_matrix_rejects_invalid_goals() {
 
     // Unknown field (serde deny_unknown_fields tested at route level).
     let json = r#"{"title":"t","description":"d","package_names":["p"],"bogus":1}"#;
-    let result = serde_json::from_str::<fkst_hosted_api::routes::goals::CreateGoalRequest>(json);
+    let result = serde_json::from_str::<fkst_control_plane::routes::goals::CreateGoalRequest>(json);
     assert!(result.is_err(), "unknown field must be rejected");
 }
 

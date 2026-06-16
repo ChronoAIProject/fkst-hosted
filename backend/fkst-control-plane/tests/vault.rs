@@ -10,16 +10,16 @@ use axum::http::{Request, StatusCode};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL;
 use base64::Engine as _;
-use fkst_hosted_api::auth::AuthMode;
-use fkst_hosted_api::authz::Authorizer;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::router::build_router;
-use fkst_hosted_api::sessions::{SessionRepo, SessionService};
-use fkst_hosted_api::state::AppState;
-use fkst_hosted_api::vault::{EnvKind, EnvScopeRef, VaultLimits, VaultService, WriteRequest};
+use fkst_control_plane::auth::AuthMode;
+use fkst_control_plane::authz::Authorizer;
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::router::build_router;
+use fkst_control_plane::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::state::AppState;
+use fkst_control_plane::vault::{EnvKind, EnvScopeRef, VaultLimits, VaultService, WriteRequest};
 use http_body_util::BodyExt;
 use secrecy::ExposeSecret;
 use tower::ServiceExt;
@@ -321,7 +321,7 @@ async fn entries_per_scope_cap_is_enforced() {
         .await
         .expect_err("cap must trip");
     assert!(
-        matches!(err, fkst_hosted_api::error::AppError::Unprocessable(_)),
+        matches!(err, fkst_control_plane::error::AppError::Unprocessable(_)),
         "got {err:?}"
     );
     // Updating an EXISTING key never trips the cap.
@@ -368,7 +368,7 @@ fn router_auth_enabled(db: Db, vault: VaultService) -> axum::Router {
         config: Config::default(),
         db,
         sessions,
-        auth_mode: AuthMode::Enabled(fkst_hosted_api::auth::NyxIdAuthSettings {
+        auth_mode: AuthMode::Enabled(fkst_control_plane::auth::NyxIdAuthSettings {
             base_url: "https://nyxid.example.test".to_string(),
         }),
         authz: Authorizer::disabled(),

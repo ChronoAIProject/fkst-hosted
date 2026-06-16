@@ -1,24 +1,26 @@
-//! fkst-hosted-api server entrypoint: JSON tracing init, config load, router
+//! fkst-control-plane server entrypoint: JSON tracing init, config load, router
 //! build, and serving with graceful shutdown (SIGTERM / Ctrl-C).
 
 use std::process::ExitCode;
 
 use std::sync::Arc;
 
-use fkst_hosted_api::authz::Authorizer;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::{redact_mongodb_uri, Db};
-use fkst_hosted_api::distribution::{DistributionConfig, Distributor, DriverHost, SelfOnlyHealth};
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::journal::store::MongoProgressStore;
-use fkst_hosted_api::journal::JournalConfig;
-use fkst_hosted_api::leases::LeaseStore;
-use fkst_hosted_api::nyxid::NyxIdClient;
-use fkst_hosted_api::reconcile::{reconcile_orphans, ReconcileConfig};
-use fkst_hosted_api::router::build_router;
-use fkst_hosted_api::sessions::{SessionRepo, SessionService};
-use fkst_hosted_api::state::AppState;
+use fkst_control_plane::authz::Authorizer;
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::{redact_mongodb_uri, Db};
+use fkst_control_plane::distribution::{
+    DistributionConfig, Distributor, DriverHost, SelfOnlyHealth,
+};
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::journal::store::MongoProgressStore;
+use fkst_control_plane::journal::JournalConfig;
+use fkst_control_plane::leases::LeaseStore;
+use fkst_control_plane::nyxid::NyxIdClient;
+use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
+use fkst_control_plane::router::build_router;
+use fkst_control_plane::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::state::AppState;
 use secrecy::ExposeSecret;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -82,7 +84,8 @@ async fn main() -> ExitCode {
     // 4a. Ensure the journal-collection indexes (idempotent; fail-closed on
     //     error) — `session_progress` + `run_journals`, incl. the unique
     //     partial `sp_run_idem_uniq` idempotency index.
-    if let Err(error) = fkst_hosted_api::journal::index::ensure_journal_indexes(&db.database).await
+    if let Err(error) =
+        fkst_control_plane::journal::index::ensure_journal_indexes(&db.database).await
     {
         tracing::error!(error = %error, "failed to ensure journal indexes");
         return ExitCode::FAILURE;
@@ -218,7 +221,7 @@ async fn main() -> ExitCode {
         &config.nyxid_client_id,
         &config.nyxid_client_secret,
     ) {
-        (fkst_hosted_api::auth::AuthMode::Enabled(settings), Some(id), Some(secret)) => {
+        (fkst_control_plane::auth::AuthMode::Enabled(settings), Some(id), Some(secret)) => {
             match NyxIdClient::new(
                 &settings.base_url,
                 &config.nyxid_github_proxy_slug,
@@ -236,7 +239,7 @@ async fn main() -> ExitCode {
                 }
             }
         }
-        (fkst_hosted_api::auth::AuthMode::Enabled(_), None, None) => {
+        (fkst_control_plane::auth::AuthMode::Enabled(_), None, None) => {
             tracing::warn!("NyxID org features disabled: NYXID_CLIENT_ID/SECRET not configured");
             None
         }
@@ -255,14 +258,14 @@ async fn main() -> ExitCode {
     //     restart. The webhook secret (if set) is lifted out into AppState so
     //     the router can mount the signature-verified webhook route.
     let mut github_app_webhook_secret: Option<secrecy::SecretString> = None;
-    let github_app = match fkst_hosted_api::github_app::GithubAppConfig::load_from_env() {
+    let github_app = match fkst_control_plane::github_app::GithubAppConfig::load_from_env() {
         Ok(Some(config)) => {
             let app_id = config.app_id;
             github_app_webhook_secret = config.webhook_secret.clone();
             let store = std::sync::Arc::new(
-                fkst_hosted_api::github_app::MongoInstallationStore::new(&db),
+                fkst_control_plane::github_app::MongoInstallationStore::new(&db),
             );
-            match fkst_hosted_api::github_app::GithubAppTokens::new_with_store(&config, store) {
+            match fkst_control_plane::github_app::GithubAppTokens::new_with_store(&config, store) {
                 Ok(tokens) => {
                     tracing::info!(
                         app_id,
@@ -301,10 +304,10 @@ async fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
-    let vault = match fkst_hosted_api::vault::VaultService::with_local_key(
+    let vault = match fkst_control_plane::vault::VaultService::with_local_key(
         &db.database,
         vault_key.expose_secret(),
-        fkst_hosted_api::vault::VaultLimits {
+        fkst_control_plane::vault::VaultLimits {
             value_byte_cap: config.vault_value_byte_cap,
             entries_per_scope_cap: config.vault_entries_per_scope_cap,
         },
@@ -351,7 +354,7 @@ async fn main() -> ExitCode {
     //         base URL); when either is absent, provisioning stays disabled and
     //         the driver behaves exactly as pre-#111.
     match (&nyxid_client, &auth_mode) {
-        (Some(client), fkst_hosted_api::auth::AuthMode::Enabled(settings)) => {
+        (Some(client), fkst_control_plane::auth::AuthMode::Enabled(settings)) => {
             sessions.enable_nyxid_token(client.clone(), settings.base_url.clone());
             tracing::info!("per-session nyxid token provisioning enabled");
         }
@@ -370,10 +373,10 @@ async fn main() -> ExitCode {
     //         before the engine spawns. The catalog API consumes the same
     //         client. Requires the NyxID service client (the proxy host); when
     //         absent, injection stays disabled and the catalog answers 503.
-    let ornn_client: Option<fkst_hosted_api::ornn::OrnnClient> = match &nyxid_client {
-        Some(client) => match fkst_hosted_api::ornn::OrnnClient::with_nyxid(
+    let ornn_client: Option<fkst_control_plane::ornn::OrnnClient> = match &nyxid_client {
+        Some(client) => match fkst_control_plane::ornn::OrnnClient::with_nyxid(
             client.clone(),
-            fkst_hosted_api::ornn::DEFAULT_ORNN_SLUG,
+            fkst_control_plane::ornn::DEFAULT_ORNN_SLUG,
         ) {
             Ok(ornn) => {
                 sessions.enable_ornn(ornn.clone());

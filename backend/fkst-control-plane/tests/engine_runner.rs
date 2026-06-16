@@ -21,9 +21,9 @@ mod support;
 use std::path::Path;
 use std::time::Duration;
 
-use fkst_hosted_api::engine::materialize::PackageFile;
-use fkst_hosted_api::engine::process::signal_group;
-use fkst_hosted_api::engine::{
+use fkst_control_plane::engine::materialize::PackageFile;
+use fkst_control_plane::engine::process::signal_group;
+use fkst_control_plane::engine::{
     EngineConfig, LiveStatus, PreparedPackage, RunnerError, SessionRunner, StartSpec,
 };
 use nix::sys::signal::Signal;

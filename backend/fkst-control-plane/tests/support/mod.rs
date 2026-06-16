@@ -22,8 +22,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::vault::{VaultLimits, VaultService};
+use fkst_control_plane::db::Db;
+use fkst_control_plane::vault::{VaultLimits, VaultService};
 
 /// Deterministic 32-byte vault KEK (base64) for integration tests. NOT a real
 /// secret — only ever used to satisfy the always-on vault wiring so the router

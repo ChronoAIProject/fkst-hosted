@@ -19,22 +19,22 @@
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fkst_hosted_api::auth::AuthMode;
-use fkst_hosted_api::authz::Authorizer;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::github_app::api::{GithubApi, InstallationToken, InstallationTokenRequest};
-use fkst_hosted_api::github_app::{
+use fkst_control_plane::auth::AuthMode;
+use fkst_control_plane::authz::Authorizer;
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::github_app::api::{GithubApi, InstallationToken, InstallationTokenRequest};
+use fkst_control_plane::github_app::{
     GithubAppConfig, GithubAppTokens, InstallationId, MongoInstallationStore,
 };
-use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::models::{
+use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::models::{
     AccountType, GithubInstallationDoc, RepoRef, RepositorySelection, SessionStatus,
 };
-use fkst_hosted_api::router::build_router;
-use fkst_hosted_api::sessions::{SessionRepo, SessionService};
-use fkst_hosted_api::state::AppState;
+use fkst_control_plane::router::build_router;
+use fkst_control_plane::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::state::AppState;
 use hmac::{Hmac, Mac};
 use secrecy::SecretString;
 use sha2::Sha256;
@@ -116,7 +116,7 @@ impl GithubApi for FakeApi {
         _app_jwt: &SecretString,
         _owner: &str,
         _repo: &str,
-    ) -> Result<InstallationId, fkst_hosted_api::github_app::GithubAppError> {
+    ) -> Result<InstallationId, fkst_control_plane::github_app::GithubAppError> {
         self.installation_calls.fetch_add(1, Ordering::SeqCst);
         Ok(InstallationId(999))
     }
@@ -126,7 +126,7 @@ impl GithubApi for FakeApi {
         _app_jwt: &SecretString,
         id: InstallationId,
         _req: &InstallationTokenRequest,
-    ) -> Result<InstallationToken, fkst_hosted_api::github_app::GithubAppError> {
+    ) -> Result<InstallationToken, fkst_control_plane::github_app::GithubAppError> {
         Ok(InstallationToken {
             token: SecretString::from(format!("ghs_fake_{}", id.0)),
             expires_at: SystemTime::now() + Duration::from_secs(3600),
@@ -389,7 +389,7 @@ async fn webhook_deleted_evicts_record_and_fails_active_session() {
 
     // Seed an ACTIVE (running) session targeting acme/site.
     let session_id = bson::Uuid::new();
-    let session = fkst_hosted_api::models::SessionDoc {
+    let session = fkst_control_plane::models::SessionDoc {
         id: session_id,
         package_name: "demo".to_string(),
         status: SessionStatus::Running,

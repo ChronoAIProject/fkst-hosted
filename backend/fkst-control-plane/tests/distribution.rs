@@ -14,14 +14,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bson::doc;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::distribution::{
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::distribution::{
     DistributionConfig, Distributor, DriverHost, HealthView, PlacementError, PodLoad,
 };
-use fkst_hosted_api::leases::{AcquireOutcome, LeaseStore, PoolConfig, PoolError};
-use fkst_hosted_api::models::{LeaseDoc, SessionDoc, SessionStatus};
-use fkst_hosted_api::sessions::repo::ORPHANED_ERROR;
+use fkst_control_plane::leases::{AcquireOutcome, LeaseStore, PoolConfig, PoolError};
+use fkst_control_plane::models::{LeaseDoc, SessionDoc, SessionStatus};
+use fkst_control_plane::sessions::repo::ORPHANED_ERROR;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::mongo::Mongo;

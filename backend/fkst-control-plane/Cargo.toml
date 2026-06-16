@@ -1,5 +1,5 @@
 [package]
-name = "fkst-hosted-api"
+name = "fkst-control-plane"
 version.workspace = true
 edition.workspace = true
 

@@ -22,7 +22,7 @@ mod support;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use fkst_hosted_api::engine::{EngineConfig, LiveStatus, SessionRunner, StartSpec};
+use fkst_control_plane::engine::{EngineConfig, LiveStatus, SessionRunner, StartSpec};
 use support::require_engine;
 
 /// How long the engine must stay Running after start to count as stable.

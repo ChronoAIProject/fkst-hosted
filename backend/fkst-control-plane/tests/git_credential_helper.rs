@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
-use fkst_hosted_api::engine::goal_token::CREDENTIAL_HELPER_SCRIPT;
-use fkst_hosted_api::engine::{
+use fkst_control_plane::engine::goal_token::CREDENTIAL_HELPER_SCRIPT;
+use fkst_control_plane::engine::{
     git_config_entries, materialize_helper_script, write_token_file, MINT_NONCE_ENV,
     TOKEN_FILE_NAME,
 };
@@ -143,7 +143,7 @@ fn jit_path_fetches_a_fresh_token_before_answering() {
     // request a JIT mint before answering.
     let (helper, token_path) = setup(dir.path(), "ghs_stale_token", soon());
     // Write the per-session nonce file (0600) the stand-in driver authenticates.
-    fkst_hosted_api::engine::goal_token::write_nonce_file(dir.path(), "session-nonce")
+    fkst_control_plane::engine::goal_token::write_nonce_file(dir.path(), "session-nonce")
         .expect("nonce");
 
     // Stand-in driver: in a thread, wait for the request file, validate the
@@ -198,7 +198,7 @@ fn jit_path_fetches_a_fresh_token_before_answering() {
 fn jit_path_falls_back_to_current_token_when_no_driver_services_it() {
     let dir = tempfile::tempdir().expect("dir");
     let (helper, token_path) = setup(dir.path(), "ghs_still_valid", soon());
-    fkst_hosted_api::engine::goal_token::write_nonce_file(dir.path(), "n").expect("nonce");
+    fkst_control_plane::engine::goal_token::write_nonce_file(dir.path(), "n").expect("nonce");
 
     // No driver: the helper waits briefly, then falls back to the current token
     // rather than failing git hard.

@@ -32,16 +32,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::github_app::api::{
+use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::github_app::api::{
     GithubApi, InstallationId, InstallationToken, InstallationTokenRequest,
 };
-use fkst_hosted_api::github_app::{GithubAppConfig, GithubAppTokens};
-use fkst_hosted_api::goals::{GoalDoc, GoalRepo, GoalStatus, GOALS_COLLECTION};
-use fkst_hosted_api::models::{RepoRef, SessionStatus};
-use fkst_hosted_api::sessions::service::GoalTriggerInfo;
-use fkst_hosted_api::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::github_app::{GithubAppConfig, GithubAppTokens};
+use fkst_control_plane::goals::{GoalDoc, GoalRepo, GoalStatus, GOALS_COLLECTION};
+use fkst_control_plane::models::{RepoRef, SessionStatus};
+use fkst_control_plane::sessions::service::GoalTriggerInfo;
+use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use secrecy::SecretString;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
@@ -99,7 +99,7 @@ impl GithubApi for CountingFakeApi {
         _app_jwt: &SecretString,
         owner: &str,
         repo: &str,
-    ) -> Result<InstallationId, fkst_hosted_api::github_app::GithubAppError> {
+    ) -> Result<InstallationId, fkst_control_plane::github_app::GithubAppError> {
         self.resolved_repos
             .lock()
             .expect("resolved repos")
@@ -112,7 +112,7 @@ impl GithubApi for CountingFakeApi {
         _app_jwt: &SecretString,
         id: InstallationId,
         _req: &InstallationTokenRequest,
-    ) -> Result<InstallationToken, fkst_hosted_api::github_app::GithubAppError> {
+    ) -> Result<InstallationToken, fkst_control_plane::github_app::GithubAppError> {
         let count = self.mint_count.fetch_add(1, Ordering::SeqCst) + 1;
         Ok(InstallationToken {
             // Distinct, clearly-fake value; never a real token. The session
@@ -165,10 +165,10 @@ async fn ctx() -> TestCtx {
         .get_host_port_ipv4(27017)
         .await
         .expect("container port");
-    let config = fkst_hosted_api::config::Config {
+    let config = fkst_control_plane::config::Config {
         mongodb_uri: format!("mongodb://{host}:{port}"),
         mongodb_server_selection_timeout_ms: 5000,
-        ..fkst_hosted_api::config::Config::default()
+        ..fkst_control_plane::config::Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
 
@@ -229,7 +229,7 @@ async fn seed_goal(db: &Db, repo: RepoRef, package: &str) -> bson::Uuid {
 async fn poll_until_settled(
     repo: &SessionRepo,
     id: bson::Uuid,
-) -> fkst_hosted_api::models::SessionDoc {
+) -> fkst_control_plane::models::SessionDoc {
     for _ in 0..200 {
         if let Some(doc) = repo.get(id).await.expect("get session") {
             if !matches!(

@@ -9,18 +9,18 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use bson::doc;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::journal::index::{
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::journal::index::{
     ensure_journal_indexes, IDX_RJ_GITHUB_PATH, IDX_RJ_PACKAGE, IDX_SP_PACKAGE, IDX_SP_RECORDED_AT,
     IDX_SP_RUN_IDEM_UNIQ, IDX_SP_SESSION_SEQ,
 };
-use fkst_hosted_api::journal::model::{
+use fkst_control_plane::journal::model::{
     CompletedEntry, ProgressKind, ProgressRecord, RunJournalDoc, SessionProgressDoc,
     RUN_JOURNALS_COLLECTION, SESSION_PROGRESS_COLLECTION, UNVERIFIED_SHA,
 };
-use fkst_hosted_api::journal::store::MongoProgressStore;
-use fkst_hosted_api::journal::{
+use fkst_control_plane::journal::store::MongoProgressStore;
+use fkst_control_plane::journal::{
     default_identity_pointers, idem_key, JournalConfig, Journaler, ProgressSignal, SessionCtx,
 };
 use secrecy::SecretString;
@@ -186,7 +186,7 @@ async fn duplicate_idem_key_is_a_benign_e11000_and_lifecycle_docs_are_exempt() {
 
     // Lifecycle docs omit idem_key entirely and are EXEMPT from the unique
     // constraint: two identical transitions both insert.
-    use fkst_hosted_api::journal::{LifecycleEvent, Transition};
+    use fkst_control_plane::journal::{LifecycleEvent, Transition};
     for _ in 0..2 {
         journaler
             .record(ProgressSignal::Lifecycle(LifecycleEvent::now(

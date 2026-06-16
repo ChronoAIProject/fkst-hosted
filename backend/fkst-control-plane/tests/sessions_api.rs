@@ -15,16 +15,16 @@
 
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
-use fkst_hosted_api::auth::AuthMode;
-use fkst_hosted_api::authz::Authorizer;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::models::{SessionDoc, SessionStatus};
-use fkst_hosted_api::router::build_router;
-use fkst_hosted_api::sessions::{SessionRepo, SessionService};
-use fkst_hosted_api::state::AppState;
+use fkst_control_plane::auth::AuthMode;
+use fkst_control_plane::authz::Authorizer;
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::models::{SessionDoc, SessionStatus};
+use fkst_control_plane::router::build_router;
+use fkst_control_plane::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use testcontainers::runners::AsyncRunner;

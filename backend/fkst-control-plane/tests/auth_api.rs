@@ -22,15 +22,15 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use fkst_hosted_api::auth::{AuthMode, NyxIdAuthSettings};
-use fkst_hosted_api::authz::Authorizer;
-use fkst_hosted_api::config::Config;
-use fkst_hosted_api::db::Db;
-use fkst_hosted_api::engine::EngineConfig;
-use fkst_hosted_api::goals::GoalRepo;
-use fkst_hosted_api::router::build_router;
-use fkst_hosted_api::sessions::{SessionRepo, SessionService};
-use fkst_hosted_api::state::AppState;
+use fkst_control_plane::auth::{AuthMode, NyxIdAuthSettings};
+use fkst_control_plane::authz::Authorizer;
+use fkst_control_plane::config::Config;
+use fkst_control_plane::db::Db;
+use fkst_control_plane::engine::EngineConfig;
+use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::router::build_router;
+use fkst_control_plane::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use testcontainers::runners::AsyncRunner;
@@ -364,7 +364,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
     // Programming-error path: a handler extracting AuthContext on a route NOT
     // behind protect(), with auth enabled, must 500 (the extractor detects the
     // missing extension under AuthMode::Enabled).
-    use fkst_hosted_api::auth::AuthContext;
+    use fkst_control_plane::auth::AuthContext;
 
     async fn needs_auth(ctx: AuthContext) -> String {
         format!("user={}", ctx.user_id)
