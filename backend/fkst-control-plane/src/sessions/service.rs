@@ -38,6 +38,7 @@ use bson::{doc, Document};
 use secrecy::SecretString;
 use tokio::sync::watch;
 
+use crate::controller::{ControllerHandle, PlacementError as ControllerPlacementError};
 use crate::distribution::{Distributor, DriverHost, PlacementError};
 use crate::engine::config::is_reserved_env_key;
 use crate::engine::{
@@ -223,6 +224,14 @@ struct Inner {
     /// CODEX_HOME (#112) and the session's NyxID token (#111) — without either,
     /// there is nowhere to install or no identity to fetch as, so it is skipped.
     ornn: OnceLock<OrnnClient>,
+    /// Controller-backed placement authority (issue #135), enabled once via
+    /// [`SessionService::enable_controller`]. Unset => placement goes through
+    /// the Mongo `distribution` path (the live path until #143). When set,
+    /// new sessions are placed through the in-memory `ClaimMap` and dispatched
+    /// to the chosen worker (which pulls + runs the engine — #136). The driver-
+    /// lifecycle status writes move onto `ClaimMap::set_status` in #136, when
+    /// engine execution physically moves to the worker and this path activates.
+    controller: OnceLock<ControllerHandle>,
 }
 
 /// Per-session codex provider wiring shared by every driver this service
@@ -306,8 +315,21 @@ impl SessionService {
                 nyxid: OnceLock::new(),
                 codex: OnceLock::new(),
                 ornn: OnceLock::new(),
+                controller: OnceLock::new(),
             }),
         }
+    }
+
+    /// Enable controller-backed placement (issue #135): new sessions are placed
+    /// through the in-memory claim authority instead of the Mongo distributor.
+    /// Call once at startup; a second call is a logged no-op. When never called
+    /// the service uses the Mongo `distribution` path (the live path until #143).
+    pub fn enable_controller(&self, handle: ControllerHandle) {
+        if self.inner.controller.set(handle).is_err() {
+            tracing::warn!("controller placement already enabled; ignoring the second call");
+            return;
+        }
+        tracing::info!("controller-backed placement enabled (in-memory claim authority)");
     }
 
     /// Enable session-progress journaling (issue #25) for every driver this
@@ -504,8 +526,77 @@ impl SessionService {
             return Err(insert_err);
         }
 
-        // Step 6: Place via distributor (if configured).
-        if let Some(ref distributor) = self.inner.distribution {
+        // Step 6: Place via the controller authority (#135) when enabled, else
+        // via the Mongo distributor (the live path until #143).
+        if let Some(handle) = self.inner.controller.get() {
+            let lease_key = session.lease_key();
+            match handle.place(&lease_key, session.id, session.goal_id).await {
+                Ok(placement) => {
+                    // The chosen worker pulls + runs the engine (#136). Stamp the
+                    // owner worker (as pod_id) + the fence so the worker's driver
+                    // writes are guarded; no local spawn (the worker runs it).
+                    let _ = self
+                        .inner
+                        .repo
+                        .transition(
+                            session.id,
+                            &[SessionStatus::Pending],
+                            doc! {
+                                "pod_id": &placement.worker_id,
+                                "fencing_token": placement.fencing_id,
+                            },
+                        )
+                        .await;
+                    tracing::info!(
+                        session_id = %session.id,
+                        goal_id = %trigger.goal_id,
+                        worker_id = %placement.worker_id,
+                        fencing_id = placement.fencing_id,
+                        "goal session placed on a worker via the controller (engine runs in #136)"
+                    );
+                }
+                Err(ControllerPlacementError::AlreadyRunning(_)) => {
+                    // Conflict: same convergence as the distributor path — fail
+                    // the just-inserted pending doc and compensate the goal CAS.
+                    let _ = self
+                        .inner
+                        .repo
+                        .transition(
+                            session.id,
+                            &[SessionStatus::Pending],
+                            doc! {
+                                "status": status_bson(SessionStatus::Failed),
+                                "error": "goal already has a live session",
+                                "stopped_at": bson::DateTime::now(),
+                            },
+                        )
+                        .await;
+                    let _ = goals
+                        .transition_status(
+                            trigger.goal_id,
+                            &[GoalStatus::Triggered],
+                            doc! {
+                                "status": bson::to_bson(&trigger.prior_status).expect("GoalStatus serializes"),
+                                "updated_at": bson::DateTime::now(),
+                            },
+                        )
+                        .await;
+                    return Err(AppError::Conflict(
+                        "goal already has a live session".to_string(),
+                    ));
+                }
+                Err(error) => {
+                    // NoCapacity / invalid / claim: stay pending; retried on the
+                    // next tick (mirrors the distributor's stay-pending behaviour).
+                    tracing::warn!(
+                        session_id = %session.id,
+                        goal_id = %trigger.goal_id,
+                        error = %error,
+                        "controller placement deferred; session stays pending"
+                    );
+                }
+            }
+        } else if let Some(ref distributor) = self.inner.distribution {
             let lease_key = session.lease_key();
             match distributor.place(&lease_key, session.id).await {
                 Ok(placement) if placement.pod_id == distributor.pod_id() => {

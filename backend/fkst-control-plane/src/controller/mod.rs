@@ -10,8 +10,17 @@
 //! (claim authority is #135) and draining/released are received + logged
 //! (reassignment is #140).
 
+pub mod claims;
+pub mod handle;
 pub mod internal_auth;
+pub mod placement;
+pub mod reassign;
 pub mod registry;
+
+pub use claims::{ClaimEntry, ClaimError, ClaimMap, ClaimStatus, FencingId};
+pub use handle::ControllerHandle;
+pub use placement::{place, select_worker, Placement, PlacementError, WorkerLoad};
+pub use reassign::{NoopSecretRedispatch, ReassignDriver, SecretRedispatch};
 
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
