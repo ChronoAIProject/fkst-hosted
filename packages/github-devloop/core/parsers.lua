@@ -507,9 +507,16 @@ function M.parse_commit_check_runs(stdout)
   for _, run in ipairs(check_run_entries(decoded)) do
     if type(run) == "table" then
       table.insert(runs, {
+        id = run.id,
+        databaseId = run.databaseId,
+        database_id = run.database_id,
         name = run.name,
         status = run.status,
         conclusion = run.conclusion,
+        head_sha = run.head_sha,
+        headSha = run.headSha,
+        check_suite = run.check_suite,
+        checkSuite = run.checkSuite,
       })
     end
   end
