@@ -10,6 +10,7 @@ return function(M, h)
     terminal = false,
     to_states = { "reviewing", "merging", "fixing", "blocked" },
     driving_queue = "devloop_merge_ready",
+    observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     output_obligation = obligation({ "state:v1 merging", "state:v1 reviewing", "state:v1 fixing", "state:v1 blocked" }, { "merging", "reviewing", "fixing", "blocked" }),
     budget = budget(390, "The merge-ready receiver is bounded by 30 minutes of merge work plus a 360 minute external CI wait window."),
     liveness_contract = liveness({

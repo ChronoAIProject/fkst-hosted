@@ -282,6 +282,47 @@ function M.liveness_contract_errors(rows)
       if not valid_timeout(row) then
         table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare redrive on_timeout for its driving queue plus force-terminate on_escalate to blocked")
       end
+      if type(row.observe_surfaces) ~= "table" or next(row.observe_surfaces) == nil then
+        table.insert(errors, tostring(row.from_state or "?") .. ": non-terminal row must declare observe_surfaces")
+      else
+        for surface, enabled in pairs(row.observe_surfaces) do
+          if surface ~= "issue" and surface ~= "pr" and surface ~= "liveness_scan" then
+            table.insert(errors, tostring(row.from_state or "?") .. ": unsupported observe surface " .. tostring(surface))
+          end
+          if enabled ~= true then
+            table.insert(errors, tostring(row.from_state or "?") .. ": observe surface must be true: " .. tostring(surface))
+          end
+        end
+      end
+      if row.pr_recovery ~= nil then
+        if type(row.pr_recovery) ~= "table" then
+          table.insert(errors, tostring(row.from_state or "?") .. ": pr_recovery must be a table")
+        else
+          for name, recovery in pairs(row.pr_recovery) do
+            if name ~= "not_mergeable" then
+              table.insert(errors, tostring(row.from_state or "?") .. ": unsupported pr_recovery " .. tostring(name))
+            elseif type(recovery) ~= "table"
+              or recovery.to_state ~= "fixing"
+              or recovery.queue ~= "devloop_fixing" then
+              table.insert(errors, tostring(row.from_state or "?") .. ": not_mergeable pr_recovery must target fixing via devloop_fixing")
+            end
+          end
+        end
+      end
+      if row.timeout_surfaces ~= nil then
+        if type(row.timeout_surfaces) ~= "table" then
+          table.insert(errors, tostring(row.from_state or "?") .. ": timeout_surfaces must be a table")
+        else
+          for surface, enabled in pairs(row.timeout_surfaces) do
+            if surface ~= "issue" and surface ~= "issue_liveness_scan" and surface ~= "pr" and surface ~= "liveness_scan" then
+              table.insert(errors, tostring(row.from_state or "?") .. ": unsupported timeout surface " .. tostring(surface))
+            end
+            if enabled ~= true then
+              table.insert(errors, tostring(row.from_state or "?") .. ": timeout surface must be true: " .. tostring(surface))
+            end
+          end
+        end
+      end
       validate_liveness_contract(M, row, errors)
       if (type(row.to_states) ~= "table" or #row.to_states == 0)
         and (type(row.reentry_commands) ~= "table" or #row.reentry_commands == 0) then
@@ -526,6 +567,43 @@ function M.issue_marker_liveness_sweep_contract_errors(rows, sweep_states)
     end
   end
   return errors
+end
+
+function M.restart_row_observable_on(row, surface)
+  return type(row) == "table"
+    and row.terminal == false
+    and type(row.observe_surfaces) == "table"
+    and row.observe_surfaces[tostring(surface or "")] == true
+end
+
+function M.restart_observe_replay_due(row, surface, state, facts, now_seconds)
+  if not M.restart_row_observable_on(row, surface) then
+    return false
+  end
+  if surface == "issue" and row.from_state == "thinking" then
+    return true
+  end
+  if surface == "liveness_scan" then
+    return not M.restart_row_liveness_deferred(row, state, facts, now_seconds)
+  end
+  return false
+end
+
+function M.restart_observe_timeout_due(row, surface, state, facts, now_seconds)
+  if type(row) ~= "table" or row.terminal == true then
+    return false
+  end
+  if M.restart_row_liveness_deferred(row, state, facts, now_seconds) then
+    return false
+  end
+  local due = M.liveness_timeout_due(row, state, now_seconds) == true
+  if not due then
+    return false
+  end
+  if type(row.timeout_surfaces) == "table" and row.timeout_surfaces[tostring(surface or "")] == true then
+    return true
+  end
+  return M.liveness_timeout_decision_with_facts(row, state, facts, now_seconds).action == "escalate"
 end
 
 function M.liveness_budget_minutes(state_name)

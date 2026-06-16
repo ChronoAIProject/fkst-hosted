@@ -10,6 +10,14 @@ return function(M, h)
     terminal = false,
     to_states = { "merge-ready", "fixing", "review-meta", "blocked" },
     driving_queue = "devloop_reviewing",
+    observe_surfaces = { issue = true, pr = true, liveness_scan = true },
+    timeout_surfaces = { issue = true, pr = true, liveness_scan = true },
+    pr_recovery = {
+      not_mergeable = {
+        to_state = "fixing",
+        queue = "devloop_fixing",
+      },
+    },
     output_obligation = obligation({ "review-result:v1", "review-converge-round:v1", "state:v1 blocked" }, { "merge-ready", "fixing", "review-meta", "blocked", "reviewing" }),
     budget = budget(150, "The long review receiver is supervised by review-converge-round heartbeats; this budget only bounds stale heartbeat redrive."),
     liveness_contract = liveness({

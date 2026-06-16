@@ -23,8 +23,6 @@ M.spec = {
   stall_window = "30s",
 }
 
-local observe_replay_states = core.issue_marker_liveness_sweep_states()
-
 local function issue_label_state(snapshot_state, issue_state)
   if issue_state ~= nil
     and (issue_state.state == "blocked" or issue_state.state == "merged")
@@ -120,10 +118,6 @@ local function thinking_state_budget_exceeded(state)
   return now() - marker_seconds >= threshold * 60
 end
 
-local function timeout_escalation_due(row, state)
-  return core.liveness_timeout_decision(row, state, now()).action == "escalate"
-end
-
 local function replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event_ts, issue_state)
   local row = core.restart_transition_row(state.state)
   local facts = {
@@ -136,23 +130,21 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
   local state_is_issue_local = issue_state ~= nil
     and issue_state.state == state.state
     and tostring(issue_state.version or "") == tostring(state.version or "")
-  if state_is_issue_local
-    and core.liveness_timeout_due(row, state, now())
-    and (state.state == "thinking"
-      or state.state == "reviewing"
-      or (issue.source == "liveness-scan" and state.state == "pr-open")
-      or timeout_escalation_due(row, state)) then
+  local timeout_surface = issue.source == "liveness-scan" and "issue_liveness_scan" or "issue"
+  if state_is_issue_local and core.restart_observe_timeout_due(row, timeout_surface, state, facts, now()) then
     return core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts)
   end
-  if observe_replay_states[state.state] and state.state == "thinking" then
+  if issue.source ~= "liveness-scan"
+    and state_is_issue_local
+    and core.restart_observe_replay_due(row, "issue", state, facts, now()) then
     return core.replay_from_table("observe_issue", issue, state, row, facts)
   end
-  if observe_replay_states[state.state]
+  if core.restart_row_observable_on(row, "issue")
     and state_is_issue_local
     and core.replay_from_table("observe_issue", issue, state, row, facts) then
     return true
   end
-  if observe_replay_states[state.state] and state.state ~= "thinking" then
+  if core.restart_row_observable_on(row, "issue") then
     return false
   end
   if issue_state == nil
@@ -417,7 +409,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
   return true
 end
 
-function pipeline(event)
+local function process_issue_event(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
     core.log_entry("observe_issue", event, "unknown", core.payload_field(issue, "dedup_key"))
@@ -540,6 +532,12 @@ function pipeline(event)
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
   end)
+end
+
+function pipeline(event)
+  core.dispatch_consumed_queue("observe_issue", M.spec, event, {
+    ["github-proxy.github_entity_changed"] = process_issue_event,
+  })
 end
 
 pipeline = core.wrap_pipeline_failure("observe_issue", pipeline)
