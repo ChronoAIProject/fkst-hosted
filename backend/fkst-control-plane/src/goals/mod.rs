@@ -10,6 +10,7 @@
 //! adds CAS transitions — keep the enum wire strings and field names exactly
 //! as specified.
 
+pub mod marker;
 pub mod model;
 pub mod repo;
 pub mod repo_create;
