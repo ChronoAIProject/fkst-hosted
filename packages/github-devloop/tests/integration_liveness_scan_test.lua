@@ -10,6 +10,15 @@ local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
+local ready = h.ready
+local run_implement = h.run_implement
+local mock_issue_implement = h.mock_issue_implement
+local deterministic_branch_for = h.deterministic_branch_for
+local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
+local mock_implement_codex = h.mock_implement_codex
+local mock_git_status = h.mock_git_status
+local mock_git_commit = h.mock_git_commit
+local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
@@ -154,6 +163,14 @@ end
 local function assert_no_entity_change(result)
   t.eq(result.exit_code, 0)
   t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
+end
+
+local function mock_missing_remote_branch(branch)
+  t.mock_command("git fetch 'origin' '" .. tostring(branch) .. "'", {
+    stdout = "",
+    stderr = "fatal: couldn't find remote ref",
+    exit_code = 128,
+  })
 end
 
 local function issue_rest_view_number(rendered)
@@ -319,6 +336,59 @@ return {
     t.eq(raised.payload.type, "issue")
     t.eq(raised.payload.source, "liveness-scan")
     t.is_true(tostring(raised.payload.dedup_key):find("liveness%-scan", 1) ~= nil)
+  end,
+
+  test_liveness_scan_reinjected_implementing_round_trips_with_frozen_version = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    local stuck = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 7201)),
+    }
+    mock_repo()
+    mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
+    mock_empty_pr_list()
+
+    local scanned = run_liveness_scan("liveness-scan-implementing-redrive-scan")
+    t.eq(scanned.exit_code, 0)
+    local entity = find_raise(scanned.raises, "github-proxy.github_entity_changed")
+    t.eq(entity ~= nil, true)
+    t.eq(entity.payload.source, "liveness-scan")
+    t.is_true(tostring(entity.payload.dedup_key):find("liveness%-scan", 1) ~= nil)
+
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
+    local observed = run_observe(issue({
+      dedup_key = entity.payload.dedup_key,
+      source = entity.payload.source,
+      source_ref = entity.payload.source_ref,
+    }), opts("liveness-scan-implementing-redrive-observe"))
+    t.eq(observed.exit_code, 0)
+    local reraised = find_raise(observed.raises, "devloop_ready")
+    t.eq(reraised ~= nil, true)
+    t.eq(reraised.payload.proposal_id, event.proposal_id)
+    t.eq(reraised.payload.dedup_key, event.dedup_key)
+    t.eq(core.implementation_attempt_version(reraised.payload.dedup_key, reraised.payload.impl_retry_attempt), event.dedup_key)
+
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, "1"),
+    })
+    mock_missing_remote_branch(branch)
+    t.mock_command("show-ref --verify --quiet", { stdout = "", stderr = "", exit_code = 1 })
+    mock_fresh_implement_worktree()
+    mock_implement_codex(0, "implemented after liveness scan re-drive")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, "1"),
+    })
+
+    local implemented = run_implement(reraised.payload, opts("liveness-scan-implementing-redrive-implement"))
+    t.eq(implemented.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    t.eq(find_raise(implemented.raises, "devloop_open_pr") ~= nil, true)
   end,
 
   test_liveness_scan_requeues_open_pr_with_non_terminal_state = function()
