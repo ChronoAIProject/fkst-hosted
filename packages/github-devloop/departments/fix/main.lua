@@ -532,25 +532,45 @@ local function run_fix_attempt(plan)
   }
 end
 
+local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_prefix, fail_closed)
+  local rechecked_state = core.current_entity_state(pr.comments, fix.proposal_id)
+  if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
+    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", tostring(reason_prefix) .. " issue state changed")
+    return nil
+  end
+  if tostring(pr.state or ""):lower() ~= "open"
+    or tostring(pr.head_ref_name or "") ~= branch
+    or tostring(pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
+    or not core.is_same_repo_pr_head(pr, repo) then
+    local outcome = fail_closed and "fail-closed(write-gate)" or "skip-stale(write-gate)"
+    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
+    if fail_closed then
+      error("github-devloop: write-time PR fact changed or head repository missing")
+    end
+    return nil
+  end
+  return pr
+end
+
 local function recheck_fix_write_gate(repo, fix, branch)
   local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_fix_cmd(repo, fix.pr_number), timeout = 30 })
   if pr_recheck.exit_code ~= 0 then
     error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
   end
   local rechecked_pr = core.parse_pr_view_fix(pr_recheck.stdout)
-  local rechecked_state = core.current_entity_state(rechecked_pr.comments, fix.proposal_id)
-  if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", "write-time issue state changed")
-    return nil
+  return validate_fix_write_gate_snapshot(repo, fix, branch, rechecked_pr, "write-time", true)
+end
+
+local function precheck_fix_write_gate(repo, fix, branch)
+  local pr_precheck = core.gh_exec({ cmd = core.gh_pr_view_fix_precheck_cmd(repo, fix.pr_number), timeout = 30 })
+  if pr_precheck.exit_code ~= 0 then
+    error("github-devloop: gh pr fix precheck failed: " .. tostring(pr_precheck.stderr))
   end
-  if tostring(rechecked_pr.state or ""):lower() ~= "open"
-    or tostring(rechecked_pr.head_ref_name or "") ~= branch
-    or tostring(rechecked_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
-    or not core.is_same_repo_pr_head(rechecked_pr, repo) then
-    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "fail-closed(write-gate)", "write-time PR fact changed or head repository missing")
-    error("github-devloop: write-time PR fact changed or head repository missing")
+  local prechecked_pr = core.parse_pr_view_fix(pr_precheck.stdout)
+  if validate_fix_write_gate_snapshot(repo, fix, branch, prechecked_pr, "pre-spawn", false) == nil then
+    return false
   end
-  return rechecked_pr
+  return true
 end
 
 local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
@@ -785,6 +805,13 @@ function pipeline(event)
     }
   end)
   if attempt_plan == nil then
+    return
+  end
+  local pre_spawn_gate_ok = false
+  with_lock(lock_key, function()
+    pre_spawn_gate_ok = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
+  end)
+  if not pre_spawn_gate_ok then
     return
   end
   local outcome = run_fix_attempt(attempt_plan)

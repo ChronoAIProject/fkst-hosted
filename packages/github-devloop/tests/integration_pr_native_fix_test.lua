@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local opts = h.opts
 local run_fix = h.run_fix
 local mock_pr_native_fix = h.mock_pr_native_fix
@@ -13,6 +14,8 @@ local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local json_string = h.json_string
+local render_comment = h.render_comment
 
 local function pr_native_review_reached(extra)
   local version = "pr-native-version"
@@ -105,5 +108,50 @@ return {
     t.eq(reviewing_raise.payload.proposal_id, event.proposal_id)
     t.eq(reviewing_raise.payload.version, expected_version)
     t.eq(count_calls("git push origin"), 1)
+  end,
+
+  test_fix_pre_spawn_write_gate_skips_stale_pr_head_before_codex = function()
+    local event = pr_native_fixing()
+    local branch = "pr-native-branch"
+    local reject_comment = core.build_review_result_comment_request(
+      "owner/repo",
+      nil,
+      event.proposal_id,
+      event.version,
+      {
+        proposal_id = event.review_proposal_id,
+        decision = "reject",
+        body = "Reject because the PR-native parser must fail closed.",
+        blocking_gap = "missing regression guard",
+        dedup_key = event.review_dedup_key,
+        source_ref = h.pr_source_ref(),
+      },
+      event.source_ref
+    ).body
+    local comments = {
+      core.state_marker(event.proposal_id, "fixing", event.version),
+      reject_comment,
+    }
+
+    mock_bot_env()
+    mock_write_env("1")
+    entity_read_mocks.mock_pr_view_raw_selector(t, {}, entity_read_mocks.pr_fix_precheck_selector, {
+      stdout = string.format(
+        '{"headRefName":"%s","headRefOid":"feedface","baseRefName":"dev","state":"OPEN","comments":[%s,%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false}\n',
+        json_string(branch),
+        render_comment(comments[1]),
+        render_comment(comments[2])
+      ),
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_pr_native_fix(comments, branch, "def456")
+
+    local result = run_fix(event, opts("fix-stale-before-codex", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git worktree list"), 0)
+    t.eq(count_calls("git push origin"), 0)
   end,
 }

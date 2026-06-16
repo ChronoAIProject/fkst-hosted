@@ -823,7 +823,10 @@ local function mock_issue_title_labels_comments(labels, comments, extra, default
     table.insert(rendered_comments, render_comment(comment))
   end
   local fields = extra or {}
-  local view_count = include_default_marker and has_value(selected_labels, "fkst-dev:ready") and 5 or 1
+  local needs_implement_rechecks = has_value(selected_labels, "fkst-dev:ready")
+    or has_value(selected_labels, "fkst-dev:implementing")
+    or has_value(selected_labels, "fkst-dev:impl-failed")
+  local view_count = include_default_marker and needs_implement_rechecks and 5 or 1
   fields.times = view_count
   entity_read_mocks.mock_issue_read_with_defaults(t, selected_labels, selected_comments, fields)
   entity_read_mocks.mock_issue_view_selector(t, {
