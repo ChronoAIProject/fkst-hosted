@@ -143,8 +143,10 @@ fn jit_path_fetches_a_fresh_token_before_answering() {
     // request a JIT mint before answering.
     let (helper, token_path) = setup(dir.path(), "ghs_stale_token", soon());
     // Write the per-session nonce file (0600) the stand-in driver authenticates.
-    fkst_control_plane::engine::goal_token::write_nonce_file(dir.path(), "session-nonce")
-        .expect("nonce");
+    // The nonce is a runtime-random per-session value (not a hard-coded secret),
+    // so the test exercises an arbitrary nonce on every run.
+    let nonce = rand::random::<u64>().to_string();
+    fkst_control_plane::engine::goal_token::write_nonce_file(dir.path(), &nonce).expect("nonce");
 
     // Stand-in driver: in a thread, wait for the request file, validate the
     // nonce, rewrite the token file with a FRESH token, then delete the request
@@ -156,10 +158,15 @@ fn jit_path_fetches_a_fresh_token_before_answering() {
     };
     let token_path_for_driver = token_path.clone();
     let request_for_driver = request_path.clone();
+    let nonce_for_driver = nonce.clone();
     let driver = std::thread::spawn(move || {
         for _ in 0..200 {
             if let Ok(contents) = std::fs::read_to_string(&request_for_driver) {
-                assert_eq!(contents.trim(), "session-nonce", "nonce must match");
+                assert_eq!(
+                    contents.trim(),
+                    nonce_for_driver.as_str(),
+                    "nonce must match"
+                );
                 write_token_file(
                     &token_path_for_driver,
                     &SecretString::from("ghs_fresh_token".to_string()),
@@ -179,7 +186,7 @@ fn jit_path_fetches_a_fresh_token_before_answering() {
         &helper,
         "get",
         &token_path,
-        Some("session-nonce"),
+        Some(nonce.as_str()),
         Some(3600),
         Some(10),
     );
@@ -198,7 +205,9 @@ fn jit_path_fetches_a_fresh_token_before_answering() {
 fn jit_path_falls_back_to_current_token_when_no_driver_services_it() {
     let dir = tempfile::tempdir().expect("dir");
     let (helper, token_path) = setup(dir.path(), "ghs_still_valid", soon());
-    fkst_control_plane::engine::goal_token::write_nonce_file(dir.path(), "n").expect("nonce");
+    // Runtime-random per-session nonce (not a hard-coded secret).
+    let nonce = rand::random::<u64>().to_string();
+    fkst_control_plane::engine::goal_token::write_nonce_file(dir.path(), &nonce).expect("nonce");
 
     // No driver: the helper waits briefly, then falls back to the current token
     // rather than failing git hard.
@@ -206,7 +215,7 @@ fn jit_path_falls_back_to_current_token_when_no_driver_services_it() {
         &helper,
         "get",
         &token_path,
-        Some("n"),
+        Some(nonce.as_str()),
         Some(3600),
         Some(1), // 1s wait so the test is fast
     );
