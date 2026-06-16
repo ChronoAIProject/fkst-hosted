@@ -230,6 +230,20 @@ function M.branch_sync_lock_key(repo, upstream, integration)
   return key
 end
 
+function M.repo_ref_store_lock_key(repo)
+  local key = "github-devloop/git/"
+    .. M.safe_repo(require_safe_repo(repo))
+    .. "/fetch"
+  if not M._is_path_safe_key(key, M._max_key_len) then
+    error("github-devloop: invalid git ref-store lock key")
+  end
+  return key
+end
+
+function M.with_repo_ref_store_lock(repo, fn)
+  return with_lock(M.repo_ref_store_lock_key(repo), fn)
+end
+
 function M.pr_freshness_lock_key(repo, branch)
   local key = "github-devloop/pr-freshness/"
     .. M.safe_repo(require_safe_repo(repo))

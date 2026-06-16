@@ -43,6 +43,14 @@ local function fetch_branch(branch)
   run_git(core.git_fetch_branch_cmd("origin", branch), 60, "git PR freshness fetch")
 end
 
+local function fetch_branches(repo, branches)
+  core.with_repo_ref_store_lock(repo, function()
+    for _, branch in ipairs(branches) do
+      fetch_branch(branch)
+    end
+  end)
+end
+
 local function remote_head(branch)
   local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "git PR freshness remote head")
   local head = trim_stdout(result)
@@ -211,7 +219,7 @@ local function push_if_real(repo, branch, branch_sha, worktree)
   end
 
   core.assert_trusted_bot_configured()
-  fetch_branch(branch)
+  fetch_branches(repo, { branch })
   local rechecked_branch_sha = remote_head(branch)
   if rechecked_branch_sha ~= branch_sha then
     core.log_cas_decision("pr_freshness_scan", "pr-freshness", {
@@ -225,7 +233,7 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     error("github-devloop: unsafe PR freshness merge head")
   end
   run_git(core.git_push_worktree_branch_update_with_lease_cmd(worktree, branch, branch_sha), 120, "git PR freshness push")
-  fetch_branch(branch)
+  fetch_branches(repo, { branch })
   local pushed_head = remote_head(branch)
   if pushed_head ~= merge_head then
     error("github-devloop: PR freshness push verification failed")
@@ -266,8 +274,7 @@ local function process_pr(repo, branches, listed_pr)
   end
 
   with_lock(core.pr_freshness_lock_key(repo, pr.head_ref_name), function()
-    fetch_branch(branches.integration)
-    fetch_branch(pr.head_ref_name)
+    fetch_branches(repo, { branches.integration, pr.head_ref_name })
     local integration_sha = remote_head(branches.integration)
     local branch_sha = remote_head(pr.head_ref_name)
     if branch_sha ~= pr.head_sha then

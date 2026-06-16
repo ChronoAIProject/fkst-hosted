@@ -13,6 +13,10 @@ return {
       "github-devloop/branch-sync/owner/repo/dev/integration/dev"
     )
     t.eq(
+      core.repo_ref_store_lock_key("owner/repo"),
+      "github-devloop/git/owner/repo/fetch"
+    )
+    t.eq(
       core.branch_sync_dedup_key("owner/repo", "dev", "integration/dev", "abcdef1234"),
       "branch-sync/owner/repo/dev/integration/dev/abcdef1234"
     )
@@ -44,6 +48,9 @@ return {
       core.branch_sync_lock_key("../repo", "dev", "integration/dev")
     end)
     t.raises(function()
+      core.repo_ref_store_lock_key("../repo")
+    end)
+    t.raises(function()
       core.branch_sync_source_ref("owner/repo", "../dev", "integration/dev")
     end)
     t.raises(function()
@@ -52,5 +59,19 @@ return {
     t.raises(function()
       core.sync_commit_marker("owner/repo", "dev", "integration/dev", "abcdef", "fedcba", "manual")
     end)
+  end,
+
+  test_branch_scan_departments_serialize_fetches_on_repo_ref_store_lock = function()
+    local expected = "core.with_repo_ref_store_lock(repo"
+    for _, path in ipairs({
+      "packages/github-devloop/departments/sync_scan/main.lua",
+      "packages/github-devloop/departments/rollup_scan/main.lua",
+      "packages/github-devloop/departments/pr_freshness_scan/main.lua",
+      "packages/github-devloop/departments/sync_conflict/main.lua",
+    }) do
+      local text = file.read(path)
+      t.is_true(text:find(expected, 1, true) ~= nil)
+      t.is_true(text:find("git_fetch_branch_cmd", 1, true) ~= nil)
+    end
   end,
 }
