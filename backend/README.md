@@ -322,12 +322,12 @@ The backend is a Cargo workspace with three crates:
 backend/
 ├── Cargo.toml                  # cargo workspace (members: fkst-shared, fkst-control-plane, fkst-worker)
 ├── docker-compose.yml          # local dev MongoDB 7 (named volume fkst_mongo_data)
-├── Dockerfile                  # multi-stage; two --target outputs (see §Docker images below)
 ├── engine.ref                  # pinned fkst-substrate commit SHA
 ├── rust-toolchain.toml         # stable + rustfmt + clippy
 ├── fkst-shared/
 │   └── src/                    # models, nyxid client, llm client, ornn::types, vault::model
 ├── fkst-control-plane/
+│   ├── Dockerfile             # slim controller image (engine-free; see §Docker images)
 │   ├── src/
 │   │   ├── main.rs             # entrypoint: JSON tracing, config, Mongo connect, graceful shutdown
 │   │   ├── lib.rs              # module exports (binary + integration tests share them)
@@ -354,6 +354,7 @@ backend/
 │       ├── packages_api.rs     # Package CRUD + CORS integration tests
 │       └── packages_archive.rs # Zip archive upload integration tests
 └── fkst-worker/
+    ├── Dockerfile             # engine-laden worker image (see §Docker images)
     └── src/
         └── main.rs             # skeleton: log role, await SIGTERM
 ```
@@ -365,29 +366,34 @@ backend/
 
 ## Docker images
 
-`backend/Dockerfile` produces **two images** via `--target`:
+Each deployable has its own Dockerfile under its crate directory; both build
+from the **repo root** as context (the dependency-cache layering needs every
+workspace crate manifest + `Cargo.lock`, which live under `backend/`):
 
-| Target | Image | Contents | ENTRYPOINT |
-|--------|-------|----------|------------|
-| `worker-runtime` | `fkst-worker` | engine-laden (built from `backend/engine.ref`); carries the engine, codex, nyxid CLI, and the runtime volume. Requires `--build-arg FKST_SUBSTRATE_REF`. | `fkst-worker` |
-| `control-plane-runtime` | `fkst-control-plane` | slim (only `ca-certificates`, no engine, runs as uid 10001). No `FKST_SUBSTRATE_REF` needed. | `fkst-control-plane` |
+| Dockerfile | Image | Contents | ENTRYPOINT |
+|------------|-------|----------|------------|
+| `backend/fkst-worker/Dockerfile` | `fkst-worker` | engine-laden (built from `backend/engine.ref`); carries the engine, codex, nyxid CLI, and the runtime volume. Requires `--build-arg FKST_SUBSTRATE_REF`. | `fkst-worker` |
+| `backend/fkst-control-plane/Dockerfile` | `fkst-control-plane` | slim (only `ca-certificates`, no engine, runs as uid 10001). No `FKST_SUBSTRATE_REF` needed. | `fkst-control-plane` |
 
 **Local builds:**
 
 ```sh
 # Worker image (engine-laden)
-docker build -f backend/Dockerfile --target worker-runtime \
+docker build -f backend/fkst-worker/Dockerfile \
   --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
   -t fkst-worker:dev .
 
 # Control-plane image (slim)
-docker build -f backend/Dockerfile --target control-plane-runtime \
+docker build -f backend/fkst-control-plane/Dockerfile \
   -t fkst-control-plane:dev .
 ```
 
-> **Transitional caveat (#145 → #136).** Engine execution currently still lives
-> in `fkst-control-plane`. Until issue #136 moves engine execution to the worker,
-> build the **controller** from `--target worker-runtime` (engine-laden) and keep
-> its runtime volume in place. The slim `control-plane-runtime` image builds
-> cleanly but is not yet the controller's production home. Once #136 lands, the
-> controller switches to `control-plane-runtime` and drops the volume.
+> **Transitional caveat (until #151).** Engine execution currently still lives
+> in `fkst-control-plane`, so the control-plane process still spawns engine
+> children at runtime. Until issue #151 moves engine execution to the worker,
+> run the **controller** Deployment from the engine-laden `fkst-worker` image
+> (with a `command:` override pointing at the `fkst-control-plane` binary the
+> controller image also carries) and keep the runtime volume in place. The slim
+> `fkst-control-plane` image builds cleanly but is not yet the controller's
+> production home. Once #151 lands, the controller switches to the slim
+> `fkst-control-plane` image and drops the volume.

@@ -36,8 +36,8 @@ jobs:
           if [ "$IS_AUTOMATION" = "true" ]; then
             echo "INFO: 'release-automation' PR — Docker build is a no-op (only version/changelog touched)."
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ ! -f backend/Dockerfile ]; then
-            echo "INFO: backend/Dockerfile absent — Docker build is a no-op (no backend image yet)."
+          elif [ ! -f backend/fkst-worker/Dockerfile ]; then
+            echo "INFO: backend/fkst-worker/Dockerfile absent — Docker build is a no-op (no backend image yet)."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -86,8 +86,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: backend/Dockerfile
-          target: worker-runtime
+          file: backend/fkst-worker/Dockerfile
           push: false
           load: true
           tags: ${{ env.IMAGE_WORKER }}
@@ -102,8 +101,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: backend/Dockerfile
-          target: control-plane-runtime
+          file: backend/fkst-control-plane/Dockerfile
           push: false
           load: true
           tags: ${{ env.IMAGE_CONTROL_PLANE }}
@@ -117,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          OUT=$(docker build -f backend/Dockerfile --target worker-runtime --build-arg FKST_SUBSTRATE_REF="" -t fkst-worker:badref . 2>&1)
+          OUT=$(docker build -f backend/fkst-worker/Dockerfile --build-arg FKST_SUBSTRATE_REF="" -t fkst-worker:badref . 2>&1)
           RC=$?
           set -e
           if [ "$RC" -eq 0 ]; then
@@ -161,8 +159,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: backend/Dockerfile
-          target: worker-runtime
+          file: backend/fkst-worker/Dockerfile
           push: false
           load: true
           tags: ${{ env.IMAGE_WORKER }}

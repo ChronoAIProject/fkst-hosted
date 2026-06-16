@@ -1,31 +1,25 @@
 # syntax=docker/dockerfile:1
 #
-# Two-image build for the control-plane/worker split (issue #145). One
-# multi-stage file produces TWO runtime images via `--target`:
+# Engine-laden worker image for the worker deployable (crate fkst-worker): the
+# session runner that executes fkst-substrate as child processes. It carries the
+# engine binaries + codex CLI + nyxid CLI + the runtime volume. The build
+# context is the repo root (the dep-cache layering needs every workspace crate
+# manifest + Cargo.lock, which live under backend/).
 #
-#   * worker-runtime        — the engine-laden worker (runs fkst-substrate as
-#                             child processes). Requires the pinned engine ref.
-#   * control-plane-runtime — the slim controller (public REST API). No engine,
-#                             no FKST_SUBSTRATE_REF needed.
+# The pinned fkst-substrate engine ref lives in backend/engine.ref (single line,
+# 40-char commit SHA). Pinning is mandatory: the build fails fast without it.
+# Local build, from the repo root:
 #
-# The pinned fkst-substrate engine ref lives in backend/engine.ref (single
-# line, 40-char commit SHA) and applies to the WORKER target ONLY. Local builds,
-# from the repo root:
-#
-#   docker build -f backend/Dockerfile --target worker-runtime \
+#   docker build -f backend/fkst-worker/Dockerfile \
 #     --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
 #     -t fkst-worker:dev .
 #
-#   docker build -f backend/Dockerfile --target control-plane-runtime \
-#     -t fkst-control-plane:dev .
-#
-# TRANSITIONAL (#145 → #136): engine execution still lives in the
-# control-plane crate today, so the control-plane process still spawns engine
-# children at runtime. The slim `control-plane-runtime` image therefore BUILDS
-# and runs (uid 10001) but cannot yet run engine sessions; until #136 moves
-# engine execution onto the worker, the control-plane Deployment runs from the
-# engine-laden `worker-runtime` image (which also carries the control-plane
-# binary) with a `command:` override. See backend/deploy/k8s/README.md.
+# TRANSITIONAL (until #151): engine execution still lives in the control-plane
+# crate today, so the control-plane process still spawns engine children. Until
+# #151 moves engine execution onto the worker, the control-plane Deployment runs
+# from THIS engine-laden image (with a `command:` override pointing at the
+# fkst-control-plane binary, which the control-plane image carries). See
+# backend/deploy/k8s/README.md and backend/fkst-control-plane/Dockerfile.
 
 ARG RUST_VERSION=1
 # Operator-pinned codex CLI version (issue #112). A Feb-2026+ release: the
@@ -161,10 +155,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=nyxid-cli-cargo-regis
 RUN test -x /cli-dist/nyxid \
     || (echo "ERROR: nyxid binary not produced by the CLI build" && exit 1)
 
-# ---- server build stage: builds the WHOLE workspace (both bins) ----
+# ---- server build stage: dep-cache warm-up, then build only the worker ----
 FROM rust:${RUST_VERSION}-bookworm AS server-builder
 WORKDIR /app
-# 1) cache the dependency graph first (all four crate manifests + lockfile +
+# 1) cache the dependency graph first (all crate manifests + lockfile +
 #    stub sources). The stubs compile, so this warm build must succeed.
 COPY backend/Cargo.toml backend/Cargo.lock ./
 COPY backend/fkst-shared/Cargo.toml fkst-shared/Cargo.toml
@@ -181,24 +175,24 @@ RUN mkdir -p fkst-shared/src fkst-engine/src fkst-journal/src fkst-control-plane
     && echo 'fn main() {}' > fkst-worker/src/main.rs \
     && echo '' > fkst-worker/src/lib.rs \
     && cargo build --release --locked --workspace
-# 2) copy the real sources and build both binaries.
+# 2) copy the real sources and build only the worker binary.
 # touch: the copied sources keep their (older) context mtimes, so without it
 # cargo's mtime-based freshness check would keep the stub-built binaries.
 COPY backend/ ./
 RUN touch fkst-shared/src/lib.rs fkst-engine/src/lib.rs fkst-journal/src/lib.rs \
         fkst-control-plane/src/main.rs fkst-control-plane/src/lib.rs \
         fkst-worker/src/main.rs fkst-worker/src/lib.rs \
-    && cargo build --release --locked --workspace
-RUN test -x /app/target/release/fkst-control-plane \
-    || (echo "ERROR: fkst-control-plane binary not produced by the server build" && exit 1)
+    && cargo build --release --locked -p fkst-worker
 RUN test -x /app/target/release/fkst-worker \
     || (echo "ERROR: fkst-worker binary not produced by the server build" && exit 1)
 
 # ---- worker runtime image (engine-laden) ----
-# = the former single `runtime` stage, now the WORKER deployable. It carries
-# the engine binaries + codex + nyxid CLI and the runtime volume. It also
-# carries the fkst-control-plane binary so the control-plane Deployment can run
-# from this image until #136 slims the control-plane image (see header).
+# The WORKER deployable. It carries the engine binaries + codex + nyxid CLI and
+# the runtime volume. (The transitional control-plane binary copy is dropped:
+# the controller now has its own image — backend/fkst-control-plane/Dockerfile.
+# Until #151, the control-plane Deployment runs from this image via a `command:`
+# override; that arrangement is documented in the README, not encoded by
+# carrying the controller binary here — see header.)
 FROM debian:bookworm-slim AS worker-runtime
 ARG FKST_SUBSTRATE_REF
 ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
@@ -218,11 +212,6 @@ COPY --from=engine-builder /engine-dist/bin/ /usr/local/bin/
 COPY --from=engine-builder /engine-dist/ENGINE_SHA /etc/fkst-engine-sha
 COPY --from=engine-builder /engine-dist/ENGINE_VERSION /etc/fkst-engine-version
 COPY --from=server-builder /app/target/release/fkst-worker /usr/local/bin/fkst-worker
-# Transitional (#145 → #136): the engine-laden image also carries the
-# control-plane binary so the control-plane Deployment can run from it (command
-# override) until engine execution moves to the worker and the slim
-# control-plane image becomes the controller's home.
-COPY --from=server-builder /app/target/release/fkst-control-plane /usr/local/bin/fkst-control-plane
 # nyxid CLI for in-session NyxID-brokered business calls (#103). Assert it
 # launches in the slim runtime (catches a missing shared lib) and reports the
 # pinned v0.7.0.
@@ -254,27 +243,3 @@ VOLUME ["/var/lib/fkst/runtime"]
 USER fkst
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/fkst-worker"]
-
-# ---- control-plane runtime image (slim, engine-free) ----
-# The controller deployable: public REST API + claim/placement authority. No
-# engine, no codex, no nyxid CLI, no runtime volume, no FKST_SUBSTRATE_REF.
-# TRANSITIONAL: until #136 moves engine execution onto the worker, the
-# control-plane process still spawns engine children, so this slim image is not
-# yet the controller's production home (the worker-runtime image is — see
-# header). This stage exists so the structure + slimming are in place for #136.
-FROM debian:bookworm-slim AS control-plane-runtime
-ARG PRODUCT_VERSION=0.0.0
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-RUN groupadd -g 10001 fkst && useradd -m -u 10001 -g 10001 -s /usr/sbin/nologin fkst
-COPY --from=server-builder /app/target/release/fkst-control-plane /usr/local/bin/fkst-control-plane
-ENV FKST_ROLE=control-plane \
-    PATH=/usr/local/bin:$PATH \
-    FKST_HOSTED_PORT=8080 \
-    FKST_HOSTED_BIND_ADDR=0.0.0.0
-LABEL org.opencontainers.image.title="fkst-control-plane" \
-      org.opencontainers.image.version="${PRODUCT_VERSION}" \
-      org.opencontainers.image.source="https://github.com/ChronoAIProject/fkst-hosted"
-USER fkst
-EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/fkst-control-plane"]
