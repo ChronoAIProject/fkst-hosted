@@ -16,9 +16,11 @@
 //!   `AppError`-coupled client stay control-plane for now.
 //! - [`vault`] — the persisted vault data model (`model`); the encrypting
 //!   service + Mongo repo stay control-plane (KEK never leaves).
+//! - [`protocol`] — the internal controller<->worker wire types (#134).
 
 pub mod llm;
 pub mod models;
 pub mod nyxid;
 pub mod ornn;
+pub mod protocol;
 pub mod vault;

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
+use fkst_control_plane::controller::{InternalAuth, WorkerRegistry};
 use fkst_control_plane::db::{redact_mongodb_uri, Db};
 use fkst_control_plane::distribution::{
     DistributionConfig, Distributor, DriverHost, SelfOnlyHealth,
@@ -18,7 +19,7 @@ use fkst_control_plane::journal::JournalConfig;
 use fkst_control_plane::leases::LeaseStore;
 use fkst_control_plane::nyxid::NyxIdClient;
 use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
-use fkst_control_plane::router::build_router;
+use fkst_control_plane::router::{build_router, mount_internal};
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
 use secrecy::ExposeSecret;
@@ -406,6 +407,11 @@ async fn main() -> ExitCode {
         tracing::info!("github app not configured; goal support disabled in session service");
     }
 
+    // Capture the internal worker-protocol config before `config` moves into
+    // AppState (issue #134).
+    let internal_auth_token = config.internal_auth_token.clone();
+    let worker_liveness_ttl_secs = config.worker_liveness_ttl_secs;
+
     let app = match build_router(AppState {
         config,
         db,
@@ -426,6 +432,60 @@ async fn main() -> ExitCode {
     };
     tracing::info!("router built");
 
+    // 5b. Internal worker protocol (issue #134): when the shared secret is set,
+    //     build the in-memory worker registry, spawn the stale-worker expiry
+    //     sweeper (cancelled on shutdown like the reaper), and merge the
+    //     shared-secret-guarded internal routes onto the top-level router. When
+    //     the secret is absent the internal surface stays closed (not mounted).
+    let registry_sweeper_shutdown = CancellationToken::new();
+    let (app, registry_sweeper_handle) = match internal_auth_token {
+        Some(token) => {
+            let ttl = std::time::Duration::from_secs(worker_liveness_ttl_secs);
+            let registry = WorkerRegistry::new(ttl);
+            // Workers must heartbeat several times per TTL window to avoid a
+            // false expiry; the controller is authoritative for this cadence.
+            let heartbeat_interval_secs = (worker_liveness_ttl_secs / 3).max(1);
+            let sweep_interval_secs = (worker_liveness_ttl_secs / 2).max(1);
+            let sweep_registry = registry.clone();
+            let sweeper_cancel = registry_sweeper_shutdown.clone();
+            let handle = tokio::spawn(async move {
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_secs(sweep_interval_secs));
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let expired = sweep_registry.expire_stale().await;
+                            if !expired.is_empty() {
+                                tracing::info!(count = expired.len(), "swept stale workers");
+                            }
+                        }
+                        _ = sweeper_cancel.cancelled() => break,
+                    }
+                }
+            });
+            tracing::info!(
+                route_prefix = "/internal/v1",
+                "internal worker protocol enabled"
+            );
+            (
+                mount_internal(
+                    app,
+                    registry,
+                    InternalAuth::new(token),
+                    heartbeat_interval_secs,
+                ),
+                Some(handle),
+            )
+        }
+        None => {
+            tracing::warn!(
+                "FKST_INTERNAL_AUTH_TOKEN not set; internal worker protocol disabled \
+                 (internal routes not mounted)"
+            );
+            (app, None)
+        }
+    };
+
     // 6. Bind and serve with graceful shutdown.
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
@@ -445,14 +505,22 @@ async fn main() -> ExitCode {
         // error must not orphan live engine processes without a SIGTERM.
         reaper_shutdown.cancel();
         let _ = reaper_handle.await;
+        registry_sweeper_shutdown.cancel();
+        if let Some(handle) = registry_sweeper_handle {
+            let _ = handle.await;
+        }
         sessions.shutdown().await;
         return ExitCode::FAILURE;
     }
 
-    // 7. Stop the reaper, then drain the session drivers (SIGTERM live
-    //    engines, bounded wait).
+    // 7. Stop the reaper + the worker-registry sweeper, then drain the session
+    //    drivers (SIGTERM live engines, bounded wait).
     reaper_shutdown.cancel();
     let _ = reaper_handle.await;
+    registry_sweeper_shutdown.cancel();
+    if let Some(handle) = registry_sweeper_handle {
+        let _ = handle.await;
+    }
     sessions.shutdown().await;
 
     tracing::info!("server stopped");

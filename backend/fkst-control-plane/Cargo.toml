@@ -46,6 +46,11 @@ zeroize = "1"
 rand = "0.8"
 
 [dev-dependencies]
+# The worker crate is a dev-dependency ONLY (the internal-protocol integration
+# test drives a real WorkerAgent against the controller's internal_router). The
+# non-test dependency graph never points control-plane -> worker, and worker
+# never points at control-plane, so the compiler-enforced boundary holds.
+fkst-worker = { path = "../fkst-worker" }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 testcontainers = "0.27"

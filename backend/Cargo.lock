@@ -886,6 +886,7 @@ dependencies = [
  "envy",
  "filetime",
  "fkst-shared",
+ "fkst-worker",
  "hmac",
  "http-body-util",
  "jsonwebtoken",
@@ -938,9 +939,19 @@ name = "fkst-worker"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "axum 0.7.9",
+ "fkst-shared",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
+ "tower",
  "tracing",
  "tracing-subscriber",
+ "wiremock",
 ]
 
 [[package]]

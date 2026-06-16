@@ -92,6 +92,13 @@ mod defaults {
         30
     }
 
+    /// Liveness TTL for the in-memory worker registry (#134): a worker whose
+    /// last heartbeat is older than this is dropped from `live_workers` and
+    /// expired by the sweeper. Must be > 0.
+    pub(super) fn worker_liveness_ttl_secs() -> u64 {
+        30
+    }
+
     pub(super) fn nyxid_github_proxy_slug() -> String {
         // NyxID `main`/v0.7.0 seeds its GitHub OAuth proxy under slug
         // `api-github` (`backend/src/services/provider_service.rs`,
@@ -208,6 +215,15 @@ struct MongoVars {
     nyxid_client_id: Option<String>,
     #[serde(default)]
     nyxid_client_secret: Option<String>,
+    /// Shared secret authenticating internal controller<->worker requests
+    /// (#134). Env `FKST_INTERNAL_AUTH_TOKEN`. Optional on the controller: when
+    /// absent, the internal routes are not mounted (closed by default).
+    #[serde(default)]
+    fkst_internal_auth_token: Option<String>,
+    /// Liveness TTL (seconds) for the in-memory worker registry (#134). Env
+    /// `FKST_WORKER_LIVENESS_TTL_SECS`. Default 30; must be > 0.
+    #[serde(default = "defaults::worker_liveness_ttl_secs")]
+    fkst_worker_liveness_ttl_secs: u64,
 }
 
 /// `FKST_JOURNAL_*` / `FKST_RAISED_*` variables (journaling settings; envy
@@ -357,6 +373,14 @@ pub struct Config {
     /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
     /// slug; blank rejected at load. Non-secret routing config.
     pub chrono_llm_base_url: String,
+    /// Shared secret authenticating internal controller<->worker requests
+    /// (#134). Env: `FKST_INTERNAL_AUTH_TOKEN`. Optional: when absent, the
+    /// internal worker-protocol routes are NOT mounted (closed by default) and
+    /// a WARN is logged. Never logged (redacted from `Debug`).
+    pub internal_auth_token: Option<SecretString>,
+    /// Liveness TTL (seconds) for the in-memory worker registry (#134). Env:
+    /// `FKST_WORKER_LIVENESS_TTL_SECS`. Default 30; zero rejected.
+    pub worker_liveness_ttl_secs: u64,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -414,6 +438,12 @@ impl fmt::Debug for Config {
             // Model name + proxy route are non-secret config — show them.
             .field("codex_model", &self.codex_model)
             .field("chrono_llm_base_url", &self.chrono_llm_base_url)
+            // The internal-auth secret never reaches any Debug/log output.
+            .field(
+                "internal_auth_token",
+                &self.internal_auth_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("worker_liveness_ttl_secs", &self.worker_liveness_ttl_secs)
             .finish()
     }
 }
@@ -452,6 +482,8 @@ impl Default for Config {
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             codex_model: defaults::codex_model(),
             chrono_llm_base_url: defaults::chrono_llm_base_url(),
+            internal_auth_token: None,
+            worker_liveness_ttl_secs: defaults::worker_liveness_ttl_secs(),
         }
     }
 }
@@ -530,6 +562,13 @@ impl Config {
         if mongo.mongodb_server_selection_timeout_ms == 0 {
             return Err(AppError::Config(
                 "MONGODB_SERVER_SELECTION_TIMEOUT_MS must be at least 1".to_string(),
+            ));
+        }
+        // A zero worker-liveness TTL would expire every worker instantly,
+        // emptying the registry — reject it loudly, mirroring the guards above.
+        if mongo.fkst_worker_liveness_ttl_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_WORKER_LIVENESS_TTL_SECS must be at least 1".to_string(),
             ));
         }
         // Both-or-neither: NYXID_CLIENT_ID and NYXID_CLIENT_SECRET.
@@ -688,6 +727,8 @@ impl Config {
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
             chrono_llm_base_url: http.chrono_llm_base_url,
+            internal_auth_token: mongo.fkst_internal_auth_token.map(SecretString::from),
+            worker_liveness_ttl_secs: mongo.fkst_worker_liveness_ttl_secs,
         })
     }
 
@@ -956,6 +997,42 @@ mod tests {
         let rendered = format!("{config:?}");
         assert!(!rendered.contains("ghp_sneaky_value"), "token leaked");
         assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
+    fn internal_auth_token_is_read_and_never_appears_in_debug() {
+        let config = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_INTERNAL_AUTH_TOKEN", "supersecret-internal-123"),
+        ]))
+        .expect("internal-auth config");
+        assert!(config.internal_auth_token.is_some());
+        let rendered = format!("{config:?}");
+        assert!(
+            !rendered.contains("supersecret-internal-123"),
+            "internal-auth token leaked into Debug"
+        );
+        assert!(rendered.contains("internal_auth_token"));
+    }
+
+    #[test]
+    fn worker_liveness_ttl_defaults_to_30_and_rejects_zero() {
+        let config = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
+            .expect("default ttl config");
+        assert_eq!(config.worker_liveness_ttl_secs, 30);
+
+        let err = Config::from_vars(vars(&[
+            URI,
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_WORKER_LIVENESS_TTL_SECS", "0"),
+        ]))
+        .expect_err("zero ttl must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_WORKER_LIVENESS_TTL_SECS"),
+            "error must name the var"
+        );
     }
 
     #[test]

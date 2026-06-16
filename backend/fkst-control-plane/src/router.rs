@@ -96,3 +96,22 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
             )),
     ))
 }
+
+/// Merge the internal worker-protocol routes onto the top-level router (#134).
+///
+/// Internal routes live at `/internal/v1/*`, NOT under `/api/v1` and NOT behind
+/// the NyxID proxy-trust middleware: they carry their own constant-time
+/// shared-secret auth (inside `internal_router`). This keeps the public
+/// `/api/v1` surface unchanged while exposing the fleet-only internal surface.
+pub fn mount_internal(
+    top: Router,
+    registry: crate::controller::WorkerRegistry,
+    auth: crate::controller::InternalAuth,
+    heartbeat_interval_secs: u64,
+) -> Router {
+    top.merge(crate::controller::internal_router(
+        registry,
+        auth,
+        heartbeat_interval_secs,
+    ))
+}

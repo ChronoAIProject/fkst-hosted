@@ -7,6 +7,9 @@
 pub mod auth;
 pub mod authz;
 pub mod config;
+// Controller side of the internal worker protocol (#134): the in-memory worker
+// registry + the shared-secret-guarded internal router.
+pub mod controller;
 pub mod db;
 pub mod distribution;
 pub mod engine;
