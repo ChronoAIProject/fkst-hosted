@@ -30,8 +30,9 @@ end
 local function liveness_redrive_ready(event)
   return core.build_devloop_ready_payload({
     proposal_id = event.proposal_id,
-    dedup_key = event.dedup_key,
+    dedup_key = core.ready_payload_inner_version(event.dedup_key),
     source_ref = event.source_ref,
+    impl_retry_attempt = core.implementation_retry_attempt(event.dedup_key),
   })
 end
 
@@ -210,19 +211,17 @@ return {
     t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
   end,
 
-  test_implementing_liveness_redrive_skips_live_attempt = function()
+  test_liveness_replayer_skips_live_implement_attempt_before_receiver = function()
     local current = ready()
-    local event = liveness_redrive_ready(current)
     local comments = {
       core.state_marker(current.proposal_id, "implementing", current.dedup_key),
       core.implement_attempt_marker(current.proposal_id, current.dedup_key, 1, tostring(now())),
     }
-    mock_issue_implement({ "fkst-dev:implementing" }, comments)
 
-    local result = run_implement(event, opts("implement-liveness-redrive-live-attempt"))
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-live-attempt-budget-owner"))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("codex exec"), 0)
-    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 
   test_implementing_redelivery_recovers_local_branch_before_attempt_budget = function()
@@ -398,35 +397,103 @@ return {
     t.eq(find_raise(result.raises, "devloop_open_pr") ~= nil, true)
   end,
 
-  -- #721 (the deeper variant, live: re-implemented attempts were the dominant
-  -- skip-stale(version-mismatch) churn on the running system). A stuck
-  -- `implementing` whose marker version carries a /reimplement/N suffix: the
-  -- implement receiver compares state.version against
-  -- implementation_attempt_version(re-raised.dedup_key, re-raised.impl_retry_attempt),
-  -- which STRIPS the /reimplement/N suffix unless impl_retry_attempt=N is supplied.
-  -- The re-drive must reproduce the suffixed version AND re-supply N so the
-  -- receiver re-derives the exact frozen version (matches, not skip-stale-forever).
-  test_observe_reraised_reimplement_attempt_reproduces_frozen_version_for_cas_match = function()
-    local base = ready()
-    local reimpl_version = base.dedup_key .. "/reimplement/2"
+  test_observe_reraises_reimplement_attempt_preserving_suffix = function()
+    local event = ready()
+    local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
     local stuck = {
-      core.state_marker(base.proposal_id, "implementing", reimpl_version),
-      core.implement_attempt_marker(base.proposal_id, reimpl_version, 2, tostring(now() - 7201)),
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, tostring(now() - 7201)),
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
-    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-721-reimpl"))
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-721-reimplement-redrive"))
+    t.eq(result.exit_code, 0)
+    local raised = find_raise(result.raises, "devloop_ready")
+    t.eq(raised.payload.proposal_id, event.proposal_id)
+    t.eq(raised.payload.dedup_key, retry_version)
+    t.eq(raised.payload.impl_retry_attempt, 2)
+  end,
+
+  test_observe_reraised_reimplement_ready_round_trips_into_implement_without_skip_stale = function()
+    local event = ready()
+    local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
+    local branch = deterministic_branch_for(event)
+    local stuck = {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, tostring(now() - 7201)),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
+    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-721-roundtrip"))
     t.eq(observed.exit_code, 0)
     local reraised = find_raise(observed.raises, "devloop_ready")
     t.eq(reraised ~= nil, true)
-    t.eq(reraised.payload.dedup_key, reimpl_version, "re-raise reproduces the /reimplement/N marker version exactly")
-    t.eq(reraised.payload.impl_retry_attempt, 2, "re-raise re-supplies the attempt N")
-    -- This is the EXACT value the implement receiver compares to state.version: it
-    -- must equal the frozen marker version, i.e. the version-CAS matches (no skip-stale).
-    t.eq(
-      core.implementation_attempt_version(reraised.payload.dedup_key, reraised.payload.impl_retry_attempt),
-      reimpl_version,
-      "receiver-recomputed version equals the frozen reimplement marker -> CAS matches"
-    )
+
+    local progress = {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, "1"),
+      core.implementing_marker(event.proposal_id, retry_version, branch, "abc123", "dev", "abc123"),
+    }
+    mock_issue_implement({ "fkst-dev:implementing" }, progress)
+    mock_remote_branch(branch, "abc123")
+
+    local result = run_implement(reraised.payload, opts("implement-721-roundtrip"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 0)
+    local kickoff = find_raise(result.raises, "devloop_open_pr")
+    t.eq(kickoff ~= nil, true)
+    t.eq(kickoff.payload.head_sha, "abc123")
+  end,
+
+  test_double_wrapped_liveness_redrive_is_not_recovered = function()
+    local event = ready()
+    local double_wrapped = core.build_devloop_ready_payload({
+      proposal_id = event.proposal_id,
+      dedup_key = event.dedup_key,
+      source_ref = event.source_ref,
+    })
+    local comments = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, "1"),
+    }
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
+
+    local result = run_implement(double_wrapped, opts("implement-726-double-wrapped-redrive"))
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.eq(comment ~= nil, true)
+    t.eq(core.implement_version_mismatch_attempt_count({ comment.payload.body }, event.proposal_id, double_wrapped.dedup_key, event.dedup_key), 1)
+  end,
+
+  test_implementing_version_mismatch_fails_closed_after_delivery_budget = function()
+    local event = ready()
+    local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, "1"),
+      core.implement_version_mismatch_marker(event.proposal_id, event.dedup_key, retry_version, 1),
+      core.implement_version_mismatch_marker(event.proposal_id, event.dedup_key, retry_version, 2),
+    })
+
+    local result = run_implement(event, opts("implement-721-version-mismatch-budget"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+  end,
+
+  test_implementing_version_mismatch_persists_skip_stale_attempt = function()
+    local event = ready()
+    local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", retry_version),
+      core.implement_attempt_marker(event.proposal_id, retry_version, 2, "1"),
+    })
+
+    local result = run_implement(event, opts("implement-721-version-mismatch-persist"))
+    t.eq(result.exit_code, 1)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.eq(comment ~= nil, true)
+    t.eq(core.implement_version_mismatch_attempt_count({ comment.payload.body }, event.proposal_id, event.dedup_key, retry_version), 1)
   end,
 
   test_observe_skips_implementing_state_marker_without_progress_facts = function()

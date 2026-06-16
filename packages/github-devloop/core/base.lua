@@ -577,6 +577,16 @@ function M.intake_candidate_delivery_dedup_key(proposal_id, effect_id, delivery_
   })
 end
 
+function M.implement_version_mismatch_key(expected_version, current_version)
+  return dedup_key({
+    "ivm",
+    decimal_checksum(table.concat({
+      "expected=" .. tostring(expected_version or ""),
+      "current=" .. tostring(current_version or ""),
+    }, "\n")),
+  })
+end
+
 function M.intake_decision_dedup_key(proposal_id, current, reintake_command)
   local reintake_created_at = "none"
   if reintake_command ~= nil then

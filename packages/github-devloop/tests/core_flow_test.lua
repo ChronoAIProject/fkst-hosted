@@ -558,6 +558,8 @@ return {
     t.eq(core.impl_failure_retry_allowed(retry_fact), false)
     t.eq(core.implementation_attempt_version(ready.dedup_key, 2), ready.dedup_key .. "/reimplement/2")
     t.eq(core.implementation_base_version(ready.dedup_key .. "/reimplement/2"), ready.dedup_key)
+    t.eq(core.implementation_retry_attempt(ready.dedup_key .. "/reimplement/2"), 2)
+    t.is_nil(core.implementation_retry_attempt(ready.dedup_key))
 
     local label = core.build_implementing_label_request("owner/repo", "42", ready)
     t.eq(label.add_labels[1], "fkst-dev:implementing")
