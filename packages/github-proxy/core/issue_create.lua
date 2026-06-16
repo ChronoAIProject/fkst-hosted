@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local max_title_len = 240
 local max_body_len = 12000
 local max_label_len = 80
@@ -13,12 +14,8 @@ local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
-local function is_bounded_string(value, limit)
-  return type(value) == "string" and value ~= "" and #value <= limit
-end
-
 local function is_bounded_marker_value(value, limit)
-  return is_bounded_string(value, limit)
+  return strings.is_bounded_string(value, limit)
     and tostring(value):find('[<>"\r\n]') == nil
 end
 
@@ -54,7 +51,7 @@ local function labels_arg(labels)
     return args
   end
   for _, label in ipairs(labels) do
-    if is_bounded_string(label, max_label_len) then
+    if strings.is_bounded_string(label, max_label_len) then
       args = args .. " --label " .. shell_single_quote(label)
     end
   end
@@ -62,7 +59,7 @@ local function labels_arg(labels)
 end
 
 local function is_valid_login(value)
-  return is_bounded_string(value, max_login_len)
+  return strings.is_bounded_string(value, max_login_len)
     and tostring(value):find("^[%w%-%[%]_.]+$") ~= nil
 end
 
@@ -158,7 +155,7 @@ local function normalize_parent_comment_target(target)
   if target == nil then
     return nil
   end
-  if type(target) ~= "table" or not is_bounded_string(target.repo, 200) then
+  if type(target) ~= "table" or not strings.is_bounded_string(target.repo, 200) then
     return false
   end
   if is_positive_integer(target.pr_number) then
@@ -313,21 +310,21 @@ function M.validate_issue_create_payload(payload)
   if payload.schema ~= "github-proxy.issue-create.v1" then
     return false
   end
-  if not is_bounded_string(payload.repo, 200) then
+  if not strings.is_bounded_string(payload.repo, 200) then
     return false
   end
-  if not is_bounded_string(payload.title, max_title_len) then
+  if not strings.is_bounded_string(payload.title, max_title_len) then
     return false
   end
-  if not is_bounded_string(payload.body, max_body_len) then
+  if not strings.is_bounded_string(payload.body, max_body_len) then
     return false
   end
   if not is_bounded_marker_value(payload.dedup_key, max_dedup_len) then
     return false
   end
   if type(payload.source_ref) ~= "table"
-    or not is_bounded_string(payload.source_ref.kind, 80)
-    or not is_bounded_string(payload.source_ref.ref, 200) then
+    or not strings.is_bounded_string(payload.source_ref.kind, 80)
+    or not strings.is_bounded_string(payload.source_ref.ref, 200) then
     return false
   end
   if payload.labels ~= nil then
@@ -335,7 +332,7 @@ function M.validate_issue_create_payload(payload)
       return false
     end
     for _, label in ipairs(payload.labels) do
-      if not is_bounded_string(label, max_label_len) then
+      if not strings.is_bounded_string(label, max_label_len) then
         return false
       end
     end

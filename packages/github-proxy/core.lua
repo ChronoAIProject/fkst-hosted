@@ -1,4 +1,5 @@
 local M = {}
+local strings = require("std.strings")
 
 require("core.error_facts").install(M)
 
@@ -41,10 +42,8 @@ local state_stage_rank = {
   merged = 900,
 }
 
-local function is_bounded_string(value, limit) return type(value) == "string" and value ~= "" and #value <= limit end
-
 local function is_git_ref_safe(value)
-  if not is_bounded_string(value, max_branch_len) then
+  if not strings.is_bounded_string(value, max_branch_len) then
     return false
   end
   local text = tostring(value)

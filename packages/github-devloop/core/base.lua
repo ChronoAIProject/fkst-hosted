@@ -1,6 +1,8 @@
 local S = {}
 
 function S.install(M)
+local error_facts = require("std.error_facts")
+local strings = require("std.strings")
 
 local max_key_len = 200
 local max_dedup_len = 512
@@ -132,9 +134,7 @@ local function neutralize_fkst_markers(value)
   return neutralized
 end
 
-local function one_line(value)
-  return tostring(value or ""):gsub("[%s]+", " ")
-end
+local one_line = error_facts.one_line
 
 local function decimal_checksum(value)
   local hash = 2166136261
@@ -145,9 +145,7 @@ local function decimal_checksum(value)
   return string.format("%010d", hash)
 end
 
-local function is_bounded_string(value, limit)
-  return type(value) == "string" and value ~= "" and #value <= limit
-end
+local is_bounded_string = strings.is_bounded_string
 
 local function sdk_truncate_utf8(value, limit)
   if type(truncate_utf8) ~= "function" then
@@ -180,29 +178,7 @@ local function fix_reflection_checkpoint_round()
   return 3
 end
 
-local function is_path_safe_key(value, limit)
-  if not is_bounded_string(value, limit or max_key_len) then
-    return false
-  end
-  if value:sub(1, 1) == "/" then
-    return false
-  end
-  if value:find("\\", 1, true) ~= nil then
-    return false
-  end
-  if value:find("%s") ~= nil then
-    return false
-  end
-  if value:find("[^%w%._%-%/#]") ~= nil then
-    return false
-  end
-  for segment in value:gmatch("[^/]+") do
-    if segment == "." or segment == ".." then
-      return false
-    end
-  end
-  return true
-end
+local is_path_safe_key = strings.is_path_safe_key
 
 local function is_git_ref_safe(value)
   if not is_bounded_string(value, max_branch_len) then
@@ -267,40 +243,8 @@ function M.assert_trusted_bot_configured()
   return trusted_bot_login
 end
 
-function M.sanitize_key(value, limit)
-  local max_len = max_key_len
-  if limit ~= nil then
-    max_len = limit
-  end
-  local sanitized = tostring(value or ""):gsub("[^%w%._%-%/#]", "-")
-  sanitized = sanitized:gsub("/+", "/")
-  sanitized = sanitized:gsub("^/+", ""):gsub("/+$", "")
-  if sanitized == "" then
-    return "empty"
-  end
-
-  local segments = {}
-  for segment in sanitized:gmatch("[^/]+") do
-    local safe_segment = segment
-    if safe_segment == "." or safe_segment == ".." then
-      safe_segment = "-"
-    end
-    table.insert(segments, safe_segment)
-  end
-
-  sanitized = table.concat(segments, "/")
-  if max_len ~= false and #sanitized > max_len then
-    sanitized = sanitized:sub(1, max_len)
-    sanitized = sanitized:gsub("/+$", "")
-  end
-  if sanitized == "" then
-    return "empty"
-  end
-  return sanitized
-end
-
 local function dedup_key(parts)
-  local key = M.sanitize_key(table.concat(parts, "/"), false)
+  local key = strings.sanitize_key(table.concat(parts, "/"), false)
   if #key > max_dedup_len then
     local suffix = "-" .. decimal_checksum(key)
     key = sdk_truncate_utf8(key, max_dedup_len - #suffix):gsub("[/%-]+$", "") .. suffix
@@ -312,7 +256,7 @@ local function dedup_key(parts)
 end
 
 function M.safe_repo(repo)
-  local safe = M.sanitize_key(repo):sub(1, max_repo_key_len):gsub("/+$", "")
+  local safe = strings.sanitize_key(repo, max_key_len):sub(1, max_repo_key_len):gsub("/+$", "")
   if safe == "" then
     return "empty"
   end
@@ -320,7 +264,7 @@ function M.safe_repo(repo)
 end
 
 function M.safe_issue(issue_number)
-  local safe = M.sanitize_key(issue_number):sub(1, max_issue_key_len):gsub("/+$", "")
+  local safe = strings.sanitize_key(issue_number, max_key_len):sub(1, max_issue_key_len):gsub("/+$", "")
   if safe == "" then
     return "empty"
   end
@@ -328,7 +272,7 @@ function M.safe_issue(issue_number)
 end
 
 function M.safe_updated_at(updated_at)
-  local safe = M.sanitize_key(updated_at):sub(1, max_update_key_len):gsub("/+$", "")
+  local safe = strings.sanitize_key(updated_at, max_key_len):sub(1, max_update_key_len):gsub("/+$", "")
   if safe == "" then
     return "empty"
   end
@@ -336,7 +280,7 @@ function M.safe_updated_at(updated_at)
 end
 
 function M.safe_version_segment(version)
-  local safe = M.sanitize_key(version, false):gsub("[/#]", "-"):gsub("%-+", "-")
+  local safe = strings.sanitize_key(version, false):gsub("[/#]", "-"):gsub("%-+", "-")
   safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
   if safe == "" then
     safe = "version"
@@ -696,7 +640,7 @@ function M.implement_lock_key(proposal_id)
 end
 
 function M.safe_issue_slug(repo, issue_number)
-  local slug = M.sanitize_key(tostring(repo or "") .. "-" .. tostring(issue_number or ""), false):gsub("/", "-")
+  local slug = strings.sanitize_key(tostring(repo or "") .. "-" .. tostring(issue_number or ""), false):gsub("/", "-")
   slug = slug:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if slug == "" then
     slug = "issue"
@@ -713,7 +657,7 @@ end
 function M.implement_branch(repo, issue_number, impl_version)
   local safe_repo = M.safe_repo(repo)
   local safe_issue = M.safe_issue(issue_number)
-  local safe_version = M.sanitize_key(impl_version, false):gsub("[/#]", "-"):gsub("%-+", "-")
+  local safe_version = strings.sanitize_key(impl_version, false):gsub("[/#]", "-"):gsub("%-+", "-")
   safe_version = safe_version:gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
   if safe_version == "" then
     safe_version = "version"
@@ -768,7 +712,7 @@ function M.judgment_worktree_path(runtime_root, role, identity)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: invalid FKST_RUNTIME_ROOT")
   end
-  local slug = M.sanitize_key(tostring(role or "") .. "-" .. tostring(identity or ""), false):gsub("/", "-")
+  local slug = strings.sanitize_key(tostring(role or "") .. "-" .. tostring(identity or ""), false):gsub("/", "-")
   slug = slug:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
   if slug == "" then
     slug = "judgment"

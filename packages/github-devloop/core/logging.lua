@@ -1,55 +1,23 @@
 local S = {}
+local error_facts = require("std.error_facts")
 
 function S.install(M)
 
-local function normalized_error_message(value)
-  local text = M._one_line(value or ""):lower()
-  text = text:gsub("%d%d%d%d%-%d%d%-%d%d[tT ]%d%d:%d%d:%d%d%.?%d*Z?", "<time>")
-  text = text:gsub("%f[%x]%x%x%x%x%x%x[%x]+%f[^%x]", "<sha>")
-  text = text:gsub("/tmp/[^%s]+", "<path>")
-  text = text:gsub("/var/folders/[^%s]+", "<path>")
-  text = text:gsub("%s+", " ")
-  return text
-end
-
-local function stable_hash(value)
-  local hash = 5381
-  for index = 1, #value do
-    hash = (hash * 33 + value:byte(index)) % 2147483647
-  end
-  return "fp-" .. tostring(hash)
-end
-
-local function source_ref_field(source_ref)
-  if type(source_ref) == "table" then
-    return M._one_line(source_ref.kind) .. ":" .. M._one_line(source_ref.ref)
-  end
-  if source_ref ~= nil then
-    return M._one_line(source_ref)
-  end
-  return nil
-end
-
 function M.error_fingerprint(error_class, queue, dept, message)
-  return stable_hash(table.concat({
-    tostring(error_class or "unknown-error"),
-    tostring(queue or ""),
-    tostring(dept or ""),
-    normalized_error_message(message),
-  }, "|"))
+  return error_facts.error_fingerprint(error_class, queue, dept, message)
 end
 
 function M.error_fact_fields(error_class, queue, dept, message, context)
   local fields = {
-    "error_class=" .. M._one_line(error_class or "unknown-error"),
+    "error_class=" .. error_facts.one_line(error_class or "unknown-error"),
     "fingerprint=" .. M.error_fingerprint(error_class, queue, dept, message),
   }
-  local source_ref = source_ref_field(context and context.source_ref)
+  local source_ref = error_facts.source_ref_field(context and context.source_ref)
   if source_ref ~= nil and source_ref ~= "" then
     table.insert(fields, "source_ref=" .. source_ref)
   end
   if context and context.attempt ~= nil then
-    table.insert(fields, "attempt=" .. M._one_line(context.attempt))
+    table.insert(fields, "attempt=" .. error_facts.one_line(context.attempt))
   end
   if context and context.terminal ~= nil then
     table.insert(fields, "terminal=" .. tostring(context.terminal == true))

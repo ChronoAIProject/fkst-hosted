@@ -1,10 +1,11 @@
 local S = {}
+local strings = require("std.strings")
 
 function S.install(M)
 local max_sync_conflict_attempts = 3
 
 local function safe_branch_segment(branch)
-  return M.sanitize_key(tostring(branch or ""), false):gsub("/", "-")
+  return strings.sanitize_key(tostring(branch or ""), false):gsub("/", "-")
 end
 
 local function conflict_fingerprint(conflict, unmerged_stdout)

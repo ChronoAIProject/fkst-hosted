@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
 local recent_closed_limit = 30
@@ -11,7 +12,7 @@ end
 
 local function snapshot_path(repo, window_key)
   local safe_repo = M.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
-  local safe_window = M.sanitize_key(tostring(window_key or "unknown"), false):gsub("[/%s]+", "-")
+  local safe_window = strings.sanitize_key(tostring(window_key or "unknown"), false):gsub("[/%s]+", "-")
   safe_window = safe_window:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if safe_window == "" then
     safe_window = "unknown"

@@ -1,4 +1,5 @@
 local M = {}
+local error_facts = require("std.error_facts")
 
 M.spec = {
   consumes = { "dead_letter" },
@@ -6,19 +7,15 @@ M.spec = {
   stall_window = "2m",
 }
 
-local function one_line(value)
-  return tostring(value or ""):gsub("%s+", " ")
-end
-
 local function dead_source_ref(payload)
   local source_ref = payload.source_ref
   if source_ref == nil and type(payload.payload) == "table" then
     source_ref = payload.payload.source_ref
   end
   if type(source_ref) == "table" then
-    return one_line(source_ref.kind) .. ":" .. one_line(source_ref.ref)
+    return error_facts.source_ref_field(source_ref)
   end
-  return one_line(source_ref)
+  return error_facts.one_line(source_ref)
 end
 
 local function dead_dedup_key(payload)
@@ -36,13 +33,13 @@ function pipeline(event)
 
   log.warn(
     "github-devloop dept=dead_letter tag=DEAD_LETTER"
-      .. " delivery_id=" .. one_line(payload.delivery_id)
-      .. " queue=" .. one_line(payload.queue)
-      .. " dead_dept=" .. one_line(payload.dept)
+      .. " delivery_id=" .. error_facts.one_line(payload.delivery_id)
+      .. " queue=" .. error_facts.one_line(payload.queue)
+      .. " dead_dept=" .. error_facts.one_line(payload.dept)
       .. " source_ref=" .. dead_source_ref(payload)
-      .. " dedup_key=" .. one_line(dead_dedup_key(payload))
-      .. " attempt=" .. one_line(payload.attempt)
-      .. " error=" .. one_line(payload.error)
+      .. " dedup_key=" .. error_facts.one_line(dead_dedup_key(payload))
+      .. " attempt=" .. error_facts.one_line(payload.attempt)
+      .. " error=" .. error_facts.one_line(payload.error)
   )
 end
 

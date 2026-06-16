@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local PACKAGE_NAMESPACE = "github-devloop"
 
 local function consumed_queue_set(consumes)
@@ -428,7 +429,7 @@ function M.merge_queue_starvation_tick_payload(repo, incident_identity, head_ent
   if type(head_entry) ~= "table" then
     return nil
   end
-  local bounded_attempt = M.sanitize_key(attempt_key or "attempt", false)
+  local bounded_attempt = strings.sanitize_key(attempt_key or "attempt", false)
   return {
     schema = "github-devloop.merge-queue-tick.v1",
     dedup_key = M._dedup_key({
@@ -455,9 +456,9 @@ function M.queue_starvation_reconcile_marker(issue_proposal_id, pr_number, versi
   if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
     error("github-devloop: invalid queue-starvation reconcile marker")
   end
-  local incident = M.sanitize_key(tostring(incident_identity or "merge-ready"), false)
-  local attempt = M.sanitize_key(tostring(attempt_key or "attempt"), false)
-  local proof = M.sanitize_key(tostring(outcome or "head-redriven"), false):gsub("/", "-")
+  local incident = strings.sanitize_key(tostring(incident_identity or "merge-ready"), false)
+  local attempt = strings.sanitize_key(tostring(attempt_key or "attempt"), false)
+  local proof = strings.sanitize_key(tostring(outcome or "head-redriven"), false):gsub("/", "-")
   if not M._is_bounded_string(version, M._max_dedup_len)
     or not M._is_path_safe_key(incident, M._max_dedup_len)
     or not M._is_path_safe_key(attempt, M._max_dedup_len)

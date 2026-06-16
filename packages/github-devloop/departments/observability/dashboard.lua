@@ -1,4 +1,5 @@
 local common = require("departments.observability.common")
+local strings = require("std.strings")
 
 local M = {}
 
@@ -39,7 +40,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
 end
 
 local function dashboard_input_path(repo, version, hash)
-  local safe = core.sanitize_key(tostring(repo or "repo"), false):gsub("[/%s]+", "-")
+  local safe = strings.sanitize_key(tostring(repo or "repo"), false):gsub("[/%s]+", "-")
   safe = safe:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if safe == "" then
     safe = "repo"
@@ -47,7 +48,7 @@ local function dashboard_input_path(repo, version, hash)
   if #safe > 120 then
     safe = safe:sub(1, 120):gsub("%-+$", "")
   end
-  local identity = core.sanitize_key(tostring(version or "unknown") .. "-" .. tostring(hash or "unknown"), false)
+  local identity = strings.sanitize_key(tostring(version or "unknown") .. "-" .. tostring(hash or "unknown"), false)
   identity = identity:gsub("[/%s]+", "-")
   identity = identity:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if identity == "" then

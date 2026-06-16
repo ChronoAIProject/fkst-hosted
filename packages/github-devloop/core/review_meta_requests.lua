@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local max_evidence_len = 600
 
 local function build_comment_evidence_digest(comments)
@@ -81,7 +82,7 @@ function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
 end
 
 function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
-  local safe_reason = M.sanitize_key(reason or "no-fix"):gsub("/", "-")
+  local safe_reason = strings.sanitize_key(reason or "no-fix", M._max_key_len):gsub("/", "-")
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
     text = M.truncate_utf8(text, M._max_impl_output_len)

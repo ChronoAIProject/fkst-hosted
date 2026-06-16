@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local conflict_hotspot_threshold = 3
 local conflict_hotspot_window_days = 7
 local conflict_hotspot_window_seconds = conflict_hotspot_window_days * 24 * 60 * 60
@@ -18,7 +19,7 @@ local function is_safe_conflict_path(path)
 end
 
 local function conflict_path_key(path)
-  local key = M.sanitize_key(tostring(path or ""), false):gsub("/", "-"):gsub("%-+", "-")
+  local key = strings.sanitize_key(tostring(path or ""), false):gsub("/", "-"):gsub("%-+", "-")
   if #key > 140 then
     local suffix = "-" .. M._decimal_checksum(key)
     key = M.truncate_utf8(key, 140 - #suffix):gsub("%-+$", "") .. suffix
