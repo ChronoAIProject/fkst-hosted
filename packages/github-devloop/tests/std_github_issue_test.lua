@@ -2,6 +2,16 @@ local gh = require("std.github")
 local issue_adapter = require("std.github.issue")
 local core = require("core")
 
+local function command_count(commands, expected)
+  local count = 0
+  for _, command in ipairs(commands) do
+    if command == expected then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local function assert_comment_equal(left, right)
   assert(left.body == right.body)
   assert(left.author_login == right.author_login)
@@ -62,5 +72,83 @@ return {
       assert(normalized.assignees[index] == assignee)
     end
     assert(normalized.author_login == old.author_login)
+  end,
+
+  test_read_issue_uses_validator_gated_cache_for_repeat_observe_read = function()
+    local ref = { kind = "external", ref = "owner/cache-adapter#issue/42" }
+    local key = issue_adapter.issue_view_cache_key("owner/cache-adapter", 42)
+    cache_set(key, "")
+    local commands = {}
+    local handle = gh.new(function(opts)
+      table.insert(commands, opts.cmd)
+      return {
+        stdout = '{"number":42,"state":"OPEN","title":"cached adapter","body":"issue body","url":"https://github.com/owner/cache-adapter/issues/42","updatedAt":"2026-06-15T00:00:00Z","labels":[],"comments":[],"assignees":[],"author":{"login":"author"}}',
+        stderr = "",
+        exit_code = 0,
+      }
+    end)
+
+    local first = handle.read_issue(ref)
+    local second = handle.read_issue(ref, {
+      updated_at = first.updated_at,
+      consumer = "observe-contract",
+    })
+
+    assert(first.title == "cached adapter")
+    assert(second.title == "cached adapter")
+    assert(command_count(commands, "gh issue view '42' --repo 'owner/cache-adapter' --json number,title,body,url,updatedAt,state,labels,comments,assignees,author") == 1)
+    assert(#commands == 1)
+  end,
+
+  test_read_issue_force_fresh_bypasses_cache_and_recaches = function()
+    local ref = { kind = "external", ref = "owner/force-adapter#issue/43" }
+    local key = issue_adapter.issue_view_cache_key("owner/force-adapter", 43)
+    cache_set(key, "")
+    local commands = {}
+    local handle = gh.new(function(opts)
+      table.insert(commands, opts.cmd)
+      if opts.cmd == "gh api 'repos/owner/force-adapter/issues/43'" then
+        return {
+          stdout = '{"number":43,"state":"open","title":"fresh adapter","body":"fresh body","html_url":"https://github.com/owner/force-adapter/issues/43","updated_at":"2026-06-15T00:00:01Z","labels":[{"name":"fresh"}],"assignees":[{"login":"dev"}],"user":{"login":"author"}}',
+          stderr = "",
+          exit_code = 0,
+        }
+      end
+      if opts.cmd == "gh api --paginate --slurp 'repos/owner/force-adapter/issues/43/comments?per_page=100'" then
+        return {
+          stdout = '[{"id":7,"body":"fresh comment","user":{"login":"bot"},"created_at":"2026-06-15T00:00:01Z"}]',
+          stderr = "",
+          exit_code = 0,
+        }
+      end
+      return {
+        stdout = '{"number":43,"state":"OPEN","title":"stale adapter","body":"stale body","url":"https://github.com/owner/force-adapter/issues/43","updatedAt":"2026-06-15T00:00:00Z","labels":[],"comments":[],"assignees":[],"author":{"login":"author"}}',
+        stderr = "",
+        exit_code = 0,
+      }
+    end)
+
+    local stale = handle.read_issue(ref)
+    local fresh = handle.read_issue(ref, {
+      force_fresh = true,
+      consumer = "authority-contract",
+    })
+    local cached = handle.read_issue(ref, {
+      updated_at = fresh.updated_at,
+      consumer = "observe-contract",
+    })
+
+    assert(stale.title == "stale adapter")
+    assert(fresh.title == "fresh adapter")
+    assert(fresh.updated_at == "2026-06-15T00:00:01Z")
+    assert(fresh.labels[1] == "fresh")
+    assert(fresh.assignees[1] == "dev")
+    assert(fresh.comments[1].body == "fresh comment")
+    assert(fresh.comments[1].author_login == "bot")
+    assert(cached.title == "fresh adapter")
+    assert(command_count(commands, "gh issue view '43' --repo 'owner/force-adapter' --json number,title,body,url,updatedAt,state,labels,comments,assignees,author") == 1)
+    assert(command_count(commands, "gh api 'repos/owner/force-adapter/issues/43'") == 1)
+    assert(command_count(commands, "gh api --paginate --slurp 'repos/owner/force-adapter/issues/43/comments?per_page=100'") == 1)
+    assert(#commands == 3)
   end,
 }

@@ -5,6 +5,40 @@ local M = {}
 -- Two documented exclusions: `blocked_by` needs GraphQL (a separate read op, not gh issue
 -- view), and comment `updated_at` is not exposed by gh issue view (only createdAt).
 local issue_view_fields = "number,title,body,url,updatedAt,state,labels,comments,assignees,author"
+local max_cache_key_segment_len = 120
+
+local function sanitize_cache_segment(value, allow_slash)
+  local pattern = allow_slash and "[^%w%._%-%/]" or "[^%w%._%-]"
+  local safe = tostring(value or ""):gsub(pattern, "-")
+  safe = safe:gsub("-+", "-")
+  if allow_slash then
+    safe = safe:gsub("/+", "/"):gsub("^/+", ""):gsub("/+$", "")
+  else
+    safe = safe:gsub("^-+", ""):gsub("-+$", "")
+  end
+  local segments = {}
+  for segment in safe:gmatch("[^/]+") do
+    if segment == "." or segment == ".." then
+      segment = "-"
+    end
+    table.insert(segments, segment)
+  end
+  safe = table.concat(segments, allow_slash and "/" or "-")
+  if #safe > max_cache_key_segment_len then
+    safe = safe:sub(1, max_cache_key_segment_len):gsub("/+$", ""):gsub("-+$", "")
+  end
+  if safe == "" then
+    return "empty"
+  end
+  return safe
+end
+
+local function issue_view_cache_key(repo, number)
+  return "github-proxy/view/"
+    .. sanitize_cache_segment(repo, true)
+    .. "/issue/"
+    .. sanitize_cache_segment(number, false)
+end
 
 local function gh_issue_view_cmd(repo, issue_number, fields)
   local selected_fields = tostring(fields or "")
@@ -18,6 +52,21 @@ end
 
 local function gh_issue_view_full_cmd(repo, issue_number)
   return gh_issue_view_cmd(repo, issue_number, issue_view_fields)
+end
+
+local function gh_issue_rest_cmd(repo, issue_number)
+  return "gh api " .. shell.shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+end
+
+local function gh_issue_comments_rest_cmd(repo, issue_number)
+  return "gh api --paginate --slurp "
+    .. shell.shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
+end
+
+local function gh_issue_updated_at_cmd(repo, issue_number)
+  return "gh api "
+    .. shell.shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+    .. " --jq " .. shell.shell_single_quote(".updated_at // .updatedAt // \"\"")
 end
 
 local function assignee_logins(assignees)
@@ -90,6 +139,185 @@ local function repo_and_number(source_ref)
   return repo, tonumber(number)
 end
 
+local function parse_json_object(stdout, context)
+  local ok, decoded = pcall(json.decode, stdout or "")
+  if ok and type(decoded) == "table" then
+    return decoded
+  end
+  error("std.github: " .. tostring(context) .. " response is not valid JSON")
+end
+
+local function append_comments(target, value)
+  if type(value) ~= "table" then
+    return
+  end
+  if type(value.comments) == "table" then
+    append_comments(target, value.comments)
+    return
+  end
+  if value.id ~= nil or value.body ~= nil or value.user ~= nil or value.author ~= nil then
+    table.insert(target, value)
+    return
+  end
+  for _, item in ipairs(value) do
+    append_comments(target, item)
+  end
+end
+
+local function rest_state(value)
+  if value == nil then
+    return nil
+  end
+  return tostring(value):upper()
+end
+
+local function json_string(value)
+  local text = tostring(value or "")
+  text = text:gsub("\\", "\\\\")
+  text = text:gsub('"', '\\"')
+  text = text:gsub("\b", "\\b")
+  text = text:gsub("\f", "\\f")
+  text = text:gsub("\n", "\\n")
+  text = text:gsub("\r", "\\r")
+  text = text:gsub("\t", "\\t")
+  text = text:gsub("[%z\1-\31]", function(char)
+    return string.format("\\u%04X", string.byte(char))
+  end)
+  return '"' .. text .. '"'
+end
+
+local function json_value(value)
+  if value == nil then
+    return "null"
+  end
+  if type(value) == "boolean" then
+    return value and "true" or "false"
+  end
+  if type(value) == "number" then
+    return tostring(value)
+  end
+  return json_string(value)
+end
+
+local function labels_json(labels)
+  local parts = {}
+  for _, label in ipairs(labels or {}) do
+    if type(label) == "table" then
+      table.insert(parts, '{"name":' .. json_value(label.name) .. "}")
+    elseif label ~= nil then
+      table.insert(parts, '{"name":' .. json_value(label) .. "}")
+    end
+  end
+  return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function assignees_json(assignees)
+  local parts = {}
+  for _, assignee in ipairs(assignees or {}) do
+    if type(assignee) == "table" then
+      table.insert(parts, '{"login":' .. json_value(assignee.login) .. "}")
+    elseif assignee ~= nil then
+      table.insert(parts, '{"login":' .. json_value(assignee) .. "}")
+    end
+  end
+  return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function comments_json(comments)
+  local parts = {}
+  for _, comment in ipairs(comments or {}) do
+    if type(comment) == "table" then
+      local author_login = nil
+      if type(comment.author) == "table" then
+        author_login = comment.author.login
+      elseif type(comment.user) == "table" then
+        author_login = comment.user.login
+      end
+      table.insert(parts, '{"id":' .. json_value(comment.databaseId or comment.database_id or comment.id)
+        .. ',"body":' .. json_value(comment.body)
+        .. ',"author":{"login":' .. json_value(author_login) .. "}"
+        .. ',"createdAt":' .. json_value(comment.createdAt or comment.created_at)
+        .. "}")
+    end
+  end
+  return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function rest_issue_to_view_stdout(issue_stdout, comments_stdout)
+  local issue = parse_json_object(issue_stdout, "issue")
+  local comments = {}
+  append_comments(comments, parse_json_object(comments_stdout ~= "" and comments_stdout or "[]", "issue comments"))
+  local author_login = nil
+  if type(issue.user) == "table" then
+    author_login = issue.user.login
+  end
+  return '{"number":' .. json_value(issue.number)
+    .. ',"title":' .. json_value(issue.title)
+    .. ',"body":' .. json_value(issue.body)
+    .. ',"url":' .. json_value(issue.html_url or issue.url)
+    .. ',"updatedAt":' .. json_value(issue.updated_at or issue.updatedAt)
+    .. ',"state":' .. json_value(rest_state(issue.state))
+    .. ',"labels":' .. labels_json(issue.labels)
+    .. ',"comments":' .. comments_json(comments)
+    .. ',"assignees":' .. assignees_json(issue.assignees)
+    .. ',"author":{"login":' .. json_value(author_login) .. "}"
+    .. "}"
+end
+
+local function parse_view_updated_at(stdout)
+  local ok, decoded = pcall(json.decode, stdout or "")
+  if not ok or type(decoded) ~= "table" then
+    return nil
+  end
+  local updated_at = decoded.updatedAt or decoded.updated_at
+  if updated_at == nil or tostring(updated_at) == "" then
+    return nil
+  end
+  return tostring(updated_at)
+end
+
+local function parse_updated_at_stdout(stdout)
+  local text = tostring(stdout or "")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then
+    return nil
+  end
+  return text
+end
+
+local function decode_cached_view(encoded)
+  local ok, decoded = pcall(json.decode, encoded or "")
+  if not ok or type(decoded) ~= "table" or type(decoded.stdout) ~= "string" then
+    return nil
+  end
+  if decoded.updated_at == nil or tostring(decoded.updated_at) == "" then
+    return nil
+  end
+  decoded.updated_at = tostring(decoded.updated_at)
+  return decoded
+end
+
+local function encode_cached_view(stdout, updated_at, producer)
+  return '{"updated_at":' .. json_string(updated_at)
+    .. ',"producer":' .. json_string(producer)
+    .. ',"stdout":' .. json_string(stdout or "")
+    .. "}"
+end
+
+local function cache_available()
+  return type(cache_get) == "function" and type(cache_set) == "function"
+end
+
+local function cache_successful_issue_view(key, stdout, producer)
+  if not cache_available() then
+    return
+  end
+  local updated_at = parse_view_updated_at(stdout)
+  if updated_at ~= nil then
+    cache_set(key, encode_cached_view(stdout or "", updated_at, producer))
+  end
+end
+
 function M.normalize_issue(gh_json_decoded_or_stdout, source_ref)
   local _repo, source_number = repo_and_number(source_ref)
   local decoded = gh_json_decoded_or_stdout
@@ -112,10 +340,51 @@ function M.normalize_issue(gh_json_decoded_or_stdout, source_ref)
   }
 end
 
+function M.issue_view_cache_key(repo, issue_number)
+  return issue_view_cache_key(repo, issue_number)
+end
+
 function M.install(handle)
-  function handle.read_issue(source_ref)
+  local function fetch_issue_view_stdout(repo, number, timeout, opts)
+    local issue = handle._exec(gh_issue_rest_cmd(repo, number), timeout, "gh issue view")
+    local comments = handle._exec(gh_issue_comments_rest_cmd(repo, number), timeout, "gh issue comments")
+    local stdout = rest_issue_to_view_stdout(issue.stdout, comments.stdout)
+    cache_successful_issue_view(issue_view_cache_key(repo, number), stdout, opts and opts.consumer or "")
+    return stdout
+  end
+
+  function handle.read_issue(source_ref, opts)
+    local options = opts or {}
     local repo, number = repo_and_number(source_ref)
-    local out = handle._exec(gh_issue_view_full_cmd(repo, number), 30, "gh issue view")
+    local timeout = tonumber(options.timeout) or 30
+    local key = issue_view_cache_key(repo, number)
+    if options.force_fresh == true then
+      return M.normalize_issue(fetch_issue_view_stdout(repo, number, timeout, options), source_ref)
+    end
+
+    local cached = cache_available() and decode_cached_view(cache_get(key)) or nil
+    local validator = tostring(options.updated_at or options.updatedAt or options.validator or "")
+    if validator ~= "" then
+      -- GitHub updatedAt is second-granular, so this validator is freshness-best-effort only.
+      -- It is safe for stale-tolerant observe reads; authority and write-gate reads must force_fresh.
+      if cached ~= nil and cached.updated_at == validator then
+        return M.normalize_issue(cached.stdout, source_ref)
+      end
+      return M.normalize_issue(fetch_issue_view_stdout(repo, number, timeout, options), source_ref)
+    end
+
+    if cached ~= nil then
+      local current = handle._exec(gh_issue_updated_at_cmd(repo, number), timeout, "gh issue updated_at")
+      if parse_updated_at_stdout(current.stdout) == cached.updated_at then
+        return M.normalize_issue(cached.stdout, source_ref)
+      end
+      if cache_available() then
+        cache_set(key, "")
+      end
+    end
+
+    local out = handle._exec(gh_issue_view_full_cmd(repo, number), timeout, "gh issue view")
+    cache_successful_issue_view(key, out.stdout, options.consumer or "")
     return M.normalize_issue(out.stdout, source_ref)
   end
 end
