@@ -1,17 +1,14 @@
-//! GitHub App installation lifecycle integration tests (issue #108) against an
-//! ephemeral Mongo container (testcontainers) and the real
-//! `build_router(AppState)` for the webhook endpoint.
+//! GitHub App installation lifecycle integration tests against an ephemeral
+//! Mongo container (testcontainers, for the Mongo-backed session repo) and the
+//! real `build_router(AppState)` for the webhook endpoint.
 //!
-//! Coverage:
-//! - `MongoInstallationStore` persistence: upsert / lookup / set_repos /
-//!   set_suspended / delete, including an ORGANIZATION-keyed record.
-//! - Resolve-from-persistence: `GithubAppTokens` reads the store BEFORE the
-//!   GitHub API (the fake API counts its calls and asserts zero on a store hit).
-//! - State survives a "restart": a record written by one store handle is read
-//!   by a fresh handle over the same DB.
-//! - Webhook HTTP: an invalid `X-Hub-Signature-256` is rejected `401`; a signed
-//!   `installation created` (org) persists an org-keyed record; a signed
-//!   `deleted` evicts the record AND fails an active session on the repo.
+//! Installation resolution is STATELESS (#141): there is no durable installation
+//! store. These tests exercise the externally-observable webhook behavior — the
+//! cache-bust hint — over the real router:
+//! - An invalid `X-Hub-Signature-256` is rejected `401`.
+//! - A signed `installation deleted` (enumerating the affected repo) evicts the
+//!   in-memory caches and fails an active session on that repo (no persistence).
+//! - A malformed signed body answers `202` (never a 5xx / redelivery storm).
 //!
 //! Self-skips when Docker is unavailable so `cargo test` stays green on runners
 //! without a Docker daemon.
@@ -25,13 +22,9 @@ use fkst_control_plane::config::Config;
 use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::github_app::api::{GithubApi, InstallationToken, InstallationTokenRequest};
-use fkst_control_plane::github_app::{
-    GithubAppConfig, GithubAppTokens, InstallationId, MongoInstallationStore,
-};
+use fkst_control_plane::github_app::{GithubAppConfig, GithubAppTokens, InstallationId};
 use fkst_control_plane::goals::GoalIssueStore;
-use fkst_control_plane::models::{
-    AccountType, GithubInstallationDoc, RepoRef, RepositorySelection, SessionStatus,
-};
+use fkst_control_plane::models::{RepoRef, SessionStatus};
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
@@ -102,8 +95,8 @@ fn app_config(webhook: Option<&str>) -> GithubAppConfig {
     }
 }
 
-/// Fake GitHub transport: counts installation lookups (must stay 0 on a store
-/// hit) and always mints a fake token.
+/// Fake GitHub transport: counts installation lookups (a cold cache probes once)
+/// and always mints a fake token.
 #[derive(Debug, Default)]
 struct FakeApi {
     installation_calls: AtomicUsize,
@@ -134,18 +127,6 @@ impl GithubApi for FakeApi {
     }
 }
 
-fn org_doc(id: i64, login: &str, repo_full: &str) -> GithubInstallationDoc {
-    GithubInstallationDoc {
-        installation_id: id,
-        account_login: login.to_lowercase(),
-        account_type: AccountType::Organization,
-        repository_selection: RepositorySelection::Selected,
-        repos: vec![repo_full.to_lowercase()],
-        suspended: false,
-        updated_at: bson::DateTime::now(),
-    }
-}
-
 fn webhook_signature(secret: &[u8], body: &[u8]) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("key");
     mac.update(body);
@@ -158,130 +139,18 @@ fn webhook_signature(secret: &[u8], body: &[u8]) -> String {
     format!("sha256={hex}")
 }
 
-// ---- persistence-only tests ------------------------------------------------
-
-#[tokio::test]
-async fn store_upsert_lookup_and_org_keyed_record() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
-    let (_c, db) = mongo().await;
-    let store = MongoInstallationStore::new(&db);
-
-    // Upsert an ORG-owned selected installation.
-    let doc = org_doc(42, "Acme", "Acme/Site");
-    store.upsert(&doc).await.expect("upsert");
-
-    // The stored record is org-keyed (account_type Organization, login lower).
-    let fetched = store.get(42).await.expect("get").expect("present");
-    assert_eq!(fetched.account_type, AccountType::Organization);
-    assert_eq!(fetched.account_login, "acme");
-    assert_eq!(fetched.repos, vec!["acme/site".to_string()]);
-
-    // Lookup is case-insensitive on owner/name.
-    let found = store
-        .lookup_repo("ACME", "SITE")
-        .await
-        .expect("lookup")
-        .expect("covered");
-    assert_eq!(found.installation_id, 42);
-
-    // An unrelated repo is not covered.
-    assert!(store
-        .lookup_repo("acme", "other")
-        .await
-        .expect("lookup")
-        .is_none());
-}
-
-#[tokio::test]
-async fn store_set_repos_set_suspended_and_delete() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
-    let (_c, db) = mongo().await;
-    let store = MongoInstallationStore::new(&db);
-    store
-        .upsert(&org_doc(7, "acme", "acme/a"))
-        .await
-        .expect("upsert");
-
-    // Add a repo via set_repos (the installation_repositories `added` path).
-    store
-        .set_repos(7, &["acme/a".to_string(), "acme/b".to_string()])
-        .await
-        .expect("set_repos");
-    assert!(store
-        .lookup_repo("acme", "b")
-        .await
-        .expect("lookup")
-        .is_some());
-
-    // Suspending hides coverage (a suspended install cannot mint).
-    assert!(store.set_suspended(7, true).await.expect("suspend"));
-    assert!(
-        store
-            .lookup_repo("acme", "a")
-            .await
-            .expect("lookup")
-            .is_none(),
-        "suspended install resolves to nothing"
-    );
-
-    // Delete is idempotent.
-    assert_eq!(store.delete(7).await.expect("delete"), 1);
-    assert_eq!(store.delete(7).await.expect("re-delete"), 0);
-}
-
-#[tokio::test]
-async fn resolve_reads_persistence_before_api_and_survives_restart() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
-    let (_c, db) = mongo().await;
-    // Seed a persisted installation as if a prior pod / webhook recorded it.
-    let store = MongoInstallationStore::new(&db);
-    store
-        .upsert(&org_doc(555, "acme", "acme/site"))
-        .await
-        .expect("seed");
-
-    // Build a FRESH token service over the SAME db (simulates a pod restart:
-    // empty in-memory caches, durable record intact).
-    let api = Arc::new(FakeApi::default());
-    let svc = GithubAppTokens::with_api_and_store(
-        &app_config(None),
-        api.clone(),
-        Some(Arc::new(MongoInstallationStore::new(&db))),
-    )
-    .expect("svc");
-
-    let _ = svc.token_for_repo("acme/site", None).await.expect("token");
-
-    // The DB was consulted; the GitHub installation API was NOT hit.
-    assert_eq!(
-        api.installation_calls.load(Ordering::SeqCst),
-        0,
-        "resolution must read persistence before the GitHub API"
-    );
-}
-
 // ---- webhook HTTP tests ----------------------------------------------------
 
-/// Build a full router with the github_app (fake API + Mongo store) and the
-/// webhook secret wired, so the webhook route is mounted and exercises the real
-/// persistence + eviction + session-fail path.
+/// Build a full router with the github_app (fake API, stateless — no store) and
+/// the webhook secret wired, so the webhook route is mounted and exercises the
+/// real cache-bust + session-fail path against the Mongo-backed session repo.
 fn router_with_webhook(db: Db) -> (axum::Router, SessionRepo) {
     let session_repo = SessionRepo::new(&db);
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(session_repo.clone(), EngineConfig::default());
-    let github_app = GithubAppTokens::with_api_and_store(
+    let github_app = GithubAppTokens::with_api(
         &app_config(Some(WEBHOOK_SECRET)),
         Arc::new(FakeApi::default()),
-        Some(Arc::new(MongoInstallationStore::new(&db))),
     )
     .expect("github app");
     let vault = support::test_vault(&db);
@@ -332,7 +201,7 @@ async fn webhook_rejects_invalid_signature_401() {
     let (_c, db) = mongo().await;
     let (router, _) = router_with_webhook(db);
 
-    let body = br#"{"action":"created","installation":{"id":1,"account":{"login":"acme","type":"Organization"},"repository_selection":"selected"},"repositories":[]}"#;
+    let body = br#"{"action":"created","installation":{"id":1,"account":{"login":"acme"}},"repositories":[]}"#;
     // A signature computed with the WRONG secret.
     let bad = webhook_signature(b"not-the-secret", body);
     let status = post_webhook(&router, "installation", &bad, body).await;
@@ -344,47 +213,33 @@ async fn webhook_rejects_invalid_signature_401() {
 }
 
 #[tokio::test]
-async fn webhook_installation_created_org_persists_org_keyed_record() {
+async fn webhook_malformed_body_is_202_not_5xx() {
     if !docker_available() {
         eprintln!("SKIP: docker unavailable");
         return;
     }
     let (_c, db) = mongo().await;
-    let store = MongoInstallationStore::new(&db);
     let (router, _) = router_with_webhook(db);
 
-    let body = br#"{
-        "action":"created",
-        "installation":{"id":314,"account":{"login":"Acme","type":"Organization"},"repository_selection":"selected"},
-        "repositories":[{"full_name":"Acme/Site"}]
-    }"#;
+    // A correctly-signed but malformed JSON body: the handler must log + answer
+    // 202 (never a 5xx, which would trigger a GitHub redelivery storm).
+    let body = br#"{"action":"deleted","installation":"not-an-object"}"#;
     let sig = webhook_signature(WEBHOOK_SECRET.as_bytes(), body);
     let status = post_webhook(&router, "installation", &sig, body).await;
-    assert_eq!(status, StatusCode::OK);
-
-    // The persisted record is org-keyed.
-    let doc = store.get(314).await.expect("get").expect("persisted");
-    assert_eq!(doc.account_type, AccountType::Organization);
-    assert_eq!(doc.account_login, "acme");
-    assert_eq!(doc.repos, vec!["acme/site".to_string()]);
-    assert!(!doc.suspended);
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "a malformed but signed body answers 202"
+    );
 }
 
 #[tokio::test]
-async fn webhook_deleted_evicts_record_and_fails_active_session() {
+async fn webhook_deleted_evicts_and_fails_active_session_without_persistence() {
     if !docker_available() {
         eprintln!("SKIP: docker unavailable");
         return;
     }
     let (_c, db) = mongo().await;
-    let store = MongoInstallationStore::new(&db);
-
-    // Seed a persisted installation covering acme/site.
-    store
-        .upsert(&org_doc(900, "acme", "acme/site"))
-        .await
-        .expect("seed install");
-
     let (router, session_repo) = router_with_webhook(db.clone());
 
     // Seed an ACTIVE (running) session targeting acme/site.
@@ -418,22 +273,19 @@ async fn webhook_deleted_evicts_record_and_fails_active_session() {
     };
     session_repo.insert(&session).await.expect("insert session");
 
-    // Deliver a signed `installation deleted` for installation 900.
+    // Deliver a signed `installation deleted` that ENUMERATES the affected repo
+    // (the per-repo cache-bust path). No durable record exists to read.
     let body = br#"{
         "action":"deleted",
-        "installation":{"id":900,"account":{"login":"acme","type":"Organization"},"repository_selection":"selected"}
+        "installation":{"id":900,"account":{"login":"acme"}},
+        "repositories":[{"full_name":"acme/site"}]
     }"#;
     let sig = webhook_signature(WEBHOOK_SECRET.as_bytes(), body);
     let status = post_webhook(&router, "installation", &sig, body).await;
     assert_eq!(status, StatusCode::OK);
 
-    // The persisted record is gone.
-    assert!(
-        store.get(900).await.expect("get").is_none(),
-        "record evicted"
-    );
-
-    // The active session was transitioned to Failed with a clear reason.
+    // The active session was transitioned to Failed with a clear reason naming
+    // the repo and the uninstall.
     let after = session_repo
         .get(session_id)
         .await

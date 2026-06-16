@@ -234,20 +234,17 @@ async fn main() -> ExitCode {
     let authz = Authorizer::new(nyxid_client.clone());
 
     // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must
-    //     never reach a live session). The token service is built WITH the
-    //     Mongo-backed installation store (issue #108) so installation
-    //     resolution reads persistence before probing GitHub and survives a pod
-    //     restart. The webhook secret (if set) is lifted out into AppState so
-    //     the router can mount the signature-verified webhook route.
+    //     never reach a live session). Installation resolution is stateless
+    //     (#141): the token service resolves on demand and caches in memory —
+    //     no durable installation store. The webhook secret (if set) is lifted
+    //     out into AppState so the router can mount the signature-verified
+    //     webhook route.
     let mut github_app_webhook_secret: Option<secrecy::SecretString> = None;
     let github_app = match fkst_control_plane::github_app::GithubAppConfig::load_from_env() {
         Ok(Some(config)) => {
             let app_id = config.app_id;
             github_app_webhook_secret = config.webhook_secret.clone();
-            let store = std::sync::Arc::new(
-                fkst_control_plane::github_app::MongoInstallationStore::new(&db),
-            );
-            match fkst_control_plane::github_app::GithubAppTokens::new_with_store(&config, store) {
+            match fkst_control_plane::github_app::GithubAppTokens::new(&config) {
                 Ok(tokens) => {
                     tracing::info!(
                         app_id,
