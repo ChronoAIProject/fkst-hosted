@@ -51,6 +51,19 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 心法：`func1: event→effects`（快、确定、可重放、**watchdog 心跳盲重投**、不枚举 case）；`codex: facts→受控产出`（慢、只读输入、过门生效）。**不要为追求「程序完美」去枚举每个失败形态写确定性分支——枚举不完，且每个分支都是新 bug 面（实证：想用程序把「终止」判得完美的精确匹配 reconcile 反而造出 livelock）。简单 watchdog 心跳盲重投 + 乐观锁兜住常态，长尾一律 codex 兜底。** watchdog 模式由 conformance 机械强制：每个非终止态必须声明 budget-bounded 或 heartbeat-deferred（heartbeat 行的 producer / surface / version-form 经单一真相源 helper 绑定 resolver），**新态不正确声明 receiver-liveness 就 conformance 失败**——把「只有 adversarial review 抓得到的 liveness bug」变成机械不变式（实证 #762：8 轮 review 每轮 tests 全绿却抓出更深的 liveness bug，正因 liveness-blind 正确性 CI 抓不到，才必须做成 conformance 契约）。下面的三级模型 / saga 化 / 活性契约都是这条的机械实现——用来让「简单」可被机械强制，不是要你手写每个 case 的确定性恢复。
 
+## 这套自愈循环的成熟名字（prior-art 合成，harness-first）
+
+上面的核心循环不是自创范式，是四套成熟工程理论的合成。按 harness-first，把名字钉清楚——新代码据此自检「我套用了哪条成熟实践、在哪偏离、为什么」：
+
+1. **Durable / workflow state machine**（Temporal·Cadence 的 durable execution；Harel statecharts；table-driven FSM）：每个**生命周期状态**是 restart 表里的一行；`core/restart` 的 `restart_transition_table` 就是这张表。
+2. **Saga pattern**（Garcia-Molina & Salem, 1987）：每次状态转移是一个有界、可补偿、保证终止的 saga step（强制 saga 化 #375）。
+3. **Crash-only software · Recovery-Oriented Computing**（Candea & Fox）+ **supervisor tree ·「let it crash」**（Erlang/OTP, Joe Armstrong）：**不枚举失败形态**；把一切当 crash，靠**有界重启（OTP 的 max restart intensity）**恢复；**重启预算耗尽就向上逃逸到更聪明、更慢的 supervisor**。本系统最顶层的 supervisor 就是 **codex**（facts→issue，过 issue→PR→review→merge 门）。所谓「概率分析」就是这条：有界重试 + 逃逸，而**预算的取值即编码了失败概率阈值**——「重投/等了 N 还不愈，就判定它不是瞬态、是结构性长尾，逃逸给 codex」。预算是**设计期常量，不是运行期概率估计器**（后者会引入第二真相源）。
+4. **Totality ·「make illegal states unrepresentable」**（type-driven design, Yaron Minsky）：conformance 强制**每个非终止态在表里都有完整一行**（budget + watchdog 模式 + 保证终止 + WHY）；缺一即 CI 失败。这把「简单」从约定变成机械不变式（#762）。
+
+**一句话：本系统 = 一个 crash-only、durable、分层受监督的状态机；恢复是有界的 watchdog 心跳盲重投；最顶层的 supervisor 是 LLM。** 这正是为什么「状态转移 + saga + 概率分析（有界重试编码概率）+ 长尾 codex 兜底 + harness 强制全状态进表」让系统**简单明了**：这五条不是五个独立机制，是同一套成熟架构的五个面，合起来**只剩一种形状——填表的一行**。新增状态 = 填一行（声明 budget / watchdog / 终止 / WHY），不发明新控制流；N 个 per-case 确定性分支塌成「1 个有界盲重投 + 1 个 codex 兜底」；conformance 让这种简单**无法腐烂**。
+
+**边界（防过度统一）：这张表治的是「生命周期状态」（marker-as-fact 状态机），不吞掉整个系统。** 事件路由（fanout/dispatch）、内容回源（source_ref→fetch）、ports/adapters egress、consensus 编排是**正交纪律**，各有各的成熟范式，不塞进这张表——硬塞违背「模式服务当前问题」。表统一 lifecycle，ports 治 egress，saga 治持久，codex 治长尾。
+
 ## 错误处理三级模型（codex-as-catch）
 
 任何流程 `A → func1 → B` 的失败处理分三级；**catch 的产出是「立项」而非「当场修」**（prior art：OTP 监督树要求快路径 supervisor 简单确定；AIOps 异常→工单；LLM 自愈模式的已知失败形态是不确定性与副作用越界）：
