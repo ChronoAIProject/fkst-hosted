@@ -143,6 +143,35 @@ return {
     t.is_true(comment:find("merge-ready", 1, true) ~= nil)
   end,
 
+  test_pr_body_evidence_gap_is_advisory_and_does_not_enter_fixing = function()
+    local event = review_event({
+      decision = "reject",
+      body = "Reject: the diff is acceptable, but the pull request description lacks duplicate-evidence analysis.",
+      blocking_gap = "Missing PR body duplicate-evidence analysis",
+      angle_results = {
+        { angle = "minimal", verdict = "approve" },
+        { angle = "structural", verdict = "reject" },
+        { angle = "delete", verdict = "approve" },
+      },
+    })
+    local impl_version = h.reviewing().version
+    h.mock_pr_origin({
+      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    h.mock_issue_result({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = h.run_review_result(event, h.opts("review-v2-pr-body-gap-advisory"))
+    t.eq(result.exit_code, 0)
+    t.is_nil(h.find_raise(result.raises, "devloop_fixing"))
+    t.is_true(h.find_raise(result.raises, "devloop_merge_ready") ~= nil)
+    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.is_true(comment:find("github-devloop PR review decision: approve", 1, true) ~= nil)
+    t.is_true(comment:find("Advisory (out-of-contract): rejected only for demand beyond the stated issue bounds", 1, true) ~= nil)
+    t.is_true(comment:find("Missing PR body duplicate-evidence analysis", 1, true) ~= nil)
+  end,
+
   test_gate_owned_reject_is_advisory_and_does_not_enter_fixing = function()
     local event = review_event({
       decision = "reject",

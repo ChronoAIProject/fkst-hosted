@@ -93,6 +93,11 @@ local out_of_contract_gap_patterns = {
   "new%s+requirement",
   "spec%s+amendment",
   "spec%-amendment",
+  "missing%s+pr%s+body%s+duplicate%s+evidence%s+analysis",
+  "missing%s+pr%s+body%s+evidence",
+  "missing%s+pull%s+request%s+body%s+evidence",
+  "missing%s+pr%s+description%s+evidence",
+  "missing%s+pull%s+request%s+description%s+evidence",
 }
 
 function M.is_gate_owned_review_gap(gap)
