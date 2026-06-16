@@ -205,6 +205,14 @@ impl WorkerAgent {
                         tracing::warn!(error = %e, session_id = %session_id, "failed to send Released");
                     }
                 }
+                ControlMessage::ResolvedDispatch(_) => {
+                    // #151: the engine executor that consumes a dispatch lands in
+                    // a later increment and the controller only emits this behind
+                    // FKST_DISPATCH_MODE, so this build ignores it.
+                    tracing::debug!(
+                        "ResolvedDispatch received but engine dispatch is not active in this build"
+                    );
+                }
             }
         }
         Ok(resp)
