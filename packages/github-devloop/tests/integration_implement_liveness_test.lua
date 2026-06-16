@@ -398,6 +398,37 @@ return {
     t.eq(find_raise(result.raises, "devloop_open_pr") ~= nil, true)
   end,
 
+  -- #721 (the deeper variant, live: re-implemented attempts were the dominant
+  -- skip-stale(version-mismatch) churn on the running system). A stuck
+  -- `implementing` whose marker version carries a /reimplement/N suffix: the
+  -- implement receiver compares state.version against
+  -- implementation_attempt_version(re-raised.dedup_key, re-raised.impl_retry_attempt),
+  -- which STRIPS the /reimplement/N suffix unless impl_retry_attempt=N is supplied.
+  -- The re-drive must reproduce the suffixed version AND re-supply N so the
+  -- receiver re-derives the exact frozen version (matches, not skip-stale-forever).
+  test_observe_reraised_reimplement_attempt_reproduces_frozen_version_for_cas_match = function()
+    local base = ready()
+    local reimpl_version = base.dedup_key .. "/reimplement/2"
+    local stuck = {
+      core.state_marker(base.proposal_id, "implementing", reimpl_version),
+      core.implement_attempt_marker(base.proposal_id, reimpl_version, 2, tostring(now() - 7201)),
+    }
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
+    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-721-reimpl"))
+    t.eq(observed.exit_code, 0)
+    local reraised = find_raise(observed.raises, "devloop_ready")
+    t.eq(reraised ~= nil, true)
+    t.eq(reraised.payload.dedup_key, reimpl_version, "re-raise reproduces the /reimplement/N marker version exactly")
+    t.eq(reraised.payload.impl_retry_attempt, 2, "re-raise re-supplies the attempt N")
+    -- This is the EXACT value the implement receiver compares to state.version: it
+    -- must equal the frozen marker version, i.e. the version-CAS matches (no skip-stale).
+    t.eq(
+      core.implementation_attempt_version(reraised.payload.dedup_key, reraised.payload.impl_retry_attempt),
+      reimpl_version,
+      "receiver-recomputed version equals the frozen reimplement marker -> CAS matches"
+    )
+  end,
+
   test_observe_skips_implementing_state_marker_without_progress_facts = function()
     local event = ready({
       dedup_key = "ready/consensus-github-devloop/issue/owner/repo/42/2026-01-01T00-00-00Z",

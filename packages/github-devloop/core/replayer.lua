@@ -539,17 +539,22 @@ local function replay_implementing(dept, issue, state, row, facts)
   if age < 7200 then
     return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(attempt-live)", "implement attempt is still inside the liveness budget")
   end
-  -- Pass the INNER (unwrapped) version: build_devloop_ready_payload re-applies
-  -- the "ready/" wrapper, so re-wrapping the already-wrapped state.version would
-  -- double-wrap it ("ready/ready/...") and the implement receiver would reject
-  -- the re-drive as skip-stale(version-mismatch) forever (#718). Stripping one
-  -- wrapper here makes the re-raised dedup_key reproduce state.version exactly so
-  -- the version-CAS matches and the stuck first-attempt implement re-enters.
-  -- (The deeper /reimplement/N variant -- the receiver also strips that suffix
-  -- unless impl_retry_attempt is re-supplied -- is a tracked follow-up.)
+  -- Reconstruct the EXACT frozen implementing version so the implement receiver's
+  -- version-CAS matches and the stuck attempt re-enters, instead of
+  -- skip-stale-forever (#718 / #721). The receiver derives the compared version as
+  -- implementation_attempt_version(ready.dedup_key, impl_retry_attempt), so two
+  -- layers must round-trip:
+  --  (1) build_devloop_ready_payload re-applies the "ready/" wrapper, so pass the
+  --      INNER (unwrapped) version, else it double-wraps to "ready/ready/..." (#718).
+  --  (2) implementation_attempt_version STRIPS a trailing "/reimplement/N" unless
+  --      the event carries impl_retry_attempt=N, so a re-implemented marker
+  --      (ready/<X>/reimplement/N) would still mismatch the stripped ready/<X>;
+  --      re-supply N from the frozen marker so the receiver re-derives the suffix (#721).
+  local reimplement_attempt = tonumber(tostring(state.version or ""):match("/reimplement/(%d+)$"))
   local payload = M.build_devloop_ready_payload({
     proposal_id = proposal_id,
     dedup_key = M.ready_payload_inner_version(state.version),
+    impl_retry_attempt = reimplement_attempt,
     source_ref = issue.source_ref,
   })
   M.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(liveness-expired)", "implement attempt exceeded liveness budget")
