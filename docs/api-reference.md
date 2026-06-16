@@ -38,33 +38,72 @@ shapes, and examples. For a high-level overview of the project, see the
 
 ## Authentication & authorization
 
-### Authentication
+### Authentication — you authenticate to NyxID, not to fkst-hosted
 
-Every endpoint **except** the [health checks](#health) requires a **NyxID access
-token** (an RS256 JWT) sent as a bearer token:
+fkst-hosted is deployed as a **NyxID downstream service**: it has **no public
+ingress** (the backend is a cluster-internal `ClusterIP` service) and is reached
+**only through the NyxID proxy**. You authenticate to **NyxID**, and NyxID
+forwards your verified identity to fkst-hosted.
+
+So the bearer token you send is a **client ↔ NyxID-proxy** concern:
 
 ```
-Authorization: Bearer <nyxid-access-token>
+Authorization: Bearer <your-nyxid-token>
 ```
 
-- A missing or malformed `Authorization` header, or an invalid/expired token,
-  returns `401 Unauthorized` with a `WWW-Authenticate: Bearer` header.
-- If the authentication service (NyxID JWKS) is unreachable, requests return
-  `503 unavailable`.
+fkst-hosted itself does **not** verify your token, fetch any JWKS, or check any
+signature — the proxy already authenticated you. It simply **trusts** the
+identity the proxy injects into the forwarded request and authorizes from there.
 
-The token's subject (`sub`) identifies the caller (`user_id`); its `scope` claim
-carries OAuth2 scopes. The scope `fkst:admin` is an operator escape hatch that
-bypasses all resource checks.
+> **Internal headers (not part of the public contract).** Between the proxy and
+> fkst-hosted, identity travels in `X-NyxID-*` request headers: a (decode-only)
+> `X-NyxID-Identity-Token` JWT carrying `sub`, `permissions[]`, `roles[]`,
+> `groups[]`, with an `X-NyxID-User-Id` (+ `-Email` / `-Name`) fallback. Clients
+> never set these — the proxy does. They are documented here only to explain the
+> trust model; do not depend on them.
 
-### Authorization model
+If a request reaches fkst-hosted with **no** injected identity at all (only
+possible when the proxy is misconfigured or bypassed), it returns
+`401 Unauthorized`.
 
-Resources (packages, sessions, goals) carry an optional `owner_user_id` and an
-optional `org_id`. Access to an action is decided in this order:
+### Authorization model — two layers
 
-1. **Admin scope** — a caller with the `fkst:admin` scope may do anything.
-2. **Owner** — the `owner_user_id` may do anything to their resource.
+Every protected endpoint is gated by **two** independent layers; **both** must
+pass.
+
+**Layer 1 — permission (the action layer).** fkst-hosted defines a vocabulary of
+`fkst:*` permission strings and requires the matching one for each endpoint.
+**NyxID owns the assignment** of these permissions to users/roles; they arrive
+in the injected identity token's `permissions[]`. fkst-hosted does **not** keep a
+local role→permission matrix or role store — it only checks exact-string
+membership. A caller whose permission set lacks the required string gets
+`403 forbidden`. The permission `fkst:admin` is the platform escape hatch and
+bypasses both layers.
+
+| Permission | Gates |
+|------------|-------|
+| `fkst:session:read` | `GET /sessions/{id}` |
+| `fkst:session:stop` | `POST /sessions/{id}/stop` |
+| `fkst:goal:read` | `GET /goals`, `GET /goals/{id}` |
+| `fkst:goal:create` | `POST /goals` |
+| `fkst:goal:update` | `PATCH /goals/{id}` |
+| `fkst:goal:delete` | `DELETE /goals/{id}` |
+| `fkst:goal:trigger` | `POST /goals/{id}/trigger` |
+| `fkst:github:read` | `GET /github/accounts`, `/github/issues`, issue/comment reads |
+| `fkst:github:write` | `POST`/`PATCH` of issues and comments |
+| `fkst:catalog:read` | all `GET /catalog/*` |
+| `fkst:vault:read` | `GET /vault/entries` |
+| `fkst:vault:write` | `PUT /vault/entries` |
+| `fkst:vault:delete` | `DELETE /vault/entries/{id}` |
+| `fkst:admin` | everything (bypass) |
+
+**Layer 2 — ownership / org (the object layer).** After the permission check,
+access to the **specific** resource is decided in this order:
+
+1. **Admin** — a caller with the `fkst:admin` permission may act on any resource.
+2. **Owner** — the resource's `owner_user_id` may act on their own resource.
 3. **Organization role** — when the resource has an `org_id`, the caller's role
-   in that org (resolved via NyxID) grants:
+   in that org (resolved live via NyxID) grants:
 
    | Org role | Read | Write | Manage |
    |----------|:----:|:-----:|:------:|
@@ -72,18 +111,22 @@ optional `org_id`. Access to an action is decided in this order:
    | Member | ✅ | ✅ | — |
    | Admin | ✅ | ✅ | ✅ |
 
-4. **Legacy** — resources with no `owner_user_id` (created before auth existed)
-   are open to any authenticated caller.
+4. **Legacy** — resources with no `owner_user_id` are open to any caller that
+   cleared the permission layer.
 
-The three actions map to endpoints as:
+> Org-role lookups use the caller's forwarded token and **fail soft** when it is
+> absent: read visibility degrades to the caller's own resources.
+
+> **Operator note.** Because the action permission now comes from NyxID, NyxID
+> must assign the matching `fkst:*` permissions to org roles to preserve the
+> table above: org **Admin** → all `fkst:*`, **Member** → read + write + trigger,
+> **Viewer** → read.
+
+The three object actions map to endpoints as:
 
 - **Read** — fetching a resource.
 - **Write** — updating a resource.
-- **Manage** — deleting a resource or managing its shares.
-
-**Packages** additionally support **shares** (see [Package sharing](#package-sharing)):
-a `read`-level share grants Read; a `use`-level share grants the ability to
-**run a session** with the package. A `read` share does **not** grant `use`.
+- **Manage** — deleting a resource.
 
 **Anti-enumeration:** a denied **Read** on someone else's private resource
 returns `404 not_found` (identical to a resource that doesn't exist), so the API
@@ -107,8 +150,8 @@ to the client).
 | HTTP status | `error` code | Meaning | Special headers |
 |-------------|--------------|---------|-----------------|
 | `400` | `invalid_request` | Malformed body, invalid name/field, or unknown JSON field | |
-| `401` | `unauthorized` | Missing/invalid token | `WWW-Authenticate: Bearer` |
-| `403` | `forbidden` | Authenticated but not permitted | |
+| `401` | `unauthorized` | No proxy-injected identity reached the service (proxy misconfigured/bypassed) | |
+| `403` | `forbidden` | Authenticated but missing the required `fkst:*` permission, or not permitted on the specific resource | |
 | `404` | `not_found` | Resource absent, or hidden by anti-enumeration | |
 | `409` | `conflict` | Conflicts with current state (duplicate name, busy package, illegal status transition) | |
 | `422` | `unprocessable` | Understood but cannot proceed (e.g. GitHub App not installed; dependent resource missing) | |
@@ -250,8 +293,9 @@ pre-validate the version-conflict before triggering.
 
 ### `GET /api/v1/sessions/{id}` — fetch session status
 
-- **Permission:** **Read** on the session — owner, org member (any role), admin
-  scope. For goal-triggered sessions the goal's owner can also read.
+- **Permission:** `fkst:session:read`, then **Read** on the session — owner, org
+  member (any role), or the `fkst:admin` permission. For goal-triggered sessions
+  the goal's owner can also read.
 - **Path parameters:** `id` (UUID).
 - **Responses:** `200 OK` with a `SessionView`; `400` malformed id; `404` not
   found / not visible.
@@ -267,7 +311,8 @@ curl -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/sessions/f4e2c0a1-…"
 Asynchronous: returns `202` immediately (for both a real transition and an
 idempotent no-op); keep polling `GET` until the status reaches `stopped`.
 
-- **Permission:** **Write** on the session — owner, org Member/Admin, admin scope.
+- **Permission:** `fkst:session:stop`, then **Write** on the session — owner, org
+  Member/Admin, or the `fkst:admin` permission.
 - **Path parameters:** `id` (UUID).
 - **Responses:** `202 Accepted` with `{ "status": "stopping" }`; `400` malformed
   id; `403` not permitted; `404` not found.
@@ -317,9 +362,10 @@ editable in any status.
 
 ### `POST /api/v1/goals` — create a goal
 
-- **Permission:** any authenticated caller. With `org_id`, you must be an org
+- **Permission:** `fkst:goal:create`. With `org_id`, you must be an org
   Member/Admin. Every listed package must be one you can **use**.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+- **Headers:** `Content-Type: application/json` (the bearer goes to the NyxID
+  proxy, not to fkst-hosted directly).
 
 **Request body**
 
@@ -350,7 +396,7 @@ curl -X POST "$FKST_API/api/v1/goals" \
 
 ### `GET /api/v1/goals` — list goals
 
-- **Permission:** authenticated. Returns goals you own plus goals in your orgs.
+- **Permission:** `fkst:goal:read`. Returns goals you own plus goals in your orgs.
 - **Query parameters**
 
   | Param | Type | Notes |
@@ -369,7 +415,8 @@ curl -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/goals?status=not_starte
 
 ### `GET /api/v1/goals/{id}` — fetch a goal
 
-- **Permission:** **Read** — owner, org member (any role), admin scope.
+- **Permission:** `fkst:goal:read`, then **Read** — owner, org member (any role),
+  or the `fkst:admin` permission.
 - **Path parameters:** `id` (UUID).
 - **Responses:** `200 OK` with a `GoalView`; `400` malformed id; `404` not found.
 
@@ -379,8 +426,9 @@ curl -H "Authorization: Bearer $TOKEN" "$FKST_API/api/v1/goals?status=not_starte
 
 Partial update; absent fields are unchanged.
 
-- **Permission:** **Write** — owner, org Member/Admin, admin scope.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+- **Permission:** `fkst:goal:update`, then **Write** — owner, org Member/Admin,
+  or the `fkst:admin` permission.
+- **Headers:** `Content-Type: application/json`.
 
 **Request body** (all optional)
 
@@ -406,7 +454,8 @@ curl -X PATCH "$FKST_API/api/v1/goals/a1b2…" \
 
 ### `DELETE /api/v1/goals/{id}` — delete a goal
 
-- **Permission:** **Manage** — owner, org Admin, admin scope.
+- **Permission:** `fkst:goal:delete`, then **Manage** — owner, org Admin, or the
+  `fkst:admin` permission.
 - **Responses:** `204 No Content`; `403` not permitted; `404` not found; `409`
   the goal is not in a mutable status (stop it first).
 
@@ -416,9 +465,9 @@ curl -X PATCH "$FKST_API/api/v1/goals/a1b2…" \
 
 Spawns a new session for the goal against a GitHub repository.
 
-- **Permission:** the goal **owner**, an org **Member/Admin** (not Viewer) for
-  org goals, or admin scope.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+- **Permission:** `fkst:goal:trigger`, then the goal **owner**, an org
+  **Member/Admin** (not Viewer) for org goals, or the `fkst:admin` permission.
+- **Headers:** `Content-Type: application/json`.
 - **Requires:** the fkst-hosted GitHub App installed on the target repo (else
   `422`). `create_new` mode also requires NyxID's credential proxy.
 
@@ -477,9 +526,10 @@ Browse the Ornn **skills / skillsets** you may attach to a session via
 [`ornn_skills`](#pinning-ornn-skills), and list their concrete versions for a
 picker. Every call forwards **your** NyxID token to Ornn through the credential
 proxy, so the results honor your private / shared / public / system visibility —
-**fkst-hosted applies no permission logic of its own**; Ornn's result (including
-any `4xx`/`5xx`) is passed through as the authoritative answer. When NyxID is not
-configured these endpoints answer `503`. All endpoints require authentication.
+beyond the `fkst:catalog:read` action gate, **fkst-hosted applies no object
+permission logic of its own**; Ornn's result (including any `4xx`/`5xx`) is passed
+through as the authoritative answer. When NyxID is not configured these endpoints
+answer `503`. All endpoints require the `fkst:catalog:read` permission.
 
 ### `GET /api/v1/catalog/skills` · `GET /api/v1/catalog/skillsets`
 
@@ -587,7 +637,7 @@ a `Retry-After` header; any other `5xx` → `502 upstream_error`.
 
 ### `GET /api/v1/github/accounts` — list linked accounts
 
-- **Permission:** authenticated.
+- **Permission:** `fkst:github:read`.
 - **Responses:** `200 OK` with an array of `AccountView`; `503` if the credential
   proxy is unavailable.
 
@@ -603,6 +653,8 @@ Queries each linked account concurrently and merges the results. **Always `200`*
 once your accounts resolve — a slow/failing/rate-limited account is reported in
 its own `error` block instead of failing the whole request. Zero linked accounts
 yields `{ "results": [] }`.
+
+- **Permission:** `fkst:github:read`.
 
 **Query parameters**
 
@@ -639,8 +691,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ### `POST /api/v1/github/repos/{owner}/{repo}/issues` — create an issue
 
-- **Permission:** authenticated (acts under your linked GitHub account).
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+- **Permission:** `fkst:github:write` (acts under your linked GitHub account).
+- **Headers:** `Content-Type: application/json`.
 - **Path parameters:** `owner`, `repo`.
 
 **Request body**
@@ -668,7 +720,7 @@ curl -X POST "$FKST_API/api/v1/github/repos/acme/billing/issues" \
 
 ### `GET /api/v1/github/repos/{owner}/{repo}/issues/{number}` — fetch one issue
 
-- **Permission:** authenticated.
+- **Permission:** `fkst:github:read`.
 - **Path parameters:** `owner`, `repo`, `number` (positive integer).
 - **Query parameters:** `account` (required when several accounts are linked).
 - **Responses:** `200 OK` with an `IssueView` (with `body` populated); `404`;
@@ -685,8 +737,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 Only the fields you supply are changed.
 
-- **Permission:** authenticated.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+- **Permission:** `fkst:github:write`.
+- **Headers:** `Content-Type: application/json`.
 
 **Request body** (all optional): `title`, `body`, `state` (e.g. `open`/`closed`),
 `labels`, `assignees`, `account`.
@@ -703,7 +755,7 @@ curl -X PATCH "$FKST_API/api/v1/github/repos/acme/billing/issues/7" \
 
 ### `GET /api/v1/github/repos/{owner}/{repo}/issues/{number}/comments` — list comments
 
-- **Permission:** authenticated.
+- **Permission:** `fkst:github:read`.
 - **Query parameters:** `account` (when several accounts linked), `page`
   (default `1`), `per_page` (default `30`).
 - **Responses:** `200 OK` with an array of `CommentView`.
@@ -717,8 +769,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ### `POST /api/v1/github/repos/{owner}/{repo}/issues/{number}/comments` — add a comment
 
-- **Permission:** authenticated.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+- **Permission:** `fkst:github:write`.
+- **Headers:** `Content-Type: application/json`.
 
 **Request body**
 
@@ -780,8 +832,7 @@ See [vault limits](#vault-limits) for the value-size and per-scope caps.
 Returns the caller's entries in a scope (key-sorted). **Secret values are never
 included**; variable values are.
 
-- **Permission:** authenticated; returns only your own entries.
-- **Headers:** `Authorization: Bearer …`.
+- **Permission:** `fkst:vault:read`; returns only your own entries.
 
 **Query parameters**
 
@@ -805,9 +856,9 @@ curl -H "Authorization: Bearer $TOKEN" \
 Upsert an entry by `(owner, scope, key)`. A `secret` value is encrypted and
 stored with a masked hint; a `variable` value is stored as plaintext config.
 
-- **Permission:** authenticated. If `org_id` is supplied, the caller must be an
-  **org Member or Admin** (else `403`); the entry is still owned by the caller.
-- **Headers:** `Authorization: Bearer …`, `Content-Type: application/json`.
+- **Permission:** `fkst:vault:write`. If `org_id` is supplied, the caller must be
+  an **org Member or Admin** (else `403`); the entry is still owned by the caller.
+- **Headers:** `Content-Type: application/json`.
 
 **Request body**
 
@@ -849,8 +900,8 @@ curl -X PUT "$FKST_API/api/v1/vault/entries" \
 
 Remove an entry by its UUID.
 
-- **Permission:** authenticated; you must own (or be an org admin of) the entry.
-- **Headers:** `Authorization: Bearer …`.
+- **Permission:** `fkst:vault:delete`; you must also own (or be an org admin of)
+  the entry.
 
 **Responses**
 

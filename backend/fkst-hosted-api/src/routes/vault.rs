@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::auth::AuthContext;
+use crate::authz::permissions::{self, require_permission};
 use crate::authz::{Action, Ownership};
 use crate::error::AppError;
 use crate::routes::extract::AppJson;
@@ -197,6 +198,7 @@ async fn list(
     ctx: AuthContext,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<EntryView>>, AppError> {
+    require_permission(&ctx, permissions::VAULT_READ)?;
     let scope = scope_from_query(&query)?;
     // Read of an owner's own entries: the owner-path authz fast-path always
     // allows it, but route through the authorizer for uniform default-deny.
@@ -235,6 +237,7 @@ async fn upsert(
     ctx: AuthContext,
     AppJson(request): AppJson<UpsertRequest>,
 ) -> Result<Json<EntryView>, AppError> {
+    require_permission(&ctx, permissions::VAULT_WRITE)?;
     let scope = scope_from_body(&request.scope)?;
 
     // If an org is named, require the caller to be an org writer; the entry is
@@ -273,6 +276,7 @@ async fn delete_one(
     ctx: AuthContext,
     Path(id): Path<String>,
 ) -> Result<StatusCode, AppError> {
+    require_permission(&ctx, permissions::VAULT_DELETE)?;
     let uuid = bson::Uuid::parse_str(&id)
         .map_err(|_| AppError::Validation("invalid entry id: must be a UUID".to_string()))?;
 
