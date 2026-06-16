@@ -120,6 +120,10 @@ local function thinking_state_budget_exceeded(state)
   return now() - marker_seconds >= threshold * 60
 end
 
+local function timeout_escalation_due(row, state)
+  return core.liveness_timeout_decision(row, state, now()).action == "escalate"
+end
+
 local function replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event_ts, issue_state)
   local row = core.restart_transition_row(state.state)
   local facts = {
@@ -132,24 +136,15 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
   local state_is_issue_local = issue_state ~= nil
     and issue_state.state == state.state
     and tostring(issue_state.version or "") == tostring(state.version or "")
-  if ((issue.source == "liveness-scan" and state.state == "pr-open") or state.state == "reviewing")
-    and state_is_issue_local
-    and core.liveness_timeout_due(row, state, now()) then
-    local timeout_state = {
-      state = state.state,
-      version = core.next_liveness_timeout_version(row, state),
-      proposal_id = state.proposal_id,
-      stage_rank = state.stage_rank,
-      marker_created_at = state.marker_created_at,
-    }
-    return core.replay_from_table("observe_issue", issue, timeout_state, row, facts)
+  if state_is_issue_local
+    and core.liveness_timeout_due(row, state, now())
+    and (state.state == "thinking"
+      or state.state == "reviewing"
+      or (issue.source == "liveness-scan" and state.state == "pr-open")
+      or timeout_escalation_due(row, state)) then
+    return core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts)
   end
   if observe_replay_states[state.state] and state.state == "thinking" then
-    if state_is_issue_local and core.liveness_timeout_due(row, state, now()) then
-      if core.maybe_timeout_redrive_from_table("observe_issue", issue, state, row, facts) then
-        return true
-      end
-    end
     return core.replay_from_table("observe_issue", issue, state, row, facts)
   end
   if observe_replay_states[state.state]

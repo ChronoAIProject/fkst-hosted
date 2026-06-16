@@ -55,6 +55,11 @@ local function timeout(queue)
     action = "redrive",
     queue = queue,
     escalate_after_attempts = 3,
+    on_escalate = {
+      action = "force-terminate",
+      terminal_state = "blocked",
+      reason = "state-output-obligation-timeout",
+    },
   }
 end
 

@@ -154,6 +154,9 @@ return {
         t.eq(row.on_timeout.action, "redrive")
         t.eq(row.on_timeout.queue, row.driving_queue)
         t.is_true(row.on_timeout.queue ~= "none")
+        t.eq(row.on_timeout.on_escalate.action, "force-terminate")
+        t.eq(row.on_timeout.on_escalate.terminal_state, "blocked")
+        t.eq(row.on_timeout.on_escalate.reason, "state-output-obligation-timeout")
       end
     end
   end,
@@ -233,6 +236,16 @@ return {
     t.eq(#errors, 1)
     t.is_true(errors[1]:find("ready", 1, true) ~= nil)
     t.is_true(errors[1]:find("output_obligation", 1, true) ~= nil)
+  end,
+
+  test_liveness_contract_rejects_non_terminal_without_force_termination = function()
+    local rows = copy_rows(core.restart_transition_table())
+    rows_by_state(rows).ready.on_timeout.on_escalate = nil
+    local errors = core.liveness_contract_errors(rows)
+    t.eq(#errors, 1)
+    t.is_true(errors[1]:find("ready", 1, true) ~= nil)
+    t.is_true(errors[1]:find("force-terminate", 1, true) ~= nil)
+    t.is_true(errors[1]:find("blocked", 1, true) ~= nil)
   end,
 
   test_liveness_timeout_versions_preserve_lineage_and_attempts = function()
