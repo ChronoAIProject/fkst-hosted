@@ -12,7 +12,7 @@ use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
-use fkst_control_plane::goals::{GoalDoc, GoalRepo, GoalStatus, RepoRef, GOALS_COLLECTION};
+use fkst_control_plane::goals::{GoalDoc, GoalIssueStore, GoalStatus, RepoRef};
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
@@ -43,7 +43,7 @@ const MONGO_TAG: &str = "7";
 struct TestApp {
     _container: ContainerAsync<Mongo>,
     router: axum::Router,
-    db: Db,
+    goals: GoalIssueStore,
 }
 
 async fn app() -> TestApp {
@@ -63,7 +63,7 @@ async fn app() -> TestApp {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     // Package validation is now format-only (#115); no PackageRepository needed.
     let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
@@ -75,7 +75,7 @@ async fn app() -> TestApp {
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
-        goals,
+        goals: goals.clone(),
         vault,
         ornn: None,
     })
@@ -83,7 +83,7 @@ async fn app() -> TestApp {
     TestApp {
         _container: container,
         router,
-        db,
+        goals,
     }
 }
 
@@ -163,8 +163,8 @@ async fn delete_path(router: &axum::Router, path: &str) -> (StatusCode, HeaderMa
     drain(response).await
 }
 
-/// Seed a goal doc directly into the goals collection with a given status.
-async fn seed_goal_with_status(db: &Db, status: GoalStatus) -> bson::Uuid {
+/// Seed a goal directly into the in-memory goal store with a given status.
+async fn seed_goal_with_status(goals: &GoalIssueStore, status: GoalStatus) -> bson::Uuid {
     let id = bson::Uuid::new();
     let now = bson::DateTime::now();
     let goal = GoalDoc {
@@ -180,11 +180,7 @@ async fn seed_goal_with_status(db: &Db, status: GoalStatus) -> bson::Uuid {
         created_at: now,
         updated_at: now,
     };
-    db.database
-        .collection::<GoalDoc>(GOALS_COLLECTION)
-        .insert_one(&goal)
-        .await
-        .expect("seed goal");
+    goals.insert(&goal).await.expect("seed goal");
     id
 }
 
@@ -317,7 +313,7 @@ async fn patch_updates_title_anytime_but_packages_conflict_when_running() {
     assert_eq!(patched["title"], "Updated title");
 
     // Seed a goal in running status.
-    let running_id = seed_goal_with_status(&app.db, GoalStatus::Running).await;
+    let running_id = seed_goal_with_status(&app.goals, GoalStatus::Running).await;
 
     // Patch title on running goal — title should be editable in any status.
     let patch = json!({"title": "Title update while running"});
@@ -421,7 +417,7 @@ async fn delete_running_is_409() {
     }
     let app = app().await;
 
-    let running_id = seed_goal_with_status(&app.db, GoalStatus::Running).await;
+    let running_id = seed_goal_with_status(&app.goals, GoalStatus::Running).await;
 
     let (status, _, err_body) =
         delete_path(&app.router, &format!("/api/v1/goals/{running_id}")).await;
@@ -635,23 +631,5 @@ async fn pagination_limit_and_offset() {
     let goals: Vec<Value> = serde_json::from_str(&list_body).expect("parse");
     assert!(goals.len() >= 3);
 }
-
-#[tokio::test]
-async fn goals_indexes_are_idempotent() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
-    let app = app().await;
-
-    // Ensure indexes twice (once in app(), once explicitly) — must not error.
-    let goals = GoalRepo::new(&app.db.database);
-    goals
-        .ensure_indexes()
-        .await
-        .expect("second ensure_indexes must succeed");
-    goals
-        .ensure_indexes()
-        .await
-        .expect("third ensure_indexes must succeed");
-}
+// (Removed `goals_indexes_are_idempotent`: goals are GitHub-Issue + in-memory
+// backed now (#137) — there is no goals collection / index step.)

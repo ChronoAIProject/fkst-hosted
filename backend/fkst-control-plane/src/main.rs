@@ -13,7 +13,7 @@ use fkst_control_plane::distribution::{
     DistributionConfig, Distributor, DriverHost, SelfOnlyHealth,
 };
 use fkst_control_plane::engine::EngineConfig;
-use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::journal::store::MongoProgressStore;
 use fkst_control_plane::journal::JournalConfig;
 use fkst_control_plane::leases::LeaseStore;
@@ -93,13 +93,10 @@ async fn main() -> ExitCode {
     }
     tracing::info!("journal indexes ensured");
 
-    // 4b. Ensure the goals-collection indexes (idempotent; fail-closed on
-    //          error). Goal CRUD and list queries depend on these.
-    let goals = GoalRepo::new(&db.database);
-    if let Err(error) = goals.ensure_indexes().await {
-        tracing::error!(error = %error, "failed to ensure goals indexes");
-        return ExitCode::FAILURE;
-    }
+    // 4b. Goals are now GitHub-Issue + in-memory backed (#137); there is no
+    //     goals collection / index step. The GoalIssueStore is built below,
+    //     after the GitHub App tokens service (it mints the App token to write
+    //     the goal issues).
 
     // 4c. Load the engine configuration (fail-closed: a zero timeout or a
     //     malformed value must never reach a live session).
@@ -286,6 +283,12 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // 5a-bis-pre. Build the goal store (#137): goals are GitHub-Issue +
+    //         in-memory backed. It mints the App installation token to write
+    //         the goal issues; without the App configured it is in-memory only
+    //         (the authoritative read path still works, no GitHub mirror).
+    let goals = GoalIssueStore::new(github_app.clone());
 
     // 5a-ter. Build the vault service (issue #100). The vault is always-on: a
     //         missing OR invalid master-key source is a fail-closed startup

@@ -27,7 +27,7 @@ use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
-use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
@@ -112,7 +112,7 @@ async fn auth_app() -> AuthTestApp {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let auth_mode = AuthMode::Enabled(NyxIdAuthSettings {
         base_url: "https://nyxid.example.test".to_string(),
@@ -155,7 +155,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
@@ -386,7 +386,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         ..Config::default()
     };
     let db = Db::connect(&config).await.expect("connect + ping");
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
     let state = AppState {

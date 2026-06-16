@@ -401,15 +401,7 @@ async fn get_one(
             );
             if let Some(repaired) = state
                 .goals
-                .transition_status(
-                    uuid,
-                    &[goal.status],
-                    doc! {
-                        "status": bson::to_bson(&repair_status).expect("GoalStatus serializes"),
-                        "active_session_id": bson::Bson::Null,
-                        "updated_at": bson::DateTime::now(),
-                    },
-                )
+                .transition_status(uuid, &[goal.status], repair_status, true)
                 .await?
             {
                 goal = repaired;
@@ -458,7 +450,7 @@ async fn update(
         body.package_names.is_some() || body.repo.is_some() || body.clear_repo.is_some();
 
     // Build the `$set` document.
-    let mut set = bson::Document::new();
+    let mut patch = crate::goals::GoalPatch::default();
     let mut needs_mutable_status = false;
 
     if let Some(ref title) = body.title {
@@ -472,7 +464,7 @@ async fn update(
                 trimmed.len()
             )));
         }
-        set.insert("title", trimmed.to_string());
+        patch.title = Some(trimmed.to_string());
     }
 
     if let Some(ref description) = body.description {
@@ -490,10 +482,7 @@ async fn update(
             description_bytes = description.len(),
             "goal description updated"
         );
-        set.insert(
-            "description",
-            bson::to_bson(description).expect("description serializes"),
-        );
+        patch.description = Some(description.clone());
     }
 
     if let Some(ref package_names) = body.package_names {
@@ -529,10 +518,7 @@ async fn update(
                 )));
             }
         }
-        set.insert(
-            "package_names",
-            bson::to_bson(package_names).expect("package_names serializes"),
-        );
+        patch.package_names = Some(package_names.clone());
         needs_mutable_status = true;
     }
 
@@ -548,19 +534,14 @@ async fn update(
                 AppError::Validation(e)
             },
         )?;
-        set.insert(
-            "repo",
-            bson::to_bson(&Some(repo_ref)).expect("repo serializes"),
-        );
+        patch.repo = Some(Some(repo_ref));
         needs_mutable_status = true;
     }
 
     if body.clear_repo == Some(true) {
-        set.insert("repo", bson::Bson::Null);
+        patch.repo = Some(None);
         needs_mutable_status = true;
     }
-
-    set.insert("updated_at", bson::DateTime::now());
 
     // Determine the mutability CAS filter.
     let mutability_filter = if touches_mutable || needs_mutable_status {
@@ -572,7 +553,7 @@ async fn update(
 
     let updated = state
         .goals
-        .patch(uuid, mutability_filter, set)
+        .patch(uuid, mutability_filter, patch)
         .await?
         .ok_or_else(|| {
             // Either not found, or status prevents the mutation.
@@ -610,7 +591,7 @@ async fn delete_one(
 
     let deleted = state
         .goals
-        .delete(uuid, mutable_statuses())
+        .delete(uuid, &mutable_statuses())
         .await?
         .ok_or_else(|| {
             // Goal exists but is in a status that doesn't allow deletion.
@@ -735,15 +716,7 @@ async fn trigger(
             );
             if let Some(repaired) = state
                 .goals
-                .transition_status(
-                    uuid,
-                    &[goal.status],
-                    doc! {
-                        "status": bson::to_bson(&repair_status).expect("GoalStatus serializes"),
-                        "active_session_id": bson::Bson::Null,
-                        "updated_at": bson::DateTime::now(),
-                    },
-                )
+                .transition_status(uuid, &[goal.status], repair_status, true)
                 .await?
             {
                 goal = repaired;

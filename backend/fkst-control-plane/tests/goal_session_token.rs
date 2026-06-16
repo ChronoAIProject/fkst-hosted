@@ -38,7 +38,7 @@ use fkst_control_plane::github_app::api::{
     GithubApi, InstallationId, InstallationToken, InstallationTokenRequest,
 };
 use fkst_control_plane::github_app::{GithubAppConfig, GithubAppTokens};
-use fkst_control_plane::goals::{GoalDoc, GoalRepo, GoalStatus, GOALS_COLLECTION};
+use fkst_control_plane::goals::{GoalDoc, GoalIssueStore, GoalStatus};
 use fkst_control_plane::models::{RepoRef, SessionStatus};
 use fkst_control_plane::sessions::service::GoalTriggerInfo;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
@@ -146,7 +146,7 @@ struct TestCtx {
     _container: ContainerAsync<Mongo>,
     db: Db,
     sessions: SessionService,
-    goals: GoalRepo,
+    goals: GoalIssueStore,
     github_api: Arc<CountingFakeApi>,
 }
 
@@ -185,8 +185,11 @@ async fn ctx() -> TestCtx {
     let github_api = Arc::new(CountingFakeApi::new(7));
     let github_app = GithubAppTokens::with_api(&test_github_config(), github_api.clone())
         .expect("github app tokens service");
-    let goals = GoalRepo::new(&db.database);
-    sessions.enable_goal_support(GoalRepo::new(&db.database), github_app);
+    // One in-memory store shared between the test (seeding goals) and the
+    // sessions service. `GoalIssueStore` is `Arc`-backed, so the clone shares
+    // the same map — seeded goals are visible to `create_for_goal`.
+    let goals = GoalIssueStore::new(None);
+    sessions.enable_goal_support(goals.clone(), github_app);
     sessions.enable_vault(support::test_vault(&db));
 
     TestCtx {
@@ -198,8 +201,9 @@ async fn ctx() -> TestCtx {
     }
 }
 
-/// Insert a NotStarted goal bound to `repo` naming `package`. Returns its id.
-async fn seed_goal(db: &Db, repo: RepoRef, package: &str) -> bson::Uuid {
+/// Insert a NotStarted goal bound to `repo` naming `package` into the
+/// in-memory store. Returns its id. (#137: goals no longer live in Mongo.)
+async fn seed_goal(goals: &GoalIssueStore, repo: RepoRef, package: &str) -> bson::Uuid {
     let id = bson::Uuid::new();
     let now = bson::DateTime::now();
     let goal = GoalDoc {
@@ -215,11 +219,7 @@ async fn seed_goal(db: &Db, repo: RepoRef, package: &str) -> bson::Uuid {
         created_at: now,
         updated_at: now,
     };
-    db.database
-        .collection::<GoalDoc>(GOALS_COLLECTION)
-        .insert_one(&goal)
-        .await
-        .expect("seed goal");
+    goals.insert(&goal).await.expect("seed goal");
     id
 }
 
@@ -264,7 +264,7 @@ async fn goal_session_mints_github_token_at_startup() {
         name: "site".to_string(),
     };
     // No seed_package needed: packages come from the repo clone, not Mongo (#115).
-    let goal_id = seed_goal(&ctx.db, repo.clone(), "goal-pkg").await;
+    let goal_id = seed_goal(&ctx.goals, repo.clone(), "goal-pkg").await;
 
     let result = ctx
         .sessions

@@ -2,25 +2,20 @@
 //!
 //! A *goal* captures the user's intent (a prompt the engine will eventually
 //! work on), the set of fkst packages to run it with, and an optional target
-//! GitHub repo. The full [`GoalStatus`] lifecycle is defined now; only
-//! `NotStarted` is written in this issue — the trigger issue adds writers.
+//! GitHub repo.
 //!
-//! Conventions (load-bearing for downstream queries):
-//! - `_id` is a `bson::Uuid` (Binary subtype 4) — matches the sessions
-//!   collection convention and is query-safe for `find_one({_id})`.
-//! - `Option<T>` fields serialize as explicit BSON `null` (no
-//!   `skip_serializing_if`) — the explicit-null convention for new
-//!   collections.
-//! - Timestamps are `bson::DateTime` (millisecond UTC).
+//! Goals are database-free (#137): the authoritative runtime state is the
+//! controller's in-memory `GoalIssueStore`, mirrored to a GitHub Issue (the
+//! durable, human-visible record). `GoalDoc` is the in-memory shape — `id` /
+//! timestamps stay `bson::Uuid` / `bson::DateTime` as convenient value types
+//! (no longer a Mongo serialization contract), and the sensitive `description`
+//! (the engine prompt) is held ONLY in memory, never written to GitHub.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-
-/// MongoDB collection holding goal documents.
-pub const GOALS_COLLECTION: &str = "goals";
 
 /// Maximum number of characters in a goal title (inclusive).
 pub const MAX_GOAL_TITLE_CHARS: usize = 200;

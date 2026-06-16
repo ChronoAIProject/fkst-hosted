@@ -13,13 +13,12 @@
 pub mod issue_store;
 pub mod marker;
 pub mod model;
-pub mod repo;
 pub mod repo_create;
 mod repo_create_classify;
 
+pub use issue_store::{GoalIssueStore, GoalPatch};
 pub use model::{
-    validate_goal_fields, GoalDoc, GoalStatus, RepoRef, GOALS_COLLECTION,
-    MAX_GOAL_DESCRIPTION_BYTES, MAX_GOAL_PACKAGES, MAX_GOAL_TITLE_CHARS, MAX_PACKAGE_NAME_BYTES,
+    validate_goal_fields, GoalDoc, GoalStatus, RepoRef, MAX_GOAL_DESCRIPTION_BYTES,
+    MAX_GOAL_PACKAGES, MAX_GOAL_TITLE_CHARS, MAX_PACKAGE_NAME_BYTES,
 };
-pub use repo::GoalRepo;
 pub use repo_create::{CreateRepoError, CreateRepoSpec};

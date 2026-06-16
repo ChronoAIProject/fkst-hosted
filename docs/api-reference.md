@@ -339,6 +339,15 @@ Packages and the repo can only be changed while the goal is in a **mutable
 status**: `not_started`, `stopped`, or `failed`. Title and description are
 editable in any status.
 
+> **Durable representation.** A goal with a target repo is mirrored as a
+> **GitHub Issue** on that repo, labelled `fkst-hosted:goal` and
+> `status:<status>` (the label tracks the lifecycle above). The issue body
+> carries only a non-sensitive summary (title, package count, repo slug) — the
+> **prompt/description is never written to GitHub**; it lives only in controller
+> memory, which is authoritative for reads. A goal created without a repo is
+> held in memory until a repo is set (at trigger time), which materialises the
+> issue. Deleting a goal **closes** its issue (GitHub issues cannot be deleted).
+
 **Data shape**
 
 ```jsonc

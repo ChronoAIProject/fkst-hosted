@@ -47,7 +47,7 @@ use crate::engine::{
 };
 use crate::error::AppError;
 use crate::github_app::GithubAppTokens;
-use crate::goals::{GoalRepo, GoalStatus, RepoRef};
+use crate::goals::{GoalIssueStore, GoalStatus, RepoRef};
 use crate::journal::model::LogRef;
 use crate::journal::parse::{parse_raised_line, ParsedLine};
 use crate::journal::store::MongoProgressStore;
@@ -258,7 +258,7 @@ struct JournalSetup {
 
 /// Goal support wiring shared by every driver this service spawns.
 struct GoalSupport {
-    goals: GoalRepo,
+    goals: GoalIssueStore,
     github_app: GithubAppTokens,
 }
 
@@ -353,7 +353,7 @@ impl SessionService {
     /// sync writes and token refresh inside the driver loop. Call once at
     /// startup, after construction but before any goal-triggered session is
     /// created.
-    pub fn enable_goal_support(&self, goals: GoalRepo, github_app: GithubAppTokens) {
+    pub fn enable_goal_support(&self, goals: GoalIssueStore, github_app: GithubAppTokens) {
         if self
             .inner
             .goal_support
@@ -454,7 +454,7 @@ impl SessionService {
     /// prior status.
     pub async fn create_for_goal(
         &self,
-        goals: &GoalRepo,
+        goals: &GoalIssueStore,
         trigger: GoalTriggerInfo,
         // The triggering user's forwarded access token, or `None` in "headers
         // mode" (no bearer forwarded by the proxy). When `None`, the driver
@@ -469,16 +469,16 @@ impl SessionService {
             GoalStatus::Stopped,
             GoalStatus::Failed,
         ];
-        let repo_bson = bson::to_bson(&Some(trigger.repo.clone())).expect("RepoRef serializes");
-        let cas_set = doc! {
-            "status": bson::to_bson(&GoalStatus::Triggered).expect("GoalStatus serializes"),
-            "repo": repo_bson,
-            "updated_at": now,
-        };
-        let _goal_after_cas = goals
-            .transition_status(trigger.goal_id, &triggerable, cas_set)
+        // Step 4: trigger CAS — single-trigger atomicity is the controller
+        // claim's job (#135); this only reflects the status label (#137).
+        goals
+            .transition_status(trigger.goal_id, &triggerable, GoalStatus::Triggered, false)
             .await?
             .ok_or_else(|| AppError::Conflict("goal already triggered or running".to_string()))?;
+        // Set the (possibly newly-created) repo on the goal + materialize/refresh
+        // its issue. Best-effort: the in-memory repo is set regardless; the issue
+        // is the durable mirror (#137).
+        let _ = goals.set_repo(trigger.goal_id, &trigger.repo).await;
 
         // Step 5: Insert SessionDoc (pending).
         let first_package = trigger.package_names.first().cloned().unwrap_or_default();
@@ -517,10 +517,8 @@ impl SessionService {
                 .transition_status(
                     trigger.goal_id,
                     &[GoalStatus::Triggered],
-                    doc! {
-                        "status": bson::to_bson(&trigger.prior_status).expect("GoalStatus serializes"),
-                        "updated_at": bson::DateTime::now(),
-                    },
+                    trigger.prior_status,
+                    true,
                 )
                 .await;
             return Err(insert_err);
@@ -575,10 +573,8 @@ impl SessionService {
                         .transition_status(
                             trigger.goal_id,
                             &[GoalStatus::Triggered],
-                            doc! {
-                                "status": bson::to_bson(&trigger.prior_status).expect("GoalStatus serializes"),
-                                "updated_at": bson::DateTime::now(),
-                            },
+                            trigger.prior_status,
+                            true,
                         )
                         .await;
                     return Err(AppError::Conflict(
@@ -636,10 +632,8 @@ impl SessionService {
                         .transition_status(
                             trigger.goal_id,
                             &[GoalStatus::Triggered],
-                            doc! {
-                                "status": bson::to_bson(&trigger.prior_status).expect("GoalStatus serializes"),
-                                "updated_at": bson::DateTime::now(),
-                            },
+                            trigger.prior_status,
+                            true,
                         )
                         .await;
                     return Err(AppError::Conflict(
@@ -2212,29 +2206,28 @@ async fn goal_status_sync(
         return;
     };
     let goals = &gs.goals;
-    let from_bson: Vec<bson::Bson> = from_statuses
-        .iter()
-        .map(|s| bson::to_bson(s).expect("GoalStatus serializes"))
-        .collect();
-    let filter = doc! {
-        "_id": goal_id,
-        "status": { "$in": from_bson },
-        "active_session_id": session_id,
-    };
-    let update = doc! {
-        "$set": {
-            "status": bson::to_bson(&target).expect("GoalStatus serializes"),
-            "updated_at": bson::DateTime::now(),
-        }
-    };
-    match goals.transition_raw(filter, update).await {
-        Ok(true) => tracing::info!(
+    // Guard (replacing the old `active_session_id == session_id` CAS pin): only
+    // sync if this session is still the goal's active session, so a newer
+    // trigger is never clobbered. The active link lives in controller memory.
+    if goals.active_session(goal_id).await != Some(session_id) {
+        tracing::debug!(
+            goal_id = %goal_id,
+            session_id = %session_id,
+            "goal-status sync skipped (not the goal's active session)"
+        );
+        return;
+    }
+    match goals
+        .transition_status(goal_id, from_statuses, target, false)
+        .await
+    {
+        Ok(Some(_)) => tracing::info!(
             goal_id = %goal_id,
             session_id = %session_id,
             target = ?target,
             "goal-status sync applied"
         ),
-        Ok(false) => tracing::debug!(
+        Ok(None) => tracing::debug!(
             goal_id = %goal_id,
             session_id = %session_id,
             "goal-status sync CAS missed (concurrent change)"

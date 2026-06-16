@@ -28,7 +28,7 @@ use fkst_control_plane::github_app::api::{GithubApi, InstallationToken, Installa
 use fkst_control_plane::github_app::{
     GithubAppConfig, GithubAppTokens, InstallationId, MongoInstallationStore,
 };
-use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::models::{
     AccountType, GithubInstallationDoc, RepoRef, RepositorySelection, SessionStatus,
 };
@@ -276,7 +276,7 @@ async fn resolve_reads_persistence_before_api_and_survives_restart() {
 /// persistence + eviction + session-fail path.
 fn router_with_webhook(db: Db) -> (axum::Router, SessionRepo) {
     let session_repo = SessionRepo::new(&db);
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(session_repo.clone(), EngineConfig::default());
     let github_app = GithubAppTokens::with_api_and_store(
         &app_config(Some(WEBHOOK_SECRET)),
