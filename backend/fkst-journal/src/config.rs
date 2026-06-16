@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use secrecy::SecretString;
 
-use crate::journal::github::DEFAULT_API_BASE;
+use crate::github::DEFAULT_API_BASE;
 
 /// Journaling configuration (see the `FKST_JOURNAL_*` / `FKST_RAISED_*` env
 /// table; constructed from the app `Config` in production and directly in
@@ -96,39 +96,11 @@ pub fn default_identity_pointers() -> Vec<String> {
         .collect()
 }
 
-impl JournalConfig {
-    /// Build the journaling config from the loaded application [`Config`]
-    /// (`FKST_JOURNAL_*` / `FKST_RAISED_*` / `GITHUB_TOKEN`). The pointer
-    /// list is parsed from its comma-separated env form; blank entries are
-    /// dropped and an empty result falls back to the default projection.
-    pub fn from_config(config: &crate::config::Config) -> Self {
-        let pointers: Vec<String> = config
-            .raised_identity_pointers
-            .split(',')
-            .map(|pointer| pointer.trim().to_string())
-            .filter(|pointer| !pointer.is_empty())
-            .collect();
-        Self {
-            flush_interval: Duration::from_millis(config.journal_flush_interval_ms),
-            flush_max_batch: config.journal_flush_max_batch,
-            github_enabled: config.journal_github_enabled,
-            issue_comments: config.journal_issue_comments,
-            activity_comment_enabled: config.journal_activity_comment_enabled,
-            cas_max_retries: config.journal_cas_max_retries,
-            bootstrap_read_retries: config.journal_bootstrap_read_retries,
-            github_branch: config.journal_github_branch.clone(),
-            github_repo: config.journal_github_repo.clone(),
-            github_api_base: DEFAULT_API_BASE.to_string(),
-            identity_pointers: if pointers.is_empty() {
-                default_identity_pointers()
-            } else {
-                pointers
-            },
-            max_line_bytes: config.raised_max_line_bytes,
-            github_token: config.github_token.clone(),
-        }
-    }
-}
+// `JournalConfig::from_config(&crate::config::Config)` lived here before the
+// #151 extraction. fkst-journal can no longer see the control-plane's `Config`,
+// so the same mapping now lives in the control-plane as the free fn
+// `journal_config_from_app` (the only unavoidable decoupling of this otherwise
+// pure move).
 
 /// Identity of the session this journaler writes for.
 #[derive(Debug, Clone)]

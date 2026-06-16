@@ -8,11 +8,11 @@ use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::journal::config::{default_identity_pointers, JournalConfig};
-use crate::journal::keys::idem_key;
-use crate::journal::model::{CompletedEntry, ProgressRecord};
-use crate::journal::test_support::{contents_body, ctx, github_cfg, raised};
-use crate::journal::{FlushOutcome, Journaler};
+use crate::config::{default_identity_pointers, JournalConfig};
+use crate::keys::idem_key;
+use crate::model::{CompletedEntry, ProgressRecord};
+use crate::test_support::{contents_body, ctx, github_cfg, raised};
+use crate::{FlushOutcome, Journaler};
 
 fn pointers() -> Vec<String> {
     default_identity_pointers()

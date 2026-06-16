@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::journal::model::LogRef;
+use crate::model::LogRef;
 
 /// A session lifecycle transition (mirrors `sessions.status` plus the
 /// journal-only `malformed_raised` / `log_watermark` anomalies).

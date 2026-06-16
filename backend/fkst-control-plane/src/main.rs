@@ -14,7 +14,7 @@ use fkst_control_plane::distribution::{
 };
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
-use fkst_control_plane::journal::JournalConfig;
+use fkst_control_plane::journal_config::journal_config_from_app;
 use fkst_control_plane::leases::LeaseStore;
 use fkst_control_plane::nyxid::NyxIdClient;
 use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
@@ -153,7 +153,7 @@ async fn main() -> ExitCode {
     // Session-progress journaling (issue #25): the committed GitHub file is
     // the sole machine-truth (#139). GitHub sync per the FKST_JOURNAL_* config
     // (absent repo/token degrades to no-durable-floor with a warn).
-    sessions.enable_journaling(JournalConfig::from_config(&config));
+    sessions.enable_journaling(journal_config_from_app(&config));
 
     match distributor.fail_orphans_at_boot().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),

@@ -5,9 +5,9 @@
 use secrecy::SecretString;
 use serde_json::json;
 
-use crate::journal::config::JournalConfig;
-use crate::journal::model::{CompletedEntry, ProgressRecord};
-use crate::journal::{ProgressSignal, SessionCtx};
+use crate::config::JournalConfig;
+use crate::model::{CompletedEntry, ProgressRecord};
+use crate::{ProgressSignal, SessionCtx};
 
 pub(crate) fn ctx(token: i64) -> SessionCtx {
     SessionCtx {

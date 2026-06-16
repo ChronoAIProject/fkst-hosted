@@ -9,10 +9,10 @@ use serde_json::json;
 use wiremock::matchers::{body_partial_json, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::journal::config::JournalConfig;
-use crate::journal::model::ProgressRecord;
-use crate::journal::test_support::{contents_body, ctx, github_cfg, mongo_only_cfg, raised};
-use crate::journal::{FlushOutcome, JournalError, Journaler};
+use crate::config::JournalConfig;
+use crate::model::ProgressRecord;
+use crate::test_support::{contents_body, ctx, github_cfg, mongo_only_cfg, raised};
+use crate::{FlushOutcome, JournalError, Journaler};
 
 // ---- journaler: flush --------------------------------------------------------------
 
@@ -52,7 +52,7 @@ async fn flush_is_debounced_and_force_creates_the_remote_file() {
 async fn flush_merges_with_the_remote_record_and_sends_the_prior_sha() {
     let server = MockServer::start().await;
     let mut remote = ProgressRecord::new("ignored", "demo", "fp", "t0".to_string());
-    remote.completed = vec![crate::journal::test_support::completed(
+    remote.completed = vec![crate::test_support::completed(
         "remote-key",
         "2026-06-09T00:00:00Z",
     )];

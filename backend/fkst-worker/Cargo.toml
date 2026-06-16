@@ -28,6 +28,11 @@ fkst-shared = { path = "../fkst-shared" }
 # links neither `mongodb` nor `fkst-control-plane`, so the worker stays
 # database-free even once it drives the engine.
 fkst-engine = { path = "../fkst-engine" }
+# Session-progress journaling (the GitHub progress record). Declared now so the
+# worker can journal RAISED events direct to GitHub in the next increment (#151);
+# `fkst-journal` links neither `mongodb` nor `fkst-control-plane`, so the worker
+# stays database-free even once it journals. Not yet wired into worker code.
+fkst-journal = { path = "../fkst-journal" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "time", "sync"] }
 tokio-util = "0.7"
 tracing = "0.1"

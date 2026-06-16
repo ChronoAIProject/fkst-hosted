@@ -8,11 +8,11 @@
 
 use std::time::Duration;
 
-use crate::journal::activity::render_activity;
-use crate::journal::github::{FileSha, RemoteRecord};
-use crate::journal::merge::{merge_record, now_rfc3339, HeadPointers};
-use crate::journal::model::{ProgressRecord, WriterEntry};
-use crate::journal::{FlushOutcome, JournalError, Journaler, SkipSet};
+use crate::activity::render_activity;
+use crate::github::{FileSha, RemoteRecord};
+use crate::merge::{merge_record, now_rfc3339, HeadPointers};
+use crate::model::{ProgressRecord, WriterEntry};
+use crate::{FlushOutcome, JournalError, Journaler, SkipSet};
 
 impl Journaler {
     /// Redo bootstrap: GET the committed progress record and build the
@@ -461,7 +461,7 @@ impl Journaler {
 
 // The journaler tests are split across sibling files (declared via `#[path]`)
 // so every `journal/*.rs` stays under 500 lines (#139). All three share the
-// `crate::journal::test_support` fixtures and see the crate-internal
+// `crate::test_support` fixtures and see the crate-internal
 // `Journaler` fields.
 #[cfg(test)]
 #[path = "flush_mech_tests.rs"]

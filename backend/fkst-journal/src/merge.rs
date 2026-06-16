@@ -4,9 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::journal::model::{
-    CompletedEntry, LifecycleEntry, ProgressRecord, WriterEntry, UNVERIFIED_SHA,
-};
+use crate::model::{CompletedEntry, LifecycleEntry, ProgressRecord, WriterEntry, UNVERIFIED_SHA};
 
 /// The writer's current run-head pointers, folded through [`merge_record`] so
 /// they survive the CAS-merge inside the committed file (#139). A non-None
