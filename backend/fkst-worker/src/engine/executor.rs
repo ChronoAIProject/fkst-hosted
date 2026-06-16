@@ -35,23 +35,57 @@ use super::{ClonedHandle, Cloner, RealCloner};
 const CODEX_HOME_MODE: u32 = 0o700;
 const CODEX_CONFIG_MODE: u32 = 0o600;
 
+/// The on-disk guards the worker owns for a session's lifetime. Dropping it
+/// removes the clone working tree (and the transient clone credential dir) and
+/// the CODEX_HOME dir; the engine itself is stopped explicitly (the supervise
+/// loop), never on drop. Held by the supervise task so the dirs outlive the
+/// engine — the worker-owned mirror of the driver's `_clone_guard` /
+/// `_codex_home_guard`.
+#[derive(Debug)]
+pub struct SessionGuards {
+    /// Held for the session lifetime; dropping it removes the clone working tree
+    /// and the transient clone credential dir (mirrors `_clone_guard`).
+    _clone: ClonedHandle,
+    /// The per-session CODEX_HOME dir guard, `Some` only when a CODEX_HOME was
+    /// rendered (config and/or ornn present). Dropping it removes the dir
+    /// (mirrors `_codex_home_guard`).
+    _codex_home: Option<TempDir>,
+}
+
+impl SessionGuards {
+    /// No guards — the re-adopt path: an adopted engine's dirs were created by
+    /// the DEAD worker (there is no `TempDir` to re-wrap), so its `runtime_dir` /
+    /// package dirs are cleaned explicitly by `RunningSession::stop` instead.
+    pub fn none() -> Self {
+        Self {
+            _clone: ClonedHandle::new(std::path::PathBuf::new(), Vec::new(), Box::new(())),
+            _codex_home: None,
+        }
+    }
+}
+
 /// A spawned, running engine plus the on-disk guards the worker owns for the
 /// session's lifetime. Dropping it removes the clone working tree and the
 /// CODEX_HOME dir; the engine itself is stopped explicitly later (the supervise
-/// increment), never on drop. `running` is `pub` so the caller can register it
-/// and (later) supervise it.
+/// loop), never on drop. `running` is `pub` so the caller can register it and
+/// supervise it; [`Self::into_parts`] hands the running engine + its guards to
+/// the supervise task.
 #[derive(Debug)]
 pub struct ExecutedSession {
     /// The live engine handle (`SessionRunner::start_with_spec` output).
     pub running: RunningSession,
-    /// Held for the session lifetime; dropping it removes the clone working tree
-    /// and the transient clone credential dir (mirrors the driver's
-    /// `_clone_guard`).
-    _clone: ClonedHandle,
-    /// The per-session CODEX_HOME dir guard, `Some` only when a CODEX_HOME was
-    /// rendered (config and/or ornn present). Dropping it removes the dir
-    /// (mirrors the driver's `_codex_home_guard`).
-    _codex_home: Option<TempDir>,
+    /// The on-disk guards (clone tree + CODEX_HOME), moved into the supervise
+    /// task so the dirs outlive the engine.
+    guards: SessionGuards,
+}
+
+impl ExecutedSession {
+    /// Split into the running engine and its on-disk guards, so the supervise
+    /// task can own both (it `&mut`-drives the engine and holds the guards for
+    /// the dirs' lifetime).
+    pub fn into_parts(self) -> (RunningSession, SessionGuards) {
+        (self.running, self.guards)
+    }
 }
 
 /// Failure modes of [`execute_dispatch`]. Each wraps the underlying domain error
@@ -182,8 +216,10 @@ pub(crate) async fn execute_dispatch_with(
 
     Ok(ExecutedSession {
         running,
-        _clone: cloned,
-        _codex_home: codex_home,
+        guards: SessionGuards {
+            _clone: cloned,
+            _codex_home: codex_home,
+        },
     })
 }
 

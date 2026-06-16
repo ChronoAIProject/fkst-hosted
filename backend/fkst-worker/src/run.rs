@@ -6,7 +6,7 @@
 
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
@@ -16,6 +16,11 @@ use fkst_shared::protocol::LifecycleState;
 use crate::agent::WorkerAgent;
 use crate::config::WorkerConfig;
 use crate::server::{health_router, shutdown_signal};
+
+/// Minimum age a stray runtime dir must reach before the re-adopt scan reaps it,
+/// so a dir created the same instant a sibling worker is mid-spawn is never
+/// deleted out from under it. The engine's stop grace is the natural lower bound.
+const READOPT_MIN_AGE: Duration = Duration::from_secs(60);
 
 /// Run the worker to completion. Returns FAILURE only on a fatal startup
 /// problem (bad secret / incompatible protocol / un-bindable health port).
@@ -31,6 +36,14 @@ pub async fn run_worker(config: WorkerConfig) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // Re-adopt any live engines this worker left running across a restart, BEFORE
+    // the steady pull/heartbeat loop, so the heartbeat's first `running_sessions`
+    // already reflects them. Each adopted engine is supervised with a PARKED
+    // refresh servicer (it must re-establish a live fence from the controller
+    // before it may mint — see `WorkerAgent::scan_and_readopt`). Dormant in prod
+    // until activation: no engines exist to adopt, so this is a no-op scan.
+    agent.scan_and_readopt(READOPT_MIN_AGE, SystemTime::now());
 
     let cancel = CancellationToken::new();
 

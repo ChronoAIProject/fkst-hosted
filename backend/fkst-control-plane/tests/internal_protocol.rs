@@ -234,14 +234,16 @@ async fn worker_agent_register_and_heartbeat_against_in_process_controller() {
         axum::serve(listener, router).await.unwrap();
     });
 
-    // Point a REAL WorkerAgent at it.
-    let agent = fkst_worker::WorkerAgent::new(
+    // Point a REAL WorkerAgent at it. `heartbeat` takes `&Arc<Self>` (a dispatch
+    // spawns a supervise loop that holds an `Arc<WorkerAgent>`), so the agent is
+    // an `Arc`; `Arc` derefs to `WorkerAgent` for the `&self` methods.
+    let agent = Arc::new(fkst_worker::WorkerAgent::new(
         format!("http://{addr}"),
         SecretString::from(TOKEN.to_string()),
         "w-agent".to_string(),
         4,
         "/tmp/e".to_string(),
-    );
+    ));
 
     let reg = agent.register().await.expect("register");
     assert!(reg.accepted);

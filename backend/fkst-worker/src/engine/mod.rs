@@ -21,6 +21,11 @@
 //! engine spawn are unchanged.
 
 pub mod executor;
+pub mod refresh;
+pub mod supervise;
+
+#[cfg(test)]
+pub mod supervise_test_support;
 
 use std::any::Any;
 use std::path::{Path, PathBuf};

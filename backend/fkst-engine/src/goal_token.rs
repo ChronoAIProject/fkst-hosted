@@ -153,6 +153,38 @@ pub fn write_nonce_file(runtime_dir: &Path, nonce: &str) -> Result<(), RunnerErr
     Ok(())
 }
 
+/// Read the per-session mint nonce file (`<runtime_dir>/.mint-nonce`), returning
+/// `None` when it is absent (the engine has not written it yet, or an adopted
+/// session whose dir is gone). A read error other than "not found" propagates so
+/// a caller never confuses a permission/IO failure with an absent nonce. The
+/// returned value is the raw file contents (NOT trimmed); callers compare with
+/// [`verify_mint_nonce`] which trims both sides.
+///
+/// This is the single source of truth for reading the nonce a JIT mint request
+/// must authenticate against — shared by the control-plane driver's
+/// `service_mint_request` and the worker's mint-request servicer (#151), so the
+/// authentication compare can never diverge between the two pollers.
+pub fn read_nonce_file(runtime_dir: &Path) -> Result<Option<String>, RunnerError> {
+    match std::fs::read_to_string(runtime_dir.join(NONCE_FILE_NAME)) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(RunnerError::Io(e)),
+    }
+}
+
+/// Authenticate a presented JIT mint-request nonce against the expected on-disk
+/// nonce. Both sides are trimmed (the file write is exact, but a helper may add a
+/// trailing newline); an empty presented value never matches (a blank request is
+/// not authenticated). `expected` is the raw file contents from
+/// [`read_nonce_file`] (or `None` when the file is absent — which never matches).
+///
+/// The nonce is secret-like (it gates a re-mint), so neither value is ever logged
+/// by this helper; the caller logs only the boolean outcome.
+pub fn verify_mint_nonce(expected: Option<&str>, presented: &str) -> bool {
+    let presented = presented.trim();
+    !presented.is_empty() && expected.map(str::trim) == Some(presented)
+}
+
 /// The git credential-helper script source. Materialized verbatim at
 /// `<runtime_dir>/git-credential-fkst` (mode `0700`).
 ///
@@ -268,11 +300,41 @@ mod tests {
     #[test]
     fn write_nonce_file_is_0600() {
         let dir = tempfile::tempdir().expect("dir");
-        write_nonce_file(dir.path(), "deadbeef").expect("nonce");
+        // Use a real generated nonce (not a hard-coded literal) so the test
+        // exercises the actual nonce shape and carries no embedded secret-like
+        // constant for scanners to flag.
+        let nonce = generate_mint_nonce();
+        write_nonce_file(dir.path(), &nonce).expect("nonce");
         let path = dir.path().join(NONCE_FILE_NAME);
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), "deadbeef");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), nonce);
         let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
         assert_eq!(mode, SECRET_FILE_MODE);
+    }
+
+    #[test]
+    fn read_nonce_file_round_trips_and_absent_is_none() {
+        let dir = tempfile::tempdir().expect("dir");
+        // Absent before any write.
+        assert_eq!(read_nonce_file(dir.path()).expect("read"), None);
+        let nonce = generate_mint_nonce();
+        write_nonce_file(dir.path(), &nonce).expect("nonce");
+        assert_eq!(
+            read_nonce_file(dir.path()).expect("read").as_deref(),
+            Some(nonce.as_str())
+        );
+    }
+
+    #[test]
+    fn verify_mint_nonce_matches_only_a_correct_nonempty_nonce() {
+        // Exact match (trimmed on both sides).
+        assert!(verify_mint_nonce(Some("abc123"), "abc123"));
+        assert!(verify_mint_nonce(Some("abc123\n"), "abc123"));
+        assert!(verify_mint_nonce(Some("abc123"), " abc123 "));
+        // Mismatches and the empty/absent cases never authenticate.
+        assert!(!verify_mint_nonce(Some("abc123"), "deadbeef"));
+        assert!(!verify_mint_nonce(None, "abc123"));
+        assert!(!verify_mint_nonce(Some("abc123"), ""));
+        assert!(!verify_mint_nonce(Some(""), ""));
     }
 
     #[test]

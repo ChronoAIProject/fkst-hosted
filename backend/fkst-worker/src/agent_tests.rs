@@ -7,14 +7,18 @@ use super::*;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn agent(uri: String) -> WorkerAgent {
-    WorkerAgent::new(
+/// `heartbeat` takes `&Arc<Self>` (a dispatch spawns a supervise loop holding an
+/// `Arc<WorkerAgent>`), so the test agent is an `Arc`; `Arc` derefs to
+/// `WorkerAgent` so the `&self` methods (`register`, `running_session_ids`, …)
+/// still resolve through it.
+fn agent(uri: String) -> Arc<WorkerAgent> {
+    Arc::new(WorkerAgent::new(
         uri,
         SecretString::from("tok".to_string()),
         "w1".into(),
         4,
         "/tmp/e".into(),
-    )
+    ))
 }
 
 #[tokio::test]
@@ -88,7 +92,7 @@ async fn heartbeat_releases_on_stop_session_control() {
 #[tokio::test]
 async fn heartbeat_swallows_a_failing_dispatch_and_stays_up() {
     use fkst_shared::models::RepoRef;
-    use fkst_shared::protocol::{CloneSpec, DispatchGoal};
+    use fkst_shared::protocol::{CloneSpec, DispatchGoal, ResolvedDispatch};
 
     let dispatch = ResolvedDispatch {
         session_id: "s-dispatch".into(),
