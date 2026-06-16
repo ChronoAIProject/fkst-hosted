@@ -132,26 +132,50 @@ resolve_phys_path() {
   printf '%s/%s\n' "$dir" "$(basename "$p")"
 }
 
+# Warn — without git-pulling (doctrine: scripts/run.sh never pulls; only dogfood.sh
+# sync does) — when the fkst-substrate checkout the BIN traces to is behind its
+# origin/dev, so a silently-stale BIN cannot masquerade as fresh. The freshness
+# build below builds from the checkout's CURRENT source; if that checkout is behind
+# origin/dev, the resulting BIN is missing newer engine primitives (e.g. exec_argv)
+# and the migrated gh/git argv paths fail under it. Local refs only (no network), so
+# this is a best-effort hint that surfaces a behind checkout after any prior fetch.
+warn_if_substrate_behind() {
+  local substrate="$1" behind
+  behind="$(git -C "$substrate" rev-list --count HEAD..origin/dev 2>/dev/null)" || behind=""
+  if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
+    echo "warning: fkst-substrate checkout '$substrate' is $behind commit(s) behind its origin/dev;" >&2
+    echo "         the BIN may be stale (missing newer engine primitives). scripts/run.sh builds from the" >&2
+    echo "         CURRENT checkout and does NOT git-pull — run 'dogfood.sh sync' (or git pull + rebuild) to refresh." >&2
+  fi
+}
+
 ensure_fresh_bin() {
   if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
-    return 0
-  fi
-  if [ -n "${FKST_NO_AUTOBUILD:-}" ]; then
-    echo "warning: FKST_NO_AUTOBUILD set; skipping fkst-framework freshness build" >&2
     return 0
   fi
 
   local phys substrate suffix
   suffix="/target/debug/fkst-framework"
   phys="$(resolve_phys_path "$BIN")" || phys="$BIN"
-
   if [[ "$phys" == *"$suffix" ]]; then
     substrate="${phys%"$suffix"}"
   else
     substrate=""
   fi
   if [ -z "$substrate" ] || [ ! -d "$substrate/.git" ] || [ ! -f "$substrate/Cargo.toml" ]; then
-    echo "warning: cannot trace BIN to an fkst-substrate checkout; skipping freshness build: $BIN" >&2
+    if [ -z "${FKST_NO_AUTOBUILD:-}" ]; then
+      echo "warning: cannot trace BIN to an fkst-substrate checkout; skipping freshness build: $BIN" >&2
+    fi
+    return 0
+  fi
+
+  # Surface a behind-substrate checkout REGARDLESS of FKST_NO_AUTOBUILD — that is
+  # exactly the silently-stale-BIN case: if the build runs it builds from this same
+  # behind checkout, and if it is skipped the existing BIN is at best this old.
+  warn_if_substrate_behind "$substrate"
+
+  if [ -n "${FKST_NO_AUTOBUILD:-}" ]; then
+    echo "warning: FKST_NO_AUTOBUILD set; skipping fkst-framework freshness build" >&2
     return 0
   fi
 
