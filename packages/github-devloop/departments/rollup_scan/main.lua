@@ -41,6 +41,14 @@ local function fetch_branch(branch)
   run_cmd(core.git_fetch_branch_cmd("origin", branch), 60, "git rollup fetch")
 end
 
+local function fetch_branches(repo, branches)
+  core.with_repo_ref_store_lock(repo, function()
+    for _, branch in ipairs(branches) do
+      fetch_branch(branch)
+    end
+  end)
+end
+
 local function remote_head(branch)
   local result = run_cmd(core.git_remote_branch_head_cmd("origin", branch), 30, "git rollup remote head")
   local head = trim_stdout(result)
@@ -125,8 +133,7 @@ function pipeline(event)
   end
 
   with_lock(core.rollup_lock_key(repo, branches.upstream, branches.integration), function()
-    fetch_branch(branches.upstream)
-    fetch_branch(branches.integration)
+    fetch_branches(repo, { branches.upstream, branches.integration })
     local ahead = ahead_count(branches.upstream, branches.integration)
     if ahead == 0 then
       core.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(not-ahead)", "integration is not ahead of upstream")

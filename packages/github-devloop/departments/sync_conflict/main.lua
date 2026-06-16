@@ -24,6 +24,14 @@ local function fetch_branch(branch)
   run_git(core.git_fetch_branch_cmd("origin", branch), 60, "git branch fetch")
 end
 
+local function fetch_branches(repo, branches)
+  core.with_repo_ref_store_lock(repo, function()
+    for _, branch in ipairs(branches) do
+      fetch_branch(branch)
+    end
+  end)
+end
+
 local function remote_head(branch)
   local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "git remote branch head")
   local head = trim_stdout(result)
@@ -151,7 +159,7 @@ local function push_if_real(conflict, worktree)
   end
 
   core.assert_trusted_bot_configured()
-  fetch_branch(conflict.integration_branch)
+  fetch_branches(conflict.repo, { conflict.integration_branch })
   local rechecked_integration_sha = remote_head(conflict.integration_branch)
   if rechecked_integration_sha ~= conflict.integration_sha then
     core.log_cas_decision("sync_conflict", "branch-sync", {
@@ -166,7 +174,7 @@ local function push_if_real(conflict, worktree)
     error("github-devloop: unsafe resolved branch sync head")
   end
   run_git(core.git_push_worktree_branch_update_cmd(worktree, conflict.integration_branch), 120, "git resolved branch sync push")
-  fetch_branch(conflict.integration_branch)
+  fetch_branches(conflict.repo, { conflict.integration_branch })
   local pushed_head = remote_head(conflict.integration_branch)
   if pushed_head ~= merge_head then
     error("github-devloop: resolved branch sync push verification failed")
@@ -184,8 +192,7 @@ function pipeline(event)
   core.log_entry("sync_conflict", event, "branch-sync", conflict.dedup_key)
 
   with_lock(core.branch_sync_lock_key(conflict.repo, conflict.upstream_branch, conflict.integration_branch), function()
-    fetch_branch(conflict.upstream_branch)
-    fetch_branch(conflict.integration_branch)
+    fetch_branches(conflict.repo, { conflict.upstream_branch, conflict.integration_branch })
     local upstream_sha = remote_head(conflict.upstream_branch)
     local integration_sha = remote_head(conflict.integration_branch)
     if integration_sha ~= conflict.integration_sha then
