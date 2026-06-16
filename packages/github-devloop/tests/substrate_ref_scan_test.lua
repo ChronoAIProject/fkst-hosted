@@ -81,6 +81,22 @@ local function mock_current_pin(sha)
   })
 end
 
+local function mock_missing_pin()
+  t.mock_command(core.git_show_substrate_ref_pin_cmd(), {
+    stdout = "",
+    stderr = "fatal: path '.fkst/substrate-ref' does not exist in 'HEAD'\n",
+    exit_code = 128,
+  })
+end
+
+local function mock_pin_read_failure()
+  t.mock_command(core.git_show_substrate_ref_pin_cmd(), {
+    stdout = "",
+    stderr = "fatal: bad object HEAD\n",
+    exit_code = 128,
+  })
+end
+
 local function mock_no_existing_pr()
   t.mock_command(core.gh_pr_list_head_cmd("owner/repo", "chore/substrate-ref-bump"), {
     stdout = "[[]]\n",
@@ -255,6 +271,32 @@ local function count_calls(needle)
 end
 
 return {
+  test_missing_substrate_ref_pin_is_benign_noop = function()
+    mock_env("")
+    mock_missing_pin()
+
+    local result = run_scan(opts("substrate-no-pin"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(core.git_show_substrate_ref_pin_cmd()), 1)
+    t.eq(count_calls("git ls-remote"), 0)
+    t.eq(count_calls("gh api"), 0)
+    t.eq(count_calls("gh pr create"), 0)
+    t.eq(count_calls("git worktree"), 0)
+    t.eq(count_calls("git push"), 0)
+  end,
+
+  test_pin_read_git_failure_still_fails_closed = function()
+    mock_env("")
+    mock_pin_read_failure()
+
+    local result = run_scan(opts("substrate-pin-read-failure"))
+
+    t.eq(result.exit_code, 1)
+    t.eq(count_calls("git ls-remote"), 0)
+    t.eq(count_calls("gh api"), 0)
+  end,
+
   test_current_pin_performs_no_github_or_git_writes = function()
     mock_env("")
     mock_current_pin(current_pin)
