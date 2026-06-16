@@ -28,6 +28,11 @@ local shared_helpers = {
   is_positive_integer = M.is_positive_integer,
 }
 
+-- Narrowest-surface proof for these package-owned helpers:
+-- surface_proof = "package-root-nearest-stable-owner"
+-- std_status = "no-existing-std-helper"
+-- collapse_status = "multi-call-site-behavioral-reuse"
+
 require("core.issue_create").install(M, shared_helpers)
 require("core.github_graphql").install(M)
 require("core.blocked_by").install(M, shared_helpers)

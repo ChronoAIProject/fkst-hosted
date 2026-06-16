@@ -23,6 +23,31 @@ local function mock_command(command, response)
   end
 end
 
+local function package_root()
+  local source = package.searchpath("tests.core_test", package.path)
+  return source:match("(.+)/tests/core_test%.lua$")
+end
+
+local function read_file(path)
+  local handle = assert(io.open(path, "r"))
+  local body = handle:read("*a")
+  handle:close()
+  return body
+end
+
+local function count_literal(text, needle)
+  local count = 0
+  local start = 1
+  while true do
+    local found = text:find(needle, start, true)
+    if found == nil then
+      return count
+    end
+    count = count + 1
+    start = found + #needle
+  end
+end
+
 return {
   test_env_command_whitelist = function()
 	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
@@ -182,6 +207,17 @@ return {
       },
       source_ref = { kind = "external", ref = "owner/repo#issue/1" },
     }), true)
+  end,
+
+  test_core_shared_helper_surface_is_the_narrowest_owner_boundary = function()
+    local root = package_root()
+    local source = read_file(root .. "/core.lua")
+
+    t.eq(count_literal(source, "function M.strip_bot_login_suffix("), 1)
+    t.eq(count_literal(source, "function M.is_positive_integer("), 1)
+    t.is_true(source:find('surface_proof = "package-root-nearest-stable-owner"', 1, true) ~= nil)
+    t.is_true(source:find('std_status = "no-existing-std-helper"', 1, true) ~= nil)
+    t.is_true(source:find('collapse_status = "multi-call-site-behavioral-reuse"', 1, true) ~= nil)
   end,
 
   test_entity_cache_key = function()
