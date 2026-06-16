@@ -10,6 +10,10 @@ fkst-shared = { path = "../fkst-shared" }
 # worker can drive it too (issue #151). `crate::engine` is now a re-export of
 # this crate; links neither `mongodb` nor `axum`.
 fkst-engine = { path = "../fkst-engine" }
+# Session-progress journaling, extracted so BOTH the control-plane and the worker
+# can journal RAISED events direct to GitHub (issue #151). `crate::journal` is now
+# a re-export of this crate; links neither `mongodb` nor `axum`.
+fkst-journal = { path = "../fkst-journal" }
 async-trait = "0.1"
 axum = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "fs"] }

@@ -19,16 +19,18 @@ use base64::Engine;
 use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::journal::github_http::{classify_status, http_err, REQUEST_TIMEOUT};
-use crate::journal::model::{ProgressRecord, PROGRESS_RECORD_SCHEMA};
-use crate::journal::JournalError;
+use crate::github_http::{classify_status, http_err, REQUEST_TIMEOUT};
+use crate::model::{ProgressRecord, PROGRESS_RECORD_SCHEMA};
+use crate::JournalError;
 
 // Re-export the shared HTTP plumbing so external paths
-// (`crate::journal::github::{DEFAULT_API_BASE, is_rate_limited, reset_seconds}`)
-// used by `github_hub/service.rs` and `config.rs` stay unchanged after the
-// split. The rate-limit helpers are crate-internal; the API base is public.
-pub use crate::journal::github_http::DEFAULT_API_BASE;
-pub(crate) use crate::journal::github_http::{is_rate_limited, reset_seconds};
+// (`fkst_journal::github::{DEFAULT_API_BASE, is_rate_limited, reset_seconds}`,
+// which the control-plane reaches as `crate::journal::github::…`) used by
+// `github_hub/service.rs` and `config.rs` stay unchanged after the #151
+// extraction. The rate-limit helpers are now consumed cross-crate by the
+// github-hub classifier, so they are public alongside the API base.
+pub use crate::github_http::DEFAULT_API_BASE;
+pub use crate::github_http::{is_rate_limited, reset_seconds};
 
 /// A Contents-API blob sha used for optimistic concurrency.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,13 +110,13 @@ impl ProgressRepo {
     }
 
     /// The configured API base. Crate-visible so the sibling
-    /// [`crate::journal::comments`] module can build its endpoint URLs.
+    /// [`crate::comments`] module can build its endpoint URLs.
     pub(crate) fn api_base(&self) -> &str {
         &self.api_base
     }
 
     /// The shared HTTP client. Crate-visible so the sibling
-    /// [`crate::journal::comments`] module can issue requests on it.
+    /// [`crate::comments`] module can issue requests on it.
     pub(crate) fn client(&self) -> &reqwest::Client {
         &self.client
     }
@@ -124,7 +126,7 @@ impl ProgressRepo {
     }
 
     /// Apply shared headers (Accept + optional bearer token) to a request.
-    /// Crate-visible so the sibling [`crate::journal::comments`] module reuses
+    /// Crate-visible so the sibling [`crate::comments`] module reuses
     /// the same auth decoration.
     pub(crate) fn decorate(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         let request = request.header("accept", "application/vnd.github+json");
@@ -263,7 +265,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::journal::model::UNVERIFIED_SHA;
+    use crate::model::UNVERIFIED_SHA;
 
     const TOKEN: &str = "ghp_supersecret_token_value_1234567890";
 

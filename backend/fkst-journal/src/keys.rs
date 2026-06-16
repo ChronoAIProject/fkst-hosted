@@ -7,8 +7,8 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::engine::materialize::PackageFile;
-use crate::journal::parse;
+use crate::parse;
+use fkst_engine::materialize::PackageFile;
 
 /// ASCII Unit Separator: joins key-derivation parts (never appears in
 /// validated package names or lowercase hex).
@@ -88,7 +88,7 @@ pub fn package_fingerprint(files: &[PackageFile], composed_deps: &[String]) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::default_identity_pointers;
+    use crate::default_identity_pointers;
 
     fn file(path: &str, content: &str) -> PackageFile {
         PackageFile {

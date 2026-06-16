@@ -5,7 +5,7 @@
 //! — only counts, the latest few lifecycle transitions, the current writer,
 //! and `updated_at`. The full payloads never leave the machine-truth file.
 
-use crate::journal::model::ProgressRecord;
+use crate::model::ProgressRecord;
 
 /// How many of the most-recent lifecycle transitions to surface.
 const MAX_TRANSITIONS: usize = 5;
@@ -60,7 +60,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::journal::model::{CompletedEntry, LifecycleEntry, WriterEntry};
+    use crate::model::{CompletedEntry, LifecycleEntry, WriterEntry};
 
     fn record() -> ProgressRecord {
         let mut record =

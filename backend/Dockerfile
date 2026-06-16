@@ -169,11 +169,13 @@ WORKDIR /app
 COPY backend/Cargo.toml backend/Cargo.lock ./
 COPY backend/fkst-shared/Cargo.toml fkst-shared/Cargo.toml
 COPY backend/fkst-engine/Cargo.toml fkst-engine/Cargo.toml
+COPY backend/fkst-journal/Cargo.toml fkst-journal/Cargo.toml
 COPY backend/fkst-control-plane/Cargo.toml fkst-control-plane/Cargo.toml
 COPY backend/fkst-worker/Cargo.toml fkst-worker/Cargo.toml
-RUN mkdir -p fkst-shared/src fkst-engine/src fkst-control-plane/src fkst-worker/src \
+RUN mkdir -p fkst-shared/src fkst-engine/src fkst-journal/src fkst-control-plane/src fkst-worker/src \
     && echo '' > fkst-shared/src/lib.rs \
     && echo '' > fkst-engine/src/lib.rs \
+    && echo '' > fkst-journal/src/lib.rs \
     && echo 'fn main() {}' > fkst-control-plane/src/main.rs \
     && echo '' > fkst-control-plane/src/lib.rs \
     && echo 'fn main() {}' > fkst-worker/src/main.rs \
@@ -183,7 +185,7 @@ RUN mkdir -p fkst-shared/src fkst-engine/src fkst-control-plane/src fkst-worker/
 # touch: the copied sources keep their (older) context mtimes, so without it
 # cargo's mtime-based freshness check would keep the stub-built binaries.
 COPY backend/ ./
-RUN touch fkst-shared/src/lib.rs fkst-engine/src/lib.rs \
+RUN touch fkst-shared/src/lib.rs fkst-engine/src/lib.rs fkst-journal/src/lib.rs \
         fkst-control-plane/src/main.rs fkst-control-plane/src/lib.rs \
         fkst-worker/src/main.rs fkst-worker/src/lib.rs \
     && cargo build --release --locked --workspace

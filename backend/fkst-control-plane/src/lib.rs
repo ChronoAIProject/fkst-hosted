@@ -21,7 +21,14 @@ pub mod error;
 pub mod github_app;
 pub mod github_hub;
 pub mod goals;
-pub mod journal;
+// Session-progress journaling was extracted to the `fkst-journal` crate (issue
+// #151) so BOTH the control-plane and the worker can journal RAISED events
+// direct to GitHub. Re-exported here under the same `journal` name so every
+// existing `crate::journal::*` / `fkst_control_plane::journal::*` path keeps
+// resolving unchanged. `journal_config` bridges the app `Config` to the
+// extracted `JournalConfig` (the only coupling the move could not preserve).
+pub use fkst_journal as journal;
+pub mod journal_config;
 pub mod leases;
 // Role-neutral leaves extracted to `fkst-shared` (issue #145). Re-exported here
 // so every existing `crate::{llm,models,nyxid}::…` path and test still resolves.

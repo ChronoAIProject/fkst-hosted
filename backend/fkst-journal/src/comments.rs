@@ -1,14 +1,14 @@
 //! The (dormant) issue-comment mirror for the per-run progress summary.
 //!
-//! Split out of [`crate::journal::github`] to keep that file focused on the
+//! Split out of [`crate::github`] to keep that file focused on the
 //! Contents-API record path; it remains an inherent method on
 //! [`ProgressRepo`] via a second `impl` block (same crate, same struct).
 
 use reqwest::StatusCode;
 
-use crate::journal::github::ProgressRepo;
-use crate::journal::github_http::{classify_status, http_err};
-use crate::journal::JournalError;
+use crate::github::ProgressRepo;
+use crate::github_http::{classify_status, http_err};
+use crate::JournalError;
 
 impl ProgressRepo {
     /// Create or update the human-readable summary comment on `issue`.
@@ -79,7 +79,7 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use crate::journal::github::ProgressRepo;
+    use crate::github::ProgressRepo;
 
     const TOKEN: &str = "ghp_supersecret_token_value_1234567890";
 

@@ -1,8 +1,8 @@
 //! Shared HTTP plumbing for the GitHub journal client: credential-free error
 //! reduction, rate-limit header parsing, and status classification.
 //!
-//! Kept separate from [`crate::journal::github`] (the Contents-API record
-//! path) and [`crate::journal::comments`] (the issue-comment mirror) so both
+//! Kept separate from [`crate::github`] (the Contents-API record
+//! path) and [`crate::comments`] (the issue-comment mirror) so both
 //! reuse the same auth/rate-limit disambiguation, and so neither file grows
 //! unwieldy.
 
@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
 
-use crate::journal::JournalError;
+use crate::JournalError;
 
 /// Default GitHub REST API base (overridable for tests / GHE).
 pub const DEFAULT_API_BASE: &str = "https://api.github.com";
@@ -22,7 +22,7 @@ pub(crate) const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::fro
 /// Reduce a reqwest error to a credential-free string (reqwest never embeds
 /// request headers in its messages; this keeps that invariant explicit).
 ///
-/// Crate-visible so the sibling [`crate::journal::comments`] module reuses the
+/// Crate-visible so the sibling [`crate::comments`] module reuses the
 /// same credential-free reduction.
 pub(crate) fn http_err(context: &str, err: reqwest::Error) -> JournalError {
     JournalError::Http(format!("{context}: {err}"))
@@ -31,9 +31,10 @@ pub(crate) fn http_err(context: &str, err: reqwest::Error) -> JournalError {
 /// Seconds until the rate-limit reset, from `retry-after` (delta seconds) or
 /// `x-ratelimit-reset` (epoch seconds). Defaults to 60s when unparseable.
 ///
-/// Crate-visible so the github-hub upstream classifier reuses the same
-/// header parsing as the journal client.
-pub(crate) fn reset_seconds(headers: &HeaderMap) -> u64 {
+/// Public so the control-plane's github-hub upstream classifier (a different
+/// crate after the #151 extraction) reuses the same header parsing as the
+/// journal client.
+pub fn reset_seconds(headers: &HeaderMap) -> u64 {
     if let Some(retry_after) = headers
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
@@ -58,9 +59,10 @@ pub(crate) fn reset_seconds(headers: &HeaderMap) -> u64 {
 /// True when a 403 carries rate-limit evidence (exhausted quota or an
 /// explicit retry hint) rather than an auth refusal.
 ///
-/// Crate-visible so the github-hub upstream classifier reuses the same
-/// rate-limit detection as the journal client.
-pub(crate) fn is_rate_limited(headers: &HeaderMap) -> bool {
+/// Public so the control-plane's github-hub upstream classifier (a different
+/// crate after the #151 extraction) reuses the same rate-limit detection as the
+/// journal client.
+pub fn is_rate_limited(headers: &HeaderMap) -> bool {
     let remaining_zero = headers
         .get("x-ratelimit-remaining")
         .and_then(|v| v.to_str().ok())
@@ -72,7 +74,7 @@ pub(crate) fn is_rate_limited(headers: &HeaderMap) -> bool {
 /// Map auth/rate-limit statuses to their dedicated variants; `None` for
 /// everything else.
 ///
-/// Crate-visible so the sibling [`crate::journal::comments`] module reuses the
+/// Crate-visible so the sibling [`crate::comments`] module reuses the
 /// same status classification.
 pub(crate) fn classify_status(status: StatusCode, headers: &HeaderMap) -> Option<JournalError> {
     match status {
@@ -94,9 +96,9 @@ mod tests {
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use crate::journal::github::ProgressRepo;
-    use crate::journal::model::ProgressRecord;
-    use crate::journal::JournalError;
+    use crate::github::ProgressRepo;
+    use crate::model::ProgressRecord;
+    use crate::JournalError;
 
     const TOKEN: &str = "ghp_supersecret_token_value_1234567890";
 

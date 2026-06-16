@@ -4,10 +4,14 @@
 #   fkst-engine        — the engine integration (the session runner), extracted
 #                        from the control-plane so BOTH roles can drive it
 #                        (issue #151). Links neither `mongodb` nor `axum`.
+#   fkst-journal       — session-progress journaling (GitHub progress record),
+#                        extracted so BOTH roles can journal RAISED events direct
+#                        to GitHub (issue #151 prerequisite). Links neither
+#                        `mongodb` nor `axum`.
 #   fkst-control-plane — the controller deployable (today's app, renamed from
 #                        fkst-hosted-api); owns the public REST API + DB.
 #   fkst-worker        — the worker deployable (a skeleton until #136/#140)
-members = ["fkst-control-plane", "fkst-engine", "fkst-shared", "fkst-worker"]
+members = ["fkst-control-plane", "fkst-engine", "fkst-journal", "fkst-shared", "fkst-worker"]
 resolver = "2"
 
 [workspace.package]

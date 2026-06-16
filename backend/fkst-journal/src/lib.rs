@@ -42,13 +42,14 @@ pub mod signals;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use crate::journal::github::ProgressRepo;
-use crate::journal::merge::{identity_projection, now_rfc3339};
-use crate::journal::model::{CompletedEntry, LifecycleEntry};
+use crate::github::ProgressRepo;
+use crate::merge::{identity_projection, now_rfc3339};
+use crate::model::{CompletedEntry, LifecycleEntry};
 
-// Re-exports: external import paths (`crate::journal::{...}` used by
-// `sessions/service.rs`) stay unchanged after the split into sibling modules,
-// and the [`Journaler`] impl blocks keep referencing these items by bare name.
+// Re-exports: the crate-root surface external consumers import (e.g.
+// `fkst_journal::{...}`, which the control-plane mirrors as `crate::journal::…`
+// via `pub use fkst_journal as journal`). The [`Journaler`] impl blocks keep
+// referencing these items by bare name.
 pub use config::{default_identity_pointers, FlushOutcome, JournalConfig, SessionCtx};
 pub use keys::{idem_key, package_fingerprint, run_key};
 pub use merge::merge_record;
@@ -142,7 +143,7 @@ impl Journaler {
     /// [`Journaler::load_skip_set`]); there is no datastore bootstrap. The
     /// caller stamps `run_key` onto the sessions doc via the sessions repo.
     pub async fn start(ctx: SessionCtx, cfg: JournalConfig) -> Result<Self, JournalError> {
-        if !crate::engine::is_valid_name(&ctx.package_name) {
+        if !fkst_engine::is_valid_name(&ctx.package_name) {
             return Err(JournalError::Other(anyhow::anyhow!(
                 "invalid package name for journaling: must fully match [A-Za-z0-9_-]+"
             )));
@@ -341,7 +342,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::journal::test_support::{ctx, github_cfg, mongo_only_cfg, raised};
+    use crate::test_support::{ctx, github_cfg, mongo_only_cfg, raised};
 
     // ---- journaler: record ---------------------------------------------------------
 
