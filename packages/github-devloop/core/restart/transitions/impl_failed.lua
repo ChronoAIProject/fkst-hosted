@@ -10,6 +10,7 @@ return function(M, h)
     terminal = false,
     to_states = { "implementing" },
     driving_queue = "devloop_ready",
+    observe_surfaces = { issue = true, liveness_scan = true },
     output_obligation = obligation({ "operator reready/reimplement command", "state:v1 implementing" }, { "implementing", "impl-failed" }),
     reentry_commands = { "reready", "reimplement" },
     budget = budget(1440, "No receiver work is expected; the row waits up to 1410 minutes for operator reentry before the 30 minute watchdog margin."),

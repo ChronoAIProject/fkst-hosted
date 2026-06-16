@@ -10,6 +10,7 @@ return function(M, h)
     terminal = false,
     to_states = { "implementing" },
     driving_queue = "devloop_ready",
+    observe_surfaces = { issue = true, liveness_scan = true },
     output_obligation = obligation({ "state:v1 implementing", "dependency-hold:v1" }, { "implementing", "ready" }),
     budget = budget(45, "Ready is deferred by dependency-wait heartbeats when blocked; otherwise implementation kickoff is expected inside the watchdog margin."),
     liveness_contract = liveness({
