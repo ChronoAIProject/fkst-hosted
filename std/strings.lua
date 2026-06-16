@@ -5,4 +5,61 @@ function S.trim(value)
   return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+function S.is_bounded_string(value, limit)
+  return type(value) == "string" and value ~= "" and #value <= limit
+end
+
+function S.is_path_safe_key(value, limit)
+  if not S.is_bounded_string(value, limit) then
+    return false
+  end
+  if value:sub(1, 1) == "/" then
+    return false
+  end
+  if value:find("\\", 1, true) ~= nil then
+    return false
+  end
+  if value:find("%s") ~= nil then
+    return false
+  end
+  if value:find("[^%w%._%-%/#]") ~= nil then
+    return false
+  end
+  for segment in value:gmatch("[^/]+") do
+    if segment == "." or segment == ".." then
+      return false
+    end
+  end
+  return true
+end
+
+function S.sanitize_key(value, limit)
+  local max_len = limit
+  local sanitized = tostring(value or ""):gsub("[^%w%._%-%/#]", "-")
+  sanitized = sanitized:gsub("/+", "/")
+  sanitized = sanitized:gsub("^/+", ""):gsub("/+$", "")
+  if sanitized == "" then
+    return "empty"
+  end
+
+  local segments = {}
+  for segment in sanitized:gmatch("[^/]+") do
+    local safe_segment = segment
+    if safe_segment == "." or safe_segment == ".." then
+      safe_segment = "-"
+    end
+    table.insert(segments, safe_segment)
+  end
+
+  sanitized = table.concat(segments, "/")
+  if max_len ~= false and max_len ~= nil and #sanitized > max_len then
+    sanitized = sanitized:sub(1, max_len)
+    sanitized = sanitized:gsub("/+$", "")
+  end
+  if sanitized == "" then
+    return "empty"
+  end
+  return sanitized
+end
+
 return S

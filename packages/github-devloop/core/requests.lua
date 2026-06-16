@@ -1,5 +1,6 @@
 local S = {}
 function S.install(M)
+local strings = require("std.strings")
 local ai_sentinel = "⟦AI:FKST⟧"
 local display_separator = " — "
 local max_display_question_len = 2000
@@ -479,7 +480,7 @@ function M.build_implement_version_mismatch_comment_request(repo, issue_number, 
 end
 
 function M.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
-  local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
+  local safe_reason = strings.sanitize_key(reason or "failed", M._max_key_len):gsub("/", "-")
   local retry_attempt = tonumber(attempt) or 1
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then

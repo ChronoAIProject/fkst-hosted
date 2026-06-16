@@ -1,4 +1,5 @@
 local common = require("departments.observability.common")
+local strings = require("std.strings")
 
 local M = {}
 
@@ -8,7 +9,7 @@ local max_reap_reason_len = common.max_reap_reason_len
 
 local function reaper_body_path(repo, pr_number, proposal_id)
   local safe_repo = core.safe_repo(repo):gsub("[/%s]+", "-")
-  local safe_issue = core.sanitize_key(tostring(proposal_id or "unknown"), false):gsub("[/%s]+", "-")
+  local safe_issue = strings.sanitize_key(tostring(proposal_id or "unknown"), false):gsub("[/%s]+", "-")
   local identity = safe_repo .. "-pr-" .. tostring(pr_number) .. "-" .. safe_issue
   identity = identity:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if identity == "" then

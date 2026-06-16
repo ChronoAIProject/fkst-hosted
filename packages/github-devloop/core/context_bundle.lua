@@ -1,4 +1,5 @@
 local S = {}
+local strings = require("std.strings")
 
 function S.install(M)
 local max_bundle_file_len = 10 * 1024 * 1024
@@ -22,7 +23,7 @@ local function runtime_root(exec)
 end
 
 local function bundle_segment(value, fallback)
-  local segment = M.sanitize_key(tostring(value or ""), false):gsub("[/#]", "-"):gsub("%-+", "-")
+  local segment = strings.sanitize_key(tostring(value or ""), false):gsub("[/#]", "-"):gsub("%-+", "-")
   segment = segment:gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
   if segment == "" then
     segment = fallback or "context"
@@ -38,7 +39,7 @@ local function bundle_segment(value, fallback)
 end
 
 local function bounded_cache_segment(value, fallback, limit, keep_slashes)
-  local segment = M.sanitize_key(tostring(value or ""), false)
+  local segment = strings.sanitize_key(tostring(value or ""), false)
   if not keep_slashes then
     segment = segment:gsub("[/#]", "-"):gsub("%-+", "-")
   end

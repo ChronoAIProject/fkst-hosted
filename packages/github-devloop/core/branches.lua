@@ -1,4 +1,5 @@
 local S = {}
+local strings = require("std.strings")
 
 function S.install(M)
 local function require_safe_branch(name, branch)
@@ -394,7 +395,7 @@ function M.pr_freshness_commit_message(repo, branch, integration, branch_parent,
 end
 
 function M.branch_sync_worktree_path(runtime_root, repo, upstream, integration, integration_sha)
-  local slug = M.sanitize_key(
+  local slug = strings.sanitize_key(
     require_safe_repo(repo)
       .. "-"
       .. require_safe_branch("upstream branch", upstream)

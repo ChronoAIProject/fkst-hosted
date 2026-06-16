@@ -1,4 +1,5 @@
 local core = require("core")
+local strings = require("std.strings")
 local t = fkst.test
 
 local function issue(extra)
@@ -75,10 +76,10 @@ return {
   end,
 
   test_sanitize_key_replaces_unsafe_characters = function()
-    t.eq(core.sanitize_key("2026-06-03T01:02:03Z"), "2026-06-03T01-02-03Z")
-    t.eq(core.sanitize_key("owner repo@example:42"), "owner-repo-example-42")
-    t.eq(core.sanitize_key("../repo"), "-/repo")
-    t.eq(core.sanitize_key(""), "empty")
+    t.eq(strings.sanitize_key("2026-06-03T01:02:03Z", 200), "2026-06-03T01-02-03Z")
+    t.eq(strings.sanitize_key("owner repo@example:42", 200), "owner-repo-example-42")
+    t.eq(strings.sanitize_key("../repo", 200), "-/repo")
+    t.eq(strings.sanitize_key("", 200), "empty")
   end,
 
   test_reply_dedup_key_is_stable_across_updates = function()

@@ -1,10 +1,7 @@
 local M = {}
+local strings = require("std.strings")
 
 local max_branch_len = 160
-
-local function is_bounded_string(value, limit)
-  return type(value) == "string" and value ~= "" and #value <= limit
-end
 
 function M.url_encode(value)
   return (tostring(value or ""):gsub("([^%w%-%._~])", function(char)
@@ -13,7 +10,7 @@ function M.url_encode(value)
 end
 
 function M.is_git_ref_safe(value)
-  if not is_bounded_string(value, max_branch_len) then
+  if not strings.is_bounded_string(value, max_branch_len) then
     return false
   end
   local text = tostring(value)

@@ -1,4 +1,5 @@
 local S = {}
+local strings = require("std.strings")
 
 function S.install(M)
 local previous_transition_lock_key = M.transition_lock_key
@@ -131,7 +132,7 @@ function M.pr_proposal_id(repo, pr_number)
   if not M.is_safe_pr_number(pr_number) then
     error("github-devloop: invalid PR proposal number")
   end
-  local safe_repo = M.sanitize_key(repo, false)
+  local safe_repo = strings.sanitize_key(repo, false)
   if safe_repo == nil or safe_repo == "" then
     error("github-devloop: invalid PR proposal repo")
   end
@@ -147,11 +148,11 @@ function M.parse_pr_proposal_id(proposal_id)
 end
 
 function M.pr_transition_lock_key(repo, pr_number)
-  return "github-devloop/transition/" .. M.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
+  return "github-devloop/transition/" .. strings.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
 end
 
 function M.merge_lane_lock_key(repo)
-  return "github-devloop/merge-lane/" .. M.sanitize_key(repo, false)
+  return "github-devloop/merge-lane/" .. strings.sanitize_key(repo, false)
 end
 
 function M.parse_entity_proposal_id(proposal_id)

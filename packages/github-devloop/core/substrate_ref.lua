@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local substrate_ref_path = ".fkst/substrate-ref"
 local substrate_remote = "https://github.com/ChronoAIProject/fkst-substrate.git"
 local substrate_branch = "dev"
@@ -117,7 +118,7 @@ local function existing_bump_pr(repo)
 end
 
 local function bump_worktree_path(runtime_root, repo, head_sha)
-  local slug = M.sanitize_key("substrate-ref-" .. tostring(repo), false):gsub("/", "-")
+  local slug = strings.sanitize_key("substrate-ref-" .. tostring(repo), false):gsub("/", "-")
   slug = slug:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if slug == "" then
     slug = "substrate-ref"
