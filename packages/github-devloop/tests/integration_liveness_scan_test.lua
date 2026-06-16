@@ -387,6 +387,31 @@ return {
     t.is_true(tostring(raised.payload.dedup_key):find("liveness%-scan", 1) ~= nil)
   end,
 
+  test_liveness_scan_over_budget_ready_escalates_to_timeout_reconcile = function()
+    local timeout_version = version .. "/timeout/ready/3"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", {
+      {
+        body = core.state_marker(proposal_id, "ready", timeout_version),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T01:02:03Z",
+      },
+    })
+
+    local result = run_observe(issue({
+      dedup_key = "liveness-scan/ready-timeout",
+      source = "liveness-scan",
+    }), opts("liveness-scan-ready-timeout"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+    local reconcile = find_raise(result.raises, "devloop_timeout_reconcile")
+    t.is_true(reconcile ~= nil)
+    t.eq(reconcile.payload.schema, "github-devloop.timeout-reconcile.v1")
+    t.eq(reconcile.payload.state, "ready")
+    t.eq(reconcile.payload.issue_version, timeout_version)
+    t.eq(reconcile.payload.round, 3)
+    t.eq(reconcile.payload.source_ref.ref, "owner/repo#issue/42")
+  end,
+
   test_liveness_scan_reinjected_implementing_round_trips_with_frozen_version = function()
     local event = ready()
     local branch = deterministic_branch_for(event)
