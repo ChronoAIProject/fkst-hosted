@@ -6,10 +6,6 @@ local function is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end
 
-function M.shell_single_quote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
-
 function M.url_encode(value)
   return (tostring(value or ""):gsub("([^%w%-%._~])", function(char)
     return string.format("%%%02X", string.byte(char))

@@ -2,24 +2,24 @@
 -- Ports & Adapters layer. A department defines make_department(ports) that
 -- closes over the injected handles and returns its engine-facing table
 -- ({ spec, pipeline }); std.ports.install builds the production handles from the
--- host exec_sync primitive, constructs the department, and exposes
+-- host exec_argv primitive, constructs the department, and exposes
 -- make_department so fake-port tests can re-build the same department against
 -- std.github_fake / std.git_fake. This removes the per-department
--- production_exec / production_ports copy (DRY: the framework owns the stable
+-- production_exec_argv / production_ports copy (DRY: the framework owns the stable
 -- common wiring, the script keeps only its business pipeline).
 local M = {}
 
-local function production_exec()
-  if type(exec_sync) == "function" then
-    return exec_sync
+local function production_exec_argv()
+  if type(exec_argv) == "function" then
+    return exec_argv
   end
   return function()
-    error("std.ports: production ports require exec_sync")
+    error("std.ports: production ports require exec_argv")
   end
 end
 
 function M.production_handles()
-  local run = production_exec()
+  local run = production_exec_argv()
   return {
     github = require("std.github").new(run),
     git = require("std.git").new(run),

@@ -1,5 +1,3 @@
-local shell = require("std.github.shell")
-
 local M = {}
 -- The neutral Issue shape this op returns is everything `gh issue view --json` provides.
 -- Two documented exclusions: `blocked_by` needs GraphQL (a separate read op, not gh issue
@@ -40,33 +38,40 @@ local function issue_view_cache_key(repo, number)
     .. sanitize_cache_segment(number, false)
 end
 
-local function gh_issue_view_cmd(repo, issue_number, fields)
+local function gh_issue_view_argv(repo, issue_number, fields)
   local selected_fields = tostring(fields or "")
   if selected_fields == "" or selected_fields:match("[^%w_,]") or selected_fields:match("^,") or selected_fields:match(",$") or selected_fields:match(",,") then
     error("std.github: invalid issue view fields")
   end
-  return "gh issue view " .. shell.shell_single_quote(issue_number)
-    .. " --repo " .. shell.shell_single_quote(repo)
-    .. " --json " .. selected_fields
+  return { "gh", "issue", "view", tostring(issue_number), "--repo", tostring(repo), "--json", selected_fields }
 end
 
-local function gh_issue_view_full_cmd(repo, issue_number)
-  return gh_issue_view_cmd(repo, issue_number, issue_view_fields)
+local function gh_issue_view_full_argv(repo, issue_number)
+  return gh_issue_view_argv(repo, issue_number, issue_view_fields)
 end
 
-local function gh_issue_rest_cmd(repo, issue_number)
-  return "gh api " .. shell.shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
+local function gh_issue_rest_argv(repo, issue_number)
+  return { "gh", "api", "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) }
 end
 
-local function gh_issue_comments_rest_cmd(repo, issue_number)
-  return "gh api --paginate --slurp "
-    .. shell.shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
+local function gh_issue_comments_rest_argv(repo, issue_number)
+  return {
+    "gh",
+    "api",
+    "--paginate",
+    "--slurp",
+    "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100",
+  }
 end
 
-local function gh_issue_updated_at_cmd(repo, issue_number)
-  return "gh api "
-    .. shell.shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
-    .. " --jq " .. shell.shell_single_quote(".updated_at // .updatedAt // \"\"")
+local function gh_issue_updated_at_argv(repo, issue_number)
+  return {
+    "gh",
+    "api",
+    "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number),
+    "--jq",
+    ".updated_at // .updatedAt // \"\"",
+  }
 end
 
 local function assignee_logins(assignees)
@@ -346,8 +351,8 @@ end
 
 function M.install(handle)
   local function fetch_issue_view_stdout(repo, number, timeout, opts)
-    local issue = handle._exec(gh_issue_rest_cmd(repo, number), timeout, "gh issue view")
-    local comments = handle._exec(gh_issue_comments_rest_cmd(repo, number), timeout, "gh issue comments")
+    local issue = handle._exec(gh_issue_rest_argv(repo, number), timeout, "gh issue view")
+    local comments = handle._exec(gh_issue_comments_rest_argv(repo, number), timeout, "gh issue comments")
     local stdout = rest_issue_to_view_stdout(issue.stdout, comments.stdout)
     cache_successful_issue_view(issue_view_cache_key(repo, number), stdout, opts and opts.consumer or "")
     return stdout
@@ -374,7 +379,7 @@ function M.install(handle)
     end
 
     if cached ~= nil then
-      local current = handle._exec(gh_issue_updated_at_cmd(repo, number), timeout, "gh issue updated_at")
+      local current = handle._exec(gh_issue_updated_at_argv(repo, number), timeout, "gh issue updated_at")
       if parse_updated_at_stdout(current.stdout) == cached.updated_at then
         return M.normalize_issue(cached.stdout, source_ref)
       end
@@ -383,7 +388,7 @@ function M.install(handle)
       end
     end
 
-    local out = handle._exec(gh_issue_view_full_cmd(repo, number), timeout, "gh issue view")
+    local out = handle._exec(gh_issue_view_full_argv(repo, number), timeout, "gh issue view")
     cache_successful_issue_view(key, out.stdout, options.consumer or "")
     return M.normalize_issue(out.stdout, source_ref)
   end

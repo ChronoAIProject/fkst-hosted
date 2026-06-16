@@ -35,8 +35,30 @@ function M.error_class(result)
   return "gh-command-failed"
 end
 
-function M.run(exec, cmd, timeout, context)
-  local result = exec({ cmd = cmd, timeout = timeout, rate_pool = { name = "gh" } })
+local function misuse_error(argv, context)
+  local bad_program
+  if type(argv) == "table" then
+    bad_program = argv[1]
+  end
+  local message = "std.github: " .. tostring(context) .. " adapter misuse: expected gh argv, got "
+    .. tostring(bad_program)
+  error(setmetatable({
+    class = "gh-adapter-misuse",
+    expected_program = "gh",
+    bad_program = bad_program,
+    message = message,
+  }, {
+    __tostring = function(err)
+      return err.message
+    end,
+  }))
+end
+
+function M.run(exec, argv, timeout, context)
+  if type(argv) ~= "table" or #argv < 1 or argv[1] ~= "gh" then
+    misuse_error(argv, context)
+  end
+  local result = exec({ argv = argv, timeout = timeout })
   if type(result) ~= "table" or tonumber(result.exit_code) ~= 0 then
     local class = M.error_class(result)
     local message = "std.github: " .. tostring(context) .. " failed: " .. class .. ": " .. stderr_of(result)

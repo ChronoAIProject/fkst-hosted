@@ -749,6 +749,25 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("std/helpers.lua constructs a new gh/git command head 'git status'", messages[0])
 
+    def test_exec_argv_raw_heads_are_flagged_outside_adapters(self) -> None:
+        source = (
+            'exec_argv({ argv = { "gh", "issue", "view", tostring(n) }, timeout = 30 })\n'
+            'exec_argv({ timeout = 30, argv = { "git", "-C", repo, "status", "--short" } })\n'
+        )
+        heads = check_repo.gh_git_adapter.command_heads(source)
+
+        self.assertEqual(heads, {"gh issue", "git status"})
+
+    def test_exec_argv_raw_heads_respect_adapter_exemption(self) -> None:
+        messages = self.messages({
+            "std/github/issue.lua": 'exec_argv({ argv = { "gh", "issue", "view", "1" } })\n',
+            "std/git/exec.lua": 'exec_argv({ argv = { "git", "status" } })\n',
+            "std/helpers.lua": 'exec_argv({ argv = { "git", "status" } })\n',
+        })
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("std/helpers.lua constructs a new gh/git command head 'git status'", messages[0])
+
     def test_check_repo_wrapper_loads_allowlist_and_prefixes_violations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
