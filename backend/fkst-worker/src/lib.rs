@@ -8,6 +8,7 @@
 
 pub mod agent;
 pub mod config;
+pub mod engine;
 pub mod run;
 pub mod server;
 

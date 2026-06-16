@@ -3,20 +3,24 @@
 //! protocol with the shared-secret header.
 
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use fkst_engine::EngineConfig;
 use fkst_shared::protocol::{
     check_protocol_version, ControlMessage, Draining, Heartbeat, HeartbeatResponse, LifecycleState,
-    PullRequest, PullResponse, RegisterRequest, RegisterResponse, Released, INTERNAL_AUTH_HEADER,
-    PROTOCOL_VERSION,
+    PullRequest, PullResponse, RegisterRequest, RegisterResponse, Released, ResolvedDispatch,
+    INTERNAL_AUTH_HEADER, PROTOCOL_VERSION,
 };
 
 use crate::config::WorkerConfig;
+use crate::engine::{execute_dispatch, ExecutedSession};
 
 /// Errors talking to the controller. Transport / 5xx are transient (retried);
 /// 4xx / auth / version / decode are fatal config-or-protocol problems.
@@ -58,6 +62,17 @@ pub struct WorkerAgent {
     /// Per-worker retry jitter (ms), derived from the worker id so a fleet
     /// retrying after a controller restart decorrelates without a PRNG.
     jitter_ms: u64,
+    /// Engine wiring for a dispatched session (#151). Used ONLY when a
+    /// `ResolvedDispatch` arrives — which the controller never sends until the
+    /// activation increment, so this stays unused in prod (the arm is dormant).
+    engine_config: EngineConfig,
+    /// In-memory registry of the sessions this worker currently runs, keyed by
+    /// session id. The `ResolvedDispatch` arm inserts a spawned
+    /// [`ExecutedSession`]; the heartbeat reports the keys as
+    /// `running_sessions`. The lock is sync and is NEVER held across an await.
+    /// The supervise loop that drains it lands in the next increment; for now an
+    /// entry lives until the worker exits.
+    sessions: Mutex<HashMap<String, ExecutedSession>>,
 }
 
 impl WorkerAgent {
@@ -67,6 +82,33 @@ impl WorkerAgent {
         worker_id: String,
         capacity: u32,
         engine_temp_root: String,
+    ) -> Self {
+        // The engine config drives a dispatched session (#151). Its `temp_root`
+        // is the worker's reported engine temp dir; the rest defaults (the arm
+        // is dormant in prod). `from_config` overrides with the env-loaded one.
+        let engine_config = EngineConfig {
+            temp_root: engine_temp_root.clone().into(),
+            ..EngineConfig::default()
+        };
+        Self::with_engine_config(
+            controller_url,
+            auth,
+            worker_id,
+            capacity,
+            engine_temp_root,
+            engine_config,
+        )
+    }
+
+    /// Inner constructor taking the resolved [`EngineConfig`], so `from_config`
+    /// can supply the env-loaded one and `new` a defaulted one.
+    fn with_engine_config(
+        controller_url: String,
+        auth: SecretString,
+        worker_id: String,
+        capacity: u32,
+        engine_temp_root: String,
+        engine_config: EngineConfig,
     ) -> Self {
         let mut hasher = DefaultHasher::new();
         worker_id.hash(&mut hasher);
@@ -79,17 +121,43 @@ impl WorkerAgent {
             capacity,
             engine_temp_root,
             jitter_ms,
+            engine_config,
+            sessions: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Build from the validated worker config.
+    /// Build from the validated worker config. The engine config is loaded from
+    /// the process environment (its defaults are all present, so this only fails
+    /// on an explicitly malformed engine var); on a load error we fall back to a
+    /// defaulted config rooted at the worker's engine temp dir and log it — a
+    /// worker must still serve heartbeats even with a dormant dispatch arm.
     pub fn from_config(config: &WorkerConfig) -> Self {
-        Self::new(
+        let engine_config = match EngineConfig::load_from_env() {
+            Ok(mut cfg) => {
+                // Pin the temp root to the worker's reported engine temp dir so a
+                // dispatched session's clone/runtime/codex dirs land where the
+                // worker advertises capacity.
+                cfg.temp_root = config.engine_temp_root.clone().into();
+                cfg
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "engine config failed to load from env; using defaults (dispatch is dormant)"
+                );
+                EngineConfig {
+                    temp_root: config.engine_temp_root.clone().into(),
+                    ..EngineConfig::default()
+                }
+            }
+        };
+        Self::with_engine_config(
             config.controller_url.clone(),
             config.internal_auth_token.clone(),
             config.worker_id.clone(),
             config.capacity,
             config.engine_temp_root.clone(),
+            engine_config,
         )
     }
 
@@ -181,41 +249,84 @@ impl WorkerAgent {
         }
     }
 
-    /// Send one heartbeat and act on any piggybacked control messages.
-    pub async fn heartbeat(
-        &self,
-        state: LifecycleState,
-        running: &[String],
-    ) -> Result<HeartbeatResponse, AgentError> {
+    /// Send one heartbeat and act on any piggybacked control messages. The
+    /// reported `running_sessions` are the keys of the in-memory session registry
+    /// (the sessions this worker currently runs).
+    pub async fn heartbeat(&self, state: LifecycleState) -> Result<HeartbeatResponse, AgentError> {
         let hb = Heartbeat {
             worker_id: self.worker_id.clone(),
             protocol_version: PROTOCOL_VERSION,
             lifecycle_state: state,
-            running_sessions: running.to_vec(),
+            running_sessions: self.running_session_ids(),
             timestamp_unix_ms: now_unix_ms(),
         };
         let resp: HeartbeatResponse = self.post_json("/internal/v1/heartbeat", &hb).await?;
         for ctrl in &resp.control {
             match ctrl {
                 ControlMessage::StopSession { session_id, reason } => {
-                    // No engine to stop yet (#136); the no-op handoff still
-                    // completes the protocol round-trip with a Released.
-                    tracing::info!(session_id = %session_id, reason = %reason, "StopSession received; releasing (no engine yet)");
+                    // No supervise/stop loop yet (#151 increment 4 only spawns);
+                    // the no-op handoff still completes the protocol round-trip
+                    // with a Released.
+                    tracing::info!(session_id = %session_id, reason = %reason, "StopSession received; releasing (no stop loop yet)");
                     if let Err(e) = self.release(session_id).await {
                         tracing::warn!(error = %e, session_id = %session_id, "failed to send Released");
                     }
                 }
-                ControlMessage::ResolvedDispatch(_) => {
-                    // #151: the engine executor that consumes a dispatch lands in
-                    // a later increment and the controller only emits this behind
-                    // FKST_DISPATCH_MODE, so this build ignores it.
-                    tracing::debug!(
-                        "ResolvedDispatch received but engine dispatch is not active in this build"
-                    );
+                ControlMessage::ResolvedDispatch(dispatch) => {
+                    // #151 increment 4: spawn + register the engine. DORMANT in
+                    // prod — the controller never emits this until the activation
+                    // increment, so this is reachable only in tests today.
+                    self.handle_resolved_dispatch(dispatch).await;
                 }
             }
         }
         Ok(resp)
+    }
+
+    /// Spawn the engine for a resolved dispatch and register the running session
+    /// (#151). A spawn failure is logged LOUDLY (never a secret) and swallowed —
+    /// a single bad dispatch must NOT crash the worker. Idempotent: a dispatch
+    /// for a session already registered is ignored (the controller's claim is the
+    /// authoritative dedupe).
+    async fn handle_resolved_dispatch(&self, dispatch: &ResolvedDispatch) {
+        let session_id = dispatch.session_id.clone();
+        if self
+            .sessions
+            .lock()
+            .expect("session registry poisoned")
+            .contains_key(&session_id)
+        {
+            tracing::debug!(session_id = %session_id, "dispatch for an already-running session; ignoring");
+            return;
+        }
+        // `execute_dispatch` is awaited to completion (the lock is NOT held across
+        // it); the spawned session is registered afterwards.
+        match execute_dispatch(&self.engine_config, dispatch, &self.http).await {
+            Ok(session) => {
+                let pid = session.running.pid;
+                self.sessions
+                    .lock()
+                    .expect("session registry poisoned")
+                    .insert(session_id.clone(), session);
+                tracing::info!(session_id = %session_id, pid, "engine spawned and session registered");
+            }
+            Err(error) => {
+                // The error never carries a secret (see ExecError); log it loudly
+                // and keep serving — the worker stays up.
+                tracing::error!(session_id = %session_id, error = %error, "failed to execute dispatch; session NOT registered");
+            }
+        }
+    }
+
+    /// The session ids this worker currently runs (the heartbeat report). The
+    /// lock is taken briefly and never held across an await.
+    fn running_session_ids(&self) -> Vec<String> {
+        self.sessions
+            .lock()
+            .expect("session registry poisoned")
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// Pull work from the controller (empty until #135).
@@ -273,81 +384,5 @@ fn now_unix_ms() -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use wiremock::matchers::{header, method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    fn agent(uri: String) -> WorkerAgent {
-        WorkerAgent::new(
-            uri,
-            SecretString::from("tok".to_string()),
-            "w1".into(),
-            4,
-            "/tmp/e".into(),
-        )
-    }
-
-    #[tokio::test]
-    async fn register_sends_auth_header_and_parses_response() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/internal/v1/register"))
-            .and(header(INTERNAL_AUTH_HEADER, "tok"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(RegisterResponse {
-                accepted: true,
-                heartbeat_interval_secs: 10,
-                controller_protocol_version: PROTOCOL_VERSION,
-            }))
-            .mount(&server)
-            .await;
-
-        let resp = agent(server.uri()).register().await.expect("register");
-        assert!(resp.accepted);
-        assert_eq!(resp.heartbeat_interval_secs, 10);
-    }
-
-    #[tokio::test]
-    async fn register_fails_closed_on_401() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/internal/v1/register"))
-            .respond_with(ResponseTemplate::new(401))
-            .mount(&server)
-            .await;
-
-        let err = agent(server.uri())
-            .register()
-            .await
-            .expect_err("must fail closed");
-        assert!(matches!(err, AgentError::Unauthorized));
-    }
-
-    #[tokio::test]
-    async fn heartbeat_releases_on_stop_session_control() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/internal/v1/heartbeat"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(HeartbeatResponse {
-                acknowledged: true,
-                control: vec![ControlMessage::StopSession {
-                    session_id: "s1".into(),
-                    reason: "drain".into(),
-                }],
-            }))
-            .mount(&server)
-            .await;
-        // The released call is best-effort; mount it so it succeeds.
-        Mock::given(method("POST"))
-            .and(path("/internal/v1/released"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
-            .mount(&server)
-            .await;
-
-        let resp = agent(server.uri())
-            .heartbeat(LifecycleState::Active, &[])
-            .await
-            .expect("heartbeat");
-        assert!(resp.acknowledged);
-    }
-}
+#[path = "agent_tests.rs"]
+mod tests;

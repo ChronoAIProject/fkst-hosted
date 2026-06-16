@@ -33,6 +33,11 @@ envy = "0.4"
 nix = { version = "0.29", features = ["signal", "process"] }
 # `rand` (0.8) sources the runtime nonces (goal-token mint challenge).
 rand = "0.8"
+# `zip` unpacks Ornn skill packages into the per-session CODEX_HOME (issue #151:
+# the on-disk install machinery moved here from the control-plane so BOTH the
+# in-process driver and the worker executor share one implementation). Matches
+# the control-plane's pin so the relocated code is byte-identical.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "sync", "io-util", "fs"] }
 tempfile = "3"
 

@@ -42,8 +42,26 @@ axum = "0.7"
 # protocol. rustls so no system OpenSSL is needed in the slim runtime.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 secrecy = "0.10"
+# Decodes the inline `OrnnSource::ZipB64` skill bytes the controller may embed in
+# a dispatch (#151). Standard, widely-used; the control-plane already pins 0.22.
+base64 = "0.22"
+# `async-trait` declares the executor's one-method `Cloner` seam (the injectable
+# clone step that lets `execute_dispatch` be unit-tested offline). Already in the
+# workspace graph (fkst-shared); the proc-macro keeps the trait method async.
+async-trait = "0.1"
+# `tempfile` holds the per-session CODEX_HOME dir guard the executor creates
+# (#151). `bson` parses the dispatch's goal-id string into the `bson::Uuid` the
+# engine `GoalContext` requires — `bson` is a standalone crate (NOT the mongodb
+# driver), so the worker stays database-free. Both are already in the graph
+# (fkst-engine pulls them).
+tempfile = "3"
+bson = "2"
 
 [dev-dependencies]
 wiremock = "0.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
+# Builds in-memory test skill zips for the engine-executor's ornn-install tests
+# (the runtime install path lives in fkst-engine; the worker only needs zip to
+# fabricate fixtures). Matches the engine/control-plane pin.
+zip = { version = "2", default-features = false, features = ["deflate"] }
