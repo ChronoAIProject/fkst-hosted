@@ -1,3 +1,5 @@
+local source_refs = require("std.source_ref")
+
 return function(M)
 function M.is_supported_open_pr(payload)
   if type(payload) ~= "table"
@@ -7,7 +9,7 @@ function M.is_supported_open_pr(payload)
     or not M._is_git_ref_safe(payload.branch)
     or not M._is_git_sha(payload.head_sha)
     or not M._is_git_ref_safe(payload.base_branch)
-    or not M._has_bounded_source_ref(payload.source_ref) then
+    or not source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len) then
     return false
   end
   local repo, issue_number = M.parse_issue_source_ref(payload.source_ref)

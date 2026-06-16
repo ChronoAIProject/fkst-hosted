@@ -1,3 +1,5 @@
+local source_refs = require("std.source_ref")
+
 return function(M)
 function M.is_supported_review_meta(payload)
   if type(payload) ~= "table"
@@ -18,6 +20,6 @@ function M.is_supported_review_meta(payload)
     and (payload.mode == nil or payload.mode == "fix-reflection")
     and (payload.fix_round == nil or tonumber(payload.fix_round) ~= nil)
     and (payload.blocking_gap == nil or M._is_bounded_string(payload.blocking_gap, M._max_blocking_gap_len))
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 end

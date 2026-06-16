@@ -1,5 +1,6 @@
 local M = {}
 local payload_validator = require("std.payload")
+local source_refs = require("std.source_ref")
 local strings = require("std.strings")
 
 function M.persistence_class()
@@ -18,12 +19,6 @@ local is_bounded_string = strings.is_bounded_string
 -- Mirrors consensus's is_path_safe_key so propose can fail closed BEFORE raising a
 -- proposal the consensus engine would reject (and before wrongly writing its cache).
 local is_path_safe_key = strings.is_path_safe_key
-
-local function has_bounded_source_ref(source_ref)
-  return type(source_ref) == "table"
-    and is_bounded_string(source_ref.kind, max_key_len)
-    and is_bounded_string(source_ref.ref, max_key_len)
-end
 
 local function require_bounded_field(payload, name, limit)
   local value = payload_validator.require_field(payload, name, "autochrono")
@@ -215,7 +210,7 @@ function M.validate_proposal(proposal)
   if not is_bounded_string(proposal.body, max_body_len) then
     return false
   end
-  return has_bounded_source_ref(proposal.source_ref)
+  return source_refs.has_bounded_source_ref(proposal.source_ref, max_key_len)
 end
 
 -- Fail-closed gate before raising a reply: a malformed consensus_reached (missing/oversized
@@ -230,7 +225,7 @@ function M.validate_reached(reached)
   if not is_bounded_string(reached.body, max_body_len) then
     return false
   end
-  return has_bounded_source_ref(reached.source_ref)
+  return source_refs.has_bounded_source_ref(reached.source_ref, max_key_len)
 end
 
 return M

@@ -17,6 +17,10 @@ return {
     t.eq(strings.is_bounded_string(123, 3), false)
   end,
 
+  test_decimal_checksum_matches_existing_package_algorithm = function()
+    t.eq(strings.decimal_checksum("DRY/Rule-of-Three"), "1383444728")
+  end,
+
   test_path_safe_key_rejects_absolute_backslash_space_and_dot_segments = function()
     t.is_true(strings.is_path_safe_key("owner/repo#issue/42", 200))
     t.is_true(strings.is_path_safe_key("cache_key.v1-2/part", 200))

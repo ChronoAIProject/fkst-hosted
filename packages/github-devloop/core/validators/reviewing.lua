@@ -1,3 +1,5 @@
+local source_refs = require("std.source_ref")
+
 return function(M)
 function M.is_supported_reviewing(payload)
   return type(payload) == "table"
@@ -12,6 +14,6 @@ function M.is_supported_reviewing(payload)
         marker_version = payload.version,
         event_version = payload.version,
       }))
-    and M._has_bounded_source_ref(payload.source_ref)
+    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 end

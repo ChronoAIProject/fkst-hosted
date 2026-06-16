@@ -1,4 +1,6 @@
 local S = {}
+local strings = require("std.strings")
+local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
 local default_call_timeout = 10
@@ -110,7 +112,7 @@ function M.sweep_rotation_offset(count, seed)
   if numeric_seed ~= nil and numeric_seed == math.floor(numeric_seed) then
     return numeric_seed % n
   end
-  local hash = M._decimal_checksum(tostring(seed or ""))
+  local hash = decimal_checksum(tostring(seed or ""))
   return tonumber(hash) % n
 end
 
