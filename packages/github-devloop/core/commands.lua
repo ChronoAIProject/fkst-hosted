@@ -416,6 +416,12 @@ function M.gh_pr_view_fix_cmd(repo, pr_number)
     .. " --json headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
 end
 
+function M.gh_pr_view_fix_precheck_cmd(repo, pr_number)
+  return "gh pr view " .. M._shell_single_quote(pr_number)
+    .. " --repo " .. M._shell_single_quote(repo)
+    .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,comments,headRepository,headRepositoryOwner,isCrossRepository"
+end
+
 function M.gh_pr_view_merge_cmd(repo, pr_number)
   return "gh pr view " .. M._shell_single_quote(pr_number)
     .. " --repo " .. M._shell_single_quote(repo)

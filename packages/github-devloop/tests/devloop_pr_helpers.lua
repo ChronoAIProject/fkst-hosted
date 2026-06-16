@@ -364,7 +364,7 @@ local function merge_comments_with_merging(event, branch, impl_version)
   return comments
 end
 
-local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_repo)
+local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_repo, times)
   local cached = base.take_pr_phase_comments()
   local with_origin = {
     core.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, head or "devloop-owner-repo-42-01HY", base.reviewing().version, "dev"),
@@ -396,10 +396,18 @@ local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_rep
     state = state or "OPEN",
     head_repo = head_repo or "owner/repo",
     cross_repo = cross_repo,
-  }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository")
+  }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = with_origin,
+    head = head or "devloop-owner-repo-42-01HY",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+  }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
 end
 
-local function mock_pr_native_fix(comments, head, head_sha, state, head_repo, cross_repo)
+local function mock_pr_native_fix(comments, head, head_sha, state, head_repo, cross_repo, times)
   local cached = base.take_pr_phase_comments()
   local input_comments = comments
   if input_comments == nil or #input_comments == 0 then
@@ -431,7 +439,15 @@ local function mock_pr_native_fix(comments, head, head_sha, state, head_repo, cr
     state = state or "OPEN",
     head_repo = head_repo or "owner/repo",
     cross_repo = cross_repo,
-  }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository")
+  }, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = input_comments,
+    head = head or "pr-native-branch",
+    head_sha = head_sha or "def456",
+    state = state or "OPEN",
+    head_repo = head_repo or "owner/repo",
+    cross_repo = cross_repo,
+  }, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,headRepository,headRepositoryOwner,isCrossRepository", times or 1)
 end
 
 local function mock_pr_origin_sequence(entries)

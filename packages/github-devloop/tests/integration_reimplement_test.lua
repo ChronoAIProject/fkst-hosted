@@ -126,6 +126,10 @@ return {
       core.state_marker(event.proposal_id, "impl-failed", ready.dedup_key),
       core.impl_failure_marker(event.proposal_id, ready.dedup_key, "codex-failed", 1),
     })
+    mock_issue_implement_raw({ "fkst-dev:impl-failed" }, {
+      core.state_marker(event.proposal_id, "impl-failed", ready.dedup_key),
+      core.impl_failure_marker(event.proposal_id, ready.dedup_key, "codex-failed", 1),
+    })
 
     local result = run_implement(ready, opts("implement-retry-success"))
     t.eq(result.exit_code, 0)

@@ -273,6 +273,7 @@ local pr_origin_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,m
 local pr_origin_legacy_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_head_selector = "headRefName"
 local pr_fix_selector = "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
+local pr_fix_precheck_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,headRepository,headRepositoryOwner,isCrossRepository"
 local pr_merge_selector = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 local pr_merge_without_rollup_selector = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus"
 local pr_freshness_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
@@ -281,6 +282,7 @@ M.pr_origin_selector = pr_origin_selector
 M.pr_origin_legacy_selector = pr_origin_legacy_selector
 M.pr_head_selector = pr_head_selector
 M.pr_fix_selector = pr_fix_selector
+M.pr_fix_precheck_selector = pr_fix_precheck_selector
 M.pr_merge_selector = pr_merge_selector
 M.pr_merge_without_rollup_selector = pr_merge_without_rollup_selector
 M.pr_freshness_selector = pr_freshness_selector
@@ -484,6 +486,7 @@ function M.mock_pr_read_forms(t, fields)
       pr_view_command(repo, number, pr_origin_legacy_selector),
       pr_view_command(repo, number, "headRefName,headRefOid,baseRefName,state,comments"),
       pr_view_command(repo, number, pr_fix_selector),
+      pr_view_command(repo, number, pr_fix_precheck_selector),
       pr_view_command(repo, number, "headRefName"),
       pr_view_command(repo, number, pr_context_selector),
       pr_view_command(repo, number, pr_freshness_selector),

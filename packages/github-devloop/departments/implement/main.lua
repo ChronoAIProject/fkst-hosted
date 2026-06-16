@@ -544,6 +544,49 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   return true
 end
 
+local function precheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
+  local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
+  if view.exit_code ~= 0 then
+    error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
+  end
+  local current = core.parse_issue_view_implement(view.stdout)
+  core.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
+  local state = core.current_state(current.comments, marker_ready.proposal_id)
+  if state.state == "implementing"
+    and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
+    local link = core.pr_link_fact(current.comments, marker_ready.proposal_id)
+    if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
+      core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "pr-open", "skip-idempotent(pr-link-visible)", "linked PR fact is already visible")
+      return false
+    end
+    return true
+  end
+  if state.state == "impl-failed" and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
+    core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "impl-failed", "skip-idempotent(already failed)", "implementation failure marker already visible")
+    return false
+  end
+  for _, expected in ipairs(expected_from_states or {}) do
+    if tostring(state.state or "") == tostring(expected)
+      and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
+      return true
+    end
+  end
+  local transition = core.versioned_transition_status(state, expected_from_states or { "ready" }, "implementing", marker_ready.dedup_key)
+  if transition ~= "apply" then
+    if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
+      core.log_cas_decision("implement", marker_ready.proposal_id, {
+        state = "ready",
+        version = marker_ready.dedup_key,
+        stage_rank = core.stage_rank("ready"),
+      }, "ready", "implementing", "apply(own-ready-hand-off)", "pre-spawn ready hand-off still matches this generation")
+      return true
+    end
+    core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "pre-spawn issue state changed")
+    return false
+  end
+  return true
+end
+
 local function backing_original_closed(current)
   local origin = core.fork_origin_fact(current)
   if origin == nil then
@@ -736,7 +779,6 @@ local function process_ready_event(event)
       current = current,
       branches = branches,
       branch = branch,
-      base_head = prepare_base(branches),
       attempt = ready.impl_retry_attempt or 1,
       expected_from_states = expected_states,
       accepted_ready_hand_off = accepted_ready_hand_off,
@@ -744,6 +786,23 @@ local function process_ready_event(event)
   end)
   if attempt_plan == nil then
     return
+  end
+
+  local pre_spawn_gate_ok = false
+  with_lock(lock_key, function()
+    pre_spawn_gate_ok = precheck_implementation_write_gate(
+      repo,
+      issue_number,
+      attempt_plan.marker_ready,
+      attempt_plan.expected_from_states,
+      attempt_plan.accepted_ready_hand_off
+    )
+  end)
+  if not pre_spawn_gate_ok then
+    return
+  end
+  if attempt_plan.base_head == nil then
+    attempt_plan.base_head = prepare_base(attempt_plan.branches)
   end
 
   local outcome = run_attempt(
