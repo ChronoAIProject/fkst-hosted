@@ -91,6 +91,13 @@ split stable local responsibilities into files beside `main.lua`, such as
 `require("departments.<department>.<module>")`. Packages do not cross-require sibling package code;
 cross-package composition goes through event queues.
 
+Shared repo-root code lives in `std/` and is vendored into each package through
+`packages/<pkg>/std -> ../../std`. Current module families cover saga/oracle helpers, GitHub and git
+ports, production port wiring, fake-port testing, strings, and GitHub debug stamps. New and migrated
+`gh`/`git` access goes through `std.github`/`std.git` (production wiring via `std.ports`); remaining
+raw call sites are migration debt in `migration/gh-git-adapter.allowlist` that the G-ADAPTER ratchet
+shrinks. Tests use `std.testing` with `std.github_fake` / `std.git_fake`.
+
 The runtime package view is `.fkst/packages/`. In this repository it is a relative symlink to
 `packages/`; host repositories may place runtime packages directly under `.fkst/packages/`.
 
@@ -158,6 +165,14 @@ Static guards include the 1000-line hard limit for `.lua`, `.sh`, `.py`, and `.r
 under `.fkst/packages/` and `scripts/`; package test naming rules; helper reachability checks; and
 selected repository-shape checks. Engine tests remain the authority for real package behavior.
 
+Repository-shape guards include G9, which forbids peer cross-package `require` and keeps sharing on
+`std/`; G10, which shrinks the saga-handler allowlist toward `std.saga.department`; and G-ADAPTER,
+which shrinks the `gh`/`git` command-construction allowlist toward `std.github` / `std.git`.
+Ports-using `gh`/`git` business tests use injected fakes through `std.testing`; existing/adapter-contract
+tests may still use `fkst.test.mock_command` while the migration proceeds. Other external CLIs such
+as `codex` still use the engine command mock; no fake `gh`/`git`/`codex` binaries are generated,
+and unmocked external commands fail closed.
+
 ## Runtime Posture
 
 GitHub writes are dry-run by default. `FKST_GITHUB_WRITE=1` is the only write posture switch; when it
@@ -182,6 +197,8 @@ need host-stable runtime, durable, and rate-pool roots:
   harness-first methodology.
 - [`docs/dev/scaffold-install-upgrade-design.md`](docs/dev/scaffold-install-upgrade-design.md):
   scaffold install, upgrade, and package-reference update design.
+- [`docs/superpowers/specs/2026-06-15-ports-adapters-design.md`](docs/superpowers/specs/2026-06-15-ports-adapters-design.md):
+  deeper ports/adapters rationale for `std.github`, `std.git`, port wiring, and fake-port tests.
 
 The authoritative engine-package contract lives in `fkst-substrate` at
 `docs/package-repo-contract.md`.
