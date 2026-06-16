@@ -12,7 +12,7 @@ pub mod types;
 
 pub use types::{
     check_protocol_version, CloneSpec, ControlMessage, CredentialRefreshRequest,
-    CredentialRefreshResponse, DispatchGoal, Draining, Heartbeat, HeartbeatResponse,
+    CredentialRefreshResponse, DispatchGoal, Draining, Heartbeat, HeartbeatResponse, JournalPlan,
     LifecycleState, OrnnPlan, OrnnSkillRef, OrnnSource, ProtocolError, PullRequest, PullResponse,
     RefreshReason, RefreshedToken, RegisterRequest, RegisterResponse, Released, ResolvedDispatch,
     SessionStatus, StatusReport, TerminalExit, WorkAssignment, INTERNAL_AUTH_HEADER,
