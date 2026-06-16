@@ -450,7 +450,7 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
   return true
 end
 
-function pipeline(event)
+local function process_pr_event(event)
   local pr = pr_context(event)
   local raw = event.payload or {}
   if pr == nil then
@@ -588,6 +588,13 @@ function pipeline(event)
     core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
     maybe_label_hints(origin, pr.number, current_pr, { state = "reviewing", version = origin.impl_version }, source_ref)
   end)
+end
+
+function pipeline(event)
+  core.dispatch_consumed_queue("observe_pr", M.spec, event, {
+    ["github-proxy.github_entity_changed"] = process_pr_event,
+    ["github-proxy.github_pr_opened"] = process_pr_event,
+  })
 end
 
 pipeline = core.wrap_pipeline_failure("observe_pr", pipeline)

@@ -409,7 +409,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
   return true
 end
 
-function pipeline(event)
+local function process_issue_event(event)
   local issue = event.payload or {}
   if not core.is_supported_issue(issue) then
     core.log_entry("observe_issue", event, "unknown", core.payload_field(issue, "dedup_key"))
@@ -532,6 +532,12 @@ function pipeline(event)
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
   end)
+end
+
+function pipeline(event)
+  core.dispatch_consumed_queue("observe_issue", M.spec, event, {
+    ["github-proxy.github_entity_changed"] = process_issue_event,
+  })
 end
 
 pipeline = core.wrap_pipeline_failure("observe_issue", pipeline)
