@@ -139,10 +139,14 @@ async fn heartbeat(State(st): State<InternalState>, Json(hb): Json<Heartbeat>) -
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
     st.registry.heartbeat(&hb).await;
-    // No control messages from the controller in this issue (the path exists).
+    // Deliver any control messages queued for this worker (point-to-point, #151).
+    // Dormant until activation enqueues: the queue is empty, so this returns
+    // `control: vec![]` exactly as before. The drain is once-only — a message is
+    // delivered to exactly one heartbeat.
+    let control = st.registry.take_control(&hb.worker_id).await;
     Json(HeartbeatResponse {
         acknowledged: true,
-        control: vec![],
+        control,
     })
     .into_response()
 }

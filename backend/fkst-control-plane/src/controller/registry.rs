@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
 
-use fkst_shared::protocol::{Draining, Heartbeat, LifecycleState, RegisterRequest, Released};
+use fkst_shared::protocol::{
+    ControlMessage, Draining, Heartbeat, LifecycleState, RegisterRequest, Released,
+};
 
 /// One worker's tracked state.
 #[derive(Debug, Clone)]
@@ -24,9 +26,17 @@ pub struct WorkerEntry {
 
 /// The controller's in-memory map of worker_id -> liveness. A worker whose
 /// `last_seen` is older than `liveness_ttl` is considered dead.
+///
+/// `outbound` is a per-worker queue of control messages awaiting delivery on the
+/// worker's next heartbeat (the point-to-point dispatch channel, #151). It is
+/// kept SEPARATE from the liveness map so a [`WorkerEntry`] snapshot stays pure
+/// liveness and never carries (secret-bearing) dispatch payloads. Dormant until
+/// the activation increment enqueues — [`take_control`](Self::take_control)
+/// drains an always-empty queue until then.
 #[derive(Clone)]
 pub struct WorkerRegistry {
     inner: Arc<RwLock<HashMap<String, WorkerEntry>>>,
+    outbound: Arc<RwLock<HashMap<String, Vec<ControlMessage>>>>,
     liveness_ttl: Duration,
 }
 
@@ -34,8 +44,29 @@ impl WorkerRegistry {
     pub fn new(liveness_ttl: Duration) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
+            outbound: Arc::new(RwLock::new(HashMap::new())),
             liveness_ttl,
         }
+    }
+
+    /// Queue a control message for delivery on `worker_id`'s next heartbeat. The
+    /// caller is responsible for having placed the session on a LIVE worker (the
+    /// placement authority, #135); a message for a worker that never heartbeats
+    /// again is cleared when the worker expires ([`expire_stale`](Self::expire_stale)).
+    /// The message may carry secrets (a `ResolvedDispatch`), so it is never logged
+    /// here — only its kind/count.
+    pub async fn enqueue_control(&self, worker_id: &str, message: ControlMessage) {
+        let mut out = self.outbound.write().await;
+        out.entry(worker_id.to_string()).or_default().push(message);
+        tracing::debug!(worker_id, "control message queued for next heartbeat");
+    }
+
+    /// Drain and return the control messages queued for `worker_id` (called by the
+    /// heartbeat handler to fill `HeartbeatResponse.control`). An empty queue (the
+    /// common case, and the only case until activation) returns an empty vec.
+    pub async fn take_control(&self, worker_id: &str) -> Vec<ControlMessage> {
+        let mut out = self.outbound.write().await;
+        out.remove(worker_id).unwrap_or_default()
     }
 
     /// Register (or re-register) a worker: reset `last_seen` and mark `Active`.
@@ -129,6 +160,15 @@ impl WorkerRegistry {
             map.remove(id);
             tracing::warn!(worker_id = %id, "worker expired (no heartbeat past liveness TTL)");
         }
+        // Drop any undelivered control messages for the expired workers so a dead
+        // worker's queue cannot leak (its work is reassigned by #140 / the
+        // activation follow-up, never delivered to the dead instance).
+        if !stale.is_empty() {
+            let mut out = self.outbound.write().await;
+            for id in &stale {
+                out.remove(id);
+            }
+        }
         stale
     }
 }
@@ -189,6 +229,57 @@ mod tests {
         assert_eq!(
             live[0].capacity, 0,
             "unknown capacity until a real register"
+        );
+    }
+
+    #[tokio::test]
+    async fn enqueue_then_take_control_drains_in_order_once() {
+        let r = WorkerRegistry::new(Duration::from_secs(10));
+        r.register(&reg("w1")).await;
+        r.enqueue_control(
+            "w1",
+            ControlMessage::StopSession {
+                session_id: "s1".to_string(),
+                reason: "a".to_string(),
+            },
+        )
+        .await;
+        r.enqueue_control(
+            "w1",
+            ControlMessage::StopSession {
+                session_id: "s2".to_string(),
+                reason: "b".to_string(),
+            },
+        )
+        .await;
+        let drained = r.take_control("w1").await;
+        assert_eq!(drained.len(), 2, "both queued messages, FIFO");
+        assert!(
+            matches!(&drained[0], ControlMessage::StopSession { session_id, .. } if session_id == "s1")
+        );
+        // A second take is empty (drain is once-only).
+        assert!(r.take_control("w1").await.is_empty());
+        // An unknown worker drains empty, never panics.
+        assert!(r.take_control("ghost").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn expiring_a_worker_drops_its_queued_control() {
+        let r = WorkerRegistry::new(Duration::from_millis(1));
+        r.register(&reg("w1")).await;
+        r.enqueue_control(
+            "w1",
+            ControlMessage::StopSession {
+                session_id: "s1".to_string(),
+                reason: "x".to_string(),
+            },
+        )
+        .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(r.expire_stale().await, vec!["w1".to_string()]);
+        assert!(
+            r.take_control("w1").await.is_empty(),
+            "expired worker's queue must be cleared"
         );
     }
 
