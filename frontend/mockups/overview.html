@@ -588,8 +588,13 @@
       set('.m-state',cur); set('.m-id',d.id||'#—'); set('#m-title',d.title||'—');
       var pr=d.pr?(''+d.pr):(end>=3?'PR open':'no PR yet'), ci=d.ci||(end>=4?'CI ✓':'—');
       var ag=(d.age&&/(\d|now)/.test(d.age))?d.age:'';
-      var parts=[(d.repo||'fkst-substrate'),'stage <b>'+stage+'</b>',pr,ci]; if(ag)parts.push(ag);
-      document.getElementById('m-meta').innerHTML=parts.join(' · ');
+      var mMeta=document.getElementById('m-meta'); mMeta.textContent='';
+      var segs=[(d.repo||'fkst-substrate'),null,pr,ci]; if(ag)segs.push(ag);
+      segs.forEach(function(s,i){
+        if(i) mMeta.appendChild(document.createTextNode(' · '));
+        if(s===null){ mMeta.appendChild(document.createTextNode('stage ')); var b=document.createElement('b'); b.textContent=stage; mMeta.appendChild(b); }
+        else mMeta.appendChild(document.createTextNode(s));
+      });
       var tl=document.getElementById('m-tl'); tl.innerHTML='';
       for(var i=0;i<=end;i++){
         tl.insertAdjacentHTML('beforeend','<div class="m-ev'+(i===end?' cur':'')+'"><span class="nd"></span><div class="st">'+SEQ[i][0]+'</div><div class="mt">'+AGO[i]+' · trusted ✓</div></div>');

@@ -30,7 +30,7 @@ import IssuesScreen from '../screens/issues/issues-screen';
 
 function OverviewRoute() {
   const context = useOutletContext<ShellOutletContext>();
-  const { data: goals, isLoading, isError, error } = useGoalsList();
+  const { data: goals, isLoading, isError } = useGoalsList();
 
   useEffect(() => {
     document.title = 'FKST — Overview';
@@ -44,15 +44,10 @@ function OverviewRoute() {
     );
   }
 
-  if (isError) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[300px] text-red font-mono text-[12px]">
-        failed to load goals: {String(error)}
-      </div>
-    );
-  }
-
-  return <Overview goals={goals} onNewGoal={context?.onNewGoal} />;
+  // On error (e.g. backend unreachable), render the Overview with no data so it
+  // shows its honest empty/unknown state — never replace the whole screen with a
+  // raw error (ARCHITECTURE.md: unreachable → honest gap, not a dead end).
+  return <Overview goals={isError ? undefined : goals} onNewGoal={context?.onNewGoal} />;
 }
 
 function GoalsRoute() {

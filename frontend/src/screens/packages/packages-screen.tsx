@@ -609,7 +609,7 @@ export function PackageRow({ name, pkg, isLoading, error, onUpdateClick, onDelet
   if (error) {
     return (
       <HairlineRow
-        className="grid grid-cols-[minmax(0,1fr)_auto] items-start"
+        className="grid grid-cols-1 gap-3 min-[600px]:grid-cols-[minmax(0,1fr)_auto] min-[600px]:gap-0 items-start"
         leftContent={
           <div className="min-w-0">
             <div className="flex items-center gap-[10px] flex-wrap">
@@ -631,7 +631,7 @@ export function PackageRow({ name, pkg, isLoading, error, onUpdateClick, onDelet
 
   return (
     <HairlineRow
-      className="grid grid-cols-[minmax(0,1fr)_auto] items-start"
+      className="grid grid-cols-1 gap-3 min-[600px]:grid-cols-[minmax(0,1fr)_auto] min-[600px]:gap-0 items-start"
       leftContent={
         <div className="min-w-0">
           <div className="flex items-center gap-[10px] flex-wrap">
@@ -697,7 +697,7 @@ export function PackageRow({ name, pkg, isLoading, error, onUpdateClick, onDelet
           <span className="text-[10px] text-gold font-mono max-w-[150px] text-right leading-tight">
             target state — applies via session restart; no enable endpoint in v1
           </span>
-          <div className="flex items-center gap-[11px] mt-1">
+          <div className="flex flex-wrap items-center justify-end gap-x-[11px] gap-y-1 mt-1 max-w-full">
             {onUpdateClick && (
               <button
                 onClick={onUpdateClick}
