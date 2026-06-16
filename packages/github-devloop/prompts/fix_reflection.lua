@@ -1,10 +1,7 @@
 return {
   template = [[You are running a read-only reflection checkpoint for github-devloop's fix loop.
 
-Execution boundary:
-- You are running in an empty runtime scratch directory, not a repository checkout.
-- Do not clone, checkout, fetch with git, create branches, or modify any repository.
-- Read GitHub context only from the local files named below.
+{{execution_boundary}}
 
 Established control practice:
 - Treat this as a PDCA/OODA checkpoint in a closed feedback loop.
@@ -19,7 +16,7 @@ If you cannot read the local context files (issue body / PR diff / comments) for
 
 Respond with exactly two lines and no other text.
 Line one: the marker named ⟦FKST:ACTION⟧ followed by one word from continue or spec-gap.
-Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph in Chinese.
+Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph.
 
 Issue:
 Proposal id: {{proposal_id}}

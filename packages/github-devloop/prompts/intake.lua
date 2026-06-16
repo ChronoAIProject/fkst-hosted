@@ -1,10 +1,7 @@
 return {
   template = [[You are the github-devloop intake judge.
 
-Execution boundary:
-- You are running in an empty runtime scratch directory, not a repository checkout.
-- Do not clone, checkout, fetch with git, create branches, or modify any repository.
-- Judge only from the local context files and issue data provided in this prompt.
+{{execution_boundary}}
 
 Decide whether this GitHub issue should be automatically enabled for autonomous implementation by adding fkst-dev:enabled, acknowledged as a tracking umbrella, declined, or escalated as an instance into a broader recurring class.
 Also classify its service class as expedite, standard, or background. This is a stable intake fact used for audit and display only; do not infer scheduling behavior from labels.
