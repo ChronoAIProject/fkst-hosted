@@ -40,20 +40,30 @@ local function runtime_segment(value)
   return safe == "" and "empty" or safe
 end
 
+-- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
+-- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
+-- configured bot login match regardless of which API populated the field.
+-- No-op for ordinary user logins (which never end in "[bot]").
+local function strip_bot_login_suffix(login)
+  if login == nil then
+    return nil
+  end
+  return (tostring(login):gsub("%[bot%]$", ""))
+end
+
 local function issue_author_login(comment)
   if type(comment) ~= "table" then
     return nil
   end
+  local raw = nil
   if comment.author_login ~= nil then
-    return tostring(comment.author_login)
+    raw = comment.author_login
+  elseif type(comment.author) == "table" and comment.author.login ~= nil then
+    raw = comment.author.login
+  elseif type(comment.user) == "table" and comment.user.login ~= nil then
+    raw = comment.user.login
   end
-  if type(comment.author) == "table" and comment.author.login ~= nil then
-    return tostring(comment.author.login)
-  end
-  if type(comment.user) == "table" and comment.user.login ~= nil then
-    return tostring(comment.user.login)
-  end
-  return nil
+  return strip_bot_login_suffix(raw)
 end
 
 function M.validate_issue_blocked_by_payload(payload)

@@ -31,19 +31,29 @@ local function comment_body(comment)
   return tostring(comment or "")
 end
 
+-- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
+-- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
+-- configured bot login match regardless of which API populated the field.
+-- No-op for ordinary user logins (which never end in "[bot]").
+local function strip_bot_login_suffix(login)
+  if login == nil then
+    return nil
+  end
+  return (tostring(login):gsub("%[bot%]$", ""))
+end
+
 local function comment_author_login(comment)
+  local raw = nil
   if type(comment) == "table" then
     if comment.author_login ~= nil then
-      return tostring(comment.author_login)
-    end
-    if type(comment.author) == "table" and comment.author.login ~= nil then
-      return tostring(comment.author.login)
-    end
-    if type(comment.user) == "table" and comment.user.login ~= nil then
-      return tostring(comment.user.login)
+      raw = comment.author_login
+    elseif type(comment.author) == "table" and comment.author.login ~= nil then
+      raw = comment.author.login
+    elseif type(comment.user) == "table" and comment.user.login ~= nil then
+      raw = comment.user.login
     end
   end
-  return nil
+  return strip_bot_login_suffix(raw)
 end
 
 function M._comment_body(comment)

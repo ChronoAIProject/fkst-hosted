@@ -1,13 +1,8 @@
 # Local, machine-specific config. Tracked template lives in .fkst/env.example.
 .fkst/env
 .fkst/board-cache.json
-# Engine runtime/durable scratch, created relative to a project-root. Numbered variants
-# (.fkst/runtime4, runtime5, …) accumulate across runs, so glob rather than match exactly.
-.fkst/runtime*
-.fkst/durable*
-# Per-package runtime scratch: the engine writes .fkst/ relative to a package project-root,
-# so running a single package (.fkst/packages/<pkg> -> ../packages) scatters scratch under it.
-packages/*/.fkst/
+.fkst/runtime/
+.fkst/durable/
 
 # Python bytecode
 __pycache__/

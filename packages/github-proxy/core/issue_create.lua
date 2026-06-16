@@ -79,17 +79,28 @@ local function assignees_arg(assignees)
   return args
 end
 
+-- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
+-- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
+-- configured bot login match regardless of which API populated the field.
+-- No-op for ordinary user logins (which never end in "[bot]").
+local function strip_bot_login_suffix(login)
+  if login == nil then
+    return nil
+  end
+  return (tostring(login):gsub("%[bot%]$", ""))
+end
+
 local function issue_author_login(issue)
   if type(issue) ~= "table" then
     return nil
   end
+  local raw = nil
   if issue.author_login ~= nil then
-    return tostring(issue.author_login)
+    raw = issue.author_login
+  elseif type(issue.author) == "table" and issue.author.login ~= nil then
+    raw = issue.author.login
   end
-  if type(issue.author) == "table" and issue.author.login ~= nil then
-    return tostring(issue.author.login)
-  end
-  return nil
+  return strip_bot_login_suffix(raw)
 end
 
 function M.issue_create_marker(dedup_key)
