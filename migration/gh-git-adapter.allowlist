@@ -16,7 +16,6 @@ packages/github-devloop/core/commands.lua:
   - gh api
   - gh issue
   - gh pr
-  - gh workflow
   - git add
   - git clean
   - git commit
