@@ -1,5 +1,12 @@
 local ports = require("std.ports")
 
+local function assert_install_rejects(make_department)
+  local ok, err = pcall(ports.install, make_department)
+  assert(ok == false, "install rejects malformed make_department return")
+  assert(tostring(err):find("std.ports.install: make_department must return a table with spec and pipeline", 1, true) ~= nil,
+    "install reports the department return-shape contract")
+end
+
 return {
   test_install_passes_production_handles_and_exposes_make_department = function()
     local seen
@@ -26,5 +33,41 @@ return {
 
   test_install_rejects_non_function = function()
     assert(not pcall(ports.install, nil), "install requires a make_department function")
+  end,
+
+  test_install_rejects_nil_department = function()
+    assert_install_rejects(function()
+      return nil
+    end)
+  end,
+
+  test_install_rejects_non_table_department = function()
+    assert_install_rejects(function()
+      return "department"
+    end)
+  end,
+
+  test_install_rejects_department_missing_spec = function()
+    assert_install_rejects(function()
+      return { pipeline = function() end }
+    end)
+  end,
+
+  test_install_rejects_department_with_non_table_spec = function()
+    assert_install_rejects(function()
+      return { spec = "spec", pipeline = function() end }
+    end)
+  end,
+
+  test_install_rejects_department_missing_pipeline = function()
+    assert_install_rejects(function()
+      return { spec = {} }
+    end)
+  end,
+
+  test_install_rejects_department_with_non_function_pipeline = function()
+    assert_install_rejects(function()
+      return { spec = {}, pipeline = "pipeline" }
+    end)
   end,
 }
