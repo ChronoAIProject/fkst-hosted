@@ -2,6 +2,10 @@ local S = {}
 
 local max_impl_auto_retry_attempts = 2
 local max_impl_retry_attempts = 100000
+local auto_retryable_reasons = {
+  ["codex-failed"] = true,
+  ["non-descendant-head"] = true,
+}
 
 local function marker_attr(marker, name)
   return marker:match(name .. '="([^"]*)"')
@@ -74,7 +78,7 @@ end
 
 function M.impl_failure_retry_allowed(fact)
   return type(fact) == "table"
-    and fact.reason == "codex-failed"
+    and auto_retryable_reasons[fact.reason] == true
     and tonumber(fact.attempt or 1) < max_impl_auto_retry_attempts
 end
 

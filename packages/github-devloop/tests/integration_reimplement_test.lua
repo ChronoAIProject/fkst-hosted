@@ -53,11 +53,33 @@ return {
     t.eq(ready.payload.impl_retry_attempt, 2)
   end,
 
+  test_observe_autoretries_non_descendant_head_once = function()
+    local event = reached()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:impl-failed" }, "OPEN", impl_failed_comments(event, "non-descendant-head", 1))
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:impl-failed" } }), opts("observe-non-descendant-head-retry"))
+    t.eq(result.exit_code, 0)
+    local ready = find_raise(result.raises, "devloop_ready")
+    t.is_true(ready ~= nil)
+    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload(event).dedup_key)
+    t.eq(ready.payload.impl_retry_attempt, 2)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
+  end,
+
   test_observe_stops_after_bounded_codex_failed_retry = function()
     local event = reached()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:impl-failed" }, "OPEN", impl_failed_comments(event, "codex-failed", 2))
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:impl-failed" } }), opts("observe-impl-failed-limit"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+  end,
+
+  test_observe_stops_after_bounded_non_descendant_head_retry = function()
+    local event = reached()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:impl-failed" }, "OPEN", impl_failed_comments(event, "non-descendant-head", 2))
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:impl-failed" } }), opts("observe-non-descendant-head-limit"))
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
