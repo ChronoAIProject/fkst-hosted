@@ -148,6 +148,9 @@ local function make_department(ports)
       local current = ports.github.read_issue({
         kind = "external",
         ref = repo .. "#issue/" .. tostring(issue_number),
+      }, {
+        consumer = "consensus_result",
+        force_fresh = true,
       })
       local to_state = "ready"
       core.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
