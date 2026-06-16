@@ -4,9 +4,10 @@ local M = {}
 
 M.spec = {
   consumes = { "devloop_substrate_ref_tick" },
-  produces = {},
-  ephemeral = { "devloop_substrate_ref_tick" },
-  retry = false,
+  produces = {
+    "github-proxy.github_pr_comment_request",
+    "devloop_merge_ready",
+  },
   stall_window = "5m",
 }
 

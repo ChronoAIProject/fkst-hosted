@@ -40,6 +40,13 @@ local function require_consensus_review_approve(comments, merge_ready)
   return false
 end
 
+local function require_merge_authority_approve(comments, merge_ready, pr, repo, branches)
+  if core.is_substrate_ref_bump_merge(merge_ready, pr, repo, branches) then
+    return true
+  end
+  return require_consensus_review_approve(comments, merge_ready)
+end
+
 local function gate_baseline_sha_from_pr(pr)
   local baseline_sha = tostring(pr and pr.base_ref_oid or "")
   if not core.is_safe_head_sha(baseline_sha) then
@@ -218,13 +225,14 @@ local function assert_open_same_repo_pr(merge_ready, pr, repo, branch, head_sha)
 end
 
 local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, origin, branches)
+  local substrate_ref_merge = core.is_substrate_ref_bump_merge(merge_ready, pr, repo, branches)
   local state = core.current_entity_state(pr.comments, merge_ready.proposal_id)
   if (state.state ~= "merge-ready" and state.state ~= "merging")
     or tostring(state.version or "") ~= tostring(merge_ready.version) then
     return false, "write-time PR state changed", state
   end
 
-  if not require_consensus_review_approve(pr.comments, merge_ready) then
+  if not require_merge_authority_approve(pr.comments, merge_ready, pr, repo, branches) then
     return false, "trusted review-result approve missing", state
   end
 
@@ -240,7 +248,7 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
   end
   if current_origin.proposal_id ~= merge_ready.proposal_id
     or current_origin.repo ~= repo
-    or tostring(current_origin.issue_number) ~= tostring(issue_number)
+    or (not substrate_ref_merge and tostring(current_origin.issue_number) ~= tostring(issue_number))
     or tostring(current_origin.branch) ~= tostring(origin.branch)
     or tostring(current_origin.impl_version) ~= tostring(origin.impl_version)
     or tostring(current_origin.base_branch) ~= tostring(origin.base_branch)
@@ -408,8 +416,12 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
-  if not core.verify_pr_review_issue_claim("merge", repo, issue_number, nil, merge_ready.proposal_id) then
+  local potential_substrate_ref_merge = core.is_potential_substrate_ref_bump_merge(merge_ready, repo)
+  local claim_verified = false
+  if not potential_substrate_ref_merge and not core.verify_pr_review_issue_claim("merge", repo, issue_number, nil, merge_ready.proposal_id) then
     return
+  elseif not potential_substrate_ref_merge then
+    claim_verified = true
   end
   if options ~= nil and type(options.queue_starvation_cause) == "table" then
     local comment_request = core.build_queue_starvation_reconcile_comment_request(repo, merge_ready, options.queue_starvation_cause)
@@ -423,6 +435,19 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       error("github-devloop: gh pr merge view failed: " .. tostring(pr_view.stderr))
     end
     current_pr = core.parse_pr_view_merge(pr_view.stdout)
+  end
+  local substrate_ref_merge = core.is_substrate_ref_bump_merge(merge_ready, current_pr, repo, branches)
+  if substrate_ref_merge then
+    issue_number = nil
+    branches = {
+      upstream = branches.upstream,
+      integration = current_pr.base_ref_name,
+    }
+  elseif potential_substrate_ref_merge then
+    core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merging", "skip-foreign(substrate-ref-shape)", "substrate-ref merge candidate did not match PR facts")
+    return
+  elseif not claim_verified and not core.verify_pr_review_issue_claim("merge", repo, issue_number, nil, merge_ready.proposal_id) then
+    return
   end
   core.log_forged_markers("merge", merge_ready.proposal_id, current_pr.comments)
   local state = core.current_entity_state(current_pr.comments, merge_ready.proposal_id)
@@ -483,6 +508,10 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   local write_enabled = (write_mode or core.write_mode()) == "real"
   local pr_ok, pr_reason = assert_open_same_repo_pr(merge_ready, current_pr, repo, origin.branch, merge_ready.reviewed_head_sha)
   if not pr_ok then
+    if substrate_ref_merge and pr_reason == "head-sha-mismatch" then
+      core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merge-ready", "skip-stale(head)", "substrate-ref bump head changed; scanner will re-authorize the new head")
+      return
+    end
     if core.is_merged_pr(current_pr)
       and tostring(current_pr.head_ref_name or "") == tostring(origin.branch)
       and tostring(current_pr.head_sha or "") == tostring(merge_ready.reviewed_head_sha)
@@ -592,7 +621,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     log_gate(merge_ready, "dry-run", "merge requires FKST_GITHUB_WRITE=1")
     return
   end
-  if not require_consensus_review_approve(current_pr.comments, merge_ready) then
+  if not require_merge_authority_approve(current_pr.comments, merge_ready, current_pr, repo, branches) then
     return
   end
   log_gate(merge_ready, "write-ready", "FKST_GITHUB_WRITE=1 and trusted review-result approve")
@@ -657,6 +686,10 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   local rechecked_pr_for_gate = core.parse_pr_view_merge(pr_recheck.stdout)
   local recheck_ok, recheck_reason, rechecked_state = assert_merge_pr_authority(merge_ready, rechecked_pr_for_gate, repo, issue_number, origin, branches)
   if not recheck_ok then
+    if substrate_ref_merge and recheck_reason == "head-sha-mismatch" then
+      core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready|merging", "merge-ready", "skip-stale(head)", "substrate-ref bump head changed before merge")
+      return
+    end
     if recheck_reason == "head-sha-mismatch" then
       log_gate(merge_ready, "reviewing", "head-sha-mismatch")
       raise_reviewing_for_current_head(repo, issue_number, merge_ready, rechecked_state, rechecked_pr_for_gate, "head-sha-mismatch")
@@ -690,7 +723,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       end
       if recheck_origin.proposal_id ~= merge_ready.proposal_id
         or recheck_origin.repo ~= repo
-        or tostring(recheck_origin.issue_number) ~= tostring(issue_number)
+        or (not substrate_ref_merge and tostring(recheck_origin.issue_number) ~= tostring(issue_number))
         or tostring(recheck_origin.branch) ~= tostring(origin.branch)
         or tostring(recheck_origin.impl_version) ~= tostring(origin.impl_version)
         or tostring(recheck_origin.base_branch) ~= tostring(origin.base_branch)
@@ -713,6 +746,10 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     error("github-devloop: merged PR fact changed before finalization")
   end
   if not merge_ok and merge_reason == "head-sha-mismatch" then
+    if substrate_ref_merge then
+      core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready", "merge-ready", "skip-stale(head)", "substrate-ref bump head changed during merge")
+      return
+    end
     log_gate(merge_ready, "reviewing", "head-sha-mismatch")
     raise_reviewing_for_current_head(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr or rechecked_pr_for_gate, "head-sha-mismatch")
     return

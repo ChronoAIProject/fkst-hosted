@@ -5,6 +5,7 @@ local current_pin = "cccccccccccccccccccccccccccccccccccccccc"
 local target_sha = "1234567890abcdef1234567890abcdef12345678"
 local base_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 local old_branch_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+local pr_head_sha = "dddddddddddddddddddddddddddddddddddddddd"
 
 local function opts(name, extra)
   local env = {
@@ -260,6 +261,67 @@ local function mock_pr_create()
   })
 end
 
+local function json_string(value)
+  return tostring(value or "")
+    :gsub("\\", "\\\\")
+    :gsub('"', '\\"')
+    :gsub("\n", "\\n")
+end
+
+local function render_comment(body)
+  return string.format(
+    '{"body":"%s","author":{"login":"fkst-test-bot"},"createdAt":"2026-06-16T22:10:00Z"}',
+    json_string(body)
+  )
+end
+
+local function substrate_review_proposal()
+  return core.pr_review_proposal_id("owner/repo", 27, "substrate-ref-bump", pr_head_sha)
+end
+
+local function substrate_review_dedup()
+  return core._dedup_key({
+    "substrate-ref-bump",
+    "review",
+    core.safe_repo("owner/repo"),
+    "27",
+    pr_head_sha,
+  })
+end
+
+local function substrate_lifecycle_comment()
+  local proposal_id = core.proposal_id("owner/repo", 27)
+  local review_proposal = substrate_review_proposal()
+  local review_dedup = substrate_review_dedup()
+  return table.concat({
+    core.pr_origin_marker(proposal_id, 27, "chore/substrate-ref-bump", "substrate-ref-bump", "dev"),
+    core.state_marker(proposal_id, "merge-ready", "substrate-ref-bump"),
+    core.review_result_marker(review_proposal, proposal_id, "approve", review_dedup),
+    core.merge_ready_marker(proposal_id, 27, "substrate-ref-bump", review_proposal, review_dedup, pr_head_sha),
+  }, "\n")
+end
+
+local function mock_bump_pr_view(comments)
+  t.mock_command("gh pr view '27' --repo 'owner/repo' --json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
+    stdout = string.format(
+      '{"headRefName":"chore/substrate-ref-bump","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"OPEN","updatedAt":"2026-06-16T22:10:00Z","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
+      pr_head_sha,
+      base_sha,
+      comments and render_comment(comments) or ""
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_bump_diff(path)
+  t.mock_command("gh pr diff '27' --repo 'owner/repo' --name-only", {
+    stdout = (path or ".fkst/substrate-ref") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
@@ -337,12 +399,18 @@ return {
     mock_no_checked_out_bump_branch()
     mock_worktree_commands(false)
     mock_pr_create()
+    mock_bump_pr_view()
+    mock_bump_diff()
 
     local result = run_scan(opts("substrate-create", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 1)
     t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
+    local comment_raise = result.raises[1]
+    t.eq(comment_raise.queue, "github-proxy.github_pr_comment_request")
+    t.is_true(comment_raise.payload.body:find('state="merge-ready"', 1, true) ~= nil)
+    t.eq(count_calls("gh pr merge"), 0)
   end,
 
   test_real_mode_updates_existing_bump_pr_branch_without_creating_second_pr = function()
@@ -356,12 +424,15 @@ return {
     mock_runtime_root("substrate-update")
     mock_no_checked_out_bump_branch()
     mock_worktree_commands(true)
+    mock_bump_pr_view()
+    mock_bump_diff()
 
     local result = run_scan(opts("substrate-update", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
   end,
 
   test_real_mode_rechecks_pr_under_lock_before_create = function()
@@ -374,6 +445,8 @@ return {
     mock_runtime_root("substrate-recheck")
     mock_no_checked_out_bump_branch()
     mock_worktree_commands(false)
+    mock_bump_pr_view()
+    mock_bump_diff()
 
     local result = run_scan(opts("substrate-recheck", { FKST_GITHUB_WRITE = "1" }))
 
@@ -381,6 +454,7 @@ return {
     t.eq(count_calls(core.gh_pr_list_head_cmd("owner/repo", "chore/substrate-ref-bump")), 1)
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
   end,
 
   test_real_mode_skips_push_when_bump_branch_already_targets_dev_head = function()
@@ -390,6 +464,8 @@ return {
     mock_existing_pr()
     mock_branch_present()
     mock_branch_pin(target_sha)
+    mock_bump_pr_view(substrate_lifecycle_comment())
+    mock_bump_diff()
 
     local result = run_scan(opts("substrate-already-current", { FKST_GITHUB_WRITE = "1" }))
 
@@ -397,6 +473,9 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("git worktree"), 0)
     t.eq(count_calls("git push"), 0)
+    t.eq(result.raises[1].queue, "devloop_merge_ready")
+    t.eq(result.raises[1].payload.proposal_id, core.proposal_id("owner/repo", 27))
+    t.eq(result.raises[1].payload.review_proposal_id, substrate_review_proposal())
   end,
 
   test_real_mode_removes_stale_checked_out_bump_branch_worktree_before_update = function()
@@ -410,11 +489,14 @@ return {
     mock_runtime_root("substrate-stale-worktree")
     mock_checked_out_bump_branch()
     mock_worktree_commands(true)
+    mock_bump_pr_view()
+    mock_bump_diff()
 
     local result = run_scan(opts("substrate-stale-worktree", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("git worktree remove --force '/tmp/fkst-packages-test/github-devloop/stale-substrate'"), 1)
     t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
   end,
 }
