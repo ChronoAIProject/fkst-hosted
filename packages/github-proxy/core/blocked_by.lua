@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local max_dedup_len = 512
 local max_repo_len = 200
 
@@ -8,12 +9,8 @@ local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
-local function is_bounded_string(value, limit)
-  return type(value) == "string" and value ~= "" and #value <= limit
-end
-
 local function is_marker_value(value)
-  return is_bounded_string(value, max_dedup_len)
+  return strings.is_bounded_string(value, max_dedup_len)
     and tostring(value):find('[<>"\r\n]') == nil
 end
 
@@ -73,7 +70,7 @@ function M.validate_issue_blocked_by_payload(payload)
   if payload.schema ~= "github-proxy.issue-blocked-by.v1" then
     return false
   end
-  if not is_bounded_string(payload.repo, max_repo_len) or split_repo(payload.repo) == nil then
+  if not strings.is_bounded_string(payload.repo, max_repo_len) or split_repo(payload.repo) == nil then
     return false
   end
   if not is_positive_integer(payload.blocked_issue_number)
@@ -88,8 +85,8 @@ function M.validate_issue_blocked_by_payload(payload)
     return false
   end
   if type(payload.source_ref) ~= "table"
-    or not is_bounded_string(payload.source_ref.kind, 80)
-    or not is_bounded_string(payload.source_ref.ref, 200) then
+    or not strings.is_bounded_string(payload.source_ref.kind, 80)
+    or not strings.is_bounded_string(payload.source_ref.ref, 200) then
     return false
   end
   return true

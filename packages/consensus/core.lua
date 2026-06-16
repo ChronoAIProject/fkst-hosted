@@ -1,4 +1,6 @@
 local M = {}
+local error_facts = require("std.error_facts")
+local strings = require("std.strings")
 
 function M.persistence_class()
   return "judgment_pipeline"
@@ -47,53 +49,20 @@ function M.read_env(name, exec)
   end
   return out.stdout
 end
-local function one_line(value)
-  return tostring(value or ""):gsub("%s+", " ")
-end
-local function normalized_error_message(value)
-  local text = one_line(value):lower()
-  text = text:gsub("%d%d%d%d%-%d%d%-%d%d[tT ]%d%d:%d%d:%d%d%.?%d*Z?", "<time>")
-  text = text:gsub("%f[%x]%x%x%x%x%x%x[%x]+%f[^%x]", "<sha>")
-  text = text:gsub("/tmp/[^%s]+", "<path>")
-  text = text:gsub("/var/folders/[^%s]+", "<path>")
-  text = text:gsub("%s+", " ")
-  return text
-end
-local function stable_hash(value)
-  local hash = 5381
-  for index = 1, #value do
-    hash = (hash * 33 + value:byte(index)) % 2147483647
-  end
-  return "fp-" .. tostring(hash)
-end
-local function source_ref_field(source_ref)
-  if type(source_ref) == "table" then
-    return one_line(source_ref.kind) .. ":" .. one_line(source_ref.ref)
-  end
-  if source_ref ~= nil then
-    return one_line(source_ref)
-  end
-  return nil
-end
 function M.error_fingerprint(error_class, queue, dept, message)
-  return stable_hash(table.concat({
-    tostring(error_class or "unknown-error"),
-    tostring(queue or ""),
-    tostring(dept or ""),
-    normalized_error_message(message),
-  }, "|"))
+  return error_facts.error_fingerprint(error_class, queue, dept, message)
 end
 function M.error_fact_fields(error_class, queue, dept, message, context)
   local fields = {
-    "error_class=" .. one_line(error_class or "unknown-error"),
+    "error_class=" .. error_facts.one_line(error_class or "unknown-error"),
     "fingerprint=" .. M.error_fingerprint(error_class, queue, dept, message),
   }
-  local source_ref = source_ref_field(context and context.source_ref)
+  local source_ref = error_facts.source_ref_field(context and context.source_ref)
   if source_ref ~= nil and source_ref ~= "" then
     table.insert(fields, "source_ref=" .. source_ref)
   end
   if context and context.attempt ~= nil then
-    table.insert(fields, "attempt=" .. one_line(context.attempt))
+    table.insert(fields, "attempt=" .. error_facts.one_line(context.attempt))
   end
   if context and context.terminal ~= nil then
     table.insert(fields, "terminal=" .. tostring(context.terminal == true))
@@ -108,9 +77,9 @@ function M.error_class_from_message(message)
 end
 function M.log_error_fact(level, dept, tag, error_class, queue, message, context)
   local fields = M.error_fact_fields(error_class, queue, dept, message, context)
-  table.insert(fields, "queue=" .. one_line(queue))
-  table.insert(fields, "error=" .. one_line(message))
-  log[level or "warn"]("consensus dept=" .. one_line(dept) .. " tag=" .. one_line(tag or "FAILURE") .. " " .. table.concat(fields, " "))
+  table.insert(fields, "queue=" .. error_facts.one_line(queue))
+  table.insert(fields, "error=" .. error_facts.one_line(message))
+  log[level or "warn"]("consensus dept=" .. error_facts.one_line(dept) .. " tag=" .. error_facts.one_line(tag or "FAILURE") .. " " .. table.concat(fields, " "))
 end
 local function event_source_ref(event)
   if type(event) == "table" and event.source_ref ~= nil then
@@ -144,32 +113,8 @@ end
 local function trim(value)
   return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
-local function is_bounded_string(value, limit)
-  return type(value) == "string" and value ~= "" and #value <= limit
-end
-local function is_path_safe_key(value)
-  if not is_bounded_string(value, max_key_len) then
-    return false
-  end
-  if value:sub(1, 1) == "/" then
-    return false
-  end
-  if value:find("\\", 1, true) ~= nil then
-    return false
-  end
-  if value:find("%s") ~= nil then
-    return false
-  end
-  if value:find("[^%w%._%-%/#]") ~= nil then
-    return false
-  end
-  for segment in value:gmatch("[^/]+") do
-    if segment == "." or segment == ".." then
-      return false
-    end
-  end
-  return true
-end
+local is_bounded_string = strings.is_bounded_string
+local is_path_safe_key = strings.is_path_safe_key
 local function manifest_paths(manifest)
   local paths = {}
   for line in (tostring(manifest or "") .. "\n"):gmatch("([^\n]*)\n") do
@@ -222,7 +167,7 @@ local function resolve_content_manifest(content_fetch)
   if key == nil then
     return value
   end
-  if not is_path_safe_key(key) then
+  if not is_path_safe_key(key, max_key_len) then
     error("consensus: invalid runtime context cache key")
   end
   local manifest = cache_get(key)
@@ -374,10 +319,10 @@ function M.is_eligible(proposal)
   if proposal.schema ~= "consensus.proposal.v1" then
     return false
   end
-  if not is_path_safe_key(proposal.proposal_id) then
+  if not is_path_safe_key(proposal.proposal_id, max_key_len) then
     return false
   end
-  if not is_path_safe_key(proposal.dedup_key) then
+  if not is_path_safe_key(proposal.dedup_key, max_key_len) then
     return false
   end
   if not has_source_ref(proposal.source_ref) then
@@ -464,7 +409,7 @@ end
 -- Keyed by dedup_key (which versions the proposal), not proposal_id, so an updated
 -- proposal re-derives consensus instead of being silently skipped.
 function M.reached_cache_key(dedup_key)
-  if not is_path_safe_key(dedup_key) then
+  if not is_path_safe_key(dedup_key, max_key_len) then
     error("consensus: invalid dedup_key")
   end
   return "consensus/reached/" .. tostring(dedup_key)

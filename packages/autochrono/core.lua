@@ -1,4 +1,5 @@
 local M = {}
+local strings = require("std.strings")
 
 function M.persistence_class()
   return "judgment_pipeline"
@@ -11,35 +12,11 @@ local max_repo_key_len = 100
 local max_issue_key_len = 30
 local max_update_key_len = 50
 
-local function is_bounded_string(value, limit)
-  return type(value) == "string" and value ~= "" and #value <= limit
-end
+local is_bounded_string = strings.is_bounded_string
 
 -- Mirrors consensus's is_path_safe_key so propose can fail closed BEFORE raising a
 -- proposal the consensus engine would reject (and before wrongly writing its cache).
-local function is_path_safe_key(value, limit)
-  if not is_bounded_string(value, limit or max_key_len) then
-    return false
-  end
-  if value:sub(1, 1) == "/" then
-    return false
-  end
-  if value:find("\\", 1, true) ~= nil then
-    return false
-  end
-  if value:find("%s") ~= nil then
-    return false
-  end
-  if value:find("[^%w%._%-%/#]") ~= nil then
-    return false
-  end
-  for segment in value:gmatch("[^/]+") do
-    if segment == "." or segment == ".." then
-      return false
-    end
-  end
-  return true
-end
+local is_path_safe_key = strings.is_path_safe_key
 
 local function has_bounded_source_ref(source_ref)
   return type(source_ref) == "table"
@@ -63,43 +40,16 @@ local function require_bounded_field(payload, name, limit)
   return value
 end
 
-function M.sanitize_key(value)
-  local sanitized = tostring(value or ""):gsub("[^%w%._%-%/#]", "-")
-  sanitized = sanitized:gsub("/+", "/")
-  sanitized = sanitized:gsub("^/+", ""):gsub("/+$", "")
-  if sanitized == "" then
-    return "empty"
-  end
-
-  local segments = {}
-  for segment in sanitized:gmatch("[^/]+") do
-    if segment == "." or segment == ".." then
-      segment = "-"
-    end
-    table.insert(segments, segment)
-  end
-
-  sanitized = table.concat(segments, "/")
-  if #sanitized > max_key_len then
-    sanitized = sanitized:sub(1, max_key_len)
-    sanitized = sanitized:gsub("/+$", "")
-  end
-  if sanitized == "" then
-    return "empty"
-  end
-  return sanitized
-end
-
 local function safe_repo(repo)
-  return M.sanitize_key(repo):sub(1, max_repo_key_len):gsub("/+$", "")
+  return strings.sanitize_key(repo, max_key_len):sub(1, max_repo_key_len):gsub("/+$", "")
 end
 
 local function safe_issue_number(issue_number)
-  return M.sanitize_key(issue_number):sub(1, max_issue_key_len):gsub("/+$", "")
+  return strings.sanitize_key(issue_number, max_key_len):sub(1, max_issue_key_len):gsub("/+$", "")
 end
 
 local function safe_updated_at(updated_at)
-  return M.sanitize_key(updated_at):sub(1, max_update_key_len):gsub("/+$", "")
+  return strings.sanitize_key(updated_at, max_key_len):sub(1, max_update_key_len):gsub("/+$", "")
 end
 
 function M.reply_dedup_key(repo, issue_number)

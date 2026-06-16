@@ -1,4 +1,5 @@
 local S = {}
+local strings = require("std.strings")
 
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
@@ -118,7 +119,7 @@ function M.operator_command_marker(command, outcome, reason)
   if outcome ~= "applied" and outcome ~= "refused" then
     error("github-devloop: invalid operator command outcome")
   end
-  local safe_reason = M.sanitize_key(reason or outcome, false):gsub("/", "-")
+  local safe_reason = strings.sanitize_key(reason or outcome, false):gsub("/", "-")
   return '<!-- fkst:github-devloop:operator-command:v1 command="' .. tostring(command.command)
     .. '" key="' .. tostring(command.key)
     .. '" outcome="' .. tostring(outcome)

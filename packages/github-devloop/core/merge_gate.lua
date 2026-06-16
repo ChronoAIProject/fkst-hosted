@@ -1,5 +1,6 @@
 local S = {}
 local registry = require("core.registry")
+local strings = require("std.strings")
 
 function S.install(M)
 local function is_open_pr(pr)
@@ -95,7 +96,7 @@ function M.merge_gate_reason_class(reason)
   if M.is_not_mergeable_reason(text) then
     return text
   end
-  return M.sanitize_key(text ~= "" and text or "gate-failed", false):gsub("/", "-")
+  return strings.sanitize_key(text ~= "" and text or "gate-failed", false):gsub("/", "-")
 end
 
 function M.merge_gate_reason_requires_pr_merge_product(reason)

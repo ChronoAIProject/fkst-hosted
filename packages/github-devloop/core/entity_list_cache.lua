@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 
 local function json_string(value)
   local text = tostring(value or "")
@@ -20,7 +21,7 @@ end
 local function normalize_poll_key(value)
   local text = tostring(value or "")
   if text ~= "" then
-    return "poll-" .. M.sanitize_key(text, 120):gsub("/", "-")
+    return "poll-" .. strings.sanitize_key(text, 120):gsub("/", "-")
   end
   return nil
 end
@@ -39,7 +40,7 @@ local function list_cache_key(repo, kind, scope, poll_key)
     "entity-list",
     M.safe_repo(repo),
     selected_kind,
-    M.sanitize_key(scope or "open", 80):gsub("/", "-"),
+    strings.sanitize_key(scope or "open", 80):gsub("/", "-"),
     normalized_poll_key,
   }, "/")
 end

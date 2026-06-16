@@ -1,4 +1,5 @@
 local S = {}
+local strings = require("std.strings")
 
 local max_round = 100000
 local max_attr_len = 240
@@ -162,7 +163,7 @@ function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_propo
     .. '" head_sha="' .. tostring(head_sha)
     .. baseline_field
     .. predecessor_field
-    .. '" reason="' .. tostring(M.sanitize_key(reason or "gate-failed", false):gsub("/", "-"))
+    .. '" reason="' .. tostring(strings.sanitize_key(reason or "gate-failed", false):gsub("/", "-"))
     .. '" -->'
 end
 
@@ -925,7 +926,7 @@ function M.orphan_reaped_marker(proposal_id, pr_number, reason)
   if not M._is_positive_pr_number(pr_number) then
     error("github-devloop: invalid orphan reaped pr number")
   end
-  local safe_reason = M.sanitize_key(reason or "parent-terminal", false):gsub("/", "-")
+  local safe_reason = strings.sanitize_key(reason or "parent-terminal", false):gsub("/", "-")
   return '<!-- fkst:github-devloop:orphan-reaped:v1 proposal="' .. tostring(proposal_id)
     .. '" pr="' .. tostring(pr_number)
     .. '" reason="' .. tostring(safe_reason)

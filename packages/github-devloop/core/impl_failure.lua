@@ -1,4 +1,5 @@
 local S = {}
+local strings = require("std.strings")
 
 local max_impl_auto_retry_attempts = 2
 local max_impl_retry_attempts = 100000
@@ -24,7 +25,7 @@ M._max_impl_retry_attempts = max_impl_retry_attempts
 M._max_impl_auto_retry_attempts = max_impl_auto_retry_attempts
 
 function M.impl_failure_marker(proposal_id, dedup_key, reason, attempt)
-  local safe_reason = M.sanitize_key(reason or "failed"):gsub("/", "-")
+  local safe_reason = strings.sanitize_key(reason or "failed", M._max_key_len):gsub("/", "-")
   local attempt_field = ""
   if attempt ~= nil then
     local n = valid_attempt(attempt)
