@@ -119,6 +119,17 @@ access to the **specific** resource is decided in this order:
 > table above: org **Admin** → all `fkst:*`, **Member** → read + write + trigger,
 > **Viewer** → read.
 
+> **Ownership is database-free.** The `owner_user_id` and `org_id` above are
+> sourced with no application datastore: for **sessions** from the controller's
+> in-memory session state, and for **goals** from the in-memory goal store
+> (mirrored to a server-controlled hidden marker on the goal's GitHub Issue, which
+> is re-validated server-side and never trusted from a client-editable region).
+> The owner is your **NyxID subject (`sub`)** — the same identity the action layer
+> uses — **not** a GitHub login, so no subject↔GitHub-login binding is involved in
+> authorization. Org-scoped list visibility is filtered in memory against the
+> orgs your forwarded token resolves to (rule 4 above never applies to a goal: an
+> issue-backed goal always carries an owner).
+
 The three object actions map to endpoints as:
 
 - **Read** — fetching a resource.

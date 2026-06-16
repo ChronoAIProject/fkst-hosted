@@ -412,4 +412,84 @@ mod tests {
             .expect_err("must fail");
         assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
     }
+
+    // ---- #142: DB-free goal/session ownership (sub-keyed) ----
+    // Ownership is sourced sub-keyed from the in-memory GoalDoc (goals) and the
+    // session's owner sub (sessions); these pin the named behaviours the
+    // DB-free ownership layer must preserve.
+
+    #[tokio::test]
+    async fn non_owner_no_org_read_is_not_found() {
+        // A stranger reading a goal owned by another sub, no shared org:
+        // anti-enumeration maps the Read denial to NotFound, never Forbidden.
+        let authz = Authorizer::disabled();
+        let ctx = ctx("sub-stranger", &[]);
+        let goal = own(Some("sub-owner"), None);
+        let err = authz
+            .authorize(&ctx, goal, Action::Read, "goal", "g-1")
+            .await
+            .expect_err("stranger read must deny");
+        assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn org_member_can_read_org_goal() {
+        // A member of the goal's org may Read but not Manage (pure policy with
+        // the org role the facade would resolve).
+        let ctx = ctx("sub-member", &[]);
+        let goal = own(Some("sub-owner"), Some("org-1"));
+        assert!(allows(&ctx, goal, Some(OrgRole::Member), Action::Read));
+        assert!(!allows(&ctx, goal, Some(OrgRole::Member), Action::Manage));
+    }
+
+    #[tokio::test]
+    async fn nyxid_outage_on_ownership_is_unavailable() {
+        // A needed org-role lookup that fails NyxID fails CLOSED (Unavailable),
+        // never silently allow.
+        let client = NyxIdClient::new(
+            "http://127.0.0.1:1",
+            "api-github",
+            "sa_test".to_string(),
+            SecretString::from("sas_test".to_string()),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("client");
+        let authz = Authorizer::new(Some(client));
+        let ctx = ctx("sub-member", &[]);
+        let goal = own(Some("sub-owner"), Some("org-1"));
+        let err = authz
+            .authorize(&ctx, goal, Action::Read, "goal", "g-1")
+            .await
+            .expect_err("outage must fail closed");
+        assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn session_owner_from_memory_has_full_access() {
+        // Session ownership feeds the owner's NyxID sub; the owner passes
+        // Read and Stop(Write) with no NyxID call.
+        let authz = Authorizer::disabled();
+        let ctx = ctx("sub-owner", &[]);
+        let session = own(Some("sub-owner"), None);
+        assert!(authz
+            .authorize(&ctx, session, Action::Read, "session", "s-1")
+            .await
+            .is_ok());
+        assert!(authz
+            .authorize(&ctx, session, Action::Write, "session", "s-1")
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn session_stranger_read_is_not_found() {
+        let authz = Authorizer::disabled();
+        let ctx = ctx("sub-stranger", &[]);
+        let session = own(Some("sub-owner"), None);
+        let err = authz
+            .authorize(&ctx, session, Action::Read, "session", "s-1")
+            .await
+            .expect_err("stranger read must deny");
+        assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
+    }
 }

@@ -253,7 +253,15 @@ fn parse_goal_uuid(id: &str) -> Result<bson::Uuid, AppError> {
         .map_err(|_| AppError::Validation("invalid goal id: must be a UUID".to_string()))
 }
 
-/// Build the ownership struct from a goal doc for authz checks.
+/// Build the ownership struct from a goal doc for authz checks (#142). The doc
+/// is the in-memory `GoalIssueStore` authority (no datastore read); its
+/// `owner_user_id` is the NyxID `sub` recorded at create (mirrored, but never
+/// trusted, on the goal issue's server-controlled marker), so caller-vs-owner is
+/// a `sub == sub` comparison — there is no GitHub-login binding to resolve.
+///
+/// `owner_user_id` is a non-Option `String`, so this ALWAYS feeds `Some(..)`:
+/// an issue-backed goal is never ownerless, so `allows` rule-4 (ownerless ->
+/// allow) is unreachable for goals (it stays only for legacy/session paths).
 fn goal_ownership(doc: &GoalDoc) -> Ownership<'_> {
     Ownership {
         owner_user_id: Some(&doc.owner_user_id),
@@ -1078,6 +1086,45 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn owned_goal(owner: &str, org: Option<&str>) -> GoalDoc {
+        GoalDoc {
+            id: bson::Uuid::new(),
+            title: "t".to_string(),
+            description: "d".to_string(),
+            package_names: vec!["p".to_string()],
+            repo: None,
+            status: GoalStatus::NotStarted,
+            owner_user_id: owner.to_string(),
+            org_id: org.map(str::to_string),
+            active_session_id: None,
+            created_at: bson::DateTime::from_millis(1_700_000_000_000),
+            updated_at: bson::DateTime::from_millis(1_700_000_000_000),
+        }
+    }
+
+    /// #142: goal ownership is sourced from the in-memory `GoalDoc` (no
+    /// datastore), keyed on the owner's NyxID `sub`, and is NEVER ownerless —
+    /// so `allows` rule-4 cannot fire for a goal.
+    #[test]
+    fn goal_ownership_is_sub_keyed_and_never_ownerless() {
+        let doc = owned_goal("sub-abc", Some("org-7"));
+        let ownership = goal_ownership(&doc);
+        assert_eq!(
+            ownership.owner_user_id,
+            Some("sub-abc"),
+            "owner is the NyxID sub from the in-memory doc"
+        );
+        assert_eq!(ownership.org_id, Some("org-7"));
+        // A goal with no org still carries its owner sub (never None).
+        let no_org_doc = owned_goal("sub-xyz", None);
+        let no_org = goal_ownership(&no_org_doc);
+        assert_eq!(no_org.owner_user_id, Some("sub-xyz"));
+        assert!(
+            no_org.owner_user_id.is_some(),
+            "an issue-backed goal is never ownerless"
+        );
+    }
 
     #[test]
     fn goal_view_emits_explicit_nulls() {
