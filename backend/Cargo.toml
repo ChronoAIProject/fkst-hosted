@@ -1,5 +1,10 @@
 [workspace]
-members = ["fkst-hosted-api"]
+# The control-plane/worker physical split (issue #145):
+#   fkst-shared        — role-neutral library (both roles link it)
+#   fkst-control-plane — the controller deployable (today's app, renamed from
+#                        fkst-hosted-api); owns the public REST API + DB.
+#   fkst-worker        — the worker deployable (a skeleton until #136/#140)
+members = ["fkst-control-plane", "fkst-shared", "fkst-worker"]
 resolver = "2"
 
 [workspace.package]

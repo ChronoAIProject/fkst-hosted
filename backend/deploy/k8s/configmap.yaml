@@ -1,10 +1,12 @@
-# Non-secret runtime configuration for fkst-hosted-api.
+# Non-secret runtime configuration for the CONTROL-PLANE (issue #145).
 #
-# Keys mirror the API's env contract (backend/fkst-hosted-api/src/config.rs):
+# Keys mirror the controller's env contract
+# (backend/fkst-control-plane/src/config.rs):
 #   - MONGODB_DB                          logical database name
 #   - MONGODB_SERVER_SELECTION_TIMEOUT_MS bounds the startup ping and /health
 #   - FKST_HOSTED_LOG_LEVEL               tracing-subscriber EnvFilter directive
-# MONGODB_URI is a credential and lives in the Secret (fkst-hosted-secret).
+# MONGODB_URI is a credential and lives in the Secret (fkst-control-plane-secret).
+# The worker's (non-DB) config lives in worker-configmap.yaml.
 #
 # Distribution / lease-takeover knobs (backend/.../src/leases/config.rs and
 # .../src/distribution/config.rs). All are set to their in-code defaults here:
@@ -16,16 +18,16 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: fkst-hosted-config
+  name: fkst-control-plane-config
   namespace: fkst-hosted
   labels:
-    app.kubernetes.io/name: fkst-hosted-api
-    app.kubernetes.io/component: api
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/component: control-plane
     app.kubernetes.io/part-of: fkst-hosted
 data:
   MONGODB_DB: "fkst_hosted"
   MONGODB_SERVER_SELECTION_TIMEOUT_MS: "5000"
-  FKST_HOSTED_LOG_LEVEL: "info,fkst_hosted_api=debug,tower_http=info"
+  FKST_HOSTED_LOG_LEVEL: "info,fkst_control_plane=debug,tower_http=info"
   # Lease + takeover cadences (defaults; see header for constraints).
   FKST_LEASE_TTL_SECS: "30"
   FKST_LEASE_RENEW_INTERVAL_SECS: "10"

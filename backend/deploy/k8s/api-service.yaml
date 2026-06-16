@@ -4,19 +4,23 @@
 # trusts the NyxID-proxy-injected identity precisely because it is reachable
 # ONLY via the in-cluster NyxID proxy, never directly by a public client.
 # Local access is `kubectl -n fkst-hosted port-forward svc/fkst-hosted 8080:80`.
+#
+# The Service fronts the CONTROL-PLANE only (issue #145): the public REST API
+# lives on the controller. Workers have no public Service — they connect UP to
+# the controller and pull work.
 apiVersion: v1
 kind: Service
 metadata:
   name: fkst-hosted
   namespace: fkst-hosted
   labels:
-    app.kubernetes.io/name: fkst-hosted-api
-    app.kubernetes.io/component: api
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/component: control-plane
     app.kubernetes.io/part-of: fkst-hosted
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: fkst-hosted-api
+    app.kubernetes.io/name: fkst-control-plane
   ports:
     - name: http
       port: 80

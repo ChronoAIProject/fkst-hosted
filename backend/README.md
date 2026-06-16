@@ -1,9 +1,10 @@
-# fkst-hosted-api
+# fkst-hosted backend
 
-`fkst-hosted-api` is the Rust (Axum) HTTP backend of **fkst-hosted**. It stores
-fkst lua packages in MongoDB and runs [fkst-substrate](https://github.com/ChronoAIProject/fkst-substrate)
-sessions on behalf of users. This is the v1 scope; this README covers **local
-development** only.
+The **fkst-hosted** Rust backend is a three-crate Cargo workspace under
+`backend/`. It stores fkst Lua packages in MongoDB and runs
+[fkst-substrate](https://github.com/ChronoAIProject/fkst-substrate) sessions on
+behalf of users. This is the v1 scope; this README covers **local development**
+only.
 
 ## Prerequisites
 
@@ -18,11 +19,11 @@ development** only.
    docker compose -f backend/docker-compose.yml up -d
    ```
 
-2. Run the API (from `backend/`). `MONGODB_URI` is required — the server
-   fails closed at startup if it is missing or Mongo is unreachable:
+2. Run the control-plane (from `backend/`). `MONGODB_URI` is required — the
+   server fails closed at startup if it is missing or Mongo is unreachable:
 
    ```sh
-   MONGODB_URI="mongodb://localhost:27017" cargo run -p fkst-hosted-api
+   MONGODB_URI="mongodb://localhost:27017" cargo run -p fkst-control-plane
    ```
 
 3. Check health:
@@ -57,7 +58,7 @@ occupies host port 27017, change the **host** side of the mapping (e.g.
 `"27018:27017"`) and point the API at it:
 
 ```sh
-MONGODB_URI="mongodb://localhost:27018" cargo run -p fkst-hosted-api
+MONGODB_URI="mongodb://localhost:27018" cargo run -p fkst-control-plane
 ```
 
 ### Local development & auth
@@ -77,7 +78,7 @@ timeout) are rejected at startup with a clear error.
 | `MONGODB_SERVER_SELECTION_TIMEOUT_MS` | no | `5000` | Driver server-selection timeout (ms). Bounds the startup ping and every `/health` check, so an unreachable Mongo fails fast instead of hanging. |
 | `FKST_HOSTED_PORT` | no | `8080` | TCP port the HTTP server binds. |
 | `FKST_HOSTED_BIND_ADDR` | no | `0.0.0.0` | Bind address. |
-| `FKST_HOSTED_LOG_LEVEL` | no | `info` | `tracing-subscriber` `EnvFilter` directive (e.g. `debug`, `fkst_hosted_api=debug`). An invalid directive falls back to `info` with a warning. Logs are JSON. |
+| `FKST_HOSTED_LOG_LEVEL` | no | `info` | `tracing-subscriber` `EnvFilter` directive (e.g. `debug`, `fkst_control_plane=debug`). An invalid directive falls back to `info` with a warning. Logs are JSON. |
 | `FKST_HOSTED_REQUEST_TIMEOUT_SECS` | no | `30` | Per-request timeout in seconds (`408 Request Timeout` on expiry). Must be ≥ 1; `0` is rejected at startup. |
 | `FKST_AUTH_ENABLED` | no | `true` | Enable NyxID JWT authentication. Set to `"false"` for local dev (all routes open, extractor yields dev context). Default is fail-closed: auth is on unless explicitly disabled. |
 | `FKST_AUTH_NYXID_BASE_URL` | when auth enabled | — | NyxID base URL for the JWKS endpoint (e.g. `https://nyxid.example.com`). Trailing `/` is trimmed. Required when `FKST_AUTH_ENABLED=true`. |
@@ -307,39 +308,86 @@ cargo test --workspace
   MongoDB container via `testcontainers` and **skip cleanly when Docker is
   absent**, so the suite stays green on Docker-less runners.
 
-## Project layout
+## Workspace layout (three crates)
+
+The backend is a Cargo workspace with three crates:
+
+| Crate | Kind | Role |
+|-------|------|------|
+| `fkst-shared` | lib | Role-neutral models and transport clients shared by both binaries. Holds domain models, the NyxID client, LLM client, Ornn types, and vault models. Depends on `bson` — **not** on `mongodb` or `axum`. |
+| `fkst-control-plane` | bin | The controller — today's full application (renamed from `fkst-hosted-api`). Owns the public REST API, MongoDB, goals, vault service, and GitHub App integration. Tracing target: `fkst_control_plane`. Binary: `fkst-control-plane`. |
+| `fkst-worker` | bin | The worker deployable — compiling skeleton for now (logs its role, waits for SIGTERM). Engine driver, registry client, and pull loop arrive in later issues (#134, #136, #140). Tracing target: `fkst_worker`. |
 
 ```
 backend/
-├── Cargo.toml              # cargo workspace (members: fkst-hosted-api)
-├── docker-compose.yml      # local dev MongoDB 7 (named volume fkst_mongo_data)
-├── Dockerfile
-├── rust-toolchain.toml     # stable + rustfmt + clippy
-└── fkst-hosted-api/
-    ├── src/
-    │   ├── main.rs         # entrypoint: JSON tracing, config, Mongo connect, graceful shutdown
-    │   ├── lib.rs          # module exports (binary + integration tests share them)
-    │   ├── auth/           # NyxID JWT authentication: JWKS cache, verification, middleware
-    │   ├── authz.rs        # Resource authorization: owner/org role policy
-    │   ├── config.rs       # typed Config from env (FKST_HOSTED_* + MONGODB_*)
-    │   ├── db.rs           # Db handle: typed collections, ping, idempotent indexes, URI redaction
-    │   ├── distribution/   # Session distribution, health view, reaper
-    │   ├── engine/         # Engine runner (process management)
-    │   ├── error.rs        # AppError -> canonical JSON error envelope
-    │   ├── github_app/     # GitHub App integration (tokens, repo access)
-    │   ├── journal/        # Session journaling to GitHub
-    │   ├── leases/         # Per-package lease store (mutual exclusion)
-    │   ├── models.rs       # BSON document models (sessions, leases)
-    │   ├── nyxid/          # NyxID client (org-role lookups)
-    │   ├── packages/       # Package domain: models, validation, repository, zip archive
-    │   ├── reconcile/      # Boot-time orphan temp-dir sweep
-    │   ├── router.rs       # routes + middleware (request-id, trace, CORS, timeout)
-    │   ├── routes/         # HTTP handlers: health, packages, sessions
-    │   ├── sessions/       # Session lifecycle service
-    │   └── state.rs        # AppState { config, db, packages, sessions, authz }
-    └── tests/
-        ├── auth_api.rs     # JWT auth integration tests
-        ├── health.rs       # router-level tests (no Docker)
-        ├── packages_api.rs # Package CRUD + CORS integration tests
-        └── packages_archive.rs # Zip archive upload integration tests
+├── Cargo.toml                  # cargo workspace (members: fkst-shared, fkst-control-plane, fkst-worker)
+├── docker-compose.yml          # local dev MongoDB 7 (named volume fkst_mongo_data)
+├── Dockerfile                  # multi-stage; two --target outputs (see §Docker images below)
+├── engine.ref                  # pinned fkst-substrate commit SHA
+├── rust-toolchain.toml         # stable + rustfmt + clippy
+├── fkst-shared/
+│   └── src/                    # models, nyxid client, llm client, ornn::types, vault::model
+├── fkst-control-plane/
+│   ├── src/
+│   │   ├── main.rs             # entrypoint: JSON tracing, config, Mongo connect, graceful shutdown
+│   │   ├── lib.rs              # module exports (binary + integration tests share them)
+│   │   ├── auth/               # NyxID JWT authentication: JWKS cache, verification, middleware
+│   │   ├── authz.rs            # Resource authorization: owner/org role policy
+│   │   ├── config.rs           # typed Config from env (FKST_HOSTED_* + MONGODB_*)
+│   │   ├── db.rs               # Db handle: typed collections, ping, idempotent indexes, URI redaction
+│   │   ├── distribution/       # Session distribution, health view, reaper
+│   │   ├── engine/             # Engine runner (process management)
+│   │   ├── error.rs            # AppError -> canonical JSON error envelope
+│   │   ├── github_app/         # GitHub App integration (tokens, repo access)
+│   │   ├── journal/            # Session journaling to GitHub
+│   │   ├── leases/             # Per-package lease store (mutual exclusion)
+│   │   ├── nyxid/              # NyxID client (org-role lookups) — types live in fkst-shared
+│   │   ├── packages/           # Package domain: validation, repository, zip archive
+│   │   ├── reconcile/          # Boot-time orphan temp-dir sweep
+│   │   ├── router.rs           # routes + middleware (request-id, trace, CORS, timeout)
+│   │   ├── routes/             # HTTP handlers: health, packages, sessions
+│   │   ├── sessions/           # Session lifecycle service
+│   │   └── state.rs            # AppState { config, db, packages, sessions, authz }
+│   └── tests/
+│       ├── auth_api.rs         # JWT auth integration tests
+│       ├── health.rs           # router-level tests (no Docker)
+│       ├── packages_api.rs     # Package CRUD + CORS integration tests
+│       └── packages_archive.rs # Zip archive upload integration tests
+└── fkst-worker/
+    └── src/
+        └── main.rs             # skeleton: log role, await SIGTERM
 ```
+
+> **Shared vs. control-plane:** the role-neutral types (models, NyxID client,
+> LLM client, Ornn types, vault model) live under `backend/fkst-shared/src/`.
+> The Axum handlers, MongoDB wiring, and all business logic remain in
+> `backend/fkst-control-plane/src/`.
+
+## Docker images
+
+`backend/Dockerfile` produces **two images** via `--target`:
+
+| Target | Image | Contents | ENTRYPOINT |
+|--------|-------|----------|------------|
+| `worker-runtime` | `fkst-worker` | engine-laden (built from `backend/engine.ref`); carries the engine, codex, nyxid CLI, and the runtime volume. Requires `--build-arg FKST_SUBSTRATE_REF`. | `fkst-worker` |
+| `control-plane-runtime` | `fkst-control-plane` | slim (only `ca-certificates`, no engine, runs as uid 10001). No `FKST_SUBSTRATE_REF` needed. | `fkst-control-plane` |
+
+**Local builds:**
+
+```sh
+# Worker image (engine-laden)
+docker build -f backend/Dockerfile --target worker-runtime \
+  --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
+  -t fkst-worker:dev .
+
+# Control-plane image (slim)
+docker build -f backend/Dockerfile --target control-plane-runtime \
+  -t fkst-control-plane:dev .
+```
+
+> **Transitional caveat (#145 → #136).** Engine execution currently still lives
+> in `fkst-control-plane`. Until issue #136 moves engine execution to the worker,
+> build the **controller** from `--target worker-runtime` (engine-laden) and keep
+> its runtime volume in place. The slim `control-plane-runtime` image builds
+> cleanly but is not yet the controller's production home. Once #136 lands, the
+> controller switches to `control-plane-runtime` and drops the volume.

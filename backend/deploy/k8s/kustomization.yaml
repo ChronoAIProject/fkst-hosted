@@ -9,19 +9,30 @@ namespace: fkst-hosted
 resources:
   - namespace.yaml
   - configmap.yaml
+  - worker-configmap.yaml
   - mongodb-service.yaml
   - mongodb-statefulset.yaml
-  - api-deployment.yaml
+  - control-plane-deployment.yaml
+  - worker-deployment.yaml
   - api-service.yaml
   - pdb.yaml
-# Image-tag seam: change the deployed tag in one place.
+# Image-tag seam: change the deployed tag in one place. Two images now (#145):
+# the slim controller and the engine-laden worker.
+# TRANSITIONAL (#145 → #136): build BOTH from this one Dockerfile —
+#   fkst-worker:dev        from `--target worker-runtime` (needs FKST_SUBSTRATE_REF)
+#   fkst-control-plane:dev from `--target worker-runtime` too (the controller
+#                          still spawns engines until #136; switch it to
+#                          `--target control-plane-runtime` then).
 images:
-  - name: fkst-hosted
+  - name: fkst-control-plane
     newTag: dev
-# Replica edit-point: the fkst-hosted-api operating range is 3..5. Scaling
-# within the range is a one-line change here (kustomize overrides the
-# Deployment's spec.replicas) — keep it in 3..5 so the PodDisruptionBudget
-# (minAvailable: 2) always has headroom.
+  - name: fkst-worker
+    newTag: dev
+# Replica edit-points. The control-plane range is 3..5 (keep >= 3 so the PDB
+# minAvailable:2 has headroom); the database-free pivot (#135) collapses it to
+# a single authoritative controller. The worker fleet scales freely (HPA #140).
 replicas:
-  - name: fkst-hosted-api
+  - name: fkst-control-plane
     count: 3
+  - name: fkst-worker
+    count: 2

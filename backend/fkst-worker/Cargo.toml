@@ -1,0 +1,24 @@
+# fkst-worker: the worker deployable of the control-plane/worker split (issue
+# #145). At scaffolding time it is a compiling SKELETON — it initialises
+# tracing, logs its role, and exits cleanly on a shutdown signal. The engine
+# driver, the registry client, and the pull loop move onto it in later
+# database-free issues (#134/#136/#140).
+#
+# It deliberately does NOT depend on the `mongodb` driver nor on
+# `fkst-control-plane`: those omissions are the compiler-enforced boundary that
+# guarantees the worker never reaches the database or the control-plane's
+# privileged state. (`cargo tree -p fkst-worker` must show neither.)
+[package]
+name = "fkst-worker"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "fkst-worker"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1"

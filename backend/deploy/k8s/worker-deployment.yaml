@@ -1,0 +1,102 @@
+# fkst-worker: the worker deployable of the control-plane/worker split (#145).
+#
+# At this stage the worker is a compiling SKELETON: it starts, logs its role,
+# and waits for SIGTERM. It exposes NO public Service — workers connect UP to
+# the controller over stable Service DNS and pull work (the registry client +
+# pull loop arrive in #134; engine execution in #136). So this Deployment has
+# no Service, no Ingress, and (until #134 adds the worker-local /health server)
+# no HTTP probes. Workers scale freely — the operating range is a follow-up
+# (#140 adds the HPA on a pending-work metric).
+#
+# It runs the engine-laden `fkst-worker` image and keeps the runtime+tmp
+# emptyDir volumes so it is ready to host engine child processes in #136.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fkst-worker
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fkst-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: fkst-hosted
+    spec:
+      # No service-link env injection — the worker's env comes only from the
+      # image + ConfigMap (+ Secret once #134 wires the internal-auth token).
+      enableServiceLinks: false
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: fkst-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: fkst-worker
+          image: fkst-worker:dev # tag managed by kustomization.yaml images
+          imagePullPolicy: IfNotPresent
+          # Pod identity is an INTENTIONAL contract: the worker id defaults to the
+          # pod name (FKST_POD_ID), sourced explicitly from the downward API.
+          env:
+            - name: FKST_ROLE
+              value: worker
+            - name: FKST_POD_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          # The worker does NOT connect to MongoDB. Its config (controller URL +
+          # internal-auth token, added in #134) comes from the worker-scoped
+          # ConfigMap/Secret. For the #145 skeleton only the log level applies.
+          envFrom:
+            - configMapRef:
+                name: fkst-worker-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Root FS is read-only, so every writable path is an explicit
+          # emptyDir. Engine runtime state is LOCAL and intentionally ephemeral
+          # (redo-from-GitHub-truth model) — never a PVC.
+          volumeMounts:
+            - name: runtime
+              mountPath: /var/lib/fkst/runtime # = FKST_RUNTIME_ROOT (image env)
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

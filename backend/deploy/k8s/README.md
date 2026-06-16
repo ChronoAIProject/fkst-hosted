@@ -4,10 +4,10 @@ Zero-to-running guide for the manifests in this directory. Primary target is
 **Docker Desktop** (context `docker-desktop`); a portability box covers
 kind/minikube/k3d and real registries.
 
-The API runs as **3 replicas** (operating range 3–5) behind one MongoDB lease
-store. Multi-pod operation, scaling, rolling updates, failover, and the
-lease/takeover tuning knobs are documented in §9 — read it before scaling or
-operating more than one replica.
+The control-plane runs as **3 replicas** (operating range 3–5) behind one
+MongoDB lease store. Multi-pod operation, scaling, rolling updates, failover,
+and the lease/takeover tuning knobs are documented in §9 — read it before
+scaling or operating more than one replica.
 
 ## 1. What gets deployed
 
@@ -15,28 +15,32 @@ Everything lands in the **`fkst-hosted`** namespace:
 
 | Resource | Kind | Purpose |
 |----------|------|---------|
-| `fkst-hosted-api` | Deployment (3 replicas, `RollingUpdate`) | The Rust API server, image `fkst-hosted:dev` (operating range 3–5, see §9) |
-| `fkst-hosted-api` | PodDisruptionBudget (`minAvailable: 2`) | Keeps ≥2 pods available during voluntary disruptions (see §9.6) |
-| `fkst-hosted` | Service (ClusterIP, `80 → 8080`) | Cluster-internal entry to the API |
+| `fkst-control-plane` | Deployment (3 replicas, `RollingUpdate`) | The Rust control-plane, image `fkst-control-plane:dev` (operating range 3–5, see §9) |
+| `fkst-control-plane` | PodDisruptionBudget (`minAvailable: 2`) | Keeps ≥2 control-plane pods available during voluntary disruptions (see §9.6) |
+| `fkst-hosted` | Service (ClusterIP, `80 → 8080`) | Cluster-internal entry to the control-plane |
+| `fkst-worker` | Deployment | Worker pods; no public Service — workers connect up to the controller and pull work |
 | `mongodb` | StatefulSet (1 replica) | Single-node MongoDB 7.0 with a retained PVC (`data-mongodb-0`, 5Gi) |
 | `mongodb` | Headless Service | Stable DNS `mongodb-0.mongodb.fkst-hosted.svc.cluster.local` |
-| `fkst-hosted-config` | ConfigMap | Non-secret runtime config |
-| `fkst-hosted-secret` | Secret | **Created by you, before apply** (template: `secret.example.yaml`) |
+| `fkst-control-plane-config` | ConfigMap | Non-secret runtime config for the control-plane |
+| `fkst-worker-config` | ConfigMap | Non-secret runtime config for workers (log level for now) |
+| `fkst-control-plane-secret` | Secret | **Created by you, before apply** — MongoDB URI, NyxID credentials, GitHub App PEM (template: `secret.example.yaml`) |
 
 Topology:
 
 ```
-port-forward 8080 ──> svc/fkst-hosted:80 ──> api pod :8080 ──(MONGODB_URI)──> mongodb-0.mongodb:27017 ──> PVC data-mongodb-0
+port-forward 8080 ──> svc/fkst-hosted:80 ──> control-plane pod :8080 ──(MONGODB_URI)──> mongodb-0.mongodb:27017 ──> PVC data-mongodb-0
+                                                                                 ↑
+                                                           worker pods (connect up, no inbound Service)
 ```
 
 ### Environment contract
 
 | Variable | Source | Value | Notes |
 |----------|--------|-------|-------|
-| `MONGODB_DB` | ConfigMap | `fkst_hosted` | Logical database name |
-| `MONGODB_SERVER_SELECTION_TIMEOUT_MS` | ConfigMap | `5000` | Bounds the startup ping and `/health` (coupled to probe timeouts, see §6) |
-| `FKST_HOSTED_LOG_LEVEL` | ConfigMap | `info,fkst_hosted_api=debug,tower_http=info` | tracing-subscriber `EnvFilter` directive |
-| `MONGODB_URI` | Secret | — | **Required, fail-closed**; embeds the root credentials, `authSource=admin` |
+| `MONGODB_DB` | ConfigMap (`fkst-control-plane-config`) | `fkst_hosted` | Logical database name |
+| `MONGODB_SERVER_SELECTION_TIMEOUT_MS` | ConfigMap (`fkst-control-plane-config`) | `5000` | Bounds the startup ping and `/health` (coupled to probe timeouts, see §6) |
+| `FKST_HOSTED_LOG_LEVEL` | ConfigMap (`fkst-control-plane-config`) | `info,fkst_control_plane=debug,tower_http=info` | tracing-subscriber `EnvFilter` directive |
+| `MONGODB_URI` | Secret (`fkst-control-plane-secret`) | — | **Required, fail-closed**; embeds the root credentials, `authSource=admin` |
 | `FKST_HOSTED_PORT` | image (`backend/Dockerfile` `ENV`) | `8080` | Baked into the image — not set by any manifest |
 | `FKST_HOSTED_BIND_ADDR` | image | `0.0.0.0` | Baked into the image |
 | `FKST_RUNTIME_ROOT` | image | `/var/lib/fkst/runtime` | Engine workspace; backed by the `runtime` emptyDir (see §6) |
@@ -50,57 +54,76 @@ port-forward 8080 ──> svc/fkst-hosted:80 ──> api pod :8080 ──(MONGOD
 All commands run from the **repo root** and pin `--context docker-desktop` so a
 stray current-context can never hit another cluster.
 
-## 3. Build the image
+## 3. Build the images
 
-The image bundles the API server **and** the fkst-substrate engine, compiled at
-the ref pinned in `backend/engine.ref` (single-line commit SHA). The build
-fails fast if `FKST_SUBSTRATE_REF` is not passed.
+`backend/Dockerfile` produces **two images** via `--target`. Both are referenced
+by `kustomization.yaml` under `images:` (`fkst-control-plane` and `fkst-worker`).
 
 ```sh
-docker build -f backend/Dockerfile \
+# Control-plane image
+# TRANSITIONAL: build from --target worker-runtime (engine-laden) until issue #136
+# moves engine execution onto the worker; then switch to --target control-plane-runtime (slim).
+docker build -f backend/Dockerfile --target worker-runtime \
   --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
-  -t fkst-hosted:dev .
+  -t fkst-control-plane:dev .
+
+# Worker image (engine-laden; needs FKST_SUBSTRATE_REF)
+docker build -f backend/Dockerfile --target worker-runtime \
+  --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
+  -t fkst-worker:dev .
 ```
 
-Docker Desktop's Kubernetes shares the host Docker daemon, so the image is
-immediately visible to the cluster — **no load/push step** (the Deployment uses
+> **Post-#136 (slim control-plane).** Once issue #136 lands and engine execution
+> moves to the worker, rebuild the control-plane from the slim target instead:
+>
+> ```sh
+> docker build -f backend/Dockerfile --target control-plane-runtime \
+>   -t fkst-control-plane:dev .
+> ```
+>
+> At that point the control-plane Deployment also drops its `runtime` emptyDir
+> volume and the `FKST_SUBSTRATE_REF` arg is no longer needed for it.
+
+Docker Desktop's Kubernetes shares the host Docker daemon, so built images are
+immediately visible to the cluster — **no load/push step** (Deployments use
 `imagePullPolicy: IfNotPresent`).
 
 > **Other clusters.** Single-node dev clusters need an explicit image load:
 >
 > ```sh
-> kind load docker-image fkst-hosted:dev        # kind
-> minikube image load fkst-hosted:dev           # minikube
-> k3d image import fkst-hosted:dev              # k3d
+> kind load docker-image fkst-control-plane:dev   # kind
+> kind load docker-image fkst-worker:dev
+> minikube image load fkst-control-plane:dev       # minikube
+> minikube image load fkst-worker:dev
+> k3d image import fkst-control-plane:dev          # k3d
+> k3d image import fkst-worker:dev
 > ```
 >
-> For a real cluster, push to a registry and retarget the image in one place —
-> the `images:` block in `kustomization.yaml`:
->
-> ```sh
-> docker tag fkst-hosted:dev registry.example.com/fkst-hosted:dev
-> docker push registry.example.com/fkst-hosted:dev
-> ```
+> For a real cluster, push to a registry and retarget both images in the
+> `images:` block of `kustomization.yaml`:
 >
 > ```yaml
 > # kustomization.yaml
 > images:
->   - name: fkst-hosted
->     newName: registry.example.com/fkst-hosted
+>   - name: fkst-control-plane
+>     newName: registry.example.com/fkst-control-plane
+>     newTag: dev
+>   - name: fkst-worker
+>     newName: registry.example.com/fkst-worker
 >     newTag: dev
 > ```
 
 ## 4. Create the Secret (before apply)
 
-`fkst-hosted-secret` is deliberately **not** in `kustomization.yaml` — `apply -k`
-can never overwrite your real credentials with placeholders. Create it first
-(the namespace must exist for the Secret to live in):
+`fkst-control-plane-secret` is deliberately **not** in `kustomization.yaml` —
+`apply -k` can never overwrite your real credentials with placeholders. Create
+it first (the namespace must exist for the Secret to live in):
 
 ```sh
 kubectl --context docker-desktop apply -f backend/deploy/k8s/namespace.yaml
 
 PW="$(openssl rand -hex 16)"
-kubectl --context docker-desktop -n fkst-hosted create secret generic fkst-hosted-secret \
+kubectl --context docker-desktop -n fkst-hosted create secret generic fkst-control-plane-secret \
   --from-literal=MONGO_INITDB_ROOT_USERNAME=root \
   --from-literal=MONGO_INITDB_ROOT_PASSWORD="$PW" \
   --from-literal=MONGODB_URI="mongodb://root:${PW}@mongodb-0.mongodb:27017/fkst_hosted?authSource=admin"
@@ -109,10 +132,11 @@ kubectl --context docker-desktop -n fkst-hosted create secret generic fkst-hoste
 **Consistency rule:** the `username:password` embedded in `MONGODB_URI` MUST
 equal `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD`, and the URI
 must keep `authSource=admin` (the root user lives in `admin`). A mismatch is
-the single most common bring-up failure: Mongo comes up fine, the API stays
-`NotReady` with auth errors. (Single-secret design: the API container also
-receives `MONGO_INITDB_ROOT_USERNAME`/`MONGO_INITDB_ROOT_PASSWORD` via the
-shared Secret's `envFrom` — harmless extras the API does not read.)
+the single most common bring-up failure: Mongo comes up fine, the control-plane
+stays `NotReady` with auth errors. (Single-secret design: the control-plane
+container also receives `MONGO_INITDB_ROOT_USERNAME`/`MONGO_INITDB_ROOT_PASSWORD`
+via the shared Secret's `envFrom` — harmless extras the control-plane does not
+read.)
 
 *Filled-file alternative:* copy `secret.example.yaml` to
 `backend/deploy/k8s/secret.yaml` (git-ignored by the root `.gitignore`, as is
@@ -131,7 +155,8 @@ every `CHANGE_ME`, then `kubectl --context docker-desktop apply -f backend/deplo
 kubectl --context docker-desktop apply -k backend/deploy/k8s
 
 kubectl --context docker-desktop -n fkst-hosted rollout status statefulset/mongodb
-kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-hosted-api
+kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-control-plane
+kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-worker
 ```
 
 (`namespace.yaml` is also in the kustomization, so re-applying it is harmless.)
@@ -274,20 +299,20 @@ headroom.
 ```yaml
 # kustomization.yaml — change 3 ↔ 5 here, then re-apply
 replicas:
-  - name: fkst-hosted-api
+  - name: fkst-control-plane
     count: 5
 ```
 
 ```sh
 kubectl --context docker-desktop apply -k backend/deploy/k8s
-kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-hosted-api
+kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-control-plane
 ```
 
 For an immediate, imperative change (e.g. a quick scale-out during an incident):
 
 ```sh
-kubectl --context docker-desktop -n fkst-hosted scale deployment/fkst-hosted-api --replicas=5
-kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-hosted-api
+kubectl --context docker-desktop -n fkst-hosted scale deployment/fkst-control-plane --replicas=5
+kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-control-plane
 ```
 
 > An imperative `scale` is reverted by the next `apply -k`. For a durable change,
@@ -297,13 +322,13 @@ kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-h
 
 ```sh
 # Restart all pods (e.g. to pick up a ConfigMap/Secret change)
-kubectl --context docker-desktop -n fkst-hosted rollout restart deployment/fkst-hosted-api
+kubectl --context docker-desktop -n fkst-hosted rollout restart deployment/fkst-control-plane
 
 # Ship a new image tag
 kubectl --context docker-desktop -n fkst-hosted set image \
-  deployment/fkst-hosted-api fkst-hosted-api=fkst-hosted:dev
+  deployment/fkst-control-plane fkst-control-plane=fkst-control-plane:dev
 
-kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-hosted-api
+kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-control-plane
 ```
 
 - **`maxUnavailable: 0` / `maxSurge: 1`** means the rollout surges one extra pod
@@ -395,8 +420,8 @@ This is a **load-distribution deferral, not a correctness gap**:
 ```sh
 # 1. Bring up the stack at 3 replicas; confirm all Ready
 kubectl --context docker-desktop apply -k backend/deploy/k8s
-kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-hosted-api
-kubectl --context docker-desktop -n fkst-hosted get pods -l app.kubernetes.io/name=fkst-hosted-api
+kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-control-plane
+kubectl --context docker-desktop -n fkst-hosted get pods -l app.kubernetes.io/name=fkst-control-plane
 
 # 2. Start one or more sessions (use a LONG-RUNNING package — see note below)
 
@@ -405,7 +430,7 @@ kubectl --context docker-desktop -n fkst-hosted delete pod <holder-pod>
 
 # 4. Observe a survivor take over within ~TTL+grace (~32s):
 #    the session's pod_id changes to a survivor and its fencing_token increments
-kubectl --context docker-desktop -n fkst-hosted logs -l app.kubernetes.io/name=fkst-hosted-api -f
+kubectl --context docker-desktop -n fkst-hosted logs -l app.kubernetes.io/name=fkst-control-plane -f
 ```
 
 - **Use a long-lived package for a live demo.** The bundled `e2e-minimal`
@@ -420,8 +445,8 @@ kubectl --context docker-desktop -n fkst-hosted logs -l app.kubernetes.io/name=f
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `ImagePullBackOff` / `ErrImageNeverPull` on the api pod | Image not built, or tag mismatch with the `images:` block in `kustomization.yaml` | Rebuild with `-t fkst-hosted:dev` (§3); on kind/minikube/k3d, run the load step |
-| api pod `CrashLoopBackOff`, log says `MONGODB_URI must be set` (or another config error) | Secret missing, key misspelled, or created after the pod started | Create/fix `fkst-hosted-secret` (§4), then `kubectl --context docker-desktop -n fkst-hosted rollout restart deployment/fkst-hosted-api` |
-| api pod stays `0/1 NotReady`; logs show Mongo auth errors | `MONGODB_URI` credentials drifted from `MONGO_INITDB_ROOT_*`, or the Secret was rotated after Mongo initialized | Restore consistency (§4); a true rotation requires the PVC wipe (§4 warning) |
+| `ImagePullBackOff` / `ErrImageNeverPull` on a pod | Image not built, or tag mismatch with the `images:` block in `kustomization.yaml` | Rebuild with `-t fkst-control-plane:dev` or `-t fkst-worker:dev` (§3); on kind/minikube/k3d, run the load step |
+| control-plane pod `CrashLoopBackOff`, log says `MONGODB_URI must be set` (or another config error) | Secret missing, key misspelled, or created after the pod started | Create/fix `fkst-control-plane-secret` (§4), then `kubectl --context docker-desktop -n fkst-hosted rollout restart deployment/fkst-control-plane` |
+| control-plane pod stays `0/1 NotReady`; logs show Mongo auth errors | `MONGODB_URI` credentials drifted from `MONGO_INITDB_ROOT_*`, or the Secret was rotated after Mongo initialized | Restore consistency (§4); a true rotation requires the PVC wipe (§4 warning) |
 | `port-forward` fails: `address already in use` | Local port 8080 is taken | Forward another local port, e.g. `kubectl --context docker-desktop -n fkst-hosted port-forward svc/fkst-hosted 18080:80` |
-| api pod stuck in `Init:0/1` | Mongo not up yet (first image pull, PVC binding) — the initContainer is waiting for `mongodb-0:27017` | `kubectl --context docker-desktop -n fkst-hosted get pods,pvc` and wait, or inspect `describe pod mongodb-0` |
+| control-plane pod stuck in `Init:0/1` | Mongo not up yet (first image pull, PVC binding) — the initContainer is waiting for `mongodb-0:27017` | `kubectl --context docker-desktop -n fkst-hosted get pods,pvc` and wait, or inspect `describe pod mongodb-0` |
