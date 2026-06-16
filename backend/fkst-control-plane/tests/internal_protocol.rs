@@ -2,6 +2,7 @@
 //! the internal router's auth + behaviour, registry liveness/expiry, and a real
 //! `WorkerAgent` driven against an in-process controller.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
@@ -10,7 +11,9 @@ use http_body_util::BodyExt;
 use secrecy::SecretString;
 use tower::ServiceExt;
 
-use fkst_control_plane::controller::{internal_router, InternalAuth, WorkerRegistry};
+use fkst_control_plane::controller::{
+    internal_router, ClaimMap, InternalAuth, SessionTokenMinter, WorkerRegistry,
+};
 use fkst_shared::protocol::{
     Draining, Heartbeat, HeartbeatResponse, LifecycleState, PullRequest, PullResponse,
     RegisterRequest, RegisterResponse, Released, INTERNAL_AUTH_HEADER, PROTOCOL_VERSION,
@@ -20,6 +23,18 @@ const TOKEN: &str = "test-internal-token";
 
 fn auth() -> InternalAuth {
     InternalAuth::new(SecretString::from(TOKEN.to_string()))
+}
+
+/// A fresh empty claim map for the controller's mid-run channels (#151). These
+/// #134 transport tests do not exercise credential-refresh / status-report, so
+/// an empty map + no minter preserves their original behaviour exactly.
+fn empty_claims() -> Arc<ClaimMap> {
+    Arc::new(ClaimMap::new())
+}
+
+/// No token minter — the credential-refresh route is not exercised here.
+fn no_minter() -> Option<Arc<dyn SessionTokenMinter>> {
+    None
 }
 
 /// Build a signed (auth-header-bearing) POST request to an internal route.
@@ -60,7 +75,7 @@ fn heartbeat(id: &str) -> Heartbeat {
 #[tokio::test]
 async fn register_then_heartbeat_marks_worker_live() {
     let registry = WorkerRegistry::new(Duration::from_secs(10));
-    let router = internal_router(registry.clone(), auth(), 5);
+    let router = internal_router(registry.clone(), auth(), 5, empty_claims(), no_minter());
 
     let resp = router
         .clone()
@@ -90,7 +105,13 @@ async fn register_then_heartbeat_marks_worker_live() {
 
 #[tokio::test]
 async fn internal_route_without_auth_header_is_401() {
-    let router = internal_router(WorkerRegistry::new(Duration::from_secs(10)), auth(), 5);
+    let router = internal_router(
+        WorkerRegistry::new(Duration::from_secs(10)),
+        auth(),
+        5,
+        empty_claims(),
+        no_minter(),
+    );
     let req = Request::builder()
         .method("POST")
         .uri("/internal/v1/register")
@@ -103,7 +124,13 @@ async fn internal_route_without_auth_header_is_401() {
 
 #[tokio::test]
 async fn wrong_auth_header_is_401() {
-    let router = internal_router(WorkerRegistry::new(Duration::from_secs(10)), auth(), 5);
+    let router = internal_router(
+        WorkerRegistry::new(Duration::from_secs(10)),
+        auth(),
+        5,
+        empty_claims(),
+        no_minter(),
+    );
     let req = Request::builder()
         .method("POST")
         .uri("/internal/v1/register")
@@ -118,7 +145,7 @@ async fn wrong_auth_header_is_401() {
 #[tokio::test]
 async fn stale_worker_expires() {
     let registry = WorkerRegistry::new(Duration::from_millis(1));
-    let router = internal_router(registry.clone(), auth(), 5);
+    let router = internal_router(registry.clone(), auth(), 5, empty_claims(), no_minter());
     router
         .oneshot(post("/internal/v1/register", &register_req("w1")))
         .await
@@ -132,7 +159,7 @@ async fn stale_worker_expires() {
 #[tokio::test]
 async fn controller_receives_draining_and_released() {
     let registry = WorkerRegistry::new(Duration::from_secs(10));
-    let router = internal_router(registry.clone(), auth(), 5);
+    let router = internal_router(registry.clone(), auth(), 5, empty_claims(), no_minter());
     router
         .clone()
         .oneshot(post("/internal/v1/register", &register_req("w1")))
@@ -172,7 +199,13 @@ async fn controller_receives_draining_and_released() {
 
 #[tokio::test]
 async fn pull_returns_no_assignments() {
-    let router = internal_router(WorkerRegistry::new(Duration::from_secs(10)), auth(), 5);
+    let router = internal_router(
+        WorkerRegistry::new(Duration::from_secs(10)),
+        auth(),
+        5,
+        empty_claims(),
+        no_minter(),
+    );
     let resp = router
         .oneshot(post(
             "/internal/v1/pull",
@@ -192,7 +225,7 @@ async fn pull_returns_no_assignments() {
 #[tokio::test]
 async fn worker_agent_register_and_heartbeat_against_in_process_controller() {
     let registry = WorkerRegistry::new(Duration::from_secs(10));
-    let router = internal_router(registry.clone(), auth(), 7);
+    let router = internal_router(registry.clone(), auth(), 7, empty_claims(), no_minter());
 
     // Serve the internal router on an ephemeral port.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

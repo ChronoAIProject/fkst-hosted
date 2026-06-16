@@ -107,10 +107,14 @@ pub fn mount_internal(
     registry: crate::controller::WorkerRegistry,
     auth: crate::controller::InternalAuth,
     heartbeat_interval_secs: u64,
+    claims: std::sync::Arc<crate::controller::ClaimMap>,
+    minter: Option<std::sync::Arc<dyn crate::controller::SessionTokenMinter>>,
 ) -> Router {
     top.merge(crate::controller::internal_router(
         registry,
         auth,
         heartbeat_interval_secs,
+        claims,
+        minter,
     ))
 }
