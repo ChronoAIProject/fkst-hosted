@@ -85,7 +85,7 @@ function GoalsRoute() {
 
 function GoalRoute() {
   const { id } = useParams<{ id: string }>();
-  const { data: goal, isLoading, isError, error } = useGoal(id);
+  const { data: goal, isLoading } = useGoal(id);
 
   useEffect(() => {
     document.title = id ? `FKST — Goal #${id}` : 'FKST — Goal Details';
@@ -99,23 +99,9 @@ function GoalRoute() {
     );
   }
 
-  if (isError) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[300px] text-red font-mono text-[12px]">
-        failed to load goal #{id}: {String(error)}
-      </div>
-    );
-  }
-
-  if (!goal) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[300px] text-ghost font-mono text-[12px]">
-        goal not found
-      </div>
-    );
-  }
-
-  return <Goal goal={goal} />;
+  // On error or not-found, render the Goal screen's honest empty state (it keeps
+  // the back-nav and shows '—'/unknown) rather than a dead-end error screen.
+  return <Goal goal={goal} goalId={id} />;
 }
 
 function IssuesRoute() {

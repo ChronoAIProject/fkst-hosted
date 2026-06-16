@@ -119,7 +119,7 @@ export function Shell() {
                 </button>
               )}
 
-              <div className="font-mono text-[11.5px] text-ghost border border-line bg-raise px-2 py-1 rounded-chip flex items-center gap-1.5 tabular-nums">
+              <div className="font-mono text-[11.5px] text-ghost border border-line bg-raise px-2 py-1 rounded-chip flex items-center gap-1.5 tabular-nums max-[600px]:hidden">
                 <span className="w-1.5 h-1.5 rounded-full bg-ghost" />
                 <span>github — unknown</span>
               </div>
