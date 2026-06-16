@@ -85,16 +85,37 @@ sync_to_dev() { # $1 worktree dir
   echo "  $1 -> $(git -C "$1" reset --hard "origin/$UPSTREAM_BRANCH" 2>&1 | tail -1)"
 }
 
-# Ensure the engine BIN is built from substrate origin/dev. Detect stale by: substrate
-# origin/dev ahead of the build checkout, OR any crate .rs newer than the BIN binary.
-bin_ensure_fresh() {
-  [ -d "$SUBSTRATE_SRC/.git" ] || git -C "$SUBSTRATE_SRC" rev-parse --git-dir >/dev/null 2>&1 \
-    || { echo "BIN: $SUBSTRATE_SRC not a substrate checkout — skipping freshness check"; return 0; }
+# Engine BIN freshness. Stale = substrate origin/dev ahead of the build checkout, OR any
+# crate .rs newer than the BIN binary. _bin_state echoes "behind newer head" (read-only,
+# fetches first) and is shared by the read-only report and the rebuild.
+_bin_state() {
   git -C "$SUBSTRATE_SRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
-  local behind newer head; head=$(git -C "$SUBSTRATE_SRC" rev-parse --short HEAD 2>/dev/null)
+  local behind newer head
+  head=$(git -C "$SUBSTRATE_SRC" rev-parse --short HEAD 2>/dev/null)
   behind=$(git -C "$SUBSTRATE_SRC" rev-list --count "HEAD..origin/$UPSTREAM_BRANCH" 2>/dev/null || echo 0)
   newer=$(find "$SUBSTRATE_SRC/crates" -name '*.rs' -newer "$BIN" 2>/dev/null | wc -l | tr -d ' ')
-  if [ -x "$BIN" ] && [ "${behind:-0}" = 0 ] && [ "${newer:-0}" = 0 ]; then
+  echo "${behind:-0} ${newer:-0} ${head:-?}"
+}
+
+# Read-only freshness report — used by `doctor`, which must NOT mutate. Rebuilding here would
+# make the BIN file current while the RUNNING supervise still executes the old engine, masking
+# the staleness behind a "fresh" line. So doctor only reports; `restart`/`bin` rebuild + reload.
+bin_freshness_report() {
+  git -C "$SUBSTRATE_SRC" rev-parse --git-dir >/dev/null 2>&1 || { echo "$SUBSTRATE_SRC not a substrate checkout"; return 0; }
+  local behind newer head; read -r behind newer head <<<"$(_bin_state)"
+  if [ -x "$BIN" ] && [ "$behind" = 0 ] && [ "$newer" = 0 ]; then
+    echo "fresh: substrate@$head (0 behind origin/$UPSTREAM_BRANCH, 0 newer .rs)"
+  else
+    echo "STALE: substrate@$head behind=$behind newer_rs=$newer → run 'dogfood.sh restart' (or 'bin') to rebuild + reload"
+  fi
+}
+
+# Rebuild the BIN from substrate origin/dev if stale — used by start/restart/bin (mutating).
+bin_ensure_fresh() {
+  git -C "$SUBSTRATE_SRC" rev-parse --git-dir >/dev/null 2>&1 \
+    || { echo "BIN: $SUBSTRATE_SRC not a substrate checkout — skipping freshness check"; return 0; }
+  local behind newer head; read -r behind newer head <<<"$(_bin_state)"
+  if [ -x "$BIN" ] && [ "$behind" = 0 ] && [ "$newer" = 0 ]; then
     echo "BIN fresh: substrate@$head (0 behind origin/$UPSTREAM_BRANCH, 0 newer .rs)"
     return 0
   fi
@@ -189,7 +210,7 @@ doctor_one() {
 }
 
 cmd_doctor() {
-  echo "engine BIN:"; bin_ensure_fresh | sed 's/^/  /'
+  echo "engine BIN:"; bin_freshness_report | sed 's/^/  /'
   echo "supervises:"
   for n in $(expand "${1:-all}"); do doctor_one "$n"; done
   echo "graphql: $(gh api rate_limit --jq '.resources.graphql.remaining' 2>/dev/null||echo ?)/5000"
