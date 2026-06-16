@@ -15,6 +15,11 @@ const DEFAULT_PORT: u16 = 8090;
 const DEFAULT_PULL_INTERVAL_SECS: u64 = 5;
 /// Default max concurrent engine sessions the worker accepts.
 const DEFAULT_CAPACITY: u32 = 4;
+/// Default graceful-drain deadline (seconds) for SIGTERM / preStop. MUST stay
+/// strictly below the k8s `terminationGracePeriodSeconds` (owned by #144) so the
+/// kubelet's own SIGKILL never races the drain mid-checkpoint; 25 leaves a
+/// margin under the common 30s default.
+const DEFAULT_DRAIN_GRACE_SECS: u64 = 25;
 
 /// Validated worker configuration.
 #[derive(Clone)]
@@ -35,6 +40,12 @@ pub struct WorkerConfig {
     pub capacity: u32,
     /// The worker's engine temp dir, reported on registration.
     pub engine_temp_root: String,
+    /// Graceful-drain deadline (seconds) for SIGTERM / preStop (#140a). Bounds
+    /// how long the worker spends checkpointing + stopping in-flight sessions
+    /// before it gives up and exits. Default 25; MUST stay below the k8s
+    /// `terminationGracePeriodSeconds` (owned by #144) so the kubelet never
+    /// SIGKILLs mid-drain.
+    pub worker_drain_grace_secs: u64,
 }
 
 // Hand-written so the internal-auth secret is never printed.
@@ -49,6 +60,7 @@ impl std::fmt::Debug for WorkerConfig {
             .field("pull_interval_secs", &self.pull_interval_secs)
             .field("capacity", &self.capacity)
             .field("engine_temp_root", &self.engine_temp_root)
+            .field("worker_drain_grace_secs", &self.worker_drain_grace_secs)
             .finish()
     }
 }
@@ -93,6 +105,12 @@ impl WorkerConfig {
 
         let capacity = parse_or("FKST_WORKER_CAPACITY", &map, DEFAULT_CAPACITY)?;
 
+        let worker_drain_grace_secs = parse_or(
+            "FKST_WORKER_DRAIN_GRACE_SECS",
+            &map,
+            DEFAULT_DRAIN_GRACE_SECS,
+        )?;
+
         // The engine temp root the image sets (FKST_RUNTIME_ROOT); fall back to
         // the OS temp dir so a local `cargo run` still produces a valid value.
         let engine_temp_root = map
@@ -110,6 +128,7 @@ impl WorkerConfig {
             pull_interval_secs,
             capacity,
             engine_temp_root,
+            worker_drain_grace_secs,
         })
     }
 }
@@ -151,7 +170,29 @@ mod tests {
         assert_eq!(c.port, DEFAULT_PORT);
         assert_eq!(c.pull_interval_secs, DEFAULT_PULL_INTERVAL_SECS);
         assert_eq!(c.capacity, DEFAULT_CAPACITY);
+        assert_eq!(c.worker_drain_grace_secs, DEFAULT_DRAIN_GRACE_SECS);
         assert_eq!(c.internal_auth_token.expose_secret(), "secret");
+    }
+
+    #[test]
+    fn drain_grace_defaults_to_25_and_is_overridable() {
+        // Default when the var is absent.
+        let c = WorkerConfig::from_vars(base()).unwrap();
+        assert_eq!(c.worker_drain_grace_secs, 25);
+
+        // Overridable via the env var.
+        let mut vars = base();
+        vars.push(("FKST_WORKER_DRAIN_GRACE_SECS".into(), "40".into()));
+        let c = WorkerConfig::from_vars(vars).unwrap();
+        assert_eq!(c.worker_drain_grace_secs, 40);
+    }
+
+    #[test]
+    fn malformed_drain_grace_is_rejected() {
+        let mut vars = base();
+        vars.push(("FKST_WORKER_DRAIN_GRACE_SECS".into(), "soon".into()));
+        let err = WorkerConfig::from_vars(vars).expect_err("malformed must fail");
+        assert!(err.to_string().contains("FKST_WORKER_DRAIN_GRACE_SECS"));
     }
 
     #[test]

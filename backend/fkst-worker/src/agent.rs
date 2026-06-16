@@ -5,6 +5,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -26,6 +27,9 @@ use crate::config::WorkerConfig;
 
 #[path = "agent_sessions.rs"]
 mod sessions;
+
+#[path = "agent_lifecycle.rs"]
+mod lifecycle;
 
 /// Errors talking to the controller. Transport / 5xx are transient (retried);
 /// 4xx / auth / version / decode are fatal config-or-protocol problems.
@@ -104,6 +108,14 @@ pub struct WorkerAgent {
     /// signal, awaits the loop's drain, and removes the entry. The lock is sync
     /// and is NEVER held across an await.
     sessions: Mutex<HashMap<String, LiveSession>>,
+    /// The worker's own drain state, the gate the pull loop reads to stop
+    /// requesting work and the drain routine flips on SIGTERM (#140a). Encoded
+    /// as a `u8` ([`LIFECYCLE_ACTIVE`] / [`LIFECYCLE_DRAINING`]) so it is a
+    /// lock-free `AtomicU8` shared across the heartbeat / pull / drain tasks; the
+    /// heartbeat's `LifecycleState` argument is passed explicitly by the run loop
+    /// and is unrelated to this gate. Begins `Active`; `begin_drain` flips it to
+    /// `Draining` idempotently and it never flips back (drain is terminal).
+    lifecycle: Arc<AtomicU8>,
 }
 
 impl WorkerAgent {
@@ -154,6 +166,7 @@ impl WorkerAgent {
             jitter_ms,
             engine_config,
             sessions: Mutex::new(HashMap::new()),
+            lifecycle: Arc::new(AtomicU8::new(lifecycle::ACTIVE)),
         }
     }
 
