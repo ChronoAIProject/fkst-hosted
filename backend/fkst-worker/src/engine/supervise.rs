@@ -1,28 +1,30 @@
-//! The worker-side supervise loop (issue #151, increment 5).
+//! The worker-side supervise loop (issue #151, increments 5 + 6c).
 //!
 //! Once the worker spawns (or re-adopts) an engine, [`supervise_session`] drives
 //! it for its lifetime — the worker-side mirror of the control-plane driver's
 //! supervise loop (`fkst-control-plane/src/sessions/service.rs`, the
-//! `SUPERVISE_POLL` / `MINT_REQUEST_POLL` `tokio::select!` loop), MINUS
-//! journaling (which needs the journal crate relocated — a SEPARATE later
-//! increment). The loop is a `tokio::select!` over:
+//! `SUPERVISE_POLL` / `MINT_REQUEST_POLL` `tokio::select!` loop), including
+//! journaling (the engine's RAISED stdout + lifecycle transitions are recorded
+//! direct to GitHub via the per-session journaler, mirroring the driver
+//! verbatim — see `super::journal`). The loop is a `tokio::select!` over:
 //!
 //! - **a 500ms status tick** → on a `LiveStatus` change, send a [`StatusReport`];
 //!   on a terminal status (Stopped/Failed), send a terminal report and exit;
 //! - **a 200ms mint tick** → the credential-refresh servicer ([`RefreshState`]):
 //!   JIT (helper request file) / periodic (pre-expiry) / reactive (a 401 flag);
 //! - **the engine's stdout line stream** → scan each line for a GitHub auth
-//!   failure to set the reactive-refresh flag, then DROP the line (journaling is
-//!   the later increment, so the loop only reads stdout to detect 401s and keep
-//!   the pipe drained);
+//!   failure to set the reactive-refresh flag, then JOURNAL the line (parse the
+//!   `RAISED:` framing into a progress event / a malformed anomaly / debug-logged
+//!   chatter);
 //! - **a stop signal** (`watch::Receiver<bool>` the agent flips on `StopSession`)
-//!   → stop the engine, send a [`Released`], send a terminal report, exit.
+//!   → journal Stopping, stop the engine, send a [`Released`], send a terminal
+//!   report, journal the terminal lifecycle, exit.
 //!
 //! DORMANT: the loop runs only for a session the worker is actually driving, and
-//! the controller emits no dispatch until activation, so develop behaviour is
-//! byte-identical. The loop owns the `RunningSession` + its on-disk guards and is
-//! the SOLE writer of the token file (via the refresh servicer). Secrets are
-//! never logged.
+//! the controller emits no dispatch (and no journal plan) until activation, so
+//! develop behaviour is byte-identical. The loop owns the `RunningSession` + its
+//! on-disk guards + the per-session journaler and is the SOLE writer of the
+//! token file (via the refresh servicer). Secrets are never logged.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,10 +33,12 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::MissedTickBehavior;
 
 use fkst_engine::{LiveStatus, RunningSession};
+use fkst_journal::{Journaler, Transition};
 use fkst_shared::protocol::{SessionStatus, TerminalExit};
 
 use crate::agent::WorkerAgent;
 use crate::engine::executor::SessionGuards;
+use crate::engine::journal;
 use crate::engine::refresh::{RefreshOutcome, RefreshState};
 
 /// Status-tick cadence — mirrors the driver's `SUPERVISE_POLL`.
@@ -66,13 +70,19 @@ pub struct SuperviseContext {
 
 /// Drive one engine to completion. Owns `running` (it `&mut`-drives `status()` /
 /// `take_stdout()` / `stop()`), `guards` (held for the dirs' lifetime, never
-/// referenced), and `stop_rx` (the agent flips it on `StopSession`). Returns when
-/// the engine is terminal or stopped — the caller (the agent) then removes the
-/// session from its registry.
+/// referenced), `journaler` (the per-session GitHub progress record, `None` when
+/// journaling is off), and `stop_rx` (the agent flips it on `StopSession`).
+/// Returns when the engine is terminal or stopped — the caller (the agent) then
+/// removes the session from its registry.
+///
+/// `journaler` is by-value (like `running` / `guards`) rather than in
+/// [`SuperviseContext`] so the spawned future stays `Send` — the journaler is
+/// `Send` and is only ever `&mut`-borrowed across awaits from this owned local.
 pub async fn supervise_session(
     mut ctx: SuperviseContext,
     mut running: RunningSession,
     guards: SessionGuards,
+    mut journaler: Option<Journaler>,
     mut stop_rx: watch::Receiver<bool>,
 ) {
     // Held for the session lifetime so the clone tree + CODEX_HOME outlive the
@@ -81,36 +91,40 @@ pub async fn supervise_session(
     let session_id = ctx.session_id.clone();
     tracing::info!(session_id = %session_id, pid = running.pid, "supervise loop started");
 
-    // The reactive-401 source: the engine's line-framed stdout. Leaving it
-    // untaken is safe (the drain task keeps the pipe flowing); `None` after EOF
-    // parks the arm. The loop reads it ONLY to detect 401s and keep it drained —
-    // journaling is the later increment.
+    // The engine's line-framed stdout: BOTH the reactive-401 source AND the
+    // journaling source. Leaving it untaken is safe (the drain task keeps the
+    // pipe flowing); `None` after EOF parks the arm. Each line is scanned for a
+    // 401 (reactive refresh) and journaled (the `RAISED:` framing).
     let mut stdout_rx = running.take_stdout();
 
     let mut status_tick = interval(SUPERVISE_POLL);
     let mut mint_tick = interval(MINT_REQUEST_POLL);
 
     // Initial status: the engine is up, so report Running once (best-effort; a
-    // failed report retries on the next status transition).
+    // failed report retries on the next status transition), then journal the
+    // Running lifecycle (mirrors the driver: report first, journal after).
     let mut last_reported: Option<SessionStatus> = None;
     report_transition(&ctx, &mut last_reported, SessionStatus::Running, None).await;
+    journal::journal_lifecycle(&mut journaler, Transition::Running).await;
 
     loop {
         tokio::select! {
             _ = mint_tick.tick() => {
                 let outcome = ctx.refresh.service_tick().await;
-                if handle_refresh_outcome(&mut ctx, &mut running, outcome).await {
+                if handle_refresh_outcome(&mut ctx, &mut running, &mut journaler, outcome).await {
                     return;
                 }
             }
             line = next_stdout_line(&mut stdout_rx) => {
                 match line {
                     // Scan for a GitHub auth failure to flag a reactive refresh,
-                    // then DROP the line (journaling is the later increment).
+                    // then journal the line (the `RAISED:` framing → a progress
+                    // event / a malformed anomaly / debug-logged chatter).
                     Some(raw) => {
                         if is_github_auth_failure(&raw) {
                             ctx.refresh.flag_reactive_401();
                         }
+                        journal::journal_stdout_line(&mut journaler, &raw).await;
                     }
                     // EOF/closed: park this arm so it never busy-loops.
                     None => stdout_rx = None,
@@ -118,7 +132,7 @@ pub async fn supervise_session(
             }
             _ = stop_rx.changed() => {
                 if *stop_rx.borrow() {
-                    stop_and_release(&ctx, &mut running, &mut last_reported).await;
+                    stop_and_release(&ctx, &mut running, &mut journaler, &mut last_reported).await;
                     return;
                 }
             }
@@ -126,7 +140,7 @@ pub async fn supervise_session(
                 match running.status() {
                     LiveStatus::Running => {}
                     terminal => {
-                        finish_terminal(&ctx, &mut running, &mut last_reported, terminal).await;
+                        finish_terminal(&ctx, &mut running, &mut journaler, &mut last_reported, terminal).await;
                         return;
                     }
                 }
@@ -139,14 +153,16 @@ pub async fn supervise_session(
 async fn handle_refresh_outcome(
     ctx: &mut SuperviseContext,
     running: &mut RunningSession,
+    journaler: &mut Option<Journaler>,
     outcome: RefreshOutcome,
 ) -> bool {
     match outcome {
         RefreshOutcome::StaleFence => {
             // Self-fence: a takeover owns the claim. Stop the local engine and
-            // exit WITHOUT a Released or a status report — the new owner drives
-            // it now; writing status here would race the takeover (mirrors the
-            // driver's lease-lost self-fence: kill the engine, zero writes).
+            // exit WITHOUT a Released, a status report, OR a journal write — the
+            // new owner drives (and journals) it now; writing here would race the
+            // takeover (mirrors the driver's lease-lost self-fence: kill the
+            // engine, zero writes).
             tracing::warn!(
                 session_id = %ctx.session_id,
                 "self-fencing: stopping the local engine without status writes"
@@ -173,6 +189,16 @@ async fn handle_refresh_outcome(
                 }),
             )
             .await;
+            // Terminal journal (the reason is non-secret operator/credential
+            // text; never a token).
+            journal::journal_finish(
+                journaler,
+                Transition::Failed {
+                    exit_code: None,
+                    error: reason.clone(),
+                },
+            )
+            .await;
             true
         }
         RefreshOutcome::Refreshed | RefreshOutcome::Skipped | RefreshOutcome::TransientFailure => {
@@ -187,9 +213,13 @@ async fn handle_refresh_outcome(
 async fn stop_and_release(
     ctx: &SuperviseContext,
     running: &mut RunningSession,
+    journaler: &mut Option<Journaler>,
     last_reported: &mut Option<SessionStatus>,
 ) {
     tracing::info!(session_id = %ctx.session_id, "stop signal received; stopping engine");
+    // Journal Stopping BEFORE the engine stop (mirrors the driver's commanded-
+    // stop order: journal Stopping forced, then stop, then finish Stopped).
+    journal::journal_lifecycle(journaler, Transition::Stopping).await;
     let exit = match ctx.agent_runner_stop(running).await {
         Ok(()) => {
             tracing::info!(session_id = %ctx.session_id, "engine stopped on command");
@@ -211,6 +241,14 @@ async fn stop_and_release(
         tracing::warn!(session_id = %ctx.session_id, error = %error, "failed to send Released (will not retry; loop exiting)");
     }
     report_transition(ctx, last_reported, SessionStatus::Stopped, Some(exit)).await;
+    // Terminal journal: a commanded stop is a clean Stopped exit.
+    journal::journal_finish(
+        journaler,
+        Transition::Stopped {
+            exit_code: exit.code,
+        },
+    )
+    .await;
 }
 
 /// Handle an UNCOMMANDED terminal engine exit: reap the dirs, then send the
@@ -220,6 +258,7 @@ async fn stop_and_release(
 async fn finish_terminal(
     ctx: &SuperviseContext,
     running: &mut RunningSession,
+    journaler: &mut Option<Journaler>,
     last_reported: &mut Option<SessionStatus>,
     terminal: LiveStatus,
 ) {
@@ -249,6 +288,18 @@ async fn finish_terminal(
     // the exit, so this only cleans up).
     let _ = ctx.agent_runner_stop(running).await;
     report_transition(ctx, last_reported, status, Some(exit)).await;
+    // Terminal journal: a clean exit is Stopped; anything else is Failed (using
+    // the engine's own exit code as the source of truth).
+    let transition = match status {
+        SessionStatus::Stopped => Transition::Stopped {
+            exit_code: exit.code,
+        },
+        _ => Transition::Failed {
+            exit_code: exit.code,
+            error: format!("engine exited: {terminal:?}"),
+        },
+    };
+    journal::journal_finish(journaler, transition).await;
 }
 
 /// Report a status transition, best-effort. Suppresses a duplicate of the
