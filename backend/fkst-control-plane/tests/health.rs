@@ -14,7 +14,7 @@ use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
-use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
@@ -35,7 +35,7 @@ async fn test_router() -> axum::Router {
     let db = Db::from_config(&config)
         .await
         .expect("lazy handle must build without I/O");
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     let vault = support::test_vault(&db);
     build_router(AppState {

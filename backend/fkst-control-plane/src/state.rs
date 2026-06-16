@@ -5,7 +5,7 @@ use crate::authz::Authorizer;
 use crate::config::Config;
 use crate::db::Db;
 use crate::github_app::GithubAppTokens;
-use crate::goals::GoalRepo;
+use crate::goals::GoalIssueStore;
 use crate::sessions::SessionService;
 use crate::vault::VaultService;
 
@@ -37,7 +37,7 @@ pub struct AppState {
     pub github_app_webhook_secret: Option<secrecy::SecretString>,
     /// Repository over the `goals` collection (domain layer owned by the goals
     /// module). Goal CRUD handlers go through this, never raw Mongo.
-    pub goals: GoalRepo,
+    pub goals: GoalIssueStore,
     /// Per-session secret/variable vault (issue #100). Always present: the
     /// `KeyProvider` is built fail-closed at boot, so the vault routes never
     /// run without an at-rest encryption key.

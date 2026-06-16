@@ -15,7 +15,7 @@ use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
-use fkst_control_plane::goals::GoalRepo;
+use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
@@ -340,7 +340,7 @@ async fn entries_per_scope_cap_is_enforced() {
 
 /// Build a router (auth disabled: the dev context owns everything) over `db`.
 fn router(db: Db, vault: VaultService) -> axum::Router {
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     build_router(AppState {
         config: Config::default(),
@@ -362,7 +362,7 @@ fn router(db: Db, vault: VaultService) -> axum::Router {
 /// the two-layer model where the action layer passes but the object layer
 /// (ownership) denies.
 fn router_auth_enabled(db: Db, vault: VaultService) -> axum::Router {
-    let goals = GoalRepo::new(&db.database);
+    let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
     build_router(AppState {
         config: Config::default(),
