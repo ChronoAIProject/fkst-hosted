@@ -459,6 +459,41 @@ local real = require("consensus.thing")
         )
 
 
+class ConvergenceBudgetGuardTest(unittest.TestCase):
+    def violations(self, loop_source: str, review_source: str | None = None) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            loop = root / ".fkst" / "packages" / "github-devloop" / "departments" / "loop"
+            review = root / ".fkst" / "packages" / "github-devloop" / "departments" / "review_loop"
+            loop.mkdir(parents=True)
+            review.mkdir(parents=True)
+            loop.joinpath("main.lua").write_text(loop_source, encoding="utf-8")
+            review.joinpath("main.lua").write_text(review_source or "", encoding="utf-8")
+            violations: list[str] = []
+            check_repo.check_convergence_budget_caps(root, violations)
+            return violations
+
+    def test_flags_loop_budget_without_stable_proposal_round_facts(self) -> None:
+        source = """
+local facts = core.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
+local round = math.max(payload.round, core.max_converge_round(facts))
+local budget_round = math.max(round, core.converge_budget_round(current.comments, proposal_id))
+local hit_round_cap = budget_round >= core.max_converge_rounds()
+"""
+        violations = self.violations(source)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("convergence round counter must derive from stable core.converge_round_facts_for_proposal() facts", violations[0])
+
+    def test_allows_loop_budget_with_stable_proposal_round_facts(self) -> None:
+        source = """
+local facts = core.converge_round_facts_for_proposal(current.comments, proposal_id)
+local round = math.max(payload.round, core.max_converge_round(facts))
+local budget_round = math.max(round, core.converge_budget_round(current.comments, proposal_id))
+local hit_round_cap = budget_round >= core.max_converge_rounds()
+"""
+        self.assertEqual(self.violations(source), [])
+
+
 class SagaHandlerRatchetTest(unittest.TestCase):
     def violations(self, source: str, allowlist: set[str]) -> list[str]:
         return check_repo.saga_handler_ratchet_violations({

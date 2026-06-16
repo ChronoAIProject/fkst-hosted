@@ -904,14 +904,14 @@ def check_entity_read_count_assertions(root: Path, violations: list[str]) -> Non
                 add(violations, "G11", f"{rel(root, path)}:{index} asserts entity-read command counts; assert outcomes instead")
 
 def check_convergence_budget_caps(root: Path, violations: list[str]) -> None:
-    for rel_path, helper in (
-        ("github-devloop/departments/loop/main.lua", "converge_budget_round"), ("github-devloop/departments/review_loop/main.lua", "review_converge_budget_round")):
+    rows = (("github-devloop/departments/loop/main.lua", "converge_budget_round", "converge_round_facts_for_proposal"), ("github-devloop/departments/review_loop/main.lua", "review_converge_budget_round", None))
+    for rel_path, helper, stable_fact_helper in rows:
         path = packages_root(root) / rel_path
         if not path.exists(): continue
         source = strip_lua_comments_and_strings(read_text(path))
-        if "hit_round_cap" in source and "core.max_converge_rounds()" in source and f"core.{helper}(" not in source:
-            add(violations, "G12", f"{rel(root, path)} convergence cap must use proposal-keyed core.{helper}() budget")
-
+        if "hit_round_cap" not in source or "core.max_converge_rounds()" not in source: continue
+        if f"core.{helper}(" not in source: add(violations, "G12", f"{rel(root, path)} convergence cap must use proposal-keyed core.{helper}() budget")
+        if stable_fact_helper is not None and f"core.{stable_fact_helper}(" not in source: add(violations, "G12", f"{rel(root, path)} convergence round counter must derive from stable core.{stable_fact_helper}() facts")
 
 def check_gh_git_adapter_ratchet(root: Path, violations: list[str]) -> None:
     sources = gh_git_adapter.sources(root, packages_root(root), read_text, rel)

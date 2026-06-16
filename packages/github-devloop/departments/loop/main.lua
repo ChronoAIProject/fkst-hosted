@@ -71,7 +71,7 @@ function pipeline(event)
 
     local base_version = core.converge_base_version(unresolved.dedup_key)
     local sr_digest = core.source_ref_digest(unresolved.source_ref)
-    local facts = core.converge_round_facts(current.comments, unresolved.proposal_id, base_version, sr_digest)
+    local facts = core.converge_round_facts_for_proposal(current.comments, unresolved.proposal_id)
     local round = math.max(tonumber(unresolved.round) or 0, core.max_converge_round(facts))
     if core.has_converge_round_marker(current.comments, unresolved.proposal_id, base_version, sr_digest, round) then
       core.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", "skip-idempotent(converge round marker already visible)", "converge round marker for incoming round is already visible")

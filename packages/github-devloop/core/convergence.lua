@@ -515,6 +515,13 @@ function M.converge_round_facts_for_source(comments, proposal_id, source_ref_dig
   return converge_record_map(M, comments, "converge%-round", matches)
 end
 
+function M.converge_round_facts_for_proposal(comments, proposal_id)
+  local matches = function(marker)
+    return attr(marker, "proposal") == tostring(proposal_id)
+  end
+  return converge_record_map(M, comments, "converge%-round", matches)
+end
+
 function M.review_converge_round_facts(comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(review_proposal_id)
@@ -527,10 +534,7 @@ function M.review_converge_round_facts(comments, review_proposal_id, issue_propo
 end
 
 function M.converge_budget_round(comments, proposal_id)
-  local matches = function(marker)
-    return attr(marker, "proposal") == tostring(proposal_id)
-  end
-  return M.max_converge_round(converge_record_map(M, comments, "converge%-round", matches))
+  return M.max_converge_round(M.converge_round_facts_for_proposal(comments, proposal_id))
 end
 
 function M.review_converge_budget_round(comments, review_proposal_id, issue_proposal_id)
