@@ -77,6 +77,18 @@ return {
   end,
 
   test_write_class_classifier_is_explicit = function()
+    t.eq(conformance.is_write_class({ argv = { "gh", "issue", "comment", "42", "--repo", "owner/x" } }), true)
+    t.eq(conformance.is_write_class({ argv = { "gh", "issue", "view", "42", "--repo", "owner/x" } }), false)
+    t.eq(conformance.is_write_class({
+      argv = { "gh", "api", "graphql" },
+      stdin = "mutation { addLabelsToLabelable(input: {}) { clientMutationId } }",
+    }), true)
+    t.eq(conformance.is_write_class({
+      argv = { "gh", "api", "graphql" },
+      stdin = "query { viewer { login } }",
+    }), false)
+    t.eq(conformance.is_write_class({ argv = { "git", "-C", "/tmp/std-saga-worktree", "push", "origin", "HEAD:branch" } }), true)
+    t.eq(conformance.is_write_class({ argv = { "git", "-C", "/tmp/std-saga-worktree", "status", "--short" } }), false)
     t.eq(conformance.is_write_class("gh issue comment 42 --repo owner/x"), true)
     t.eq(conformance.is_write_class("gh issue reopen '42' --repo owner/x"), true)
     t.eq(conformance.is_write_class("gh pr merge '7' --repo owner/x"), true)

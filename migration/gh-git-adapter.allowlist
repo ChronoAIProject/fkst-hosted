@@ -73,13 +73,3 @@ packages/github-proxy/core/rest_view.lua:
   - gh api
 packages/github-proxy/departments/github_poll/main.lua:
   - gh
-std/github_debug_stamp.lua:
-  - git rev-parse
-std/saga_conformance.lua:
-  - gh api
-  - gh issue
-  - gh label
-  - gh pr
-  - gh workflow
-  - git
-  - git push

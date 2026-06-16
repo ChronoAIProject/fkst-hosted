@@ -12,6 +12,10 @@ local function is_ancestor_argv(maybe_ancestor_sha, descendant_sha)
   return { "git", "merge-base", "--is-ancestor", tostring(maybe_ancestor_sha), tostring(descendant_sha) }
 end
 
+local function rev_parse_verify_head_argv()
+  return { "git", "rev-parse", "--verify", "HEAD" }
+end
+
 local function exec_result(handle, argv, timeout, context)
   local ok, result_or_error = pcall(handle._exec, argv, timeout, context)
   if ok then
@@ -34,6 +38,10 @@ function M.install(handle)
 
   function handle.is_ancestor(maybe_ancestor_sha, descendant_sha, timeout)
     return exec_result(handle, is_ancestor_argv(maybe_ancestor_sha, descendant_sha), timeout, "git merge-base --is-ancestor")
+  end
+
+  function handle.rev_parse_verify_head(timeout)
+    return exec_result(handle, rev_parse_verify_head_argv(), timeout, "git rev-parse --verify HEAD")
   end
 end
 

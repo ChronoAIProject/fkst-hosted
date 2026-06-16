@@ -285,10 +285,12 @@ return {
     handle.push_branch("feature/a", 21)
     handle.show_ref_branch("feature/a", 22)
     handle.is_ancestor("abc123", "def456", 23)
+    handle.rev_parse_verify_head(24)
 
     assert_argv_equal(calls[1].argv, { "git", "push", "-u", "origin", "feature/a" }, "push_branch")
     assert_argv_equal(calls[2].argv, { "git", "show-ref", "--verify", "refs/heads/feature/a" }, "show_ref_branch")
     assert_argv_equal(calls[3].argv, { "git", "merge-base", "--is-ancestor", "abc123", "def456" }, "is_ancestor")
+    assert_argv_equal(calls[4].argv, { "git", "rev-parse", "--verify", "HEAD" }, "rev_parse_verify_head")
     for index, call in ipairs(calls) do
       assert(call.timeout == index + 20, "git method timeout mismatch for call " .. tostring(index))
       assert(call.cmd == nil, "git method must not pass cmd")
