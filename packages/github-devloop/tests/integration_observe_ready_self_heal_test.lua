@@ -382,6 +382,42 @@ return {
     t.eq(ready.payload.source_ref.ref, "owner/repo#issue/42")
   end,
 
+  test_observe_issue_pr_open_with_pr_local_reviewing_closed_link_redrives_ready = function()
+    local event = reached()
+    local ready_payload = core.build_devloop_ready_payload(event)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
+      core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+    })
+    mock_linked_pr_state({
+      core.state_marker(event.proposal_id, "reviewing", ready_payload.dedup_key),
+    }, "CLOSED")
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:reviewing" }, source = "liveness-scan" }), opts("observe-issue-pr-open-pr-local-reviewing-closed"))
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    local ready = find_raise(result.raises, "devloop_ready")
+    t.is_true(ready ~= nil)
+    t.eq(ready.payload.proposal_id, event.proposal_id)
+    t.eq(ready.payload.dedup_key, "ready/" .. ready_payload.dedup_key .. "/reimplement/1")
+    t.eq(ready.payload.source_ref.ref, "owner/repo#issue/42")
+  end,
+
+  test_observe_issue_pr_open_with_pr_local_reviewing_merged_link_marks_issue_merged = function()
+    local event = reached()
+    local ready_payload = core.build_devloop_ready_payload(event)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
+      core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
+      core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+    })
+    mock_linked_pr_state({
+      core.state_marker(event.proposal_id, "reviewing", ready_payload.dedup_key),
+    }, "MERGED")
+
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:reviewing" }, source = "liveness-scan" }), opts("observe-issue-pr-open-pr-local-reviewing-merged"))
+    assert_merged_terminal(result)
+  end,
+
   test_observe_issue_pr_open_absent_link_redrives_ready_for_replacement_pr = function()
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)

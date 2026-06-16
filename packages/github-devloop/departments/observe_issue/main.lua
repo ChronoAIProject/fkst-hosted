@@ -58,6 +58,58 @@ local function linked_open_pr(snapshot, pr_number)
   return nil
 end
 
+local function linked_pr(snapshot, pr_number)
+  for _, item in ipairs(snapshot and snapshot.prs or {}) do
+    if tostring(item.number or "") == tostring(pr_number or "") then
+      return item.current
+    end
+  end
+  return nil
+end
+
+local function issue_local_pr_bound_state_matches_link(issue_state, link)
+  if issue_state == nil or link == nil then
+    return false
+  end
+  if issue_state.state == "pr-open" or issue_state.state == "reviewing" then
+    return core.strip_transition_version_suffixes(issue_state.version) == core.strip_transition_version_suffixes(link.impl_version)
+  end
+  if issue_state.state == "fixing" then
+    return core.fixing_version_matches_link(issue_state.version, link.impl_version)
+  end
+  if issue_state.state == "review-meta" or issue_state.state == "merge-ready" or issue_state.state == "merging" then
+    return core.fixing_version_matches_link(issue_state.version, link.impl_version)
+  end
+  return false
+end
+
+local function maybe_reconcile_issue_local_orphaned_pr(issue, proposal_id, current, issue_state, link, snapshot)
+  if not issue_local_pr_bound_state_matches_link(issue_state, link) then
+    return false
+  end
+  local row = core.restart_transition_row(issue_state.state)
+  if row == nil or row.terminal == true then
+    return false
+  end
+  local facts = {
+    proposal_id = proposal_id,
+    current = current,
+    link = link,
+    snapshot = snapshot,
+  }
+  local current_pr = linked_pr(snapshot, link.pr_number)
+  if current_pr == nil then
+    if snapshot.absent_prs ~= nil and snapshot.absent_prs[tostring(link.pr_number or "")] == true then
+      return core.terminal_linked_pr_action("observe_issue", issue, issue_state, proposal_id, link, nil, facts)
+    end
+    return false
+  end
+  if tostring(current_pr.state or ""):lower() == "open" then
+    return false
+  end
+  return core.terminal_linked_pr_action("observe_issue", issue, issue_state, proposal_id, link, current_pr, facts)
+end
+
 local function issue_label_projection_state(snapshot_state, issue_state, link, snapshot)
   if issue_state ~= nil
     and issue_state.state == "pr-open"
@@ -458,6 +510,9 @@ function pipeline(event)
         core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
       end
       raise_stale_dependency_label_clear(issue, proposal_id, state, current.labels)
+      if maybe_reconcile_issue_local_orphaned_pr(issue, proposal_id, current, issue_state, link, snapshot) then
+        return
+      end
       if replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event.ts, issue_state) then
         return
       end
