@@ -10,8 +10,11 @@
 //! (claim authority is #135) and draining/released are received + logged
 //! (reassignment is #140).
 
+pub mod claims;
 pub mod internal_auth;
 pub mod registry;
+
+pub use claims::{ClaimEntry, ClaimError, ClaimMap, ClaimStatus, FencingId};
 
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
