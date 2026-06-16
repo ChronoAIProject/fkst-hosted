@@ -360,7 +360,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
   end
   local payload = core.build_devloop_ready_payload({
     proposal_id = proposal_id,
-    dedup_key = state.version,
+    dedup_key = core.ready_payload_inner_version(state.version),
     source_ref = issue.source_ref,
     impl_retry_attempt = attempt,
   })
