@@ -45,14 +45,14 @@ pub async fn run_worker(config: WorkerConfig) -> ExitCode {
     // until activation: no engines exist to adopt, so this is a no-op scan.
     agent.scan_and_readopt(READOPT_MIN_AGE, SystemTime::now());
 
+    // Two tokens so the SIGTERM path can DRAIN before the loops stop. `serve_stop`
+    // takes the health server down the instant the signal fires (k8s has already
+    // removed the pod from endpoints, so liveness no longer matters). `cancel`
+    // stops the heartbeat + pull loops, but ONLY AFTER the drain finishes — the
+    // controller needs the worker to keep heartbeating (so it is not expired) and
+    // to keep receiving its `Released` acks throughout the drain (#140a).
     let cancel = CancellationToken::new();
-
-    // Translate the OS shutdown signal into a cancellation everything observes.
-    let signal_cancel = cancel.clone();
-    tokio::spawn(async move {
-        shutdown_signal().await;
-        signal_cancel.cancel();
-    });
+    let serve_stop = CancellationToken::new();
 
     // Heartbeat loop on the controller-dictated cadence.
     let hb_interval = reg.heartbeat_interval_secs.max(1);
@@ -84,6 +84,13 @@ pub async fn run_worker(config: WorkerConfig) -> ExitCode {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    // Once draining, STOP requesting new work — the worker is
+                    // handing off, not taking on (#140a). Keep looping so the
+                    // cancel arm can still break the loop on final shutdown.
+                    if pull_agent.lifecycle() != LifecycleState::Active {
+                        tracing::debug!("draining: skipping pull");
+                        continue;
+                    }
                     match pull_agent.pull(capacity).await {
                         Ok(resp) => tracing::debug!(assignments = resp.assignments.len(), "pull (no claim authority yet)"),
                         Err(error) => tracing::warn!(error = %error, "pull failed (will retry next tick)"),
@@ -94,7 +101,10 @@ pub async fn run_worker(config: WorkerConfig) -> ExitCode {
         }
     });
 
-    // Serve the local health endpoint until the shutdown signal fires.
+    // Serve the local health endpoint. It is taken down by `serve_stop` (flipped
+    // the instant the OS shutdown signal fires) — BEFORE the drain runs — because
+    // k8s has already pulled the pod from its Service endpoints by the time it
+    // sends SIGTERM, so liveness no longer matters during the drain.
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
@@ -106,21 +116,44 @@ pub async fn run_worker(config: WorkerConfig) -> ExitCode {
     };
     tracing::info!(addr = %addr, "worker health server listening");
 
-    let serve_cancel = cancel.clone();
-    let serve = axum::serve(listener, health_router())
-        .with_graceful_shutdown(async move { serve_cancel.cancelled_owned().await });
-    if let Err(error) = serve.await {
-        tracing::error!(error = %error, "worker health server error");
-    }
+    let serve_token = serve_stop.clone();
+    let serve = tokio::spawn(async move {
+        let server = axum::serve(listener, health_router())
+            .with_graceful_shutdown(async move { serve_token.cancelled_owned().await });
+        if let Err(error) = server.await {
+            tracing::error!(error = %error, "worker health server error");
+        }
+    });
 
-    // Stop the loops, then send a best-effort final Draining heartbeat so the
-    // controller marks the worker draining promptly (no real drain here — #140).
+    // Block here until the OS asks the worker to terminate. The heartbeat + pull
+    // loops keep running in the background throughout (the controller still needs
+    // liveness), and the health server stays up until we flip `serve_stop` below.
+    shutdown_signal().await;
+    tracing::info!("shutdown signal received; beginning graceful drain");
+
+    // Take the health server down first (the pod is already out of rotation).
+    serve_stop.cancel();
+
+    // DRAIN while the heartbeat loop is STILL ALIVE: the controller must keep
+    // seeing this worker (so it is not expired mid-handoff) and must receive each
+    // session's `Released` during the drain. `run_drain` flips the pull gate
+    // (begin_drain), announces `Draining`, then checkpoints + stops every
+    // in-flight session within the bounded grace, emitting a `Released` apiece.
+    let grace = Duration::from_secs(config.worker_drain_grace_secs);
+    let outcome = crate::drain::run_drain(&agent, grace).await;
+    tracing::info!(
+        released = outcome.released,
+        total = outcome.total,
+        timed_out = outcome.timed_out,
+        "drain finished; stopping background loops"
+    );
+
+    // ONLY NOW stop the heartbeat + pull loops and await everything. The drain
+    // already sent `Draining` (no redundant final heartbeat needed).
     cancel.cancel();
     let _ = heartbeat.await;
     let _ = pull.await;
-    if let Err(error) = agent.heartbeat(LifecycleState::Draining).await {
-        tracing::debug!(error = %error, "final draining heartbeat not delivered (controller may be gone)");
-    }
+    let _ = serve.await;
 
     tracing::info!("worker stopped");
     ExitCode::SUCCESS

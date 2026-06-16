@@ -8,10 +8,12 @@
 
 pub mod agent;
 pub mod config;
+pub mod drain;
 pub mod engine;
 pub mod run;
 pub mod server;
 
 pub use agent::{AgentError, WorkerAgent};
 pub use config::WorkerConfig;
+pub use drain::{run_drain, DrainOutcome, DrainState};
 pub use run::run_worker;

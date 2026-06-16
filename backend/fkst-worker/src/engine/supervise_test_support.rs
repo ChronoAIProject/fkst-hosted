@@ -222,6 +222,15 @@ pub(crate) async fn mount_released(server: &MockServer) {
         .await;
 }
 
+/// Mount a draining responder (the worker's drain announcement, #140a).
+pub(crate) async fn mount_draining(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(wm_path("/internal/v1/draining"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(server)
+        .await;
+}
+
 /// All status-report request bodies the server received, decoded.
 pub(crate) async fn received_statuses(server: &MockServer) -> Vec<StatusReport> {
     server
@@ -253,4 +262,16 @@ pub(crate) async fn saw_released(server: &MockServer) -> bool {
         .unwrap_or_default()
         .into_iter()
         .any(|r| r.url.path() == "/internal/v1/released")
+}
+
+/// Count of requests the server received on a given path (e.g. the number of
+/// `Draining` or `Released` posts the drain made).
+pub(crate) async fn request_count(server: &MockServer, path: &str) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.url.path() == path)
+        .count()
 }
