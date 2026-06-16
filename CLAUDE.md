@@ -41,15 +41,15 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **迪米特法则**：一个对象应该对其他对象保持最少的了解。
 - **合成复用原则**：尽量使用对象组合，而不是继承来达到复用的目的。
 
-## 核心循环：不分析原因，盲重投 + 乐观锁 + codex 兜底（简单优先）
+## 核心循环：不分析原因，watchdog 心跳盲重投 + 乐观锁 + codex 兜底（简单优先）
 
-系统**不追求「用程序完美枚举处理每一种失败」**。程序保持笨、健壮、确定；智能长尾交给 codex。恢复路径只有三条手段，按此顺序：
+系统**不追求「用程序完美枚举处理每一种失败」**。程序保持笨、健壮、确定；智能长尾交给 codex。**「不分析原因」是铁律，但触发重投的「超时」绝不能是裸 wall-clock**——裸定时器会在健康的长跑异步 receiver（implement codex ~2h / review consensus / CI 等待）**还在干活**时就开火，把健康工作当 strand 终结，反向重造 #762 要修的病（false-terminal，不是 frozen；实证 #762 8 轮 review 逐层逼出）。正解是 **watchdog timer 模式**（嵌入式经典 harness）：被监督的 receiver 周期性「踢狗」（写心跳 marker），watchdog 只在**狗没被踢**（心跳超预算变陈）时才动作。**关键：踢狗检测不是根因分析**——它是一个通用 liveness 探针（receiver 还在不在动？），**不问「为什么慢」**，所以「不分析原因、程序保持笨」原封不动；我们没加任何 per-case 分支，只加了**一个通用 liveness 信号**。恢复路径只有三条手段，按此顺序：
 
-1. **超时盲重投（有界）**：任何非终止态超预算 → 直接**盲目重投**（重发驱动事件、version 单调 +1），**不分析为何卡、不写 per-case 根因恢复分支**。大多数瞬态卡顿一投即愈。重投有界（计数/预算）；耗尽进入第 3 条。
+1. **watchdog 心跳盲重投（有界）**：每个非终止态声明它的 watchdog，二选一——(a) **budget-bounded**：无长跑 receiver、或工时上界已知时，预算 ≥ receiver 最大健康工时，超预算即真卡（pr-open / fixing / merge-ready 390m CI SLA 等）；(b) **heartbeat-deferred**：有长跑 receiver 时，receiver 周期写心跳 marker（**既有 bot marker 即心跳，不是新真相源、不动引擎**），心跳在预算内就 **defer**（让它干活），心跳变陈才动（implementing / thinking / reviewing）。两种都**不分析为何卡、不写 per-case 根因分支**；触发后的**动作仍是盲的**——盲目重投（重发驱动事件、version 单调 +1）。重投有界（sweep 自有 durable attempt 计数，从稳定血统派生、脱离 receiver 能否消费 redrive）；耗尽进入第 3 条。**一句话：重投动作是盲的（零分析），watchdog 心跳只决定「何时」投——这就把「盲」和「别误杀健康长活」调和了。**
 2. **并发乐观锁**：一切并发用 version 全序 + CAS 兜住（乐观并发），**不写专门的并发协调**。陈旧重投被新版本盖过即可，func1 无需感知并发。
 3. **搞不定 → catch → 结构化日志 → codex 兜底**：盲重投耗尽、或确定性路径明确处理不了的，`try-catch` 住、落**丰富可 grep 的结构化事实**（`error_class`/`fingerprint`/`source_ref`/WHY/`terminal`），写一个确定性终态（如 `blocked`-with-WHY），**交 codex 作智能兜底**——codex 只读消费这些事实、经 review 门（issue→PR→review→merge）起草修复或重立项。
 
-心法：`func1: event→effects`（快、确定、可重放、**盲重投**、不枚举 case）；`codex: facts→受控产出`（慢、只读输入、过门生效）。**不要为追求「程序完美」去枚举每个失败形态写确定性分支——枚举不完，且每个分支都是新 bug 面（实证：想用程序把「终止」判得完美的精确匹配 reconcile 反而造出 livelock）。简单盲重投 + 乐观锁兜住常态，长尾一律 codex 兜底。** 下面的三级模型 / saga 化 / 活性契约都是这条的机械实现——用来让「简单」可被机械强制，不是要你手写每个 case 的确定性恢复。
+心法：`func1: event→effects`（快、确定、可重放、**watchdog 心跳盲重投**、不枚举 case）；`codex: facts→受控产出`（慢、只读输入、过门生效）。**不要为追求「程序完美」去枚举每个失败形态写确定性分支——枚举不完，且每个分支都是新 bug 面（实证：想用程序把「终止」判得完美的精确匹配 reconcile 反而造出 livelock）。简单 watchdog 心跳盲重投 + 乐观锁兜住常态，长尾一律 codex 兜底。** watchdog 模式由 conformance 机械强制：每个非终止态必须声明 budget-bounded 或 heartbeat-deferred（heartbeat 行的 producer / surface / version-form 经单一真相源 helper 绑定 resolver），**新态不正确声明 receiver-liveness 就 conformance 失败**——把「只有 adversarial review 抓得到的 liveness bug」变成机械不变式（实证 #762：8 轮 review 每轮 tests 全绿却抓出更深的 liveness bug，正因 liveness-blind 正确性 CI 抓不到，才必须做成 conformance 契约）。下面的三级模型 / saga 化 / 活性契约都是这条的机械实现——用来让「简单」可被机械强制，不是要你手写每个 case 的确定性恢复。
 
 ## 错误处理三级模型（codex-as-catch）
 
