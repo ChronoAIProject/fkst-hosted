@@ -10,6 +10,8 @@ return function(M, h)
     terminal = false,
     to_states = { "ready", "blocked" },
     driving_queue = "consensus.proposal",
+    observe_surfaces = { issue = true, liveness_scan = true },
+    timeout_surfaces = { issue = true, issue_liveness_scan = true, liveness_scan = true },
     output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "blocked", "thinking" }),
     budget = budget(150, "The long consensus receiver is supervised by converge-round heartbeats; this budget only bounds stale heartbeat redrive."),
     liveness_contract = liveness({

@@ -8,8 +8,16 @@ return function(M, h)
   return {
     from_state = "pr-open",
     terminal = false,
-    to_states = { "reviewing" },
+    to_states = { "reviewing", "fixing" },
     driving_queue = "devloop_reviewing",
+    observe_surfaces = { issue = true, pr = true, liveness_scan = true },
+    timeout_surfaces = { issue_liveness_scan = true, pr = true, liveness_scan = true },
+    pr_recovery = {
+      not_mergeable = {
+        to_state = "fixing",
+        queue = "devloop_fixing",
+      },
+    },
     output_obligation = obligation({ "state:v1 reviewing", "devloop_reviewing" }, { "reviewing" }),
     budget = budget(30, "No long receiver work is expected; the row uses the standard 30 minute watchdog margin after PR creation."),
     liveness_contract = liveness({

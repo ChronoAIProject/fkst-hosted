@@ -10,6 +10,7 @@ return function(M, h)
     terminal = false,
     to_states = { "fixing", "blocked" },
     driving_queue = "devloop_review_meta",
+    observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     output_obligation = obligation({ "review-meta:v1", "state:v1 fixing", "state:v1 blocked" }, { "fixing", "blocked" }),
     budget = budget(90, "The review-meta receiver is bounded by a 60 minute codex decision attempt plus the standard 30 minute watchdog margin."),
     liveness_contract = liveness({

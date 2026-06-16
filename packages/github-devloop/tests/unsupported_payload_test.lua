@@ -525,6 +525,28 @@ return {
     end
   end,
 
+  test_observers_fail_closed_for_declared_but_unrouted_queue = function()
+    for _, path in ipairs({
+      "departments/observe_issue/main.lua",
+      "departments/observe_pr/main.lua",
+    }) do
+      local old_pipeline = pipeline
+      local module = dofile(package_root() .. "/" .. path)
+      table.insert(module.spec.consumes, "devloop_unrouted_probe")
+
+      local ok, err = pcall(function()
+        pipeline({
+          queue = "github-devloop.devloop_unrouted_probe",
+          payload = {},
+        })
+      end)
+      pipeline = old_pipeline
+
+      t.eq(ok, false)
+      t.is_true(tostring(err):find("consumed%-queue%-unrouted") ~= nil)
+    end
+  end,
+
   test_unsupported_payload_consumers_skip_non_table_payloads = function()
     for _, case in ipairs(cases) do
       for _, payload in ipairs({ false, "foreign-payload", 42 }) do

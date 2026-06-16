@@ -10,6 +10,7 @@ return function(M, h)
     terminal = false,
     to_states = { "pr-open", "impl-failed" },
     driving_queue = "devloop_ready",
+    observe_surfaces = { issue = true, liveness_scan = true },
     output_obligation = obligation({ "state:v1 pr-open", "state:v1 impl-failed" }, { "pr-open", "impl-failed" }),
     budget = budget(45, "The long implementation receiver is supervised by implement-attempt heartbeats; this budget only bounds stale heartbeat redrive."),
     liveness_contract = liveness({

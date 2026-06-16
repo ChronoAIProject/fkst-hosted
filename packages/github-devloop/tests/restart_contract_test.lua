@@ -89,6 +89,7 @@ end
 
 local function allowed_extra_transition(state, next_state)
   return (state == "reviewing" and next_state == "blocked")
+    or (state == "pr-open" and next_state == "fixing")
     or (state == "impl-failed" and next_state == "implementing")
 end
 
@@ -186,7 +187,7 @@ return {
     local observe_issue = file.read("packages/github-devloop/departments/observe_issue/main.lua")
     t.is_true(liveness_scan:find("core.restart_transition_row", 1, true) ~= nil)
     t.is_true(liveness_scan:find("should_reinject_state", 1, true) ~= nil)
-    t.is_true(observe_issue:find("core.issue_marker_liveness_sweep_states()", 1, true) ~= nil)
+    t.is_true(observe_issue:find("core.restart_row_observable_on", 1, true) ~= nil)
     t.is_true(observe_issue:find("maybe_reconcile_issue_local_orphaned_pr", 1, true) ~= nil)
   end,
 
