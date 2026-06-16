@@ -66,6 +66,25 @@ local function assert_no_history_directive(prompt)
 end
 
 return {
+  test_prompt_preamble_uses_locale_catalog_keys = function()
+    local original_t = _G.t
+    local calls = {}
+    _G.t = function(key)
+      table.insert(calls, key)
+      return "catalog:" .. key
+    end
+    local ok, prompt = pcall(core.prompt_preamble, proposal(), function(_cmd)
+      return { stdout = "zh", stderr = "", exit_code = 0 }
+    end)
+    _G.t = original_t
+
+    t.eq(ok, true)
+    t.eq(calls[1], "consensus.prompt_preamble.language.zh")
+    t.eq(calls[2], "consensus.prompt_preamble.judgment_harness")
+    t.eq(calls[3], "consensus.prompt_preamble.history")
+    t.is_true(prompt:find("catalog:consensus.prompt_preamble.language.zh", 1, true) ~= nil)
+  end,
+
   test_prompt_preamble_language_env = function()
     t.eq(core.read_env_command("FKST_OUTPUT_LANG"), 'printf %s "$FKST_OUTPUT_LANG"')
     t.eq(core.output_language(function(_cmd)
