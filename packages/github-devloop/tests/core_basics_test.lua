@@ -76,6 +76,34 @@ return {
     t.eq(spec.rate_pool.burst, nil)
     t.eq(spec.rate_pool.refill_per_hour, nil)
   end,
+  test_core_shared_surface_keeps_two_copy_helpers_local = function()
+    t.is_nil(core.age_minutes)
+    t.is_nil(core.valid_round)
+  end,
+  test_core_shared_judgment_worktree_reads_runtime_root_and_mkdirs = function()
+    local worktree = core.judgment_worktree_path("/tmp/fkst-runtime\n", "review-meta", "dedup/key")
+    t.mock_command(core.read_runtime_root_cmd(), {
+      stdout = "/tmp/fkst-runtime\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.mkdir_p_cmd(worktree), {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local actual = core.judgment_worktree("review-meta", "dedup/key")
+
+    t.eq(actual, worktree)
+    local saw_mkdir = false
+    for _, call in ipairs(t.command_calls()) do
+      if call.rendered == core.mkdir_p_cmd(worktree) then
+        saw_mkdir = true
+      end
+    end
+    t.eq(saw_mkdir, true)
+  end,
   test_opt_in_detection = function()
     t.eq(core.is_opted_in({ "fkst-dev:enabled" }), true)
     t.eq(core.is_opted_in({ "bug" }), false)

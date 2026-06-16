@@ -714,6 +714,19 @@ function M.judgment_worktree_path(runtime_root, role, identity)
   return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
 end
 
+function M.judgment_worktree(role, identity)
+  local runtime = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+  if runtime.exit_code ~= 0 then
+    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
+  end
+  local worktree = M.judgment_worktree_path(runtime.stdout, role, identity)
+  local mkdir = exec_sync({ cmd = M.mkdir_p_cmd(worktree), timeout = 30 })
+  if mkdir.exit_code ~= 0 then
+    error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
+  end
+  return worktree
+end
+
 function M.judgment_codex_opts(prompt, worktree)
   return {
     prompt = prompt,
