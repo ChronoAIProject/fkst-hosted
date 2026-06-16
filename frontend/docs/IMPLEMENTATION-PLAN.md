@@ -1,7 +1,7 @@
 # fkst-hosted Frontend Implementation Plan
 
 > **Status:** PR-by-PR roadmap for `frontend/`. Authoritative once approved alongside
-> [`ARCHITECTURE.md`](./ARCHITECTURE.md). It builds the seven locked mockups
+> [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). It builds the seven locked mockups
 > (`frontend/mockups/`) against the **real** hosted backend v1 API (this repo, `develop`),
 > the GitHub plane (via NyxID — a v1 gap), and the deferred host-agent plane, under
 > [`../../CLAUDE.md`](../../CLAUDE.md)'s git/changeset/auto-merge discipline.
@@ -17,7 +17,7 @@
 These bind **every** increment below. They are not aspirational — they are the merge gate.
 
 1. **No app code until this plan + the architecture brief are approved.** Today `frontend/`
-   holds only reference artifacts (`docs/design.md`, `docs/ARCHITECTURE.md`, this plan,
+   holds only reference artifacts (`../../docs/design.md`, `../../docs/ARCHITECTURE.md`, this plan,
    `mockups/`, `README.md`). There is **no `frontend/package.json` and no React app yet**,
    and the frontend CI workflow is intentionally a no-op until that gate file exists.
    Increment **F0a** is the first one allowed to write code, and only after approval.

@@ -17,10 +17,11 @@ never a second source of truth.
 ```
 frontend/
 ├── README.md                     # you are here
-├── docs/
-│   ├── design.md                 # the LOCKED design system (tokens, type, components, anti-slop)
-│   ├── ARCHITECTURE.md           # architecture brief — stack, planes, data/truth model, IA, build integration
-│   └── IMPLEMENTATION-PLAN.md    # PR-by-PR roadmap, milestones, dependency ordering
+├── docs/                         # FE WORKING docs (design.md + ARCHITECTURE.md now at repo-root docs/)
+│   ├── IMPLEMENTATION-PLAN.md    # PR-by-PR roadmap, milestones, dependency ordering
+│   ├── PENDING.md                # outstanding FE gaps / follow-ups
+│   ├── QA-TESTPLAN.md            # QA plan
+│   └── VERIFY-REPORT.md          # live-verify report
 └── mockups/                      # the 7 locked production screens (self-contained HTML; open in a browser)
     ├── overview.html  goals.html  packages.html  goal.html
     ├── runs.html      settings.html
@@ -48,7 +49,7 @@ into Goals. **Inbox is deferred** (hidden from nav). Overview has two views — 
 ## Provenance
 
 - **Design system** — verbatim copy of the locked `DESIGN.md` (FKST Mission Control, v2)
-  from `fe-blueprint/`. Treat [`docs/design.md`](docs/design.md) as authoritative; the
+  from `fe-blueprint/`. Treat [`docs/design.md`](../docs/design.md) as authoritative; the
   upstream blueprint (`00-FRONTEND-TRD.md`, `01-DATA-REFERENCE.md`) is the deeper reference.
 - **Mockups** — copied from the locked screen set `designs/goal-board-20260611/`. They are
   **fidelity targets**, not shipped code; all seven share one token system and cross-link by

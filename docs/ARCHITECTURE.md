@@ -2,7 +2,7 @@
 
 > **Status:** Authoritative for all frontend work in `fkst-hosted`. This document governs `frontend/`. It is grounded in the locked mockups, the locked design system, the Frontend TRD, the data reference, the **real** hosted backend v1 API (this repo, `develop`), and the repo conventions in the root `CLAUDE.md`. Where it conflicts with an aspirational doc, the **real v1 API and CLAUDE.md win**.
 >
-> **Source of the locked artifacts.** The locked design system is authored at `…/FKST/fe-blueprint/DESIGN.md`; the locked HTML mockups live at `…/.gstack/projects/FKST/designs/goal-board-20260611/`. The FE bootstrap **copies** these into the repo as `frontend/docs/design.md` and `frontend/mockups/` (reference artifacts checked in beside the app). They are inputs to build against, **not** a running app — there is no `frontend/package.json` / React app yet, and the FE CI workflow is intentionally a no-op until that file exists (§7).
+> **Source of the locked artifacts.** The locked design system is authored at `…/FKST/fe-blueprint/DESIGN.md`; the locked HTML mockups live at `…/.gstack/projects/FKST/designs/goal-board-20260611/`. The FE bootstrap **copies** these into the repo as `docs/design.md` (repo-root docs) and `frontend/mockups/` (reference artifacts checked in beside the app). They are inputs to build against, **not** a running app — there is no `frontend/package.json` / React app yet, and the FE CI workflow is intentionally a no-op until that file exists (§7).
 >
 > **The single most important rule:** the FE is a **read-mostly observer**. It must never become a second source of truth, never fabricate data, never show `0` for an unreachable source (show `unknown`), and never render a control for a capability that has no real backing — such gaps render as a **disabled control + an honest note**.
 >
@@ -201,7 +201,7 @@ The console **persists successful API reads** so a refresh or a later visit pain
 
 ## 6. Design-system implementation
 
-The design system (authored at `fe-blueprint/DESIGN.md`, copied into the repo as `frontend/docs/design.md`) is **locked**. It becomes code in five layers (1–5), with cross-cutting responsive, accessibility, and anti-slop rules below them:
+The design system (authored at `fe-blueprint/DESIGN.md`, copied into the repo as `docs/design.md`) is **locked**. It becomes code in five layers (1–5), with cross-cutting responsive, accessibility, and anti-slop rules below them:
 
 **1. Token layer (oklch CSS custom properties).** Tokens are authored as `oklch()` CSS custom properties on `:root` (and a `[data-theme]` if ever needed). This is the single source; nothing hardcodes a hex except the **red semaphore** (`--red: oklch(67% 0.18 18)`) and the documented green/gold semaphores where the design system pins them.
 
@@ -265,7 +265,7 @@ The design system (authored at `fe-blueprint/DESIGN.md`, copied into the repo as
 
 ## 7. Monorepo & build integration
 
-**`frontend/` layout (proposed).** Today the directory holds only the copied reference artifacts (`docs/design.md`, `mockups/`, a `README.md`) — there is **no app yet**; the FE bootstrap PR creates everything else, including the gate file `frontend/package.json`:
+**`frontend/` layout.** The locked design system and this architecture brief now live at **repo-root `docs/`** (`docs/design.md`, `docs/ARCHITECTURE.md`) alongside the API-contract docs; the locked HTML `frontend/mockups/` and the FE **working** docs (`frontend/docs/`: IMPLEMENTATION-PLAN, PENDING, QA-TESTPLAN, VERIFY-REPORT) stay under `frontend/`. The app layout:
 ```
 frontend/
 ├─ package.json          # CREATE in bootstrap; mirrors root version (below). Its existence ARMS frontend-ci.yml
@@ -274,9 +274,8 @@ frontend/
 ├─ tsconfig.json
 ├─ index.html
 ├─ .storybook/           # Storybook config + addons (a11y/axe, viewport, interactions, controls)
-├─ docs/
-│  ├─ design.md          # COPIED IN from fe-blueprint/DESIGN.md (locked design system; reference artifact)
-│  └─ ARCHITECTURE.md    # THIS document
+├─ docs/                 # FE WORKING docs: IMPLEMENTATION-PLAN, PENDING, QA-TESTPLAN, VERIFY-REPORT
+│                        #   (design.md + ARCHITECTURE.md now live at repo-root docs/)
 ├─ mockups/              # COPIED IN from .gstack/projects/FKST/designs/goal-board-20260611/ (locked HTML mockups)
 ├─ src/
 │  ├─ app/               # router, providers (QueryClient + persistQueryClient hydrate, theme)
