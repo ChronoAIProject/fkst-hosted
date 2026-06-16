@@ -22,9 +22,9 @@ return function(M, h)
       source_ref = "source_ref:issue",
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
-    effects = effect({ "devloop_ready" }, "impl-failed replay is complete when trusted codex-failed impl-failure attempt is below the retry ceiling"),
-    marker_facts = "state:v1 impl-failed plus impl-failure:v1 reason=codex-failed attempt<N",
+    effects = effect({ "devloop_ready" }, "impl-failed replay is complete when trusted retryable impl-failure attempt is below the retry ceiling"),
+    marker_facts = "state:v1 impl-failed plus impl-failure:v1 retryable reason attempt<N",
     kickoff = "devloop_ready",
-    replay = "Observe re-raises ready/<version> after one observe tick for bounded codex-failed implementation retries.",
+    replay = "Observe re-raises ready/<version> after one observe tick for bounded retryable implementation failures.",
   }
 end
