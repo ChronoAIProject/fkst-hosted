@@ -17,7 +17,9 @@
 //! `Debug` and zeroize on drop; plaintext and DEK buffers are wiped after use.
 
 pub mod crypto;
-pub mod model;
+// `model` was extracted to `fkst-shared` (issue #145); re-export it so
+// `crate::vault::model::…` keeps resolving for the service, repo, and callers.
+pub use fkst_shared::vault::model;
 pub mod repo;
 pub mod service;
 

@@ -21,7 +21,9 @@
 
 pub mod client;
 pub mod inject;
-pub mod types;
+// `types` was extracted to `fkst-shared` (issue #145); re-export it so
+// `crate::ornn::types::…` keeps resolving for the client, injector, and callers.
+pub use fkst_shared::ornn::types;
 
 use std::path::Path;
 

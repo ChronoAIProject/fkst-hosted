@@ -7,5 +7,18 @@
 //! of `axum` — the worker links this crate, and keeping those out here is what
 //! makes "the worker never touches the database" a compiler-enforced fact.
 //!
-//! Modules are populated by the extraction commit; at scaffolding time the
-//! crate is intentionally empty.
+//! What lives here:
+//! - [`models`] — wire/domain document shapes (`RepoRef`, `SessionDoc`,
+//!   `LeaseDoc`, the GitHub-installation doc); `bson`-shaped but driver-free.
+//! - [`nyxid`] — the NyxID credential-proxy transport client.
+//! - [`llm`] — the `LlmGateway` seam and its NyxID-backed implementation.
+//! - [`ornn`] — the Ornn pin DTOs (`types`); the on-disk injector and the
+//!   `AppError`-coupled client stay control-plane for now.
+//! - [`vault`] — the persisted vault data model (`model`); the encrypting
+//!   service + Mongo repo stay control-plane (KEK never leaves).
+
+pub mod llm;
+pub mod models;
+pub mod nyxid;
+pub mod ornn;
+pub mod vault;
