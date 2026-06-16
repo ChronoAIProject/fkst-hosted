@@ -785,4 +785,30 @@ mod tests {
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].owner_user_id, "user-1");
     }
+
+    /// #142: org-scoped LIST visibility is an in-memory filter (no Mongo `$in`):
+    /// a goal owned by someone else is included only when its `org_id` is in the
+    /// caller's visible-org set; a non-visible, non-owned org goal is excluded.
+    #[tokio::test]
+    async fn list_filters_by_in_memory_visibility() {
+        let store = store_with(Arc::new(FakeIssueApi::default()));
+        // A stranger's goal in org-visible.
+        let mut visible = goal(Some(repo()));
+        visible.owner_user_id = "stranger".to_string();
+        visible.org_id = Some("org-visible".to_string());
+        store.insert(&visible).await.unwrap();
+        // A stranger's goal in an org the caller cannot see.
+        let mut hidden = goal(Some(repo()));
+        hidden.owner_user_id = "stranger".to_string();
+        hidden.org_id = Some("org-hidden".to_string());
+        store.insert(&hidden).await.unwrap();
+
+        let visible_ids = ["org-visible".to_string()];
+        let listed = store
+            .list("caller", &visible_ids, None, 50, 0)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1, "only the visible-org goal is listed");
+        assert_eq!(listed[0].org_id.as_deref(), Some("org-visible"));
+    }
 }
