@@ -18,16 +18,23 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use nix::sys::signal::Signal;
+use nix::unistd::{getpgid, Pid};
 use tempfile::TempDir;
 use tokio::process::Child;
 
+use crate::engine::breadcrumb::{
+    read_exit_breadcrumb, write_exit_breadcrumb, write_owner_breadcrumb, ExitBreadcrumb,
+    OwnerBreadcrumb,
+};
 use crate::engine::config::EngineConfig;
 use crate::engine::error::RunnerError;
 use crate::engine::logs::tail_child_logs;
 use crate::engine::materialize::{materialize_packages, write_fkst_env, PreparedPackage};
 use crate::engine::process::{
     is_panicked, is_pid_alive, is_ready, kill_group_quiet, reap_with_grace, run_conformance,
-    spawn_supervise, ChildGroupGuard, GoalEnv, OutputBuffer, SpawnedChild,
+    signal_group, spawn_supervise, ChildGroupGuard, GoalEnv, OutputBuffer, SpawnedChild,
+    REAP_POLL_INTERVAL, SIGKILL_REAP_POLLS,
 };
 
 /// Poll interval of the post-spawn ready-wait loop.
@@ -106,11 +113,135 @@ pub struct StartSpec {
     /// Canonicalized `<repo>/.fkst/packages/<name>` dirs, one per package, in
     /// order. Only consulted when [`Self::project_root`] is `Some`.
     pub package_roots: Vec<PathBuf>,
+    /// The controller-assigned session id (#136): written into the owner
+    /// breadcrumb so a restarted worker can re-adopt this engine. EMPTY for the
+    /// classic / test path (single-package, no controller) — an empty
+    /// `session_id` means "no owner breadcrumb is required" and a breadcrumb
+    /// write failure does NOT fail the start (keeps existing runner tests
+    /// byte-compatible). A real goal dispatch sets it non-empty.
+    pub session_id: String,
+    /// The worker pod identity (#136): recorded in the owner breadcrumb. Empty
+    /// for the classic / test path.
+    pub worker_id: String,
+}
+
+/// The process handle behind a [`RunningSession`]: either a `Child` spawned by
+/// THIS process, or a re-adopted engine (after a worker restart) we identify
+/// purely from OS truth + the on-disk breadcrumb (no `Child` — the original
+/// parent is dead; the engine is re-parented to PID 1, which reaps it).
+#[derive(Debug)]
+enum ProcHandle {
+    /// Spawned here: liveness via `try_wait`, stop via `reap_with_grace`.
+    Owned(Child),
+    /// Re-adopted: liveness via `is_pid_alive(pid)` + `getpgid(pid) == pgid` +
+    /// the owner breadcrumb's `run_nonce` still matching; stop via
+    /// signal-by-pgid; exit read from the on-disk exit breadcrumb.
+    Adopted {
+        pid: i32,
+        pgid: i32,
+        run_nonce: String,
+    },
+}
+
+/// Classify the terminal status of an ADOPTED process from its exit breadcrumb.
+/// Absent (or code/signal both `None`) is the canonical "unknown exit" marker,
+/// `Failed { code: None, signal: None }`.
+fn classify_from_exit_breadcrumb(bc: Option<ExitBreadcrumb>) -> LiveStatus {
+    match bc {
+        Some(ExitBreadcrumb { code: Some(0), .. }) => LiveStatus::Stopped,
+        Some(ExitBreadcrumb {
+            code: Some(code), ..
+        }) => LiveStatus::Failed {
+            code: Some(code),
+            signal: None,
+        },
+        Some(ExitBreadcrumb {
+            signal: Some(signal),
+            ..
+        }) => LiveStatus::Failed {
+            code: None,
+            signal: Some(signal),
+        },
+        // Present-but-empty or absent: unknown exit.
+        _ => LiveStatus::Failed {
+            code: None,
+            signal: None,
+        },
+    }
+}
+
+/// Build the exit breadcrumb that records a terminal [`LiveStatus`].
+fn exit_breadcrumb_from_status(status: LiveStatus) -> ExitBreadcrumb {
+    match status {
+        // `Running` is never terminal; treat defensively as unknown exit.
+        LiveStatus::Running => ExitBreadcrumb::observed(None, None),
+        LiveStatus::Stopped => ExitBreadcrumb::observed(Some(0), None),
+        LiveStatus::Failed { code, signal } => ExitBreadcrumb::observed(code, signal),
+    }
+}
+
+/// Is the adopted process still genuinely OUR live engine? Alive, leading its
+/// own group, and the owner breadcrumb's nonce still matches (the PID-reuse
+/// guard).
+fn adopted_is_live(runtime_dir: &Path, pid: i32, pgid: i32, run_nonce: &str) -> bool {
+    if pid <= 0 || !is_pid_alive(pid) {
+        return false;
+    }
+    // Leads its own group? A reused PID that landed in a different group fails.
+    match getpgid(Some(Pid::from_raw(pid))) {
+        Ok(actual) if actual.as_raw() == pgid => {}
+        _ => return false,
+    }
+    // The breadcrumb's nonce must still match (a reused PID that happens to lead
+    // its own group will not match the original spawn's nonce).
+    matches!(
+        crate::engine::breadcrumb::read_owner_breadcrumb(runtime_dir),
+        Ok(Some(bc)) if bc.pgid == pgid && bc.run_nonce == run_nonce
+    )
+}
+
+/// Stop an ADOPTED process group: SIGTERM the group, poll `is_pid_alive` up to
+/// `grace`, escalate to SIGKILL, bounded re-poll. There is no `Child` to
+/// `waitpid` (the original parent is dead; the process is re-parented to PID 1,
+/// which reaps it), so liveness is judged by `is_pid_alive` going false.
+/// `ESRCH`/`EPERM` from `signal_group` are tolerated (group already gone / the
+/// Darwin zombie quirk), exactly as `reap_with_grace`.
+async fn stop_adopted(pid: i32, pgid: i32, grace: Duration) -> Result<(), RunnerError> {
+    if pid <= 0 || pgid <= 0 || !is_pid_alive(pid) {
+        return Ok(()); // nothing valid to signal / already gone
+    }
+    let _ = signal_group(pgid, Signal::SIGTERM);
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        if !is_pid_alive(pid) {
+            return Ok(());
+        }
+        tokio::time::sleep(REAP_POLL_INTERVAL).await;
+    }
+    // Escalate.
+    let _ = signal_group(pgid, Signal::SIGKILL);
+    for _ in 0..SIGKILL_REAP_POLLS {
+        if !is_pid_alive(pid) {
+            return Ok(());
+        }
+        tokio::time::sleep(REAP_POLL_INTERVAL).await;
+    }
+    if is_pid_alive(pid) {
+        // Still alive after SIGKILL grace — best-effort: PID 1 will reap it; the
+        // dir is still cleaned by the caller. Surface it as a warn, not a hard
+        // error (we cannot waitpid a non-child to confirm otherwise).
+        tracing::warn!(
+            pid,
+            pgid,
+            "adopted process group still alive after SIGKILL grace"
+        );
+    }
+    Ok(())
 }
 
 /// Live handle for one engine process, held by the caller for the session's
-/// lifetime. Owns the spawned [`Child`] and the temp-dir guards; dropping
-/// the handle removes the dirs but NEVER kills a live engine
+/// lifetime. Owns the spawned [`Child`] OR an adopted pid, plus the temp-dir
+/// guards; dropping the handle removes the dirs but NEVER kills a live engine
 /// (`kill_on_drop(false)` — lifecycle is explicit via [`Self::stop`]).
 #[derive(Debug)]
 pub struct RunningSession {
@@ -124,11 +255,16 @@ pub struct RunningSession {
     /// ALL materialized package root paths (one per package in the spec).
     /// For single-package sessions this is `[package_dir]`.
     pub package_dirs: Vec<PathBuf>,
-    child: Child,
+    handle: ProcHandle,
     /// Temp-dir guards for ALL materialized packages (one per package).
     /// Dropped during cleanup to remove the on-disk trees.
     package_guards: Vec<TempDir>,
     runtime_guard: Option<TempDir>,
+    /// On-disk dirs an ADOPTED session owns (its runtime + package dirs). For an
+    /// adopted run there is no `TempDir` to re-wrap (the original was created by
+    /// the dead worker), so `cleanup()` removes these explicitly. Empty for an
+    /// owned session (the `TempDir` guards above remove its dirs).
+    adopted_dirs: Vec<PathBuf>,
     /// Merged stdout+stderr ring buffer fed by the spawn drains (issue #50):
     /// ready markers come from stdout, panics/exit reasons from stderr.
     output: OutputBuffer,
@@ -143,28 +279,61 @@ pub struct RunningSession {
 }
 
 impl RunningSession {
-    /// Liveness via cached `try_wait` (never blocks, never panics).
+    /// Liveness — `try_wait` for an owned `Child`, OS truth + the exit
+    /// breadcrumb for an adopted process. Caches the first terminal observation
+    /// and (for owned sessions) writes the exit breadcrumb exactly once on the
+    /// terminal transition.
     pub fn status(&mut self) -> LiveStatus {
         if let Some(cached) = self.terminal_status {
             return cached;
         }
-        match self.child.try_wait() {
-            Ok(None) => LiveStatus::Running,
-            Ok(Some(exit)) => {
-                let status = classify_exit(exit);
-                tracing::info!(pid = self.pid, ?exit, "session.status: terminal");
-                self.terminal_status = Some(status);
-                status
+        match &mut self.handle {
+            ProcHandle::Owned(child) => match child.try_wait() {
+                Ok(None) => LiveStatus::Running,
+                Ok(Some(exit)) => {
+                    let status = classify_exit(exit);
+                    tracing::info!(pid = self.pid, ?exit, "session.status: terminal");
+                    self.terminal_status = Some(status);
+                    self.record_exit_breadcrumb(status);
+                    status
+                }
+                Err(err) => {
+                    tracing::error!(pid = self.pid, error = %err, "session.status: try_wait failed");
+                    let status = LiveStatus::Failed {
+                        code: None,
+                        signal: None,
+                    };
+                    self.terminal_status = Some(status);
+                    self.record_exit_breadcrumb(status);
+                    status
+                }
+            },
+            ProcHandle::Adopted {
+                pid,
+                pgid,
+                run_nonce,
+            } => {
+                if adopted_is_live(&self.runtime_dir, *pid, *pgid, run_nonce) {
+                    LiveStatus::Running
+                } else {
+                    let status = classify_from_exit_breadcrumb(
+                        read_exit_breadcrumb(&self.runtime_dir).ok().flatten(),
+                    );
+                    tracing::info!(pid = self.pid, ?status, "session.status: adopted terminal");
+                    self.terminal_status = Some(status);
+                    status
+                }
             }
-            Err(err) => {
-                tracing::error!(pid = self.pid, error = %err, "session.status: try_wait failed");
-                let status = LiveStatus::Failed {
-                    code: None,
-                    signal: None,
-                };
-                self.terminal_status = Some(status);
-                status
-            }
+        }
+    }
+
+    /// Write the exit breadcrumb once for an owned session's terminal status
+    /// (best-effort — a write failure is logged, never fatal).
+    fn record_exit_breadcrumb(&self, status: LiveStatus) {
+        if let Err(err) =
+            write_exit_breadcrumb(&self.runtime_dir, &exit_breadcrumb_from_status(status))
+        {
+            tracing::warn!(pid = self.pid, error = %err, "failed to write exit breadcrumb (non-fatal)");
         }
     }
 
@@ -203,14 +372,48 @@ impl RunningSession {
     /// an exit caused by our SIGTERM/SIGKILL is the normal `Stopped`.
     pub async fn stop(&mut self, grace: Duration) -> Result<(), RunnerError> {
         tracing::info!(pid = self.pid, "session.stopping");
-        let result = reap_with_grace(&mut self.child, self.pid, grace).await;
+        let pid = self.pid;
+        // OS-level reap, with the handle borrow scoped so `cleanup()` (which
+        // borrows &mut self) can run after. `Ok(Some(status))` = an exit
+        // observed BEFORE our signalling (a crash racing the stop, owned path);
+        // `Ok(None)` = a normal stop with no pre-signal exit.
+        let result: Result<Option<LiveStatus>, RunnerError> = match &mut self.handle {
+            ProcHandle::Owned(child) => reap_with_grace(child, pid, grace)
+                .await
+                .map(|outcome| outcome.pre_signal_exit.map(classify_exit)),
+            ProcHandle::Adopted {
+                pid: apid, pgid, ..
+            } => stop_adopted(*apid, *pgid, grace).await.map(|()| None),
+        };
+
         match result {
-            Ok(outcome) => {
+            Ok(pre_exit) => {
                 if self.terminal_status.is_none() {
-                    self.terminal_status = Some(match outcome.pre_signal_exit {
-                        Some(exit) => classify_exit(exit),
-                        None => LiveStatus::Stopped,
-                    });
+                    // Honor a pre-existing terminal observation (a crash racing
+                    // the stop): the owned path carries it in `pre_exit`; the
+                    // adopted path reads it from the on-disk exit breadcrumb.
+                    // Otherwise this is a normal `Stopped`.
+                    let status = match pre_exit {
+                        Some(status) => status,
+                        None => match read_exit_breadcrumb(&self.runtime_dir).ok().flatten() {
+                            Some(bc) => classify_from_exit_breadcrumb(Some(bc)),
+                            None => LiveStatus::Stopped,
+                        },
+                    };
+                    self.terminal_status = Some(status);
+                    // Write the exit breadcrumb if not already present (best-effort).
+                    if read_exit_breadcrumb(&self.runtime_dir)
+                        .ok()
+                        .flatten()
+                        .is_none()
+                    {
+                        if let Err(err) = write_exit_breadcrumb(
+                            &self.runtime_dir,
+                            &exit_breadcrumb_from_status(status),
+                        ) {
+                            tracing::warn!(pid, error = %err, "failed to write exit breadcrumb on stop (non-fatal)");
+                        }
+                    }
                 }
                 self.cleanup();
                 Ok(())
@@ -238,6 +441,17 @@ impl RunningSession {
         }
         if self.runtime_guard.take().is_some() {
             dirs_removed += 1;
+        }
+        // Adopted sessions hold raw PathBufs (no TempDir to re-wrap); remove
+        // them explicitly, isolating per-dir errors.
+        for dir in self.adopted_dirs.drain(..) {
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => dirs_removed += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    tracing::warn!(pid = self.pid, dir = %dir.display(), error = %e, "adopted dir removal failed (non-fatal)");
+                }
+            }
         }
         if dirs_removed > 0 {
             tracing::info!(pid = self.pid, dirs_removed, "session.cleanup");
@@ -280,6 +494,45 @@ impl SessionRunner {
     /// PID-reuse caveat there).
     pub fn is_pid_alive(pid: i32) -> bool {
         is_pid_alive(pid)
+    }
+
+    /// Build an ADOPTED [`RunningSession`] from a verified owner breadcrumb
+    /// (#136). The caller (`engine::adopt`) only calls this AFTER confirming
+    /// liveness + group + nonce match. The engine's stdout/stderr streams died
+    /// with the original worker, so `output` is empty and `stdout_lines` is
+    /// `None`; liveness is OS truth and the exit is read from the exit
+    /// breadcrumb. The on-disk `runtime_dir` + `package_dirs` are removed by
+    /// `cleanup()` on stop (held as raw paths, not `TempDir` guards).
+    pub fn adopt(
+        &self,
+        runtime_dir: PathBuf,
+        package_dirs: Vec<PathBuf>,
+        owner: OwnerBreadcrumb,
+    ) -> RunningSession {
+        let package_dir = package_dirs
+            .first()
+            .cloned()
+            .unwrap_or_else(|| runtime_dir.clone());
+        let mut adopted_dirs = package_dirs.clone();
+        adopted_dirs.push(runtime_dir.clone());
+        RunningSession {
+            pid: owner.pid,
+            runtime_dir,
+            package_dir,
+            package_dirs,
+            handle: ProcHandle::Adopted {
+                pid: owner.pid,
+                pgid: owner.pgid,
+                run_nonce: owner.run_nonce,
+            },
+            package_guards: Vec::new(),
+            runtime_guard: None,
+            adopted_dirs,
+            output: OutputBuffer::new(crate::engine::process::OUTPUT_RING_CAP_BYTES),
+            stdout_lines: None,
+            terminal_status: None,
+            log_tail_lines: self.config.log_tail_lines,
+        }
     }
 
     /// Best-effort engine child-log tail for a known runtime dir (spec
@@ -328,6 +581,10 @@ impl SessionRunner {
             codex_home: None,
             project_root: None,
             package_roots: Vec::new(),
+            // Classic path: empty ids => the owner breadcrumb is best-effort
+            // (a write failure does not fail the start).
+            session_id: String::new(),
+            worker_id: String::new(),
         };
         self.start_with_spec(&spec).await
     }
@@ -519,6 +776,34 @@ impl SessionRunner {
             stdout_lines,
         } = spawned;
         let mut guard = ChildGroupGuard::new(child, pid);
+
+        // #136: write the owner breadcrumb so a RESTARTED worker can re-adopt
+        // this still-live engine from OS truth. Written AFTER spawn + BEFORE the
+        // ready-wait, so a crash mid-ready-wait still leaves a breadcrumb the
+        // next boot can reap. The breadcrumb carries no secret; the nonce is
+        // never logged.
+        let owner_bc = OwnerBreadcrumb {
+            session_id: spec.session_id.clone(),
+            pid,
+            pgid: pid,
+            goal_id: spec.goal.as_ref().map(|g| g.goal_id.to_string()),
+            run_nonce: generate_mint_nonce(),
+            worker_id: spec.worker_id.clone(),
+        };
+        if let Err(err) = write_owner_breadcrumb(&runtime_dir, &owner_bc) {
+            if spec.session_id.is_empty() {
+                // Classic / test path (no controller): tolerate a write failure
+                // so existing runner tests stay byte-compatible.
+                tracing::warn!(pid, error = %err, "owner breadcrumb write failed (classic path; tolerated)");
+            } else {
+                // Real dispatch: a missing breadcrumb means an un-re-adoptable
+                // engine — fail the start, killing + reaping the just-spawned child.
+                kill_group_quiet(pid);
+                let _ = guard.defuse().wait().await;
+                return Err(err);
+            }
+        }
+
         let ready_timeout = Duration::from_secs(self.config.ready_timeout_secs);
         let started = Instant::now();
         loop {
@@ -604,9 +889,10 @@ impl SessionRunner {
             runtime_dir,
             package_dir,
             package_dirs,
-            child: guard.defuse(),
+            handle: ProcHandle::Owned(guard.defuse()),
             package_guards,
             runtime_guard: Some(runtime_guard),
+            adopted_dirs: Vec::new(),
             output,
             stdout_lines: Some(stdout_lines),
             terminal_status: None,
@@ -1450,6 +1736,93 @@ esac
         assert!(wait_until(move || !is_pid_alive(pid)).await);
     }
 
+    // ---- adopted sessions (#136) -------------------------------------------------------
+
+    /// Spawn a real `sleep` child leading its OWN process group (so pid == pgid),
+    /// returning the pid. tokio's orphan reaper collects the zombie after death.
+    async fn spawn_grouped_sleeper() -> i32 {
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 30")
+            .process_group(0)
+            .kill_on_drop(false)
+            .spawn()
+            .expect("spawn sleeper");
+        child.id().expect("pid") as i32
+    }
+
+    fn adopt_owner(pid: i32) -> OwnerBreadcrumb {
+        OwnerBreadcrumb {
+            session_id: "adopt-sess".to_string(),
+            pid,
+            pgid: pid,
+            goal_id: None,
+            run_nonce: "adopt-nonce-abc".to_string(),
+            worker_id: "adopt-worker".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn adopted_session_status_running_then_terminal_on_death() {
+        let stub_dir = tempfile::tempdir().unwrap();
+        let temp_root = tempfile::tempdir().unwrap();
+        let bin = engine_stub(stub_dir.path(), READY_SUPERVISE);
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let pid = spawn_grouped_sleeper().await;
+        let runtime_dir = temp_root.path().join("fkst-rt-adopt-status");
+        std::fs::create_dir_all(&runtime_dir).unwrap();
+        let owner = adopt_owner(pid);
+        write_owner_breadcrumb(&runtime_dir, &owner).unwrap();
+
+        let mut session = runner.adopt(runtime_dir.clone(), vec![], owner);
+        assert_eq!(
+            runner.status(&mut session),
+            LiveStatus::Running,
+            "adopted live engine reports Running"
+        );
+
+        // Kill it; no exit breadcrumb exists -> unknown-exit terminal.
+        signal_group(pid, Signal::SIGKILL).expect("kill");
+        assert!(wait_until(move || !is_pid_alive(pid)).await);
+        assert_eq!(
+            runner.status(&mut session),
+            LiveStatus::Failed {
+                code: None,
+                signal: None
+            },
+            "dead adopted engine with no exit breadcrumb is unknown-exit"
+        );
+    }
+
+    #[tokio::test]
+    async fn adopted_session_stop_signals_group_and_removes_dir() {
+        let stub_dir = tempfile::tempdir().unwrap();
+        let temp_root = tempfile::tempdir().unwrap();
+        let bin = engine_stub(stub_dir.path(), READY_SUPERVISE);
+        let runner = SessionRunner::new(config(&bin, temp_root.path()));
+
+        let pid = spawn_grouped_sleeper().await;
+        let runtime_dir = temp_root.path().join("fkst-rt-adopt-stop");
+        std::fs::create_dir_all(&runtime_dir).unwrap();
+        let owner = adopt_owner(pid);
+        write_owner_breadcrumb(&runtime_dir, &owner).unwrap();
+
+        let mut session = runner.adopt(runtime_dir.clone(), vec![], owner);
+        assert_eq!(runner.status(&mut session), LiveStatus::Running);
+
+        runner.stop(&mut session).await.expect("adopted stop");
+        assert!(
+            wait_until(move || !is_pid_alive(pid)).await,
+            "stop must signal the group dead"
+        );
+        assert!(
+            !runtime_dir.exists(),
+            "adopted stop removes the runtime dir"
+        );
+        assert_eq!(runner.status(&mut session), LiveStatus::Stopped);
+    }
+
     // ---- helpers -----------------------------------------------------------------------
 
     #[test]
@@ -1494,6 +1867,8 @@ esac
             codex_home: None,
             project_root: None,
             package_roots: Vec::new(),
+            session_id: String::new(),
+            worker_id: String::new(),
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1582,6 +1957,8 @@ esac
             codex_home: None,
             project_root: None,
             package_roots: Vec::new(),
+            session_id: String::new(),
+            worker_id: String::new(),
         };
         let mut session = runner.start_with_spec(&spec).await.expect("start multi");
 
@@ -1639,6 +2016,8 @@ esac
             codex_home: None,
             project_root: None,
             package_roots: Vec::new(),
+            session_id: String::new(),
+            worker_id: String::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(
@@ -1679,6 +2058,8 @@ esac
             codex_home: None,
             project_root: None,
             package_roots: Vec::new(),
+            session_id: String::new(),
+            worker_id: String::new(),
         };
         let mut session = runner
             .start_with_spec(&spec)
@@ -1792,6 +2173,8 @@ esac
             codex_home: None,
             project_root: None,
             package_roots: Vec::new(),
+            session_id: String::new(),
+            worker_id: String::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));
@@ -1815,6 +2198,8 @@ esac
             codex_home: None,
             project_root: None,
             package_roots: Vec::new(),
+            session_id: String::new(),
+            worker_id: String::new(),
         };
         let err = runner.start_with_spec(&spec).await.expect_err("must fail");
         assert!(matches!(err, RunnerError::InvalidPackage(_)));

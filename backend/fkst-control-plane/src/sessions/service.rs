@@ -1489,6 +1489,11 @@ async fn drive_inner(
             codex_home,
             project_root,
             package_roots,
+            // Real dispatch (#136): write the owner breadcrumb so the OS-truth
+            // reconcile sweep sees this engine as live (and a restarted worker
+            // can re-adopt it). The session id makes the breadcrumb mandatory.
+            session_id: id.to_string(),
+            worker_id: inner.pod_id.clone().unwrap_or_default(),
         })
         .await
     {

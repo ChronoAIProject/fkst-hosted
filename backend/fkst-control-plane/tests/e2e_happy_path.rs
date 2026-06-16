@@ -88,6 +88,8 @@ async fn e2e_repo_scoped_package_runs_then_stops_against_the_real_engine() {
         codex_home: None,
         project_root: Some(repo.path().to_path_buf()),
         package_roots: vec![package_root],
+        session_id: String::new(),
+        worker_id: String::new(),
     };
     let mut session = runner
         .start_with_spec(&spec)
