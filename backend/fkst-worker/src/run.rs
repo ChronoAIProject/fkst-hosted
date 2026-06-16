@@ -51,7 +51,7 @@ pub async fn run_worker(config: WorkerConfig) -> ExitCode {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    if let Err(error) = hb_agent.heartbeat(LifecycleState::Active, &[]).await {
+                    if let Err(error) = hb_agent.heartbeat(LifecycleState::Active).await {
                         tracing::warn!(error = %error, "heartbeat failed (will retry next tick)");
                     }
                 }
@@ -105,7 +105,7 @@ pub async fn run_worker(config: WorkerConfig) -> ExitCode {
     cancel.cancel();
     let _ = heartbeat.await;
     let _ = pull.await;
-    if let Err(error) = agent.heartbeat(LifecycleState::Draining, &[]).await {
+    if let Err(error) = agent.heartbeat(LifecycleState::Draining).await {
         tracing::debug!(error = %error, "final draining heartbeat not delivered (controller may be gone)");
     }
 

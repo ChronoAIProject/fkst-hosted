@@ -24,6 +24,7 @@ pub mod materialize;
 pub mod process;
 pub mod runner;
 pub mod runtime;
+pub mod skills;
 pub mod util;
 
 pub use adopt::{os_truth_live_set, scan_and_adopt, AdoptReport};
@@ -39,4 +40,5 @@ pub use materialize::{materialize_helper_script, PreparedPackage};
 pub use process::{is_pid_alive, GoalEnv};
 pub use runner::{GoalContext, LiveStatus, RunningSession, SessionRunner, StartSpec};
 pub use runtime::{dir_age, RUNTIME_DIR_PREFIX};
+pub use skills::{append_instructions, install_skill, render_marker_block};
 pub use util::is_valid_name;

@@ -248,7 +248,7 @@ async fn worker_agent_register_and_heartbeat_against_in_process_controller() {
     assert_eq!(reg.heartbeat_interval_secs, 7);
 
     let hb = agent
-        .heartbeat(LifecycleState::Active, &[])
+        .heartbeat(LifecycleState::Active)
         .await
         .expect("heartbeat");
     assert!(hb.acknowledged);

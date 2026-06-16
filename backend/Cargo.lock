@@ -877,6 +877,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "zip",
 ]
 
 [[package]]
@@ -902,13 +903,17 @@ name = "fkst-worker"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
+ "base64",
+ "bson",
  "fkst-engine",
  "fkst-shared",
  "reqwest",
  "secrecy",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -916,6 +921,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wiremock",
+ "zip",
 ]
 
 [[package]]
