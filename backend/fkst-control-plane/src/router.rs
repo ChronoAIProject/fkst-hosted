@@ -109,6 +109,7 @@ pub fn mount_internal(
     heartbeat_interval_secs: u64,
     claims: std::sync::Arc<crate::controller::ClaimMap>,
     minter: Option<std::sync::Arc<dyn crate::controller::SessionTokenMinter>>,
+    reassign: Option<std::sync::Arc<crate::controller::ReassignDriver>>,
 ) -> Router {
     top.merge(crate::controller::internal_router(
         registry,
@@ -116,5 +117,6 @@ pub fn mount_internal(
         heartbeat_interval_secs,
         claims,
         minter,
+        reassign,
     ))
 }

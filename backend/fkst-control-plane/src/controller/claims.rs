@@ -260,6 +260,21 @@ impl ClaimMap {
             .cloned()
     }
 
+    /// The `lease_key` of the entry currently bound to `session_id`, if any
+    /// (the inverse of the `lease_key`-keyed map). Used by the per-session
+    /// graceful-drain reassignment path (#140), which carries a `session_id` and
+    /// must resolve it to the `lease_key` [`reassign`](Self::reassign) operates
+    /// on. Scans the map — the fleet (and so the map) is small. Mirrors the
+    /// find-by-session lookup in [`set_status_for_session`](Self::set_status_for_session).
+    pub fn lease_key_for_session(&self, session_id: bson::Uuid) -> Option<String> {
+        self.inner
+            .lock()
+            .expect("claim map poisoned")
+            .values()
+            .find(|e| e.session_id == session_id)
+            .map(|e| e.lease_key.clone())
+    }
+
     pub fn list(&self) -> Vec<ClaimEntry> {
         self.inner
             .lock()

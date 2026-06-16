@@ -247,6 +247,28 @@ pub(super) struct Inner {
     controller: OnceLock<ControllerHandle>,
 }
 
+impl Inner {
+    /// Fetch one session document. A sibling-module accessor (#140) so the
+    /// re-dispatch seam can re-read the session without `Inner`'s private `repo`
+    /// field leaking out of this module.
+    pub(super) async fn get_session(&self, id: bson::Uuid) -> Result<Option<SessionDoc>, AppError> {
+        self.repo.get(id).await
+    }
+
+    /// The controller-held raw user token for `session_id`, if this process still
+    /// holds it (#138). A sibling-module accessor (#140) for the re-dispatch seam,
+    /// mirroring [`SessionService::held_token`]. The token is a zeroizing
+    /// `SecretString`; the lock is sync and never held across an await, and the
+    /// value is never logged.
+    pub(super) fn held_token(&self, session_id: bson::Uuid) -> Option<SecretString> {
+        self.session_tokens
+            .lock()
+            .expect("session token store poisoned")
+            .get(&session_id)
+            .cloned()
+    }
+}
+
 /// Per-session codex provider wiring shared by every driver this service
 /// spawns. Carries the operator-pinned chrono-llm DEFAULT values (#112).
 struct CodexSetup {
@@ -351,12 +373,7 @@ impl SessionService {
     /// per-session NyxID key can be re-minted (`Some`) or the session must
     /// escalate (`None`, after a controller restart).
     pub(crate) fn held_token(&self, session_id: bson::Uuid) -> Option<SecretString> {
-        self.inner
-            .session_tokens
-            .lock()
-            .expect("session token store poisoned")
-            .get(&session_id)
-            .cloned()
+        self.inner.held_token(session_id)
     }
 
     /// Enable controller-backed placement (issue #135): new sessions are placed
@@ -369,6 +386,24 @@ impl SessionService {
             return;
         }
         tracing::info!("controller-backed placement enabled (in-memory claim authority)");
+    }
+
+    /// Build the real re-dispatch seam (#140) the controller's
+    /// [`crate::controller::ReassignDriver`] calls when it reassigns a session to
+    /// a new worker. It re-resolves the session's full dispatch from THIS
+    /// service's wiring (the same resolver the live placement path uses) and
+    /// queues it to the new worker via `registry`. Returned as the
+    /// `Arc<dyn SecretRedispatch>` seam so `Inner` stays encapsulated. Wired only
+    /// behind `FKST_DISPATCH_MODE`; with dispatch off the driver keeps the inert
+    /// [`crate::controller::NoopSecretRedispatch`] default instead.
+    pub fn make_redispatch(
+        &self,
+        registry: crate::controller::WorkerRegistry,
+    ) -> Arc<dyn crate::controller::SecretRedispatch> {
+        Arc::new(super::redispatch::DispatchRedispatch::new(
+            self.inner.clone(),
+            registry,
+        ))
     }
 
     /// Enable session-progress journaling (issue #25) for every driver this

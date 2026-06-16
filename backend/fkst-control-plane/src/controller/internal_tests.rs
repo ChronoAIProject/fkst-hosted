@@ -81,7 +81,9 @@ fn populated_claims(owner: &str) -> (Arc<ClaimMap>, bson::Uuid, FencingId) {
 fn router(claims: Arc<ClaimMap>, minter: Option<Arc<dyn SessionTokenMinter>>) -> axum::Router {
     let registry = WorkerRegistry::new(Duration::from_secs(30));
     let auth = InternalAuth::new(SecretString::from(TEST_SECRET.to_string()));
-    internal_router(registry, auth, 10, claims, minter)
+    // No reassign driver here: these tests cover the credential-refresh /
+    // status-report fence behaviour, which is independent of reassignment.
+    internal_router(registry, auth, 10, claims, minter, None)
 }
 
 /// POST `body` to `path` with the valid internal-auth header, returning the

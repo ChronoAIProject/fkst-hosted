@@ -9,36 +9,58 @@
 //!   fencing + the engine's git-idempotency fence-reject the old engine's late
 //!   writes (no journal corruption ever).
 //! - **graceful drain** ([`ReassignDriver::on_worker_draining`] →
-//!   [`ReassignDriver::on_worker_released`]): a worker being scaled down sends
-//!   `Draining`; we WAIT for its `Released` ack (engine confirmed stopped)
-//!   before reassigning, collapsing the overlap to ~zero. The detailed drain
-//!   message choreography lives in #140; this module exposes the primitive +
-//!   entry points both paths call.
+//!   [`ReassignDriver::on_session_released`]): a worker being scaled down sends
+//!   `Draining`; we WAIT for its `Released` ack (engine confirmed stopped) for a
+//!   session before reassigning THAT session, collapsing the overlap to ~zero. A
+//!   `Released` carries one `session_id`, so the graceful path is per-session.
 //!
-//! "Dispatching the redo" is logical in the pull model: [`ClaimMap::reassign`]
-//! leaves the claim `Pending` owned by the new worker, which pulls + spawns the
-//! engine in #136. The in-memory secret re-dispatch is the [`SecretRedispatch`]
-//! seam (a no-op default; #138 injects the real one).
+//! "Dispatching the redo" is a PUSH in the active path (#151): [`ClaimMap::reassign`]
+//! bumps the fence + re-owns the claim to the new worker, then the
+//! [`SecretRedispatch`] seam re-resolves the session's dispatch and queues it to
+//! the new worker's outbound control channel (delivered on its next heartbeat).
+//! The seam is async; the default is a no-op (the byte-identical posture when
+//! dispatch is not wired), and [`crate::sessions::DispatchRedispatch`] is the
+//! real implementation injected behind `FKST_DISPATCH_MODE`.
 
 use std::sync::Arc;
+
+use async_trait::async_trait;
+use fkst_shared::protocol::LifecycleState;
 
 use crate::controller::claims::ClaimMap;
 use crate::controller::placement::{select_worker, WorkerLoad};
 use crate::controller::registry::WorkerRegistry;
 
-/// Seam for re-dispatching a session's in-memory secrets to its NEW worker on
-/// reassignment (#138 injects the real implementation; the default is a no-op).
+/// Seam for re-dispatching a session's run to its NEW worker on reassignment.
+///
+/// Async because the real implementation ([`crate::sessions::DispatchRedispatch`],
+/// #140) re-resolves a fresh [`fkst_shared::protocol::ResolvedDispatch`] (an async
+/// token mint + env/codex/ornn resolution) and queues it to the new worker's
+/// outbound control channel — both awaits. `new_fence` is the bumped fence
+/// [`ClaimMap::reassign`] just allocated; the resolver stamps it onto the
+/// dispatch so the new worker's mid-run channels echo the current fence (a
+/// superseded worker, still on the old fence, is fence-rejected). The default is
+/// a no-op so a controller without dispatch wired (the byte-identical posture
+/// until activation) does nothing.
+#[async_trait]
 pub trait SecretRedispatch: Send + Sync {
-    fn re_dispatch(&self, session_id: bson::Uuid, new_worker: &str);
+    async fn re_dispatch(&self, session_id: bson::Uuid, new_worker: &str, new_fence: i64);
 }
 
-/// Default no-op seam used until #138 wires real secret dispatch.
+/// Default no-op seam used when dispatch is not wired (the byte-identical
+/// posture until activation injects the real [`crate::sessions::DispatchRedispatch`]).
 #[derive(Debug, Default, Clone)]
 pub struct NoopSecretRedispatch;
 
+#[async_trait]
 impl SecretRedispatch for NoopSecretRedispatch {
-    fn re_dispatch(&self, session_id: bson::Uuid, new_worker: &str) {
-        tracing::debug!(session_id = %session_id, new_worker, "secret re-dispatch seam (no-op until #138)");
+    async fn re_dispatch(&self, session_id: bson::Uuid, new_worker: &str, new_fence: i64) {
+        tracing::debug!(
+            session_id = %session_id,
+            new_worker,
+            new_fence,
+            "secret re-dispatch seam (no-op; dispatch not wired)"
+        );
     }
 }
 
@@ -66,14 +88,22 @@ impl ReassignDriver {
         }
     }
 
-    /// Snapshot of live workers + their controller-authoritative load (the claim
-    /// map's active count, immediate — not heartbeat-lagged), optionally
+    /// Snapshot of ACTIVE live workers + their controller-authoritative load (the
+    /// claim map's active count, immediate — not heartbeat-lagged), optionally
     /// excluding one worker (the dead/draining one being redistributed off).
+    ///
+    /// Only `LifecycleState::Active` workers are candidates: a Draining worker is
+    /// shedding load, so reassigning ONTO it would just have to move the work
+    /// again — it must never be a reassignment target. This mirrors the same
+    /// Active filter [`crate::controller::ControllerHandle::snapshot_loads`]
+    /// applies to NEW placement, so both placement and reassignment agree on the
+    /// candidate set.
     async fn live_worker_loads(&self, exclude: Option<&str>) -> Vec<WorkerLoad> {
         self.registry
             .live_workers()
             .await
             .into_iter()
+            .filter(|w| w.lifecycle_state == LifecycleState::Active)
             .filter(|w| Some(w.worker_id.as_str()) != exclude)
             .map(|w| WorkerLoad {
                 active_sessions: self.claims.active_load(&w.worker_id),
@@ -100,20 +130,69 @@ impl ReassignDriver {
                 );
                 continue;
             };
-            if self
-                .claims
-                .reassign(&entry.lease_key, &chosen.worker_id)
-                .is_some()
+            if let Some(reassigned_entry) =
+                self.claims.reassign(&entry.lease_key, &chosen.worker_id)
             {
-                // Redo is now "dispatched": the claim is Pending owned by the new
-                // worker (it pulls + spawns the engine in #136). Re-dispatch the
-                // session's in-memory secrets to the new worker (#138 seam).
+                // The claim is now owned by the new worker with a freshly bumped
+                // fence. Re-dispatch the session to that worker stamped with the
+                // NEW fence so its mid-run channels echo the current fence (the
+                // superseded-worker guard). The returned entry carries the bumped
+                // fence; pass it through.
                 self.secrets
-                    .re_dispatch(entry.session_id, &chosen.worker_id);
+                    .re_dispatch(
+                        entry.session_id,
+                        &chosen.worker_id,
+                        reassigned_entry.fencing_id,
+                    )
+                    .await;
                 reassigned += 1;
             }
         }
         reassigned
+    }
+
+    /// Per-session graceful-drain entry point (#140): reassign exactly the ONE
+    /// session a worker's `Released` ack named (its engine confirmed stopped) onto
+    /// a live worker, returning whether it reassigned. Unlike
+    /// [`reassign_owned`](Self::reassign_owned) (which sweeps a whole worker), a
+    /// `Released` carries a single `session_id`, so this resolves it to its
+    /// `lease_key` and reassigns just that claim. An unknown session (already
+    /// reassigned, or terminal) or a fleet with no live capacity is a no-op
+    /// returning `false` (the entry, if any, stays put and is retriable on the
+    /// next tick) — never lost, never errored.
+    pub async fn on_session_released(&self, session_id: bson::Uuid) -> bool {
+        let Some(lease_key) = self.claims.lease_key_for_session(session_id) else {
+            tracing::debug!(
+                session_id = %session_id,
+                "released session has no live claim; nothing to reassign"
+            );
+            return false;
+        };
+        // The CURRENT owner is excluded from candidate selection so the released
+        // worker is never picked as its own replacement.
+        let current_owner = self.claims.get(&lease_key).map(|e| e.owner_worker);
+        let loads = self.live_worker_loads(current_owner.as_deref()).await;
+        let Some(chosen) = select_worker(&loads, self.max_load).cloned() else {
+            tracing::warn!(
+                lease_key = %lease_key,
+                session_id = %session_id,
+                "released session found no live worker with capacity; left pending + retriable"
+            );
+            return false;
+        };
+        let Some(reassigned_entry) = self.claims.reassign(&lease_key, &chosen.worker_id) else {
+            // Raced: the entry vanished between the lookup and the reassign.
+            tracing::debug!(
+                lease_key = %lease_key,
+                session_id = %session_id,
+                "released session's claim vanished before reassign"
+            );
+            return false;
+        };
+        self.secrets
+            .re_dispatch(session_id, &chosen.worker_id, reassigned_entry.fencing_id)
+            .await;
+        true
     }
 
     /// Abrupt-death entry point: reassign all of the dead worker's in-flight work
@@ -127,144 +206,20 @@ impl ReassignDriver {
     }
 
     /// Graceful-drain entry point: the worker announced `Draining`. Do NOT
-    /// reassign yet — wait for the `Released` ack (engine confirmed stopped) via
-    /// [`Self::on_worker_released`], collapsing the double-run window to ~zero.
-    /// The stop-request + bounded-timeout-fallback-to-abrupt choreography is #140.
+    /// reassign yet — the worker is flushing/handing off its live sessions and
+    /// will send a per-session `Released` ack (engine confirmed stopped) for each,
+    /// at which point [`Self::on_session_released`] reassigns that one session,
+    /// collapsing the double-run window to ~zero. Marking the worker `Draining`
+    /// in the registry ALSO removes it from the placement + reassignment candidate
+    /// set (the Active filter), so it stops receiving new work immediately.
     pub async fn on_worker_draining(&self, worker_id: &str) {
         tracing::info!(
             worker_id,
-            "worker draining; awaiting Released before reassigning"
+            "worker draining; awaiting per-session Released acks before reassigning"
         );
-    }
-
-    /// Graceful-drain completion: the worker's `Released` ack arrived (engine
-    /// confirmed stopped). Reassign its in-flight work now (~zero overlap).
-    pub async fn on_worker_released(&self, worker_id: &str) -> usize {
-        tracing::info!(worker_id, "worker released; reassigning its drained work");
-        self.reassign_owned(worker_id).await
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-    use std::time::Duration;
-
-    use fkst_shared::protocol::{RegisterRequest, PROTOCOL_VERSION};
-
-    fn reg(id: &str) -> RegisterRequest {
-        RegisterRequest {
-            worker_id: id.to_string(),
-            protocol_version: PROTOCOL_VERSION,
-            capacity: 100,
-            engine_temp_root: "/tmp/e".to_string(),
-        }
-    }
-
-    /// Spy seam recording every (session_id, new_worker) re-dispatch call.
-    #[derive(Default)]
-    struct SpySecrets {
-        calls: Mutex<Vec<(bson::Uuid, String)>>,
-    }
-    impl SecretRedispatch for SpySecrets {
-        fn re_dispatch(&self, session_id: bson::Uuid, new_worker: &str) {
-            self.calls
-                .lock()
-                .unwrap()
-                .push((session_id, new_worker.to_string()));
-        }
-    }
-
-    async fn driver_with(
-        claims: Arc<ClaimMap>,
-        live: &[&str],
-        secrets: Arc<dyn SecretRedispatch>,
-    ) -> ReassignDriver {
-        let registry = WorkerRegistry::new(Duration::from_secs(60));
-        for id in live {
-            registry.register(&reg(id)).await;
-        }
-        ReassignDriver::new(claims, registry, 0, secrets)
-    }
-
-    #[tokio::test]
-    async fn abrupt_death_reassigns_all_owned_active_entries_with_fresh_fences() {
-        let claims = Arc::new(ClaimMap::new());
-        let a = claims.claim("a", bson::Uuid::new(), None, "dead").unwrap();
-        let b = claims.claim("b", bson::Uuid::new(), None, "dead").unwrap();
-        let driver = driver_with(claims.clone(), &["live"], Arc::new(NoopSecretRedispatch)).await;
-
-        let n = driver.on_worker_dead("dead").await;
-        assert_eq!(n, 2);
-        let ra = claims.get("a").unwrap();
-        let rb = claims.get("b").unwrap();
-        assert_eq!(ra.owner_worker, "live");
-        assert_eq!(rb.owner_worker, "live");
-        assert!(ra.fencing_id > a.fencing_id);
-        assert!(rb.fencing_id > b.fencing_id);
-    }
-
-    #[tokio::test]
-    async fn graceful_drain_waits_for_released_then_reassigns() {
-        let claims = Arc::new(ClaimMap::new());
-        claims.claim("a", bson::Uuid::new(), None, "drain").unwrap();
-        let driver = driver_with(claims.clone(), &["live"], Arc::new(NoopSecretRedispatch)).await;
-
-        // Draining alone must NOT reassign.
-        driver.on_worker_draining("drain").await;
-        assert_eq!(
-            claims.get("a").unwrap().owner_worker,
-            "drain",
-            "no reassign before Released"
-        );
-
-        // The Released ack triggers the reassignment.
-        let n = driver.on_worker_released("drain").await;
-        assert_eq!(n, 1);
-        assert_eq!(claims.get("a").unwrap().owner_worker, "live");
-    }
-
-    #[tokio::test]
-    async fn reassign_calls_secret_redispatch_seam_for_new_worker() {
-        let claims = Arc::new(ClaimMap::new());
-        let sid = bson::Uuid::new();
-        claims.claim("a", sid, None, "dead").unwrap();
-        let spy = Arc::new(SpySecrets::default());
-        let driver = driver_with(claims, &["live"], spy.clone()).await;
-
-        driver.on_worker_dead("dead").await;
-        let calls = spy.calls.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0], (sid, "live".to_string()));
-    }
-
-    #[tokio::test]
-    async fn no_capacity_leaves_entry_pending_and_retriable() {
-        let claims = Arc::new(ClaimMap::new());
-        claims.claim("a", bson::Uuid::new(), None, "dead").unwrap();
-        // No live workers at all (the only worker is the dead one, excluded).
-        let driver = driver_with(claims.clone(), &[], Arc::new(NoopSecretRedispatch)).await;
-        let n = driver.on_worker_dead("dead").await;
-        assert_eq!(n, 0, "nothing reassigned");
-        // The entry survives, still owned by the dead worker, retriable.
-        let e = claims.get("a").unwrap();
-        assert_eq!(e.owner_worker, "dead");
-        assert!(super::super::claims::is_active(e.status));
-
-        // Bring a live worker up: the SAME entry now reassigns (retriable).
-        driver.registry.register(&reg("late")).await;
-        let n2 = driver.on_worker_dead("dead").await;
-        assert_eq!(n2, 1);
-        assert_eq!(claims.get("a").unwrap().owner_worker, "late");
-    }
-
-    #[tokio::test]
-    async fn load_snapshot_excludes_only_the_named_worker() {
-        let claims = Arc::new(ClaimMap::new());
-        let driver = driver_with(claims, &["w1", "w2"], Arc::new(NoopSecretRedispatch)).await;
-        let loads = driver.live_worker_loads(Some("w1")).await;
-        assert_eq!(loads.len(), 1);
-        assert_eq!(loads[0].worker_id, "w2");
-    }
-}
+#[path = "reassign_tests.rs"]
+mod tests;

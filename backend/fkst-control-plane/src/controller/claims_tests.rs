@@ -235,3 +235,13 @@ fn seed_fencing_raises_floor_for_post_restart_redo() {
         "next fence must exceed the seeded floor"
     );
 }
+
+#[test]
+fn lease_key_for_session_resolves_the_bound_entry() {
+    let m = ClaimMap::new();
+    let s = uuid();
+    m.claim("pkg", s, None, "w1").unwrap();
+    assert_eq!(m.lease_key_for_session(s).as_deref(), Some("pkg"));
+    // An unknown session resolves to nothing.
+    assert_eq!(m.lease_key_for_session(uuid()), None);
+}

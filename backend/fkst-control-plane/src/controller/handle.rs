@@ -38,12 +38,18 @@ impl ControllerHandle {
         &self.claims
     }
 
-    /// Snapshot every live worker with its controller-authoritative load.
+    /// Snapshot every ACTIVE live worker with its controller-authoritative load.
+    ///
+    /// A Draining worker (#140) is shedding load, so it must stop receiving NEW
+    /// placements — filtering it out here mirrors the same Active filter the
+    /// reassignment driver applies to its candidate set, so placement and
+    /// reassignment agree on which workers can take work.
     pub async fn snapshot_loads(&self) -> Vec<WorkerLoad> {
         self.registry
             .live_workers()
             .await
             .into_iter()
+            .filter(|w| w.lifecycle_state == fkst_shared::protocol::LifecycleState::Active)
             .map(|w| WorkerLoad {
                 active_sessions: self.claims.active_load(&w.worker_id),
                 worker_id: w.worker_id,
@@ -116,6 +122,57 @@ mod tests {
         let claims = Arc::new(ClaimMap::new());
         let registry = WorkerRegistry::new(Duration::from_secs(60));
         let handle = ControllerHandle::new(claims, registry, 0);
+        let err = handle
+            .place("pkg", bson::Uuid::new(), None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PlacementError::NoCapacity));
+    }
+
+    #[tokio::test]
+    async fn place_skips_a_draining_worker() {
+        use fkst_shared::protocol::Draining;
+
+        let claims = Arc::new(ClaimMap::new());
+        let registry = WorkerRegistry::new(Duration::from_secs(60));
+        registry.register(&reg("keep")).await;
+        registry.register(&reg("drain")).await;
+        // Mark `drain` Draining: it must drop out of the placement candidate set.
+        registry
+            .mark_draining(&Draining {
+                worker_id: "drain".to_string(),
+                sessions: vec![],
+                checkpoint_done: false,
+            })
+            .await;
+        let handle = ControllerHandle::new(claims, registry, 0);
+
+        // The snapshot must exclude the Draining worker entirely.
+        let loads = handle.snapshot_loads().await;
+        assert_eq!(loads.len(), 1);
+        assert_eq!(loads[0].worker_id, "keep");
+
+        // Placement therefore lands on the Active worker, never the Draining one.
+        let p = handle.place("pkg", bson::Uuid::new(), None).await.unwrap();
+        assert_eq!(p.worker_id, "keep");
+    }
+
+    #[tokio::test]
+    async fn place_returns_no_capacity_when_all_workers_are_draining() {
+        use fkst_shared::protocol::Draining;
+
+        let claims = Arc::new(ClaimMap::new());
+        let registry = WorkerRegistry::new(Duration::from_secs(60));
+        registry.register(&reg("drain")).await;
+        registry
+            .mark_draining(&Draining {
+                worker_id: "drain".to_string(),
+                sessions: vec![],
+                checkpoint_done: false,
+            })
+            .await;
+        let handle = ControllerHandle::new(claims, registry, 0);
+        // The only live worker is Draining, so there is no Active capacity.
         let err = handle
             .place("pkg", bson::Uuid::new(), None)
             .await
