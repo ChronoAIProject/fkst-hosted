@@ -548,10 +548,10 @@ function M.intake_decision_dedup_key(proposal_id, current, reintake_command)
   })
 end
 
-function M.ci_dispatch_once_key(repo, pr_number, head_sha)
+function M.ci_selfheal_once_key(repo, pr_number, head_sha)
   return M._dedup_key({
     "github-devloop",
-    "ci-dispatch-selfheal",
+    "ci-selfheal",
     M.safe_repo(repo),
     "pr",
     M.safe_issue(pr_number),

@@ -241,4 +241,15 @@ return {
     t.eq(eligible, false)
     t.eq(reason, "rollup-pending")
   end,
+
+  test_rerunnable_check_run_ids_for_head_are_deduplicated_and_head_bound = function()
+    local ids = core.rerunnable_check_run_ids_for_head({
+      { id = 101, head_sha = "def456" },
+      { id = 101, head_sha = "def456" },
+      { id = 202, check_suite = { head_sha = "def456" } },
+      { id = 303, head_sha = "abc123" },
+      { id = "not-numeric", head_sha = "def456" },
+    }, "def456")
+    t.eq(table.concat(ids, ","), "101,202")
+  end,
 }
