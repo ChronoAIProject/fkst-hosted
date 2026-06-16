@@ -123,6 +123,21 @@ return {
     end)
   end,
 
+  test_strip_bot_login_suffix_normalizes_app_author_logins = function()
+    t.eq(core.strip_bot_login_suffix("fkst-test-bot[bot]"), "fkst-test-bot")
+    t.eq(core.strip_bot_login_suffix("fkst-test-bot"), "fkst-test-bot")
+    t.is_nil(core.strip_bot_login_suffix(nil))
+  end,
+
+  test_is_positive_integer_accepts_only_bounded_positive_integers = function()
+    t.eq(core.is_positive_integer(1), true)
+    t.eq(core.is_positive_integer("2147483647"), true)
+    t.eq(core.is_positive_integer(0), false)
+    t.eq(core.is_positive_integer(-1), false)
+    t.eq(core.is_positive_integer(1.5), false)
+    t.eq(core.is_positive_integer("2147483648"), false)
+  end,
+
   test_entity_cache_key = function()
     local key = core.entity_cache_key("owner/repo", "issue", 12)
     t.eq(key, "github-proxy/issue/owner/repo/12")

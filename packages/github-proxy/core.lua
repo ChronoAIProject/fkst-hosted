@@ -7,6 +7,22 @@ function M.persistence_class()
   return "stateless_adapter"
 end
 
+-- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
+-- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
+-- configured bot login match regardless of which API populated the field.
+-- No-op for ordinary user logins (which never end in "[bot]").
+function M.strip_bot_login_suffix(login)
+  if login == nil then
+    return nil
+  end
+  return (tostring(login):gsub("%[bot%]$", ""))
+end
+
+function M.is_positive_integer(value)
+  local n = tonumber(value)
+  return n ~= nil and n >= 1 and n % 1 == 0 and n <= 2147483647
+end
+
 require("core.issue_create").install(M)
 require("core.github_graphql").install(M)
 require("core.blocked_by").install(M)
@@ -67,11 +83,6 @@ local function is_git_ref_safe(value)
     end
   end
   return text:find("^[%w%._%-%/]+$") ~= nil
-end
-
-local function is_positive_number(value)
-  local number = tonumber(value)
-  return number ~= nil and number >= 1 and number % 1 == 0 and number <= 2147483647
 end
 
 local function is_safe_marker_value(value)
@@ -199,12 +210,7 @@ function M.configure_trusted_bot_login(login)
     trusted_bot_login = nil
     return nil
   end
-  -- Normalize the GitHub App "[bot]" suffix so a login configured as either the
-  -- bare "<slug>" (GraphQL form) or "<slug>[bot]" (REST form) matches the
-  -- equally normalized author logins. No-op for ordinary user logins (which
-  -- never end in "[bot]"), so existing bot-user-account deployments are
-  -- unaffected and a deployment configured with the "[bot]" suffix keeps working.
-  trusted_bot_login = (tostring(login):gsub("%[bot%]$", ""))
+  trusted_bot_login = M.strip_bot_login_suffix(login)
   return trusted_bot_login
 end
 
@@ -280,7 +286,7 @@ end
 
 function M.is_safe_branch(branch) return is_git_ref_safe(branch) end
 
-function M.is_safe_pr_number(pr_number) return is_positive_number(pr_number) end
+function M.is_safe_pr_number(pr_number) return M.is_positive_integer(pr_number) end
 
 function M.is_safe_head_sha(head_sha) return is_git_sha(head_sha) end
 
@@ -588,7 +594,7 @@ function M.parse_pr_list_for_head(gh_json_stdout, branch)
           base = pr.base.ref
         end
         local state = tostring(pr.state or "")
-        if is_positive_number(number)
+        if M.is_positive_integer(number)
           and tostring(head or "") == tostring(branch)
           and state:lower() == "open" then
           return {
@@ -650,7 +656,7 @@ end
 function M.parse_pr_create(stdout)
   local url = tostring(stdout or ""):match("(https?://%S+/pull/(%d+))")
   local number = url and url:match("/pull/(%d+)")
-  if is_positive_number(number) then
+  if M.is_positive_integer(number) then
     return {
       number = tonumber(number),
       url = url,
@@ -660,7 +666,7 @@ function M.parse_pr_create(stdout)
 end
 
 function M.github_pr_view_head_oid(repo, pr_number, timeout)
-  if not is_positive_number(pr_number) then
+  if not M.is_positive_integer(pr_number) then
     error("github-proxy: invalid PR number")
   end
   return M.github().pr_view(repo, pr_number, timeout or 30)
