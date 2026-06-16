@@ -210,7 +210,12 @@ function M.configure_trusted_bot_login(login)
     trusted_bot_login = nil
     return nil
   end
-  trusted_bot_login = tostring(login)
+  -- Normalize the GitHub App "[bot]" suffix so a login configured as either the
+  -- bare "<slug>" (GraphQL form) or "<slug>[bot]" (REST form) matches the
+  -- equally normalized author logins. No-op for ordinary user logins (which
+  -- never end in "[bot]"), so existing bot-user-account deployments are
+  -- unaffected and a deployment configured with the "[bot]" suffix keeps working.
+  trusted_bot_login = (tostring(login):gsub("%[bot%]$", ""))
   return trusted_bot_login
 end
 

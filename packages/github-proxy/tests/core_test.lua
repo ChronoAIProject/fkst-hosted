@@ -321,6 +321,42 @@ return {
     t.eq(core.has_trusted_marker(comments, key, "fkst-test-bot"), true)
   end,
 
+  test_trusted_comment_marker_accepts_github_app_bot_suffix = function()
+    -- A GitHub App authored the marker: the REST read path reports a
+    -- "<slug>[bot]" login, but FKST_GITHUB_BOT_LOGIN holds the bare GraphQL
+    -- slug. The author-login normalization must let the bare login match.
+    local key = "owner/repo#1@x"
+    local marker = core.comment_marker(key)
+    local comments = core.parse_issue_comments(
+      '{"comments":[{"body":"'
+        .. marker
+        .. '","author":{"login":"fkst-test-bot[bot]"}}]}'
+    )
+
+    t.eq(core.has_trusted_marker(comments, key, "fkst-test-bot"), true)
+    t.eq(core.has_trusted_marker(comments, key, "other-bot"), false)
+  end,
+
+  test_configure_trusted_bot_login_normalizes_app_bot_suffix = function()
+    -- A deployment may configure FKST_GITHUB_BOT_LOGIN as the REST "<slug>[bot]"
+    -- form (e.g. a GitHub App) rather than the bare GraphQL slug. It must
+    -- normalize to the bare slug so it keeps matching the equally normalized
+    -- author logins; bare configs are unaffected.
+    t.eq(core.configure_trusted_bot_login("fkst-test-bot[bot]"), "fkst-test-bot")
+    t.eq(core.configure_trusted_bot_login("fkst-test-bot"), "fkst-test-bot")
+
+    -- End to end: a "[bot]"-suffixed config still trusts a "[bot]" REST author
+    -- (the pre-existing behaviour for such deployments is preserved).
+    local key = "owner/repo#1@x"
+    local marker = core.comment_marker(key)
+    local comments = core.parse_issue_comments(
+      '{"comments":[{"body":"' .. marker .. '","author":{"login":"fkst-test-bot[bot]"}}]}'
+    )
+    t.eq(core.has_trusted_marker(comments, key, core.configure_trusted_bot_login("fkst-test-bot[bot]")), true)
+
+    core.configure_trusted_bot_login("") -- reset shared state to its initial nil
+  end,
+
   test_current_devloop_state_default_rank_converges_review_conflict_to_fixing = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
