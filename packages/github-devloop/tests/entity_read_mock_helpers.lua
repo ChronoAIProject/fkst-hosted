@@ -1,7 +1,7 @@
 local M = {}
 local core = require("core")
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or "")
     :gsub("\\", "\\\\")
     :gsub('"', '\\"')
@@ -15,7 +15,7 @@ local function json_string(value)
     end)
 end
 
-local function json_value(value)
+local function encode_json_value(value)
   if value == nil then
     return "null"
   end
@@ -25,7 +25,7 @@ local function json_value(value)
   if type(value) == "number" then
     return tostring(value)
   end
-  return '"' .. json_string(value) .. '"'
+  return '"' .. encode_json_string(value) .. '"'
 end
 
 local function shell_quote(value)
@@ -36,20 +36,20 @@ local function owner_login(repo)
   return tostring(repo or "owner/repo"):match("^([^/]+)/") or "owner"
 end
 
-local function labels_json(labels)
+local function encode_labels_json(labels)
   local rendered = {}
   for _, label in ipairs(labels or {}) do
     local name = type(label) == "table" and label.name or label
-    table.insert(rendered, '{"name":' .. json_value(name) .. "}")
+    table.insert(rendered, '{"name":' .. encode_json_value(name) .. "}")
   end
   return table.concat(rendered, ",")
 end
 
-local function assignees_json(assignees)
+local function encode_assignees_json(assignees)
   local rendered = {}
   for _, assignee in ipairs(assignees or {}) do
     local login = type(assignee) == "table" and assignee.login or assignee
-    table.insert(rendered, '{"login":' .. json_value(login) .. "}")
+    table.insert(rendered, '{"login":' .. encode_json_value(login) .. "}")
   end
   return table.concat(rendered, ",")
 end
@@ -89,11 +89,11 @@ function M.view_comment_json(comment)
     return comment
   end
   local id = comment_id(comment)
-  local id_field = id ~= nil and tostring(id) ~= "" and '"id":' .. json_value(id) .. "," or ""
+  local id_field = id ~= nil and tostring(id) ~= "" and '"id":' .. encode_json_value(id) .. "," or ""
   return "{" .. id_field
-    .. '"body":' .. json_value(comment_body(comment))
-    .. ',"author":{"login":' .. json_value(comment_author(comment)) .. "}"
-    .. ',"createdAt":' .. json_value(comment_created_at(comment) or "2026-06-03T01:00:00Z")
+    .. '"body":' .. encode_json_value(comment_body(comment))
+    .. ',"author":{"login":' .. encode_json_value(comment_author(comment)) .. "}"
+    .. ',"createdAt":' .. encode_json_value(comment_created_at(comment) or "2026-06-03T01:00:00Z")
     .. "}"
 end
 
@@ -102,16 +102,16 @@ local function rest_comment_json(comment, index)
     local body = comment:match('"body"%s*:%s*"([^"]*)"') or ""
     local author = comment:match('"author"%s*:%s*{%s*"login"%s*:%s*"([^"]*)"') or "fkst-test-bot"
     local created_at = comment:match('"createdAt"%s*:%s*"([^"]*)"') or "2026-06-03T01:00:00Z"
-    return '{"id":' .. json_value(index)
-      .. ',"body":' .. json_value(body)
-      .. ',"user":{"login":' .. json_value(author) .. "}"
-      .. ',"created_at":' .. json_value(created_at)
+    return '{"id":' .. encode_json_value(index)
+      .. ',"body":' .. encode_json_value(body)
+      .. ',"user":{"login":' .. encode_json_value(author) .. "}"
+      .. ',"created_at":' .. encode_json_value(created_at)
       .. "}"
   end
-  return '{"id":' .. json_value(comment_id(comment) or index)
-    .. ',"body":' .. json_value(comment_body(comment))
-    .. ',"user":{"login":' .. json_value(comment_author(comment)) .. "}"
-    .. ',"created_at":' .. json_value(comment_created_at(comment) or "2026-06-03T01:00:00Z")
+  return '{"id":' .. encode_json_value(comment_id(comment) or index)
+    .. ',"body":' .. encode_json_value(comment_body(comment))
+    .. ',"user":{"login":' .. encode_json_value(comment_author(comment)) .. "}"
+    .. ',"created_at":' .. encode_json_value(comment_created_at(comment) or "2026-06-03T01:00:00Z")
     .. "}"
 end
 
@@ -136,14 +136,14 @@ function M.issue_view_stdout(fields)
   return string.format(
     '{"number":%d,"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s],"author":{"login":"%s"}}\n',
     tonumber(f.number) or 42,
-    json_string(f.title or "Implement decision recorder"),
-    json_string(f.body or ""),
-    json_string(f.updated_at or "2026-06-03T01:02:03Z"),
-    json_string(f.state or "OPEN"),
-    labels_json(f.labels),
+    encode_json_string(f.title or "Implement decision recorder"),
+    encode_json_string(f.body or ""),
+    encode_json_string(f.updated_at or "2026-06-03T01:02:03Z"),
+    encode_json_string(f.state or "OPEN"),
+    encode_labels_json(f.labels),
     M.view_comments_json(f.comments),
-    assignees_json(f.assignees or { "fkst-test-bot" }),
-    json_string(f.author_login or "fkst-test-bot")
+    encode_assignees_json(f.assignees or { "fkst-test-bot" }),
+    encode_json_string(f.author_login or "fkst-test-bot")
   )
 end
 
@@ -155,23 +155,23 @@ function M.pr_view_stdout(fields)
   return string.format(
     '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","baseRefOid":"%s","state":"%s","updatedAt":"%s","isDraft":%s,"merged":%s,"mergedAt":"%s","comments":[%s],"labels":[%s],"headRepository":{"nameWithOwner":"%s","owner":{"login":"%s"}},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s"%s}\n',
     tonumber(f.number) or 7,
-    json_string(f.head or "devloop-owner-repo-42-01HY"),
-    json_string(f.head_sha or "def456"),
-    json_string(f.base_branch or "dev"),
-    json_string(f.base_sha or "abc123"),
-    json_string(state),
-    json_string(f.updated_at or "2026-06-03T02:03:04Z"),
+    encode_json_string(f.head or "devloop-owner-repo-42-01HY"),
+    encode_json_string(f.head_sha or "def456"),
+    encode_json_string(f.base_branch or "dev"),
+    encode_json_string(f.base_sha or "abc123"),
+    encode_json_string(state),
+    encode_json_string(f.updated_at or "2026-06-03T02:03:04Z"),
     f.is_draft == true and "true" or "false",
     state == "MERGED" and "true" or "false",
-    json_string(merged_at),
+    encode_json_string(merged_at),
     M.view_comments_json(f.comments),
-    labels_json(f.labels),
-    json_string(f.head_repo or f.repo or "owner/repo"),
-    json_string(owner),
-    json_string(owner),
+    encode_labels_json(f.labels),
+    encode_json_string(f.head_repo or f.repo or "owner/repo"),
+    encode_json_string(owner),
+    encode_json_string(owner),
     f.cross_repo == true and "true" or "false",
-    json_string(f.mergeable or "MERGEABLE"),
-    json_string(f.merge_state or "CLEAN"),
+    encode_json_string(f.mergeable or "MERGEABLE"),
+    encode_json_string(f.merge_state or "CLEAN"),
     f.status_check_rollup_json ~= nil and ',"statusCheckRollup":' .. f.status_check_rollup_json or ""
   )
 end
@@ -181,13 +181,13 @@ local function issue_rest_stdout(fields)
   return string.format(
     '{"number":%d,"title":"%s","body":"%s","state":"%s","updated_at":"%s","labels":[%s],"user":{"login":"%s"},"assignees":[%s]}\n',
     tonumber(f.number) or 42,
-    json_string(f.title or "Implement decision recorder"),
-    json_string(f.body or ""),
-    json_string(tostring(f.state or "OPEN"):lower()),
-    json_string(f.updated_at or "2026-06-03T01:02:03Z"),
-    labels_json(f.labels),
-    json_string(f.author_login or "fkst-test-bot"),
-    assignees_json(f.assignees or { "fkst-test-bot" })
+    encode_json_string(f.title or "Implement decision recorder"),
+    encode_json_string(f.body or ""),
+    encode_json_string(tostring(f.state or "OPEN"):lower()),
+    encode_json_string(f.updated_at or "2026-06-03T01:02:03Z"),
+    encode_labels_json(f.labels),
+    encode_json_string(f.author_login or "fkst-test-bot"),
+    encode_assignees_json(f.assignees or { "fkst-test-bot" })
   )
 end
 
@@ -212,22 +212,22 @@ local function pr_rest_stdout(fields)
   return string.format(
     '{"number":%d,"state":"%s","updated_at":"%s","merged_at":%s,"draft":%s,"labels":[%s],"user":{"login":"%s"},"mergeable":%s,"mergeable_state":%s,"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}}}\n',
     tonumber(f.number) or 7,
-    json_string(state == "MERGED" and "closed" or state:lower()),
-    json_string(f.updated_at or "2026-06-03T02:03:04Z"),
-    merged_at ~= "" and json_value(merged_at) or "null",
+    encode_json_string(state == "MERGED" and "closed" or state:lower()),
+    encode_json_string(f.updated_at or "2026-06-03T02:03:04Z"),
+    merged_at ~= "" and encode_json_value(merged_at) or "null",
     f.is_draft == true and "true" or "false",
-    labels_json(f.labels),
-    json_string(f.author_login or "fkst-test-bot"),
+    encode_labels_json(f.labels),
+    encode_json_string(f.author_login or "fkst-test-bot"),
     mergeable == nil and "null" or (mergeable == true and "true" or "false"),
-    json_value(mergeable_state),
-    json_string(f.head or "devloop-owner-repo-42-01HY"),
-    json_string(f.head_sha or "def456"),
-    json_string(head_repo),
-    json_string(owner_login(head_repo)),
-    json_string(f.base_branch or "dev"),
-    json_string(f.base_sha or "abc123"),
-    json_string(repo),
-    json_string(owner_login(repo))
+    encode_json_value(mergeable_state),
+    encode_json_string(f.head or "devloop-owner-repo-42-01HY"),
+    encode_json_string(f.head_sha or "def456"),
+    encode_json_string(head_repo),
+    encode_json_string(owner_login(head_repo)),
+    encode_json_string(f.base_branch or "dev"),
+    encode_json_string(f.base_sha or "abc123"),
+    encode_json_string(repo),
+    encode_json_string(owner_login(repo))
   )
 end
 
@@ -309,7 +309,7 @@ local function pr_rest_command(repo, number)
 end
 
 local function list_labels_json(labels)
-  return labels_json(labels)
+  return encode_labels_json(labels)
 end
 
 local function issue_list_item_json(issue)
@@ -317,16 +317,16 @@ local function issue_list_item_json(issue)
   return string.format(
     '{"number":%d,"title":%s,"body":%s,"createdAt":%s,"updatedAt":%s,"closedAt":%s,"state":%s,"labels":[%s],"assignees":[%s],"author":{"login":%s},"url":%s}',
     tonumber(item.number) or 42,
-    json_value(item.title or "Issue"),
-    json_value(item.body or ""),
-    json_value(item.created_at or "2026-06-03T01:00:00Z"),
-    json_value(item.updated_at or "2026-06-03T01:02:03Z"),
-    json_value(item.closed_at or item.closedAt or "2026-06-04T01:02:03Z"),
-    json_value(item.state or "OPEN"),
+    encode_json_value(item.title or "Issue"),
+    encode_json_value(item.body or ""),
+    encode_json_value(item.created_at or "2026-06-03T01:00:00Z"),
+    encode_json_value(item.updated_at or "2026-06-03T01:02:03Z"),
+    encode_json_value(item.closed_at or item.closedAt or "2026-06-04T01:02:03Z"),
+    encode_json_value(item.state or "OPEN"),
     list_labels_json(item.labels),
-    assignees_json(item.assignees or { "fkst-test-bot" }),
-    json_value(item.author_login or "fkst-test-bot"),
-    json_value(item.url or ("https://github.example/owner/repo/issues/" .. tostring(item.number or 42)))
+    encode_assignees_json(item.assignees or { "fkst-test-bot" }),
+    encode_json_value(item.author_login or "fkst-test-bot"),
+    encode_json_value(item.url or ("https://github.example/owner/repo/issues/" .. tostring(item.number or 42)))
   )
 end
 
@@ -335,12 +335,12 @@ local function pr_list_item_json(pr)
   return string.format(
     '{"number":%d,"title":%s,"state":%s,"labels":[%s],"base":{"ref":%s},"head":{"ref":%s,"sha":%s}}',
     tonumber(item.number) or 7,
-    json_value(item.title or "PR"),
-    json_value(item.state or "open"),
+    encode_json_value(item.title or "PR"),
+    encode_json_value(item.state or "open"),
     list_labels_json(item.labels),
-    json_value(item.base_branch or "dev"),
-    json_value(item.head or "devloop-owner-repo-42-01HY"),
-    json_value(item.head_sha or "def456")
+    encode_json_value(item.base_branch or "dev"),
+    encode_json_value(item.head or "devloop-owner-repo-42-01HY"),
+    encode_json_value(item.head_sha or "def456")
   )
 end
 

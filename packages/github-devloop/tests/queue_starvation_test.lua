@@ -23,16 +23,16 @@ local function run_observability(name)
   }, opts(name or "queue-starvation"))
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
 
 local function render_comment(body, author, created_at)
   return string.format(
     '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
-    json_string(body),
-    json_string(author or "fkst-test-bot"),
-    json_string(created_at or "2026-06-13T01:02:03Z")
+    encode_json_string(body),
+    encode_json_string(author or "fkst-test-bot"),
+    encode_json_string(created_at or "2026-06-13T01:02:03Z")
   )
 end
 
@@ -166,11 +166,11 @@ end
 local function recent_closed_item(number, closed_at, labels)
   local rendered_labels = {}
   for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, '{"name":"' .. json_string(label) .. '"}')
+    table.insert(rendered_labels, '{"name":"' .. encode_json_string(label) .. '"}')
   end
   return '{"number":' .. tostring(number)
     .. ',"title":"Closed issue ' .. tostring(number)
-    .. '","closedAt":"' .. json_string(closed_at)
+    .. '","closedAt":"' .. encode_json_string(closed_at)
     .. '","labels":[' .. table.concat(rendered_labels, ",") .. "]}";
 end
 

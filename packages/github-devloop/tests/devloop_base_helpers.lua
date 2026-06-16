@@ -548,7 +548,7 @@ local default_marker_version = "2026-06-02T00-00-00Z"
 local pr_phase_comments = nil
 local pending_pr_origin = nil
 
-local function assignees_json(assignees)
+local function encode_assignees_json(assignees)
   local rendered = {}
   for _, assignee in ipairs(assignees or { "fkst-test-bot" }) do
     table.insert(rendered, string.format('{"login":"%s"}', json_string(assignee)))
@@ -954,6 +954,7 @@ return {
   run_review_meta = run_review_meta,
   run_merge = run_merge,
   json_string = json_string,
+  encode_json_string = json_string,
   render_comment = render_comment,
   default_marker_version = default_marker_version,
   mock_issue_state = mock_issue_state,

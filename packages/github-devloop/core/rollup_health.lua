@@ -5,7 +5,7 @@ local strings = require("std.strings")
 local detector = "rollup-health"
 local default_red_window_minutes = 30
 
-local function json_string(value)
+local function encode_json_string(value)
   local text = tostring(value or "")
   text = text:gsub("\\", "\\\\")
   text = text:gsub('"', '\\"')
@@ -82,18 +82,18 @@ end
 local function write_snapshot(repo, evidence)
   local path = snapshot_path(repo, evidence.pr_number, evidence.head_sha)
   file.write(path, "{"
-    .. '"detector":' .. json_string(detector)
-    .. ',"repo":' .. json_string(repo)
+    .. '"detector":' .. encode_json_string(detector)
+    .. ',"repo":' .. encode_json_string(repo)
     .. ',"pr_number":' .. tostring(tonumber(evidence.pr_number) or 0)
-    .. ',"upstream_branch":' .. json_string(evidence.upstream_branch)
-    .. ',"integration_branch":' .. json_string(evidence.integration_branch)
-    .. ',"head_sha":' .. json_string(evidence.head_sha)
-    .. ',"updated_at":' .. json_string(evidence.updated_at)
-    .. ',"red_started_at":' .. json_string(evidence.red_started_at)
+    .. ',"upstream_branch":' .. encode_json_string(evidence.upstream_branch)
+    .. ',"integration_branch":' .. encode_json_string(evidence.integration_branch)
+    .. ',"head_sha":' .. encode_json_string(evidence.head_sha)
+    .. ',"updated_at":' .. encode_json_string(evidence.updated_at)
+    .. ',"red_started_at":' .. encode_json_string(evidence.red_started_at)
     .. ',"age_minutes":' .. tostring(tonumber(evidence.age_minutes) or 0)
     .. ',"threshold_minutes":' .. tostring(tonumber(evidence.threshold_minutes) or 0)
-    .. ',"failing_check":' .. json_string(evidence.failing_check)
-    .. ',"generated_at":' .. json_string(format_timestamp(evidence.now_seconds))
+    .. ',"failing_check":' .. encode_json_string(evidence.failing_check)
+    .. ',"generated_at":' .. encode_json_string(format_timestamp(evidence.now_seconds))
     .. "}\n")
   return path
 end

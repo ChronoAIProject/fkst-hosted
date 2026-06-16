@@ -41,7 +41,7 @@ local function ownership_json(logins, author_login)
     .. tostring(author_login or "fkst-test-bot") .. '"}}\n'
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return '"' .. tostring(value or "")
     :gsub("\\", "\\\\")
     :gsub('"', '\\"')
@@ -54,14 +54,14 @@ local function issue_state_json(fields)
   local selected = fields or {}
   local comments = {}
   for _, comment in ipairs(selected.comments or {}) do
-    table.insert(comments, '{"body":' .. json_string(comment.body or "")
-      .. ',"author":{"login":' .. json_string(comment.author_login or "fkst-test-bot") .. "}}")
+    table.insert(comments, '{"body":' .. encode_json_string(comment.body or "")
+      .. ',"author":{"login":' .. encode_json_string(comment.author_login or "fkst-test-bot") .. "}}")
   end
-  return '{"title":' .. json_string(selected.title or "Implement fork isolation")
-    .. ',"updatedAt":' .. json_string(selected.updated_at or "2026-06-03T01:02:03Z")
-    .. ',"state":' .. json_string(selected.state or "OPEN")
+  return '{"title":' .. encode_json_string(selected.title or "Implement fork isolation")
+    .. ',"updatedAt":' .. encode_json_string(selected.updated_at or "2026-06-03T01:02:03Z")
+    .. ',"state":' .. encode_json_string(selected.state or "OPEN")
     .. ',"labels":[],"comments":[' .. table.concat(comments, ",")
-    .. '],"assignees":[],"author":{"login":' .. json_string(selected.author_login or "human") .. "}}\n"
+    .. '],"assignees":[],"author":{"login":' .. encode_json_string(selected.author_login or "human") .. "}}\n"
 end
 
 local function state(name, created_at)

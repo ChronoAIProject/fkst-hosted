@@ -79,7 +79,7 @@ local function count_exact_calls(command)
   return count
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   return tostring(value or "")
     :gsub("\\", "\\\\")
     :gsub('"', '\\"')
@@ -93,9 +93,9 @@ end
 local function seed_cached_issue_view(repo, issue_number, stdout, updated_at, producer)
   return {
     key = core.entity_view_cache_key(repo, "issue", issue_number),
-    value = '{"updated_at":"' .. json_string(updated_at)
-    .. '","producer":"' .. json_string(producer or "seed")
-    .. '","stdout":"' .. json_string(stdout)
+    value = '{"updated_at":"' .. encode_json_string(updated_at)
+    .. '","producer":"' .. encode_json_string(producer or "seed")
+    .. '","stdout":"' .. encode_json_string(stdout)
     .. '"}',
   }
 end

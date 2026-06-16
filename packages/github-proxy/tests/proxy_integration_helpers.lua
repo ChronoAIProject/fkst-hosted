@@ -117,7 +117,7 @@ local function mock_poll(issue_stdout, pr_stdout)
   mock_pr_list(pr_stdout)
 end
 
-local function json_string(value)
+local function encode_json_string(value)
   local text = tostring(value or "")
   text = text:gsub("\\", "\\\\")
   text = text:gsub('"', '\\"')
@@ -135,13 +135,13 @@ end
 local function comment_json(body, author, id, database_id)
   local id_field = ""
   if id ~= nil then
-    id_field = '"id":"' .. json_string(id) .. '",'
+    id_field = '"id":"' .. encode_json_string(id) .. '",'
   end
   local database_id_field = ""
   if database_id ~= nil then
     database_id_field = '"databaseId":' .. tostring(database_id) .. ","
   end
-  return string.format('{%s%s"body":"%s","author":{"login":"%s"}}', id_field, database_id_field, json_string(body), json_string(author or "fkst-test-bot"))
+  return string.format('{%s%s"body":"%s","author":{"login":"%s"}}', id_field, database_id_field, encode_json_string(body), encode_json_string(author or "fkst-test-bot"))
 end
 
 local function rest_comment_json(body, author, id)
@@ -152,8 +152,8 @@ local function rest_comment_json(body, author, id)
   return string.format(
     '{"id":%s,"body":"%s","user":{"login":"%s"}}',
     tostring(comment_id),
-    json_string(body),
-    json_string(author or "fkst-test-bot")
+    encode_json_string(body),
+    encode_json_string(author or "fkst-test-bot")
   )
 end
 
@@ -210,7 +210,7 @@ end
 local function mock_pr_label_guard(labels, comments)
   local rendered_labels = {}
   for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+    table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   t.mock_command("gh api repos/owner/x/pulls/7", {
     stdout = '{"head":{"ref":"devloop-owner-x-42-01HY","sha":"abc123","repo":{"full_name":"owner/x","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/x","owner":{"login":"owner"}}},"state":"open","updated_at":"2026-06-03T02:03:04Z","labels":[' .. table.concat(rendered_labels, ",") .. "]}\n",
@@ -224,10 +224,10 @@ local function mock_pr_label_guard(labels, comments)
   })
 end
 
-local function assignees_json(assignees)
+local function encode_assignees_json(assignees)
   local rendered = {}
   for _, assignee in ipairs(assignees or { "fkst-test-bot" }) do
-    table.insert(rendered, string.format('{"login":"%s"}', json_string(assignee)))
+    table.insert(rendered, string.format('{"login":"%s"}', encode_json_string(assignee)))
   end
   return table.concat(rendered, ",")
 end
@@ -235,10 +235,10 @@ end
 local function mock_pr_open_guard(labels, comments, assignees)
   local rendered_labels = {}
   for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', json_string(label)))
+    table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   t.mock_command("gh api repos/owner/x/issues/42", {
-    stdout = '{"title":"Bridge issue","body":"","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[' .. table.concat(rendered_labels, ",") .. '],"assignees":[' .. assignees_json(assignees) .. "]}\n",
+    stdout = '{"title":"Bridge issue","body":"","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[' .. table.concat(rendered_labels, ",") .. '],"assignees":[' .. encode_assignees_json(assignees) .. "]}\n",
     stderr = "",
     exit_code = 0,
   })
@@ -291,7 +291,7 @@ end
 local function label_list_json(labels)
   local parts = {}
   for _, label in ipairs(labels or {}) do
-    table.insert(parts, string.format('{"name":"%s"}', json_string(label)))
+    table.insert(parts, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   return "[" .. table.concat(parts, ",") .. "]\n"
 end
@@ -609,7 +609,8 @@ return {
   mock_issue_list = mock_issue_list,
   mock_pr_list = mock_pr_list,
   mock_poll = mock_poll,
-  json_string = json_string,
+  json_string = encode_json_string,
+  encode_json_string = encode_json_string,
   comment_json = comment_json,
   mock_comment_view = mock_comment_view,
   mock_comment_view_failure = mock_comment_view_failure,

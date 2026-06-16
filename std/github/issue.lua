@@ -1,4 +1,13 @@
 local M = {}
+local github_view = require("std.github_view")
+local append_comments = github_view.append_comments
+local rest_state = github_view.rest_state
+local json_string = github_view.json_string
+local json_value = github_view.json_value
+local labels_json = github_view.labels_json
+local assignees_json = github_view.assignees_json
+local parse_view_updated_at = github_view.parse_view_updated_at
+local parse_updated_at_stdout = github_view.parse_updated_at_stdout
 -- The neutral Issue shape this op returns is everything `gh issue view --json` provides.
 -- Two documented exclusions: `blocked_by` needs GraphQL (a separate read op, not gh issue
 -- view), and comment `updated_at` is not exposed by gh issue view (only createdAt).
@@ -174,82 +183,6 @@ local function parse_json_object(stdout, context)
   error("std.github: " .. tostring(context) .. " response is not valid JSON")
 end
 
-local function append_comments(target, value)
-  if type(value) ~= "table" then
-    return
-  end
-  if type(value.comments) == "table" then
-    append_comments(target, value.comments)
-    return
-  end
-  if value.id ~= nil or value.body ~= nil or value.user ~= nil or value.author ~= nil then
-    table.insert(target, value)
-    return
-  end
-  for _, item in ipairs(value) do
-    append_comments(target, item)
-  end
-end
-
-local function rest_state(value)
-  if value == nil then
-    return nil
-  end
-  return tostring(value):upper()
-end
-
-local function json_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\")
-  text = text:gsub('"', '\\"')
-  text = text:gsub("\b", "\\b")
-  text = text:gsub("\f", "\\f")
-  text = text:gsub("\n", "\\n")
-  text = text:gsub("\r", "\\r")
-  text = text:gsub("\t", "\\t")
-  text = text:gsub("[%z\1-\31]", function(char)
-    return string.format("\\u%04X", string.byte(char))
-  end)
-  return '"' .. text .. '"'
-end
-
-local function json_value(value)
-  if value == nil then
-    return "null"
-  end
-  if type(value) == "boolean" then
-    return value and "true" or "false"
-  end
-  if type(value) == "number" then
-    return tostring(value)
-  end
-  return json_string(value)
-end
-
-local function labels_json(labels)
-  local parts = {}
-  for _, label in ipairs(labels or {}) do
-    if type(label) == "table" then
-      table.insert(parts, '{"name":' .. json_value(label.name) .. "}")
-    elseif label ~= nil then
-      table.insert(parts, '{"name":' .. json_value(label) .. "}")
-    end
-  end
-  return "[" .. table.concat(parts, ",") .. "]"
-end
-
-local function assignees_json(assignees)
-  local parts = {}
-  for _, assignee in ipairs(assignees or {}) do
-    if type(assignee) == "table" then
-      table.insert(parts, '{"login":' .. json_value(assignee.login) .. "}")
-    elseif assignee ~= nil then
-      table.insert(parts, '{"login":' .. json_value(assignee) .. "}")
-    end
-  end
-  return "[" .. table.concat(parts, ",") .. "]"
-end
-
 local function comments_json(comments)
   local parts = {}
   for _, comment in ipairs(comments or {}) do
@@ -289,27 +222,6 @@ local function rest_issue_to_view_stdout(issue_stdout, comments_stdout)
     .. ',"assignees":' .. assignees_json(issue.assignees)
     .. ',"author":{"login":' .. json_value(author_login) .. "}"
     .. "}"
-end
-
-local function parse_view_updated_at(stdout)
-  local ok, decoded = pcall(json.decode, stdout or "")
-  if not ok or type(decoded) ~= "table" then
-    return nil
-  end
-  local updated_at = decoded.updatedAt or decoded.updated_at
-  if updated_at == nil or tostring(updated_at) == "" then
-    return nil
-  end
-  return tostring(updated_at)
-end
-
-local function parse_updated_at_stdout(stdout)
-  local text = tostring(stdout or "")
-  text = text:gsub("^%s+", ""):gsub("%s+$", "")
-  if text == "" then
-    return nil
-  end
-  return text
 end
 
 local function decode_cached_view(encoded)
