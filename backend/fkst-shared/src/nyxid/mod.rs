@@ -47,13 +47,20 @@ pub const DEFAULT_GITHUB_PROXY_SLUG: &str = "api-github";
 /// Endpoint that lists the user's linked GitHub connections (one per linked
 /// GitHub account) under the caller's delegated token.
 ///
-/// **UNVERIFIED — confirm against NyxID main; confined here.** NyxID `main`
-/// today exposes `GET /api/v1/keys` (per-`UserService` instances, addressed by
-/// id/slug/label) and `GET /api/v1/connections` (one row per service) — neither
-/// yet projects a per-github-login `{connection_id, login, primary}` shape; the
-/// multi-connection github listing is still a NyxID draft. This constant + the
-/// [`GithubConnection`] deserialize mapping are the ONLY places that change when
-/// that listing ships; the wiremock tests pin the contract regardless.
+/// **Draft contract — does NOT match NyxID main; confined here; consumed ONLY
+/// by `github_hub` (NOT the ownership/authz path).** Verified against NyxID
+/// `main` @ `bcaccc9` (v0.7.0): NyxID has NO per-github-login projection. The
+/// real `GET /api/v1/connections` takes no `provider` param and returns
+/// per-`UserService` rows (`service_id`/`service_name`/`has_credential`, no
+/// `login`); the actual per-account listing is `GET /api/v1/providers/my-tokens`
+/// → `{ "tokens": [...] }`, where the GitHub login lives in `metadata["username"]`
+/// (may be absent) and there is no `connection_id`/`primary`; per-account routing
+/// (`_nyxid_via`) keys on a `UserService` id from `/api/v1/keys`, not the token
+/// id; and the identity JWT carries no github-login claim. This `{connection_id,
+/// login, primary}` shape + path are therefore a wiremock-pinned DRAFT used only
+/// by the github-issues hub. Correcting it to the verified `main` model is
+/// tracked in #156. The object/ownership layer never reads this — goal/session
+/// ownership is keyed on the NyxID `sub` (#142), so no sub↔login binding exists.
 pub const GITHUB_CONNECTIONS_PATH: &str = "/api/v1/connections?provider=github";
 
 /// NyxID-internal query selector that pins a proxied request to one specific
@@ -132,7 +139,7 @@ pub struct OrgSummary {
 /// Tolerant by design: unknown NyxID fields are ignored and `primary` defaults
 /// to `false` when NyxID omits it, so the type survives NyxID field drift while
 /// the wiremock tests pin the contract. See [`GITHUB_CONNECTIONS_PATH`] for the
-/// confined, UNVERIFIED route assumption.
+/// confined DRAFT route/shape (does not match NyxID main; corrected in #156).
 #[derive(Debug, Clone, Deserialize)]
 pub struct GithubConnection {
     /// Opaque connection identifier; fed verbatim to NyxID's `_nyxid_via`
@@ -691,8 +698,8 @@ impl NyxIdClient {
     /// List the caller's linked GitHub connections via NyxID, using the
     /// delegated bearer. Maps NyxID's response into [`GithubConnection`]s.
     ///
-    /// See [`GITHUB_CONNECTIONS_PATH`] for the confined, UNVERIFIED route
-    /// assumption. No credentials appear in any error.
+    /// See [`GITHUB_CONNECTIONS_PATH`] for the confined DRAFT route/shape (does
+    /// not match NyxID main; corrected in #156). No credentials appear in any error.
     pub async fn github_connections(
         &self,
         delegated: &DelegatedToken,
