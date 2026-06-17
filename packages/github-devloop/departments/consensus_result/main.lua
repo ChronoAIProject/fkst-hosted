@@ -25,9 +25,20 @@ local function with_effect_version(reached, version)
   return copy
 end
 
-local function raise_result_effects(repo, issue_number, reached, current, state, gate, reason, version)
+local function dependency_hold_effects_complete(current, reached, version)
+  if type(current) ~= "table" or type(reached) ~= "table" then
+    return false
+  end
+  return core.has_state_marker(current.comments, reached.proposal_id, "dependency_wait", version)
+    and core.dependency_hold_fact(current.comments, reached.proposal_id) ~= nil
+    and core.state_label_hint_matches(current.labels, "dependency_wait")
+    and core.has_label(current.labels, core._blocked_on_dependency_label)
+end
+
+local function raise_result_effects(repo, issue_number, reached, current, state, gate, reason, version, to_state)
   version = version or result_version(reached)
-  local comment_request = core.build_result_comment_request(repo, issue_number, reached)
+  to_state = to_state or (gate and gate.ok and "ready" or "dependency_wait")
+  local comment_request = core.build_result_comment_request(repo, issue_number, reached, to_state)
   local label_request = core.build_result_label_request(repo, issue_number, reached)
   local dependency_comment_request = nil
   local dependency_label_request = nil
@@ -87,7 +98,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
   end
-  core.log_apply("consensus_result", reached.proposal_id, "ready", version, { add = { "fkst-dev:ready" }, remove = { "fkst-dev:thinking" } }, raised)
+  core.log_apply("consensus_result", reached.proposal_id, to_state, version, { add = { "fkst-dev:ready" }, remove = { "fkst-dev:thinking" } }, raised)
 
   if not core.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key) then
     core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
@@ -96,7 +107,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
     core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
   if not gate.ok then
-    core.log_cas_decision("consensus_result", reached.proposal_id, state, "ready", "implementing", "hold-dependency", gate.reason)
+    core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "dependency_wait", "hold-dependency", gate.reason)
     if dependency_comment_request ~= nil then
       core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_comment_request)
     end
@@ -152,13 +163,21 @@ local function make_department(ports)
         consumer = "consensus_result",
         force_fresh = true,
       })
-      local to_state = "ready"
       core.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
       local state = core.current_state(current.comments, reached.proposal_id)
+      local gate = core.dependency_gate(repo, issue_number, {
+        proposal_id = reached.proposal_id,
+        version = version,
+        comments = current.comments,
+      })
+      local to_state = gate.ok and "ready" or "dependency_wait"
       local transition = core.versioned_transition_status(state, { "thinking" }, to_state, version)
       if transition == "idempotent" or transition == "stale" then
         if transition == "idempotent" and tostring(state.version or "") == tostring(version) then
-          if core.result_effects_complete(current, reached) then
+          local complete = gate.ok
+            and core.result_effects_complete(current, reached)
+            or dependency_hold_effects_complete(current, reached, version)
+          if complete then
             core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, "skip-idempotent(result effects complete)", "all declared result effects are derivable")
             return
           end
@@ -168,13 +187,10 @@ local function make_department(ports)
             reached,
             current,
             state,
-            core.dependency_gate(repo, issue_number, {
-              proposal_id = reached.proposal_id,
-              version = version,
-              comments = current.comments,
-            }),
+            gate,
             "applied(result effects incomplete)",
-            version
+            version,
+            to_state
           )
           return
         end
@@ -187,12 +203,7 @@ local function make_department(ports)
       end
       core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "consensus decision=" .. tostring(reached.decision))
 
-      local gate = core.dependency_gate(repo, issue_number, {
-        proposal_id = reached.proposal_id,
-        version = version,
-        comments = current.comments,
-      })
-      raise_result_effects(repo, issue_number, reached, current, state, gate, core.cas_outcome(state, transition, version), version)
+      raise_result_effects(repo, issue_number, reached, current, state, gate, core.cas_outcome(state, transition, version), version, to_state)
     end)
   end
 

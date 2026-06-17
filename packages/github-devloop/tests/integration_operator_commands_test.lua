@@ -359,7 +359,7 @@ return {
     local event = reached()
     local command = trusted_issue_command("reready", "IC_issue_reready_release")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" }, "OPEN", {
-      core.state_marker(event.proposal_id, "ready", event.dedup_key),
+      core.state_marker(event.proposal_id, "dependency_wait", event.dedup_key),
       "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
         .. core.dependency_unresolvable_marker(event.proposal_id, event.dedup_key, { 42 }),
       command,
@@ -386,7 +386,7 @@ return {
     t.eq(result.exit_code, 0)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find("operator command refused", 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find("reready requires ready state", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("reready requires ready or dependency_wait state", 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 

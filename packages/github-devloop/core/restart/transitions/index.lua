@@ -1,5 +1,6 @@
 return {
   { module = "blocked", key = "blocked" },
+  { module = "dependency_wait", key = "dependency_wait" },
   { module = "fixing", key = "fixing" },
   { module = "impl_failed", key = "impl-failed" },
   { module = "implementing", key = "implementing" },

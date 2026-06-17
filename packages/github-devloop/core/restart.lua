@@ -186,6 +186,7 @@ local default_consumer_sources = {
   "packages/github-devloop/departments/decompose/main.lua",
   "packages/github-devloop/departments/observe_pr/main.lua",
   "packages/github-devloop/departments/observe_issue/main.lua",
+  "packages/github-devloop/core/ready_split.lua",
   "packages/github-devloop/core/replayer.lua",
   "packages/github-devloop/core/requests.lua",
 }

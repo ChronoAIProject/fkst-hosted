@@ -115,7 +115,7 @@ return {
   end,
 
   test_executable_restart_table_covers_non_terminal_states = function()
-    local expected = { "thinking", "ready", "implementing", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged" }
+    local expected = { "thinking", "dependency_wait", "ready", "implementing", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged" }
     local by_state = table_by_state()
     t.eq(#core.liveness_contract_errors(), 0)
     for _, state in ipairs(expected) do
@@ -265,7 +265,8 @@ return {
     local by_state = table_by_state()
     local expected = {
       thinking = { mode = "live-defer", family = "converge-round", max_age = 120, budget = 150 },
-      ready = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 45 },
+      dependency_wait = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 525600 },
+      ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 45 },
       implementing = { mode = "live-defer", family = "implement-attempt", max_age = 120, budget = 45 },
       ["pr-open"] = { mode = "row-budget-bounds-receiver", receiver = 0, budget = 30 },
       reviewing = { mode = "live-defer", family = "review-converge-round", max_age = 120, budget = 150 },
@@ -696,7 +697,7 @@ return {
     end
     local ok, err = pcall(function()
       for _, row in ipairs(core.restart_transition_table()) do
-        if row.terminal == false then
+        if row.terminal == false and row.from_state ~= "dependency_wait" then
           local before = #raised
           local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
           local state = {
@@ -793,11 +794,9 @@ return {
 
   test_multi_effect_rows_declare_and_call_completeness_derivation = function()
     local by_state = table_by_state()
-    t.eq(by_state.ready.effects.intent_count, 3)
-    t.eq(by_state.ready.effects.kinds[1], "result-marker")
-    t.eq(by_state.ready.effects.kinds[2], "ready-label")
-    t.eq(by_state.ready.effects.kinds[3], "devloop_ready")
-    t.eq(by_state.ready.effects.completeness_derivation, "result_effects_complete")
+    t.eq(by_state.ready.effects.intent_count, 1)
+    t.eq(by_state.ready.effects.kinds[1], "devloop_ready")
+    t.eq(by_state.dependency_wait.effects.completeness_derivation, "dependency_gate_rederive")
     t.eq(by_state.blocked.effects.intent_count, 2)
     t.eq(by_state.blocked.effects.completeness_derivation, "decompose_children_complete")
     t.eq(#core.restart_effect_contract_errors(), 0)
@@ -818,11 +817,11 @@ return {
 
   test_multi_effect_contract_rejects_marker_only_rows = function()
     local rows = copy_rows(core.restart_transition_table())
-    local ready = rows_by_state(rows).ready
+    local ready = rows_by_state(rows).dependency_wait
     ready.effects.completeness_derivation = nil
     local errors = core.restart_effect_contract_errors(rows)
     t.eq(#errors, 1)
-    t.is_true(errors[1]:find("ready", 1, true) ~= nil)
+    t.is_true(errors[1]:find("dependency_wait", 1, true) ~= nil)
     t.is_true(errors[1]:find("completeness derivation", 1, true) ~= nil)
   end,
 

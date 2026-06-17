@@ -344,6 +344,13 @@ local function count_calls(needle)
   return count
 end
 
+local function marker_body(raises, needle)
+  local raise = find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
+    return type(payload.body) == "string" and payload.body:find(needle, 1, true) ~= nil
+  end)
+  return raise and raise.payload.body or nil
+end
+
 return {
   test_dependency_graphql_contract_is_named = function()
     local operations = core.github_graphql_queries
@@ -613,7 +620,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 53 }),
       }
@@ -631,6 +638,53 @@ return {
     t.is_true(clear ~= nil)
   end,
 
+  test_legacy_ready_cycle_hold_canonicalizes_to_dependency_wait = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: cycle\n\nReason: dependency-cycle\n\n"
+          .. core.dependency_cycle_marker(proposal_id, version),
+      }
+    )
+    mock_blocked_by(42, { { number = 54 } })
+    mock_blocked_by(54, { { number = 42 } })
+    local result = run_observe()
+    t.eq(result.exit_code, 0)
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
+    local split_version = core.ready_split_version(version)
+    local body = marker_body(result.raises, "ready-split-canonicalized:v1")
+    t.is_true(body ~= nil)
+    t.is_true(body:find('derived_state="dependency_wait"', 1, true) ~= nil)
+    t.is_true(body:find('state="dependency_wait"', 1, true) ~= nil)
+    t.is_true(body:find('version="' .. split_version .. '"', 1, true) ~= nil)
+    t.is_true(body:find("fkst:github-devloop:dependency-wait:v1", 1, true) ~= nil)
+  end,
+
+  test_legacy_ready_satisfied_split_raises_ready_at_split_version_once = function()
+    mock_observe_issue(
+      { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
+      {
+        core.state_marker(proposal_id, "ready", version),
+        "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
+          .. core.dependency_wait_marker(proposal_id, version, { 53 }),
+      }
+    )
+    mock_blocked_by(42, { { number = 53 } })
+    mock_blocked_by(53, {})
+    mock_blocker_issue(53, "merged")
+    local result = run_observe()
+    t.eq(result.exit_code, 0)
+    t.eq(count_queue(result.raises, "devloop_ready"), 1)
+    local split_version = core.ready_split_version(version)
+    local ready = find_raise(result.raises, "devloop_ready")
+    t.eq(ready.payload.dedup_key, core._dedup_key({ "ready", split_version }))
+    local body = marker_body(result.raises, "ready-split-canonicalized:v1")
+    t.is_true(body ~= nil)
+    t.is_true(body:find('state="ready"', 1, true) ~= nil)
+    t.is_true(body:find('version="' .. split_version .. '"', 1, true) ~= nil)
+  end,
+
   test_liveness_scan_reinjected_dependency_hold_uses_observe_gate = function()
     mock_repo()
     mock_liveness_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
@@ -638,7 +692,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 53 }),
       }
@@ -651,7 +705,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 53 }),
       }
@@ -686,7 +740,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 57 }),
       }
@@ -718,7 +772,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "fkst: dependency-waiver 60",
         "github-devloop dependency hold: waiting\n\nReason: dependency-waiver-required\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 60 }, "waiting", "dependency-waiver-required"),
@@ -729,7 +783,13 @@ return {
     local result = run_observe()
     t.eq(result.exit_code, 0)
     t.is_true(has_queue(result.raises, "devloop_ready"))
+    local split_version = core.ready_split_version(version)
+    t.eq(find_raise(result.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", split_version }))
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-waiver:v1"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-release:v1"))
+    t.is_true(has_marker(result.raises, "fkst:github-devloop:ready-split-canonicalized:v1"))
+    t.is_true(has_marker(result.raises, 'state="ready"'))
+    t.is_true(has_marker(result.raises, 'version="' .. split_version .. '"'))
     t.is_true(has_marker(result.raises, "fkst:github-devloop:operator-command:v1"))
     t.is_true(has_marker(result.raises, 'command="dependency-waiver"'))
     t.is_true(has_marker(result.raises, 'blocker="60"'))
@@ -740,7 +800,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         dependency_waiver_comment(59),
         "github-devloop dependency hold: waiting\n\nReason: dependency-waiver-required\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 59 }, "waiting", "dependency-waiver-required"),
@@ -761,7 +821,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 7 }),
       }
@@ -806,7 +866,7 @@ return {
     t.eq(gh_failed.reason, "gh-failed")
 
     local old_gh_failed = core.dependency_hold_fact({
-      core.state_marker(proposal_id, "ready", version),
+      core.state_marker(proposal_id, "dependency_wait", version),
       "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
         .. core.dependency_wait_marker(proposal_id, version, { 42 }),
     }, proposal_id)
@@ -844,7 +904,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
           .. core.dependency_unresolvable_marker(proposal_id, version, { 42 }),
       }
@@ -853,7 +913,7 @@ return {
     local released = run_observe()
     t.eq(released.exit_code, 0)
     t.is_true(has_queue(released.raises, "devloop_ready"))
-    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", version }))
+    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", core.ready_split_version(version) }))
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
     local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
@@ -865,7 +925,7 @@ return {
     mock_observe_issue(
       { "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" },
       {
-        core.state_marker(proposal_id, "ready", version),
+        core.state_marker(proposal_id, "dependency_wait", version),
         "github-devloop dependency hold: unresolvable\n\nReason: gh-failed\n\n"
           .. core.dependency_wait_marker(proposal_id, version, { 42 }),
       }
@@ -874,7 +934,7 @@ return {
     local released = run_observe()
     t.eq(released.exit_code, 0)
     t.is_true(has_queue(released.raises, "devloop_ready"))
-    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", version }))
+    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", core.ready_split_version(version) }))
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
   end,
 
@@ -896,14 +956,15 @@ return {
     t.eq(has_queue(result.raises, "devloop_ready"), false)
   end,
 
-  test_implement_backstop_returns_without_implementing = function()
+  test_implement_backstop_moves_ready_to_dependency_wait = function()
     mock_blocked_by(42, { { number = 55 } })
     mock_blocked_by(55, {})
     mock_blocker_issue(55, "ready")
     mock_implement_issue()
     local result = run_implement()
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.is_true(has_marker(result.raises, 'state="dependency_wait"'))
+    t.eq(has_queue(result.raises, "devloop_open_pr"), false)
   end,
 
   test_no_blockers_unaffected = function()

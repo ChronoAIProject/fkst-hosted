@@ -138,6 +138,16 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
       comments = current.comments,
     })
   end
+  if state.state == "ready" then
+    facts.dependency_gate = facts.dependency_gate or core.dependency_gate(issue.repo, issue.number, {
+      proposal_id = proposal_id,
+      version = state.version,
+      comments = current.comments,
+    })
+    if core.canonicalize_legacy_ready_dependency_wait("observe_issue", issue, state, facts) then
+      return true
+    end
+  end
   local state_is_issue_local = issue_state ~= nil
     and issue_state.state == state.state
     and tostring(issue_state.version or "") == tostring(state.version or "")
@@ -245,7 +255,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
 end
 
 local function raise_stale_dependency_label_clear(issue, proposal_id, state, labels)
-  if state.state == "ready" or not core.has_label(labels, core._blocked_on_dependency_label) then
+  if state.state == "ready" or state.state == "dependency_wait" or not core.has_label(labels, core._blocked_on_dependency_label) then
     return false
   end
   core.log_apply("observe_issue", proposal_id, state.state, state.version, { add = {}, remove = { core._blocked_on_dependency_label } }, {
@@ -271,19 +281,19 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
     core.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
-  if state.state ~= "ready" then
+  if state.state ~= "ready" and state.state ~= "dependency_wait" then
     core.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "refused(invalid-state)", "operator reready requires ready state")
     local refusal = core.build_operator_issue_command_refusal_request(
       issue.repo,
       issue.number,
       command,
-      "reready requires ready state",
+      "reready requires ready or dependency_wait state",
       issue.source_ref
     )
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return true
   end
-  core.replay_from_table("observe_issue", issue, state, core.restart_transition_row("ready"), {
+  core.replay_from_table("observe_issue", issue, state, core.restart_transition_row(state.state), {
     proposal_id = proposal_id,
     current = current,
     command = command,
@@ -312,13 +322,13 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
     core.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
-  if state.state ~= "ready" then
-    core.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "refused(invalid-state)", "operator dependency waiver requires ready state")
+  if state.state ~= "dependency_wait" then
+    core.log_cas_decision("observe_issue", proposal_id, state, "dependency_wait", "ready", "refused(invalid-state)", "operator dependency waiver requires dependency_wait state")
     local refusal = core.build_operator_issue_command_refusal_request(
       issue.repo,
       issue.number,
       command,
-      "dependency-waiver requires ready state",
+      "dependency-waiver requires dependency_wait state",
       issue.source_ref
     )
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
@@ -355,18 +365,25 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
     blocker_number,
     issue.source_ref
   )
-  local payload = core.build_devloop_ready_payload({
+  core.log_cas_decision("observe_issue", proposal_id, state, "dependency_wait", "ready", "applied(operator-dependency-waiver)", "trusted operator command created dependency waiver")
+  core.replay_from_table("observe_issue", issue, state, core.restart_transition_row("dependency_wait"), {
     proposal_id = proposal_id,
-    dedup_key = state.version,
-    source_ref = issue.source_ref,
+    current = current,
+    command_comment_request = comment_request,
+    dependency_gate = {
+      ok = true,
+      kind = "satisfied",
+      reason = "dependency-waiver",
+      notes = {
+        {
+          kind = "dependency-waiver",
+          blocker_number = blocker_number,
+          reason = "completed_without_merged_marker",
+        },
+      },
+      unmet = {},
+    },
   })
-  core.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "applied(operator-dependency-waiver)", "trusted operator command created dependency waiver")
-  core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
-    "github-proxy.github_issue_comment_request",
-    "devloop_ready",
-  })
-  core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise("observe_issue", proposal_id, "devloop_ready", payload)
   return true
 end
 

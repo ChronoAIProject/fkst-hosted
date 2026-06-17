@@ -414,10 +414,10 @@ return {
   end,
 
   test_live_defer_clear_opens_fresh_timeout_generation = function()
-    local row = core.restart_transition_row("ready")
+    local row = core.restart_transition_row("dependency_wait")
     local source_ref = core.issue_source_ref(repo, 42)
     local state = {
-      state = "ready",
+      state = "dependency_wait",
       version = version,
       proposal_id = proposal_id,
       marker_created_at = "2026-06-03T09:45:00Z",
@@ -425,19 +425,19 @@ return {
     local old_generation = core._dedup_key({
       "restart-liveness:v2",
       proposal_id,
-      "ready",
-      "ready.actionable",
-      "state_entry:v1",
+      "dependency_wait",
+      "dependency_held_blocker_bound",
+      "live_defer_epoch:v1",
       "old-state-entry",
       tostring(core.iso_timestamp_epoch_seconds("2026-06-03T09:45:00Z") * 1000),
     })
     local comments = {
-      state_comment("ready", version, "2026-06-03T09:45:00Z"),
+      state_comment("dependency_wait", version, "2026-06-03T09:45:00Z"),
       trusted_comment(core.dependency_wait_marker(proposal_id, version, { 7 }), "2026-06-03T09:45:01Z"),
       trusted_comment(core.dependency_release_marker(proposal_id, version), "2026-06-03T10:33:00Z"),
-      timeout_attempt_comment("ready", version, 1, source_ref),
-      timeout_attempt_comment("ready", version, 2, source_ref),
-      timeout_attempt_comment("ready", version, 3, source_ref),
+      timeout_attempt_comment("dependency_wait", version, 1, source_ref),
+      timeout_attempt_comment("dependency_wait", version, 2, source_ref),
+      timeout_attempt_comment("dependency_wait", version, 3, source_ref),
       timeout_attempt_v2_comment(row, old_generation, 1, source_ref),
       timeout_attempt_v2_comment(row, old_generation, 2, source_ref),
       timeout_attempt_v2_comment(row, old_generation, 3, source_ref),
@@ -472,7 +472,7 @@ return {
     facts.now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T11:18:01Z")
     facts.actionable_epoch_eval = nil
     due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
-    t.eq(due, true)
+    t.eq(due, false)
     t.eq(age, 45)
     t.eq(core.liveness_timeout_attempt(row, state, facts), 0)
     raised = capture_raises(function()
@@ -481,21 +481,16 @@ return {
         number = 42,
         source_ref = source_ref,
       }, state, row, facts)
-      t.eq(applied, true)
+      t.eq(applied, false)
     end)
-    t.eq(#raised, 1)
+    t.eq(#raised, 0)
     local attempt = nil
     for _, item in ipairs(raised) do
       if item.queue == "github-proxy.github_issue_comment_request" then
         attempt = item
       end
     end
-    t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
-    t.is_true(attempt.payload.body:find('state="ready"', 1, true) ~= nil)
-    t.is_true(attempt.payload.body:find('liveness_class_id="ready.actionable"', 1, true) ~= nil)
-    t.is_true(attempt.payload.body:find('generation_key="' .. eval.generation_key .. '"', 1, true) ~= nil)
-    t.is_true(attempt.payload.body:find('round="1"', 1, true) ~= nil)
+    t.eq(attempt, nil)
     t.eq(state.marker_created_at, "2026-06-03T09:45:00Z")
   end,
 
@@ -528,9 +523,9 @@ return {
   end,
 
   test_live_defer_absent_clear_with_unsatisfied_gate_is_contract_invalid = function()
-    local row = core.restart_transition_row("ready")
+    local row = core.restart_transition_row("dependency_wait")
     local state = {
-      state = "ready",
+      state = "dependency_wait",
       version = version,
       proposal_id = proposal_id,
       marker_created_at = "2026-06-03T09:45:00Z",
@@ -539,7 +534,7 @@ return {
       proposal_id = proposal_id,
       current = {
         comments = {
-          state_comment("ready", version, "2026-06-03T09:45:00Z"),
+          state_comment("dependency_wait", version, "2026-06-03T09:45:00Z"),
         },
       },
       dependency_gate = {
@@ -552,7 +547,7 @@ return {
     }
     local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
     t.eq(eval.status, "contract_invalid")
-    t.eq(eval.reason, "live-defer-clear-absent-after-dependency-gate:waiting-on-dependency")
+    t.eq(eval.reason, "live-defer marker absent but no durable clear fact or never-deferred proof exists")
   end,
 
   test_timeout_reconcile_why_reports_effective_heartbeat_age = function()

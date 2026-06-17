@@ -19,6 +19,7 @@ end
 
 function M.state_marker(proposal_id, state, version, effects)
   if state ~= "thinking"
+    and state ~= "dependency_wait"
     and state ~= "ready"
     and state ~= "implementing"
     and state ~= "pr-open"
@@ -164,6 +165,17 @@ function M.version_reimplement_round(version)
   return max_n
 end
 
+function M.version_ready_split_round(version)
+  local max_n = 0
+  for n in tostring(version or ""):gmatch("[/-]ready%-split[/-](%d+)") do
+    local parsed = tonumber(n) or 0
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
+end
+
 local timeout_order_states = {
   "thinking",
   "ready",
@@ -225,6 +237,7 @@ local function version_sort_key(version, stage_rank)
     timeout_n = version_max_timeout_round(version),
     review_loop_n = M.version_review_loop_round(version),
     review_meta_action_n = M.version_review_meta_action_round(version),
+    ready_split_n = M.version_ready_split_round(version),
     stage_rank = tonumber(stage_rank) or 0,
   }
 end
@@ -255,6 +268,9 @@ local function compare_version_keys(left, right)
   end
   if left.review_loop_n ~= right.review_loop_n then
     return left.review_loop_n > right.review_loop_n and 1 or -1
+  end
+  if left.ready_split_n ~= right.ready_split_n then
+    return left.ready_split_n > right.ready_split_n and 1 or -1
   end
   return 0
 end
@@ -293,6 +309,8 @@ local function strip_transition_version_suffixes(version)
       :gsub("%-timeout%-[%w%-]+%-%d+$", "")
       :gsub("/reimplement/%d+$", "")
       :gsub("%-reimplement%-%d+$", "")
+      :gsub("/ready%-split/%d+$", "")
+      :gsub("%-ready%-split%-%d+$", "")
       :gsub("/loop/%d+$", "")
       :gsub("%-loop%-%d+$", "")
   end
@@ -333,6 +351,9 @@ local function compare_same_base_transition_versions(incoming_version, current_v
   end
   if incoming_key.review_loop_n ~= current_key.review_loop_n then
     return incoming_key.review_loop_n > current_key.review_loop_n and 1 or -1
+  end
+  if incoming_key.ready_split_n ~= current_key.ready_split_n then
+    return incoming_key.ready_split_n > current_key.ready_split_n and 1 or -1
   end
   return 0
 end
@@ -589,10 +610,12 @@ function M.state_label_changes(to_state)
   end
 
   local remove_labels = {}
+  local remove_seen = {}
   for _, state in ipairs(M._state_order) do
     local label = M._label_by_state[state]
-    if state ~= to_state then
+    if state ~= to_state and label ~= add_label and remove_seen[label] ~= true then
       table.insert(remove_labels, label)
+      remove_seen[label] = true
     end
   end
   return { add_label }, remove_labels

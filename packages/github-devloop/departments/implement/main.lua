@@ -647,11 +647,35 @@ local function process_ready_event(event)
     local state = core.current_state(current.comments, ready.proposal_id)
     local gate = core.dependency_gate(repo, issue_number, {
       proposal_id = ready.proposal_id,
-      version = ready.dedup_key,
+      version = core.ready_payload_inner_version(ready.dedup_key),
       comments = current.comments,
     })
     if not gate.ok then
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-dependency-backstop", gate.reason)
+      local inner_ready_version = core.ready_payload_inner_version(ready.dedup_key)
+      local dep_version = core.ready_split_version(inner_ready_version)
+      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "dependency_wait", "hold-dependency-backstop", gate.reason)
+      core.log_apply("implement", ready.proposal_id, "dependency_wait", dep_version, { add = { core._blocked_on_dependency_label }, remove = {} }, {
+        "github-proxy.github_issue_comment_request",
+        "github-proxy.github_issue_label_request",
+      })
+      core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", core.build_ready_split_canonicalized_comment_request(
+        repo,
+        issue_number,
+        ready.proposal_id,
+        inner_ready_version,
+        "dependency_wait",
+        dep_version,
+        gate,
+        ready.source_ref
+      ))
+      core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
+        repo,
+        issue_number,
+        { core._blocked_on_dependency_label },
+        {},
+        core._dedup_key({ "dependency", "label", "hold", tostring(ready.proposal_id), tostring(dep_version), tostring(gate.kind) }),
+        ready.source_ref
+      ))
       return
     end
 

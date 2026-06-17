@@ -208,15 +208,15 @@ return {
     t.is_true(contains_error(errors, "reviewing: non-terminal row must declare liveness_class_id"))
   end,
 
-  test_887_ready_model_fixture_uses_dependency_release_epoch_after_p2 = function()
-    local ready = rows_by_state(core.restart_transition_table()).ready
-    t.eq(ready.defer.kind, "release_gate")
-    local errors = core.strict_restart_liveness_contract_errors({ ready })
+  test_dependency_wait_model_fixture_uses_dependency_release_epoch = function()
+    local row = rows_by_state(core.restart_transition_table()).dependency_wait
+    t.eq(row.defer.kind, "release_gate")
+    local errors = core.strict_restart_liveness_contract_errors({ row })
     t.eq(#errors, 0)
 
     local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
-    local due, age = core.liveness_timeout_due_with_facts(ready, {
-      state = "ready",
+    local due, age = core.liveness_timeout_due_with_facts(row, {
+      state = "dependency_wait",
       version = "ready/887",
       proposal_id = "github-devloop/issue/owner/repo/887",
       marker_created_at = "2026-06-03T09:45:00Z",
@@ -253,12 +253,12 @@ return {
         reason = "test drift",
       }
     end
-    local ok, errors = pcall(core.strict_restart_liveness_contract_errors, { rows_by_state(core.restart_transition_table()).ready })
+    local ok, errors = pcall(core.strict_restart_liveness_contract_errors, { rows_by_state(core.restart_transition_table()).dependency_wait })
     core.actionable_epoch_resolve = original
     if not ok then
       error(errors)
     end
-    t.is_true(contains_error(errors, "ready: actionable_epoch runtime provenance must match declared source"))
+    t.is_true(contains_error(errors, "dependency_wait: actionable_epoch runtime provenance must match declared source"))
   end,
 
   test_negative_control_live_defer_without_actionable_epoch_fails = function()
@@ -306,12 +306,12 @@ return {
   end,
 
   test_release_gate_still_requires_clear_fact_and_passes_when_declared = function()
-    local ready = rows_by_state(core.restart_transition_table()).ready
-    t.eq(#core.strict_restart_liveness_contract_errors({ ready }), 0)
-    local row = copy_value(ready)
+    local dependency_wait = rows_by_state(core.restart_transition_table()).dependency_wait
+    t.eq(#core.strict_restart_liveness_contract_errors({ dependency_wait }), 0)
+    local row = copy_value(dependency_wait)
     row.defer.clear_fact = nil
     local errors = core.strict_restart_liveness_contract_errors({ row })
-    t.is_true(contains_error(errors, "ready: release_gate defer must declare durable clear_fact"))
+    t.is_true(contains_error(errors, "dependency_wait: release_gate defer must declare durable clear_fact"))
   end,
 
   test_heartbeat_defer_rejects_missing_redrive_generation = function()

@@ -478,6 +478,15 @@ function M.dependency_release_marker(proposal_id, version)
     .. '" -->'
 end
 
+function M.ready_split_canonicalized_marker(proposal_id, from_version, to_version, derived_state, reason)
+  return '<!-- fkst:github-devloop:ready-split-canonicalized:v1 proposal="' .. tostring(proposal_id)
+    .. '" from_version="' .. safe_dependency_attr(from_version)
+    .. '" to_version="' .. safe_dependency_attr(to_version)
+    .. '" derived_state="' .. safe_dependency_attr(derived_state)
+    .. '" reason="' .. safe_dependency_attr(reason or "ready_split_rederive")
+    .. '" -->'
+end
+
 function M.dependency_void_marker(proposal_id, version, blocker_number, reason)
   return '<!-- fkst:github-devloop:dependency-void:v1 proposal="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
@@ -595,6 +604,39 @@ function M.dependency_release_fact(comments, proposal_id, version)
     end
   end
   return nil
+end
+
+function M.ready_split_canonicalized_fact(comments, proposal_id, from_version)
+  local core = root()
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:ready%-split%-canonicalized:v1.-%-%->"
+  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
+    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_from = marker:match('from_version="([^"]*)"')
+      if marker_proposal == tostring(proposal_id)
+        and marker_from == tostring(from_version) then
+        return {
+          proposal_id = marker_proposal,
+          from_version = marker_from,
+          to_version = decode_dependency_attr(marker_attr(marker, "to_version")),
+          derived_state = decode_dependency_attr(marker_attr(marker, "derived_state")),
+          reason = decode_dependency_attr(marker_attr(marker, "reason")),
+          comment_created_at = core._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function M.ready_split_version(version)
+  local core = root()
+  local base = core.strip_transition_version_suffixes(version)
+  local next_n = core.version_ready_split_round(version) + 1
+  return tostring(base) .. "/ready-split/" .. tostring(next_n)
 end
 
 function M.dependency_wait_fact(comments, proposal_id)

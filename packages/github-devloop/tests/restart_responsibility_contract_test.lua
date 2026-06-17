@@ -113,23 +113,18 @@ end
 return {
   test_known_god_states_inventory_is_exact = function()
     local inventory = core.known_god_states()
-    assert_inventory_errors(inventory, "ready", {
-      ["ready: non-terminal row must declare responsibility_signature"] = true,
-    })
-    t.eq(inventory.blocked, nil)
     local count = 0
     for _ in pairs(inventory) do
       count = count + 1
     end
-    t.eq(count, 1)
+    t.eq(count, 0)
   end,
 
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
     local strict = core.strict_restart_responsibility_contract_errors()
-    for _, state in ipairs({ "ready" }) do
-      t.is_true(core.responsibility_contract_inventory_is_listed_violation(state, strict), state)
-    end
+    t.eq(core.responsibility_contract_inventory_is_listed_violation("ready", strict), false)
+    t.eq(core.responsibility_contract_inventory_is_listed_violation("dependency_wait", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("blocked", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("merge-ready", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("reviewing", strict), false)
@@ -141,7 +136,7 @@ return {
 
   test_clean_single_responsibility_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    for _, state in ipairs({ "thinking", "implementing", "impl-failed", "pr-open", "reviewing", "review-meta", "merge-ready", "merging", "fixing", "blocked" }) do
+    for _, state in ipairs({ "thinking", "dependency_wait", "ready", "implementing", "impl-failed", "pr-open", "reviewing", "review-meta", "merge-ready", "merging", "fixing", "blocked" }) do
       local errors = core.strict_restart_responsibility_contract_errors({ by_state[state] })
       t.eq(#errors, 0, state .. ": " .. joined_errors(errors))
     end
@@ -416,30 +411,49 @@ return {
     t.is_true(contains_error(errors, "ready: responsibility_signature.driving_queue must match row.driving_queue"))
   end,
 
-  test_inventory_ratchet_rejects_stale_entry_after_signature_added = function()
-    local rows = copy_rows(core.restart_transition_table())
-    local by_state = rows_by_state(rows)
-    local ready = by_state.ready
-    ready.responsibility_signature = {
-      receiver_kind = "dependency-gate",
-      driving_queue = "devloop_ready",
-      state_kind = "queue_wait",
-      liveness_class = "ready.actionable",
-      input_fact_family = "dependency-gate",
-      output_postcondition_family = "implementation-kickoff",
-      phase_rank = core.stage_rank("ready"),
-      lineage_keys = { "state.version", "source_ref" },
-      successors = {
-        {
-          state = "implementing",
-          output_variant = "dependency-satisfied",
-          postcondition_family = "implementation-kickoff",
-          monotonic = true,
-        },
+  test_queue_wait_arbitrary_extra_non_terminal_successor_still_fails = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table()).ready)
+    row.from_state = "synthetic-queue-wait-extra"
+    row.to_states = { "implementing", "fixing", "blocked" }
+    row.responsibility_signature.phase_rank = core.stage_rank("ready")
+    row.responsibility_signature.successors = {
+      {
+        state = "implementing",
+        output_variant = "implementation_started",
+        postcondition_family = "implementation_kickoff",
+        monotonic = true,
+      },
+      {
+        state = "fixing",
+        output_variant = "arbitrary_extra",
+        failure = true,
+        bump = true,
+      },
+      {
+        state = "blocked",
+        output_variant = "actionable_kickoff_timeout",
+        terminal = true,
+        monotonic = true,
       },
     }
-    local errors = core.restart_responsibility_inventory_errors(rows)
-    t.is_true(contains_error(errors, "ready: listed known_god_states entry is stale and must be removed"))
+    local original_stage_rank = core.stage_rank
+    core.stage_rank = function(state)
+      if state == "synthetic-queue-wait-extra" then
+        return original_stage_rank("ready")
+      end
+      return original_stage_rank(state)
+    end
+    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    core.stage_rank = original_stage_rank
+    if not ok then
+      error(errors)
+    end
+    t.is_true(contains_error(errors, "synthetic-queue-wait-extra: queue_wait may only add terminal cancel/block successors"), joined_errors(errors))
+  end,
+
+  test_known_god_states_inventory_remains_empty = function()
+    local errors = core.restart_responsibility_inventory_errors()
+    t.eq(#errors, 0, joined_errors(errors))
   end,
 
   test_known_god_state_with_duplicate_signature_still_fails_rule_6 = function()
@@ -463,6 +477,29 @@ return {
     table.insert(rows, other)
     local errors = core.restart_responsibility_inventory_errors(rows)
     t.is_true(contains_error(errors, "synthetic-ready-duplicate: duplicate responsibility_signature shared with ready"), joined_errors(errors))
+  end,
+
+  test_invariant_6_rejects_old_fused_ready_dependency_hold = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table()).ready)
+    row.liveness_class_id = "ready.actionable"
+    row.watchdog = {
+      mode = "live-defer",
+      budget_ms = 45 * 60 * 1000,
+    }
+    row.defer = {
+      kind = "release_gate",
+      live_marker = "dependency-wait:v1",
+      freshness_ms = 525600 * 60 * 1000,
+      clear_fact = "dependency-release:v1",
+      observed_fact = "dependency-wait-observed:v1",
+      clear_opens_generation = true,
+    }
+    row.responsibility_signature.liveness_class = "ready.actionable"
+    row.responsibility_signature.input_fact_family = "ready-base-preconditions partitioned by blockedBy empty/nonempty"
+    row.responsibility_signature.output_postcondition_family = "implementation_kickoff and dependency-release-or-blocker-tracking"
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "ready: invariant #6 forbids dependency release_gate defer on actionable ready"), joined_errors(errors))
+    t.is_true(contains_error(errors, "ready: invariant #6 forbids mixing implementation kickoff and dependency release/blocker tracking"), joined_errors(errors))
   end,
 
   test_signature_omitting_real_successor_fails_successor_set_check = function()

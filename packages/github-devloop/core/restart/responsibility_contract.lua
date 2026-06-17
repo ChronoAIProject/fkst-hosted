@@ -11,11 +11,7 @@ local state_kinds = {
   budget_bounded_recovery = true,
 }
 
-local known_god_states = {
-  ready = {
-    ["ready: non-terminal row must declare responsibility_signature"] = "dependency gate and implementation kickoff are still fused until the ready split.",
-  },
-}
+local known_god_states = {}
 
 local function copy_table(map)
   local out = {}
@@ -115,6 +111,16 @@ end
 
 local function edge_is_normal(edge)
   return not edge_is_terminal(edge) and not edge_is_failure(edge)
+end
+
+local function edge_is_ready_dependency_regression(row, edge)
+  return state_name(row) == "ready"
+    and edge ~= nil
+    and edge.state == "dependency_wait"
+    and edge.failure == true
+    and edge.bump == true
+    and edge.regression == "blocker_reappeared"
+    and edge.output_variant == "blocker_reappeared"
 end
 
 local function successor_list(subject)
@@ -256,7 +262,9 @@ local function validate_kind_fanout(row, signature, edges, errors)
       table.insert(errors, state .. ": queue_wait state must declare exactly one normal successor")
     end
     for _, edge in ipairs(edges or {}) do
-      if not edge_is_normal(edge) and edge_is_terminal(edge) ~= true then
+      if not edge_is_normal(edge)
+        and edge_is_terminal(edge) ~= true
+        and not edge_is_ready_dependency_regression(row, edge) then
         table.insert(errors, state .. ": queue_wait may only add terminal cancel/block successors")
       end
     end
@@ -402,6 +410,30 @@ local function validate_unique_signature(row, signature, seen, errors)
   seen[fingerprint] = row.from_state
 end
 
+local function validate_blocked_by_partition_invariant(row, signature, errors)
+  local state = state_name(row)
+  local input = tostring(signature.input_fact_family or "")
+  local output = tostring(signature.output_postcondition_family or "")
+  local defer = row and row.defer or nil
+  if input:find("blocked", 1, true) ~= nil
+    and input:find("no-open-blockers", 1, true) ~= nil then
+    table.insert(errors, state .. ": invariant #6 forbids a hold state partitioned by issue.blockedBy empty/nonempty")
+  end
+  if output:find("implementation_kickoff", 1, true) ~= nil
+    and output:find("dependency", 1, true) ~= nil then
+    table.insert(errors, state .. ": invariant #6 forbids mixing implementation kickoff and dependency release/blocker tracking")
+  end
+  if state == "ready" and type(defer) == "table" and defer.kind == "release_gate" then
+    table.insert(errors, state .. ": invariant #6 forbids dependency release_gate defer on actionable ready")
+  end
+  if state == "ready" and tostring(row.liveness_class_id or "") ~= "actionable_kickoff" then
+    table.insert(errors, state .. ": invariant #6 requires ready to be pure actionable_kickoff")
+  end
+  if state == "dependency_wait" and tostring(row.liveness_class_id or "") ~= "dependency_held_blocker_bound" then
+    table.insert(errors, state .. ": invariant #6 requires dependency_wait to be dependency_held_blocker_bound")
+  end
+end
+
 local function validate_row(row, seen, all_rows, errors)
   if row == nil or row.terminal == true then
     return
@@ -419,6 +451,7 @@ local function validate_row(row, seen, all_rows, errors)
   validate_kind_fanout(row, signature, actual_edges, errors)
   validate_phase_monotonicity(row, signature, actual_edges, errors)
   validate_generation_entry_policy(row, actual_edges, all_rows, errors)
+  validate_blocked_by_partition_invariant(row, signature, errors)
   validate_unique_signature(row, signature, seen, errors)
 end
 

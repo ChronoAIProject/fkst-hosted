@@ -443,7 +443,7 @@ return {
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" }, "OPEN", {
-      core.state_marker(proposal_id, "ready", version),
+      core.state_marker(proposal_id, "dependency_wait", version),
       core.dependency_wait_marker(proposal_id, version, { 7 }),
     })
     mock_empty_pr_list()
@@ -461,7 +461,7 @@ return {
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready", "fkst-dev:blocked-on-dependency" }, "OPEN", {
-      timeout_state_comment("ready", version, "2026-06-03T00:00:00Z"),
+      timeout_state_comment("dependency_wait", version, "2026-06-03T00:00:00Z"),
       "github-devloop dependency hold: waiting\n\nReason: waiting-on-dependency\n\n"
         .. core.dependency_wait_marker(proposal_id, version, { 271 }),
     })
@@ -495,9 +495,8 @@ return {
     t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v1", 1, true) ~= nil)
     t.is_true(attempt.payload.body:find('state="ready"', 1, true) ~= nil)
-    t.is_true(attempt.payload.body:find('liveness_class_id="ready.actionable"', 1, true) ~= nil)
     t.is_true(attempt.payload.body:find('round="1"', 1, true) ~= nil)
   end,
 

@@ -143,6 +143,16 @@ local function maybe_timeout_action(entity, state, facts)
       comments = facts.current and facts.current.comments,
     })
   end
+  if state.state == "ready" then
+    facts.dependency_gate = facts.dependency_gate or core.dependency_gate(entity and entity.repo, entity and entity.number, {
+      proposal_id = facts.proposal_id or state.proposal_id,
+      version = state and state.version,
+      comments = facts.current and facts.current.comments,
+    })
+    if core.canonicalize_legacy_ready_dependency_wait("liveness_scan", entity, state, facts) then
+      return "handled"
+    end
+  end
   local proposal_id = facts.proposal_id or state.proposal_id
   if core.restart_row_liveness_deferred(row, state, facts, facts.now_seconds or now()) then
     core.log_cas_decision("liveness_scan", proposal_id, state, row.from_state, row.driving_queue, "skip-active-output-obligation", "receiver liveness contract signal is still fresh")

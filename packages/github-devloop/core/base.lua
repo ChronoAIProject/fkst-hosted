@@ -70,6 +70,7 @@ local state_labels = {
 
 local label_by_state = {
   thinking = thinking_label,
+  dependency_wait = ready_label,
   ready = ready_label,
   implementing = implementing_label,
   ["pr-open"] = pr_open_label,
@@ -90,8 +91,9 @@ end
 
 local state_graph = {
   unmanaged = { "thinking" },
-  thinking = { "ready", "blocked" },
-  ready = { "implementing" },
+  thinking = { "dependency_wait", "ready", "blocked" },
+  dependency_wait = { "dependency_wait", "ready", "blocked" },
+  ready = { "dependency_wait", "implementing", "blocked" },
   implementing = { "pr-open", "impl-failed" },
   ["pr-open"] = { "reviewing", "blocked" },
   reviewing = { "merge-ready", "fixing", "review-meta" },
@@ -104,9 +106,10 @@ local state_graph = {
   blocked = {},
 }
 
-local state_order = { "thinking", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged" }
+local state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged" }
 local state_stage_rank = {
   thinking = 100,
+  dependency_wait = 500,
   ready = 500,
   implementing = 600,
   ["pr-open"] = 650,

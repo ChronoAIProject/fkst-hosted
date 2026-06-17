@@ -85,6 +85,7 @@ end
 function M.resolve_replay_payload_fields(row, state, facts)
   return resolve_payload_fields(row, state, facts or {})
 end
+
 local function find_linked_pr(snapshot, pr_number)
   for _, item in ipairs(snapshot and snapshot.prs or {}) do
     if tostring(item.number or "") == tostring(pr_number or "") then
@@ -429,138 +430,6 @@ local function replay_thinking(dept, issue, state, row, facts)
   })
 end
 
-local function raise_dependency_release(dept, issue, proposal_id, state, current, ready_payload, command_comment_request, gate)
-  local raised = { "devloop_ready" }
-  local has_blocked_label = M.has_label(current.labels, M._blocked_on_dependency_label)
-  local release_fact = M.dependency_release_fact(current.comments, proposal_id, state.version)
-  if release_fact == nil then
-    table.insert(raised, "github-proxy.github_issue_comment_request")
-  end
-  if command_comment_request ~= nil then
-    table.insert(raised, "github-proxy.github_issue_comment_request")
-  end
-  if has_blocked_label then
-    table.insert(raised, "github-proxy.github_issue_label_request")
-  end
-  M.log_apply(dept, proposal_id, nil, nil, { add = {}, remove = { M._blocked_on_dependency_label } }, raised)
-  if command_comment_request ~= nil then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
-  end
-  if release_fact == nil then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_release_comment_request(
-      issue.repo,
-      issue.number,
-      proposal_id,
-      state.version,
-      gate,
-      issue.source_ref
-    ))
-  end
-  if has_blocked_label then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
-      issue.repo,
-      issue.number,
-      {},
-      { M._blocked_on_dependency_label },
-      M._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }),
-      issue.source_ref
-    ))
-  end
-  M.log_raise(dept, proposal_id, "devloop_ready", ready_payload)
-  return true
-end
-
-local function replay_ready(dept, issue, state, row, facts)
-  local proposal_id = facts.proposal_id
-  local fields = resolve_payload_fields(row, state, {
-    issue = issue,
-    state = state,
-    proposal_id = proposal_id,
-  })
-  local ready_payload = facts.ready_payload or M.build_devloop_ready_payload({
-    proposal_id = fields.proposal_id,
-    dedup_key = M.strip_transition_version_suffixes(fields.dedup_key),
-    source_ref = fields.source_ref,
-  })
-  local current = facts.current
-  local command = facts.command
-  local dependency_hold = M.dependency_hold_fact(current.comments, proposal_id)
-  local gate = facts.dependency_gate or M.dependency_gate(issue.repo, issue.number, {
-    proposal_id = proposal_id,
-    version = state.version,
-    comments = current.comments,
-  })
-  if dependency_hold ~= nil then
-    M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "recheck-dependency-hold", dependency_hold.reason)
-  end
-  if not gate.ok then
-    local marker = gate.kind == "cycle"
-      and M.dependency_cycle_marker(proposal_id, state.version)
-      or (gate.kind == "unresolvable"
-        and M.dependency_unresolvable_marker(proposal_id, state.version, gate.unmet, gate.kind, gate.reason)
-        or M.dependency_wait_marker(proposal_id, state.version, gate.unmet, gate.kind, gate.reason))
-    M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "retry-pending(dependency-hold)", gate.reason)
-    local raised = {}
-    if dependency_hold == nil then
-      table.insert(raised, "github-proxy.github_issue_comment_request")
-      table.insert(raised, "github-proxy.github_issue_label_request")
-    end
-    local command_comment_request = nil
-    if command ~= nil then
-      command_comment_request = M.build_operator_issue_reready_comment_request(
-        issue.repo,
-        issue.number,
-        command,
-        "dependency-hold",
-        issue.source_ref
-      )
-      table.insert(raised, "github-proxy.github_issue_comment_request")
-    end
-    if #raised > 0 then
-      M.log_apply(dept, proposal_id, nil, nil, { add = { M._blocked_on_dependency_label }, remove = {} }, raised)
-    end
-    if command_comment_request ~= nil then
-      M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
-    end
-    if dependency_hold == nil then
-      M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_hold_comment_request(issue.repo, issue.number, proposal_id, state.version, gate, marker, issue.source_ref))
-      M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
-        issue.repo,
-        issue.number,
-        { M._blocked_on_dependency_label },
-        {},
-        M._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }),
-        issue.source_ref
-      ))
-    end
-    return #raised > 0
-  end
-  if dependency_hold ~= nil then
-    M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "release-dependency-hold", gate.reason)
-    local command_comment_request = command ~= nil and M.build_operator_issue_reready_comment_request(
-      issue.repo,
-      issue.number,
-      command,
-      "dependency-release",
-      issue.source_ref
-    ) or nil
-    return raise_dependency_release(dept, issue, proposal_id, state, current, ready_payload, command_comment_request, gate)
-  end
-  local raised = { "devloop_ready" }
-  local command_comment_request = nil
-  if command ~= nil then
-    command_comment_request = M.build_operator_issue_reready_comment_request(issue.repo, issue.number, command, "ready", issue.source_ref)
-    table.insert(raised, "github-proxy.github_issue_comment_request")
-  end
-  M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "applied(replay)", "dependency gate is satisfied")
-  M.log_apply(dept, proposal_id, nil, nil, { add = {}, remove = {} }, raised)
-  if command_comment_request ~= nil then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
-  end
-  M.log_raise(dept, proposal_id, "devloop_ready", ready_payload)
-  return true
-end
-
 local function replay_implementing(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local attempt = facts["implement-attempt"]
@@ -619,7 +488,7 @@ local function replay_impl_failed(dept, issue, state, row, facts)
     source_ref = fields.source_ref,
     impl_retry_attempt = M.next_impl_retry_attempt(failure),
   })
-  return replay_ready(dept, issue, retry_state, M.restart_transition_row("ready"), replay_facts)
+  return M.replay_ready_state(dept, issue, retry_state, M.restart_transition_row("ready"), replay_facts)
 end
 
 local function replay_fixing_to_reviewing(dept, issue, state, proposal_id, link, current_pr, feedback, source_ref)
@@ -942,7 +811,8 @@ end
 
 local replayers = {
   thinking = replay_thinking,
-  ready = replay_ready,
+  dependency_wait = M.replay_dependency_wait_state,
+  ready = M.replay_ready_state,
   implementing = replay_implementing,
   ["impl-failed"] = replay_impl_failed,
   fixing = replay_fixing,

@@ -50,6 +50,7 @@ return {
   test_restart_completeness_audit_covers_non_terminal_states = function()
     local expected = {
       "thinking",
+      "dependency_wait",
       "ready",
       "implementing",
       "pr-open",
