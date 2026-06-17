@@ -210,6 +210,21 @@ function M.has_trusted_issue_create_marker(issues, dedup_key, bot_login)
   return false
 end
 
+function M.trusted_issue_create_number(issues, dedup_key, bot_login)
+  if type(issues) ~= "table" then
+    return nil
+  end
+  local marker = M.issue_create_marker(dedup_key)
+  for _, issue in ipairs(issues) do
+    if issue_author_login(issue) == tostring(bot_login)
+      and tostring(issue.body or ""):find(marker, 1, true) ~= nil
+      and shared.is_positive_integer(issue.number) then
+      return tostring(math.floor(tonumber(issue.number)))
+    end
+  end
+  return nil
+end
+
 function M.has_trusted_issue_created_marker(comments, dedup_key, bot_login)
   if type(comments) ~= "table" then
     return false
@@ -287,6 +302,20 @@ end
 
 local function issue_create_intent_marker_body_file(dedup_key)
   return "/tmp/fkst-github-proxy-intent-" .. issue_create_runtime_identity(dedup_key) .. ".md"
+end
+
+local function search_created_issue_number(repo, dedup_key, bot_login)
+  local search = M.gh_exec(function(timeout)
+    return M.github_issue_create_search(repo, dedup_key, timeout)
+  end, 30, "GitHub issue create search")
+  return M.trusted_issue_create_number(M.parse_issue_create_search(search.stdout), dedup_key, bot_login)
+end
+
+local function write_parent_created_marker(parent, dedup_key, issue_number)
+  local marker_path = issue_created_marker_body_file(dedup_key)
+  file.write(marker_path, M.issue_created_marker(dedup_key, issue_number or "unknown") .. "\n")
+  M.gh_exec(M.gh_issue_create_parent_comment_cmd(parent, marker_path), 30, "GitHub parent issue-created comment")
+  M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
 end
 
 function M.validate_issue_create_payload(payload)
@@ -404,35 +433,32 @@ function M.write_issue_create_request(payload)
         maybe_raise_post_create_blocked_by(payload, existing_created_issue)
         return
       end
-      if M.has_trusted_issue_create_intent_marker(parent_comments, payload.dedup_key, bot_login) then
-        log.info("github-proxy: skip-idempotent issue-create parent marker already present")
-        return
-      end
-
-      local intent_path = issue_create_intent_marker_body_file(payload.dedup_key)
-      file.write(intent_path, M.issue_create_intent_marker(payload.dedup_key) .. "\n")
-      M.gh_exec(M.gh_issue_create_parent_comment_cmd(parent, intent_path), 30, "GitHub parent issue-create intent comment")
-      M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
-      local confirm = M.gh_exec(M.gh_issue_create_parent_view_cmd(parent), 30, "GitHub parent issue-create intent confirm")
-      if not M.has_trusted_issue_create_intent_marker(M.parse_issue_comments(confirm.stdout), payload.dedup_key, bot_login) then
-        error("github-proxy: issue-create intent marker not visible after write")
+      if not M.has_trusted_issue_create_intent_marker(parent_comments, payload.dedup_key, bot_login) then
+        local intent_path = issue_create_intent_marker_body_file(payload.dedup_key)
+        file.write(intent_path, M.issue_create_intent_marker(payload.dedup_key) .. "\n")
+        M.gh_exec(M.gh_issue_create_parent_comment_cmd(parent, intent_path), 30, "GitHub parent issue-create intent comment")
+        M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
+        local confirm = M.gh_exec(M.gh_issue_create_parent_view_cmd(parent), 30, "GitHub parent issue-create intent confirm")
+        if not M.has_trusted_issue_create_intent_marker(M.parse_issue_comments(confirm.stdout), payload.dedup_key, bot_login) then
+          error("github-proxy: issue-create intent marker not visible after write")
+        end
       end
     end
 
-    -- once() is host-runtime scratch, not an external fact. Parent-backed
-    -- requests use the parent intent marker as the cross-runtime dup gate. The
-    -- no-parent fallback keeps issue body search as a bounded external backstop.
-    local ran = once(M.issue_create_once_key(payload.dedup_key), function()
-      if parent == nil then
-        local search = M.gh_exec(function(timeout)
-          return M.github_issue_create_search(repo, payload.dedup_key, timeout)
-        end, 30, "GitHub issue create search")
-        if M.has_trusted_issue_create_marker(M.parse_issue_create_search(search.stdout), payload.dedup_key, bot_login) then
-          log.info("github-proxy: skip-idempotent issue-create marker already present")
-          return
-        end
+    local searched_issue_number = search_created_issue_number(repo, payload.dedup_key, bot_login)
+    if searched_issue_number ~= nil then
+      log.info("github-proxy: reconcile issue-create marker into parent ledger")
+      if parent ~= nil then
+        write_parent_created_marker(parent, payload.dedup_key, searched_issue_number)
       end
+      maybe_raise_post_create_blocked_by(payload, searched_issue_number)
+      return
+    end
 
+    -- once() is host-runtime scratch, not an external fact. The issue body
+    -- marker search above is the durable duplicate backstop; parent-backed
+    -- requests also publish intent and created facts into the parent ledger.
+    local ran = once(M.issue_create_once_key(payload.dedup_key), function()
       local body = tostring(payload.body) .. "\n\n" .. M.issue_create_marker(payload.dedup_key) .. "\n"
       body = M.with_github_debug_stamp(body, {
         emitter = "github-proxy.issue-create",
@@ -449,10 +475,7 @@ function M.write_issue_create_request(payload)
         M.invalidate_entity_after_write(repo, "issue", issue_number)
       end
       if parent ~= nil then
-        local marker_path = issue_created_marker_body_file(payload.dedup_key)
-        file.write(marker_path, M.issue_created_marker(payload.dedup_key, issue_number or "unknown") .. "\n")
-        M.gh_exec(M.gh_issue_create_parent_comment_cmd(parent, marker_path), 30, "GitHub parent issue-created comment")
-        M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
+        write_parent_created_marker(parent, payload.dedup_key, issue_number)
       end
       maybe_raise_post_create_blocked_by(payload, issue_number)
     end)

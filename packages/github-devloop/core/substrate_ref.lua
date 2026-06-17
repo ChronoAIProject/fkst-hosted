@@ -323,28 +323,16 @@ local function mechanical_review_dedup_key(repo, pr_number_value, head_sha)
   })
 end
 
-local function backing_issue_dedup_key(repo, pr_number_value)
-  return M._dedup_key({
-    "substrate-ref-bump",
-    "backing-issue",
-    M.safe_repo(repo),
-    tostring(pr_number_value),
-  })
+local function lifecycle_proposal_id(repo, pr_number_value)
+  return M.pr_proposal_id(repo, pr_number_value)
 end
 
-local function backing_issue_number(pr, dedup_key)
-  for _, comment in ipairs(M._trusted_marker_comments(pr and pr.comments or {})) do
-    local body = M._comment_body(comment)
-    for marker in body:gmatch("<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->") do
-      if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
-        local number = pr_number(marker:match('issue="(%d+)"'))
-        if number ~= nil then
-          return number
-        end
-      end
-    end
-  end
-  return nil
+function M.is_substrate_ref_lifecycle(proposal_id, pr_number_value, version)
+  local repo, proposal_pr = M.parse_pr_proposal_id(proposal_id)
+  local head_sha = tostring(version or ""):match("^" .. lifecycle_version_prefix .. "/(%x+)$")
+  return repo ~= nil
+    and tostring(proposal_pr or "") == tostring(pr_number_value or "")
+    and M._is_git_sha(head_sha)
 end
 
 local function validate_bump_pr(repo, base_branch, pr)
@@ -376,44 +364,17 @@ local function validate_bump_pr(repo, base_branch, pr)
   return true, "substrate-ref-bump-ok"
 end
 
-local function backing_issue_create_request(repo, pr, current_pin, target_sha, dedup_key)
-  local body = table.concat({
-    "Backing issue for the autonomous `fkst-substrate` pin bump PR.",
-    "",
-    "PR: #" .. tostring(pr.number),
-    "Branch: `" .. bump_branch .. "`",
-    "Base: `" .. tostring(pr.base_ref_name) .. "`",
-    "Previous pin: `" .. tostring(current_pin) .. "`",
-    "Target pin: `" .. tostring(target_sha) .. "`",
-    "",
-    "This issue owns the normal `github-devloop` lifecycle for the bump PR. The scanner only advances the PR after the trusted parent ledger records this issue number.",
-  }, "\n")
-  return {
-    schema = "github-proxy.issue-create.v1",
-    repo = repo,
-    title = bump_title,
-    body = body,
-    assignees = { M.claim_owner() },
-    dedup_key = dedup_key,
-    parent_comment_target = {
-      repo = repo,
-      pr_number = pr.number,
-    },
-    source_ref = M.pr_source_ref(repo, pr.number),
-  }
-end
-
-local function lifecycle_comments(repo, issue_number, pr, head_sha)
+local function lifecycle_comments(repo, pr, head_sha)
   local version = lifecycle_version(head_sha)
-  local proposal_id = M.proposal_id(repo, issue_number)
+  local proposal_id = lifecycle_proposal_id(repo, pr.number)
   local review_proposal = mechanical_review_proposal_id(repo, pr.number, head_sha)
   local review_dedup = mechanical_review_dedup_key(repo, pr.number, head_sha)
   return table.concat({
-    "github-devloop substrate-ref bump lifecycle: backing issue approval",
+    "github-devloop substrate-ref bump lifecycle: PR-owned approval",
     "",
-    "This PR changes only `.fkst/substrate-ref`; the backing issue owns lifecycle state and the central merge gate owns CI, mergeability, same-repo, and head checks.",
+    "This PR changes only `.fkst/substrate-ref`; the PR comment stream owns lifecycle state and the central merge gate owns CI, mergeability, same-repo, and head checks.",
     "",
-    M.pr_origin_marker(proposal_id, issue_number, bump_branch, version, pr.base_ref_name),
+    M.pr_origin_marker(proposal_id, pr.number, bump_branch, version, pr.base_ref_name),
     M.state_marker(proposal_id, "merge-ready", version),
     M.review_result_marker(review_proposal, proposal_id, "approve", review_dedup),
     M.merge_ready_marker(proposal_id, pr.number, version, review_proposal, review_dedup, head_sha),
@@ -440,21 +401,8 @@ local function ensure_bump_lifecycle(repo, base_branch, existing, current_pin, t
     })
     return nil
   end
-  local issue_dedup = backing_issue_dedup_key(repo, number)
-  local issue_number = backing_issue_number(pr, issue_dedup)
-  if issue_number == nil then
-    local request = backing_issue_create_request(repo, pr, current_pin, target_sha, issue_dedup)
-    log_scan("backing-issue-requested", {
-      "repo=" .. repo,
-      "pr=" .. tostring(number),
-      "dedup_key=" .. tostring(issue_dedup),
-    })
-    M.log_raise("substrate_ref_scan", "substrate-ref-bump/" .. tostring(number), "github-proxy.github_issue_create_request", request)
-    raise("github-proxy.github_issue_create_request", request)
-    return nil
-  end
   local version = lifecycle_version(pr.head_sha)
-  local proposal_id = M.proposal_id(repo, issue_number)
+  local proposal_id = lifecycle_proposal_id(repo, number)
   local review_proposal = mechanical_review_proposal_id(repo, number, pr.head_sha)
   local review_dedup = mechanical_review_dedup_key(repo, number, pr.head_sha)
   if not M.has_state_marker(pr.comments, proposal_id, "merge-ready", version)
@@ -464,32 +412,15 @@ local function ensure_bump_lifecycle(repo, base_branch, existing, current_pin, t
       kind = "pr",
       repo = repo,
       number = pr.number,
-    }, lifecycle_comments(repo, issue_number, pr, pr.head_sha), M._dedup_key({
+    }, lifecycle_comments(repo, pr, pr.head_sha), M._dedup_key({
       "substrate-ref-bump",
       "lifecycle",
       M.safe_repo(repo),
-      tostring(issue_number),
       tostring(number),
       tostring(pr.head_sha),
     }), M.pr_source_ref(repo, number))
-    local label_request = M.build_state_label_request(
-      repo,
-      issue_number,
-      "merge-ready",
-      M._dedup_key({
-        "substrate-ref-bump",
-        "label",
-        M.safe_repo(repo),
-        tostring(issue_number),
-        tostring(number),
-        tostring(pr.head_sha),
-      }),
-      M.issue_source_ref(repo, issue_number)
-    )
     M.log_raise("substrate_ref_scan", proposal_id, "github-proxy.github_pr_comment_request", request)
-    M.log_raise("substrate_ref_scan", proposal_id, "github-proxy.github_issue_label_request", label_request)
     raise("github-proxy.github_pr_comment_request", request)
-    raise("github-proxy.github_issue_label_request", label_request)
     return nil
   end
   local payload = M.build_devloop_merge_ready_payload(proposal_id, number, version, {

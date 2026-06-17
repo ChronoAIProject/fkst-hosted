@@ -917,6 +917,23 @@ function M.pr_origin_fact(comments)
           base_branch = marker_base_branch,
         }
       end
+      local pr_repo, pr_number = M.parse_pr_proposal_id(marker_proposal)
+      if pr_repo ~= nil
+        and marker_issue == tostring(pr_number)
+        and M._is_git_ref_safe(marker_branch)
+        and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
+        and M._is_git_ref_safe(marker_base_branch) then
+        return {
+          proposal_id = marker_proposal,
+          repo = pr_repo,
+          issue_number = nil,
+          pr_number = pr_number,
+          branch = marker_branch,
+          impl_version = marker_impl_version,
+          base_branch = marker_base_branch,
+          pr_native = true,
+        }
+      end
     end
   end
   return nil
