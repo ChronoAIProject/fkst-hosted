@@ -33,7 +33,17 @@ local function normalized_fact(payload)
     return nil, "missing-source-ref"
   end
 
-  local normalized_source_ref = M.normalize_source_ref(source_ref)
+  local attempt = tonumber(source.attempt or payload.attempt or 1)
+  if attempt == nil or attempt < 1 or attempt % 1 ~= 0 then
+    return nil, "invalid-attempt"
+  end
+
+  local normalized_source_ref
+  if source_ref.kind == "cron" and tostring(source_ref.ref or "") == "" then
+    normalized_source_ref = { kind = "cron", ref = "" }
+  else
+    normalized_source_ref = M.normalize_source_ref(source_ref)
+  end
   local repo, issue_number = M.parse_issue_source_ref(normalized_source_ref)
   local parent_target
   if repo ~= nil then
@@ -44,18 +54,26 @@ local function normalized_fact(payload)
   else
     local pr_repo, pr_number = M.parse_pr_source_ref(normalized_source_ref)
     if pr_repo == nil then
-      return nil, "source-ref-not-issue-or-pr"
+      return {
+        schema = tostring(source.schema or payload.schema or ""),
+        queue = tostring(queue),
+        dept = tostring(source.dept or payload.dept or ""),
+        error_class = M.error_fact_class({ error_class = source.error_class or payload.error_class }),
+        fingerprint = tostring(fingerprint),
+        source_ref = normalized_source_ref,
+        attempt = attempt,
+        terminal = (source.terminal or payload.terminal) == true,
+        message = tostring(source.message or source.error or payload.error or ""),
+        delivery_id = tostring(payload.delivery_id or source.delivery_id or ""),
+        dead_queue = tostring(payload.queue or ""),
+        no_issue_parent = true,
+      }, nil
     end
     repo = pr_repo
     parent_target = {
       repo = pr_repo,
       pr_number = tostring(pr_number),
     }
-  end
-
-  local attempt = tonumber(source.attempt or payload.attempt or 1)
-  if attempt == nil or attempt < 1 or attempt % 1 ~= 0 then
-    return nil, "invalid-attempt"
   end
 
   return {
@@ -221,6 +239,9 @@ function M.failure_triage_decision(payload)
   local fact, reason = normalized_fact(payload)
   if fact == nil then
     return { action = "skip", reason = reason }
+  end
+  if fact.no_issue_parent == true then
+    return { action = "skip", reason = "no-issue-parent", fact = fact }
   end
 
   local count = recorded_count(fact.source_repo, fact.fingerprint) + 1

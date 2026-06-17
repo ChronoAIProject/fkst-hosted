@@ -247,6 +247,48 @@ class BoardScriptTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_recurring_cron_dead_letters_surface_in_board_and_health(self) -> None:
+        h = BoardHarness(
+            {
+                "failure_facts": [
+                    {
+                        "schema": "fkst.failure_fact.v1",
+                        "origin_queue": "github-devloop.devloop_branch_tick",
+                        "origin_dept": "github-devloop.sync_scan",
+                        "source_ref": {"kind": "cron", "ref": ""},
+                        "error_class": "framework_child_nonzero",
+                        "fingerprint": "sync-scan:permission-denied",
+                        "attempt": 5,
+                        "terminal": True,
+                    },
+                    {
+                        "schema": "fkst.failure_fact.v1",
+                        "origin_queue": "github-devloop.devloop_branch_tick",
+                        "origin_dept": "github-devloop.sync_scan",
+                        "source_ref": {"kind": "cron", "ref": ""},
+                        "error_class": "framework_child_nonzero",
+                        "fingerprint": "sync-scan:permission-denied",
+                        "attempt": 6,
+                        "terminal": True,
+                    },
+                ],
+                "queues": [{"queue": "github-devloop.devloop_branch_tick", "ready": 0, "leased": 0, "retry": 0, "dlq": 2}],
+            }
+        )
+        try:
+            board = h.run_board("--refresh", "--stall", "1800")
+            self.assertEqual(board.returncode, 0, board.stderr + board.stdout)
+            self.assertEqual(board.stdout.splitlines()[0], "1 ANOMALIES NEEDING ATTENTION")
+            self.assertIn("type=infra-stall", board.stdout)
+            self.assertIn("queue=github-devloop.devloop_branch_tick", board.stdout)
+            self.assertIn("infra-stall:github-devloop.sync_scan", board.stdout)
+
+            health = h.run_health("--stall", "1800")
+            self.assertEqual(health.returncode, 0, health.stderr + health.stdout)
+            self.assertEqual(health.stdout.strip(), "1 ANOMALIES NEEDING ATTENTION")
+        finally:
+            h.close()
+
     def test_health_subcommand_prints_compact_verdict_from_same_observe_cache(self) -> None:
         h = BoardHarness(
             {

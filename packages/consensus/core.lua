@@ -393,7 +393,7 @@ function M.mkdir_p_cmd(path)
   if value == "" or value:find("[\r\n]") ~= nil then
     error("consensus: invalid directory path")
   end
-  return "mkdir -p " .. shell_single_quote(value) .. " && chmod 0555 " .. shell_single_quote(value)
+  return "mkdir -p " .. shell_single_quote(value)
 end
 
 -- Fail-closed parse. A genuine answer is an ADJACENT pair: exactly one clean verdict line

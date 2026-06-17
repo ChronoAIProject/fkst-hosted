@@ -340,15 +340,68 @@ def failure_fact_records(data: Any) -> list[dict[str, Any]]:
     return []
 
 
-def failure_fact_anomalies(data: Any) -> list[dict[str, Any]]:
+def fact_source_ref_kind(fact: dict[str, Any]) -> str:
+    source_ref = fact.get("source_ref")
+    if isinstance(source_ref, dict):
+        return str(source_ref.get("kind") or "")
+    return ""
+
+
+def fact_queue(fact: dict[str, Any]) -> str:
+    return first_string(fact, ("origin_queue", "queue", "event_queue"))
+
+
+def fact_dept(fact: dict[str, Any]) -> str:
+    return first_string(fact, ("origin_dept", "dept", "department", "dead_dept"), fact_queue(fact))
+
+
+def cron_failure_fact(fact: dict[str, Any]) -> bool:
+    queue = fact_queue(fact)
+    return queue.endswith("_tick") or fact_source_ref_kind(fact) == "cron"
+
+
+def infra_liveness_anomalies(data: Any) -> tuple[list[dict[str, Any]], set[str]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    suppressed_queues: set[str] = set()
+    for fact in failure_fact_records(data):
+        if not cron_failure_fact(fact):
+            continue
+        dept = fact_dept(fact)
+        queue = fact_queue(fact)
+        key = dept if dept != "-" else queue
+        row = grouped.setdefault(
+            key,
+            {
+                "type": "infra-stall",
+                "queue": queue,
+                "details": f"infra-stall:{key} " + summary_fields(fact),
+                "count": 1,
+                "observed_count": 0,
+            },
+        )
+        row["observed_count"] = int_value(row.get("observed_count")) + 1
+        if queue != "-":
+            suppressed_queues.add(queue)
     rows = []
+    for row in grouped.values():
+        if int_value(row.get("observed_count")) > 1:
+            row["details"] = f"{row['details']} observed_count={row['observed_count']}"
+            rows.append(row)
+    return rows, suppressed_queues
+
+
+def failure_fact_anomalies(data: Any, suppressed_queues: set[str] | None = None) -> list[dict[str, Any]]:
+    rows = []
+    suppressed = suppressed_queues or set()
     for fact in failure_fact_records(data):
         if not (bool_value(fact.get("terminal")) or fact.get("disposition") == "terminal"):
+            continue
+        if fact_queue(fact) in suppressed:
             continue
         rows.append(
             {
                 "type": "terminal-failure",
-                "queue": first_string(fact, ("origin_queue", "queue", "event_queue")),
+                "queue": fact_queue(fact),
                 "details": summary_fields(fact),
                 "count": 1,
             }
@@ -376,9 +429,10 @@ def failure_fact_expected_transients(data: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def dead_letter_anomalies(data: Any) -> list[dict[str, Any]]:
+def dead_letter_anomalies(data: Any, suppressed_queues: set[str] | None = None) -> list[dict[str, Any]]:
     if not isinstance(data, dict):
         return []
+    suppressed = suppressed_queues or set()
     for key in ("dlq", "dead_letters", "dead_letter"):
         if key not in data:
             continue
@@ -388,10 +442,13 @@ def dead_letter_anomalies(data: Any) -> list[dict[str, Any]]:
         rows = []
         for raw in list_from_any(value):
             if isinstance(raw, dict):
+                queue = first_string(raw, ("queue", "event_queue", "name"))
+                if queue in suppressed:
+                    continue
                 rows.append(
                     {
                         "type": "queue-dlq",
-                        "queue": first_string(raw, ("queue", "event_queue", "name")),
+                        "queue": queue,
                         "details": summary_fields(raw),
                         "count": 1,
                     }
@@ -401,7 +458,7 @@ def dead_letter_anomalies(data: Any) -> list[dict[str, Any]]:
     rows = []
     for queue in queue_records(data):
         count = int_value(queue.get("dlq"))
-        if count > 0:
+        if count > 0 and queue["queue"] not in suppressed:
             rows.append({"type": "queue-dlq", "queue": queue["queue"], "details": f"count={count}", "count": count})
     return rows
 
@@ -431,8 +488,10 @@ def anomaly_records(data: Any, now: datetime, stall_seconds: int) -> list[dict[s
         if row["entity_terminal"] is not True and row["dwell_seconds"] is not None and row["dwell_seconds"] > stall_seconds:
             anomalies.append({"type": "stalled-entity", **common})
 
-    anomalies.extend(failure_fact_anomalies(data))
-    anomalies.extend(dead_letter_anomalies(data))
+    infra, suppressed_queues = infra_liveness_anomalies(data)
+    anomalies.extend(infra)
+    anomalies.extend(failure_fact_anomalies(data, suppressed_queues))
+    anomalies.extend(dead_letter_anomalies(data, suppressed_queues))
     return anomalies
 
 
@@ -466,9 +525,9 @@ def health_line(anomalies: list[dict[str, Any]]) -> str:
 
 
 def render_anomaly(row: dict[str, Any]) -> str:
-    if row["type"] == "queue-dlq":
+    if row["type"] in {"queue-dlq", "infra-stall"}:
         details = f" {row['details']}" if row.get("details") else ""
-        return f"- type=queue-dlq queue={row.get('queue', '-')}{details}"
+        return f"- type={row['type']} queue={row.get('queue', '-')}{details}"
     if "entity" not in row:
         details = f" {row['details']}" if row.get("details") else ""
         return f"- type={row['type']} queue={row.get('queue', '-')}{details}"

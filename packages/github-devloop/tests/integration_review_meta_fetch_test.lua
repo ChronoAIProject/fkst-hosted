@@ -56,12 +56,19 @@ local function assert_review_meta_judgment_call()
   t.is_true(calls[1].stdin:find("empty runtime scratch directory", 1, true) ~= nil)
   t.is_true(calls[1].stdin:find("Do not clone, checkout, fetch with git", 1, true) ~= nil)
   local chmod_calls = 0
+  local mkdir_calls = 0
   for _, call in ipairs(t.command_calls()) do
     if call.rendered:find("chmod 0555", 1, true) ~= nil then
       chmod_calls = chmod_calls + 1
     end
+    if call.rendered:find("mkdir -p", 1, true) ~= nil
+      and call.rendered:find("/judgment-worktrees/github-devloop-review-meta-", 1, true) ~= nil then
+      mkdir_calls = mkdir_calls + 1
+      t.is_nil(call.rendered:find("chmod", 1, true))
+    end
   end
-  t.eq(chmod_calls, 1)
+  t.eq(chmod_calls, 0)
+  t.eq(mkdir_calls, 1)
 end
 
 local function run_case(stdout, name)

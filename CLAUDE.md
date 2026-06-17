@@ -2,7 +2,7 @@
 
 ## 工作语言
 
-源文件内部一律英文：`.lua`、`.sh`、`.py`、`.rs` 等里的注释、docstring、log/error 文本、模板字符串和标识符都保持英文，与 fkst-substrate 引擎、命令行工具和 LLM 语料一致。例外：明确作为本地化资源表保存的 outward text values 可以使用目标语言的 UTF-8 字面量；这些文本必须保持源码可读、可 grep，禁止用 hex/base64/byte-escape/`string.char` 等 decode helper 隐藏。源文件之外的对外产物（文档、issue/PR/comment、commit message、变更说明）**英文为主、中英双语**：英文是准绳文本，中文可作辅助补注。代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。对话回复跟随用户语言。不要中英混杂凑句子。存量中文文档（含本文件）可保留中文，新增规范性文本英文优先。
+源文件内部一律英文：`.lua`、`.sh`、`.py`、`.rs` 等里的注释、docstring、log/error 文本、模板字符串和标识符都保持英文，与 fkst-substrate 引擎、命令行工具和 LLM 语料一致。例外：明确作为本地化资源表保存的 outward text values 可以使用目标语言的 UTF-8 字面量；这些文本必须保持源码可读、可 grep，禁止用 hex/base64/byte-escape/`string.char` 等 decode helper 隐藏。源文件之外的对外产物（文档、issue/PR/comment、commit message、变更说明）**一律英文**：英文是唯一准绳文本，不附加中文补注/restatement。代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。对话回复跟随用户语言。不要中英混杂凑句子。存量中文文档（含本文件）可保留中文，新增规范性文本英文优先。
 
 ## 这个仓库是什么
 
@@ -25,7 +25,7 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **事件流** `source → fanout → route → spawn → RAISED`：raiser 静态声明 cron/file_watch；Department `M.spec` 静态声明 `consumes/produces/fanout/stall_window`。Department 收到的是 `Event{queue, payload, ts}`，**无生命周期 hook、无共享内存、无持久态**，同一 `pipeline` 跑两次是两次独立调用。
 - **SDK surface（固定；权威完整列表与签名见契约文档）**：经原语访问 `raise / spawn_codex_sync / spawn_codex`（`opts.timeout` 控 codex 整体超时，默认 3600s）`/ exec_sync / exec_argv / await_all / with_lock / once / cache_* / git_log_* / count_worktrees / setup_worktree / file / json.decode`（仅 decode）`/ log / now` 等，外加 test 模式 `fkst.test.*`（`mock_command` / `command_calls` / `run_department` 等）。`exec_sync` 是 genuine-shell primitive；`gh`/`git` egress 只经 `std.github`/`std.git` 构造 argv 并调用 `exec_argv`。**包不直接碰 `<RT>`/文件系统当状态**——经原语。`once`/`cache_*`/`with_lock` 的 key 是经校验的**可读相对 path**（如 `github-proxy/issue/owner/repo/42`），不是 hex。使用 ports 的业务代码访问 `gh`/`git` 时，不按 command string mock：访问经注入的 `std.github`/`std.git` handles，测试用 `std.testing.run_fake` + in-process `std.github_fake`/`std.git_fake`；`fkst.test.mock_command` / `fkst.test.command_calls` 仍用于其他外部 CLI（如 `codex`）以及 adapter-contract tests（command spelling 本身是被测对象时）。不生成 fake `gh` / `git` / `codex` 二进制；未 mock 的外部命令 fail-closed。
 - **事实源 doctrine**：跨 pipeline 的真相只来自 git / 外部源（GitHub）/ 明确 host fact。GitHub 是 eventually-consistent authenticated fact source，不是 strong-consistency KV；读 GitHub marker 当事实时只信本 bot 作者（`FKST_GITHUB_BOT_LOGIN`，真写 `FKST_GITHUB_WRITE=1` 时未配置 fail-closed），用 state marker 的 `version` 做版本有序 CAS，version 总序是 `(updated_at ISO, loop round N, stage_rank)`，同 timestamp 下较大 `/loop/N` 胜过早期 loop，即使早期 marker 阶段更靠后。靠同 issue 统一 `with_lock`、幂等 marker 写入、可靠投递重导和自愈收敛。no-consensus 收敛轮次记在 converge-round / review-converge-round trusted-bot marker，true-stall reconcile 在锁内重导并按 reconcile / review-reconcile marker 幂等跳过已可见的同 round 结果、并 pin 当前 state 与版本段（thinking/reviewing 且 version 段匹配）才落 `blocked`；reconcile 是确定性判（drop→blocked），无 codex，因此不存在两个同 version codex 写出矛盾结果的窗口。包不在源码树或 `<RT>` 存"为活过崩溃"的业务状态；恢复靠 raiser 从源重导 + 下游按 `dedup_key` 幂等。源码树运行期只读。
-- **Assignee claim doctrine**：`github-devloop` uses GitHub issue assignees as an optimistic lease and UI surface for multi-instance isolation. The protocol is current-assignees-only: an unmanaged unassigned issue may be assigned to `FKST_GITHUB_BOT_LOGIN`, then re-read before proceeding; any non-self assignee means skip, and every external write re-verifies that the same self-only claim is still held. Losing the claim is stop-on-discovery, while marker trust, version CAS, dedup, review gates, and merge gates remain authoritative. Timeout release is self-only: after a fresh assignee read, the package may remove only its own configured bot login, never a human or non-self assignee; dry-run posture logs the would-release without mutating GitHub. 中文补充：assignee 只是外层乐观租约和可见 UI，不替代状态 marker/CAS/merge gate。
+- **Assignee claim doctrine**：`github-devloop` uses GitHub issue assignees as an optimistic lease and UI surface for multi-instance isolation. The protocol is current-assignees-only: an unmanaged unassigned issue may be assigned to `FKST_GITHUB_BOT_LOGIN`, then re-read before proceeding; any non-self assignee means skip, and every external write re-verifies that the same self-only claim is still held. Losing the claim is stop-on-discovery, while marker trust, version CAS, dedup, review gates, and merge gates remain authoritative. Timeout release is self-only: after a fresh assignee read, the package may remove only its own configured bot login, never a human or non-self assignee; dry-run posture logs the would-release without mutating GitHub.
 - **可靠投递 / durable delivery（substrate dev 已合并）**：投递默认可靠，事件经 redb 持久 delivery（at-least-once-until-ack、lease+fencing、retry+backoff、DLQ）。对包作者：
   - **raise 到可靠下游的事件要带 `source_ref = {kind, ref}`**（稳定指针；消费者据此**回源 derive 当前真相**，不信可能过期的 payload；缺失会 fail-closed）。github-proxy 用 `{kind="external", ref="<repo>#<type>/<number>"}`（见 `core.entity_source_ref`）。
   - **【宪法·内容不入 payload】大体量内容（issue body / PR diff / 评论 / 代码 / 文件）绝不整体序列化进可靠投递 payload。** redb 可靠投递 payload 受 ~64KiB 静态上界约束；把内容塞进去 → 被迫机械截断（body 12000 / diff 8000 / digest 600 之类）→ 丢失全貌、codex 看不全、还反复跟 64KiB 死磕（dogfood 实证的反模式）。**内容传输是文件系统 / 网络的职责，不是投递管道的职责。** payload 只承载 `source_ref` 指针 + 小体量控制字段（schema / dedup_key / version / round / 短 digest）；需要内容的 codex / department **据 `source_ref` 从源自己 fetch 完整内容**——`gh issue view` 读全 issue + 全部评论、`gh pr diff` 读完整 diff、worktree / 文件系统读代码、网络读资源——拿全貌、无文字上限。这是「回源 derive 真相」doctrine 的硬化：截断快照本就违背它。历史上的机械文字上限（把内容塞 payload/codex prompt 再截断的 `max_*_len` 设计）一律视为待迁移技术债；**新代码不得新增此类设计**，需要把内容给下游 codex 时，给 `source_ref` + 让它回源 fetch，而非塞进 payload。
@@ -39,6 +39,14 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 - **flat 包 vs composed 包**：flat 包必须自有契约、自有裸名队列、0 外部 package namespace 引用，并通过单根 conformance；composed 包可以引用兄弟包 namespace 做组合/适配，但必须放 `composed.deps` 声明所组合的兄弟包，并经组合 conformance 验证。`composed.deps` 是测试组合的最小约定，不是版本/依赖解析 manifest，也不是部署配置；这是本仓为了让组合 glue 成为 CI 覆盖的一等包而接受的取舍。
 - 事件带 `schema` 字段（如 `"github-proxy.v1"`）；幂等靠 `dedup_key`（+ 出站用评论里的 HTML marker 等外部 durable 源）。
 - 出站写外部（如 `gh issue comment`）会改外部状态：默认 dry-run，真写只由 `FKST_GITHUB_WRITE=1` 表达。`github-devloop` 本质是直接自治系统，不保留历史兼容、双模式、人工 label gate 或 opt-in 写入开关；不可逆 merge 仍必须满足可信 marker、独立 PR diff `review-result:v1 approve`、head-bound、CI/mergeability、branch protection 与写前重导。
+
+## No Permission-Based Control / 禁止用文件权限做控制
+
+Never use file or directory permissions as a control, guard, isolation, or read-only mechanism anywhere in this system. Production source must not add `chmod`, restrictive mode literals such as `0555` / `0444` / `0500` / `0400`, read-only directories, or any equivalent permission-removal scheme to enforce behavior. The only allowed permission operation is making a test fixture or probe executable, such as `chmod +x` in test code; that is fixture setup, not control-by-permission.
+
+Directory permissions are fragile: a read-only parent prevents `git worktree add` from creating the leaf, breaks `rm -rf` cleanup, varies by OS/filesystem, and can fail silently enough to look like unrelated liveness drift. They are also redundant: runtime read-only and source immutability are enforced by process isolation, including codex `--sandbox read-only`, worktree isolation, and the engine's runtime-only-read source handling. The authority for control is isolation plus durable marker/CAS/saga facts, never file modes.
+
+Incident of record (2026-06-17): `mkdir -p X && chmod 0555 X` on a worktree parent broke `sync_scan`'s `git worktree add`, stalled forward sync across a week's dev advance, left running code stale, and allowed recurrence of an already-fixed false-terminal class. ⟦AI:FKST⟧
 
 ## 面向对象基本原则
 
@@ -202,15 +210,15 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 ## Git 提交/分支规范
 
-- **语言**：提交信息、PR 标题/正文、分支说明属对外产物，**英文为主、中英双语**（英文为准，中文可辅注）；分支名本身、代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。不要中英混杂凑句。
+- **语言**：提交信息、PR 标题/正文、分支说明属对外产物，**一律英文**（英文是唯一准绳文本，不附加中文补注）；分支名本身、代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。不要中英混杂凑句。
 - **分支**：集成/默认分支是 `dev`；不直接向 `dev` 提交，一律从 `dev` 切分支并开 PR。分支名用 `<type>/<kebab-topic>`，`type` 只能是 `feat|fix|docs|chore|refactor|test`。合并后删除分支，不留长期僵尸分支。
 - **提交**：一个 commit 是一个自洽逻辑改动，不混入无关改动或格式化噪声。subject 用一行英文祈使句概括做了什么，不堆叠多事；改动多于琐碎时，空行后写 body，说明为什么、影响和取舍，关键词/符号/错误分类保持可 grep。改契约就改完整，旧形态从当前态删除；不留 deprecated shim / `.old` / `_legacy`。
-- **PR / 合并**：对 `dev` 开 PR；标题英文为主（中文可辅注），正文含动机、改动、测试证据（命令 + 结果）。CI 绿才合；合并用 squash，保持 `dev` 线性、一个 feature 一条 commit，subject 末尾保留 `(#PR)`。AI 生成的 PR 正文/变更说明末尾保留 `⟦AI:FKST⟧`。
+- **PR / 合并**：对 `dev` 开 PR；标题英文，正文含动机、改动、测试证据（命令 + 结果）。CI 绿才合；合并用 squash，保持 `dev` 线性、一个 feature 一条 commit，subject 末尾保留 `(#PR)`。AI 生成的 PR 正文/变更说明末尾保留 `⟦AI:FKST⟧`。
 
 ## 纪律（沿用 fkst-substrate）
 
 - **永不手改程序状态（program-state is program-only）**：系统状态（state/converge/review-result 等 marker、runtime/durable 内容）只能由程序产生，任何人（含运营者/babysitter agent）不得手写或直接修改——即使身份可信、语法正确。需要干预时的固定顺序：**先改程序**（自驱管线优先；程序自身瘫痪才走 out-of-band 修程序），再通过 GitHub 面的合法接口操作（issue、评论指令、push 提交、关闭自己立的 issue）。人的干预必须是程序定义的合法输入，不是代行程序的状态写权。
-- 源文件内部英文；对外产物英文为主、中英双语。错误分类要窄（避免 `general error`）；日志/commit/event payload 可 grep。AI 生成的对外文本末尾保留 `⟦AI:FKST⟧`。
+- 源文件内部英文；对外产物一律英文。错误分类要窄（避免 `general error`）；日志/commit/event payload 可 grep。AI 生成的对外文本末尾保留 `⟦AI:FKST⟧`。
 - 单个源代码文件不得超过 1000 行（范围含生产源码、测试源码、脚本源码，.lua/.sh/.py/.rs 等），硬上限、不设豁免；先删死码/重复代码，再按稳定职责拆成多文件（department-local 子模块 `require("departments.<dept>.<mod>")` / package-root `core.lua` / 多个 `*_test.lua` 等）。拆分粒度是稳定职责而非文件数：**既不得为凑行数把多职责硬塞进单文件（如让一个 department 只保留 `main.lua`）**，也不得用无职责边界的碎片化、空转发文件或 compat/legacy/shim 壳凑行数。
 - `scripts/check_repo.py` 强制 ratchet 枚举：G9 禁 peer cross-package require（共享只走 `std/`）；G10 通过 `migration/saga-handler.allowlist` + `std.saga.department` shape 做 shrink-only saga-handler ratchet；G-ADAPTER 通过 `scripts/check_repo_gh_git_adapter.py` + `migration/gh-git-adapter.allowlist` 做 `gh`/`git` adapter ratchet，新 `gh`/`git` construction 只能在 `std.github`/`std.git` adapter paths 内，allowlist 是必须持续缩小的 migration debt。
 - 不留 deprecated shim / compat layer / `.old` / `_legacy`；改契约就改完整，旧形态从当前态删除。文档描述当前态，历史留 git。

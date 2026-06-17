@@ -771,7 +771,7 @@ function M.mkdir_p_cmd(path)
   if value == "" or value:find("[\r\n]") ~= nil then
     error("github-devloop: invalid directory path")
   end
-  return "mkdir -p " .. M._shell_single_quote(value) .. " && chmod 0555 " .. M._shell_single_quote(value)
+  return "mkdir -p " .. M._shell_single_quote(value)
 end
 
 function M.git_worktree_remove_if_present_cmd(worktree)

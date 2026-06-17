@@ -277,6 +277,8 @@ return {
   end,
   test_core_shared_judgment_worktree_reads_runtime_root_and_mkdirs = function()
     local worktree = core.judgment_worktree_path("/tmp/fkst-runtime\n", "review-meta", "dedup/key")
+    t.eq(core.mkdir_p_cmd(worktree), "mkdir -p '" .. worktree .. "'")
+    t.is_nil(core.mkdir_p_cmd(worktree):find("chmod", 1, true))
     t.mock_command(core.read_runtime_root_cmd(), {
       stdout = "/tmp/fkst-runtime\n",
       stderr = "",

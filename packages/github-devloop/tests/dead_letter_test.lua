@@ -213,4 +213,23 @@ return {
     t.eq(raised.payload.parent_comment_target.pr_number, "7")
     t.eq(raised.payload.source_ref.ref, "owner/repo#pr/7")
   end,
+
+  test_cron_source_ref_triages_without_issue_parent_or_raise = function()
+    local fact = {
+      schema = "fkst.failure_fact.v1",
+      queue = "github-devloop.devloop_branch_tick",
+      dept = "github-devloop.sync_scan",
+      error_class = "framework-child-nonzero",
+      fingerprint = "framework-child-nonzero:sync-scan",
+      error = "sync scan failed",
+      source_ref = { kind = "cron", ref = "" },
+      attempt = 5,
+      terminal = true,
+    }
+
+    local result = t.run_department("departments/dead_letter/main.lua", event(fact), run_opts("cron-source-ref"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+  end,
 }

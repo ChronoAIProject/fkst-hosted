@@ -8,8 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_gh_git_adapter as gh_git_adapter
-import check_repo_ingress
+import check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_perm
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -917,9 +916,10 @@ def check_gh_git_adapter_ratchet(root: Path, violations: list[str]) -> None:
     for message in gh_git_adapter.ratchet_messages(sources, allowlist, lua_string_literals):
         add(violations, "G-ADAPTER", message)
 
+def check_no_permission_control(root: Path, violations: list[str]) -> None: check_repo_perm.check_no_permission_control(root, violations, read_text=read_text, rel=rel)
+
 def is_saga_handler_source(source: str) -> bool:
     return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
-
 
 def has_free_form_pipeline_source(source: str) -> bool:
     return FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None
@@ -982,6 +982,7 @@ def main() -> int:
     check_convergence_budget_caps(root, violations)
     for message in check_repo_ingress.scoped_file_watch_ingress_messages(root, packages_root(root), read_text, rel):
         add(violations, "G13", message)
+    check_no_permission_control(root, violations)
     check_gh_git_adapter_ratchet(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
 
@@ -996,5 +997,4 @@ def main() -> int:
     print("OK: repository checks passed")
     return 0
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == "__main__": raise SystemExit(main())

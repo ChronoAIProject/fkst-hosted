@@ -107,13 +107,13 @@ local function judgment_call(role)
   return nil
 end
 
-local function assert_judgment_dir_read_only(count)
+local function assert_judgment_dir_created_without_permission_control(count)
   local seen = 0
   for _, call in ipairs(t.command_calls()) do
     if call.rendered:find("mkdir -p", 1, true) ~= nil
       and call.rendered:find("/judgment-worktrees/consensus-", 1, true) ~= nil then
       seen = seen + 1
-      t.is_true(call.rendered:find("chmod 0555", 1, true) ~= nil)
+      t.is_nil(call.rendered:find("chmod", 1, true))
     end
   end
   t.eq(seen, count)
@@ -199,7 +199,7 @@ return {
     assert_judgment_worktree(minimal_call, "angle-minimal")
     assert_judgment_worktree(structural_call, "angle-structural")
     assert_judgment_worktree(delete_call, "angle-delete")
-    assert_judgment_dir_read_only(3)
+    assert_judgment_dir_created_without_permission_control(3)
     t.is_true(minimal_call.stdin:find("Angle: minimal", 1, true) ~= nil)
     t.is_true(minimal_call.stdin:find("source_ref.ref: demo/consensus/42", 1, true) ~= nil)
     t.is_true(minimal_call.stdin:find("fetch-source --ref demo/consensus/42 --full", 1, true) ~= nil)
