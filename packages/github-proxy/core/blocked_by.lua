@@ -15,14 +15,6 @@ local function optional_marker_value(value)
   return value == nil or is_marker_value(value)
 end
 
-local function split_repo(repo)
-  local owner, name = tostring(repo or ""):match("^([^/]+)/([^/]+)$")
-  if owner == nil or owner == "" or name == nil or name == "" then
-    return nil, nil
-  end
-  return owner, name
-end
-
 local function runtime_segment(value)
   local safe = tostring(value or ""):gsub("[^%w._-]", "_")
   safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
@@ -51,7 +43,7 @@ function M.validate_issue_blocked_by_payload(payload)
   if payload.schema ~= "github-proxy.issue-blocked-by.v1" then
     return false
   end
-  if not strings.is_bounded_string(payload.repo, max_repo_len) or split_repo(payload.repo) == nil then
+  if not strings.is_bounded_string(payload.repo, max_repo_len) or strings.split_repo(payload.repo) == nil then
     return false
   end
   if not shared.is_positive_integer(payload.blocked_issue_number)
@@ -95,7 +87,7 @@ function M.parse_issue_node_id(stdout)
 end
 
 function M.gh_issue_blocked_by_cmd(repo, issue_number)
-  local owner, name = split_repo(repo)
+  local owner, name = strings.split_repo(repo)
   if owner == nil or not shared.is_positive_integer(issue_number) then
     error("github-proxy: invalid blockedBy query target")
   end

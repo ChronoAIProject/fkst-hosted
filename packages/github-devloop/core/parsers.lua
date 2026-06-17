@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 function M.parse_issue_view_state(stdout)
   local decoded = json.decode(stdout or "{}")
   return M.issue_state_from_json(decoded)
@@ -532,13 +533,6 @@ function M.parse_pr_view_head_state(stdout)
   }
 end
 
-local function comment_body(comment)
-  if type(comment) == "table" then
-    return tostring(comment.body or "")
-  end
-  return tostring(comment or "")
-end
-
 local function comment_author_login(comment)
   if type(comment) == "table" then
     if comment.author_login ~= nil then
@@ -580,7 +574,7 @@ local function trusted_marker_comments(comments)
 end
 
 function M.comment_body(comment)
-  return comment_body(comment)
+  return strings.comment_body(comment)
 end
 
 function M.comment_author_login(comment)
@@ -592,7 +586,7 @@ function M.comment_created_at(comment)
 end
 
 
-M._comment_body = comment_body
+M._comment_body = strings.comment_body
 M._comment_author_login = comment_author_login
 M._comment_created_at = comment_created_at
 M._is_trusted_comment = is_trusted_comment
