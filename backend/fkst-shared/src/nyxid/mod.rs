@@ -236,6 +236,12 @@ struct Inner {
     /// `/api/v1/proxy/{slug}`. Isolates the route shape in one place so the
     /// downstream-service slug is configurable per deployment.
     github_proxy_path: String,
+    /// The configured downstream-service slug NyxID resolves to inject the
+    /// user's GitHub credential. Retained alongside `github_proxy_path` because
+    /// the forwarded-user-token helpers ([`NyxIdClient::proxy_github_user`])
+    /// build the generic `/api/v1/proxy/s/{slug}` shape, which needs the raw
+    /// slug rather than the legacy `/api/v1/proxy/{slug}` path.
+    github_proxy_slug: String,
     client_id: String,
     client_secret: SecretString,
     http: reqwest::Client,
@@ -323,6 +329,7 @@ impl NyxIdClient {
             inner: Arc::new(Inner {
                 base_url: base_url.trim_end_matches('/').to_string(),
                 github_proxy_path: format!("/api/v1/proxy/{github_proxy_slug}"),
+                github_proxy_slug: github_proxy_slug.to_string(),
                 client_id,
                 client_secret,
                 http,
@@ -639,6 +646,77 @@ impl NyxIdClient {
         self.proxy_github(delegated, method, &routed, body).await
     }
 
+    /// Proxy a GitHub request through NyxID's credential-injection proxy
+    /// presenting the user's OWN forwarded bearer token (no RFC 8693 exchange).
+    ///
+    /// Targets the generic `{base}/api/v1/proxy/s/{slug}{github_path}` shape —
+    /// the same slug proxy [`proxy_request`] uses — verified reachable for the
+    /// api-github slug under a forwarded user bearer (`GET …/s/api-github/user`
+    /// returns the user profile). The configured GitHub-proxy slug names the
+    /// downstream service; the user token is exposed only to build the
+    /// `Authorization` header and is NEVER captured into any error, log line, or
+    /// the returned value. The full response is buffered into a [`ProxyResponse`]
+    /// (status/headers/body surfaced verbatim, no success-mapping) so callers
+    /// pass GitHub's 4xx/5xx through as the authoritative result.
+    pub async fn proxy_github_user(
+        &self,
+        user_token: &SecretString,
+        method: reqwest::Method,
+        github_path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<ProxyResponse, NyxIdError> {
+        let url = format!(
+            "{}/api/v1/proxy/s/{}{github_path}",
+            self.inner.base_url, self.inner.github_proxy_slug
+        );
+        let mut request = self
+            .inner
+            .http
+            .request(method, &url)
+            .bearer_auth(user_token.expose_secret());
+        if let Some(bytes) = body {
+            request = request.body(bytes);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|e| http_err("github user proxy", e))?;
+
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|e| http_err("github user proxy body", e))?
+            .to_vec();
+        Ok(ProxyResponse {
+            status,
+            headers,
+            body,
+        })
+    }
+
+    /// Proxy a forwarded-user-token GitHub request pinned to ONE linked GitHub
+    /// account.
+    ///
+    /// Appends NyxID's verified `_nyxid_via=<connection_id>` selector to the
+    /// proxied path (URL-encoded; joined with `&` when `github_path` already
+    /// carries a query string, `?` otherwise) and delegates to the unchanged
+    /// [`proxy_github_user`]. NyxID strips this selector before forwarding to
+    /// GitHub. All per-account routing is confined to this helper.
+    pub async fn proxy_github_user_for(
+        &self,
+        user_token: &SecretString,
+        connection: &GithubConnection,
+        method: reqwest::Method,
+        github_path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<ProxyResponse, NyxIdError> {
+        let routed = with_via_selector(github_path, &connection.connection_id);
+        self.proxy_github_user(user_token, method, &routed, body)
+            .await
+    }
+
     /// Proxy an arbitrary request to a downstream service through NyxID's
     /// credential-injection proxy, presenting the user's OWN bearer token.
     ///
@@ -721,6 +799,47 @@ impl NyxIdClient {
         }
         if !status.is_success() {
             tracing::error!(status = %status, "nyxid github connections request failed");
+            return Err(NyxIdError::Http(format!(
+                "github connections status {status}"
+            )));
+        }
+
+        let connections: Vec<GithubConnection> = response
+            .json()
+            .await
+            .map_err(|e| NyxIdError::Malformed(format!("github connections body: {e}")))?;
+        Ok(connections)
+    }
+
+    /// List the caller's linked GitHub connections via NyxID, using the user's
+    /// OWN forwarded bearer token (no RFC 8693 exchange). Mirrors
+    /// [`github_connections`] but presents the user token directly; maps NyxID's
+    /// response into [`GithubConnection`]s.
+    ///
+    /// See [`GITHUB_CONNECTIONS_PATH`] for the confined DRAFT route/shape (does
+    /// not match NyxID main; corrected in #156). The user token is exposed only
+    /// to build the bearer header and appears in no error.
+    pub async fn github_connections_user(
+        &self,
+        user_token: &SecretString,
+    ) -> Result<Vec<GithubConnection>, NyxIdError> {
+        let url = format!("{}{}", self.inner.base_url, GITHUB_CONNECTIONS_PATH);
+        let response = self
+            .inner
+            .http
+            .get(&url)
+            .bearer_auth(user_token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| http_err("github user connections", e))?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            let body = response.text().await.unwrap_or_default();
+            return Err(NyxIdError::ExchangeRejected(body));
+        }
+        if !status.is_success() {
+            tracing::error!(status = %status, "nyxid github user connections request failed");
             return Err(NyxIdError::Http(format!(
                 "github connections status {status}"
             )));
@@ -1315,6 +1434,197 @@ mod tests {
             .await
             .expect("proxy");
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    // ---- proxy_github_user / proxy_github_user_for (forwarded user token) ----
+
+    #[tokio::test]
+    async fn proxy_github_user_hits_slug_proxy_with_user_bearer() {
+        let server = MockServer::start().await;
+        // Forwarded user token must hit the generic `/api/v1/proxy/s/{slug}`
+        // shape (NOT the legacy `/api/v1/proxy/{slug}` path).
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/api/v1/proxy/s/{DEFAULT_GITHUB_PROXY_SLUG}/user"
+            )))
+            .and(header("authorization", "Bearer user_tok"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_json(serde_json::json!({"login": "octocat"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let token = SecretString::from("user_tok".to_string());
+        let resp = client
+            .proxy_github_user(&token, reqwest::Method::GET, "/user", None)
+            .await
+            .expect("proxy github user");
+        assert_eq!(resp.status, reqwest::StatusCode::OK);
+        assert!(resp
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .contains("application/json"));
+        assert!(!resp.body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn proxy_github_user_honours_an_override_slug() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/proxy/s/custom-gh-slug/user"))
+            .and(header("authorization", "Bearer user_tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server)
+            .await;
+
+        let client = client_with_slug(&server.uri(), "custom-gh-slug");
+        let token = SecretString::from("user_tok".to_string());
+        let resp = client
+            .proxy_github_user(&token, reqwest::Method::GET, "/user", None)
+            .await
+            .expect("proxy github user");
+        assert_eq!(resp.status, reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn proxy_github_user_passes_upstream_status_through_verbatim() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/api/v1/proxy/s/{DEFAULT_GITHUB_PROXY_SLUG}/user"
+            )))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let token = SecretString::from("user_tok".to_string());
+        let resp = client
+            .proxy_github_user(&token, reqwest::Method::GET, "/user", None)
+            .await
+            .expect("proxy returns Ok even on 4xx");
+        assert_eq!(resp.status, reqwest::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn proxy_github_user_for_appends_via_selector_under_user_bearer() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/api/v1/proxy/s/{DEFAULT_GITHUB_PROXY_SLUG}/issues"
+            )))
+            .and(header("authorization", "Bearer user_tok"))
+            .and(wiremock::matchers::query_param("_nyxid_via", "c-42"))
+            .and(wiremock::matchers::query_param("state", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let token = SecretString::from("user_tok".to_string());
+        let connection = GithubConnection {
+            connection_id: "c-42".to_string(),
+            login: "octocat".to_string(),
+            primary: true,
+        };
+        let resp = client
+            .proxy_github_user_for(
+                &token,
+                &connection,
+                reqwest::Method::GET,
+                "/issues?state=open",
+                None,
+            )
+            .await
+            .expect("proxy github user for");
+        assert_eq!(resp.status, reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn proxy_github_user_never_leaks_the_user_token_in_errors() {
+        // Point at nothing to force a transport error carrying the URL; the
+        // user token must never appear in Display or Debug of the error.
+        let client = test_client("http://127.0.0.1:1");
+        let secret = "user_super_secret_github_token";
+        let err = client
+            .proxy_github_user(
+                &SecretString::from(secret.to_string()),
+                reqwest::Method::GET,
+                "/user",
+                None,
+            )
+            .await
+            .expect_err("unreachable");
+        assert!(!format!("{err}").contains(secret), "Display leaked token");
+        assert!(!format!("{err:?}").contains(secret), "Debug leaked token");
+    }
+
+    // ---- github_connections_user (forwarded user token) ----
+
+    #[tokio::test]
+    async fn github_connections_user_lists_accounts_under_user_bearer() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/connections"))
+            .and(header("authorization", "Bearer user_tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                { "connection_id": "c1", "login": "octocat", "primary": true },
+                { "connection_id": "c2", "login": "hubber", "extra": "ignored" }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let token = SecretString::from("user_tok".to_string());
+        let connections = client
+            .github_connections_user(&token)
+            .await
+            .expect("connections");
+        assert_eq!(connections.len(), 2);
+        assert_eq!(connections[0].login, "octocat");
+        assert!(connections[0].primary);
+        assert_eq!(connections[1].connection_id, "c2");
+        assert!(!connections[1].primary);
+    }
+
+    #[tokio::test]
+    async fn github_connections_user_rejection_is_typed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/connections"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        let token = SecretString::from("user_tok".to_string());
+        let err = client
+            .github_connections_user(&token)
+            .await
+            .expect_err("must fail");
+        assert!(
+            matches!(err, NyxIdError::ExchangeRejected(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn github_connections_user_secret_never_appears_in_error_or_debug() {
+        // Point at nothing to trigger a transport error carrying the URL.
+        let client = test_client("http://127.0.0.1:1");
+        let secret = "user_super_secret_connections_tok";
+        let err = client
+            .github_connections_user(&SecretString::from(secret.to_string()))
+            .await
+            .expect_err("unreachable");
+        assert!(!format!("{err}").contains(secret), "Display leaked secret");
+        assert!(!format!("{err:?}").contains(secret), "Debug leaked secret");
     }
 
     // ---- mint_user_api_key / revoke_api_key ----
