@@ -8,8 +8,8 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-
 import check_repo_gh_git_adapter as gh_git_adapter
+import check_repo_ingress
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -96,16 +96,15 @@ def long_bracket_at(text: str, index: int) -> tuple[int, str] | None:
     level = cursor - index - 1
     return cursor - index + 1, "]" + ("=" * level) + "]"
 
-
 def mask_span(chars: list[str], start: int, end: int) -> None:
     for index in range(start, end):
         if chars[index] != "\n":
             chars[index] = " "
 
+
 def end_of_long_bracket(text: str, body_start: int, closer: str) -> int:
     close_start = text.find(closer, body_start)
     return len(text) if close_start == -1 else close_start + len(closer)
-
 
 def end_of_quoted_string(text: str, start: int) -> int:
     quote = text[start]
@@ -118,7 +117,6 @@ def end_of_quoted_string(text: str, start: int) -> int:
             return cursor + 1
         cursor += 1
     return len(text)
-
 
 def bracket_test_assignment_key_string_end(text: str, quote_start: int) -> int | None:
     quote = text[quote_start]
@@ -982,6 +980,8 @@ def main() -> int:
     check_cross_package_require(root, violations)
     check_entity_read_count_assertions(root, violations)
     check_convergence_budget_caps(root, violations)
+    for message in check_repo_ingress.scoped_file_watch_ingress_messages(root, packages_root(root), read_text, rel):
+        add(violations, "G13", message)
     check_gh_git_adapter_ratchet(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
 

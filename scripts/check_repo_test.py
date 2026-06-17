@@ -26,6 +26,7 @@ def load_check_repo():
 
 
 check_repo = load_check_repo()
+check_repo_ingress = check_repo.check_repo_ingress
 
 
 class GraphqlConnectionGuardTest(unittest.TestCase):
@@ -230,6 +231,64 @@ end
         self.assertEqual(self.violation_lines(source), [])
 
 
+class ScopedFileWatchIngressGuardTest(unittest.TestCase):
+    def violation(self, rel_path: str, source: str) -> str | None:
+        root = Path("/repo")
+        return check_repo_ingress.scoped_file_watch_ingress_violation(
+            root,
+            root / rel_path,
+            source,
+            check_repo.rel,
+        )
+
+    def test_allows_package_owned_ingress_glob(self) -> None:
+        source = """
+return {
+  type = "file_watch",
+  glob = ".fkst/ingress/github-proxy/issue-comment-request/*.json",
+  produces = "issue_comment_request",
+}
+"""
+        self.assertIsNone(
+            self.violation(
+                "packages/github-proxy/raisers/issue_comment_request_ingress.lua",
+                source,
+            )
+        )
+
+    def test_rejects_cross_package_ingress_glob(self) -> None:
+        source = """
+return {
+  type = "file_watch",
+  glob = ".fkst/ingress/consensus/issue-comment-request/*.json",
+  produces = "issue_comment_request",
+}
+"""
+        violation = self.violation(
+            "packages/github-proxy/raisers/issue_comment_request_ingress.lua",
+            source,
+        )
+
+        self.assertIsNotNone(violation)
+        self.assertIn(".fkst/ingress/github-proxy/issue-comment-request/*.json", violation or "")
+
+    def test_rejects_unmatched_queue_segment(self) -> None:
+        source = """
+return {
+  type = "file_watch",
+  glob = ".fkst/ingress/github-proxy/comments/*.json",
+  produces = "issue_comment_request",
+}
+"""
+        violation = self.violation(
+            "packages/github-proxy/raisers/issue_comment_request_ingress.lua",
+            source,
+        )
+
+        self.assertIsNotNone(violation)
+        self.assertIn("issue_comment_request", violation or "")
+
+
 class RunScriptContractTest(unittest.TestCase):
     def source(self) -> str:
         return Path(__file__).with_name("run.sh").read_text(encoding="utf-8")
@@ -288,7 +347,7 @@ class RunScriptContractTest(unittest.TestCase):
             scripts.mkdir(parents=True)
             pkg.mkdir(parents=True)
 
-            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_gh_git_adapter.py"):
+            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_gh_git_adapter.py", "check_repo_ingress.py"):
                 shutil.copy2(root / "scripts" / name, scripts / name)
             for name in ("check_repo_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "board_test.py", "doctor_test.py"):
                 (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
