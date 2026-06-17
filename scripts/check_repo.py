@@ -315,11 +315,11 @@ def unguarded_rest_per_page_lines(text: str) -> list[int]:
     for index, line in enumerate(source_lines):
         if "per_page=100" not in line:
             continue
-        window = "\n".join(source_lines[max(0, index - 3) : index + 2])
-        if "gh api" not in window or "--paginate" not in window:
+        window = "\n".join(source_lines[max(0, index - 12) : index + 7])
+        raw_unpaginated_line = "gh api" in line and "--paginate" not in line and "%-%-paginate" not in line
+        if raw_unpaginated_line or not ((("--paginate" in window or "%-%-paginate" in window) and ("gh api" in window or re.search(r"['\"]gh['\"]\s*,\s*['\"]api['\"]", window) is not None)) or re.search(r"(?:[\.:]\s*|\b)[A-Za-z0-9_]*paginate[A-Za-z0-9_]*\s*\(", window) is not None):
             lines.append(index + 1)
     return lines
-
 
 def hidden_text_string_char_lines(text: str) -> list[int]:
     stripped = strip_lua_comments_and_strings(text)

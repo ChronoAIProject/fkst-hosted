@@ -108,6 +108,25 @@ local cmd = "gh api --paginate --slurp "
 """
         self.assertEqual(self.warning_lines(source), [])
 
+    def test_allows_paginated_adapter_read(self) -> None:
+        source = """
+return github().api_paginate_slurp("repos/o/r/issues?state=open&per_page=100")
+"""
+        self.assertEqual(self.warning_lines(source), [])
+
+    def test_warns_non_paginated_adapter_read(self) -> None:
+        source = """
+return github().api_get("o/r", "issues?state=open&per_page=100")
+"""
+        self.assertEqual(self.warning_lines(source), [2])
+
+    def test_warns_raw_unpaginated_read_near_paginated_adapter(self) -> None:
+        source = """
+local ok = github().api_paginate_slurp("repos/o/r/issues?state=open&per_page=100")
+local bad = "gh api 'repos/o/r/pulls?state=open&per_page=100'"
+"""
+        self.assertEqual(self.warning_lines(source), [3])
+
 
 class HiddenTextGuardTest(unittest.TestCase):
     def hidden_lines(self, source: str) -> list[int]:
