@@ -51,10 +51,10 @@ local function wrapped_error_class(message)
     or lower:find("secondary rate limit", 1, true) ~= nil then
     return "gh-rate-limited"
   end
-  if lower:find("gh ", 1, true) ~= nil and lower:find(" failed", 1, true) ~= nil then
+  if lower:find("github command", 1, true) ~= nil and lower:find(" failed", 1, true) ~= nil then
     return "gh-command-failed"
   end
-  if lower:find("git ", 1, true) ~= nil and lower:find(" failed", 1, true) ~= nil then
+  if lower:find("version-control command", 1, true) ~= nil and lower:find(" failed", 1, true) ~= nil then
     return "git-command-failed"
   end
   if (lower:find("json", 1, true) ~= nil or lower:find("parse", 1, true) ~= nil)

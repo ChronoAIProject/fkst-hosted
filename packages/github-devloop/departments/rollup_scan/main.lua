@@ -111,7 +111,7 @@ local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, pu
     publish_policy = publish_policy,
   })
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
-  local result = core.gh_exec({ cmd = core.gh_pr_create_body_cmd(repo, integration, upstream, title, notes), timeout = 60 })
+  local result = core.gh_pr_create_body(repo, integration, upstream, title, notes, 60)
   if result.exit_code == 0 then
     return true
   end

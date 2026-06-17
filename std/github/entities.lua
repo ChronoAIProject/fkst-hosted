@@ -64,6 +64,14 @@ local function pr_view_argv(repo, pr_number)
   return { "gh", "api", "repos/" .. tostring(repo) .. "/pulls/" .. tostring(pr_number) }
 end
 
+local function pr_view_cli_argv(repo, pr_number, fields)
+  return { "gh", "pr", "view", tostring(pr_number), "--repo", tostring(repo), "--json", tostring(fields) }
+end
+
+local function pr_diff_name_only_argv(repo, pr_number)
+  return { "gh", "pr", "diff", tostring(pr_number), "--repo", tostring(repo), "--name-only" }
+end
+
 local function entity_updated_at_argv(repo, kind, number)
   local path_kind = kind == "pr" and "pulls" or "issues"
   return {
@@ -129,6 +137,19 @@ local function pr_create_argv(repo, branch, base_branch, title, body_file)
   return argv
 end
 
+local function pr_create_body_argv(repo, branch, base_branch, title, body)
+  local argv = { "gh", "pr", "create", "--repo", tostring(repo), "--head", tostring(branch) }
+  if base_branch ~= nil then
+    table.insert(argv, "--base")
+    table.insert(argv, tostring(base_branch))
+  end
+  table.insert(argv, "--title")
+  table.insert(argv, tostring(title))
+  table.insert(argv, "--body")
+  table.insert(argv, tostring(body))
+  return argv
+end
+
 local function label_list_argv(repo)
   return { "gh", "label", "list", "--repo", tostring(repo), "--limit", "1000", "--json", "name" }
 end
@@ -191,8 +212,16 @@ function M.install(handle)
     return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST head repository/headRefOid/state")
   end
 
+  function handle.pr_cli_view(repo, pr_number, fields, timeout)
+    return handle._exec(pr_view_cli_argv(repo, pr_number, fields), timeout, "gh pr view")
+  end
+
   function handle.pr_rest_view(repo, pr_number, timeout)
     return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST view")
+  end
+
+  function handle.pr_diff_name_only(repo, pr_number, timeout)
+    return handle._exec(pr_diff_name_only_argv(repo, pr_number), timeout, "gh pr diff --name-only")
   end
 
   function handle.pr_updated_at(repo, pr_number, timeout)
@@ -209,6 +238,10 @@ function M.install(handle)
 
   function handle.pr_create(repo, branch, base_branch, title, body_file, timeout)
     return handle._exec(pr_create_argv(repo, branch, base_branch, title, body_file), timeout, "gh pr create")
+  end
+
+  function handle.pr_create_body(repo, branch, base_branch, title, body, timeout)
+    return handle._exec(pr_create_body_argv(repo, branch, base_branch, title, body), timeout, "gh pr create")
   end
 
   function handle.label_list(repo, timeout)

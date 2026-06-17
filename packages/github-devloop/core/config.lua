@@ -135,11 +135,14 @@ function M.intake_probe_gate(exec)
 end
 
 local function current_checkout_branch(exec)
-  local run = exec or exec_sync
+  local run = exec or exec_argv
   if type(run) ~= "function" then
-    error("github-devloop: branch config requires exec_sync")
+    error("github-devloop: branch config requires exec_argv")
   end
-  local ok, out = pcall(run, "git rev-parse --abbrev-ref HEAD")
+  local git = require("std.git").new(run)
+  local ok, out = pcall(function()
+    return git.current_branch(30)
+  end)
   if not ok or type(out) ~= "table" or out.exit_code ~= 0 then
     error("github-devloop: current checkout branch read failed")
   end

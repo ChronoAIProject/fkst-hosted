@@ -16,12 +16,28 @@ local function fetch_branch_argv(remote, branch)
   return { "git", "fetch", tostring(remote), tostring(branch) }
 end
 
+local function ls_remote_branch_argv(remote, branch)
+  return { "git", "ls-remote", tostring(remote), "refs/heads/" .. tostring(branch) }
+end
+
+local function fetch_remote_branch_to_tracking_ref_argv(remote, branch, tracking_ref)
+  return { "git", "fetch", tostring(remote), "refs/heads/" .. tostring(branch) .. ":" .. tostring(tracking_ref) }
+end
+
 local function remote_branch_head_argv(remote, branch)
   return { "git", "rev-parse", "--verify", "refs/remotes/" .. tostring(remote) .. "/" .. tostring(branch) .. "^{commit}" }
 end
 
+local function rev_parse_ref_commit_argv(ref)
+  return { "git", "rev-parse", "--verify", tostring(ref) .. "^{commit}" }
+end
+
 local function fetch_head_commit_argv()
   return { "git", "rev-parse", "--verify", "FETCH_HEAD^{commit}" }
+end
+
+local function current_branch_argv()
+  return { "git", "rev-parse", "--abbrev-ref", "HEAD" }
 end
 
 local function rev_parse_verify_head_argv()
@@ -56,6 +72,17 @@ end
 
 local function trees_equal_quiet_argv(sha_a, sha_b)
   return { "git", "diff", "--quiet", tostring(sha_a), tostring(sha_b) }
+end
+
+local function show_file_argv(ref, path)
+  return { "git", "show", tostring(ref) .. ":" .. tostring(path) }
+end
+
+local function diff_name_only_argv(worktree, ref)
+  if worktree == nil then
+    return { "git", "diff", "--name-only", tostring(ref) }
+  end
+  return worktree_argv(worktree, "diff", "--name-only", tostring(ref))
 end
 
 local function merge_tree_argv(approved_head_sha, base_head_sha)
@@ -121,8 +148,24 @@ local function worktree_add_detached_argv(worktree, sha)
   return { "git", "worktree", "add", "--detach", tostring(worktree), tostring(sha) }
 end
 
+local function worktree_add_reset_branch_argv(worktree, branch, base)
+  return { "git", "worktree", "add", "-B", tostring(branch), tostring(worktree), tostring(base) }
+end
+
 local function worktree_remove_argv(worktree)
   return { "git", "worktree", "remove", "--force", tostring(worktree) }
+end
+
+local function worktree_list_argv()
+  return { "git", "worktree", "list", "--porcelain" }
+end
+
+local function add_all_argv(worktree)
+  return worktree_argv(worktree, "add", "-A")
+end
+
+local function commit_message_argv(worktree, message)
+  return worktree_argv(worktree, "commit", "-m", message)
 end
 
 local function exec_result(handle, argv, timeout, context)
@@ -153,12 +196,28 @@ function M.install(handle)
     return exec_result(handle, fetch_branch_argv(remote, branch), timeout, "git fetch")
   end
 
+  function handle.ls_remote_branch(remote, branch, timeout)
+    return exec_result(handle, ls_remote_branch_argv(remote, branch), timeout, "git ls-remote branch")
+  end
+
+  function handle.fetch_remote_branch_to_tracking_ref(remote, branch, tracking_ref, timeout)
+    return exec_result(handle, fetch_remote_branch_to_tracking_ref_argv(remote, branch, tracking_ref), timeout, "git fetch remote branch")
+  end
+
   function handle.remote_branch_head(remote, branch, timeout)
     return exec_result(handle, remote_branch_head_argv(remote, branch), timeout, "git rev-parse remote branch")
   end
 
+  function handle.rev_parse_ref_commit(ref, timeout)
+    return exec_result(handle, rev_parse_ref_commit_argv(ref), timeout, "git rev-parse ref commit")
+  end
+
   function handle.fetch_head_commit(timeout)
     return exec_result(handle, fetch_head_commit_argv(), timeout, "git rev-parse FETCH_HEAD")
+  end
+
+  function handle.current_branch(timeout)
+    return exec_result(handle, current_branch_argv(), timeout, "git rev-parse current branch")
   end
 
   function handle.rev_parse_verify_head(timeout)
@@ -179,6 +238,14 @@ function M.install(handle)
 
   function handle.trees_equal_quiet(sha_a, sha_b, timeout)
     return exec_result(handle, trees_equal_quiet_argv(sha_a, sha_b), timeout, "git diff --quiet trees")
+  end
+
+  function handle.show_file(ref, path, timeout)
+    return exec_result(handle, show_file_argv(ref, path), timeout, "git show file")
+  end
+
+  function handle.diff_name_only(worktree, ref, timeout)
+    return exec_result(handle, diff_name_only_argv(worktree, ref), timeout, "git diff --name-only")
   end
 
   function handle.merge_tree(approved_head_sha, base_head_sha, timeout)
@@ -217,8 +284,24 @@ function M.install(handle)
     return exec_result(handle, worktree_add_detached_argv(worktree, sha), timeout, "git worktree add --detach")
   end
 
+  function handle.worktree_add_reset_branch(worktree, branch, base, timeout)
+    return exec_result(handle, worktree_add_reset_branch_argv(worktree, branch, base), timeout, "git worktree add -B")
+  end
+
   function handle.worktree_remove(worktree, timeout)
     return exec_result(handle, worktree_remove_argv(worktree), timeout, "git worktree remove")
+  end
+
+  function handle.worktree_list(timeout)
+    return exec_result(handle, worktree_list_argv(), timeout, "git worktree list")
+  end
+
+  function handle.add_all(worktree, timeout)
+    return exec_result(handle, add_all_argv(worktree), timeout, "git add -A")
+  end
+
+  function handle.commit_message(worktree, message, timeout)
+    return exec_result(handle, commit_message_argv(worktree, message), timeout, "git commit -m")
   end
 end
 

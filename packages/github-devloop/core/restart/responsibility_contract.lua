@@ -20,12 +20,6 @@ local known_god_states = {
   ["merge-ready"] = {
     ["merge-ready: non-terminal row must declare responsibility_signature"] = "Worst god-state: CI wait, merge start, review carry-over/backward review, fix fallback, and block fallback are still fused.",
   },
-  implementing = {
-    ["implementing: non-terminal row must declare responsibility_signature"] = "Implementation success and implementation terminal failure are still fused until the implementing split.",
-  },
-  fixing = {
-    ["fixing: non-terminal row must declare responsibility_signature"] = "Fix execution and review-meta fallback are still fused until the fixing split.",
-  },
   blocked = {
     ["blocked: non-terminal row must declare responsibility_signature"] = "Terminal hold, operator reentry, and decomposition fanout are still fused until the blocked split.",
   },

@@ -7,22 +7,41 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "fixing",
     liveness_class_id = "fixing.actionable",
     watchdog = watchdog("row-budget-bounds-receiver", 120),
     actionable_epoch = actionable_epoch("state_entry:v1"),
     terminal = false,
-    to_states = { "reviewing", "review-meta" },
+    to_states = { "reviewing" },
     driving_queue = "devloop_fixing",
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
-    output_obligation = obligation({ "fix:v1", "state:v1 reviewing", "review-meta:v1" }, { "reviewing", "review-meta", "fixing" }),
+    output_obligation = obligation({ "fix:v1", "state:v1 reviewing" }, { "reviewing", "fixing" }),
     budget = budget(120, "The fixing receiver is bounded by a 60 minute codex repair attempt plus the standard 30 minute watchdog margin and retry slack."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
       receiver_bound_minutes = 60,
     }),
     on_timeout = timeout("devloop_fixing"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "code-producer",
+      driving_queue = "devloop_fixing",
+      state_kind = "worker",
+      liveness_class = "fixing.actionable",
+      input_fact_family = "fix-feedback",
+      output_postcondition_family = "revision_published",
+      phase_rank = M.stage_rank("fixing"),
+      lineage_keys = { "state.version", "review-result.dedup", "review-result.head_sha", "source_ref" },
+      successors = {
+        {
+          state = "reviewing",
+          output_variant = "revision_published",
+          postcondition_family = "revision_published",
+          bump = true,
+        },
+      },
+    }),
     payload_builder = M.build_devloop_fixing_payload,
     dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<reviewed_head_sha>",
     required_facts = {

@@ -55,6 +55,18 @@ function M.new(model)
   function handle.issue_rest_view(repo, issue_number, timeout)
     return handle._exec({ "gh", "api", "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) }, timeout, "gh issue REST view")
   end
+  function handle.issue_view(repo, issue_number, fields, timeout)
+    return handle._exec({
+      "gh",
+      "issue",
+      "view",
+      tostring(issue_number),
+      "--repo",
+      tostring(repo),
+      "--json",
+      tostring(fields),
+    }, timeout, "gh issue view")
+  end
   function handle.issue_updated_at(repo, issue_number, timeout)
     return handle._exec({
       "gh",
