@@ -6,7 +6,7 @@ local target_sha = "1234567890abcdef1234567890abcdef12345678"
 local base_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 local old_branch_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 local pr_head_sha = "dddddddddddddddddddddddddddddddddddddddd"
-local backing_issue_number = 845
+local pr_number = 27
 
 local function opts(name, extra)
   local env = {
@@ -277,7 +277,7 @@ local function render_comment(body)
 end
 
 local function substrate_review_proposal()
-  return core.pr_review_proposal_id("owner/repo", 27, "substrate-ref-bump/" .. pr_head_sha, pr_head_sha)
+  return core.pr_review_proposal_id("owner/repo", pr_number, "substrate-ref-bump/" .. pr_head_sha, pr_head_sha)
 end
 
 local function substrate_review_dedup()
@@ -285,43 +285,25 @@ local function substrate_review_dedup()
     "substrate-ref-bump",
     "review",
     core.safe_repo("owner/repo"),
-    "27",
+    tostring(pr_number),
     pr_head_sha,
   })
 end
 
-local substrate_backing_issue_comment
+local function substrate_proposal_id()
+  return core.pr_proposal_id("owner/repo", pr_number)
+end
 
 local function substrate_lifecycle_comment()
-  local proposal_id = core.proposal_id("owner/repo", backing_issue_number)
+  local proposal_id = substrate_proposal_id()
   local version = "substrate-ref-bump/" .. pr_head_sha
   local review_proposal = substrate_review_proposal()
   local review_dedup = substrate_review_dedup()
   return table.concat({
-    substrate_backing_issue_comment(),
-    core.pr_origin_marker(proposal_id, backing_issue_number, "chore/substrate-ref-bump", version, "dev"),
     core.state_marker(proposal_id, "merge-ready", version),
     core.review_result_marker(review_proposal, proposal_id, "approve", review_dedup),
-    core.merge_ready_marker(proposal_id, 27, version, review_proposal, review_dedup, pr_head_sha),
+    core.merge_ready_marker(proposal_id, pr_number, version, review_proposal, review_dedup, pr_head_sha),
   }, "\n")
-end
-
-substrate_backing_issue_comment = function()
-  return '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. core._dedup_key({
-    "substrate-ref-bump",
-    "backing-issue",
-    core.safe_repo("owner/repo"),
-    "chore/substrate-ref-bump",
-  }) .. '" issue="' .. backing_issue_number .. '" -->'
-end
-
-local function legacy_substrate_backing_issue_comment()
-  return '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. core._dedup_key({
-    "substrate-ref-bump",
-    "backing-issue",
-    core.safe_repo("owner/repo"),
-    "27",
-  }) .. '" issue="' .. backing_issue_number .. '" -->'
 end
 
 local function mock_bump_pr_view(comments)
@@ -349,6 +331,16 @@ local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
     if call.rendered:find(needle, 1, true) ~= nil then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local function count_raises(result, queue)
+  local count = 0
+  for _, raised in ipairs(result.raises or {}) do
+    if raised.queue == queue then
       count = count + 1
     end
   end
@@ -430,19 +422,14 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 1)
     t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
-    local create_raise = result.raises[1]
-    t.eq(create_raise.queue, "github-proxy.github_issue_create_request")
-    t.eq(create_raise.payload.parent_comment_target.pr_number, 27)
-    t.eq(create_raise.payload.dedup_key, core._dedup_key({
-      "substrate-ref-bump",
-      "backing-issue",
-      core.safe_repo("owner/repo"),
-      "chore/substrate-ref-bump",
-    }))
-    t.is_true(create_raise.payload.body:find("PR: #27", 1, true) ~= nil)
-    t.is_true(create_raise.payload.body:find("Authoritative owner:", 1, true) ~= nil)
-    t.is_true(create_raise.payload.body:find("Ledger de-duplication:", 1, true) ~= nil)
-    t.is_true(create_raise.payload.body:find("Recurrence waiver:", 1, true) ~= nil)
+    local lifecycle_raise = result.raises[1]
+    t.eq(lifecycle_raise.queue, "github-proxy.github_pr_comment_request")
+    t.eq(lifecycle_raise.payload.pr_number, pr_number)
+    t.is_true(lifecycle_raise.payload.body:find('proposal="' .. substrate_proposal_id() .. '"', 1, true) ~= nil)
+    t.is_true(lifecycle_raise.payload.body:find('state="merge-ready"', 1, true) ~= nil)
+    t.is_true(lifecycle_raise.payload.body:find("github-devloop substrate-ref bump lifecycle: PR-owned approval", 1, true) ~= nil)
+    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
+    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 
@@ -457,7 +444,7 @@ return {
     mock_runtime_root("substrate-update")
     mock_no_checked_out_bump_branch()
     mock_worktree_commands(true)
-    mock_bump_pr_view(substrate_backing_issue_comment())
+    mock_bump_pr_view()
     mock_bump_diff()
 
     local result = run_scan(opts("substrate-update", { FKST_GITHUB_WRITE = "1" }))
@@ -466,33 +453,10 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
-    t.is_true(result.raises[1].payload.body:find('proposal="' .. core.proposal_id("owner/repo", backing_issue_number) .. '"', 1, true) ~= nil)
-    t.is_true(result.raises[1].payload.body:find('issue="' .. tostring(backing_issue_number) .. '"', 1, true) ~= nil)
+    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
+    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
+    t.is_true(result.raises[1].payload.body:find('proposal="' .. substrate_proposal_id() .. '"', 1, true) ~= nil)
     t.is_true(result.raises[1].payload.body:find('state="merge-ready"', 1, true) ~= nil)
-  end,
-
-  test_real_mode_honors_legacy_pr_number_backing_issue_ledger = function()
-    mock_env("1")
-    mock_current_pin(current_pin)
-    mock_substrate_head(target_sha)
-    mock_existing_pr()
-    mock_branch_present()
-    mock_branch_pin_missing()
-    mock_base_head()
-    mock_runtime_root("substrate-legacy-ledger")
-    mock_no_checked_out_bump_branch()
-    mock_worktree_commands(true)
-    mock_bump_pr_view(legacy_substrate_backing_issue_comment())
-    mock_bump_diff()
-
-    local result = run_scan(opts("substrate-legacy-ledger", { FKST_GITHUB_WRITE = "1" }))
-
-    t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr create"), 0)
-    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
-    t.is_true(result.raises[1].payload.body:find('proposal="' .. core.proposal_id("owner/repo", backing_issue_number) .. '"', 1, true) ~= nil)
   end,
 
   test_real_mode_rechecks_pr_under_lock_before_create = function()
@@ -505,7 +469,7 @@ return {
     mock_runtime_root("substrate-recheck")
     mock_no_checked_out_bump_branch()
     mock_worktree_commands(false)
-    mock_bump_pr_view(substrate_backing_issue_comment())
+    mock_bump_pr_view()
     mock_bump_diff()
 
     local result = run_scan(opts("substrate-recheck", { FKST_GITHUB_WRITE = "1" }))
@@ -515,7 +479,8 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
+    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
+    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
   end,
 
   test_real_mode_skips_push_when_bump_branch_already_targets_dev_head = function()
@@ -535,7 +500,7 @@ return {
     t.eq(count_calls("git worktree"), 0)
     t.eq(count_calls("git push"), 0)
     t.eq(result.raises[1].queue, "devloop_merge_ready")
-    t.eq(result.raises[1].payload.proposal_id, core.proposal_id("owner/repo", backing_issue_number))
+    t.eq(result.raises[1].payload.proposal_id, substrate_proposal_id())
     t.eq(result.raises[1].payload.review_proposal_id, substrate_review_proposal())
   end,
 
@@ -550,7 +515,7 @@ return {
     mock_runtime_root("substrate-stale-worktree")
     mock_checked_out_bump_branch()
     mock_worktree_commands(true)
-    mock_bump_pr_view(substrate_backing_issue_comment())
+    mock_bump_pr_view()
     mock_bump_diff()
 
     local result = run_scan(opts("substrate-stale-worktree", { FKST_GITHUB_WRITE = "1" }))
@@ -559,6 +524,7 @@ return {
     t.eq(count_calls("git worktree remove --force '/tmp/fkst-packages-test/github-devloop/stale-substrate'"), 1)
     t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
-    t.eq(result.raises[2].queue, "github-proxy.github_issue_label_request")
+    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
+    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
   end,
 }
