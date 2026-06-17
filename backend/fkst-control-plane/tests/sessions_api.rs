@@ -1,6 +1,9 @@
-//! Session HTTP API integration tests against an ephemeral Mongo container
-//! (testcontainers), driven via `tower::ServiceExt::oneshot` against the REAL
-//! `build_router(AppState)`.
+//! Session HTTP API integration tests driven via `tower::ServiceExt::oneshot`
+//! against the REAL `build_router(AppState)`.
+//!
+//! Since #143 the controller is datastore-free: sessions are backed by the
+//! in-memory `SessionRepo`, so these tests need no Docker and no Mongo
+//! container — they run unconditionally.
 //!
 //! Since #115 sessions are created ONLY via a goal trigger (a session loads its
 //! packages from its goal repo's `.fkst/packages/`), so the classic
@@ -9,16 +12,12 @@
 //! `GET`/`stop` id-parsing + not-found edges, and the orphan sweep (which seeds
 //! documents directly via the repository). The full goal→session lifecycle is
 //! covered by the goal-trigger and runner suites.
-//!
-//! Every test gets a fresh container and self-skips when Docker is unavailable
-//! so `cargo test` stays green on runners without a daemon.
 
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use fkst_control_plane::auth::AuthMode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::models::{SessionDoc, SessionStatus};
@@ -27,30 +26,12 @@ use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::Value;
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
 mod support;
 
-/// True when a Docker daemon answers `docker info`.
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-/// Mongo image tag — Mongo 7 (the integration-test datastore major, until issue 143 removes Mongo).
-const MONGO_TAG: &str = "7";
-
-/// Everything a test needs, with the container kept alive.
+/// Everything a test needs.
 struct TestApp {
-    _container: ContainerAsync<Mongo>,
     router: axum::Router,
     /// The same in-memory session store the router's `SessionService` holds, so
     /// a test can seed/inspect the documents the API serves (the orphan sweep).
@@ -59,35 +40,19 @@ struct TestApp {
     repo: SessionRepo,
 }
 
-/// Start an ephemeral Mongo and build the real application router over it. No
+/// Build the real application router over the in-memory session store. No
 /// engine is wired: these tests never start an engine process.
 async fn app() -> TestApp {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
+    let config = Config::default();
 
     let goals = GoalIssueStore::new(None);
     // One in-memory store shared between the router's service and the test's
     // seed/inspect handle (cloning shares the Arc-backed map).
     let repo = SessionRepo::new();
     let sessions = SessionService::new(repo.clone(), EngineConfig::default());
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     let router = build_router(AppState {
         config,
-        db: db.clone(),
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
@@ -98,11 +63,7 @@ async fn app() -> TestApp {
         ornn: None,
     })
     .expect("router");
-    TestApp {
-        _container: container,
-        router,
-        repo,
-    }
+    TestApp { router, repo }
 }
 
 /// Drain a response into (status, headers, parsed JSON body or Null).
@@ -155,10 +116,6 @@ async fn get_path(router: &axum::Router, path: &str) -> (StatusCode, HeaderMap, 
 
 #[tokio::test]
 async fn malformed_and_unknown_ids_map_to_400_and_404() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = app().await;
 
     for path in [
@@ -191,10 +148,6 @@ async fn malformed_and_unknown_ids_map_to_400_and_404() {
 
 #[tokio::test]
 async fn classic_session_create_endpoint_is_removed_404() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = app().await;
 
     // `POST /api/v1/sessions` was removed: sessions are created via goal
@@ -222,10 +175,6 @@ async fn classic_session_create_endpoint_is_removed_404() {
 
 #[tokio::test]
 async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = app().await;
     let repo = app.repo.clone();
 

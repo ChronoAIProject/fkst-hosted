@@ -10,8 +10,8 @@
 //! `NyxIdGithubProxy::from_context` → `exchange_token` → `proxy_github_for`
 //! path is exercised end-to-end; no part of the proxy seam is mocked away.
 //!
-//! Each test gets a fresh Mongo container (testcontainers) and self-skips when
-//! Docker is unavailable so `cargo test` stays green without a daemon.
+//! The controller is datastore-free (#143), so these tests need no Docker and
+//! run unconditionally; wiremock still drives the fake GitHub/NyxID endpoints.
 
 use std::time::Duration;
 
@@ -22,7 +22,6 @@ use base64::Engine;
 use fkst_control_plane::auth::{AuthMode, NyxIdAuthSettings};
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::nyxid::{NyxIdClient, DEFAULT_GITHUB_PROXY_SLUG};
@@ -32,16 +31,11 @@ use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use secrecy::SecretString;
 use serde_json::{json, Value};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::ImageExt;
-use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 mod support;
-
-const MONGO_TAG: &str = "7";
 
 /// Header carrying the proxy-injected identity JWT.
 const HEADER_IDENTITY_TOKEN: &str = "X-NyxID-Identity-Token";
@@ -57,17 +51,6 @@ const _: () = assert!(matches!(
     DEFAULT_GITHUB_PROXY_SLUG.as_bytes(),
     b"api-github"
 ));
-
-/// True when a Docker daemon answers `docker info`.
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
 
 // ---- Identity / bearer helpers ----
 
@@ -93,7 +76,6 @@ fn admin_identity_token() -> String {
 // ---- App harness ----
 
 struct TestApp {
-    _container: testcontainers::ContainerAsync<Mongo>,
     /// Held so the wiremock server (NyxID) stays up for the test.
     _server: MockServer,
     router: axum::Router,
@@ -112,19 +94,7 @@ async fn app(server: MockServer) -> TestApp {
         .mount(&server)
         .await;
 
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("host");
-    let port = container.get_host_port_ipv4(27017).await.expect("port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
+    let config = Config::default();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
 
@@ -137,10 +107,9 @@ async fn app(server: MockServer) -> TestApp {
     )
     .expect("nyxid client");
 
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     let router = build_router(AppState {
         config,
-        db,
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
             base_url: server.uri(),
@@ -155,7 +124,6 @@ async fn app(server: MockServer) -> TestApp {
     .expect("router");
 
     TestApp {
-        _container: container,
         _server: server,
         router,
     }
@@ -240,10 +208,6 @@ fn one_connection() -> Value {
 
 #[tokio::test]
 async fn accounts_lists_connections_via_nyxid() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, two_connections()).await;
     let app = app(server).await;
@@ -259,10 +223,6 @@ async fn accounts_lists_connections_via_nyxid() {
 
 #[tokio::test]
 async fn issues_aggregate_merges_two_accounts_with_partial_failure() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, two_connections()).await;
 
@@ -315,10 +275,6 @@ async fn issues_aggregate_merges_two_accounts_with_partial_failure() {
 
 #[tokio::test]
 async fn issues_aggregate_respects_accounts_filter_state_labels_pagination() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, two_connections()).await;
 
@@ -357,10 +313,6 @@ async fn issues_aggregate_respects_accounts_filter_state_labels_pagination() {
 
 #[tokio::test]
 async fn create_issue_translates_201_and_copies_ratelimit_headers() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     Mock::given(method("POST"))
@@ -401,10 +353,6 @@ async fn create_issue_translates_201_and_copies_ratelimit_headers() {
 
 #[tokio::test]
 async fn create_issue_with_two_accounts_and_no_account_param_is_422() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, two_connections()).await;
     let app = app(server).await;
@@ -429,10 +377,6 @@ async fn create_issue_with_two_accounts_and_no_account_param_is_422() {
 
 #[tokio::test]
 async fn patch_issue_state_closed_roundtrips() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     Mock::given(method("PATCH"))
@@ -466,10 +410,6 @@ async fn patch_issue_state_closed_roundtrips() {
 
 #[tokio::test]
 async fn get_single_issue_includes_body() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     Mock::given(method("GET"))
@@ -496,10 +436,6 @@ async fn get_single_issue_includes_body() {
 
 #[tokio::test]
 async fn comments_list_and_create_roundtrip() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     // List comments.
@@ -554,10 +490,6 @@ async fn comments_list_and_create_roundtrip() {
 
 #[tokio::test]
 async fn rate_limited_single_target_is_429_with_retry_after() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     Mock::given(method("GET"))
@@ -581,10 +513,6 @@ async fn rate_limited_single_target_is_429_with_retry_after() {
 
 #[tokio::test]
 async fn github_500_is_502_upstream() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     Mock::given(method("GET"))
@@ -603,10 +531,6 @@ async fn github_500_is_502_upstream() {
 
 #[tokio::test]
 async fn github_404_is_404() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     Mock::given(method("GET"))
@@ -625,10 +549,6 @@ async fn github_404_is_404() {
 
 #[tokio::test]
 async fn per_page_is_clamped_to_50() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let server = MockServer::start().await;
     mount_connections(&server, one_connection()).await;
     // The mock ONLY matches when per_page=50; if the handler forwarded 999 the

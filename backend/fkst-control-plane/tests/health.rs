@@ -1,9 +1,10 @@
 //! Integration tests for the built router, driven via `tower::ServiceExt::oneshot`
-//! (no real TCP bind, no Docker).
+//! (no real TCP bind, no Docker, no datastore).
 //!
-//! The Mongo handle points at an unreachable address with a short
-//! server-selection timeout, so both health paths must answer `503 degraded`
-//! quickly instead of hanging.
+//! The controller is datastore-free (#143): `/health` and `/api/v1/health`
+//! report ready unconditionally, since a process that can answer the route is
+//! healthy. These tests assert the exact `200 ok` wire contract and that the
+//! routes are public.
 
 use std::time::Duration;
 
@@ -12,7 +13,6 @@ use axum::http::{Request, StatusCode};
 use fkst_control_plane::auth::AuthMode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::router::build_router;
@@ -23,24 +23,13 @@ use tower::ServiceExt;
 
 mod support;
 
-/// Nothing listens on port 1; selection fails after ~200ms.
-const UNREACHABLE_URI: &str = "mongodb://127.0.0.1:1";
-
-async fn test_router() -> axum::Router {
-    let config = Config {
-        mongodb_uri: UNREACHABLE_URI.to_string(),
-        mongodb_server_selection_timeout_ms: 200,
-        ..Config::default()
-    };
-    let db = Db::from_config(&config)
-        .await
-        .expect("lazy handle must build without I/O");
+fn test_router() -> axum::Router {
+    let config = Config::default();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     build_router(AppState {
         config,
-        db,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
@@ -53,10 +42,10 @@ async fn test_router() -> axum::Router {
     .expect("router")
 }
 
-async fn assert_degraded(path: &str) {
+async fn assert_ready(path: &str) {
     let response = tokio::time::timeout(
         Duration::from_secs(2),
-        test_router().await.oneshot(
+        test_router().oneshot(
             Request::get(path)
                 .body(Body::empty())
                 .expect("request builds"),
@@ -66,7 +55,7 @@ async fn assert_degraded(path: &str) {
     .expect("health must answer within 2s, not hang")
     .expect("router must respond");
 
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.status(), StatusCode::OK);
 
     let content_type = response
         .headers()
@@ -89,29 +78,30 @@ async fn assert_degraded(path: &str) {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
 
-    // Exact wire contract, including field order: status, mongo, version.
+    // Exact wire contract, including field order: status, version. The
+    // datastore-free controller dropped the `mongo` field (#143).
     let expected = format!(
-        r#"{{"status":"degraded","mongo":"down","version":"{}"}}"#,
+        r#"{{"status":"ok","version":"{}"}}"#,
         env!("CARGO_PKG_VERSION")
     );
     assert_eq!(std::str::from_utf8(&body).unwrap(), expected);
 }
 
 #[tokio::test]
-async fn health_returns_503_degraded_when_mongo_is_down() {
-    assert_degraded("/health").await;
+async fn health_returns_200_ok_with_no_datastore() {
+    assert_ready("/health").await;
 }
 
 #[tokio::test]
-async fn api_v1_health_returns_503_degraded_when_mongo_is_down() {
-    assert_degraded("/api/v1/health").await;
+async fn api_v1_health_returns_200_ok_with_no_datastore() {
+    assert_ready("/api/v1/health").await;
 }
 
 #[tokio::test]
 async fn unknown_route_returns_404() {
     let response = tokio::time::timeout(
         Duration::from_secs(2),
-        test_router().await.oneshot(
+        test_router().oneshot(
             Request::get("/does-not-exist")
                 .body(Body::empty())
                 .expect("request builds"),

@@ -1,16 +1,16 @@
-//! Goals HTTP API integration tests against an ephemeral Mongo container
-//! (testcontainers), driven via `tower::ServiceExt::oneshot` against the REAL
-//! `build_router(AppState)` — the full middleware stack, no mock layer.
+//! Goals HTTP API integration tests driven via `tower::ServiceExt::oneshot`
+//! against the REAL `build_router(AppState)` — the full middleware stack, no
+//! mock layer.
 //!
-//! Every test gets a fresh container and self-skips when Docker is
-//! unavailable so `cargo test` stays green on runners without a daemon.
+//! The controller is datastore-free (#143): goals are GitHub-Issue + in-memory
+//! backed (`GoalIssueStore`), so these tests need no Docker and no database
+//! container. Every test runs unconditionally.
 
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use fkst_control_plane::auth::AuthMode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::{GoalDoc, GoalIssueStore, GoalStatus, RepoRef};
 use fkst_control_plane::router::build_router;
@@ -18,58 +18,25 @@ use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
 mod support;
 
-/// True when a Docker daemon answers `docker info`.
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-/// Mongo image tag — Mongo 7 (the integration-test datastore major, until issue 143 removes Mongo).
-const MONGO_TAG: &str = "7";
-
-/// Start an ephemeral Mongo and build the real application router over it.
+/// Build the real application router over the datastore-free controller.
 struct TestApp {
-    _container: ContainerAsync<Mongo>,
     router: axum::Router,
     goals: GoalIssueStore,
 }
 
 async fn app() -> TestApp {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
+    let config = Config::default();
+    // Goals are GitHub-Issue + in-memory backed (#137); no datastore needed.
     let goals = GoalIssueStore::new(None);
     // Package validation is now format-only (#115); no PackageRepository needed.
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     let router = build_router(AppState {
         config,
-        db: db.clone(),
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
@@ -80,11 +47,7 @@ async fn app() -> TestApp {
         ornn: None,
     })
     .expect("router");
-    TestApp {
-        _container: container,
-        router,
-        goals,
-    }
+    TestApp { router, goals }
 }
 
 /// Drain a response into (status, headers, raw body string).
@@ -188,10 +151,6 @@ async fn seed_goal_with_status(goals: &GoalIssueStore, status: GoalStatus) -> bs
 
 #[tokio::test]
 async fn post_goal_creates_201_with_location_and_not_started() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names are validated for FORMAT only (#115); no store seeding needed.
     let body = json!({
@@ -239,10 +198,6 @@ async fn post_goal_creates_201_with_location_and_not_started() {
 
 #[tokio::test]
 async fn list_scopes_to_own_plus_org_and_filters_by_status() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names validated by format only; no store seeding required.
 
@@ -287,10 +242,6 @@ async fn list_scopes_to_own_plus_org_and_filters_by_status() {
 
 #[tokio::test]
 async fn patch_updates_title_anytime_but_packages_conflict_when_running() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names validated by format only; no store seeding required.
 
@@ -341,10 +292,6 @@ async fn patch_updates_title_anytime_but_packages_conflict_when_running() {
 
 #[tokio::test]
 async fn patch_repo_and_clear_repo_mutually_exclusive() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names validated by format only; no store seeding required.
 
@@ -379,10 +326,6 @@ async fn patch_repo_and_clear_repo_mutually_exclusive() {
 
 #[tokio::test]
 async fn delete_not_started_204_then_404() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names validated by format only; no store seeding required.
 
@@ -411,10 +354,6 @@ async fn delete_not_started_204_then_404() {
 
 #[tokio::test]
 async fn delete_running_is_409() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
 
     let running_id = seed_goal_with_status(&app.goals, GoalStatus::Running).await;
@@ -428,10 +367,6 @@ async fn delete_running_is_409() {
 
 #[tokio::test]
 async fn get_malformed_uuid_is_400() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
 
     let (status, _, body) = get_path(&app.router, "/api/v1/goals/not-a-uuid").await;
@@ -447,7 +382,7 @@ async fn get_malformed_uuid_is_400() {
 
 #[tokio::test]
 async fn goal_doc_round_trips_and_statuses_serialize_snake_case() {
-    // This test validates serde behavior without Docker.
+    // Pure serde behavior; no router or datastore involved.
     use bson::Bson;
 
     let cases = [
@@ -489,7 +424,7 @@ async fn goal_doc_round_trips_and_statuses_serialize_snake_case() {
 
 #[tokio::test]
 async fn validation_matrix_rejects_invalid_goals() {
-    // This test validates the pure validation function without Docker.
+    // Pure validation function; no router or datastore involved.
     use fkst_control_plane::goals::validate_goal_fields;
 
     // Empty title.
@@ -550,10 +485,6 @@ async fn validation_matrix_rejects_invalid_goals() {
 
 #[tokio::test]
 async fn post_goal_with_repo_sets_repo() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names validated by format only; no store seeding required.
 
@@ -573,10 +504,6 @@ async fn post_goal_with_repo_sets_repo() {
 
 #[tokio::test]
 async fn patch_clear_repo_works() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names validated by format only; no store seeding required.
 
@@ -602,10 +529,6 @@ async fn patch_clear_repo_works() {
 
 #[tokio::test]
 async fn pagination_limit_and_offset() {
-    if !docker_available() {
-        eprintln!("SKIP: Docker unavailable");
-        return;
-    }
     let app = app().await;
     // Package names validated by format only; no store seeding required.
 

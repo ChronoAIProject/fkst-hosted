@@ -3,8 +3,8 @@
 //! fkst-hosted no longer authenticates users: the NyxID proxy verifies the
 //! caller and injects the identity into the forwarded request. These tests
 //! exercise the router with the injected `X-NyxID-*` headers (no JWKS, no
-//! signature verification, no network). MongoDB runs via testcontainers; the
-//! suite self-skips when Docker is unavailable.
+//! signature verification, no network). The controller is datastore-free
+//! (#143), so these tests need no database and run unconditionally.
 //!
 //! Test cases:
 //!  1. Valid identity token carrying `fkst:goal:read` -> 200 on `/api/v1/goals`
@@ -25,7 +25,6 @@ use base64::Engine;
 use fkst_control_plane::auth::{AuthMode, NyxIdAuthSettings};
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::router::build_router;
@@ -33,31 +32,14 @@ use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::ImageExt;
-use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
 mod support;
-
-/// Mongo image tag.
-const MONGO_TAG: &str = "7";
 
 /// Header carrying the proxy-injected identity JWT.
 const HEADER_IDENTITY_TOKEN: &str = "X-NyxID-Identity-Token";
 /// Header carrying just the user id (headers mode).
 const HEADER_USER_ID: &str = "X-NyxID-User-Id";
-
-/// Whether Docker is reachable (testcontainers needs it).
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .arg("info")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
 
 /// Build a JWT-shaped identity token from a claims payload and an arbitrary
 /// (unverified) signature segment. The signature is NEVER checked — the proxy
@@ -86,9 +68,8 @@ async fn drain(response: axum::response::Response) -> (StatusCode, HeaderMap, Va
     (status, headers, body)
 }
 
-/// Everything a test with auth enabled needs (Mongo container kept alive).
+/// Everything a test with auth enabled needs.
 struct AuthTestApp {
-    _container: testcontainers::ContainerAsync<Mongo>,
     router: axum::Router,
 }
 
@@ -96,31 +77,15 @@ struct AuthTestApp {
 /// JWKS endpoint, no service-account NyxID client (`Authorizer::disabled`) —
 /// these tests only exercise the authn/RBAC edge, not org lookups.
 async fn auth_app() -> AuthTestApp {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
+    let config = Config::default();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let auth_mode = AuthMode::Enabled(NyxIdAuthSettings {
         base_url: "https://nyxid.example.test".to_string(),
     });
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     let router = build_router(AppState {
         config,
-        db,
         sessions,
         auth_mode,
         authz: Authorizer::disabled(),
@@ -131,36 +96,17 @@ async fn auth_app() -> AuthTestApp {
         ornn: None,
     })
     .expect("router");
-    AuthTestApp {
-        _container: container,
-        router,
-    }
+    AuthTestApp { router }
 }
 
 /// Build an app with auth disabled.
-async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
+async fn no_auth_app() -> axum::Router {
+    let config = Config::default();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
-    let vault = support::test_vault(&db);
-    let router = build_router(AppState {
+    let vault = support::test_vault();
+    build_router(AppState {
         config,
-        db,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
@@ -170,8 +116,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
         vault,
         ornn: None,
     })
-    .expect("router");
-    (container, router)
+    .expect("router")
 }
 
 /// GET `path` with an `X-NyxID-Identity-Token` carrying `payload`.
@@ -233,10 +178,6 @@ async fn get_no_identity(router: &axum::Router, path: &str) -> (StatusCode, Head
 
 #[tokio::test]
 async fn valid_identity_with_permission_returns_200() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = auth_app().await;
     let payload = json!({ "sub": "u-1", "permissions": ["fkst:goal:read"] });
     let (status, _h, body) =
@@ -247,10 +188,6 @@ async fn valid_identity_with_permission_returns_200() {
 
 #[tokio::test]
 async fn bad_signature_but_valid_payload_is_accepted() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     // The trust contract: a junk signature with a valid payload is accepted.
     // fkst-hosted makes NO network call (there is no JWKS endpoint configured
     // and `base_url` is unroutable) — proven by this returning 200 quickly.
@@ -272,10 +209,6 @@ async fn bad_signature_but_valid_payload_is_accepted() {
 
 #[tokio::test]
 async fn identity_without_required_permission_returns_403() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = auth_app().await;
     // Has SOME permission, but not the one `/api/v1/goals` (read) requires.
     let payload = json!({ "sub": "u-2", "permissions": ["fkst:session:read"] });
@@ -286,10 +219,6 @@ async fn identity_without_required_permission_returns_403() {
 
 #[tokio::test]
 async fn headers_mode_has_no_permissions_so_gated_route_is_403() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = auth_app().await;
     // Headers mode carries an empty permission set -> the action layer denies.
     let (status, _h, body) =
@@ -300,10 +229,6 @@ async fn headers_mode_has_no_permissions_so_gated_route_is_403() {
 
 #[tokio::test]
 async fn no_injected_identity_returns_401() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = auth_app().await;
     let (status, _h, body) = get_no_identity(&app.router, "/api/v1/goals").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "body: {body}");
@@ -312,10 +237,6 @@ async fn no_injected_identity_returns_401() {
 
 #[tokio::test]
 async fn admin_permission_bypasses_per_route_permission() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = auth_app().await;
     // `fkst:admin` alone (no `fkst:goal:read`) still passes the action layer.
     let payload = json!({ "sub": "ops", "permissions": ["fkst:admin"] });
@@ -326,10 +247,6 @@ async fn admin_permission_bypasses_per_route_permission() {
 
 #[tokio::test]
 async fn health_routes_are_public_with_auth_enabled() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     let app = auth_app().await;
 
     let (status, _h, body) = get_no_identity(&app.router, "/health").await;
@@ -343,11 +260,7 @@ async fn health_routes_are_public_with_auth_enabled() {
 
 #[tokio::test]
 async fn auth_disabled_routes_are_open_and_extractor_yields_dev_admin() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
-    let (_container, router) = no_auth_app().await;
+    let router = no_auth_app().await;
     // No identity needed; the dev context carries `fkst:admin`, so the gated
     // `/api/v1/goals` read passes and returns an empty list.
     let (status, _h, body) = get_no_identity(&router, "/api/v1/goals").await;
@@ -357,10 +270,6 @@ async fn auth_disabled_routes_are_open_and_extractor_yields_dev_admin() {
 
 #[tokio::test]
 async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
-    if !docker_available() {
-        eprintln!("skipped: docker unavailable");
-        return;
-    }
     // Programming-error path: a handler extracting AuthContext on a route NOT
     // behind protect(), with auth enabled, must 500 (the extractor detects the
     // missing extension under AuthMode::Enabled).
@@ -370,28 +279,12 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         format!("user={}", ctx.user_id)
     }
 
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
+    let config = Config::default();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     let state = AppState {
         config,
-        db,
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
             base_url: "https://nyxid.example.test".to_string(),

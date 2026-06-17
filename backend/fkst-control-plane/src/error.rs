@@ -25,14 +25,11 @@ pub enum AppError {
     /// The request conflicts with the current state. Renders as 409.
     #[error("conflict: {0}")]
     Conflict(String),
-    /// A required dependency (e.g. MongoDB) is unreachable. Renders as 503.
-    /// The message must be safe for clients (no connection detail).
+    /// A required dependency (e.g. NyxID, the LLM gateway, or the credential
+    /// proxy) is unreachable. Renders as 503. The message must be safe for
+    /// clients (no connection detail).
     #[error("unavailable: {0}")]
     Unavailable(String),
-    /// MongoDB driver failure. Renders as 500; the driver text may carry
-    /// host/connection detail, so it is logged but never echoed.
-    #[error("mongodb error: {0}")]
-    Mongo(#[from] mongodb::error::Error),
     /// BSON serialization failure. Renders as 500.
     #[error("bson serialization error: {0}")]
     Bson(#[from] bson::ser::Error),
@@ -291,10 +288,7 @@ impl IntoResponse for AppError {
                 false,
                 None,
             ),
-            AppError::Config(_)
-            | AppError::Mongo(_)
-            | AppError::Bson(_)
-            | AppError::Internal(_) => (
+            AppError::Config(_) | AppError::Bson(_) | AppError::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal",
                 INTERNAL_CLIENT_MESSAGE.to_string(),
@@ -388,10 +382,10 @@ mod tests {
     #[tokio::test]
     async fn unavailable_renders_503_unavailable() {
         let (status, body, _headers) =
-            render(AppError::Unavailable("mongo unreachable".into())).await;
+            render(AppError::Unavailable("nyxid unreachable".into())).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["error"], "unavailable");
-        assert_eq!(body["message"], "mongo unreachable");
+        assert_eq!(body["message"], "nyxid unreachable");
     }
 
     #[tokio::test]
@@ -424,22 +418,6 @@ mod tests {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"], "unauthorized");
         assert_eq!(body["message"], "missing proxy-injected identity");
-    }
-
-    #[tokio::test]
-    async fn mongo_renders_500_without_leaking_inner_text() {
-        // A real driver error wrapping a deterministic inner text.
-        let io = std::io::Error::other("dial mongodb://user:secret@db:27017 refused");
-        let err = AppError::Mongo(mongodb::error::Error::from(io));
-        // The inner text stays reachable for logging via Display/Debug.
-        assert!(format!("{err}").contains("secret"));
-
-        let (status, body, _headers) = render(err).await;
-        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(body["error"], "internal");
-        assert_eq!(body["message"], "internal server error");
-        assert!(!body.to_string().contains("secret"));
-        assert!(!body.to_string().contains("27017"));
     }
 
     #[tokio::test]

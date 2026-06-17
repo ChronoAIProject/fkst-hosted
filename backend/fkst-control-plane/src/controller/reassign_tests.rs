@@ -4,8 +4,8 @@
 //!
 //! The seam is exercised with a [`SpySecrets`] fake (records every re-dispatch
 //! call's `(session_id, new_worker, new_fence)`), so the reassignment LOGIC is
-//! tested without a Mongo-backed `DispatchRedispatch`. The real re-dispatch
-//! (resolve + enqueue) is covered end-to-end by the testcontainers integration
+//! tested in isolation from `DispatchRedispatch`. The real re-dispatch
+//! (resolve + enqueue) is covered end-to-end by the in-memory integration
 //! test `tests/reassign_redispatch.rs`.
 
 use super::*;

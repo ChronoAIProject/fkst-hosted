@@ -6,7 +6,6 @@ use std::process::ExitCode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::controller::{ClaimMap, ControllerHandle, InternalAuth, WorkerRegistry};
-use fkst_control_plane::db::{redact_mongodb_uri, Db};
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::journal_config::journal_config_from_app;
@@ -51,37 +50,14 @@ async fn main() -> ExitCode {
         bind_addr = %config.bind_addr,
         request_timeout_secs = config.request_timeout_secs,
         log_level = %config.log_level,
-        mongodb_db = %config.mongodb_db,
-        // Redacted host only — the full URI may embed credentials.
-        mongodb_host = %redact_mongodb_uri(&config.mongodb_uri),
         "config loaded"
     );
 
-    // 3. Connect to MongoDB (fail-closed: never serve without the store).
-    let db = match Db::connect(&config).await {
-        Ok(db) => db,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to connect to mongodb");
-            return ExitCode::FAILURE;
-        }
-    };
-    tracing::info!("mongo connected");
-
-    // 4. Ensure indexes (idempotent; fail-closed on error).
-    if let Err(error) = db.ensure_indexes().await {
-        tracing::error!(error = %error, "failed to ensure mongodb indexes");
-        return ExitCode::FAILURE;
-    }
-    tracing::info!("indexes ensured");
-
-    // 4a. The committed GitHub journal file is the SOLE machine-truth (#139):
-    //     the two Mongo journaling collections and their indexes were removed,
-    //     so there is no journal-index step here.
-
-    // 4b. Goals are now GitHub-Issue + in-memory backed (#137); there is no
-    //     goals collection / index step. The GoalIssueStore is built below,
-    //     after the GitHub App tokens service (it mints the App token to write
-    //     the goal issues).
+    // 3. The controller is datastore-free (#143): there is no database to
+    //    connect to, no indexes to ensure, and no journal/goals collection.
+    //    Goals are GitHub-Issue + in-memory backed (#137); the journal's SOLE
+    //    machine-truth is the committed GitHub file (#139); sessions live in an
+    //    in-memory store (#198-i). The store-bearing wiring below is built next.
 
     // 4c. Load the engine configuration (fail-closed: a zero timeout or a
     //     malformed value must never reach a live session).
@@ -361,7 +337,6 @@ async fn main() -> ExitCode {
 
     let app = match build_router(AppState {
         config,
-        db,
         sessions: sessions.clone(),
         auth_mode,
         authz,

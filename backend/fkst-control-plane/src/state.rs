@@ -3,21 +3,19 @@
 use crate::auth::AuthMode;
 use crate::authz::Authorizer;
 use crate::config::Config;
-use crate::db::Db;
 use crate::github_app::GithubAppTokens;
 use crate::goals::GoalIssueStore;
 use crate::sessions::SessionService;
 use crate::vault::VaultService;
 
 /// Clonable state shared across the router. Every member is cheap to clone
-/// (`Db` and the repository's `Collection` are `Arc`-backed inside the
-/// driver; the session service is an `Arc` handle).
+/// (the session service is an `Arc` handle). The controller is datastore-free
+/// (#143): there is no database handle here.
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
-    pub db: Db,
     /// Single-pod session orchestration (sessions module); HTTP handlers go
-    /// through this, never raw Mongo or the engine runner.
+    /// through this, never the engine runner directly.
     pub sessions: SessionService,
     /// Authentication mode: disabled (local dev) or enabled with NyxID
     /// settings. Determines whether the JWT middleware is active.
@@ -35,8 +33,8 @@ pub struct AppState {
     /// `SecretString` and never logged; the webhook handler uses it to verify
     /// `X-Hub-Signature-256` over the raw body before any parse.
     pub github_app_webhook_secret: Option<secrecy::SecretString>,
-    /// Repository over the `goals` collection (domain layer owned by the goals
-    /// module). Goal CRUD handlers go through this, never raw Mongo.
+    /// Goal store (GitHub-Issue + in-memory backed, domain layer owned by the
+    /// goals module). Goal CRUD handlers go through this.
     pub goals: GoalIssueStore,
     /// Per-session secret/variable vault (issue #100), in-memory (#138).
     /// Secrets are supplied inline at goal trigger and held by the controller

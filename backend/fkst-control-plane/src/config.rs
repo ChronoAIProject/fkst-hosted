@@ -1,8 +1,12 @@
 //! Typed runtime configuration loaded from environment variables.
 //!
-//! Two envy passes over the same snapshot of variables:
-//! 1. the `FKST_HOSTED_*`-prefixed HTTP/server settings, and
-//! 2. the unprefixed MongoDB settings (`MONGODB_URI` is required, fail-closed).
+//! Several envy passes over the same snapshot of variables:
+//! 1. the `FKST_HOSTED_*`-prefixed HTTP/server settings,
+//! 2. the `FKST_*`-prefixed journaling + auth settings, and
+//! 3. the unprefixed platform settings (the `GITHUB_TOKEN` /
+//!    `NYXID_CLIENT_ID` / `NYXID_CLIENT_SECRET` secrets and the internal
+//!    worker-protocol knobs). The controller is datastore-free (#143), so
+//!    there is no MongoDB configuration to load.
 
 use std::fmt;
 
@@ -10,7 +14,6 @@ use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::auth::{AuthMode, NyxIdAuthSettings};
-use crate::db::redact_mongodb_uri;
 use crate::error::AppError;
 
 /// Prefix shared by every HTTP/server configuration environment variable.
@@ -35,18 +38,6 @@ mod defaults {
 
     pub(super) fn request_timeout_secs() -> u64 {
         30
-    }
-
-    pub(super) fn mongodb_uri_placeholder() -> String {
-        "mongodb://localhost:27017".to_string()
-    }
-
-    pub(super) fn mongodb_db() -> String {
-        "fkst_hosted".to_string()
-    }
-
-    pub(super) fn mongodb_server_selection_timeout_ms() -> u64 {
-        5000
     }
 
     pub(super) fn journal_flush_interval_ms() -> u64 {
@@ -209,20 +200,14 @@ struct HttpVars {
     chrono_llm_base_url: String,
 }
 
-/// Unprefixed MongoDB variables. `MONGODB_URI` has no default: a backend
-/// without a store is misconfigured and must fail closed at startup.
-/// `GITHUB_TOKEN` rides this unprefixed pass too (secret; optional —
-/// without it GitHub journaling degrades to Mongo-only with a warn).
+/// Unprefixed platform variables. The controller is datastore-free (#143), so
+/// no MongoDB settings ride this pass. `GITHUB_TOKEN` is here (secret; optional
+/// — without it GitHub journaling degrades to no-durable-floor with a warn).
 /// `NYXID_CLIENT_ID` / `NYXID_CLIENT_SECRET` also ride this pass (platform
 /// credentials are unprefixed, following the `GITHUB_TOKEN` precedent).
 /// Both-or-neither: only one set is a config error naming the missing var.
 #[derive(Deserialize)]
-struct MongoVars {
-    mongodb_uri: String,
-    #[serde(default = "defaults::mongodb_db")]
-    mongodb_db: String,
-    #[serde(default = "defaults::mongodb_server_selection_timeout_ms")]
-    mongodb_server_selection_timeout_ms: u64,
+struct PlatformVars {
     #[serde(default)]
     github_token: Option<String>,
     #[serde(default)]
@@ -306,23 +291,13 @@ pub struct Config {
     /// Per-request timeout in seconds for the tower-http `TimeoutLayer`.
     /// Env: `FKST_HOSTED_REQUEST_TIMEOUT_SECS`. Default 30.
     pub request_timeout_secs: u64,
-    /// MongoDB connection string (may embed credentials — never log it in
-    /// full). Env: `MONGODB_URI`. Required, fail-closed.
-    pub mongodb_uri: String,
-    /// Logical MongoDB database name. Env: `MONGODB_DB`.
-    /// Default "fkst_hosted".
-    pub mongodb_db: String,
-    /// Driver server-selection timeout in milliseconds; bounds the startup
-    /// ping and `/health` so an unreachable Mongo fails fast.
-    /// Env: `MONGODB_SERVER_SELECTION_TIMEOUT_MS`. Default 5000.
-    pub mongodb_server_selection_timeout_ms: u64,
     /// Max debounce (ms) before flushing buffered completions to GitHub.
     /// Env: `FKST_JOURNAL_FLUSH_INTERVAL_MS`. Default 2000.
     pub journal_flush_interval_ms: u64,
     /// Flush early when this many new completions are buffered.
     /// Env: `FKST_JOURNAL_FLUSH_MAX_BATCH`. Default 50.
     pub journal_flush_max_batch: usize,
-    /// Master switch for GitHub journaling (Mongo journaling is always on).
+    /// Master switch for GitHub journaling (the SOLE machine-truth, #139).
     /// Env: `FKST_JOURNAL_GITHUB_ENABLED`. Default true.
     pub journal_github_enabled: bool,
     /// Enable the optional issue-comment mirroring (dormant by default).
@@ -342,7 +317,7 @@ pub struct Config {
     /// Env: `FKST_JOURNAL_GITHUB_BRANCH`. Default "main".
     pub journal_github_branch: String,
     /// `owner/name` of the journal repo; absent => GitHub journaling is
-    /// disabled (Mongo-only, warn). Env: `FKST_JOURNAL_GITHUB_REPO`.
+    /// disabled (no durable floor, warn). Env: `FKST_JOURNAL_GITHUB_REPO`.
     pub journal_github_repo: Option<String>,
     /// Comma-separated JSON pointers forming raised-event identity.
     /// Env: `FKST_RAISED_IDENTITY_POINTERS`.
@@ -353,7 +328,7 @@ pub struct Config {
     pub raised_max_line_bytes: usize,
     /// GitHub API token (SECRET — env/secret manager only; never logged,
     /// redacted from Debug). Env: `GITHUB_TOKEN`. Optional: absent =>
-    /// GitHub journaling is disabled (Mongo-only, warn).
+    /// GitHub journaling is disabled (no durable floor, warn).
     pub github_token: Option<SecretString>,
     /// Authentication mode: disabled (local dev) or enabled with NyxID
     /// settings. Env: `FKST_AUTH_ENABLED` (default true = fail-closed).
@@ -426,8 +401,8 @@ pub struct Config {
     pub placement_max_load: u64,
 }
 
-// Hand-written so the URI (which may embed credentials) is always printed
-// through the redaction helper — `{:?}` can never leak a password.
+// Hand-written so the secret-bearing fields (the tokens) are always rendered as
+// `<redacted>` — `{:?}` can never leak a credential.
 impl fmt::Debug for Config {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Config")
@@ -435,12 +410,6 @@ impl fmt::Debug for Config {
             .field("bind_addr", &self.bind_addr)
             .field("log_level", &self.log_level)
             .field("request_timeout_secs", &self.request_timeout_secs)
-            .field("mongodb_uri", &redact_mongodb_uri(&self.mongodb_uri))
-            .field("mongodb_db", &self.mongodb_db)
-            .field(
-                "mongodb_server_selection_timeout_ms",
-                &self.mongodb_server_selection_timeout_ms,
-            )
             .field("journal_flush_interval_ms", &self.journal_flush_interval_ms)
             .field("journal_flush_max_batch", &self.journal_flush_max_batch)
             .field("journal_github_enabled", &self.journal_github_enabled)
@@ -505,9 +474,6 @@ impl Default for Config {
             bind_addr: defaults::bind_addr(),
             log_level: defaults::log_level(),
             request_timeout_secs: defaults::request_timeout_secs(),
-            mongodb_uri: defaults::mongodb_uri_placeholder(),
-            mongodb_db: defaults::mongodb_db(),
-            mongodb_server_selection_timeout_ms: defaults::mongodb_server_selection_timeout_ms(),
             journal_flush_interval_ms: defaults::journal_flush_interval_ms(),
             journal_flush_max_batch: defaults::journal_flush_max_batch(),
             journal_github_enabled: defaults::journal_github_enabled(),
@@ -545,8 +511,8 @@ impl Config {
     /// Deserialize a `Config` from environment-style key/value pairs.
     ///
     /// Testable seam: unit tests feed explicit pairs instead of mutating the
-    /// process environment. The pairs are collected once and fed to both
-    /// envy passes (prefixed HTTP vars, unprefixed Mongo vars).
+    /// process environment. The pairs are collected once and fed to every
+    /// envy pass (prefixed HTTP/journal/auth vars, unprefixed platform vars).
     pub fn from_vars(vars: impl IntoIterator<Item = (String, String)>) -> Result<Config, AppError> {
         let vars: Vec<(String, String)> = vars.into_iter().collect();
 
@@ -601,32 +567,18 @@ impl Config {
             ));
         }
 
-        let mongo: MongoVars = envy::from_iter(vars.clone()).map_err(|e| match e {
-            // Name the exact env var so the fail-closed startup error is
-            // actionable (envy reports the lowercase field name).
-            envy::Error::MissingValue(field) => {
-                AppError::Config(format!("{} must be set", field.to_uppercase()))
-            }
-            other => AppError::Config(other.to_string()),
-        })?;
-        // A zero selection timeout would make every Mongo operation fail
-        // instantly (or fall back to a driver default) — reject it loudly,
-        // mirroring the request-timeout guard above.
-        if mongo.mongodb_server_selection_timeout_ms == 0 {
-            return Err(AppError::Config(
-                "MONGODB_SERVER_SELECTION_TIMEOUT_MS must be at least 1".to_string(),
-            ));
-        }
+        let platform: PlatformVars =
+            envy::from_iter(vars.clone()).map_err(|e| AppError::Config(e.to_string()))?;
         // A zero worker-liveness TTL would expire every worker instantly,
         // emptying the registry — reject it loudly, mirroring the guards above.
-        if mongo.fkst_worker_liveness_ttl_secs == 0 {
+        if platform.fkst_worker_liveness_ttl_secs == 0 {
             return Err(AppError::Config(
                 "FKST_WORKER_LIVENESS_TTL_SECS must be at least 1".to_string(),
             ));
         }
         // Both-or-neither: NYXID_CLIENT_ID and NYXID_CLIENT_SECRET.
         let (nyxid_client_id, nyxid_client_secret) =
-            match (mongo.nyxid_client_id, mongo.nyxid_client_secret) {
+            match (platform.nyxid_client_id, platform.nyxid_client_secret) {
                 (Some(id), Some(secret)) => (Some(id), Some(SecretString::from(secret))),
                 (None, None) => (None, None),
                 (Some(_), None) => {
@@ -730,9 +682,6 @@ impl Config {
             bind_addr: http.bind_addr,
             log_level: http.log_level,
             request_timeout_secs: http.request_timeout_secs,
-            mongodb_uri: mongo.mongodb_uri,
-            mongodb_db: mongo.mongodb_db,
-            mongodb_server_selection_timeout_ms: mongo.mongodb_server_selection_timeout_ms,
             journal_flush_interval_ms: journal.journal_flush_interval_ms,
             journal_flush_max_batch: journal.journal_flush_max_batch,
             journal_github_enabled: journal.journal_github_enabled,
@@ -744,7 +693,7 @@ impl Config {
             journal_github_repo: journal.journal_github_repo,
             raised_identity_pointers: journal.raised_identity_pointers,
             raised_max_line_bytes: journal.raised_max_line_bytes,
-            github_token: mongo.github_token.map(SecretString::from),
+            github_token: platform.github_token.map(SecretString::from),
             auth: auth_mode,
             nyxid_client_id,
             nyxid_client_secret,
@@ -758,10 +707,10 @@ impl Config {
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
             chrono_llm_base_url: http.chrono_llm_base_url,
-            internal_auth_token: mongo.fkst_internal_auth_token.map(SecretString::from),
-            worker_liveness_ttl_secs: mongo.fkst_worker_liveness_ttl_secs,
-            dispatch_mode_enabled: mongo.fkst_dispatch_mode,
-            placement_max_load: mongo.fkst_placement_max_load,
+            internal_auth_token: platform.fkst_internal_auth_token.map(SecretString::from),
+            worker_liveness_ttl_secs: platform.fkst_worker_liveness_ttl_secs,
+            dispatch_mode_enabled: platform.fkst_dispatch_mode,
+            placement_max_load: platform.fkst_placement_max_load,
         })
     }
 
@@ -775,9 +724,6 @@ impl Config {
 mod tests {
     use super::*;
 
-    /// Minimal valid URI: every `from_vars` test input needs `MONGODB_URI`.
-    const URI: (&str, &str) = ("MONGODB_URI", "mongodb://localhost:27017");
-
     fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
             .iter()
@@ -786,22 +732,31 @@ mod tests {
     }
 
     #[test]
-    fn defaults_apply_when_only_mongodb_uri_is_set() {
-        let config = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
+    fn defaults_apply_when_nothing_is_set() {
+        // The controller is datastore-free (#143): no MONGODB_* var is required
+        // at startup; an otherwise-empty environment loads cleanly.
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")]))
             .expect("defaults should deserialize");
         assert_eq!(config.port, 8080);
         assert_eq!(config.bind_addr, "0.0.0.0");
         assert_eq!(config.log_level, "info");
         assert_eq!(config.request_timeout_secs, 30);
-        assert_eq!(config.mongodb_uri, "mongodb://localhost:27017");
-        assert_eq!(config.mongodb_db, "fkst_hosted");
-        assert_eq!(config.mongodb_server_selection_timeout_ms, 5000);
         assert!(matches!(config.auth, AuthMode::Disabled));
     }
 
     #[test]
+    fn no_mongodb_var_is_required_at_startup() {
+        // Regression guard for #143: with no MONGODB_URI set, the store-free
+        // controller must still load — there is no mandatory datastore config.
+        // (Auth is the only other fail-closed gate, disabled here to isolate
+        // the datastore assertion.)
+        Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")]))
+            .expect("loads without any MONGODB_* var");
+    }
+
+    #[test]
     fn default_impl_matches_env_defaults() {
-        let from_env = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
+        let from_env = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")]))
             .expect("defaults should deserialize");
         let from_default = Config::default();
         assert_eq!(from_default.port, from_env.port);
@@ -811,28 +766,11 @@ mod tests {
             from_default.request_timeout_secs,
             from_env.request_timeout_secs
         );
-        assert_eq!(from_default.mongodb_uri, from_env.mongodb_uri);
-        assert_eq!(from_default.mongodb_db, from_env.mongodb_db);
-        assert_eq!(
-            from_default.mongodb_server_selection_timeout_ms,
-            from_env.mongodb_server_selection_timeout_ms
-        );
-    }
-
-    #[test]
-    fn missing_mongodb_uri_is_a_config_error_naming_the_env_var() {
-        let err = Config::from_vars(vars(&[])).expect_err("missing MONGODB_URI must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("MONGODB_URI"),
-            "error must name MONGODB_URI, got: {err}"
-        );
     }
 
     #[test]
     fn port_is_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_PORT", "9090"),
         ]))
@@ -843,7 +781,6 @@ mod tests {
     #[test]
     fn bind_addr_is_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_BIND_ADDR", "127.0.0.1"),
         ]))
@@ -854,7 +791,6 @@ mod tests {
     #[test]
     fn log_level_is_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_LOG_LEVEL", "debug"),
         ]))
@@ -865,7 +801,6 @@ mod tests {
     #[test]
     fn request_timeout_secs_is_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "5"),
         ]))
@@ -874,67 +809,8 @@ mod tests {
     }
 
     #[test]
-    fn mongodb_uri_is_read_from_env() {
-        let config = Config::from_vars(vars(&[
-            ("MONGODB_URI", "mongodb://mongo.svc:27017"),
-            ("FKST_AUTH_ENABLED", "false"),
-        ]))
-        .unwrap();
-        assert_eq!(config.mongodb_uri, "mongodb://mongo.svc:27017");
-    }
-
-    #[test]
-    fn mongodb_db_is_overridable() {
-        let config = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            ("MONGODB_DB", "other_db"),
-        ]))
-        .unwrap();
-        assert_eq!(config.mongodb_db, "other_db");
-    }
-
-    #[test]
-    fn mongodb_server_selection_timeout_ms_is_overridable() {
-        let config = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "750"),
-        ]))
-        .unwrap();
-        assert_eq!(config.mongodb_server_selection_timeout_ms, 750);
-    }
-
-    #[test]
-    fn non_numeric_mongodb_timeout_is_a_config_error() {
-        let err = Config::from_vars(vars(&[
-            URI,
-            ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "soon"),
-        ]))
-        .expect_err("non-numeric timeout must fail");
-        assert!(matches!(err, AppError::Config(_)));
-    }
-
-    #[test]
-    fn zero_mongodb_selection_timeout_is_a_config_error() {
-        let err = Config::from_vars(vars(&[
-            URI,
-            ("FKST_AUTH_ENABLED", "false"),
-            ("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "0"),
-        ]))
-        .expect_err("zero selection timeout must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string()
-                .contains("MONGODB_SERVER_SELECTION_TIMEOUT_MS"),
-            "error must name the env var, got: {err}"
-        );
-    }
-
-    #[test]
     fn zero_request_timeout_is_a_config_error() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_REQUEST_TIMEOUT_SECS", "0"),
         ]))
@@ -945,15 +821,14 @@ mod tests {
 
     #[test]
     fn non_numeric_port_is_a_config_error() {
-        let err = Config::from_vars(vars(&[URI, ("FKST_HOSTED_PORT", "abc")]))
+        let err = Config::from_vars(vars(&[("FKST_HOSTED_PORT", "abc")]))
             .expect_err("non-numeric port must fail");
         assert!(matches!(err, AppError::Config(_)));
     }
 
     #[test]
     fn journal_defaults_apply_when_unset() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert_eq!(config.journal_flush_interval_ms, 2000);
         assert_eq!(config.journal_flush_max_batch, 50);
         assert!(config.journal_github_enabled);
@@ -974,7 +849,6 @@ mod tests {
     #[test]
     fn journal_vars_are_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_JOURNAL_FLUSH_INTERVAL_MS", "500"),
             ("FKST_JOURNAL_FLUSH_MAX_BATCH", "10"),
@@ -1010,7 +884,7 @@ mod tests {
             ("FKST_JOURNAL_CAS_MAX_RETRIES", "0"),
             ("FKST_RAISED_MAX_LINE_BYTES", "0"),
         ] {
-            let err = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false"), (var, value)]))
+            let err = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false"), (var, value)]))
                 .expect_err("zero must fail");
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
@@ -1019,7 +893,7 @@ mod tests {
 
     #[test]
     fn non_boolean_journal_switch_is_a_config_error() {
-        let err = Config::from_vars(vars(&[URI, ("FKST_JOURNAL_GITHUB_ENABLED", "yep")]))
+        let err = Config::from_vars(vars(&[("FKST_JOURNAL_GITHUB_ENABLED", "yep")]))
             .expect_err("non-boolean must fail");
         assert!(matches!(err, AppError::Config(_)));
     }
@@ -1027,7 +901,6 @@ mod tests {
     #[test]
     fn github_token_is_read_and_never_appears_in_debug() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("GITHUB_TOKEN", "ghp_sneaky_value"),
         ]))
@@ -1041,7 +914,6 @@ mod tests {
     #[test]
     fn internal_auth_token_is_read_and_never_appears_in_debug() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_INTERNAL_AUTH_TOKEN", "supersecret-internal-123"),
         ]))
@@ -1057,12 +929,11 @@ mod tests {
 
     #[test]
     fn worker_liveness_ttl_defaults_to_30_and_rejects_zero() {
-        let config = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
-            .expect("default ttl config");
+        let config =
+            Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("default ttl config");
         assert_eq!(config.worker_liveness_ttl_secs, 30);
 
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_WORKER_LIVENESS_TTL_SECS", "0"),
         ]))
@@ -1078,7 +949,7 @@ mod tests {
     fn dispatch_mode_defaults_to_off() {
         // Unset => OFF: the controller stays disabled and the in-process path
         // is the live behaviour (the byte-identical pre-#151 guarantee, i7b).
-        let config = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")]))
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")]))
             .expect("default dispatch-mode config");
         assert!(
             !config.dispatch_mode_enabled,
@@ -1089,7 +960,6 @@ mod tests {
     #[test]
     fn dispatch_mode_is_overridable_via_env() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_DISPATCH_MODE", "true"),
         ]))
@@ -1100,22 +970,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn debug_output_redacts_mongodb_credentials() {
-        let config = Config {
-            mongodb_uri: "mongodb://user:hunter2@mongo.svc:27017".to_string(),
-            ..Config::default()
-        };
-        let rendered = format!("{config:?}");
-        assert!(!rendered.contains("hunter2"), "debug leaked the password");
-        assert!(rendered.contains("mongodb://<redacted>@mongo.svc:27017"));
-    }
-
     // ---- auth configuration tests ----------------------------------------------
 
     #[test]
     fn auth_enabled_without_base_url_is_a_config_error_naming_the_variable() {
-        let err = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "true")]))
+        let err = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "true")]))
             .expect_err("enabled without base URL must fail");
         assert!(matches!(err, AppError::Config(_)));
         assert!(
@@ -1127,7 +986,6 @@ mod tests {
     #[test]
     fn auth_enabled_with_base_url_builds_enabled_mode() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "true"),
             ("FKST_AUTH_NYXID_BASE_URL", "https://nyxid.example.com/"),
         ]))
@@ -1147,7 +1005,6 @@ mod tests {
         // The old verification settings no longer exist; supplying them must be
         // harmless (envy ignores unknown vars) — `base_url` is all that matters.
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "true"),
             ("FKST_AUTH_NYXID_BASE_URL", "https://nyxid.example.com"),
             ("FKST_AUTH_ISSUER", "ignored"),
@@ -1168,7 +1025,6 @@ mod tests {
     #[test]
     fn nyxid_creds_both_set_are_accepted() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("NYXID_CLIENT_ID", "sa_test"),
             ("NYXID_CLIENT_SECRET", "sas_test"),
@@ -1181,7 +1037,7 @@ mod tests {
     #[test]
     fn nyxid_creds_neither_set_is_accepted() {
         let config =
-            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("neither set");
+            Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("neither set");
         assert!(config.nyxid_client_id.is_none());
         assert!(config.nyxid_client_secret.is_none());
     }
@@ -1189,7 +1045,6 @@ mod tests {
     #[test]
     fn nyxid_client_id_without_secret_is_a_config_error() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("NYXID_CLIENT_ID", "sa_test"),
         ]))
@@ -1204,7 +1059,6 @@ mod tests {
     #[test]
     fn nyxid_client_secret_without_id_is_a_config_error() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("NYXID_CLIENT_SECRET", "sas_test"),
         ]))
@@ -1219,7 +1073,6 @@ mod tests {
     #[test]
     fn nyxid_client_secret_never_appears_in_debug() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("NYXID_CLIENT_ID", "sa_test"),
             ("NYXID_CLIENT_SECRET", "sas_should_not_leak"),
@@ -1235,15 +1088,13 @@ mod tests {
 
     #[test]
     fn nyxid_org_cache_ttl_defaults_to_30() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert_eq!(config.nyxid_org_cache_ttl_secs, 30);
     }
 
     #[test]
     fn nyxid_org_cache_ttl_is_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_NYXID_ORG_CACHE_TTL_SECS", "60"),
         ]))
@@ -1254,7 +1105,6 @@ mod tests {
     #[test]
     fn zero_nyxid_org_cache_ttl_is_a_config_error_naming_the_variable() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_NYXID_ORG_CACHE_TTL_SECS", "0"),
         ]))
@@ -1268,15 +1118,13 @@ mod tests {
 
     #[test]
     fn nyxid_github_proxy_slug_defaults_to_api_github() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert_eq!(config.nyxid_github_proxy_slug, "api-github");
     }
 
     #[test]
     fn nyxid_github_proxy_slug_is_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_NYXID_GITHUB_PROXY_SLUG", "api-github-pat"),
         ]))
@@ -1287,7 +1135,6 @@ mod tests {
     #[test]
     fn blank_nyxid_github_proxy_slug_is_a_config_error_naming_the_variable() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_NYXID_GITHUB_PROXY_SLUG", "   "),
         ]))
@@ -1309,8 +1156,7 @@ mod tests {
 
     #[test]
     fn llm_defaults_when_gateway_unset() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert!(config.llm_gateway_url.is_none());
         assert!(config.llm_model.is_none());
         assert_eq!(config.llm_timeout_secs, 20);
@@ -1320,7 +1166,6 @@ mod tests {
     #[test]
     fn llm_vars_are_all_overridable() {
         let mut pairs = vec![
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             (
                 "FKST_HOSTED_LLM_GATEWAY_URL",
@@ -1344,7 +1189,6 @@ mod tests {
     #[test]
     fn zero_llm_timeout_is_a_config_error_naming_the_var() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_LLM_TIMEOUT_SECS", "0"),
         ]))
@@ -1359,7 +1203,6 @@ mod tests {
     #[test]
     fn zero_llm_max_output_bytes_is_a_config_error_naming_the_var() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_LLM_MAX_OUTPUT_BYTES", "0"),
         ]))
@@ -1374,7 +1217,6 @@ mod tests {
     #[test]
     fn llm_gateway_without_nyxid_creds_is_a_config_error() {
         let err = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             (
                 "FKST_HOSTED_LLM_GATEWAY_URL",
@@ -1393,7 +1235,6 @@ mod tests {
     #[test]
     fn llm_gateway_without_model_is_a_config_error() {
         let mut pairs = vec![
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             (
                 "FKST_HOSTED_LLM_GATEWAY_URL",
@@ -1412,7 +1253,6 @@ mod tests {
     #[test]
     fn llm_gateway_with_creds_and_model_is_accepted() {
         let mut pairs = vec![
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             (
                 "FKST_HOSTED_LLM_GATEWAY_URL",
@@ -1433,8 +1273,7 @@ mod tests {
 
     #[test]
     fn vault_caps_default() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert_eq!(config.vault_value_byte_cap, 65_536);
         assert_eq!(config.vault_entries_per_scope_cap, 100);
     }
@@ -1442,7 +1281,6 @@ mod tests {
     #[test]
     fn vault_caps_are_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_VAULT_VALUE_BYTE_CAP", "1024"),
             ("FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP", "5"),
@@ -1458,7 +1296,7 @@ mod tests {
             ("FKST_HOSTED_VAULT_VALUE_BYTE_CAP", "0"),
             ("FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP", "0"),
         ] {
-            let err = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false"), (var, value)]))
+            let err = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false"), (var, value)]))
                 .expect_err("zero cap must fail");
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
@@ -1469,8 +1307,7 @@ mod tests {
 
     #[test]
     fn codex_defaults_apply_when_unset() {
-        let config =
-            Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
         assert_eq!(config.codex_model, "gpt-5-codex");
         assert_eq!(
             config.chrono_llm_base_url,
@@ -1481,7 +1318,6 @@ mod tests {
     #[test]
     fn codex_vars_are_overridable() {
         let config = Config::from_vars(vars(&[
-            URI,
             ("FKST_AUTH_ENABLED", "false"),
             ("FKST_HOSTED_CODEX_MODEL", "gpt-4.1"),
             (
@@ -1500,7 +1336,7 @@ mod tests {
     #[test]
     fn blank_codex_vars_are_config_errors_naming_the_var() {
         for var in ["FKST_HOSTED_CODEX_MODEL", "FKST_HOSTED_CHRONO_LLM_BASE_URL"] {
-            let err = Config::from_vars(vars(&[URI, ("FKST_AUTH_ENABLED", "false"), (var, "   ")]))
+            let err = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false"), (var, "   ")]))
                 .expect_err("blank must fail");
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");

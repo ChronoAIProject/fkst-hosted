@@ -4,10 +4,10 @@
 //! dispatched to worker A, then a reassignment (driven through the
 //! [`ReassignDriver`] over the real [`DispatchRedispatch`]) re-resolves a FRESH
 //! [`ResolvedDispatch`] with a BUMPED fence and queues it to worker B's outbound
-//! control channel. This exercises the same Mongo-backed resolve path the live
-//! placement uses, so it needs a Mongo — it uses an ephemeral testcontainers
-//! Mongo and self-skips when Docker is unavailable (so `cargo test` stays green
-//! on daemonless runners), mirroring `activation_dispatch.rs`.
+//! control channel. The resolve path is now the in-memory [`ClaimMap`] claim
+//! authority (datastore-free, #143), so this exercises pure in-process wiring:
+//! no datastore and no Docker are required, and `cargo test` runs it
+//! unconditionally on every runner.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -15,9 +15,6 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use secrecy::SecretString;
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::mongo::Mongo;
 
 use fkst_control_plane::controller::{ClaimMap, ControllerHandle, ReassignDriver, WorkerRegistry};
 use fkst_control_plane::engine::EngineConfig;
@@ -35,18 +32,6 @@ const REPO: &str = "site";
 const OWNER_USER: &str = "user-1";
 const WORKER_A: &str = "worker-a";
 const WORKER_B: &str = "worker-b";
-const MONGO_TAG: &str = "7";
-
-/// True when a Docker daemon answers `docker info`.
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
 
 // ---- fakes ----------------------------------------------------------------
 
@@ -140,22 +125,15 @@ fn reg(id: &str) -> RegisterRequest {
 }
 
 struct Harness {
-    _container: ContainerAsync<Mongo>,
     sessions: SessionService,
     goals: GoalIssueStore,
 }
 
-/// Start an ephemeral Mongo + a session service with goal support, seed `goal`.
+/// Build a datastore-free session service with goal support and seed `goal`.
+///
+/// The session store and the claim authority are both in-memory (#143/#198), so
+/// no datastore or Docker is involved — the harness is pure in-process wiring.
 async fn harness(goal: &GoalDoc) -> Harness {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    // The session store is now in-memory (#198): the SessionRepo no longer takes a
-    // `Db`, so this harness no longer connects to the container. The container is
-    // still started (kept alive via `_container`) so the suite's docker self-skip
-    // gate stays meaningful and the wiring is ready for the rest of AppState.
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let github_app =
         GithubAppTokens::with_api(&github_config(), Arc::new(FakeGithubApi::default()))
@@ -164,11 +142,7 @@ async fn harness(goal: &GoalDoc) -> Harness {
     goals.insert(goal).await.expect("seed goal");
     sessions.enable_goal_support(goals.clone(), github_app);
 
-    Harness {
-        _container: container,
-        sessions,
-        goals,
-    }
+    Harness { sessions, goals }
 }
 
 /// Trigger a goal on the controller path so a session is placed + dispatched onto
@@ -215,10 +189,6 @@ async fn place_and_dispatch(
 /// (bumped fence, new worker_id) is queued to that worker's outbound channel.
 #[tokio::test]
 async fn dead_worker_redispatches_to_a_live_worker_with_bumped_fence() {
-    if !docker_available() {
-        eprintln!("skipping: docker unavailable");
-        return;
-    }
     let goal_id = bson::Uuid::new();
     let h = harness(&goal_doc(goal_id)).await;
     let (session_id, registry, claims, driver) = place_and_dispatch(&h, goal_id).await;
@@ -266,10 +236,6 @@ async fn dead_worker_redispatches_to_a_live_worker_with_bumped_fence() {
 /// re-dispatches it to a live worker with a bumped fence.
 #[tokio::test]
 async fn released_session_redispatches_to_a_live_worker() {
-    if !docker_available() {
-        eprintln!("skipping: docker unavailable");
-        return;
-    }
     let goal_id = bson::Uuid::new();
     let h = harness(&goal_doc(goal_id)).await;
     let (session_id, registry, claims, driver) = place_and_dispatch(&h, goal_id).await;

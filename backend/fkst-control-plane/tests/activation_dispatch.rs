@@ -7,9 +7,10 @@
 //! spawning the engine in-process. The negative case proves the no-controller
 //! fallback enqueues NOTHING (it spawns the driver in-process, #198-ii).
 //!
-//! `create_for_goal` inserts + transitions real session documents, so this needs
-//! a Mongo. It uses an ephemeral testcontainers Mongo and self-skips when Docker
-//! is unavailable, so `cargo test` stays green on daemonless runners.
+//! `create_for_goal` inserts + transitions sessions through the in-memory
+//! `SessionRepo` (#198) and seeds goals into an in-memory `GoalIssueStore`, so the
+//! suite is datastore-free (#143): no Mongo, no testcontainers, no Docker. The
+//! tests run unconditionally on any runner.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -17,9 +18,6 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use secrecy::SecretString;
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::mongo::Mongo;
 
 use fkst_control_plane::controller::{ClaimMap, ControllerHandle, WorkerRegistry};
 use fkst_control_plane::engine::EngineConfig;
@@ -36,18 +34,6 @@ const OWNER: &str = "acme";
 const REPO: &str = "site";
 const OWNER_USER: &str = "user-1";
 const WORKER: &str = "worker-7";
-const MONGO_TAG: &str = "7";
-
-/// True when a Docker daemon answers `docker info`.
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
 
 // ---- fakes ----------------------------------------------------------------
 
@@ -141,27 +127,17 @@ fn reg(id: &str) -> RegisterRequest {
     }
 }
 
-/// Everything a test needs, with the Mongo container kept alive.
+/// Everything a test needs.
 struct Harness {
-    _container: ContainerAsync<Mongo>,
     sessions: SessionService,
     goals: GoalIssueStore,
 }
 
-/// Start an ephemeral Mongo, build a session service with goal support, and seed
-/// `goal` into the (in-memory) goal store. No vault/codex/ornn is wired — the
-/// minimal resolve path (token + clone spec + nonce) is enough to assert the
-/// dispatch is enqueued.
+/// Build a session service with goal support over the in-memory `SessionRepo`
+/// (#198), and seed `goal` into the in-memory goal store. No datastore is needed
+/// (#143). No vault/codex/ornn is wired — the minimal resolve path (token + clone
+/// spec + nonce) is enough to assert the dispatch is enqueued.
 async fn harness(goal: &GoalDoc) -> Harness {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    // The session store is now in-memory (#198): the SessionRepo no longer takes a
-    // `Db`, so this harness no longer connects to the container. The container is
-    // still started (kept alive via `_container`) so the suite's docker self-skip
-    // gate stays meaningful and the wiring is ready for the rest of AppState.
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let github_app =
         GithubAppTokens::with_api(&github_config(), Arc::new(FakeGithubApi::default()))
@@ -170,11 +146,7 @@ async fn harness(goal: &GoalDoc) -> Harness {
     goals.insert(goal).await.expect("seed goal");
     sessions.enable_goal_support(goals.clone(), github_app);
 
-    Harness {
-        _container: container,
-        sessions,
-        goals,
-    }
+    Harness { sessions, goals }
 }
 
 /// A registry with exactly ONE registered live worker, plus a fresh claim map,
@@ -197,10 +169,6 @@ fn one_worker_controller() -> (WorkerRegistry, ControllerHandle) {
 /// created session.
 #[tokio::test]
 async fn controller_enabled_trigger_enqueues_a_dispatch_to_the_worker() {
-    if !docker_available() {
-        eprintln!("skipping: docker unavailable");
-        return;
-    }
     let goal_id = bson::Uuid::new();
     let h = harness(&goal_doc(goal_id)).await;
 
@@ -249,10 +217,6 @@ async fn controller_enabled_trigger_enqueues_a_dispatch_to_the_worker() {
 /// fallback, #198-ii).
 #[tokio::test]
 async fn controller_disabled_trigger_enqueues_nothing() {
-    if !docker_available() {
-        eprintln!("skipping: docker unavailable");
-        return;
-    }
     let goal_id = bson::Uuid::new();
     let h = harness(&goal_doc(goal_id)).await;
 

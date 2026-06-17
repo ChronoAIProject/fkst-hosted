@@ -29,7 +29,9 @@ sha2 = "0.10"
 # pairs with the already-present `sha2` (no GitHub SDK — consistent with the
 # hand-rolled `reqwest` + `jsonwebtoken` GitHub App transport).
 hmac = "0.12"
-mongodb = "3"
+# `bson` is a standalone crate (NOT the mongodb driver, removed in #143). It is
+# kept for `SessionDoc`'s value types (`bson::Uuid` / `bson::DateTime`) and the
+# in-memory `SessionRepo` CAS round-trip (`bson::to_document`).
 bson = "2"
 regex = "1"
 thiserror = "1"
@@ -57,12 +59,10 @@ rand = "0.8"
 fkst-worker = { path = "../fkst-worker" }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-testcontainers = "0.27"
 # `zip` is only used now to BUILD test skill packages in the ornn module's
 # `#[cfg(test)]` suite — the install implementation that consumed it moved to
 # `fkst-engine` (#151). It is therefore a dev-dependency, not a runtime one.
 zip = { version = "2", default-features = false, features = ["deflate"] }
-testcontainers-modules = { version = "0.15", features = ["mongo"] }
 wiremock = "0.6"
 filetime = "0.2"
 rsa = { version = "0.9", features = ["pem"] }

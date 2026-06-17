@@ -1,14 +1,18 @@
-//! Authoritative BSON document shapes for the `sessions` and `leases`
-//! collections.
+//! Authoritative BSON-shaped document for the `SessionDoc` session record.
 //!
-//! Conventions (load-bearing for downstream queries):
+//! The controller is datastore-free (#143): there is no MongoDB. `SessionDoc`
+//! is nonetheless serialized via `bson` because the in-memory `SessionRepo`'s
+//! compare-and-set round-trips the document through `bson::to_document` to
+//! reproduce — byte-for-byte — the field-level semantics the driver once
+//! enforced (see `sessions/repo.rs`). These conventions are therefore still
+//! load-bearing for that CAS:
 //! - `Option<T>` fields serialize as explicit BSON `null` (no
 //!   `skip_serializing_if`) so the document shape is stable.
 //! - UUIDs are stored as `bson::Uuid` (BSON Binary subtype 4) — a raw
-//!   `uuid::Uuid` would serialize as a *string* and silently never match
-//!   `find_one({_id})` lookups. Convert to/from `uuid::Uuid` at the edges.
-//! - Timestamps are `bson::DateTime` (millisecond UTC, driver-native) so
-//!   round-trips are lossless.
+//!   `uuid::Uuid` would serialize as a *string* and silently never match the
+//!   `_id` equality the CAS relies on. Convert to/from `uuid::Uuid` at the edges.
+//! - Timestamps are `bson::DateTime` (millisecond UTC) so round-trips are
+//!   lossless.
 //!
 //! Re-exports: [`RepoRef`] is shared by both the sessions and goals domains.
 //! The canonical definition lives here; `goals/model.rs` re-exports it.
@@ -142,7 +146,8 @@ impl SessionDoc {
         }
     }
 
-    /// Returns the lease key for this session. For goal sessions this is
+    /// Returns the claim key for this session, used to key the in-memory claim
+    /// authority (`controller::ClaimMap`). For goal sessions this is
     /// `"goal-<hyphenated-uuid>"`; for classic sessions it is the
     /// `package_name`. The result always satisfies `is_valid_name` because
     /// the UUID's hex chars and hyphens are in `[A-Za-z0-9_-]+`.
@@ -152,20 +157,6 @@ impl SessionDoc {
             None => self.package_name.clone(),
         }
     }
-}
-
-/// `leases` collection: `_id` is the lease key — either a package name (for
-/// classic sessions) or `"goal-<uuid>"` (for goal-triggered sessions). At most
-/// one live holder per lease key.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LeaseDoc {
-    #[serde(rename = "_id")]
-    pub package_name: String,
-    pub session_id: bson::Uuid,
-    pub holder_pod: String,
-    pub fencing_token: i64,
-    pub expires_at: bson::DateTime,
-    pub renewed_at: bson::DateTime,
 }
 
 #[cfg(test)]
@@ -203,17 +194,6 @@ mod tests {
         }
     }
 
-    fn sample_lease() -> LeaseDoc {
-        LeaseDoc {
-            package_name: "demo-package".to_string(),
-            session_id: bson::Uuid::new(),
-            holder_pod: "pod-0".to_string(),
-            fencing_token: 7,
-            expires_at: bson::DateTime::from_millis(1_700_000_060_000),
-            renewed_at: bson::DateTime::from_millis(1_700_000_030_000),
-        }
-    }
-
     #[test]
     fn session_doc_round_trips_losslessly() {
         let doc = sample_session();
@@ -223,17 +203,10 @@ mod tests {
     }
 
     #[test]
-    fn lease_doc_round_trips_losslessly() {
-        let doc = sample_lease();
-        let raw = bson::to_document(&doc).expect("serialize");
-        let back: LeaseDoc = bson::from_document(raw).expect("deserialize");
-        assert_eq!(back, doc);
-    }
-
-    #[test]
     fn session_id_serializes_as_binary_subtype_uuid_not_string() {
-        // Regression guard: a string `_id` would silently never match
-        // `find_one({_id: <uuid>})` against driver-written Binary data.
+        // Regression guard: a string `_id` would change the document shape the
+        // in-memory CAS round-trips through `bson`, breaking the `_id` equality
+        // it relies on (sessions/repo.rs).
         let raw = bson::to_document(&sample_session()).expect("serialize");
         match raw.get("_id").expect("_id present") {
             Bson::Binary(binary) => assert_eq!(binary.subtype, BinarySubtype::Uuid),
@@ -255,32 +228,6 @@ mod tests {
             let bson = bson::to_bson(&status).expect("serialize");
             assert_eq!(bson, Bson::String(expected.to_string()));
         }
-    }
-
-    #[test]
-    fn lease_session_id_serializes_as_binary_subtype_uuid_not_string() {
-        // Regression guard for the lease coordination layer: `session_id`
-        // must stay Binary subtype 4 on BOTH sides of the `sessions._id`
-        // join — a string here would silently never match the driver-written
-        // Binary `_id` of `sessions` (and vice versa).
-        let raw = bson::to_document(&sample_lease()).expect("serialize");
-        match raw.get("session_id").expect("session_id present") {
-            Bson::Binary(binary) => assert_eq!(binary.subtype, BinarySubtype::Uuid),
-            other => panic!("expected Bson::Binary(subtype Uuid), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn lease_doc_id_carries_the_package_name() {
-        let raw = bson::to_document(&sample_lease()).expect("serialize");
-        assert_eq!(
-            raw.get("_id").expect("_id present"),
-            &Bson::String("demo-package".to_string())
-        );
-        assert!(
-            !raw.contains_key("package_name"),
-            "package_name must map onto _id only"
-        );
     }
 
     #[test]
