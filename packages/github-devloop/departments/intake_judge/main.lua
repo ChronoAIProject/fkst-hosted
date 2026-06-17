@@ -125,6 +125,11 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
     return nil
   end
+  local bump_pr_number = core.substrate_ref_backing_issue_pr_number(current)
+  if bump_pr_number ~= nil then
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-substrate-ref-backing-issue", "substrate-ref bump backing issue is PR-owned by #" .. tostring(bump_pr_number))
+    return nil
+  end
   if not core.claim_issue_for_management("intake_judge", repo, issue_number, current, candidate.proposal_id) then
     return nil
   end

@@ -327,12 +327,51 @@ local function lifecycle_proposal_id(repo, pr_number_value)
   return M.pr_proposal_id(repo, pr_number_value)
 end
 
+local function extract_bump_pr_number(text)
+  local body = tostring(text or "")
+  for _, pattern in ipairs({
+    "[Pp][Rr]%s*:%s*#(%d+)",
+    "[Pp]ull%s+[Rr]equest%s*:%s*#(%d+)",
+    "github%.com/[^%s)]+/pull/(%d+)",
+  }) do
+    local value = body:match(pattern)
+    if pr_number(value) ~= nil then
+      return pr_number(value)
+    end
+  end
+  return nil
+end
+
 function M.is_substrate_ref_lifecycle(proposal_id, pr_number_value, version)
   local repo, proposal_pr = M.parse_pr_proposal_id(proposal_id)
   local head_sha = tostring(version or ""):match("^" .. lifecycle_version_prefix .. "/(%x+)$")
   return repo ~= nil
     and tostring(proposal_pr or "") == tostring(pr_number_value or "")
     and M._is_git_sha(head_sha)
+end
+
+function M.substrate_ref_backing_issue_pr_number(issue)
+  if type(issue) ~= "table" then
+    return nil
+  end
+  local title = tostring(issue.title or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if title ~= bump_title then
+    return nil
+  end
+  local body = tostring(issue.body or "")
+  local normalized = body:lower()
+  if normalized:find("backing issue for the autonomous fkst%-substrate pin bump pr", 1, false) == nil then
+    return nil
+  end
+  if normalized:find("%.fkst/substrate%-ref", 1, false) == nil
+    and normalized:find("fkst%-substrate pin bump", 1, false) == nil then
+    return nil
+  end
+  return extract_bump_pr_number(body)
+end
+
+function M.is_substrate_ref_backing_issue(issue)
+  return M.substrate_ref_backing_issue_pr_number(issue) ~= nil
 end
 
 local function validate_bump_pr(repo, base_branch, pr)
