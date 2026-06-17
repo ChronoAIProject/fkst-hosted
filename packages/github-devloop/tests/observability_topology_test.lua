@@ -210,16 +210,6 @@ local function count_literal(haystack, needle)
   end
 end
 
-local function macro_node_count(mermaid)
-  local count = 0
-  for line in tostring(mermaid or ""):gmatch("[^\n]+") do
-    if line:match("^%s+[a-z][a-z0-9_]*%[") ~= nil then
-      count = count + 1
-    end
-  end
-  return count
-end
-
 return {
   test_observability_declares_graph_json_authorization = function()
     local main_path = package.searchpath("departments.observability.main", package.path)
@@ -231,53 +221,72 @@ return {
     t.eq(module.spec.stall_window, "2m")
   end,
 
-  test_topology_drift_validation_requires_every_department_mapped_or_ignored = function()
-    local graph = topology_fixture()
-    t.eq(topology.validate_graph(graph), true)
+  test_topology_derives_unknown_department_lane_and_edges_from_graph = function()
+    local b = graph_builder()
+    b.raiser("new-package.alarm_poll", "new-package.alarm_tick")
+    b.department("new-package.alpha_one", { "new-package.alarm_tick" }, { "new-package.work_ready" })
+    b.department("new-package.beta_two", { "new-package.work_ready" }, {})
 
-    table.insert(graph.nodes, {
-      kind = "department",
-      id = "department:github-devloop.new_runtime_path",
-      name = "new_runtime_path",
-      package = "github-devloop",
-      consumes = {},
-      produces = {},
-      ephemeral = {},
-      stall_window = "30s",
-    })
+    local mermaid = topology.render_mermaid(b.graph())
 
-    local ok, err = pcall(function()
-      topology.validate_graph(graph)
-    end)
-    t.eq(ok, false)
-    t.is_true(tostring(err):find("unmapped department", 1, true) ~= nil)
+    t.is_true(mermaid:find("subgraph lane_", 1, true) ~= nil)
+    t.is_true(mermaid:find("[\"new-package\"]", 1, true) ~= nil)
+    t.is_true(mermaid:find("[\"alarm_poll\"]", 1, true) ~= nil)
+    t.is_true(mermaid:find("[\"alpha_one\"]", 1, true) ~= nil)
+    t.is_true(mermaid:find("[\"beta_two\"]", 1, true) ~= nil)
+    t.is_true(mermaid:find(" --> ", 1, true) ~= nil)
+    t.is_true(mermaid:find("alarm_poll", 1, true) ~= nil)
+    t.is_true(mermaid:find("alpha_one", 1, true) ~= nil)
+    t.is_true(mermaid:find("beta_two", 1, true) ~= nil)
   end,
 
-  test_topology_mermaid_is_deterministic_and_bounded = function()
+  test_topology_mermaid_is_deterministic_and_derived = function()
     local graph = topology_fixture()
     local mermaid = topology.render_mermaid(graph)
     local permuted = topology.render_mermaid(permuted_graph(graph))
 
     t.eq(mermaid, permuted)
     t.is_true(mermaid:find("flowchart LR", 1, true) == 1)
-    t.eq(count_literal(mermaid, "subgraph github_proxy_lane[\"github-proxy\"]"), 1)
-    t.eq(count_literal(mermaid, "subgraph consensus_lane[\"consensus\"]"), 1)
-    t.eq(count_literal(mermaid, "subgraph github_devloop_lane[\"github-devloop\"]"), 1)
-    t.is_true(macro_node_count(mermaid) <= 12)
-    t.is_true(mermaid:find("github --> poll", 1, true) ~= nil)
-    t.is_true(mermaid:find("poll --> observe", 1, true) ~= nil)
-    t.is_true(mermaid:find("intake --> consensus", 1, true) ~= nil)
-    t.is_true(mermaid:find("consensus --> ready", 1, true) ~= nil)
-    t.is_true(mermaid:find("ready --> implement", 1, true) ~= nil)
-    t.is_true(mermaid:find("implement --> pr", 1, true) ~= nil)
-    t.is_true(mermaid:find("pr --> observe", 1, true) ~= nil)
-    t.is_true(mermaid:find("review --> consensus", 1, true) ~= nil)
-    t.is_true(mermaid:find("consensus --> merge_ready", 1, true) ~= nil)
-    t.is_true(mermaid:find("merge_ready --> merge", 1, true) ~= nil)
-    t.is_true(mermaid:find("rollup_dev", 1, true) ~= nil)
+    t.eq(count_literal(mermaid, "[\"github-proxy\"]"), 1)
+    t.eq(count_literal(mermaid, "[\"consensus\"]"), 1)
+    t.eq(count_literal(mermaid, "[\"github-devloop\"]"), 1)
+    t.is_true(mermaid:find("[\"github_poll\"]", 1, true) ~= nil)
+    t.is_true(mermaid:find("[\"observe_issue\"]", 1, true) ~= nil)
+    t.is_true(mermaid:find("[\"consensus_result\"]", 1, true) ~= nil)
+    t.eq(mermaid:find("[\"ready(dep-gate)\"]", 1, true), nil)
+    t.is_true(mermaid:find("github_poll", 1, true) ~= nil)
+    t.is_true(mermaid:find("observe_issue", 1, true) ~= nil)
+    t.is_true(mermaid:find("intake_judge", 1, true) ~= nil)
+    t.is_true(mermaid:find("consensus_result", 1, true) ~= nil)
+    t.is_true(mermaid:find("implement", 1, true) ~= nil)
+    t.is_true(mermaid:find("github_pr_open", 1, true) ~= nil)
+    t.is_true(mermaid:find("review_result", 1, true) ~= nil)
+    t.is_true(mermaid:find("merge", 1, true) ~= nil)
+    t.is_true(mermaid:find("rollup_merge", 1, true) ~= nil)
     t.eq(mermaid:find("#42", 1, true), nil)
     t.eq(mermaid:find("quota", 1, true), nil)
     t.eq(mermaid:find("queue depth", 1, true), nil)
+  end,
+
+  test_topology_mermaid_normalizes_ids_and_escapes_labels = function()
+    local b = graph_builder()
+    b.department("odd.pkg-a", {}, { "odd.ready-q" })
+    b.department("odd.pkg b", { "odd.ready-q" }, {})
+    local graph = b.graph()
+    for _, node in ipairs(graph.nodes) do
+      if node.id == "department:odd.pkg-a" then
+        node.name = "pkg-a \"source\""
+      elseif node.id == "department:odd.pkg b" then
+        node.name = "pkg b [sink]"
+      end
+    end
+
+    local mermaid = topology.render_mermaid(graph)
+
+    t.is_true(mermaid:find("[\"pkg-a \\\"source\\\"\"]", 1, true) ~= nil)
+    t.is_true(mermaid:find("[\"pkg b [sink]\"]", 1, true) ~= nil)
+    t.eq(mermaid:find("department:odd.pkg-a", 1, true), nil)
+    t.eq(mermaid:find("pkg b -->", 1, true), nil)
   end,
 
   test_dashboard_renders_topology_before_working_and_keeps_hash_stable = function()
@@ -321,7 +330,7 @@ return {
     })
 
     t.is_true(rendered.body:find(
-      "Operator orientation: this collapses raw `graph_json()` nodes and queues into the package lanes and message path needed to read the live work sections below.",
+      "Operator orientation: this projects `graph_json()` nodes into package lanes and queue-mediated message paths needed to read the live work sections below.",
       1,
       true
     ) ~= nil)

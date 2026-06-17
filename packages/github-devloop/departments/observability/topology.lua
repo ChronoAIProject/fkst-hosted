@@ -1,107 +1,11 @@
+local strings = require("std.strings")
+
 local M = {}
 
-local lanes = {
-  { id = "github_proxy_lane", label = "github-proxy" },
-  { id = "consensus_lane", label = "consensus" },
-  { id = "github_devloop_lane", label = "github-devloop" },
+local renderable_kinds = {
+  department = true,
+  raiser = true,
 }
-
-local macro_nodes = {
-  { id = "github", label = "GitHub", lane = "github_proxy_lane" },
-  { id = "poll", label = "poll", lane = "github_proxy_lane" },
-  { id = "pr", label = "PR", lane = "github_proxy_lane" },
-  { id = "consensus", label = "consensus(angles+meta)", lane = "consensus_lane" },
-  { id = "observe", label = "observe", lane = "github_devloop_lane" },
-  { id = "intake", label = "intake", lane = "github_devloop_lane" },
-  { id = "ready", label = "ready(dep-gate)", lane = "github_devloop_lane" },
-  { id = "implement", label = "implement", lane = "github_devloop_lane" },
-  { id = "review", label = "review", lane = "github_devloop_lane" },
-  { id = "merge_ready", label = "merge-ready", lane = "github_devloop_lane" },
-  { id = "merge", label = "merge", lane = "github_devloop_lane" },
-  { id = "rollup_dev", label = "rollup->dev", lane = "github_devloop_lane" },
-}
-
-local department_macro = {
-  ["github-proxy.github_poll"] = "poll",
-  ["github-proxy.github_pr_open"] = "pr",
-
-  ["consensus.decide"] = "consensus",
-
-  ["github-devloop.observe_issue"] = "observe",
-  ["github-devloop.observe_pr"] = "observe",
-  ["github-devloop.intake_scan"] = "intake",
-  ["github-devloop.intake_probe"] = "intake",
-  ["github-devloop.intake_judge"] = "intake",
-  ["github-devloop.consensus_result"] = "ready",
-  ["github-devloop.implement"] = "implement",
-  ["github-devloop.open_pr"] = "implement",
-  ["github-devloop.review_pr"] = "review",
-  ["github-devloop.review_loop"] = "review",
-  ["github-devloop.review_result"] = "merge_ready",
-  ["github-devloop.merge"] = "merge",
-  ["github-devloop.rollup_scan"] = "rollup_dev",
-  ["github-devloop.rollup_merge"] = "rollup_dev",
-}
-
-local raiser_macro = {
-  ["github-proxy.github_poll"] = "github",
-}
-
-local ignored_departments = {
-  ["autochrono.propose"] = true,
-  ["autochrono.reply"] = true,
-  ["consensus.dead_letter"] = true,
-  ["github-autochrono.inbound_glue"] = true,
-  ["github-autochrono.outbound_glue"] = true,
-  ["github-devloop.comment_handoff"] = true,
-  ["github-devloop.dead_letter"] = true,
-  ["github-devloop.decompose"] = true,
-  ["github-devloop.doctor"] = true,
-  ["github-devloop.ensure_repo"] = true,
-  ["github-devloop.fix"] = true,
-  ["github-devloop.liveness_scan"] = true,
-  ["github-devloop.loop"] = true,
-  ["github-devloop.observability"] = true,
-  ["github-devloop.pr_freshness_scan"] = true,
-  ["github-devloop.reconcile"] = true,
-  ["github-devloop.review_meta"] = true,
-  ["github-devloop.substrate_ref_scan"] = true,
-  ["github-devloop.sync_conflict"] = true,
-  ["github-devloop.sync_scan"] = true,
-  ["github-proxy.github_comment"] = true,
-  ["github-proxy.github_issue_blocked_by"] = true,
-  ["github-proxy.github_issue_create"] = true,
-  ["github-proxy.github_issue_label"] = true,
-  ["github-proxy.github_pr_comment"] = true,
-}
-
-local function macro_index()
-  local index = {}
-  for order, node in ipairs(macro_nodes) do
-    index[node.id] = {
-      order = order,
-      lane = node.lane,
-      label = node.label,
-    }
-  end
-  return index
-end
-
-local macros = macro_index()
-
-local function canonical_from_node(node, expected_kind)
-  local id = tostring(node and node.id or "")
-  local prefix = tostring(expected_kind) .. ":"
-  if id:sub(1, #prefix) == prefix then
-    return id:sub(#prefix + 1)
-  end
-  local package = tostring(node and node.package or "")
-  local name = tostring(node and node.name or "")
-  if package ~= "" and name ~= "" then
-    return package .. "." .. name
-  end
-  return nil
-end
 
 local function require_graph(graph)
   if type(graph) ~= "table" then
@@ -115,51 +19,95 @@ local function require_graph(graph)
   end
 end
 
-local function validate_macro_references()
-  for canonical, macro_id in pairs(department_macro) do
-    if ignored_departments[canonical] then
-      error("github-devloop: topology: department mapped and ignored: " .. canonical)
-    end
-    if macros[macro_id] == nil then
-      error("github-devloop: topology: map references unknown macro: " .. tostring(macro_id))
+local function canonical_from_node(node)
+  local package_name = tostring(node and node.package or "")
+  local name = tostring(node and node.name or "")
+  if package_name ~= "" and name ~= "" then
+    return package_name .. "." .. name
+  end
+
+  local id = tostring(node and node.id or "")
+  local parsed_package, parsed_name = id:match("^[^:]+:([^%.]+)%.(.+)$")
+  if parsed_package ~= nil and parsed_package ~= "" and parsed_name ~= nil and parsed_name ~= "" then
+    return parsed_package .. "." .. parsed_name
+  end
+
+  return nil
+end
+
+local function node_package(node)
+  local package_name = tostring(node and node.package or "")
+  if package_name ~= "" then
+    return package_name
+  end
+  local canonical = canonical_from_node(node)
+  if canonical == nil then
+    return nil
+  end
+  local parsed = canonical:match("^([^%.]+)%.")
+  if parsed == "" then
+    return nil
+  end
+  return parsed
+end
+
+local function node_label(node)
+  local name = tostring(node and node.name or "")
+  if name ~= "" then
+    return name
+  end
+  local canonical = canonical_from_node(node)
+  if canonical ~= nil then
+    local _package_name, parsed_name = canonical:match("^([^%.]+)%.(.+)$")
+    if parsed_name ~= nil and parsed_name ~= "" then
+      return parsed_name
     end
   end
-  for canonical, macro_id in pairs(raiser_macro) do
-    if macros[macro_id] == nil then
-      error("github-devloop: topology: raiser map references unknown macro: " .. tostring(macro_id) .. " for " .. tostring(canonical))
-    end
+  return tostring(node and node.id or "unknown")
+end
+
+local function mermaid_label(value)
+  return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\r", " "):gsub("\n", " ")
+end
+
+local function mermaid_id(prefix, raw, used)
+  local base = tostring(raw or ""):gsub("[^%w_]", "_"):gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
+  if base == "" then
+    base = "node"
   end
+  if base:match("^[%d]") then
+    base = "n_" .. base
+  end
+  local candidate = tostring(prefix) .. "_" .. base
+  if used[candidate] == nil or used[candidate] == raw then
+    used[candidate] = raw
+    return candidate
+  end
+
+  local suffixed = candidate .. "_" .. strings.decimal_checksum(raw)
+  used[suffixed] = raw
+  return suffixed
 end
 
 function M.validate_graph(graph)
   require_graph(graph)
-  validate_macro_references()
 
   for _, node in ipairs(graph.nodes) do
-    if node.kind == "department" then
-      local canonical = canonical_from_node(node, "department")
-      if canonical == nil then
-        error("github-devloop: topology: malformed department node in topology graph")
+    if renderable_kinds[node.kind] then
+      if node_package(node) == nil then
+        error("github-devloop: topology: renderable node missing package: " .. tostring(node.id or ""))
       end
-      local mapped = department_macro[canonical] ~= nil
-      local ignored = ignored_departments[canonical] == true
-      if not mapped and not ignored then
-        error("github-devloop: topology: unmapped department in topology graph: " .. canonical)
+      if canonical_from_node(node) == nil then
+        error("github-devloop: topology: renderable node missing canonical name: " .. tostring(node.id or ""))
+      end
+    elseif node.kind == "queue" then
+      if tostring(node.id or "") == "" then
+        error("github-devloop: topology: queue node missing id")
       end
     end
   end
 
   return true
-end
-
-local function mapped_macro_for_node(node)
-  if node.kind == "department" then
-    return department_macro[canonical_from_node(node, "department")]
-  end
-  if node.kind == "raiser" then
-    return raiser_macro[canonical_from_node(node, "raiser")]
-  end
-  return nil
 end
 
 local function sorted_values(set)
@@ -171,33 +119,85 @@ local function sorted_values(set)
   return values
 end
 
-local function collect_edges(graph)
+local function graph_indexes(graph)
   local node_by_id = {}
-  local macro_by_node = {}
+  local package_set = {}
+  local render_nodes = {}
+  local id_used = {}
+  local lane_id_by_package = {}
+
   for _, node in ipairs(graph.nodes) do
-    node_by_id[tostring(node.id or "")] = node
-    local macro_id = mapped_macro_for_node(node)
-    if macro_id ~= nil then
-      macro_by_node[tostring(node.id or "")] = macro_id
+    local graph_id = tostring(node.id or "")
+    if graph_id ~= "" then
+      node_by_id[graph_id] = node
+    end
+    if renderable_kinds[node.kind] then
+      local package_name = node_package(node)
+      local canonical = canonical_from_node(node)
+      package_set[package_name] = true
+      table.insert(render_nodes, {
+        graph_id = graph_id,
+        canonical = canonical,
+        kind = tostring(node.kind or ""),
+        label = node_label(node),
+        package = package_name,
+      })
     end
   end
 
+  local packages = sorted_values(package_set)
+  for _, package_name in ipairs(packages) do
+    lane_id_by_package[package_name] = mermaid_id("lane", package_name, id_used)
+  end
+
+  table.sort(render_nodes, function(left, right)
+    if left.package ~= right.package then
+      return left.package < right.package
+    end
+    if left.kind ~= right.kind then
+      return left.kind < right.kind
+    end
+    if left.canonical ~= right.canonical then
+      return left.canonical < right.canonical
+    end
+    return left.graph_id < right.graph_id
+  end)
+
+  local mermaid_id_by_graph_id = {}
+  for _, node in ipairs(render_nodes) do
+    node.mermaid_id = mermaid_id("node", node.graph_id ~= "" and node.graph_id or node.canonical, id_used)
+    if node.graph_id ~= "" then
+      mermaid_id_by_graph_id[node.graph_id] = node.mermaid_id
+    end
+  end
+
+  return {
+    node_by_id = node_by_id,
+    lane_id_by_package = lane_id_by_package,
+    packages = packages,
+    render_nodes = render_nodes,
+    mermaid_id_by_graph_id = mermaid_id_by_graph_id,
+  }
+end
+
+local function collect_edges(graph, indexes)
   local queue_producers = {}
   local queue_consumers = {}
+
   for _, edge in ipairs(graph.edges) do
     local from = tostring(edge.from or "")
     local to = tostring(edge.to or "")
     local relation = tostring(edge.relation or "")
     if relation == "produces" or relation == "raises" then
-      local producer = macro_by_node[from]
-      local target = node_by_id[to]
+      local producer = indexes.mermaid_id_by_graph_id[from]
+      local target = indexes.node_by_id[to]
       if producer ~= nil and target ~= nil and target.kind == "queue" then
         queue_producers[to] = queue_producers[to] or {}
         queue_producers[to][producer] = true
       end
     elseif relation == "consumes" then
-      local source = node_by_id[from]
-      local consumer = macro_by_node[to]
+      local source = indexes.node_by_id[from]
+      local consumer = indexes.mermaid_id_by_graph_id[to]
       if consumer ~= nil and source ~= nil and source.kind == "queue" then
         queue_consumers[from] = queue_consumers[from] or {}
         queue_consumers[from][consumer] = true
@@ -225,26 +225,19 @@ local function collect_edges(graph)
     table.insert(edges, edge)
   end
   table.sort(edges, function(left, right)
-    local left_from = macros[left.from] and macros[left.from].order or 999
-    local right_from = macros[right.from] and macros[right.from].order or 999
-    if left_from ~= right_from then
-      return left_from < right_from
+    if left.from ~= right.from then
+      return left.from < right.from
     end
-    local left_to = macros[left.to] and macros[left.to].order or 999
-    local right_to = macros[right.to] and macros[right.to].order or 999
-    if left_to ~= right_to then
-      return left_to < right_to
-    end
-    return left.from .. "/" .. left.to < right.from .. "/" .. right.to
+    return left.to < right.to
   end)
   return edges
 end
 
-local function append_lane(lines, lane)
-  table.insert(lines, "  subgraph " .. lane.id .. "[\"" .. lane.label .. "\"]")
-  for _, node in ipairs(macro_nodes) do
-    if node.lane == lane.id then
-      table.insert(lines, "    " .. node.id .. "[\"" .. node.label .. "\"]")
+local function append_lane(lines, indexes, package_name)
+  table.insert(lines, "  subgraph " .. indexes.lane_id_by_package[package_name] .. "[\"" .. mermaid_label(package_name) .. "\"]")
+  for _, node in ipairs(indexes.render_nodes) do
+    if node.package == package_name then
+      table.insert(lines, "    " .. node.mermaid_id .. "[\"" .. mermaid_label(node.label) .. "\"]")
     end
   end
   table.insert(lines, "  end")
@@ -252,17 +245,15 @@ end
 
 function M.render_mermaid(graph)
   M.validate_graph(graph)
+  local indexes = graph_indexes(graph)
   local lines = { "flowchart LR" }
-  for _, lane in ipairs(lanes) do
-    append_lane(lines, lane)
+  for _, package_name in ipairs(indexes.packages) do
+    append_lane(lines, indexes, package_name)
   end
-  for _, edge in ipairs(collect_edges(graph)) do
+  for _, edge in ipairs(collect_edges(graph, indexes)) do
     table.insert(lines, "  " .. edge.from .. " --> " .. edge.to)
   end
   return table.concat(lines, "\n")
 end
-
-M._department_macro = department_macro
-M._ignored_departments = ignored_departments
 
 return M
