@@ -167,7 +167,7 @@ to the client).
 | `429` | `rate_limited` | Upstream (GitHub) rate-limited the request | `Retry-After: <seconds>` |
 | `500` | `internal` | Unexpected server error | |
 | `502` | `upstream_error` | An upstream provider (GitHub via proxy) returned an unexpected error | |
-| `503` | `unavailable` | A dependency (NyxID, LLM gateway, credential proxy) is unavailable | |
+| `503` | `unavailable` | A dependency (NyxID, credential proxy) is unavailable | |
 | `408` | — | Request exceeded the server timeout | |
 
 ---

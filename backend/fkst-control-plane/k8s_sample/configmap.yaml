@@ -53,12 +53,6 @@ data:
   # Slug of the NyxID GitHub proxy service. Non-blank (fail-closed).
   FKST_NYXID_GITHUB_PROXY_SLUG: "api-github"
 
-  # --- LLM gateway (optional; both URL + model required together if set) ---
-  # FKST_HOSTED_LLM_GATEWAY_URL: "https://nyx.chrono-ai.fun/api/v1/llm/gateway/v1"
-  # FKST_HOSTED_LLM_MODEL: "claude-sonnet"
-  FKST_HOSTED_LLM_TIMEOUT_SECS: "20" # >= 1
-  FKST_HOSTED_LLM_MAX_OUTPUT_BYTES: "1048576" # >= 1
-
   # --- Vault caps ---
   FKST_HOSTED_VAULT_VALUE_BYTE_CAP: "65536" # >= 1
   FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP: "100" # >= 1

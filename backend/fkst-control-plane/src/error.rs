@@ -25,9 +25,9 @@ pub enum AppError {
     /// The request conflicts with the current state. Renders as 409.
     #[error("conflict: {0}")]
     Conflict(String),
-    /// A required dependency (e.g. NyxID, the LLM gateway, or the credential
-    /// proxy) is unreachable. Renders as 503. The message must be safe for
-    /// clients (no connection detail).
+    /// A required dependency (e.g. NyxID or the credential proxy) is
+    /// unreachable. Renders as 503. The message must be safe for clients
+    /// (no connection detail).
     #[error("unavailable: {0}")]
     Unavailable(String),
     /// BSON serialization failure. Renders as 500.
