@@ -92,6 +92,7 @@ bypasses both layers.
 | `fkst:github:read` | `GET /github/accounts`, `/github/issues`, issue/comment reads |
 | `fkst:github:write` | `POST`/`PATCH` of issues and comments |
 | `fkst:catalog:read` | all `GET /catalog/*` |
+| `fkst:repo:setup` | `POST /repos/{owner}/{name}/fkst-setup` |
 | `fkst:admin` | everything (bypass) |
 
 **Layer 2 — ownership / org (the object layer).** After the permission check,
@@ -899,6 +900,90 @@ curl -H "Authorization: Bearer $TOKEN" \
 curl -X POST "$FKST_API/api/v1/github/repos/acme/billing/issues/7/comments" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{ "body": "Thanks, looking into this." }'
+```
+
+---
+
+## Repo fkst-context setup
+
+### `POST /api/v1/repos/{owner}/{name}/fkst-setup` — initialize a repo for fkst
+
+Scaffolds a `.fkst/` directory onto the repository's **default branch** so the
+repo is ready to drive fkst sessions. It commits, as one atomic commit
+(`fkst: initialize fkst context`):
+
+- `.fkst/packages/example/departments/example/main.lua` — a minimal valid example
+  package (passes the engine's package validation),
+- `.fkst/packages/example/README.md` — explains the example package,
+- `.fkst/AGENTS.md` — the per-repo base instruction file prepended to every fkst
+  session spawned from this repo.
+
+- **Permission:** `fkst:repo:setup`. With `org_id`, you must be an org
+  Member/Admin. The repository's GitHub ownership is enforced by the **fkst-hosted
+  GitHub App installation** — the App must already be installed on `{owner}/{name}`
+  (it holds the `contents:write` used to commit). Unlike the issues hub, this
+  endpoint writes through the **App installation token**, not your linked GitHub
+  account (which is read-only).
+- **Headers:** `Content-Type: application/json` only when sending a body.
+
+**Path parameters**
+
+| Param | Notes |
+|-------|-------|
+| `owner` | `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$` |
+| `name` | `^[A-Za-z0-9._-]{1,100}$` |
+
+**Query parameters**
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `force` | boolean | Re-commit the three scaffold paths over an existing `.fkst` (never deletes other `.fkst` content). Default `false` = safe, no-overwrite. |
+
+**Request body** (optional)
+
+| Field | Type | Required | Notes |
+|-------|------|:--------:|-------|
+| `org_id` | string | no | Enforce an org-writer check for this org |
+
+**Idempotency.** Before writing, the endpoint checks whether `.fkst` already
+exists. If it does and `force` is not set, it returns **`200`** with
+`already_initialized: true` and `created_paths: []` — **no** content is
+overwritten. A fresh repo is scaffolded and returns **`201`**; a `?force=true`
+re-commit over an existing `.fkst` returns **`200`** with
+`already_initialized: false`.
+
+**Response body**
+
+```json
+{
+  "repo": { "owner": "acme", "name": "site" },
+  "default_branch": "main",
+  "commit_sha": "abc123...",
+  "created_paths": [
+    ".fkst/packages/example/departments/example/main.lua",
+    ".fkst/packages/example/README.md",
+    ".fkst/AGENTS.md"
+  ],
+  "already_initialized": false
+}
+```
+
+On an already-initialized no-op, `default_branch` and `commit_sha` are `null` and
+`created_paths` is empty.
+
+**Responses:** `201` freshly scaffolded; `200` already initialized (no-op) or
+forced re-commit; `400` malformed owner/name; `403` missing `fkst:repo:setup` or
+failed org-writer check; `404` repository not found; `409` the default branch
+moved during scaffolding (retry); `422` the GitHub App is not configured/installed
+(carries an install hint); `502` GitHub rejected the commit.
+
+```sh
+curl -X POST "$FKST_API/api/v1/repos/acme/site/fkst-setup" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Re-commit the scaffold over an existing .fkst
+curl -X POST "$FKST_API/api/v1/repos/acme/site/fkst-setup?force=true" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
