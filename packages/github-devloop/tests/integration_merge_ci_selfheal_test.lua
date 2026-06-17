@@ -33,6 +33,14 @@ local function mock_rerunnable_check_runs()
   })
 end
 
+local function mock_failing_required_check_runs()
+  t.mock_command(check_runs_cmd, {
+    stdout = '{"total_count":1,"check_runs":[{"id":123,"name":"test","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_head_nudge_worktree(old_head, new_head)
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
@@ -183,6 +191,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker(event) }, rollup_json, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "UNSTABLE")
+    mock_failing_required_check_runs()
 
     local result = run_merge(event, opts("merge-unstable-failure-rollup", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -191,9 +200,9 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
     local fixing_payload = find_raise(result.raises, "devloop_fixing").payload
-    t.eq(fixing_payload.gate_failure_excerpt, "rollup-red: verify: COMPLETED/FAILURE")
+    t.eq(fixing_payload.gate_failure_excerpt, "own-ci-red")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
-    t.is_true(comment_body:find("rollup-red: verify: COMPLETED/FAILURE", 1, true) ~= nil)
+    t.is_true(comment_body:find("own-ci-red", 1, true) ~= nil)
   end,
 
   test_missing_status_within_first_observed_grace_does_not_dispatch = function()

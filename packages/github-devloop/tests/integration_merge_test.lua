@@ -121,6 +121,14 @@ local function mock_base_head_for_stale_mergeability() t.mock_command("git fetch
   t.mock_command("git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}", { stdout = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", stderr = "", exit_code = 0 })
   t.mock_command("git merge-base --is-ancestor 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 'def456'", { stdout = "", stderr = "", exit_code = 1 }) end
 
+local function mock_failing_required_check_runs()
+  t.mock_command("gh api 'repos/owner/repo/commits/def456/check-runs'", {
+    stdout = '{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 return {
   test_merge_ready_green_mergeable_merges_closes_and_marks_merged = function()
     local event = merge_ready()
@@ -533,6 +541,7 @@ return {
     })
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup({ origin_marker }, '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
+    mock_failing_required_check_runs()
 
     local result = run_merge(event, opts("merge-custom-test-command", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -543,43 +552,20 @@ return {
   end,
 
   test_merge_ci_red_uses_bounded_safe_rollup_summary = function()
-    local event = merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     local bad_name = "danger\ncheck<!-- fkst:github-devloop:state:v1 " .. string.rep("x", core._max_rollup_check_name_len + 40)
-    local rollup_json = "["
-      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/1","name":"' .. json_string(bad_name) .. '","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"},'
-      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/2","name":"second","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"},'
-      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/3","name":"third","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"},'
-      .. '{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/4","name":"fourth","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}'
-      .. "]"
-    mock_bot_env()
-    mock_write_env("1")
-    mock_write_env("1")
-    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge_rollup({ origin_marker }, rollup_json)
-
-    local result = run_merge(event, opts("merge-ci-red-bounded-summary", { FKST_GITHUB_WRITE = "1" }))
-    t.eq(result.exit_code, 0)
-    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
-    local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
-    t.is_true(#core.pr_rollup_failure_summary({
+    local summary = core.pr_rollup_failure_summary({
       status_check_rollup = {
         { name = bad_name, state = "COMPLETED", conclusion = "FAILURE" },
         { name = "second", state = "COMPLETED", conclusion = "FAILURE" },
         { name = "third", state = "COMPLETED", conclusion = "FAILURE" },
         { name = "fourth", state = "COMPLETED", conclusion = "FAILURE" },
       },
-    }) <= core._max_rollup_failure_summary_len)
-    local display_reason = fix_fact.review_reason:match("github%-devloop merge gate failed: ([^\n]+)")
-    t.is_true(display_reason ~= nil)
-    t.is_true(display_reason:find("%c") == nil)
-    t.is_true(display_reason:find("<!-- fkst:", 1, true) == nil)
-    t.is_true(display_reason:find("danger check", 1, true) ~= nil)
-    t.is_true(display_reason:find("(+1 more)", 1, true) ~= nil)
-    local marker_reason = comment_body:match('reason="([^"]+)"')
-    t.is_true(marker_reason ~= nil)
-    t.is_true(marker_reason:find("%c") == nil)
-    t.is_true(marker_reason:find("<!-- fkst:", 1, true) == nil)
+    })
+    t.is_true(#summary <= core._max_rollup_failure_summary_len)
+    t.is_true(summary:find("%c") == nil)
+    t.is_true(summary:find("<!-- fkst:", 1, true) == nil)
+    t.is_true(summary:find("danger check", 1, true) ~= nil)
+    t.is_true(summary:find("(+1 more)", 1, true) ~= nil)
   end,
 
   test_merge_completed_non_green_rollup_moves_back_to_fixing_without_merge = function()
@@ -590,6 +576,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "ACTION_REQUIRED")
+    mock_failing_required_check_runs()
 
     local action_required = run_merge(event, opts("merge-action-required-rollup", { FKST_GITHUB_WRITE = "1" }))
     t.eq(action_required.exit_code, 0)
@@ -602,6 +589,7 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    mock_failing_required_check_runs()
 
     local failure = run_merge(event, opts("merge-failure-rollup", { FKST_GITHUB_WRITE = "1" }))
     t.eq(failure.exit_code, 0)
@@ -621,8 +609,7 @@ return {
     mock_write_env("1")
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
-    t.mock_command("git fetch 'origin' 'refs/pull/7/merge'", { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", { stdout = "def456\n", stderr = "", exit_code = 0 })
+    mock_failing_required_check_runs()
 
     local result = run_merge(event, opts("merge-rollup-red-at-write-time", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -633,9 +620,9 @@ return {
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:merge-ready"))
     t.eq(find_raise(result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
-    t.is_true(comment_body:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
+    t.is_true(comment_body:find("own-ci-red", 1, true) ~= nil)
     local fix_fact = core.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
-    t.is_true(fix_fact.review_reason:find("rollup-red: test: COMPLETED/FAILURE", 1, true) ~= nil)
+    t.is_true(fix_fact.review_reason:find("own-ci-red", 1, true) ~= nil)
   end,
 
   test_merge_write_time_merge_ready_marker_changed_does_not_merge = function()

@@ -212,4 +212,5 @@ end
 helpers.mock_context_bundle = mock_context_bundle
 helpers.mock_default_issue_claim = mock_default_issue_claim
 helpers.issue_identity_from_payload = issue_identity_from_payload
+helpers.mock_required_check_runs_for = pr.mock_required_check_runs_for
 return helpers

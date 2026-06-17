@@ -180,6 +180,13 @@ local function require_marker_fact(facts, family)
   if family == "merge-gate" then
     return M.merge_gate_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
+  if family == "merge-gate-wait" then
+    local current_pr = current_pr_fact(facts)
+    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+      return nil
+    end
+    return M.merge_gate_wait_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+  end
   if family == "decomposed" then
     local link = facts.link
     if link == nil then
@@ -265,6 +272,8 @@ local function store_gathered_marker_fact(facts, family, value)
     facts.review_meta = facts.review_meta or value
   elseif family == "merge-gate" then
     facts.feedback = facts.feedback or value
+  elseif family == "merge-gate-wait" then
+    facts.merge_gate_wait = value
   elseif family == "decomposed" then
     facts.decomposed = value
   elseif family == "impl-failure" then

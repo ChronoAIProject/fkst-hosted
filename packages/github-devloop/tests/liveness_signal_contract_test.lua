@@ -41,6 +41,19 @@ return {
     t.eq(by_state.reviewing.liveness_contract.signal.version_form, "safe_version_segment")
   end,
 
+  test_liveness_contract_binds_row_budget_progress_signal_metadata = function()
+    local by_state = rows_by_state(core.restart_transition_table())
+    for _, state in ipairs({ "merge-ready", "merging" }) do
+      local signal = by_state[state].liveness_contract.progress_signal
+      t.eq(signal.family, "merge-gate-wait")
+      t.eq(signal.resolver, "merge-gate-wait")
+      t.eq(signal.producer, "merge-gate-wait")
+      t.eq(signal.surface, "pr-comment-stream")
+      t.eq(signal.version_form, "raw")
+      t.eq(signal.max_age_minutes, 360)
+    end
+  end,
+
   test_liveness_contract_rejects_live_defer_surface_or_version_form_drift = function()
     local rows = copy_rows(core.restart_transition_table())
     local row = rows_by_state(rows).reviewing
@@ -61,5 +74,16 @@ return {
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("must declare surface", 1, true) ~= nil)
     t.is_true(joined:find("must declare version_form", 1, true) ~= nil)
+  end,
+
+  test_liveness_contract_rejects_row_budget_progress_signal_drift = function()
+    local rows = copy_rows(core.restart_transition_table())
+    local row = rows_by_state(rows)["merge-ready"]
+    row.liveness_contract.progress_signal.surface = "issue-comment-stream"
+    row.liveness_contract.progress_signal.max_age_minutes = nil
+    local errors = core.liveness_contract_errors(rows)
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("row-budget progress_signal must declare finite max_age_minutes", 1, true) ~= nil)
+    t.is_true(joined:find("producer binding surface mismatch", 1, true) ~= nil)
   end,
 }

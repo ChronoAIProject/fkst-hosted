@@ -79,7 +79,7 @@ return {
       },
     }))
     t.eq(ok, false)
-    t.eq(reason, "rollup-red")
+    t.eq(reason, "ci-unknown")
 
     ok, reason = core.evaluate_ci_merge_gate(pr({
       status_check_rollup = {
@@ -87,7 +87,7 @@ return {
       },
     }))
     t.eq(ok, false)
-    t.eq(reason, "rollup-red")
+    t.eq(reason, "ci-unknown")
 
     ok, reason = core.evaluate_ci_merge_gate(pr({ mergeable = "CONFLICTING" }))
     t.eq(ok, false)
@@ -95,12 +95,13 @@ return {
   end,
 
   test_merge_gate_reason_class_controls_pr_merge_ref_verification = function()
-    t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-red"), true)
-    t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-red: test: COMPLETED/FAILURE"), true)
-    t.eq(core.merge_gate_reason_class("merge-state-unstable-with-failing-checks"), "rollup-red")
-    t.eq(core.merge_gate_reason_requires_pr_merge_product("merge-state-unstable-with-failing-checks"), true)
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-red"), false)
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-red: test: COMPLETED/FAILURE"), false)
+    t.eq(core.merge_gate_reason_class("merge-state-unstable-with-failing-checks"), "ci-wait")
+    t.eq(core.merge_gate_reason_requires_pr_merge_product("merge-state-unstable-with-failing-checks"), false)
     t.eq(core.merge_gate_reason_requires_pr_merge_product("mergeable-conflicting"), false)
     t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-pending"), false)
+    t.eq(core.merge_gate_reason_class("own-ci-red"), "own-ci-red")
   end,
 
   test_unstable_with_completed_failure_routes_to_ci_red = function()
@@ -111,7 +112,7 @@ return {
       },
     }))
     t.eq(ok, false)
-    t.eq(reason, "rollup-red")
+    t.eq(reason, "ci-unknown")
   end,
 
   test_unstable_with_pending_check_remains_transient_wait = function()
@@ -177,6 +178,38 @@ return {
     })
     t.eq(ok, false)
     t.eq(reason, "rollup-red")
+  end,
+
+  test_rollup_red_green_required_head_checks_is_external_ci_red = function()
+    mock_check_runs('{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"success","head_sha":"def456"}]}\n')
+    local classification = core.classify_pr_ci_gate(pr({
+      status_check_rollup = {
+        { name = "shared-integration", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }), {
+      repo = "owner/repo",
+      proposal_id = "github-devloop/issue/owner/repo/42",
+    })
+    t.eq(classification.kind, "EXTERNAL_CI_RED")
+    t.eq(classification.merge_blocking, true)
+    t.eq(classification.actionable, false)
+    t.eq(classification.reason, "external-ci-red")
+  end,
+
+  test_rollup_red_red_required_head_check_is_own_ci_red = function()
+    mock_check_runs('{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n')
+    local classification = core.classify_pr_ci_gate(pr({
+      status_check_rollup = {
+        { name = "shared-integration", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }), {
+      repo = "owner/repo",
+      proposal_id = "github-devloop/issue/owner/repo/42",
+    })
+    t.eq(classification.kind, "OWN_CI_RED")
+    t.eq(classification.merge_blocking, true)
+    t.eq(classification.actionable, true)
+    t.eq(classification.reason, "own-ci-red")
   end,
 
   test_empty_rollup_fallback_pending_required_commit_check_run = function()
