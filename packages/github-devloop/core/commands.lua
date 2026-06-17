@@ -622,6 +622,28 @@ function M.git_ls_remote_branch_cmd(remote, branch)
     .. " " .. M._shell_single_quote("refs/heads/" .. tostring(branch))
 end
 
+function M.git_fetch_remote_branch_to_tracking_ref_cmd(remote, branch, tracking_ref)
+  local selected_remote = tostring(remote or "")
+  if selected_remote == "" or selected_remote:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid git remote")
+  end
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid remote branch")
+  end
+  if not M._is_git_ref_safe(tracking_ref) then
+    error("github-devloop: invalid tracking ref")
+  end
+  return "git fetch " .. M._shell_single_quote(selected_remote)
+    .. " " .. M._shell_single_quote("refs/heads/" .. tostring(branch) .. ":" .. tostring(tracking_ref))
+end
+
+function M.git_rev_parse_ref_commit_cmd(ref)
+  if not M._is_git_ref_safe(ref) then
+    error("github-devloop: invalid git ref")
+  end
+  return "git rev-parse --verify " .. M._shell_single_quote(tostring(ref) .. "^{commit}")
+end
+
 function M.git_fetch_pr_merge_ref_cmd(remote, pr_number)
   if not M._is_git_ref_safe(remote) then
     error("github-devloop: invalid git remote")
