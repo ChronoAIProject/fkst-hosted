@@ -19,8 +19,7 @@ local function require_repo(repo)
   return value
 end
 
-local function run_git(cmd, timeout, error_class)
-  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+local function run_required(result, error_class)
   if result.exit_code ~= 0 then
     error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
   end
@@ -34,20 +33,12 @@ local function require_git_ok(result, error_class)
   return result
 end
 
-local function run_gh(cmd, timeout, error_class)
-  local result = core.gh_exec({ cmd = cmd, timeout = timeout or 30 })
-  if result.exit_code ~= 0 then
-    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
-  end
-  return result
-end
-
 local function trim_stdout(result)
   return tostring(result.stdout or ""):gsub("%s+$", "")
 end
 
 local function fetch_branch(branch)
-  run_git(core.git_fetch_branch_cmd("origin", branch), 60, "PR freshness fetch")
+  run_required(core.git_fetch_branch("origin", branch, 60), "PR freshness fetch")
 end
 
 local function fetch_branches(repo, branches)
@@ -59,7 +50,7 @@ local function fetch_branches(repo, branches)
 end
 
 local function remote_head(branch)
-  local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "PR freshness remote head")
+  local result = run_required(core.git_remote_branch_head("origin", branch, 30), "PR freshness remote head")
   local head = trim_stdout(result)
   if not core.is_safe_head_sha(head) then
     error("github-devloop: unsafe PR freshness branch head")
@@ -79,7 +70,7 @@ local function is_ancestor(ancestor_sha, descendant_sha)
 end
 
 local function runtime_root()
-  local result = run_git(core.read_runtime_root_cmd(), 30, "FKST_RUNTIME_ROOT read")
+  local result = run_required(exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
   return result.stdout
 end
 
@@ -99,7 +90,7 @@ end
 local function with_temp_worktree(runtime, repo, branch, integration, branch_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, integration, branch, branch_sha)
   local plan = core.git_worktree_add_detached_plan(worktree, branch_sha)
-  run_git(core.mkdir_p_cmd(plan.parent_dir), 30, "PR freshness worktree parent directory setup")
+  run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
   require_git_ok(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
 
   local ok, result = pcall(fn, worktree)
@@ -146,7 +137,7 @@ local function issue_state(repo, issue_number)
   if issue_number == nil then
     return { labels = {}, comments = {} }
   end
-  local viewed = run_gh(core.gh_issue_view_result_cmd(repo, issue_number), 30, "gh PR freshness issue view")
+  local viewed = run_required(core.gh_issue_view_result(repo, issue_number, 30), "PR freshness issue view")
   return core.parse_issue_view_result(viewed.stdout)
 end
 
@@ -183,12 +174,12 @@ local function candidate_reason(pr, origin, issue, state)
 end
 
 local function load_current_pr(repo, pr_number)
-  local viewed = run_gh(core.gh_pr_view_freshness_cmd(repo, pr_number), 30, "gh PR freshness view")
+  local viewed = run_required(core.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
   return core.parse_pr_view_merge(viewed.stdout)
 end
 
 local function list_open_prs(repo)
-  local listed = run_gh(core.gh_pr_list_freshness_cmd(repo), 30, "gh PR freshness list")
+  local listed = run_required(core.gh_pr_list_freshness(repo, 30), "PR freshness list")
   return core.parse_pr_list_freshness(listed.stdout)
 end
 
@@ -234,7 +225,7 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     }, "freshness", "push", "skip-foreign(head)", "PR branch head changed before push")
     return
   end
-  local merge_head = trim_stdout(run_git(core.git_head_sha_cmd(worktree), 30, "PR freshness head"))
+  local merge_head = trim_stdout(run_required(core.git_head_sha(worktree, 30), "PR freshness head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe PR freshness merge head")
   end

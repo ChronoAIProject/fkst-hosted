@@ -112,7 +112,7 @@ local function issue_comments_for_origin(origin)
   if origin.issue_number == nil then
     return nil
   end
-  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_result_cmd(origin.repo, origin.issue_number), timeout = 30 })
+  local issue_view = core.gh_issue_view_result(origin.repo, origin.issue_number, 30)
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue result view failed: " .. tostring(issue_view.stderr))
   end
@@ -123,7 +123,7 @@ local function issue_reviewing_for_origin(origin)
   if origin.issue_number == nil then
     return nil
   end
-  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_reviewing_cmd(origin.repo, origin.issue_number), timeout = 30 })
+  local issue_view = core.gh_issue_view_reviewing(origin.repo, origin.issue_number, 30)
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue reviewing view failed: " .. tostring(issue_view.stderr))
   end

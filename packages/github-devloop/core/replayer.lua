@@ -246,7 +246,7 @@ local function gather_fetch_before_compare_fact(facts, entity, family)
     return true
   end
   if family == "decompose-children" then
-    local child_list = M.gh_exec({ cmd = M.gh_issue_list_decompose_children_cmd(entity.repo, facts.proposal_id), timeout = 30 })
+    local child_list = M.gh_issue_list_decompose_children(entity.repo, facts.proposal_id, 30)
     if child_list.exit_code ~= 0 then
       error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
     end

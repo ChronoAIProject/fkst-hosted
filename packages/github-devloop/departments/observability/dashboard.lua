@@ -17,7 +17,11 @@ end
 
 local function ensure_dashboard_label(repo, limits, deadline)
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
-  local existing = core.observability_exec(core.gh_dashboard_label_get_cmd(repo, dashboard_label), limits, deadline, "dashboard label get")
+  local existing = core.observability_exec({
+    run = function(timeout)
+      return core.gh_dashboard_label_get(repo, dashboard_label, timeout)
+    end,
+  }, limits, deadline, "dashboard label get")
   if core.observability_result_deferred(existing) then return "deferred" end
   if existing.exit_code == 0 then
     return "exists"
@@ -27,7 +31,11 @@ local function ensure_dashboard_label(repo, limits, deadline)
   end
 
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
-  local created = core.observability_exec(core.gh_dashboard_label_create_cmd(repo, dashboard_label), limits, deadline, "dashboard label create")
+  local created = core.observability_exec({
+    run = function(timeout)
+      return core.gh_dashboard_label_create(repo, dashboard_label, timeout)
+    end,
+  }, limits, deadline, "dashboard label create")
   if core.observability_result_deferred(created) then return "deferred" end
   if created.exit_code == 0 then
     log.info("github-devloop dept=observability tag=DASHBOARD_LABEL_CREATED label=" .. dashboard_label)
@@ -316,7 +324,11 @@ function core.render_observability_dashboard(args)
 end
 
 local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
-  local listed = core.observability_exec(core.gh_dashboard_issue_list_cmd(repo, dashboard_label), limits, deadline, "dashboard issue list")
+  local listed = core.observability_exec({
+    run = function(timeout)
+      return core.gh_dashboard_issue_list(repo, dashboard_label, timeout)
+    end,
+  }, limits, deadline, "dashboard issue list")
   if core.observability_result_deferred(listed) then
     return "deferred"
   end
@@ -343,7 +355,11 @@ local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
 end
 
 local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login, limits, deadline)
-  local view = core.observability_run_cmd(core.gh_dashboard_issue_get_cmd(repo, issue_number), limits, deadline, "dashboard issue get")
+  local view = core.observability_run_cmd({
+    run = function(timeout)
+      return core.gh_dashboard_issue_get(repo, issue_number, timeout)
+    end,
+  }, limits, deadline, "dashboard issue get")
   if core.observability_result_deferred(view) then
     return "deferred"
   end
@@ -397,7 +413,11 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   if current == nil then
     deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
     local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-    local created = core.observability_run_cmd(core.gh_dashboard_issue_create_cmd(repo, path), limits, deadline, "dashboard issue create")
+    local created = core.observability_run_cmd({
+      run = function(timeout)
+        return core.gh_dashboard_issue_create(repo, path, timeout)
+      end,
+    }, limits, deadline, "dashboard issue create")
     if core.observability_result_deferred(created) then return "deferred" end
     log.info("github-devloop dept=observability tag=DASHBOARD_CREATED hash=" .. tostring(dashboard.hash))
     return "created"
@@ -439,7 +459,11 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   end
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
-  local updated = core.observability_exec(core.gh_dashboard_issue_update_cmd(repo, current.number, path), limits, deadline, "dashboard issue update")
+  local updated = core.observability_exec({
+    run = function(timeout)
+      return core.gh_dashboard_issue_update(repo, current.number, path, timeout)
+    end,
+  }, limits, deadline, "dashboard issue update")
   if core.observability_result_deferred(updated) then return "deferred" end
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")

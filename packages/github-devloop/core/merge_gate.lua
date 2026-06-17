@@ -44,7 +44,7 @@ local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
 end
 
 function M.commit_check_runs_merge_gate(repo, head_sha, opts)
-  local result = M.gh_exec({ cmd = M.gh_commit_check_runs_cmd(repo, head_sha), timeout = 30 })
+  local result = M.gh_commit_check_runs(repo, head_sha, 30)
   if result.exit_code ~= 0 then
     error("github-devloop: gh commit check-runs failed: " .. tostring(result.stderr))
   end
@@ -58,7 +58,7 @@ local function fetch_commit_check_runs(repo, head_sha)
   if tostring(repo or "") == "" or not M.is_safe_head_sha(head_sha) then
     return nil, "ci-unknown"
   end
-  local result = M.gh_exec({ cmd = M.gh_commit_check_runs_cmd(repo, head_sha), timeout = 30 })
+  local result = M.gh_commit_check_runs(repo, head_sha, 30)
   if result.exit_code ~= 0 then
     return nil, "ci-unknown"
   end
@@ -316,7 +316,7 @@ function M.ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_s
 end
 
 local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
-  local runtime_result = M.gh_exec({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+  local runtime_result = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
   if runtime_result.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
@@ -339,7 +339,7 @@ local function rerequest_head_check_runs(repo, pr_number, head_sha, runs, propos
     return false, "ci-selfheal-no-rerunnable-check-runs"
   end
   for _, id in ipairs(ids) do
-    local result = M.gh_exec({ cmd = M.gh_check_run_rerequest_cmd(repo, id), timeout = 30 })
+    local result = M.gh_check_run_rerequest(repo, id, 30)
     if result.exit_code ~= 0 then
       error("github-devloop: check-run rerequest failed: " .. tostring(result.stderr))
     end
@@ -369,7 +369,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
     return false, "ci-selfheal-foreign-head"
   end
   local worktree = merge_ci_selfheal_worktree(repo, pr_number, head_sha)
-  local remove_result = M.gh_exec({ cmd = M.git_worktree_remove_if_present_cmd(worktree), timeout = 60 })
+  local remove_result = M.git_worktree_remove_if_present(worktree, 60)
   if remove_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal worktree cleanup failed: " .. tostring(remove_result.stderr))
   end
@@ -382,10 +382,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   if add_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal worktree add failed: " .. tostring(add_result.stderr))
   end
-  local commit_result = M.gh_exec({
-    cmd = M.git_empty_commit_cmd(worktree, "chore: nudge PR CI"),
-    timeout = 60,
-  })
+  local commit_result = M.git_empty_commit(worktree, "chore: nudge PR CI", 60)
   if commit_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal empty commit failed: " .. tostring(commit_result.stderr))
   end
@@ -393,7 +390,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   if push_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal push failed: " .. tostring(push_result.stderr))
   end
-  local pushed_head = M.gh_exec({ cmd = M.git_head_sha_cmd(worktree), timeout = 30 })
+  local pushed_head = M.git_head_sha(worktree, 30)
   if pushed_head.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal head read failed: " .. tostring(pushed_head.stderr))
   end
@@ -494,7 +491,7 @@ function M.run_verified_pr_merge(request)
   local pr_number = request and request.pr_number
   local max_attempts = merge_attempt_limit(request)
   for attempt = 1, max_attempts do
-    local pr_recheck = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
+    local pr_recheck = M.gh_pr_view_merge(repo, pr_number, 30)
     if pr_recheck.exit_code ~= 0 then
       error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
     end
@@ -530,7 +527,7 @@ function M.run_verified_pr_merge(request)
       request.before_merge(rechecked_pr)
     end
 
-    local merge_result = M.gh_exec({ cmd = M.gh_pr_merge_cmd(repo, pr_number, merge_head_sha), timeout = 120 })
+    local merge_result = M.gh_pr_merge(repo, pr_number, merge_head_sha, 120)
     if merge_result.exit_code ~= 0 then
       if attempt < max_attempts and M.is_match_head_modified_error(merge_result.stderr) then
         M.log_line("info", tostring(request.dept or "merge"), tostring(request.proposal_id or "merge"), "MATCH_HEAD_RETRY", {
@@ -547,7 +544,7 @@ function M.run_verified_pr_merge(request)
     else
       M.invalidate_entity_after_write(repo, "pr", pr_number)
 
-      local merged_view = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
+      local merged_view = M.gh_pr_view_merge(repo, pr_number, 30)
       if merged_view.exit_code ~= 0 then
         error("github-devloop: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
       end

@@ -48,16 +48,16 @@ local function encode_json_string(value)
   return '"' .. text .. '"'
 end
 
-local function run_gh(cmd, timeout, error_class)
-  local result = M.gh_exec({ cmd = cmd, timeout = timeout or 30 })
+local function run_gh(fn, timeout, error_class)
+  local result = fn(timeout or 30)
   if result.exit_code ~= 0 then
     error("github-devloop: " .. tostring(error_class) .. " failed: " .. tostring(result.stderr))
   end
   return result
 end
 
-local function run_exec(cmd, timeout, error_class)
-  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+local function run_result(fn, timeout, error_class)
+  local result = fn(timeout or 30)
   if result.exit_code ~= 0 then
     return nil, tostring(error_class) .. " failed: " .. tostring(result.stderr)
   end
@@ -156,7 +156,9 @@ local function ensure_labels(repo, mode, existing_labels)
 
   local created = 0
   for _, desired in ipairs(missing) do
-    run_gh(M.gh_repo_label_create_cmd(repo, desired.name, desired.color, desired.description), 30, "gh label create")
+    run_gh(function(timeout)
+      return M.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
+    end, 30, "gh label create")
     created = created + 1
     log_ensure("label", "created", {
       "mode=real",
@@ -166,7 +168,9 @@ local function ensure_labels(repo, mode, existing_labels)
   end
   local updated = 0
   for _, desired in ipairs(drifted) do
-    run_gh(M.gh_repo_label_update_cmd(repo, desired.name, desired.color, desired.description), 30, "gh label update")
+    run_gh(function(timeout)
+      return M.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
+    end, 30, "gh label update")
     updated = updated + 1
     log_ensure("label", "updated", {
       "mode=real",
@@ -200,7 +204,9 @@ local function ensure_label(repo, mode, existing_labels, desired)
     }
   end
   if current ~= nil then
-    run_gh(M.gh_repo_label_update_cmd(repo, desired.name, desired.color, desired.description), 30, "gh label update")
+    run_gh(function(timeout)
+      return M.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
+    end, 30, "gh label update")
     log_ensure("label", "updated", {
       "mode=real",
       "repo=" .. repo,
@@ -208,7 +214,9 @@ local function ensure_label(repo, mode, existing_labels, desired)
     })
     return { missing = 0, drifted = 1, created = 0, updated = 1 }
   end
-  run_gh(M.gh_repo_label_create_cmd(repo, desired.name, desired.color, desired.description), 30, "gh label create")
+  run_gh(function(timeout)
+    return M.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
+  end, 30, "gh label create")
   log_ensure("label", "created", {
     "mode=real",
     "repo=" .. repo,
@@ -240,7 +248,9 @@ local function ensure_dashboard_anchor_label(repo, mode, issue)
     })
     return false
   end
-  run_gh(M.gh_dashboard_issue_add_label_cmd(repo, issue.number, dashboard_label), 30, "gh dashboard anchor label add")
+  run_gh(function(timeout)
+    return M.gh_dashboard_issue_add_label(repo, issue.number, dashboard_label, timeout)
+  end, 30, "gh dashboard anchor label add")
   log_ensure("dashboard-anchor-label", "added", {
     "mode=real",
     "repo=" .. repo,
@@ -273,7 +283,9 @@ local function ensure_dashboard_anchor(repo, mode, issues, bot_login)
   end
 
   local path = write_dashboard_anchor_input(repo)
-  run_gh(M.gh_dashboard_issue_create_cmd(repo, path), 30, "gh dashboard anchor create")
+  run_gh(function(timeout)
+    return M.gh_dashboard_issue_create(repo, path, timeout)
+  end, 30, "gh dashboard anchor create")
   log_ensure("dashboard-anchor", "created", {
     "mode=real",
     "repo=" .. repo,
@@ -290,7 +302,9 @@ local function ensure_topology(branches)
     return { ok = true, held = false }
   end
 
-  local fetched, fetch_error = run_exec(M.git_fetch_branch_cmd("origin", branches.integration), 60, "git integration branch fetch")
+  local fetched, fetch_error = run_result(function(timeout)
+    return M.git_fetch_branch("origin", branches.integration, timeout)
+  end, 60, "integration branch fetch")
   if fetched == nil then
     log_ensure("topology", "hold", {
       "integration=" .. branches.integration,
@@ -300,7 +314,9 @@ local function ensure_topology(branches)
     return { ok = false, held = true, reason = "missing-integration-branch" }
   end
 
-  local head, head_error = run_exec(M.git_remote_branch_head_cmd("origin", branches.integration), 30, "git integration branch head")
+  local head, head_error = run_result(function(timeout)
+    return M.git_remote_branch_head("origin", branches.integration, timeout)
+  end, 30, "integration branch head")
   if head == nil then
     log_ensure("topology", "hold", {
       "integration=" .. branches.integration,
@@ -351,9 +367,13 @@ function M.ensure_repo()
   if cfg.write_mode == "real" then
     M.assert_trusted_bot_configured()
   end
-  local labels = M.parse_repo_labels(run_gh(M.gh_repo_labels_list_cmd(repo), 30, "gh label list").stdout)
+  local labels = M.parse_repo_labels(run_gh(function(timeout)
+    return M.gh_repo_labels_list(repo, timeout)
+  end, 30, "gh label list").stdout)
   local dashboard_issues = M.parse_dashboard_issue_list(
-    run_gh(M.gh_dashboard_issue_all_open_cmd(repo), 30, "gh dashboard issue list").stdout
+    run_gh(function(timeout)
+      return M.gh_dashboard_issue_all_open(repo, timeout)
+    end, 30, "gh dashboard issue list").stdout
   )
   local topology_result = ensure_topology({
     upstream = cfg.upstream_branch,

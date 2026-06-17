@@ -85,10 +85,7 @@ function pipeline(event)
   end
 
   local cursor_created_at, cursor_number = parse_cursor(cache_get(CURSOR_KEY))
-  local listed = core.gh_exec({
-    cmd = core.gh_issue_list_intake_probe_cmd(repo, PROBE_LIMIT, api_since_from_cursor(cursor_created_at)),
-    timeout = 30,
-  })
+  local listed = core.gh_issue_list_intake_probe(repo, PROBE_LIMIT, api_since_from_cursor(cursor_created_at), 30)
   if listed.exit_code ~= 0 then
     error("github-devloop: intake-probe-list-failed: " .. tostring(listed.stderr))
   end

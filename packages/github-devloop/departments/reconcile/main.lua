@@ -125,7 +125,7 @@ local function command_indicates_not_found(result)
 end
 
 local function load_timeout_issue_surface(repo, issue_number, proposal_id, state_name)
-  local view = core.gh_exec({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
+  local view = core.gh_issue_view_loop(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: timeout-reconcile-issue-view-failed: " .. tostring(view.stderr))
   end
@@ -171,7 +171,7 @@ local function pipeline_thinking(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = core.gh_exec({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue reconcile view failed: " .. tostring(view.stderr))
     end
@@ -249,7 +249,7 @@ local function pipeline_review(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+    local view = core.gh_pr_view_origin(repo, pr_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr review reconcile view failed: " .. tostring(view.stderr))
     end
@@ -325,7 +325,7 @@ local function pipeline_fix(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+    local view = core.gh_pr_view_origin(repo, pr_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr fix reconcile view failed: " .. tostring(view.stderr))
     end
@@ -395,7 +395,7 @@ local function pipeline_timeout(event)
       if not core.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
         return
       end
-      local view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+      local view = core.gh_pr_view_origin(repo, pr_number, 30)
       if view.exit_code ~= 0 then
         if not command_indicates_not_found(view) then
           error("github-devloop: gh pr timeout reconcile view failed: " .. tostring(view.stderr))

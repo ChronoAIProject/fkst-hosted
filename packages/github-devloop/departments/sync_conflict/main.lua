@@ -8,8 +8,7 @@ M.spec = {
   stall_window = "10m",
 }
 
-local function run_git(cmd, timeout, error_class)
-  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+local function run_required(result, error_class)
   if result.exit_code ~= 0 then
     error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
   end
@@ -28,7 +27,7 @@ local function trim_stdout(result)
 end
 
 local function fetch_branch(branch)
-  run_git(core.git_fetch_branch_cmd("origin", branch), 60, "branch fetch")
+  run_required(core.git_fetch_branch("origin", branch, 60), "branch fetch")
 end
 
 local function fetch_branches(repo, branches)
@@ -40,7 +39,7 @@ local function fetch_branches(repo, branches)
 end
 
 local function remote_head(branch)
-  local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "remote branch head")
+  local result = run_required(core.git_remote_branch_head("origin", branch, 30), "remote branch head")
   local head = trim_stdout(result)
   if not core.is_safe_head_sha(head) then
     error("github-devloop: unsafe remote branch head")
@@ -60,7 +59,7 @@ local function is_ancestor(ancestor_sha, descendant_sha)
 end
 
 local function runtime_root()
-  local result = run_git(core.read_runtime_root_cmd(), 30, "FKST_RUNTIME_ROOT read")
+  local result = run_required(exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
   return result.stdout
 end
 
@@ -87,7 +86,7 @@ local function with_temp_worktree(conflict, fn)
     conflict.integration_sha
   )
   local plan = core.git_worktree_add_detached_plan(worktree, conflict.integration_sha)
-  run_git(core.mkdir_p_cmd(plan.parent_dir), 30, "worktree parent directory setup")
+  run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
   require_git_ok(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree, runtime)
@@ -125,7 +124,7 @@ local function raise_sync_conflict_escalation(conflict, fingerprint, attempt, re
 end
 
 local function commit_resolution(worktree, runtime, conflict)
-  run_git(core.git_add_all_cmd(worktree), 30, "git add")
+  run_required(core.git_add_all(worktree, 30), "stage conflict resolution")
   local unmerged = require_git_ok(core.git_unmerged_paths(worktree, 30), "unmerged path check before commit")
   if tostring(unmerged.stdout or "") ~= "" then
     error("github-devloop: sync conflict remains unresolved before commit")
@@ -175,7 +174,7 @@ local function push_if_real(conflict, worktree)
     return
   end
 
-  local merge_head = trim_stdout(run_git(core.git_head_sha_cmd(worktree), 30, "resolved sync head"))
+  local merge_head = trim_stdout(run_required(core.git_head_sha(worktree, 30), "resolved sync head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe resolved branch sync head")
   end

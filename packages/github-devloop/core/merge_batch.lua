@@ -55,11 +55,11 @@ local function head_contains_base(base_head, entry)
     or not M.is_safe_branch(entry and entry.head_branch) then
     return false, "unsafe-current-base"
   end
-  local fetch_result = exec_sync({ cmd = M.git_fetch_branch_cmd("origin", entry.head_branch), timeout = 60 })
+  local fetch_result = M.git_fetch_branch("origin", entry.head_branch, 60)
   if fetch_result.exit_code ~= 0 then
     return false, "candidate-head-fetch-failed"
   end
-  local fetched_head = exec_sync({ cmd = M.git_fetch_head_commit_cmd(), timeout = 30 })
+  local fetched_head = M.git_fetch_head_commit(30)
   if fetched_head.exit_code ~= 0 then
     return false, "candidate-head-underivable"
   end

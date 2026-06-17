@@ -289,12 +289,12 @@ local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
   if current_pr.is_draft ~= true then
     return current_pr
   end
-  local ready_result = core.gh_exec({ cmd = core.gh_pr_ready_cmd(repo, merge_ready.pr_number), timeout = 60 })
+  local ready_result = core.gh_pr_ready(repo, merge_ready.pr_number, 60)
   if ready_result.exit_code ~= 0 then
     error("github-devloop: PR ready failed: " .. tostring(ready_result.stderr))
   end
 
-  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
+  local pr_view = core.gh_pr_view_merge(repo, merge_ready.pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: PR ready recheck failed: " .. tostring(pr_view.stderr))
   end
@@ -316,7 +316,7 @@ local function write_merging_marker(repo, merge_ready, comments)
     context = merge_ready.reviewed_head_sha,
   })
   file.write(path, body)
-  local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, merge_ready.pr_number, path), timeout = 30 })
+  local result = core.gh_pr_comment(repo, merge_ready.pr_number, path, 30)
   if result.exit_code ~= 0 then
     error("github-devloop: PR merging marker comment failed: " .. tostring(result.stderr))
   end
@@ -344,7 +344,7 @@ end
 
 local function finalize_merged(repo, issue_number, merge_ready, current_state, reason, merged_pr)
   if issue_number ~= nil then
-    local close_result = core.gh_exec({ cmd = core.gh_issue_close_cmd(repo, issue_number), timeout = 60 })
+    local close_result = core.gh_issue_close(repo, issue_number, 60)
     if close_result.exit_code ~= 0 then
       error("github-devloop: issue close failed: " .. tostring(close_result.stderr))
     end
@@ -393,7 +393,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   local current_pr = initial_pr
   if current_pr == nil then
-    local pr_view = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
+    local pr_view = core.gh_pr_view_merge(repo, merge_ready.pr_number, 30)
     if pr_view.exit_code ~= 0 then
       error("github-devloop: PR merge view failed: " .. tostring(pr_view.stderr))
     end
@@ -641,7 +641,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
 
-  local pr_recheck = core.gh_exec({ cmd = core.gh_pr_view_merge_cmd(repo, merge_ready.pr_number), timeout = 30 })
+  local pr_recheck = core.gh_pr_view_merge(repo, merge_ready.pr_number, 30)
   if pr_recheck.exit_code ~= 0 then
     error("github-devloop: PR merge recheck failed: " .. tostring(pr_recheck.stderr))
   end

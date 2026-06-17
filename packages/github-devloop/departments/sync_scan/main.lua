@@ -17,8 +17,7 @@ local function require_repo(repo)
   return value
 end
 
-local function run_git(cmd, timeout, error_class)
-  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+local function run_required(result, error_class)
   if result.exit_code ~= 0 then
     error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
   end
@@ -37,7 +36,7 @@ local function trim_stdout(result)
 end
 
 local function fetch_branch(branch)
-  run_git(core.git_fetch_branch_cmd("origin", branch), 60, "branch fetch")
+  run_required(core.git_fetch_branch("origin", branch, 60), "branch fetch")
 end
 
 local function fetch_branches(repo, branches)
@@ -49,7 +48,7 @@ local function fetch_branches(repo, branches)
 end
 
 local function remote_head(branch)
-  local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "remote branch head")
+  local result = run_required(core.git_remote_branch_head("origin", branch, 30), "remote branch head")
   local head = trim_stdout(result)
   if not core.is_safe_head_sha(head) then
     error("github-devloop: unsafe remote branch head")
@@ -80,7 +79,7 @@ local function trees_equal(sha_a, sha_b)
 end
 
 local function runtime_root()
-  local result = run_git(core.read_runtime_root_cmd(), 30, "FKST_RUNTIME_ROOT read")
+  local result = run_required(exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
   return result.stdout
 end
 
@@ -100,7 +99,7 @@ end
 local function with_temp_worktree(runtime, repo, upstream, integration, integration_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, upstream, integration, integration_sha)
   local plan = core.git_worktree_add_detached_plan(worktree, integration_sha)
-  run_git(core.mkdir_p_cmd(plan.parent_dir), 30, "worktree parent directory setup")
+  run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
   require_git_ok(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree)
@@ -156,7 +155,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
     return
   end
 
-  local merge_head = trim_stdout(run_git(core.git_head_sha_cmd(worktree), 30, "sync head"))
+  local merge_head = trim_stdout(run_required(core.git_head_sha(worktree, 30), "sync head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe branch sync merge head")
   end

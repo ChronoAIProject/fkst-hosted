@@ -253,7 +253,7 @@ local function maybe_decompose_children(repo, entity)
   if M.decomposed_fact(entity.comments, entity.proposal_id) == nil then
     return nil
   end
-  local result = M.gh_exec({ cmd = M.gh_issue_list_decompose_children_cmd(repo, entity.proposal_id), timeout = 30 })
+  local result = M.gh_issue_list_decompose_children(repo, entity.proposal_id, 30)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-decompose-child-list-failed: " .. tostring(result.stderr))
   end

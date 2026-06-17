@@ -86,7 +86,9 @@ function pipeline(event)
       -- intake_judge re-reads fresh before any CAS decision. Cache collapses the
       -- per-poll re-read of the same issue (a dominant GraphQL drain).
       local view = core.gh_exec_cached(
-        core.gh_issue_view_intake_scan_cmd(repo, issue_number),
+        function()
+          return core.gh_issue_view_intake_scan(repo, issue_number, 30)
+        end,
         core.gh_read_cache_key("intake-scan", repo, issue_number),
         90
       )

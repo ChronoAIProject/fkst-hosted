@@ -247,8 +247,8 @@ local function truncate_if_needed(text, dept, proposal_id, file_name)
   return M.truncate_utf8(value, max_bundle_file_len)
 end
 
-local function fetch_cmd(cmd, label, exec)
-  local result = M.gh_exec({ cmd = cmd, timeout = 60 }, nil, exec)
+local function fetch_result(fn, label)
+  local result = fn(60)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     error("github-devloop: context bundle " .. label .. " failed: " .. tostring(result and result.stderr or "nil result"))
   end
@@ -418,22 +418,30 @@ function M.build_context_bundle(args)
 
   local issue_json = '{"title":"PR-only context","body":"No backing GitHub issue is available for this delivery.","labels":[],"comments":[],"state":"UNKNOWN"}\n'
   if issue_number ~= nil then
-    issue_json = fetch_cmd(M.gh_issue_view_cmd(repo, issue_number, "title,body,updatedAt,labels,comments,state"), "issue fetch", args.exec)
+    issue_json = fetch_result(function(timeout)
+      return M.gh_issue_view(repo, issue_number, "title,body,updatedAt,labels,comments,state", timeout, args.exec)
+    end, "issue fetch")
   end
   issue_json = truncate_if_needed(issue_json, args.dept, proposal_id, "issue.json")
   write_file(tmp_bundle.issue_path, issue_json, args.exec)
   tmp_bundle.issue_bytes = #issue_json
 
   if args.pr_number ~= nil then
-    local pr_json = fetch_cmd(M.gh_pr_view_context_cmd(repo, args.pr_number), "pr fetch", args.exec)
+    local pr_json = fetch_result(function(timeout)
+      return M.gh_pr_view_context(repo, args.pr_number, timeout, args.exec)
+    end, "pr fetch")
     pr_json = truncate_if_needed(pr_json, args.dept, proposal_id, "pr.json")
     write_file(tmp_bundle.pr_path, pr_json, args.exec)
     tmp_bundle.pr_bytes = #pr_json
-    local diff = fetch_cmd(M.gh_pr_diff_cmd(repo, args.pr_number), "pr diff fetch", args.exec)
+    local diff = fetch_result(function(timeout)
+      return M.gh_pr_diff(repo, args.pr_number, timeout, args.exec)
+    end, "pr diff fetch")
     diff = truncate_if_needed(diff, args.dept, proposal_id, "diff.patch")
     write_file(tmp_bundle.diff_path, diff, args.exec)
     tmp_bundle.diff_bytes = #diff
-    local names = fetch_cmd(M.gh_pr_diff_name_only_cmd(repo, args.pr_number), "pr diff name-only fetch", args.exec)
+    local names = fetch_result(function(timeout)
+      return M.gh_pr_diff_name_only(repo, args.pr_number, timeout, args.exec)
+    end, "pr diff name-only fetch")
     local risk = risk_report(parse_name_only_paths(names))
     risk = truncate_if_needed(risk, args.dept, proposal_id, risk_file_name)
     write_file(tmp_bundle.risk_path, risk, args.exec)

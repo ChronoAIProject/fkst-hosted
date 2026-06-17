@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local gh_argv = require("tests.gh_argv_mock_helpers")
 local opts = h.opts
 local fixing = h.fixing
 local run_fix = h.run_fix
@@ -142,7 +143,7 @@ return {
     local merge_index = nil
     local codex_index = nil
     for index, call in ipairs(t.command_calls()) do
-      if call.rendered:find("git -C '" .. worktree .. "' merge --no-edit 'abc123'", 1, true) ~= nil then
+      if gh_argv.argv_contains(call, { "git", "-C", worktree, "merge", "--no-edit", "abc123" }) then
         merge_index = index
       elseif call.rendered:find("codex exec", 1, true) ~= nil then
         codex_index = index

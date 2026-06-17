@@ -47,6 +47,11 @@ local function mock_head_nudge_worktree(old_head, new_head)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("[ -d '/tmp/fkst-packages-test/github-devloop/runtime/worktrees/merge-ci-selfheal-owner/repo-7-def456' ]", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git worktree remove --force", {
     stdout = "",
     stderr = "",

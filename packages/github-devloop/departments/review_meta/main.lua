@@ -42,7 +42,7 @@ function pipeline(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, review_meta.pr_number), timeout = 30 })
+    local view = core.gh_pr_view_origin(repo, review_meta.pr_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr review-meta view failed: " .. tostring(view.stderr))
     end
@@ -53,7 +53,7 @@ function pipeline(event)
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = core.gh_exec({ cmd = core.gh_issue_view_fix_cmd(repo, issue_number), timeout = 30 })
+      local issue_view = core.gh_issue_view_fix(repo, issue_number, 30)
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
       end

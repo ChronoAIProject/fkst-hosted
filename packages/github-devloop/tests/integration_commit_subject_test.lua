@@ -17,11 +17,11 @@ local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local run_implement = h.run_implement
 local run_fix = h.run_fix
+local gh_argv = require("tests.gh_argv_mock_helpers")
 
 local function has_commit_subject(subject)
-  local rendered_subject = "commit -m '" .. tostring(subject):gsub("'", "'\\''") .. "'"
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(rendered_subject, 1, true) ~= nil then
+    if gh_argv.argv_contains(call, { "git", "commit", "-m", subject }) then
       return true
     end
   end

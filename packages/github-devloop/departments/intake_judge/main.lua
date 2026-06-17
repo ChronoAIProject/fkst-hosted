@@ -116,7 +116,7 @@ local function copy_table(value)
 end
 
 local function read_current_for_candidate(repo, issue_number, candidate, event_ts, expected_decision_dedup_key)
-  local view = core.gh_exec({ cmd = core.gh_issue_view_intake_judge_cmd(repo, issue_number), timeout = 30 })
+  local view = core.gh_issue_view_intake_judge(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue intake judge view failed: " .. tostring(view.stderr))
   end

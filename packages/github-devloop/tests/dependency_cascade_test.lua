@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local gh_argv = require("tests.gh_argv_mock_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -336,7 +337,7 @@ end
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
-    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       count = count + 1
     end
   end

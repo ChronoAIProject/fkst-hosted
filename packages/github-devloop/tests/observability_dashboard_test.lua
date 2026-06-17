@@ -51,7 +51,7 @@ local function dashboard_issue_list_stdout_many(bodies)
 end
 
 local function command_input_path(command)
-  return tostring(command or ""):match("%-%-input '([^']+)'")
+  return tostring(command or ""):match("%-%-input '?([^'%s]+)'?")
 end
 
 local function dashboard_body_from_input(path)
@@ -61,26 +61,37 @@ local function dashboard_body_from_input(path)
 end
 
 local function with_fake_dashboard_github(fake, callback)
-  local old_gh_exec = core.gh_exec
-  core.gh_exec = function(cmd_or_opts)
-    local cmd = type(cmd_or_opts) == "table" and tostring(cmd_or_opts.cmd or "") or tostring(cmd_or_opts or "")
-    table.insert(fake.commands, cmd)
-    if cmd == core.gh_dashboard_label_get_cmd("owner/repo", core.dashboard_label()) then
+  local old_label_get = core.gh_dashboard_label_get
+  local old_issue_list = core.gh_dashboard_issue_list
+  local old_issue_create = core.gh_dashboard_issue_create
+  core.gh_dashboard_label_get = function(repo, label)
+    table.insert(fake.commands, "label_get")
+    if repo == "owner/repo" and label == core.dashboard_label() then
       return { stdout = '{"name":"fkst-dashboard"}\n', stderr = "", exit_code = 0 }
     end
-    if cmd == core.gh_dashboard_issue_list_cmd("owner/repo", core.dashboard_label()) then
+    error("unexpected dashboard label get")
+  end
+  core.gh_dashboard_issue_list = function(repo, label)
+    table.insert(fake.commands, "issue_list")
+    if repo == "owner/repo" and label == core.dashboard_label() then
       fake.list_calls = fake.list_calls + 1
       return { stdout = dashboard_issue_list_stdout(fake.issue_body), stderr = "", exit_code = 0 }
     end
-    if cmd:find("gh api %-%-method POST 'repos/owner/repo/issues'", 1) == 1 then
-      fake.create_calls = fake.create_calls + 1
-      fake.issue_body = dashboard_body_from_input(command_input_path(cmd))
-      return { stdout = '{"number":99}\n', stderr = "", exit_code = 0 }
+    error("unexpected dashboard issue list")
+  end
+  core.gh_dashboard_issue_create = function(repo, input_file)
+    table.insert(fake.commands, "issue_create")
+    if repo ~= "owner/repo" then
+      error("unexpected dashboard issue create")
     end
-    error("unexpected command: " .. cmd)
+    fake.create_calls = fake.create_calls + 1
+    fake.issue_body = dashboard_body_from_input(input_file)
+    return { stdout = '{"number":99}\n', stderr = "", exit_code = 0 }
   end
   local results = { pcall(callback) }
-  core.gh_exec = old_gh_exec
+  core.gh_dashboard_label_get = old_label_get
+  core.gh_dashboard_issue_list = old_issue_list
+  core.gh_dashboard_issue_create = old_issue_create
   local ok = table.remove(results, 1)
   if not ok then
     error(results[1])
@@ -184,27 +195,33 @@ return {
 
   test_dashboard_locator_empty_stdout_fails_closed_without_create = function()
     mock_env("1")
-    local old_gh_exec = core.gh_exec
+    local old_label_get = core.gh_dashboard_label_get
+    local old_issue_list = core.gh_dashboard_issue_list
+    local old_issue_create = core.gh_dashboard_issue_create
     local create_calls = 0
-    core.gh_exec = function(cmd_or_opts)
-      local cmd = type(cmd_or_opts) == "table" and tostring(cmd_or_opts.cmd or "") or tostring(cmd_or_opts or "")
-      if cmd == core.gh_dashboard_label_get_cmd("owner/repo", core.dashboard_label()) then
+    core.gh_dashboard_label_get = function(repo, label)
+      if repo == "owner/repo" and label == core.dashboard_label() then
         return { stdout = '{"name":"fkst-dashboard"}\n', stderr = "", exit_code = 0 }
       end
-      if cmd == core.gh_dashboard_issue_list_cmd("owner/repo", core.dashboard_label()) then
+      error("unexpected dashboard label get")
+    end
+    core.gh_dashboard_issue_list = function(repo, label)
+      if repo == "owner/repo" and label == core.dashboard_label() then
         return { stdout = "", stderr = "", exit_code = 0 }
       end
-      if cmd:find("gh api %-%-method POST 'repos/owner/repo/issues'", 1) == 1 then
-        create_calls = create_calls + 1
-        return { stdout = '{"number":99}\n', stderr = "", exit_code = 0 }
-      end
-      error("unexpected command: " .. cmd)
+      error("unexpected dashboard issue list")
+    end
+    core.gh_dashboard_issue_create = function()
+      create_calls = create_calls + 1
+      return { stdout = '{"number":99}\n', stderr = "", exit_code = 0 }
     end
 
     local ok, err = pcall(function()
       core.publish_observability_dashboard("owner/repo", dashboard_fixture(), core.observability_limits(), now() + 90)
     end)
-    core.gh_exec = old_gh_exec
+    core.gh_dashboard_label_get = old_label_get
+    core.gh_dashboard_issue_list = old_issue_list
+    core.gh_dashboard_issue_create = old_issue_create
 
     t.eq(ok, false)
     t.is_true(tostring(err):find("dashboard issue list failed: empty output", 1, true) ~= nil)
@@ -215,33 +232,49 @@ return {
     mock_env("1")
     local old_body = "old\n" .. core.dashboard_marker("old", "2026-06-01T00:00:00Z")
     local newer_body = "newer\n" .. core.dashboard_marker("newer", "2026-06-01T00:01:00Z")
-    local old_gh_exec = core.gh_exec
+    local old_label_get = core.gh_dashboard_label_get
+    local old_issue_list = core.gh_dashboard_issue_list
+    local old_issue_get = core.gh_dashboard_issue_get
+    local old_issue_update = core.gh_dashboard_issue_update
+    local old_issue_create = core.gh_dashboard_issue_create
     local create_calls = 0
     local get_calls = 0
-    core.gh_exec = function(cmd_or_opts)
-      local cmd = type(cmd_or_opts) == "table" and tostring(cmd_or_opts.cmd or "") or tostring(cmd_or_opts or "")
-      if cmd == core.gh_dashboard_label_get_cmd("owner/repo", core.dashboard_label()) then
+    core.gh_dashboard_label_get = function(repo, label)
+      if repo == "owner/repo" and label == core.dashboard_label() then
         return { stdout = '{"name":"fkst-dashboard"}\n', stderr = "", exit_code = 0 }
       end
-      if cmd == core.gh_dashboard_issue_list_cmd("owner/repo", core.dashboard_label()) then
+      error("unexpected dashboard label get")
+    end
+    core.gh_dashboard_issue_list = function(repo, label)
+      if repo == "owner/repo" and label == core.dashboard_label() then
         return { stdout = dashboard_issue_list_stdout_many({ old_body, newer_body }), stderr = "", exit_code = 0 }
       end
-      if cmd == core.gh_dashboard_issue_get_cmd("owner/repo", 99) then
+      error("unexpected dashboard issue list")
+    end
+    core.gh_dashboard_issue_get = function(repo, issue_number)
+      if repo == "owner/repo" and tonumber(issue_number) == 99 then
         get_calls = get_calls + 1
         return { stdout = 'HTTP/2.0 200 OK\netag: "dashboard-old-etag"\n\n{"number":99,"title":"fkst-dev board","author":{"login":"fkst-test-bot"},"body":"' .. encode_body(old_body) .. '"}\n', stderr = "", exit_code = 0 }
       end
-      if cmd:find("gh api %-%-method PATCH 'repos/owner/repo/issues/99'", 1) == 1 then
+      error("unexpected dashboard issue get")
+    end
+    core.gh_dashboard_issue_update = function(repo, issue_number)
+      if repo == "owner/repo" and tonumber(issue_number) == 99 then
         return { stdout = '{"number":99}\n', stderr = "", exit_code = 0 }
       end
-      if cmd:find("gh api %-%-method POST 'repos/owner/repo/issues'", 1) == 1 then
-        create_calls = create_calls + 1
-        return { stdout = '{"number":101}\n', stderr = "", exit_code = 0 }
-      end
-      error("unexpected command: " .. cmd)
+      error("unexpected dashboard issue update")
+    end
+    core.gh_dashboard_issue_create = function()
+      create_calls = create_calls + 1
+      return { stdout = '{"number":101}\n', stderr = "", exit_code = 0 }
     end
 
     local result = core.publish_observability_dashboard("owner/repo", dashboard_fixture(), core.observability_limits(), now() + 90)
-    core.gh_exec = old_gh_exec
+    core.gh_dashboard_label_get = old_label_get
+    core.gh_dashboard_issue_list = old_issue_list
+    core.gh_dashboard_issue_get = old_issue_get
+    core.gh_dashboard_issue_update = old_issue_update
+    core.gh_dashboard_issue_create = old_issue_create
 
     t.eq(result, "updated")
     t.eq(get_calls, 1)

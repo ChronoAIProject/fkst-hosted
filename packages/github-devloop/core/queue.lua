@@ -238,14 +238,14 @@ function M.merge_queue_head(repo, base_branch, current)
     end
   end
 
-  local list = M.gh_exec({ cmd = M.gh_pr_list_merge_queue_cmd(repo, base_branch), timeout = 30 })
+  local list = M.gh_pr_list_merge_queue(repo, base_branch, 30)
   if list.exit_code ~= 0 then
     error("github-devloop: merge queue PR list failed: " .. tostring(list.stderr))
   end
   for _, pr_item in ipairs(M.parse_pr_list_merge_queue(list.stdout)) do
     local pr_number = tonumber(pr_item.number)
     if pr_number ~= nil and not seen[tostring(pr_number)] then
-      local view = M.gh_exec({ cmd = M.gh_pr_view_merge_cmd(repo, pr_number), timeout = 30 })
+      local view = M.gh_pr_view_merge(repo, pr_number, 30)
       if view.exit_code ~= 0 then
         error("github-devloop: merge queue PR view failed: " .. tostring(view.stderr))
       end
@@ -493,7 +493,7 @@ function M.merge_ready_payload_from_queue_entry(entry, source_ref)
 end
 
 function M.merge_queue_changed_files(repo, entry)
-  local result = M.gh_exec({ cmd = M.gh_pr_diff_name_only_cmd(repo, entry.pr_number), timeout = 30 })
+  local result = M.gh_pr_diff_name_only(repo, entry.pr_number, 30)
   if result.exit_code ~= 0 then
     return nil, "diff-name-only-failed: " .. tostring(result.stderr)
   end
@@ -525,7 +525,7 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
 
   local integration_branch = M.branch_config().integration
 
-  local list = M.gh_exec({ cmd = M.gh_issue_list_wip_cmd(repo), timeout = 30 })
+  local list = M.gh_issue_list_wip(repo, 30)
   if list.exit_code ~= 0 then
     error("github-devloop: WIP issue list failed: " .. tostring(list.stderr))
   end
@@ -534,7 +534,7 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
   for _, issue in ipairs(M.parse_issue_number_list(list.stdout)) do
     local issue_number = tonumber(issue.number)
     if issue_number ~= nil and tostring(issue_number) ~= tostring(current_issue_number) then
-      local view = M.gh_exec({ cmd = M.gh_issue_view_state_cmd(repo, issue_number), timeout = 30 })
+      local view = M.gh_issue_view_state(repo, issue_number, 30)
       if view.exit_code ~= 0 then
         error("github-devloop: WIP issue state view failed: " .. tostring(view.stderr))
       end

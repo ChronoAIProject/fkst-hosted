@@ -92,7 +92,7 @@ function M.fetch_shared_issue_observe_list(repo, opts)
   local exec_opts = M.gh_issue_list_observe_opts(repo)
   exec_opts.timeout = options.timeout or exec_opts.timeout
   return fetch_shared_list(repo, "issue", "open", options.poll_key, function()
-    return M.gh_exec(exec_opts, nil, options.exec)
+    return exec_opts.run(exec_opts.timeout)
   end)
 end
 
@@ -101,15 +101,14 @@ function M.fetch_shared_pr_observe_list(repo, opts)
   local exec_opts = M.gh_pr_list_observe_opts(repo)
   exec_opts.timeout = options.timeout or exec_opts.timeout
   return fetch_shared_list(repo, "pr", "open", options.poll_key, function()
-    return M.gh_exec(exec_opts, nil, options.exec)
+    return exec_opts.run(exec_opts.timeout)
   end)
 end
 
 function M.fetch_shared_issue_intake_list(repo, limit, opts)
   local options = opts or {}
-  local cmd = M.gh_issue_list_intake_cmd(repo, limit)
   return fetch_shared_list(repo, "issue", "intake-" .. tostring(limit or 100), options.poll_key, function()
-    return M.gh_exec({ cmd = cmd, timeout = options.timeout or 30 }, nil, options.exec)
+    return M.gh_issue_list_intake(repo, limit, options.timeout or 30)
   end)
 end
 

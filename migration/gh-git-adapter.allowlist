@@ -1,22 +1,4 @@
 packages/github-devloop/core/base.lua:
   - gh
-packages/github-devloop/core/commands.lua:
-  - gh api
-  - gh issue
-  - gh pr
-  - git add
-  - git clean
-  - git commit
-  - git fetch
-  - git ls-remote
-  - git merge
-  - git push
-  - git reset
-  - git rev-list
-  - git rev-parse
-  - git show-ref
-  - git status
-  - git switch
-  - git worktree
 packages/github-devloop/core/github_graphql.lua:
   - gh api

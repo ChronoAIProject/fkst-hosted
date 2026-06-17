@@ -55,7 +55,7 @@ local function decompose_plan(decompose, current_issue, content_fetch)
 end
 
 local function read_current_pr(repo, pr_number)
-  local pr_view = core.gh_exec({ cmd = core.gh_pr_view_origin_cmd(repo, pr_number), timeout = 30 })
+  local pr_view = core.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr decompose view failed: " .. tostring(pr_view.stderr))
   end
@@ -63,7 +63,7 @@ local function read_current_pr(repo, pr_number)
 end
 
 local function read_decompose_issue(repo, issue_number)
-  local issue_view = core.gh_exec({ cmd = core.gh_issue_view_decompose_cmd(repo, issue_number), timeout = 30 })
+  local issue_view = core.gh_issue_view_decompose(repo, issue_number, 30)
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue decompose view failed: " .. tostring(issue_view.stderr))
   end
@@ -71,7 +71,7 @@ local function read_decompose_issue(repo, issue_number)
 end
 
 local function read_decompose_child_issues(repo, proposal_id)
-  local child_list = core.gh_exec({ cmd = core.gh_issue_list_decompose_children_cmd(repo, proposal_id), timeout = 30 })
+  local child_list = core.gh_issue_list_decompose_children(repo, proposal_id, 30)
   if child_list.exit_code ~= 0 then
     error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
   end
@@ -208,7 +208,7 @@ local function write_decomposed_marker(repo, decompose, count)
     context = decompose.proposal_id,
   })
   file.write(path, body)
-  local result = core.gh_exec({ cmd = core.gh_pr_comment_cmd(repo, decompose.pr_number, path), timeout = 30 })
+  local result = core.gh_pr_comment(repo, decompose.pr_number, path, 30)
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr decomposed marker comment failed: " .. tostring(result.stderr))
   end

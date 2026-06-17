@@ -39,6 +39,14 @@ local function mock_implement_worktree_reconcile()
   })
 end
 
+local function mock_worktree_parent_mkdir()
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_fresh_implement_worktree(path)
   t.mock_command("git fetch 'origin' 'dev'", {
     stdout = "",
@@ -70,6 +78,7 @@ local function mock_fresh_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  mock_worktree_parent_mkdir()
   t.mock_command("git worktree add -b", {
     stdout = "",
     stderr = "",
@@ -124,6 +133,7 @@ local function mock_existing_empty_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  mock_worktree_parent_mkdir()
   t.mock_command("git worktree add", {
     stdout = "",
     stderr = "",
@@ -236,6 +246,7 @@ local function mock_outside_runtime_implement_worktree_rebuild(runtime_root, bra
     stderr = "",
     exit_code = 0,
   })
+  mock_worktree_parent_mkdir()
   t.mock_command("git worktree add", {
     stdout = "",
     stderr = "",
@@ -307,6 +318,7 @@ local function mock_multiple_outside_runtime_implement_worktrees_rebuild(runtime
     stderr = "",
     exit_code = 0,
   })
+  mock_worktree_parent_mkdir()
   t.mock_command("git worktree add", {
     stdout = "",
     stderr = "",
@@ -493,6 +505,7 @@ local function mock_missing_fix_worktree(branch, head, path)
     stderr = "",
     exit_code = 0,
   })
+  mock_worktree_parent_mkdir()
   t.mock_command("git worktree add --force -B", {
     stdout = "",
     stderr = "",
@@ -541,6 +554,7 @@ local function mock_outside_runtime_fix_worktree(branch, head, path)
     stderr = "",
     exit_code = 0,
   })
+  mock_worktree_parent_mkdir()
   t.mock_command("git worktree add --force -B", {
     stdout = "",
     stderr = "",

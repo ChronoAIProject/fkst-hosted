@@ -1,5 +1,7 @@
 local t = fkst.test
 local core = require("core")
+local gh_argv = require("tests.gh_argv_mock_helpers")
+gh_argv.install(t, core)
 
 local current_pin = "cccccccccccccccccccccccccccccccccccccccc"
 local target_sha = "1234567890abcdef1234567890abcdef12345678"
@@ -155,11 +157,6 @@ end
 
 local function mock_branch_missing()
   t.mock_command("git fetch origin chore/substrate-ref-bump", {
-    stdout = "",
-    stderr = "fatal: couldn't find remote ref chore/substrate-ref-bump\n",
-    exit_code = 128,
-  })
-  t.mock_command("git fetch 'origin' 'chore/substrate-ref-bump'", {
     stdout = "",
     stderr = "fatal: couldn't find remote ref chore/substrate-ref-bump\n",
     exit_code = 128,
@@ -516,7 +513,7 @@ end
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       count = count + 1
     end
   end
@@ -526,7 +523,7 @@ end
 local function count_git_write_calls()
   local count = 0
   for _, call in ipairs(t.command_calls()) do
-    local rendered = tostring(call.rendered or "")
+    local rendered = gh_argv.call_rendered(call)
     if rendered:find("git worktree add", 1, true) ~= nil
       or rendered:find(" git add ", 1, true) ~= nil
       or rendered:find(" commit ", 1, true) ~= nil
@@ -632,7 +629,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 1)
-    t.eq(count_calls(" push origin HEAD:refs/heads/chore/substrate-ref-bump"), 1)
+    t.eq(count_calls("HEAD:refs/heads/chore/substrate-ref-bump"), 1)
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 1)
     local audit_raise = result.raises[1]
     t.eq(audit_raise.queue, "github-proxy.github_pr_comment_request")
@@ -757,7 +754,7 @@ return {
     mock_base_head()
     mock_runtime_root("substrate-pin-mismatch")
     mock_no_checked_out_bump_branch()
-    mock_worktree_commands("substrate-pin-mismatch", true, pr_head_sha)
+    mock_worktree_commands("substrate-pin-mismatch", true, old_branch_sha)
     mock_existing_pr()
     mock_bump_pr_view(nil, {
       rollup = '[{"name":"ci","status":"IN_PROGRESS","conclusion":""}]',
@@ -770,7 +767,7 @@ return {
     local result = run_scan(opts("substrate-pin-mismatch", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. pr_head_sha), 1)
+    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. old_branch_sha), 1)
     eq_zero(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), "merge call after repin")
     eq_zero(count_raises(result, "github-proxy.github_pr_comment_request"), "comment raises after repin")
   end,
@@ -817,7 +814,7 @@ return {
     mock_base_head()
     mock_runtime_root("substrate-stale-worktree")
     mock_checked_out_bump_branch()
-    mock_worktree_commands("substrate-stale-worktree", true, pr_head_sha)
+    mock_worktree_commands("substrate-stale-worktree", true, old_branch_sha)
     mock_existing_pr()
     mock_bump_pr_view(nil, {
       rollup = '[{"name":"ci","status":"IN_PROGRESS","conclusion":""}]',
@@ -831,7 +828,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("git worktree remove --force /tmp/fkst-packages-test/github-devloop/stale-substrate"), 1)
-    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. pr_head_sha), 1)
+    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. old_branch_sha), 1)
     eq_zero(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), "merge call after stale-worktree repin")
     eq_zero(count_raises(result, "github-proxy.github_issue_create_request"), "create raises after stale-worktree repin")
     eq_zero(count_raises(result, "github-proxy.github_issue_label_request"), "label raises after stale-worktree repin")

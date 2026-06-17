@@ -133,11 +133,11 @@ function pipeline(event)
       return
     end
 
-    local branch_ref = exec_sync({ cmd = core.git_show_ref_cmd(".", fact.branch), timeout = 30 })
+    local branch_ref = core.git_show_ref(".", fact.branch, 30)
     if branch_ref.exit_code ~= 0 then
       error("github-devloop: implementing branch missing: " .. tostring(branch_ref.stderr))
     end
-    local branch_head = exec_sync({ cmd = core.git_rev_parse_branch_cmd(".", fact.branch), timeout = 30 })
+    local branch_head = core.git_rev_parse_branch(".", fact.branch, 30)
     if branch_head.exit_code ~= 0 then
       error("github-devloop: implementing branch head missing: " .. tostring(branch_head.stderr))
     end
