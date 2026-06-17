@@ -153,7 +153,12 @@ function M.build_rollup_health_issue_create_request(repo, evidence, snapshot)
     repo = repo,
     title = alert_title(evidence),
     body = alert_body(evidence, snapshot),
-    labels = json.decode("[]"),
+    -- When rollup auto-fix is on, the watchdog issue is born as an enabled,
+    -- expedite work-item so the loop claims + fixes the red rollup ahead of new
+    -- issues. Default off ⇒ no labels (passive watchdog, today's behavior).
+    labels = evidence.rollup_autofix
+      and json.decode('["fkst-dev:enabled","fkst-class:expedite"]')
+      or json.decode("[]"),
     dedup_key = M.rollup_health_dedup_key(repo, evidence.failing_check),
     parent_comment_target = {
       repo = repo,
@@ -209,6 +214,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     age_minutes = age,
     threshold_minutes = threshold,
     failing_check = failing_check,
+    rollup_autofix = M.rollup_autofix_enabled(),
   }
   local snapshot = write_snapshot(repo, evidence)
   local request = M.build_rollup_health_issue_create_request(repo, evidence, snapshot)

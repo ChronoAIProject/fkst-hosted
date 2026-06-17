@@ -86,6 +86,19 @@ local function gh_issue_edit_assignee_argv(repo, issue_number, flag, login)
   }
 end
 
+local function gh_issue_edit_label_argv(repo, issue_number, flag, label)
+  return {
+    "gh",
+    "issue",
+    "edit",
+    tostring(issue_number),
+    "--repo",
+    tostring(repo),
+    flag,
+    tostring(label),
+  }
+end
+
 local function gh_issue_updated_at_argv(repo, issue_number)
   return {
     "gh",
@@ -354,6 +367,22 @@ function M.install(handle)
       gh_issue_edit_assignee_argv(repo, issue_number, "--remove-assignee", login),
       timeout,
       "gh issue unassign"
+    )
+  end
+
+  function handle.issue_add_label(repo, issue_number, label, timeout)
+    return handle._exec(
+      gh_issue_edit_label_argv(repo, issue_number, "--add-label", label),
+      timeout,
+      "gh issue add label"
+    )
+  end
+
+  function handle.issue_remove_label(repo, issue_number, label, timeout)
+    return handle._exec(
+      gh_issue_edit_label_argv(repo, issue_number, "--remove-label", label),
+      timeout,
+      "gh issue remove label"
     )
   end
 

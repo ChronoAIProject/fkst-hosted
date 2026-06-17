@@ -4,6 +4,7 @@ function S.install(M)
 local env = require("std.env")
 local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,
+  FKST_GITHUB_CLAIM_MODE = true,
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_UPSTREAM_BRANCH = true,
@@ -12,6 +13,7 @@ local allowed_env = {
   FKST_DEVLOOP_MAX_INFLIGHT = true,
   FKST_DEVLOOP_MANAGED_SIBLING_REPOS = true,
   FKST_DEVLOOP_ROLLUP_MERGE = true,
+  FKST_DEVLOOP_ROLLUP_AUTOFIX = true,
   FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = true,
   FKST_DEVLOOP_RELEASE_NOTES_FALLBACK = true,
   FKST_DEVLOOP_CONFLICT_LOG_CMD = true,
@@ -63,6 +65,28 @@ end
 
 function M.write_mode(exec)
   return M.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
+end
+
+-- Claim mode is opt-in and additive: the default (unset/empty/unknown) is
+-- "assignee", which is byte-for-byte today's behavior. "label" opts into
+-- holding ownership via the fkst-dev:claimed label, which a GitHub App can set
+-- even though an App cannot be an issue assignee.
+function M.claim_mode(exec)
+  local raw = M.read_env("FKST_GITHUB_CLAIM_MODE", exec)
+  raw = M._trim(raw or "")
+  if raw == "label" then
+    return "label"
+  end
+  return "assignee"
+end
+
+-- Rollup auto-fix is opt-in and additive: default (unset/anything-but-"1") is
+-- off, which is byte-for-byte today's behavior (the rollup-health watchdog only
+-- files a passive issue). When "1", the watchdog issue is created already
+-- fkst-dev:enabled + fkst-class:expedite so the loop claims and fixes the red
+-- rollup ahead of new issues (expedite class + inflight cap = priority).
+function M.rollup_autofix_enabled(exec)
+  return M._trim(M.read_env("FKST_DEVLOOP_ROLLUP_AUTOFIX", exec) or "") == "1"
 end
 
 function M.max_inflight(exec)

@@ -248,7 +248,7 @@ end
 
 local function ensure_dashboard_anchor(repo, mode, issues, bot_login)
   for _, issue in ipairs(issues or {}) do
-    if tostring(issue.author_login or "") == tostring(bot_login or "")
+    if M.strip_bot_login_suffix(issue.author_login or "") == M.strip_bot_login_suffix(bot_login or "")
       and tostring(issue.title or "") == dashboard_title
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
       local label_added = ensure_dashboard_anchor_label(repo, mode, issue)
@@ -375,12 +375,24 @@ function M.ensure_repo()
     color = "ededed",
     description = "fkst observability dashboard singleton",
   })
+  -- The fkst-dev:claimed label backs label-mode ownership; only register it when
+  -- the deployment opts into label-mode so assignee-mode repos stay unchanged.
+  local claim_label_result = nil
+  if M.claim_mode() == "label" then
+    claim_label_result = ensure_label(repo, apply_mode, labels, {
+      name = M.claimed_label(),
+      color = "0E8A16",
+      description = "fkst-dev-label-mode-ownership-claim",
+    })
+  end
   local dashboard_result = ensure_dashboard_anchor(repo, apply_mode, dashboard_issues, cfg.bot_login)
   return {
     repo = repo,
     mode = cfg.write_mode,
+    claim_mode = M.claim_mode(),
     labels = label_result,
     dashboard_label = dashboard_label_result,
+    claim_label = claim_label_result,
     dashboard_anchor = dashboard_result,
     topology = topology_result,
   }

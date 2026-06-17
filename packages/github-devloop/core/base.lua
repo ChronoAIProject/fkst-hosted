@@ -214,12 +214,25 @@ local function is_positive_pr_number(value)
   return number ~= nil and number >= 1 and number % 1 == 0 and number <= 2147483647
 end
 
+-- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
+-- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
+-- configured bot login match regardless of which API populated the field.
+-- Nil-safe (nil in → nil out) and a no-op for ordinary user logins (which never
+-- end in "[bot]"), so claim_owner() and author comparisons keep their existing
+-- nil semantics when the bot login is unconfigured.
+function M.strip_bot_login_suffix(login)
+  if login == nil then
+    return nil
+  end
+  return (tostring(login):gsub("%[bot%]$", ""))
+end
+
 function M.configure_trusted_bot_login(login)
   if login == nil or tostring(login) == "" then
     trusted_bot_login = nil
     return nil
   end
-  trusted_bot_login = tostring(login)
+  trusted_bot_login = M.strip_bot_login_suffix(login)
   return trusted_bot_login
 end
 
