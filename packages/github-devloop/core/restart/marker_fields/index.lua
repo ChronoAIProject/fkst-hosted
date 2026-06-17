@@ -1,4 +1,5 @@
 return {
+  { module = "autonomy_result", key = "autonomy-result" },
   { module = "converge_round", key = "converge-round" },
   { module = "decomposed", key = "decomposed" },
   { module = "dependency_cycle", key = "dependency-cycle" },

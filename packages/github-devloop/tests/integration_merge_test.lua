@@ -149,6 +149,13 @@ return {
     t.is_true(comment_raise.payload.body:find('state="merging"', 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('state="merged"', 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("fkst:github-devloop:autonomy-result:v1", 1, true) ~= nil)
+    local avm = core.autonomy_result_fact({ comment_raise.payload.body }, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha)
+    t.eq(avm.valid_autonomous_merge, "pending")
+    t.eq(avm.pre_merge_ci, "pass")
+    t.eq(avm.human_touch_count, 0)
+    t.eq(avm.retry_count, 0)
+    t.eq(avm.codex_calls, nil)
   end,
 
   test_pr_native_merge_ready_without_backing_issue_is_not_owned = function()
