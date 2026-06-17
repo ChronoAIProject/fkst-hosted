@@ -47,6 +47,10 @@ function M.state_marker(proposal_id, state, version, effects)
     .. ' -->'
 end
 
+function M.version_order_key(version)
+  return source_ref.version_order_key(version)
+end
+
 function M.stage_rank(state)
   return M._state_stage_rank[state] or 0
 end
