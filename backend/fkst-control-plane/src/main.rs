@@ -3,19 +3,13 @@
 
 use std::process::ExitCode;
 
-use std::sync::Arc;
-
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::controller::{ControllerHandle, InternalAuth, WorkerRegistry};
+use fkst_control_plane::controller::{ClaimMap, ControllerHandle, InternalAuth, WorkerRegistry};
 use fkst_control_plane::db::{redact_mongodb_uri, Db};
-use fkst_control_plane::distribution::{
-    DistributionConfig, Distributor, DriverHost, SelfOnlyHealth,
-};
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::journal_config::journal_config_from_app;
-use fkst_control_plane::leases::LeaseStore;
 use fkst_control_plane::nyxid::NyxIdClient;
 use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_control_plane::router::{build_router, mount_internal};
@@ -117,48 +111,24 @@ async fn main() -> ExitCode {
     };
     let reconcile_engine_config = engine_config.clone();
 
-    // 4d. Load the distribution configuration (fail-closed: a bad cadence
-    //     or pod identity must never reach the lease layer).
-    let distribution_config = match DistributionConfig::load_from_env() {
-        Ok(distribution_config) => distribution_config,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to load distribution configuration");
-            return ExitCode::FAILURE;
-        }
-    };
-    // The per-pod/worker max-load cap the in-process distributor uses for
-    // placement (`FKST_PLACEMENT_MAX_LOAD`, 0 = uncapped). Captured before the
-    // distributor moves `distribution_config` in; the controller's placement
-    // honours the SAME semantics (#151 i7b), so dispatch mode caps workers at
-    // the identical value rather than inventing a second knob.
-    let dispatch_max_load = distribution_config.max_load;
+    // 4d. The per-worker max-load cap used by worker-dispatch placement
+    //     (`FKST_PLACEMENT_MAX_LOAD`, 0 = uncapped). Carried over from the
+    //     deleted distribution layer (#198-ii). Only consulted under dispatch
+    //     mode; the in-process claim path never rejects on load.
+    let dispatch_max_load = config.placement_max_load;
 
-    // 4e. Lease store + its indexes (idempotent; fail-closed on error), then
-    //     the distributor over the self-only health view.
-    let lease_store = LeaseStore::new(&db, &distribution_config.pool);
-    if let Err(error) = lease_store.ensure_indexes().await {
-        tracing::error!(error = %error, "failed to ensure lease indexes");
-        return ExitCode::FAILURE;
-    }
-    let health = Arc::new(SelfOnlyHealth::new(
-        db.clone(),
-        distribution_config.pool.pod_id.clone(),
-    ));
-    let distributor = Distributor::new(db.clone(), lease_store, health, distribution_config);
-
-    // 4f. Build the session service (lease-fenced drivers) and sweep
-    //     orphans BEFORE binding: any pre-terminal session in Mongo refers
-    //     to an engine process that died with the previous pod and must be
-    //     failed — and its lease released — before clients can observe
-    //     stale "running" state.
-    let sessions =
-        SessionService::with_distribution(SessionRepo::new(), engine_config, distributor.clone());
+    // 4f. Build the session service (in-memory store) and sweep orphans BEFORE
+    //     binding: any pre-terminal session left in the in-memory store from a
+    //     prior incarnation must be failed before clients can observe stale
+    //     "running" state. A fresh controller has none, but the call is kept for
+    //     parity and the logged outcome.
+    let sessions = SessionService::new(SessionRepo::new(), engine_config);
     // Session-progress journaling (issue #25): the committed GitHub file is
     // the sole machine-truth (#139). GitHub sync per the FKST_JOURNAL_* config
     // (absent repo/token degrades to no-durable-floor with a warn).
     sessions.enable_journaling(journal_config_from_app(&config));
 
-    match distributor.fail_orphans_at_boot().await {
+    match sessions.repo().fail_orphans().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),
         Err(error) => {
             tracing::error!(error = %error, "orphan sweep failed");
@@ -187,12 +157,10 @@ async fn main() -> ExitCode {
         "orphan temp-dir reconciliation completed"
     );
 
-    // 4g. Spawn the takeover reaper, cancelled on shutdown.
-    let reaper_shutdown = CancellationToken::new();
-    let reaper_handle = tokio::spawn(Arc::new(distributor).run_reaper(
-        Arc::new(sessions.clone()) as Arc<dyn DriverHost>,
-        reaper_shutdown.clone(),
-    ));
+    // 4g. (removed, #198-ii) No takeover reaper: a single authoritative
+    //     controller owns every claim, so there is no cross-pod takeover to
+    //     drive. Worker reassignment (dispatch mode only) is handled by the
+    //     registry sweeper + the reassignment driver wired in step 5b.
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
@@ -411,45 +379,55 @@ async fn main() -> ExitCode {
     };
     tracing::info!("router built");
 
+    // 5a-quater. Controller-backed placement (#135, #198-ii): the in-memory
+    //     `ClaimMap` is the SINGLE claim authority for placement, so it is built
+    //     and enabled UNCONDITIONALLY — the in-process default path claims
+    //     through it, and dispatch mode places workers through it. The registry
+    //     is built here too so the controller handle and `mount_internal` (below)
+    //     share the SAME registry + claims: a dispatch queued via the handle is
+    //     drained by the heartbeat handler, and the fence a worker echoes is
+    //     checked against the live claim map. `dispatch_mode` rides on the handle
+    //     so `create_for_goal` picks in-process vs worker-dispatch off it.
+    let ttl = std::time::Duration::from_secs(worker_liveness_ttl_secs);
+    let registry = WorkerRegistry::new(ttl);
+    let claims = std::sync::Arc::new(ClaimMap::new());
+    sessions.enable_controller(ControllerHandle::new(
+        claims.clone(),
+        registry.clone(),
+        dispatch_max_load,
+        dispatch_mode_enabled,
+    ));
+    tracing::info!(
+        dispatch_mode = dispatch_mode_enabled,
+        max_load = dispatch_max_load,
+        "controller-backed placement enabled (in-memory claim authority)"
+    );
+
     // 5b. Internal worker protocol (issue #134): when the shared secret is set,
-    //     build the in-memory worker registry, spawn the stale-worker expiry
-    //     sweeper (cancelled on shutdown like the reaper), and merge the
-    //     shared-secret-guarded internal routes onto the top-level router. When
-    //     the secret is absent the internal surface stays closed (not mounted).
+    //     spawn the stale-worker expiry sweeper (cancelled on shutdown) and merge
+    //     the shared-secret-guarded internal routes onto the top-level router,
+    //     reusing the SAME registry + claims wired above. When the secret is
+    //     absent the internal surface stays closed (not mounted), but the
+    //     in-process claim authority is still live.
     let registry_sweeper_shutdown = CancellationToken::new();
     let (app, registry_sweeper_handle) = match internal_auth_token {
         Some(token) => {
-            let ttl = std::time::Duration::from_secs(worker_liveness_ttl_secs);
-            let registry = WorkerRegistry::new(ttl);
             // Workers must heartbeat several times per TTL window to avoid a
             // false expiry; the controller is authoritative for this cadence.
             let heartbeat_interval_secs = (worker_liveness_ttl_secs / 3).max(1);
             let sweep_interval_secs = (worker_liveness_ttl_secs / 2).max(1);
-            // The controller's claim authority for the mid-run worker channels
-            // (#151). A FRESH empty map: placement only inserts into it under
-            // dispatch mode, so with dispatch OFF the credential-refresh /
-            // status-report routes are reachable but inert in prod (every fence
-            // check misses) — develop behaviour is byte-identical.
-            let claims = std::sync::Arc::new(fkst_control_plane::controller::ClaimMap::new());
             tracing::info!(
                 route_prefix = "/internal/v1",
                 "internal worker protocol enabled"
             );
             // Dispatch mode (#151 i7b / #140, default OFF): only when the operator
-            // opts in AND the internal protocol is enabled (we are inside that
-            // arm) do we enable controller-backed placement + worker reassignment.
-            // The handle/driver MUST share the SAME registry + claims that
-            // `mount_internal` uses — so a dispatch queued here is drained by the
-            // heartbeat handler, and the fence the worker echoes is checked
-            // against the live claim map — hence the clones BEFORE `registry`
-            // moves into `mount_internal`. When OFF the controller + reassign
-            // driver stay None: goal sessions run the byte-identical in-process
-            // distributor path and the sweeper stays log-only.
+            // opts in do we wire the worker-reassignment driver. The driver MUST
+            // share the SAME registry + claims so a redo lands on the live
+            // outbound queue and re-fences the live claim. When OFF the reassign
+            // driver stays None (goal sessions run in-process; the sweeper is
+            // log-only).
             let reassign: Option<std::sync::Arc<fkst_control_plane::controller::ReassignDriver>> =
                 if dispatch_mode_enabled {
-                    let controller_handle =
-                        ControllerHandle::new(claims.clone(), registry.clone(), dispatch_max_load);
-                    sessions.enable_controller(controller_handle);
                     // The real re-dispatch seam (#140): re-resolves a reassigned
                     // session's dispatch + queues it to the new worker. Shares the
                     // SAME registry so the redo lands on the live outbound queue.
@@ -542,10 +520,8 @@ async fn main() -> ExitCode {
         .await
     {
         tracing::error!(error = %error, "server error");
-        // Still stop the reaper and drain the session drivers: a serve
-        // error must not orphan live engine processes without a SIGTERM.
-        reaper_shutdown.cancel();
-        let _ = reaper_handle.await;
+        // Still stop the worker-registry sweeper and drain the session drivers:
+        // a serve error must not orphan live engine processes without a SIGTERM.
         registry_sweeper_shutdown.cancel();
         if let Some(handle) = registry_sweeper_handle {
             let _ = handle.await;
@@ -554,10 +530,8 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    // 7. Stop the reaper + the worker-registry sweeper, then drain the session
-    //    drivers (SIGTERM live engines, bounded wait).
-    reaper_shutdown.cancel();
-    let _ = reaper_handle.await;
+    // 7. Stop the worker-registry sweeper, then drain the session drivers
+    //    (SIGTERM live engines, bounded wait).
     registry_sweeper_shutdown.cancel();
     if let Some(handle) = registry_sweeper_handle {
         let _ = handle.await;

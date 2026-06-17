@@ -2,27 +2,24 @@
 //! one engine process and advances the session document through
 //! `pending -> validating -> running -> stopping -> stopped | failed`.
 //!
-//! Two postures, selected at construction:
-//! - **Single-pod (legacy, [`SessionService::new`])**: no lease is taken;
-//!   the driver is spawned inline on create. Used by tests and
-//!   non-distributed runs; behavior is unchanged from v1.
-//! - **Distributed ([`SessionService::with_distribution`])**: create runs
-//!   [`Distributor::place`] (lease acquire + ownership write) and only
-//!   spawns a local driver when this pod was chosen; a live lease for
-//!   another session surfaces as `409 Conflict`. The driver is **fenced**:
-//!   its claim CAS pins `pod_id` + `fencing_token`, it renews the package
-//!   lease on an interval and self-terminates WITHOUT touching the document
-//!   when the lease is lost (a takeover pod owns the session now), and it
-//!   releases the lease on every terminal exit.
+//! Placement runs through the controller's in-memory [`ClaimMap`] (the SINGLE
+//! claim authority, #198-ii): a goal trigger CLAIMS its `lease_key` and, in the
+//! DEFAULT in-process mode, spawns a local driver fenced by the claim's pod id +
+//! `fencing_id` (a conflicting live claim surfaces as `409 Conflict`); under
+//! dispatch mode it places the session on a worker instead. Because exactly one
+//! controller is authoritative, a claim is never lost to a cross-pod takeover,
+//! so the driver no longer renews/self-fences — it just RELEASES the claim on
+//! every terminal exit (the no-stranded-claim invariant). The Mongo lease /
+//! distribution / reaper machinery this replaced was deleted.
 //!
 //! Concurrency rules (load-bearing):
 //! - Every status write goes through the repository CAS
 //!   ([`SessionRepo::transition`] / [`SessionRepo::transition_guarded`]); a
-//!   CAS miss means a concurrent stop or takeover won and the driver
+//!   CAS miss means a concurrent stop won and the driver
 //!   converges instead of overwriting.
 //! - The in-memory registry `Mutex` is sync and NEVER held across an await;
-//!   [`SessionService::ensure_driver`]-style spawns are entry-guarded so two
-//!   racing spawn requests start exactly one driver.
+//!   [`SessionService::spawn_driver`] is entry-guarded so two racing spawn
+//!   requests start exactly one driver.
 //! - `SessionRunner::start` is awaited to completion, never select-cancelled
 //!   (a cancelled start would leak intent mid-spawn; stop-vs-start races are
 //!   resolved AFTER start returns, via the `validating -> running` CAS).
@@ -33,13 +30,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use bson::{doc, Document};
 use secrecy::SecretString;
 use tokio::sync::watch;
 
-use crate::controller::{ControllerHandle, PlacementError as ControllerPlacementError};
-use crate::distribution::{Distributor, DriverHost, PlacementError};
+use crate::controller::{ClaimError, ControllerHandle, PlacementError as ControllerPlacementError};
 use crate::engine::config::is_reserved_env_key;
 use crate::engine::{
     clone_repo_packages, EngineConfig, GoalContext, LiveStatus, RunnerError, RunningSession,
@@ -57,7 +52,6 @@ use crate::journal::{
     package_fingerprint, JournalConfig, Journaler, LifecycleEvent, ProgressSignal, SessionCtx,
     Transition,
 };
-use crate::leases::RenewOutcome;
 use crate::models::{SessionDoc, SessionStatus, TerminalCause};
 use crate::nyxid::NyxIdClient;
 use crate::ornn::OrnnClient;
@@ -107,9 +101,11 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(100);
 /// Extra headroom on top of the engine stop grace for the shutdown drain.
 const SHUTDOWN_HEADROOM_SECS: u64 = 10;
 
-/// Renew "interval" used when a driver has no lease to renew (single-pod
-/// posture): effectively never fires meaningfully, and the arm no-ops.
-const NO_LEASE_RENEW_INTERVAL: Duration = Duration::from_secs(86_400);
+/// Stable advisory owner id stamped onto an in-process claim when `HOSTNAME` is
+/// unset (local/test runs). With a single authoritative controller the claim's
+/// owner is only used for journaling/load reflection, never for cross-pod
+/// arbitration, so a constant fallback is safe and keeps the owner non-blank.
+const CONTROLLER_OWNER_FALLBACK: &str = "controller";
 
 /// Default token refresh interval: mint a fresh GitHub installation token
 /// every 55 minutes (tokens expire after ~60 min, 5 min buffer).
@@ -190,22 +186,20 @@ pub(super) struct Inner {
     /// lock is sync and never held across an await.
     registry: Mutex<HashMap<bson::Uuid, watch::Sender<bool>>>,
     /// Controller-held user access tokens, keyed by session id (#138). Inserted
-    /// at `create_for_goal` when the trigger carried a token, re-supplied to the
-    /// failover driver by [`SessionService::ensure_driver`] so a same-process
-    /// worker loss can re-mint the per-session NyxID key, and removed on the
-    /// session's terminal exit. Lost on a controller restart — which is exactly
-    /// the documented "survive worker loss, NOT controller loss" boundary. The
-    /// token is a zeroizing `SecretString`; the lock is sync, never held across
-    /// an await.
+    /// at `create_for_goal` when the trigger carried a token, re-supplied to a
+    /// reassigned worker by the dispatch-mode redispatch seam
+    /// ([`crate::sessions::redispatch`]) so a worker loss can re-mint the
+    /// per-session NyxID key, and removed on the session's terminal exit. Lost on
+    /// a controller restart — which is exactly the documented "survive worker
+    /// loss, NOT controller loss" boundary. The token is a zeroizing
+    /// `SecretString`; the lock is sync, never held across an await.
     session_tokens: Mutex<HashMap<bson::Uuid, SecretString>>,
-    /// Pod identity stamped onto sessions this pod drives. With
-    /// distribution this is the distributor's pod id; without, the advisory
-    /// `HOSTNAME` (or `null`).
+    /// Pod identity stamped onto sessions this controller drives — the advisory
+    /// `HOSTNAME` (or `null` locally). It is the owner stamped onto in-process
+    /// claims and the value every driver CAS fences against.
     pod_id: Option<String>,
     /// Bound for the shutdown drain (engine stop grace + headroom).
     shutdown_bound: Duration,
-    /// Placement + lease layer; `None` selects the single-pod posture.
-    distribution: Option<Distributor>,
     /// Journaling layer (issue #25), enabled once at startup via
     /// [`SessionService::enable_journaling`]. Unset => journaling is off
     /// (legacy tests / minimal runs); the driver behaves identically either
@@ -240,13 +234,13 @@ pub(super) struct Inner {
     /// CODEX_HOME (#112) and the session's NyxID token (#111) — without either,
     /// there is nowhere to install or no identity to fetch as, so it is skipped.
     pub(super) ornn: OnceLock<OrnnClient>,
-    /// Controller-backed placement authority (issue #135), enabled once via
-    /// [`SessionService::enable_controller`]. Unset => placement goes through
-    /// the Mongo `distribution` path (the live path until #143). When set,
-    /// new sessions are placed through the in-memory `ClaimMap` and dispatched
-    /// to the chosen worker (which pulls + runs the engine — #136). The driver-
-    /// lifecycle status writes move onto `ClaimMap::set_status` in #136, when
-    /// engine execution physically moves to the worker and this path activates.
+    /// Controller-backed placement authority (#135, #198-ii): the in-memory
+    /// `ClaimMap` is the SINGLE claim authority for placement. Enabled once via
+    /// [`SessionService::enable_controller`]; production wires it
+    /// unconditionally. In the DEFAULT in-process mode `create_for_goal` claims
+    /// the lease key here and spawns the local driver; under dispatch mode
+    /// (`handle.dispatch_mode()`) it places on a worker instead. Unset => a
+    /// minimal/test build that spawns the driver unfenced (no claim).
     controller: OnceLock<ControllerHandle>,
 }
 
@@ -310,33 +304,17 @@ pub struct SessionService {
 }
 
 impl SessionService {
-    /// Build the single-pod service (no lease coordination; v1 behavior).
-    /// `pod_id` is taken from `HOSTNAME` when present (the Kubernetes pod
-    /// name); absent locally, the advisory field stays `null` until the
-    /// first driver write.
+    /// Build the session service. `pod_id` is taken from `HOSTNAME` when present
+    /// (the Kubernetes pod name); absent locally, the advisory field stays
+    /// `null` until the first driver write. Placement runs through the
+    /// controller's in-memory `ClaimMap` once [`Self::enable_controller`] is
+    /// wired (production does so unconditionally, #198-ii).
     pub fn new(repo: SessionRepo, engine: EngineConfig) -> Self {
         let pod_id = std::env::var("HOSTNAME").ok();
-        Self::build(repo, engine, pod_id, None)
+        Self::build(repo, engine, pod_id)
     }
 
-    /// Build the distributed service: create places sessions through the
-    /// distributor, drivers are fenced by the package lease, and the pod
-    /// identity is the distributor's.
-    pub fn with_distribution(
-        repo: SessionRepo,
-        engine: EngineConfig,
-        distributor: Distributor,
-    ) -> Self {
-        let pod_id = Some(distributor.pod_id().to_string());
-        Self::build(repo, engine, pod_id, Some(distributor))
-    }
-
-    fn build(
-        repo: SessionRepo,
-        engine: EngineConfig,
-        pod_id: Option<String>,
-        distribution: Option<Distributor>,
-    ) -> Self {
+    fn build(repo: SessionRepo, engine: EngineConfig, pod_id: Option<String>) -> Self {
         let shutdown_bound = Duration::from_secs(engine.stop_grace_secs + SHUTDOWN_HEADROOM_SECS);
         Self {
             inner: Arc::new(Inner {
@@ -346,7 +324,6 @@ impl SessionService {
                 session_tokens: Mutex::new(HashMap::new()),
                 pod_id,
                 shutdown_bound,
-                distribution,
                 journal: OnceLock::new(),
                 goal_support: OnceLock::new(),
                 vault: OnceLock::new(),
@@ -372,17 +349,21 @@ impl SessionService {
     }
 
     /// The controller-held token for `session_id`, if this process still holds it
-    /// (#138). Used by the failover [`Self::ensure_driver`] to decide whether the
+    /// (#138). Used by the dispatch-mode redispatch seam to decide whether the
     /// per-session NyxID key can be re-minted (`Some`) or the session must
-    /// escalate (`None`, after a controller restart).
+    /// escalate (`None`, after a controller restart). Kept (not `dead_code`)
+    /// because the in-crate failover tests assert this hold/forget seam.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn held_token(&self, session_id: bson::Uuid) -> Option<SecretString> {
         self.inner.held_token(session_id)
     }
 
-    /// Enable controller-backed placement (issue #135): new sessions are placed
-    /// through the in-memory claim authority instead of the Mongo distributor.
-    /// Call once at startup; a second call is a logged no-op. When never called
-    /// the service uses the Mongo `distribution` path (the live path until #143).
+    /// Enable controller-backed placement (#135, #198-ii): new sessions claim
+    /// through the in-memory `ClaimMap`. The handle also carries the dispatch
+    /// mode (`handle.dispatch_mode()`) so `create_for_goal` picks the in-process
+    /// vs worker-dispatch path off the same object. Call once at startup
+    /// (production does so unconditionally); a second call is a logged no-op.
+    /// When never called the service spawns the driver unfenced (test builds).
     pub fn enable_controller(&self, handle: ControllerHandle) {
         if self.inner.controller.set(handle).is_err() {
             tracing::warn!("controller placement already enabled; ignoring the second call");
@@ -542,7 +523,8 @@ impl SessionService {
     /// flow:
     /// 4. Goal CAS: not_started/stopped/failed -> triggered
     /// 5. Insert SessionDoc (pending)
-    /// 6. Place via distributor
+    /// 6. Place via the controller's in-memory claim authority (claim + spawn
+    ///    in-process, or dispatch to a worker under dispatch mode)
     /// 7. Set active_session_id on goal
     /// 8. Return result
     ///
@@ -624,213 +606,226 @@ impl SessionService {
         }
 
         // Hold the triggering user's token in controller memory (#138), keyed by
-        // session id, BEFORE placement so a near-instant failover takeover finds
-        // it. The failover driver re-mints the per-session NyxID key with it; it
-        // is cleared on the session's terminal exit, and lost on a controller
-        // restart (the documented "worker loss, not controller loss" boundary).
+        // session id, BEFORE placement so a near-instant worker reassignment
+        // (dispatch mode) finds it. The reassigned worker re-mints the
+        // per-session NyxID key with it; it is cleared on the session's terminal
+        // exit, and lost on a controller restart (the documented "worker loss,
+        // not controller loss" boundary).
         if let Some(token) = &raw_token {
             self.hold_session_token(session.id, token.clone());
         }
 
-        // Step 6: Place via the controller authority (#135) when enabled, else
-        // via the Mongo distributor (the live path until #143).
+        // Step 6: Place via the controller's in-memory claim authority (#135,
+        // #198-ii). The controller is the SINGLE claim authority for BOTH
+        // execution modes: in dispatch mode it places the session on a remote
+        // worker (which pulls + runs the engine); otherwise (the DEFAULT) it
+        // claims the lease key directly and spawns the in-process driver. The
+        // controller is enabled unconditionally at startup, so a missing handle
+        // means a minimal/test build with no controller wired — then no
+        // placement runs and the session stays pending (the same stay-pending
+        // outcome the legacy NoCapacity path produced).
         if let Some(handle) = self.inner.controller.get() {
             let lease_key = session.lease_key();
-            match handle.place(&lease_key, session.id, session.goal_id).await {
-                Ok(placement) => {
-                    // The chosen worker pulls + runs the engine. Stamp the owner
-                    // worker (as pod_id) + the fence so the worker's driver writes
-                    // are guarded; no local spawn (the worker runs it).
-                    let _ = self
-                        .inner
-                        .repo
-                        .transition(
-                            session.id,
-                            &[SessionStatus::Pending],
-                            doc! {
-                                "pod_id": &placement.worker_id,
-                                "fencing_token": placement.fencing_id,
-                            },
-                        )
-                        .await;
-                    // Resolve the fully self-contained dispatch from the SAME wiring
-                    // the in-process driver uses, then queue it to the placed worker
-                    // (delivered on its next heartbeat). NEVER log the dispatch — it
-                    // carries SecretStrings; `DispatchError` carries none, so logging
-                    // it is safe.
-                    match super::dispatch::resolve_dispatch(
-                        &self.inner,
-                        &session,
-                        raw_token.as_ref(),
-                        &placement.worker_id,
-                        placement.fencing_id,
-                    )
-                    .await
-                    {
-                        Ok(dispatch) => {
-                            handle
-                                .enqueue_dispatch(
-                                    &placement.worker_id,
-                                    fkst_shared::protocol::ControlMessage::ResolvedDispatch(
-                                        Box::new(dispatch),
-                                    ),
-                                )
-                                .await;
-                            tracing::info!(
-                                session_id = %session.id,
-                                goal_id = %trigger.goal_id,
-                                worker_id = %placement.worker_id,
-                                fencing_id = placement.fencing_id,
-                                "dispatch resolved + queued to worker (delivered on next heartbeat)"
-                            );
-                        }
-                        Err(error) => {
-                            // Resolution failed (token mint / env / nyxid / codex /
-                            // ornn): fail the just-inserted pending doc loudly and
-                            // compensate the goal CAS, mirroring the AlreadyRunning
-                            // arm. The detail is logged (safe; no secret); the API
-                            // response carries only a generic 503 so no internal
-                            // detail leaks to the caller.
-                            tracing::error!(
-                                session_id = %session.id,
-                                error = %error,
-                                "dispatch resolution failed; failing the session"
-                            );
-                            let _ = self
-                                .inner
-                                .repo
-                                .transition(
-                                    session.id,
-                                    &[SessionStatus::Pending],
-                                    doc! {
-                                        "status": status_bson(SessionStatus::Failed),
-                                        "error": "failed to resolve session dispatch",
-                                        "stopped_at": bson::DateTime::now(),
-                                    },
-                                )
-                                .await;
-                            let _ = goals
-                                .transition_status(
-                                    trigger.goal_id,
-                                    &[GoalStatus::Triggered],
-                                    trigger.prior_status,
-                                    true,
-                                )
-                                .await;
-                            return Err(AppError::Unavailable(
-                                "failed to resolve session dispatch".to_string(),
-                            ));
-                        }
+            if !handle.dispatch_mode() {
+                // In-process default: the in-memory `ClaimMap` is the
+                // mutual-exclusion gate. A conflicting live claim is a 409; a
+                // fresh claim stamps the controller pod id + the claim's fence
+                // onto the owned clone and spawns the local driver. `pod_id` is
+                // this controller's identity (HOSTNAME via `new()`); absent
+                // locally it falls back to a stable advisory id so the claim's
+                // owner is never blank.
+                let pod_id = self
+                    .inner
+                    .pod_id
+                    .clone()
+                    .unwrap_or_else(|| CONTROLLER_OWNER_FALLBACK.to_string());
+                match handle
+                    .claims()
+                    .claim(&lease_key, session.id, Some(trigger.goal_id), &pod_id)
+                {
+                    Ok(entry) => {
+                        // Stamp ownership onto the SessionDoc the driver reads:
+                        // the controller pod id + the claim's fence become the
+                        // `fence` filter every status CAS pins (drive_inner). The
+                        // user's raw token rides into the detached task
+                        // transiently so the driver can mint the per-session
+                        // NyxID key (#111).
+                        let mut owned = session.clone();
+                        owned.pod_id = Some(pod_id);
+                        owned.fencing_token = Some(entry.fencing_id);
+                        tracing::info!(
+                            session_id = %session.id,
+                            goal_id = %trigger.goal_id,
+                            lease_key = %lease_key,
+                            fencing_id = entry.fencing_id,
+                            "goal session claimed; spawning in-process driver"
+                        );
+                        self.spawn_driver(&owned, raw_token.clone());
+                    }
+                    Err(ClaimError::AlreadyClaimed(_)) => {
+                        // Conflict: a live claim already owns this lease key for a
+                        // different session. Fail the just-inserted pending doc
+                        // and compensate the goal CAS, then surface 409 — exactly
+                        // as the dispatch `AlreadyRunning` arm below does.
+                        let _ = self
+                            .inner
+                            .repo
+                            .transition(
+                                session.id,
+                                &[SessionStatus::Pending],
+                                doc! {
+                                    "status": status_bson(SessionStatus::Failed),
+                                    "error": "goal already has a live session",
+                                    "stopped_at": bson::DateTime::now(),
+                                },
+                            )
+                            .await;
+                        let _ = goals
+                            .transition_status(
+                                trigger.goal_id,
+                                &[GoalStatus::Triggered],
+                                trigger.prior_status,
+                                true,
+                            )
+                            .await;
+                        return Err(AppError::Conflict(
+                            "goal already has a live session".to_string(),
+                        ));
                     }
                 }
-                Err(ControllerPlacementError::AlreadyRunning(_)) => {
-                    // Conflict: same convergence as the distributor path — fail
-                    // the just-inserted pending doc and compensate the goal CAS.
-                    let _ = self
-                        .inner
-                        .repo
-                        .transition(
-                            session.id,
-                            &[SessionStatus::Pending],
-                            doc! {
-                                "status": status_bson(SessionStatus::Failed),
-                                "error": "goal already has a live session",
-                                "stopped_at": bson::DateTime::now(),
-                            },
+            } else {
+                match handle.place(&lease_key, session.id, session.goal_id).await {
+                    Ok(placement) => {
+                        // The chosen worker pulls + runs the engine. Stamp the owner
+                        // worker (as pod_id) + the fence so the worker's driver writes
+                        // are guarded; no local spawn (the worker runs it).
+                        let _ = self
+                            .inner
+                            .repo
+                            .transition(
+                                session.id,
+                                &[SessionStatus::Pending],
+                                doc! {
+                                    "pod_id": &placement.worker_id,
+                                    "fencing_token": placement.fencing_id,
+                                },
+                            )
+                            .await;
+                        // Resolve the fully self-contained dispatch from the SAME wiring
+                        // the in-process driver uses, then queue it to the placed worker
+                        // (delivered on its next heartbeat). NEVER log the dispatch — it
+                        // carries SecretStrings; `DispatchError` carries none, so logging
+                        // it is safe.
+                        match super::dispatch::resolve_dispatch(
+                            &self.inner,
+                            &session,
+                            raw_token.as_ref(),
+                            &placement.worker_id,
+                            placement.fencing_id,
                         )
-                        .await;
-                    let _ = goals
-                        .transition_status(
-                            trigger.goal_id,
-                            &[GoalStatus::Triggered],
-                            trigger.prior_status,
-                            true,
-                        )
-                        .await;
-                    return Err(AppError::Conflict(
-                        "goal already has a live session".to_string(),
-                    ));
-                }
-                Err(error) => {
-                    // NoCapacity / invalid / claim: stay pending; retried on the
-                    // next tick (mirrors the distributor's stay-pending behaviour).
-                    tracing::warn!(
-                        session_id = %session.id,
-                        goal_id = %trigger.goal_id,
-                        error = %error,
-                        "controller placement deferred; session stays pending"
-                    );
-                }
-            }
-        } else if let Some(ref distributor) = self.inner.distribution {
-            let lease_key = session.lease_key();
-            match distributor.place(&lease_key, session.id).await {
-                Ok(placement) if placement.pod_id == distributor.pod_id() => {
-                    // This pod was chosen; spawn the driver. The user's raw
-                    // token rides into the detached task transiently so the
-                    // driver can mint the per-session NyxID key (#111).
-                    let mut owned = session.clone();
-                    owned.pod_id = Some(placement.pod_id);
-                    owned.fencing_token = Some(placement.fencing_token);
-                    self.spawn_driver(&owned, raw_token.clone());
-                }
-                Ok(_placement) => {
-                    // Another pod was chosen; its reaper picks it up.
-                    tracing::info!(
-                        session_id = %session.id,
-                        goal_id = %trigger.goal_id,
-                        "goal session placed on another pod"
-                    );
-                }
-                Err(PlacementError::AlreadyRunning(_)) => {
-                    // Conflict: converge the just-inserted pending doc to
-                    // failed and compensate the goal CAS.
-                    let _ = self
-                        .inner
-                        .repo
-                        .transition(
-                            session.id,
-                            &[SessionStatus::Pending],
-                            doc! {
-                                "status": status_bson(SessionStatus::Failed),
-                                "error": "goal already has a live session",
-                                "stopped_at": bson::DateTime::now(),
-                            },
-                        )
-                        .await;
-                    let _ = goals
-                        .transition_status(
-                            trigger.goal_id,
-                            &[GoalStatus::Triggered],
-                            trigger.prior_status,
-                            true,
-                        )
-                        .await;
-                    return Err(AppError::Conflict(
-                        "goal already has a live session".to_string(),
-                    ));
-                }
-                Err(PlacementError::NoCapacity) => {
-                    // Retriable: session stays pending; the reaper retries.
-                    tracing::warn!(
-                        session_id = %session.id,
-                        goal_id = %trigger.goal_id,
-                        "no capacity at goal trigger; session stays pending for the reaper"
-                    );
-                }
-                Err(error) => {
-                    // Transient failure: session stays pending; the reaper
-                    // retries placement.
-                    tracing::error!(
-                        session_id = %session.id,
-                        goal_id = %trigger.goal_id,
-                        error = %error,
-                        "placement failed at goal trigger; session stays pending for the reaper"
-                    );
+                        .await
+                        {
+                            Ok(dispatch) => {
+                                handle
+                                    .enqueue_dispatch(
+                                        &placement.worker_id,
+                                        fkst_shared::protocol::ControlMessage::ResolvedDispatch(
+                                            Box::new(dispatch),
+                                        ),
+                                    )
+                                    .await;
+                                tracing::info!(
+                                    session_id = %session.id,
+                                    goal_id = %trigger.goal_id,
+                                    worker_id = %placement.worker_id,
+                                    fencing_id = placement.fencing_id,
+                                    "dispatch resolved + queued to worker (delivered on next heartbeat)"
+                                );
+                            }
+                            Err(error) => {
+                                // Resolution failed (token mint / env / nyxid / codex /
+                                // ornn): fail the just-inserted pending doc loudly and
+                                // compensate the goal CAS, mirroring the AlreadyRunning
+                                // arm. The detail is logged (safe; no secret); the API
+                                // response carries only a generic 503 so no internal
+                                // detail leaks to the caller.
+                                tracing::error!(
+                                    session_id = %session.id,
+                                    error = %error,
+                                    "dispatch resolution failed; failing the session"
+                                );
+                                let _ = self
+                                    .inner
+                                    .repo
+                                    .transition(
+                                        session.id,
+                                        &[SessionStatus::Pending],
+                                        doc! {
+                                            "status": status_bson(SessionStatus::Failed),
+                                            "error": "failed to resolve session dispatch",
+                                            "stopped_at": bson::DateTime::now(),
+                                        },
+                                    )
+                                    .await;
+                                let _ = goals
+                                    .transition_status(
+                                        trigger.goal_id,
+                                        &[GoalStatus::Triggered],
+                                        trigger.prior_status,
+                                        true,
+                                    )
+                                    .await;
+                                return Err(AppError::Unavailable(
+                                    "failed to resolve session dispatch".to_string(),
+                                ));
+                            }
+                        }
+                    }
+                    Err(ControllerPlacementError::AlreadyRunning(_)) => {
+                        // Conflict: same convergence as the in-process claim path —
+                        // fail the just-inserted pending doc and compensate the goal CAS.
+                        let _ = self
+                            .inner
+                            .repo
+                            .transition(
+                                session.id,
+                                &[SessionStatus::Pending],
+                                doc! {
+                                    "status": status_bson(SessionStatus::Failed),
+                                    "error": "goal already has a live session",
+                                    "stopped_at": bson::DateTime::now(),
+                                },
+                            )
+                            .await;
+                        let _ = goals
+                            .transition_status(
+                                trigger.goal_id,
+                                &[GoalStatus::Triggered],
+                                trigger.prior_status,
+                                true,
+                            )
+                            .await;
+                        return Err(AppError::Conflict(
+                            "goal already has a live session".to_string(),
+                        ));
+                    }
+                    Err(error) => {
+                        // NoCapacity / invalid / claim: stay pending; retried on the
+                        // next tick (mirrors the in-process stay-pending behaviour).
+                        tracing::warn!(
+                            session_id = %session.id,
+                            goal_id = %trigger.goal_id,
+                            error = %error,
+                            "controller placement deferred; session stays pending"
+                        );
+                    }
                 }
             }
         } else {
-            // Single-pod posture: spawn the driver inline.
+            // No controller wired (minimal/test build): spawn the driver inline
+            // without a claim. Production always enables the controller, so this
+            // is the unfenced legacy fallback for tests that never call
+            // `enable_controller`.
             self.spawn_driver(&session, raw_token.clone());
         }
 
@@ -838,8 +833,8 @@ impl SessionService {
         let active_set = goals.set_active_session(trigger.goal_id, session.id).await;
         if !active_set.unwrap_or(false) {
             // The goal may have been concurrently modified; the session is
-            // already created and will be picked up by the driver/reaper. Log
-            // but do not fail the trigger.
+            // already created and driven by the spawned driver. Log but do not
+            // fail the trigger.
             tracing::warn!(
                 goal_id = %trigger.goal_id,
                 session_id = %session.id,
@@ -987,17 +982,15 @@ impl SessionService {
     }
 
     /// Entry-guarded driver spawn: start a detached driver task for
-    /// `session` unless one is already registered. The driver's claim CAS
-    /// (and, when fenced, the lease) stays the authoritative dedupe; this
-    /// guard only prevents a second in-process task from clobbering the
-    /// first one's stop channel.
+    /// `session` unless one is already registered. The controller's claim is the
+    /// authoritative mutual-exclusion gate; this guard only prevents a second
+    /// in-process task from clobbering the first one's stop channel.
     ///
     /// `raw_token` is the triggering user's first-party access token, threaded
     /// transiently into the detached task so the driver can mint the
-    /// per-session NyxID key (#111). It is `Some` only on the create/trigger
-    /// path (where a live HTTP request supplied it) and `None` on the
-    /// reaper/failover seam (which rebuilds purely from `SessionDoc`, with no
-    /// user token in hand). It is NEVER persisted.
+    /// per-session NyxID key (#111). It is `Some` on the create/trigger path
+    /// (where a live HTTP request supplied it) and `None` otherwise. It is NEVER
+    /// persisted.
     fn spawn_driver(&self, session: &SessionDoc, raw_token: Option<SecretString>) {
         let (stop_tx, stop_rx) = watch::channel(false);
         {
@@ -1114,37 +1107,6 @@ impl SessionService {
     }
 }
 
-/// The reaper's seam: ensure a local driver runs for a session this pod
-/// owns (placement scan or post-takeover redo). Idempotent via the registry
-/// entry guard; the claim CAS dedupes across process restarts.
-#[async_trait]
-impl DriverHost for SessionService {
-    async fn ensure_driver(&self, session: &SessionDoc) {
-        // Failover (#138): re-supply the controller-held user token if this
-        // process still has it (a same-process worker loss), so the driver can
-        // re-mint the per-session NyxID key (B4). It is absent only after a
-        // controller restart (or a takeover by a DIFFERENT pod that never held
-        // it) — then `None` makes B4 ESCALATE a session that previously minted a
-        // key rather than running with broken auth. This is the documented
-        // "survive worker loss, NOT controller loss" guarantee.
-        let token = self.held_token(session.id);
-        self.spawn_driver(session, token);
-    }
-}
-
-/// Pure self-fencing decision for the renew arm: with no successful renewal
-/// for longer than the lease TTL, this driver can no longer prove it holds
-/// the lease — the lease has certainly lapsed on the server (the last
-/// successful renew set `expires_at = then + ttl`) and another pod may have
-/// taken over, so a renew ERROR must now be treated exactly like an
-/// observed `Lost`. At exactly the TTL boundary the lease is only just
-/// dead and no takeover (which itself needs a write AFTER expiry plus the
-/// grace window) can have spawned, so strictly-greater keeps one final
-/// retry without risking a dual engine.
-fn renew_overdue(since_last_success: Duration, lease_ttl: Duration) -> bool {
-    since_last_success > lease_ttl
-}
-
 /// Truncate driver-produced error text at a char boundary so the stored
 /// document stays bounded (full text is in the logs).
 fn truncate_error(text: &str) -> String {
@@ -1190,10 +1152,12 @@ fn describe_exit(status: LiveStatus, session: &RunningSession) -> String {
     }
 }
 
-/// Drive one session, then settle the package lease: every terminal exit
-/// releases the lease this driver held (equality-pinned, so an already
-/// taken-over lease is an untouched `NotHeld`); a lost lease releases
-/// NOTHING (the takeover pod owns lease and document now).
+/// Drive one session, then settle its claim: EVERY terminal exit of
+/// [`drive_inner`] releases the controller's claim for this session's lease key
+/// (the no-stranded-claim invariant). With a single authoritative controller a
+/// claim is never lost to a takeover, so there is no "don't release" case — the
+/// release is unconditional and runs once `drive_inner` returns. The release is
+/// fence-pinned ([`ClaimMap::release`]), so a stale fence is a harmless no-op.
 async fn drive(
     inner: Arc<Inner>,
     id: bson::Uuid,
@@ -1209,7 +1173,7 @@ async fn drive(
     // (mirroring how `goal_info` is threaded) to avoid rewriting its many
     // early returns.
     let mut nyxid_handle: Option<NyxidTokenHandle> = None;
-    let release = drive_inner(
+    drive_inner(
         &inner,
         id,
         &package_name,
@@ -1221,22 +1185,12 @@ async fn drive(
     )
     .await;
 
-    // Teardown revoke (#111): best-effort revoke of the per-session NyxID key
-    // on EVERY terminal driver exit, including a lease loss / self-fence — the
-    // key was minted by THIS driver and is revoked by its id, so revoking it
-    // here cannot touch a takeover pod's freshly-minted key. A revoke failure
-    // is logged and swallowed (the key is non-expiring; a sweep is the
-    // backstop) so it never blocks lease release below.
+    // Teardown revoke (#111): best-effort revoke of the per-session NyxID key on
+    // EVERY terminal driver exit — the key was minted by THIS driver and is
+    // revoked by its id. A revoke failure is logged and swallowed (the key is
+    // non-expiring; a sweep is the backstop) so it never blocks claim release.
     if let (Some(setup), Some(handle)) = (inner.nyxid.get(), &nyxid_handle) {
         nyxid_token::revoke(&setup.client, handle).await;
-    }
-
-    if !release {
-        // Lease LOST: a takeover pod owns the document now. Do NOT clear this
-        // pod's in-memory token/secret state here — clearing happens only on a
-        // genuine terminal exit (below), so a same-process re-dispatch can still
-        // find the held token.
-        return;
     }
 
     // Genuine terminal exit (#138): drop the controller-held token and the inline
@@ -1254,30 +1208,36 @@ async fn drive(
             &EnvScopeRef::repo(&gi.repo.owner, &gi.repo.name),
         );
     }
-    if let (Some(distributor), Some(token)) = (&inner.distribution, fencing_token) {
-        // Use lease_key for the release: for goal sessions the lease key is
-        // "goal-<uuid>", for classic sessions it's the package_name.
+
+    // Release the controller's claim for this lease key (the no-stranded-claim
+    // invariant): EVERY terminal exit reaches here, so the goal can always be
+    // re-triggered. Fence-pinned, so an entry already reclaimed/superseded is a
+    // harmless no-op. Only a goal/classic session that actually CLAIMED carries a
+    // `fencing_token`; an unfenced test spawn (no controller) carries `None` and
+    // there is nothing to release.
+    if let (Some(handle), Some(token)) = (inner.controller.get(), fencing_token) {
+        // For goal sessions the lease key is "goal-<uuid>"; for classic sessions
+        // it is the package_name (mirrors `SessionDoc::lease_key`).
         let lease_key = match &goal_info {
             Some(gi) => format!("goal-{}", gi.goal_id),
             None => package_name.clone(),
         };
-        if let Err(error) = distributor.leases().release(&lease_key, token).await {
-            tracing::error!(
-                session_id = %id,
-                lease_key = %lease_key,
-                token,
-                error = %error,
-                "lease release failed on driver exit; the lease will lapse"
-            );
-        }
+        let released = handle.claims().release(&lease_key, token);
+        tracing::info!(
+            session_id = %id,
+            lease_key = %lease_key,
+            fencing_id = token,
+            released,
+            "claim released on driver exit"
+        );
     }
 }
 
 /// The driver state machine for one session. Every status write is a CAS
-/// (pinned to this pod + fencing token when fenced); every exit path leaves
-/// the document terminal or owned by whoever won the race. Returns whether
-/// the caller should release the lease (`false` only when the lease was
-/// LOST — the document belongs to a takeover pod and must not be touched).
+/// (pinned to this controller's pod id + fencing token when fenced); every exit
+/// path leaves the document terminal or owned by whoever won the race. Returns
+/// `()` — with a single authoritative controller there is no takeover, so the
+/// caller ALWAYS releases the claim (no "don't release" case).
 #[allow(clippy::too_many_arguments)]
 async fn drive_inner(
     inner: &Arc<Inner>,
@@ -1288,13 +1248,13 @@ async fn drive_inner(
     goal_info: &mut Option<GoalDrive>,
     raw_token: Option<SecretString>,
     nyxid_handle: &mut Option<NyxidTokenHandle>,
-) -> bool {
+) {
     let now = bson::DateTime::now;
 
-    // Ownership pins for every CAS this driver performs: with a fencing
-    // token the filter requires the document to still carry this pod's
-    // identity AND this token, so a superseded driver's write can never
-    // land after a takeover rebound the session.
+    // Ownership pins for every CAS this driver performs: with a fencing token
+    // the filter requires the document to still carry this controller's pod id
+    // AND this token, so a stale driver's write (e.g. after a stop raced it)
+    // can never land out of order.
     let fence: Document = match (&inner.pod_id, fencing_token) {
         (Some(pod_id), Some(token)) => doc! { "pod_id": pod_id, "fencing_token": token },
         _ => Document::new(),
@@ -1316,8 +1276,9 @@ async fn drive_inner(
     match claimed {
         Ok(Some(_)) => {}
         Ok(None) => {
-            // Raced: a stop arrived before we claimed, the doc vanished, or
-            // (fenced) a takeover rebound it to another pod/token.
+            // Raced: a stop arrived before we claimed the doc, or the doc
+            // vanished. (The `fence` still guards the CAS so a stale driver
+            // write can never land out of order.)
             match inner.repo.get(id).await {
                 Ok(Some(session)) if session.status == SessionStatus::Stopping => {
                     let _ = inner
@@ -1338,11 +1299,11 @@ async fn drive_inner(
                     tracing::warn!(session_id = %id, state = ?other.map(|s| s.map(|d| d.status)), "driver lost the pending claim; exiting");
                 }
             }
-            return true;
+            return;
         }
         Err(error) => {
             tracing::error!(session_id = %id, error = %error, "driver failed to claim session");
-            return true;
+            return;
         }
     }
 
@@ -1357,8 +1318,8 @@ async fn drive_inner(
     let Some(gi) = goal_info.as_mut() else {
         // No goal repo => no package source since #115 (a session loads its
         // packages from its goal repo). This can only be a stale pre-#115
-        // document a reaper picked up; fail it loudly rather than run with no
-        // packages — sessions are created exclusively via a goal trigger now.
+        // document; fail it loudly rather than run with no packages — sessions
+        // are created exclusively via a goal trigger now.
         tracing::error!(
             session_id = %id,
             "session has no goal repo; classic package sessions are unsupported since #115"
@@ -1371,7 +1332,7 @@ async fn drive_inner(
             goal_info,
         )
         .await;
-        return true;
+        return;
     };
     // Mint the token + build the GoalContext (the clone needs the freshly-minted
     // App installation token; `token_for_repo` caches per (repo, perms), so this
@@ -1383,7 +1344,7 @@ async fn drive_inner(
         Err(reason) => {
             tracing::error!(session_id = %id, reason = %reason, "failed to prepare goal context");
             fail_session(inner, id, &fence, &reason, goal_info).await;
-            return true;
+            return;
         }
     };
     // Clone the repo + resolve the named packages against `<repo>/.fkst/packages/`.
@@ -1406,7 +1367,7 @@ async fn drive_inner(
             let reason = describe_runner_error(&error);
             tracing::error!(session_id = %id, error = %error, "failed to clone goal repo packages");
             fail_session(inner, id, &fence, &reason, goal_info).await;
-            return true;
+            return;
         }
     };
     // Journaling content fingerprint (#25 redo keys on package content): derived
@@ -1454,14 +1415,15 @@ async fn drive_inner(
         Ok(Some(session_doc)) => session_doc,
         Ok(None) => {
             // The document vanished between the claim and here (a concurrent
-            // delete). Nothing to fail; just exit (the lease is still released).
+            // delete). Nothing to fail; just exit (the claim is still released
+            // by the teardown).
             tracing::warn!(session_id = %id, "session document vanished before env resolution");
-            return true;
+            return;
         }
         Err(error) => {
             tracing::error!(session_id = %id, error = %error, "driver failed to load session for env resolution");
             fail_session(inner, id, &fence, "failed to load session", goal_info).await;
-            return true;
+            return;
         }
     };
     let mut env_profile = match resolve_env_profile(inner, &session_doc).await {
@@ -1479,7 +1441,7 @@ async fn drive_inner(
                 goal_info,
             )
             .await;
-            return true;
+            return;
         }
     };
     if !env_profile.is_empty() {
@@ -1502,13 +1464,12 @@ async fn drive_inner(
     // never proceed without the credential its consumers expect.
     //
     // The token source (#138): at trigger it is the forwarded user token; on a
-    // failover rebuild it is the controller-held token re-supplied by
-    // `ensure_driver` from the in-memory `session_tokens` map (a same-process
-    // worker loss). `raw_token` is `None` only when the controller no longer
-    // holds it — a controller RESTART, or a takeover by a different pod that
-    // never held it — and there a session that previously minted a key ESCALATES
-    // to Failed rather than running with broken auth (the documented "survive
-    // worker loss, NOT controller loss" boundary).
+    // dispatch-mode worker reassignment it is the controller-held token
+    // re-supplied by the redispatch seam from the in-memory `session_tokens` map
+    // (a worker loss). `raw_token` is `None` only when the controller no longer
+    // holds it — a controller RESTART — and there a session that previously
+    // minted a key ESCALATES to Failed rather than running with broken auth (the
+    // documented "survive worker loss, NOT controller loss" boundary).
     if let Some(setup) = inner.nyxid.get() {
         match &raw_token {
             Some(token) => {
@@ -1549,7 +1510,7 @@ async fn drive_inner(
                                 goal_info,
                             )
                             .await;
-                            return true;
+                            return;
                         }
                         // Hand the handle to `drive` for teardown revoke.
                         *nyxid_handle = Some(handle);
@@ -1566,16 +1527,15 @@ async fn drive_inner(
                             goal_info,
                         )
                         .await;
-                        return true;
+                        return;
                     }
                 }
             }
             None => {
                 if session_doc.nyxid_key_id.is_some() {
                     // ESCALATE: the controller no longer holds this session's
-                    // token (a controller restart, or a takeover by a pod that
-                    // never held it), so the NyxID session identity cannot be
-                    // re-established (#138). Never run with broken auth.
+                    // token (a controller restart), so the NyxID session identity
+                    // cannot be re-established (#138). Never run with broken auth.
                     tracing::error!(
                         session_id = %id,
                         "cannot re-establish nyxid session token on failover; no user access token available"
@@ -1588,7 +1548,7 @@ async fn drive_inner(
                         goal_info,
                     )
                     .await;
-                    return true;
+                    return;
                 }
                 // No prior key (this session never had one) and no token to mint
                 // with: proceed without a NyxID token, unchanged behaviour.
@@ -1636,7 +1596,7 @@ async fn drive_inner(
             )
             .await;
             fail_session(inner, id, &fence, reason, goal_info).await;
-            return true;
+            return;
         }
     }
 
@@ -1672,7 +1632,7 @@ async fn drive_inner(
                         )
                         .await;
                         fail_session(inner, id, &fence, reason, goal_info).await;
-                        return true;
+                        return;
                     }
                     tracing::info!(session_id = %id, "seeded repo .fkst/AGENTS.md as CODEX_HOME base");
                 }
@@ -1692,7 +1652,7 @@ async fn drive_inner(
                 )
                 .await;
                 fail_session(inner, id, &fence, reason, goal_info).await;
-                return true;
+                return;
             }
         }
     }
@@ -1739,7 +1699,7 @@ async fn drive_inner(
                         )
                         .await;
                         fail_session(inner, id, &fence, reason, goal_info).await;
-                        return true;
+                        return;
                     }
                     tracing::info!(session_id = %id, pin_count = pins.len(), "injected pinned ornn skills");
                 }
@@ -1758,7 +1718,7 @@ async fn drive_inner(
                     )
                     .await;
                     fail_session(inner, id, &fence, reason, goal_info).await;
-                    return true;
+                    return;
                 }
             }
         }
@@ -1807,7 +1767,7 @@ async fn drive_inner(
             )
             .await;
             fail_session(inner, id, &fence, &describe_runner_error(&error), goal_info).await;
-            return true;
+            return;
         }
     };
     journal_lifecycle(&mut journaler, Transition::Spawned { pid: session.pid }).await;
@@ -1862,7 +1822,7 @@ async fn drive_inner(
             goal_label_sync(inner, gi.goal_id, id, &[LABEL_TERMINATED], &[LABEL_RUNNING]).await;
         }
         journal_finish(&mut journaler, Transition::Stopped { exit_code: None }).await;
-        return true;
+        return;
     }
     tracing::info!(session_id = %id, pid = session.pid, "session running");
     journal_lifecycle(&mut journaler, Transition::Running).await;
@@ -1903,27 +1863,17 @@ async fn drive_inner(
     // keeps the pipe flowing); `None` after EOF parks the select arm.
     let mut stdout_rx = session.take_stdout();
 
-    // (D) Supervise: react to stop requests, renew the lease, consume the
-    // stdout journal stream, and watch engine liveness.
+    // (D) Supervise: react to stop requests, consume the stdout journal stream,
+    // and watch engine liveness. A single authoritative controller never loses
+    // the claim, so there is no lease-renew arm and no self-fence — the loop
+    // exits only on stop, engine exit, or a fatal token-refresh failure.
     let mut tick = tokio::time::interval(SUPERVISE_POLL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let renew_interval = match (&inner.distribution, fencing_token) {
-        (Some(distributor), Some(_)) => distributor.config().renew_interval,
-        _ => NO_LEASE_RENEW_INTERVAL,
-    };
-    let mut renew_tick = tokio::time::interval(renew_interval);
-    renew_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Fast JIT mint-request servicer (#107): polls for the credential helper's
     // near-expiry re-mint request so it is serviced within a git operation's
     // patience window (the 500ms supervise tick alone would be too slow).
     let mut mint_tick = tokio::time::interval(MINT_REQUEST_POLL);
     mint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // Self-fencing clock: the lease was live when this driver claimed the
-    // session, so the success window starts now. Renew ERRORS (Mongo
-    // unreachable) leave us blind: past the TTL the lease may have lapsed
-    // and been taken over, so the engine must die as if the lease were
-    // observed Lost — never run past what we can prove we hold.
-    let mut last_renew_success = tokio::time::Instant::now();
     loop {
         tokio::select! {
             // JIT mint-request servicer (#107): the credential helper drops a
@@ -1941,7 +1891,7 @@ async fn drive_inner(
                         inner, id, &fence, &mut session, &mut journaler, goal_info, &reason,
                     )
                     .await;
-                    return true;
+                    return;
                 }
             }
             // A closed channel (service dropped) also reads as a stop: this
@@ -1971,7 +1921,7 @@ async fn drive_inner(
                                 &reason,
                             )
                             .await;
-                            return true;
+                            return;
                         }
                         journal_stdout_line(&mut journaler, &raw).await;
                     }
@@ -2073,88 +2023,7 @@ async fn drive_inner(
                         .await;
                     }
                 }
-                return true;
-            }
-            _ = renew_tick.tick() => {
-                let (Some(distributor), Some(token)) = (&inner.distribution, fencing_token) else {
-                    continue;
-                };
-                // Use the lease key (goal-<uuid> for goal sessions, package_name
-                // for classic) for renewal.
-                let lease_key = match goal_info {
-                    Some(gi) => format!("goal-{}", gi.goal_id),
-                    None => package_name.to_string(),
-                };
-                match distributor.leases().renew(&lease_key, token).await {
-                    Ok(RenewOutcome::Renewed(_)) => {
-                        last_renew_success = tokio::time::Instant::now();
-                    }
-                    Ok(RenewOutcome::Lost) => {
-                        // Fenced out: a takeover pod owns the lease and the
-                        // document now. Kill the local engine and exit
-                        // WITHOUT writing status and WITHOUT releasing.
-                        tracing::warn!(
-                            session_id = %id,
-                            lease_key = %lease_key,
-                            token,
-                            "package lease lost; stopping the local engine without document writes"
-                        );
-                        if let Err(error) = inner.runner.stop(&mut session).await {
-                            tracing::error!(session_id = %id, error = %error, "engine stop failed after lease loss");
-                        }
-                        // Mongo-side terminal journal only: this writer's
-                        // token is superseded, so the journaler's own fence
-                        // keeps it off GitHub; local records aid forensics.
-                        journal_finish(
-                            &mut journaler,
-                            Transition::Failed {
-                                exit_code: None,
-                                error: "package lease lost; superseded by takeover".to_string(),
-                            },
-                        )
-                        .await;
-                        return false;
-                    }
-                    Err(error) => {
-                        let lease_ttl = distributor.config().pool.lease_ttl;
-                        if renew_overdue(last_renew_success.elapsed(), lease_ttl) {
-                            // Sustained failure past the TTL: the lease may
-                            // already belong to a takeover pod. SELF-FENCE —
-                            // treat it exactly like an observed Lost (kill
-                            // the engine, zero document writes, no release).
-                            tracing::warn!(
-                                session_id = %id,
-                                lease_key = %lease_key,
-                                token,
-                                error = %error,
-                                lease_ttl_secs = lease_ttl.as_secs(),
-                                "lease renew failing past the TTL; self-fencing \
-                                 (stopping the local engine without document writes)"
-                            );
-                            if let Err(stop_error) = inner.runner.stop(&mut session).await {
-                                tracing::error!(session_id = %id, error = %stop_error, "engine stop failed after renew self-fence");
-                            }
-                            journal_finish(
-                                &mut journaler,
-                                Transition::Failed {
-                                    exit_code: None,
-                                    error: "lease renew failing past the TTL; self-fenced"
-                                        .to_string(),
-                                },
-                            )
-                            .await;
-                            return false;
-                        }
-                        // Transient: keep supervising; the TTL still gives
-                        // at least one more renewal window.
-                        tracing::error!(
-                            session_id = %id,
-                            lease_key = %lease_key,
-                            error = %error,
-                            "lease renew errored; retrying on the next interval"
-                        );
-                    }
-                }
+                return;
             }
             _ = tick.tick() => {
                 // Debounced GitHub sync of buffered completions (no-op when
@@ -2176,7 +2045,7 @@ async fn drive_inner(
                         inner, id, &fence, &mut session, &mut journaler, goal_info, &reason,
                     )
                     .await;
-                    return true;
+                    return;
                 }
 
                 let live = session.status();
@@ -2236,7 +2105,7 @@ async fn drive_inner(
                         .await;
                     }
                     journal_finish(&mut journaler, Transition::Stopped { exit_code }).await;
-                    return true;
+                    return;
                 }
                 if live == LiveStatus::Stopped {
                     // Uncommanded CLEAN exit (exit 0): the engine finished its
@@ -2304,7 +2173,7 @@ async fn drive_inner(
                     }
                     // Reap/cleanup the exited engine's dirs.
                     let _ = inner.runner.stop(&mut session).await;
-                    return true;
+                    return;
                 }
                 // Uncommanded non-zero / signal exit (LiveStatus::Failed).
                 let error = describe_exit(live, &session);
@@ -2375,7 +2244,7 @@ async fn drive_inner(
                 }
                 // Reap/cleanup the dead engine's dirs.
                 let _ = inner.runner.stop(&mut session).await;
-                return true;
+                return;
             }
         }
     }
@@ -3240,23 +3109,6 @@ mod tests {
         assert_eq!(truncate_error("boom"), "boom");
     }
 
-    /// The self-fence trips only STRICTLY past the TTL: while the time
-    /// since the last successful renew is at or under the TTL the lease
-    /// could still be live (keep retrying); one tick past it the engine
-    /// must die rather than run unprovably.
-    #[test]
-    fn renew_overdue_trips_strictly_past_the_ttl() {
-        let ttl = Duration::from_secs(30);
-        assert!(!renew_overdue(Duration::ZERO, ttl));
-        assert!(!renew_overdue(Duration::from_secs(10), ttl));
-        assert!(
-            !renew_overdue(ttl, ttl),
-            "the exact TTL boundary still allows one final retry"
-        );
-        assert!(renew_overdue(ttl + Duration::from_millis(1), ttl));
-        assert!(renew_overdue(Duration::from_secs(120), ttl));
-    }
-
     #[test]
     fn truncate_error_caps_long_text_at_a_char_boundary() {
         let long = "α".repeat(MAX_ERROR_BYTES); // 2 bytes per char
@@ -3580,11 +3432,12 @@ mod tests {
     // ---- failover: controller-held session token (#138) -----------------------
     //
     // These exercise the deterministic seam that drives the failover NyxID
-    // re-mint decision: `ensure_driver` re-supplies `held_token(id)` to the
-    // driver, and B4 re-mints when that is `Some` or ESCALATES when it is `None`.
-    // (The full B4 mint/escalate fork itself is pre-existing #111 logic, covered
-    // by `nyxid_token`'s provision tests; a full-drive test cannot reach B4 in a
-    // fake-repo harness because `clone_repo_packages` runs — and fails — first.)
+    // re-mint decision: the dispatch-mode redispatch seam re-supplies
+    // `held_token(id)` to a reassigned worker, and B4 re-mints when that is
+    // `Some` or ESCALATES when it is `None`. (The full B4 mint/escalate fork
+    // itself is pre-existing #111 logic, covered by `nyxid_token`'s provision
+    // tests; a full-drive test cannot reach B4 in a fake-repo harness because
+    // `clone_repo_packages` runs — and fails — first.)
 
     #[tokio::test]
     async fn failover_reuses_controller_held_token_to_remint() {

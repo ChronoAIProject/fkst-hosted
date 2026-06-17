@@ -22,20 +22,42 @@ pub struct ControllerHandle {
     claims: Arc<ClaimMap>,
     registry: WorkerRegistry,
     max_load: u64,
+    /// Whether goal sessions are dispatched to a remote worker (`true`) or run
+    /// in-process on this controller (`false`, the default). Carried ON the
+    /// handle so the claim authority and its placement mode are one atomic unit:
+    /// `create_for_goal` reads `dispatch_mode()` off the same handle it pulls
+    /// [`claims`](Self::claims) from (#198-ii). The in-memory `ClaimMap` is the
+    /// single claim authority for BOTH modes; this flag only selects whether the
+    /// engine runs here or on a worker.
+    dispatch_mode: bool,
 }
 
 impl ControllerHandle {
-    pub fn new(claims: Arc<ClaimMap>, registry: WorkerRegistry, max_load: u64) -> Self {
+    pub fn new(
+        claims: Arc<ClaimMap>,
+        registry: WorkerRegistry,
+        max_load: u64,
+        dispatch_mode: bool,
+    ) -> Self {
         Self {
             claims,
             registry,
             max_load,
+            dispatch_mode,
         }
     }
 
     /// The shared claim authority (for the reassignment driver + reflection).
     pub fn claims(&self) -> &Arc<ClaimMap> {
         &self.claims
+    }
+
+    /// Whether placement dispatches goal sessions to a remote worker (`true`) or
+    /// runs the engine in-process (`false`, the default). The in-process path
+    /// still claims through [`claims`](Self::claims); only the execution site
+    /// differs.
+    pub fn dispatch_mode(&self) -> bool {
+        self.dispatch_mode
     }
 
     /// Snapshot every ACTIVE live worker with its controller-authoritative load.
@@ -111,7 +133,7 @@ mod tests {
             .claim("other", bson::Uuid::new(), None, "w1")
             .unwrap();
 
-        let handle = ControllerHandle::new(claims.clone(), registry, 0);
+        let handle = ControllerHandle::new(claims.clone(), registry, 0, false);
         let p = handle.place("pkg", bson::Uuid::new(), None).await.unwrap();
         assert_eq!(p.worker_id, "w2");
         assert_eq!(handle.claims().get("pkg").unwrap().owner_worker, "w2");
@@ -121,7 +143,7 @@ mod tests {
     async fn place_returns_no_capacity_with_no_live_workers() {
         let claims = Arc::new(ClaimMap::new());
         let registry = WorkerRegistry::new(Duration::from_secs(60));
-        let handle = ControllerHandle::new(claims, registry, 0);
+        let handle = ControllerHandle::new(claims, registry, 0, false);
         let err = handle
             .place("pkg", bson::Uuid::new(), None)
             .await
@@ -145,7 +167,7 @@ mod tests {
                 checkpoint_done: false,
             })
             .await;
-        let handle = ControllerHandle::new(claims, registry, 0);
+        let handle = ControllerHandle::new(claims, registry, 0, false);
 
         // The snapshot must exclude the Draining worker entirely.
         let loads = handle.snapshot_loads().await;
@@ -171,7 +193,7 @@ mod tests {
                 checkpoint_done: false,
             })
             .await;
-        let handle = ControllerHandle::new(claims, registry, 0);
+        let handle = ControllerHandle::new(claims, registry, 0, false);
         // The only live worker is Draining, so there is no Active capacity.
         let err = handle
             .place("pkg", bson::Uuid::new(), None)
@@ -189,7 +211,7 @@ mod tests {
         registry.register(&reg("w1")).await;
         // Clone the registry so the test can drain the same shared outbound queue
         // the handle enqueues into (the handle moves its copy in).
-        let handle = ControllerHandle::new(claims, registry.clone(), 0);
+        let handle = ControllerHandle::new(claims, registry.clone(), 0, false);
 
         handle
             .enqueue_dispatch(

@@ -11,7 +11,6 @@ pub mod config;
 // registry + the shared-secret-guarded internal router.
 pub mod controller;
 pub mod db;
-pub mod distribution;
 // The engine integration was extracted to the `fkst-engine` crate (issue #151)
 // so both the control-plane and the worker can drive it. Re-exported here under
 // the same `engine` name so every existing `crate::engine::*` /
@@ -29,7 +28,6 @@ pub mod goals;
 // extracted `JournalConfig` (the only coupling the move could not preserve).
 pub use fkst_journal as journal;
 pub mod journal_config;
-pub mod leases;
 // Role-neutral leaves extracted to `fkst-shared` (issue #145). Re-exported here
 // so every existing `crate::{llm,models,nyxid}::…` path and test still resolves.
 pub use fkst_shared::llm;

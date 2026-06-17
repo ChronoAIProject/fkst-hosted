@@ -115,6 +115,13 @@ mod defaults {
         false
     }
 
+    /// Per-worker active-session placement cap (#198-ii). `0` means uncapped (a
+    /// worker is never rejected on load) — the documented default carried over
+    /// from the deleted distribution layer.
+    pub(super) fn placement_max_load() -> u64 {
+        0
+    }
+
     pub(super) fn nyxid_github_proxy_slug() -> String {
         // NyxID `main`/v0.7.0 seeds its GitHub OAuth proxy under slug
         // `api-github` (`backend/src/services/provider_service.rs`,
@@ -237,6 +244,11 @@ struct MongoVars {
     /// of spawning the engine in-process. Default false (the in-process path).
     #[serde(default = "defaults::dispatch_mode_enabled")]
     fkst_dispatch_mode: bool,
+    /// Per-worker active-session placement cap (#198-ii). Env
+    /// `FKST_PLACEMENT_MAX_LOAD`. Default 0 (uncapped); only used under dispatch
+    /// mode.
+    #[serde(default = "defaults::placement_max_load")]
+    fkst_placement_max_load: u64,
 }
 
 /// `FKST_JOURNAL_*` / `FKST_RAISED_*` variables (journaling settings; envy
@@ -402,10 +414,16 @@ pub struct Config {
     /// Dispatch-mode master switch (#151 i7b). Env: `FKST_DISPATCH_MODE`.
     /// Default false. When `true` AND the internal protocol is enabled, goal
     /// sessions are placed + dispatched to a worker (delivered on the worker's
-    /// next heartbeat) instead of spawning the engine in-process; the controller
-    /// stays disabled (and behaviour stays byte-identical to pre-#151) when
-    /// false. Non-secret routing flag.
+    /// next heartbeat) instead of spawning the engine in-process. When false
+    /// (the default) the controller claims + runs the engine in-process; the
+    /// in-memory `ClaimMap` is the claim authority either way (#198-ii).
+    /// Non-secret routing flag.
     pub dispatch_mode_enabled: bool,
+    /// Per-worker active-session cap used by worker-dispatch placement (#198-ii,
+    /// formerly the distribution layer's `FKST_PLACEMENT_MAX_LOAD`). `0` means
+    /// uncapped (the default). Only consulted under dispatch mode; the in-process
+    /// path never rejects on load. Non-secret routing knob.
+    pub placement_max_load: u64,
 }
 
 // Hand-written so the URI (which may embed credentials) is always printed
@@ -475,6 +493,7 @@ impl fmt::Debug for Config {
             .field("worker_liveness_ttl_secs", &self.worker_liveness_ttl_secs)
             // Non-secret feature flag — show it.
             .field("dispatch_mode_enabled", &self.dispatch_mode_enabled)
+            .field("placement_max_load", &self.placement_max_load)
             .finish()
     }
 }
@@ -517,6 +536,7 @@ impl Default for Config {
             internal_auth_token: None,
             worker_liveness_ttl_secs: defaults::worker_liveness_ttl_secs(),
             dispatch_mode_enabled: defaults::dispatch_mode_enabled(),
+            placement_max_load: defaults::placement_max_load(),
         }
     }
 }
@@ -741,6 +761,7 @@ impl Config {
             internal_auth_token: mongo.fkst_internal_auth_token.map(SecretString::from),
             worker_liveness_ttl_secs: mongo.fkst_worker_liveness_ttl_secs,
             dispatch_mode_enabled: mongo.fkst_dispatch_mode,
+            placement_max_load: mongo.fkst_placement_max_load,
         })
     }
 
