@@ -111,6 +111,39 @@ sync_to_run_branch() { # $1 worktree dir
   echo "  $1 -> $(git -C "$1" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>&1 | tail -1; git -C "$1" rev-parse --short HEAD 2>/dev/null) ($INTEGRATION_BRANCH)"
 }
 
+# Ensure a checkout's INTEGRATION_BRANCH is >= UPSTREAM_BRANCH (dev) by merging upstream
+# FORWARD into integration and pushing. Why: operator out-of-band fixes land on dev; the
+# dogfood runs on integration; the in-pipeline sync_scan ff's dev->integration but can lag
+# (or the running supervise is itself stale), so _proc_stale reads "current" against a stale
+# integration and the supervise never picks up operator fixes. This deterministically merges
+# dev forward (plain ff when integration is an ancestor of dev; a merge commit when integration
+# has its own un-rolled commits — both keep integration >= dev) and pushes, so the next
+# _proc_stale sees pkg-stale and restarts onto the fix. Forward-only (never rewrites integration);
+# aborts on conflict and leaves it for sync_conflict; a push failure is non-fatal.
+ensure_integration_caught_up() { # $1 checkout dir
+  local wt="$1"
+  git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  [ "$INTEGRATION_BRANCH" = "$UPSTREAM_BRANCH" ] && return 0   # single-branch topology: nothing to merge
+  git -C "$wt" fetch origin "$INTEGRATION_BRANCH" "$UPSTREAM_BRANCH" -q 2>/dev/null || return 0
+  git -C "$wt" rev-parse --verify "origin/$INTEGRATION_BRANCH" >/dev/null 2>&1 || return 0
+  git -C "$wt" rev-parse --verify "origin/$UPSTREAM_BRANCH"   >/dev/null 2>&1 || return 0
+  local behind; behind=$(git -C "$wt" rev-list --count "origin/$INTEGRATION_BRANCH..origin/$UPSTREAM_BRANCH" 2>/dev/null || echo 0)
+  [ "${behind:-0}" -eq 0 ] && return 0
+  echo "  $INTEGRATION_BRANCH is $behind behind $UPSTREAM_BRANCH in $(basename "$wt") -> merging $UPSTREAM_BRANCH forward"
+  git -C "$wt" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>/dev/null \
+    || { echo "    WARN: could not checkout $INTEGRATION_BRANCH — leaving for sync_scan"; return 0; }
+  if git -C "$wt" merge --no-edit "origin/$UPSTREAM_BRANCH" >/dev/null 2>&1; then
+    if git -C "$wt" push origin "HEAD:$INTEGRATION_BRANCH" >/dev/null 2>&1; then
+      echo "    merged + pushed: $INTEGRATION_BRANCH -> $(git -C "$wt" rev-parse --short HEAD)"
+    else
+      echo "    WARN: merge ok but push failed (perm/race) — leaving for sync_scan"
+    fi
+  else
+    git -C "$wt" merge --abort 2>/dev/null
+    echo "    WARN: $UPSTREAM_BRANCH does not merge cleanly into $INTEGRATION_BRANCH — leaving for sync_conflict"
+  fi
+}
+
 # Engine BIN freshness. Stale = substrate origin/dev ahead of the build checkout, OR any
 # crate .rs newer than the BIN binary. _bin_state echoes "behind newer head" (read-only,
 # fetches first) and is shared by the read-only report and the rebuild.
@@ -206,6 +239,8 @@ stop_one() {
 restart_one() {
   cfg "$1" || return 1
   echo "[$1] sync to origin/$INTEGRATION_BRANCH (run branch; rollup target stays $UPSTREAM_BRANCH):"
+  ensure_integration_caught_up "$PKGSRC"                              # keep run branch (integration) >= dev so operator fixes deploy
+  [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
   sync_to_run_branch "$PKGSRC"
   [ "$HOST" != "$PKGSRC" ] && sync_to_run_branch "$HOST"
   stop_one "$1"; sleep 1
@@ -311,6 +346,8 @@ cmd_sync() {
   local n st
   for n in $(expand "${1:-all}"); do
     cfg "$n" || continue
+    ensure_integration_caught_up "$PKGSRC"                              # keep run branch (integration) >= dev so operator fixes deploy
+    [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
     st=$(_proc_stale "$n")
     case "$st" in
       pkg-stale|engine-stale) echo "  $n: $st -> auto-restart"; restart_one "$n" | sed 's/^/    /' ;;
