@@ -59,6 +59,37 @@ return {
     t.eq(fact.codex_calls, nil)
   end,
 
+  test_autonomy_result_fact_recomputes_predicate_from_parsed_gates = function()
+    local record = {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      repo = "owner/repo",
+      issue_number = "42",
+      pr_number = "7",
+      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/2",
+      head_sha = "def456",
+      task_class = "L2",
+      human_touch_count = 0,
+      rounds = 2,
+      retry_count = 2,
+      codex_calls = nil,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pending",
+        post_merge_probe = "pending",
+        no_revert_reopen = "pending",
+        cost_budget = "pending",
+      },
+    }
+
+    local marker = core.autonomy_result_marker(record):gsub(
+      'valid_autonomous_merge="pending"',
+      'valid_autonomous_merge="true"'
+    )
+    local fact = core.autonomy_result_fact({ marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
+    t.eq(fact.valid_autonomous_merge, "pending")
+  end,
+
   test_task_class_uses_explicit_label_before_title_fallback = function()
     t.eq(core.autonomy_task_class({
       title = "fix scheduler regression",

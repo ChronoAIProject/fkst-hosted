@@ -221,6 +221,14 @@ function M.autonomy_result_fact(comments, proposal_id, pr_number, version, head_
       local rounds = tonumber(marker:match('rounds="(%d+)"'))
       local retry_count = tonumber(marker:match('retry_count="(%d+)"'))
       local codex_calls_raw = marker:match('codex_calls="([^"]+)"')
+      local gates = {
+        human_touch = normalize_gate_state(marker:match('gate_human_touch="([^"]+)"')),
+        pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
+        evidence_manifest = normalize_gate_state(marker:match('gate_evidence_manifest="([^"]+)"')),
+        post_merge_probe = normalize_gate_state(marker:match('gate_post_merge_probe="([^"]+)"')),
+        no_revert_reopen = normalize_gate_state(marker:match('gate_no_revert_reopen="([^"]+)"')),
+        cost_budget = normalize_gate_state(marker:match('gate_cost_budget="([^"]+)"')),
+      }
       if marker_proposal == tostring(proposal_id)
         and tostring(marker_pr) == tostring(pr_number)
         and tostring(marker_version) == tostring(version)
@@ -250,15 +258,8 @@ function M.autonomy_result_fact(comments, proposal_id, pr_number, version, head_
           rounds = rounds,
           retry_count = retry_count,
           codex_calls = codex_calls,
-          gates = {
-            human_touch = normalize_gate_state(marker:match('gate_human_touch="([^"]+)"')),
-            pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
-            evidence_manifest = normalize_gate_state(marker:match('gate_evidence_manifest="([^"]+)"')),
-            post_merge_probe = normalize_gate_state(marker:match('gate_post_merge_probe="([^"]+)"')),
-            no_revert_reopen = normalize_gate_state(marker:match('gate_no_revert_reopen="([^"]+)"')),
-            cost_budget = normalize_gate_state(marker:match('gate_cost_budget="([^"]+)"')),
-          },
-          valid_autonomous_merge = valid,
+          gates = gates,
+          valid_autonomous_merge = M.autonomy_valid_autonomous_merge(gates),
           comment_created_at = M._comment_created_at(comment),
         }
       end
