@@ -52,27 +52,6 @@ local function append_errors(target, source)
   end
 end
 
-local function source_text(path, override)
-  if override ~= nil then
-    return tostring(override)
-  end
-  local ok, text = pcall(file.read, path)
-  if ok then
-    return tostring(text or "")
-  end
-  return ""
-end
-
-local function function_block(text, name)
-  local pattern = "function M%." .. tostring(name):gsub("([^%w])", "%%%1") .. "%("
-  local start_pos = text:find(pattern)
-  if start_pos == nil then
-    return ""
-  end
-  local next_function = text:find("\nfunction M%.", start_pos + 1)
-  return text:sub(start_pos, next_function or #text)
-end
-
 local function has_declared_effect(row, expected)
   for _, kind in ipairs(row and row.effects and row.effects.kinds or {}) do
     if kind == expected then
@@ -80,6 +59,46 @@ local function has_declared_effect(row, expected)
     end
   end
   return false
+end
+
+local function operator_dependency_waiver_contract(opts)
+  local options = opts or {}
+  local proposal_id = options.proposal_id or "github-devloop/issue/owner/repo/42"
+  local version = options.version or "ready/base/dependency-wait"
+  local blocker_number = options.blocker_number or 60
+  local command = options.command or {
+    command = "dependency-waiver",
+    key = "operator-command-key",
+    blocker_number = blocker_number,
+  }
+  local source_ref = options.source_ref or {
+    kind = "external",
+    ref = "owner/repo#issue/42",
+  }
+  local expected_waiver_marker = M.dependency_waiver_marker(
+    proposal_id,
+    version,
+    blocker_number,
+    "operator-waiver"
+  )
+  local forbidden_ready_marker = M.state_marker(proposal_id, "ready", version)
+  local request = nil
+  if options.operator_dependency_waiver_request_body == nil then
+    request = M.build_operator_issue_dependency_waiver_comment_request(
+      options.repo or "owner/repo",
+      options.issue_number or 42,
+      command,
+      proposal_id,
+      version,
+      blocker_number,
+      source_ref
+    )
+  end
+  return {
+    body = options.operator_dependency_waiver_request_body or request.body or "",
+    expected_waiver_marker = expected_waiver_marker,
+    forbidden_ready_marker = forbidden_ready_marker,
+  }
 end
 
 local function static_obligation_errors(rows, opts)
@@ -125,20 +144,12 @@ local function static_obligation_errors(rows, opts)
     end
   end
 
-  local operator_source = source_text(
-    "packages/github-devloop/core/operator_commands.lua",
-    options.operator_commands_source
-  )
-  local waiver_block = function_block(operator_source, "build_operator_issue_dependency_waiver_comment_request")
-  if waiver_block == "" then
-    table.insert(errors, "dependency-waiver: operator path must declare build_operator_issue_dependency_waiver_comment_request")
-  else
-    if waiver_block:find("dependency_waiver_marker", 1, true) == nil then
-      table.insert(errors, "dependency-waiver: operator path must write dependency-waiver marker")
-    end
-    if waiver_block:find("state_marker", 1, true) ~= nil then
-      table.insert(errors, "dependency-waiver: operator path must not write raw state:v1 ready")
-    end
+  local waiver_contract = operator_dependency_waiver_contract(options)
+  if waiver_contract.body:find(waiver_contract.expected_waiver_marker, 1, true) == nil then
+    table.insert(errors, "dependency-waiver: operator path must write dependency-waiver marker")
+  end
+  if waiver_contract.body:find(waiver_contract.forbidden_ready_marker, 1, true) ~= nil then
+    table.insert(errors, "dependency-waiver: operator path must not write raw state:v1 ready")
   end
 
   return errors
@@ -213,12 +224,13 @@ local challenge_fixtures = {
     title = "half-migrated operator waiver path",
     expect = "dependency-waiver: operator path must write dependency-waiver marker",
     errors = function()
+      local proposal_id = "github-devloop/issue/owner/repo/42"
+      local version = "ready/base/dependency-wait"
       return M.competence_gate_errors(M.restart_transition_table(), {
-        operator_commands_source = [[
-function M.build_operator_issue_dependency_waiver_comment_request(repo, issue_number, command, proposal_id, version, blocker_number, source_ref)
-  return M.build_issue_comment_request(repo, issue_number, {}, "waived\n" .. M.state_marker(proposal_id, "ready", version))
-end
-]],
+        operator_dependency_waiver_request_body = "waived\n" .. M.state_marker(proposal_id, "ready", version),
+        proposal_id = proposal_id,
+        version = version,
+        blocker_number = 60,
       })
     end,
   },
