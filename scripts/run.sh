@@ -31,6 +31,11 @@
 #       Uses .fkst/run/board-cache.json by default as a TTL cache; --refresh forces
 #       a read from the engine. The cache is local only and never authoritative.
 #
+#   scripts/run.sh ratchet-migration-dry-run <891|892> [--slice-size N]
+#       Print a deterministic child issue body for a code-owned allowlist ratchet
+#       parent. This is read-only and never creates issues, writes comments, closes
+#       parents, or runs issue-provided inventory commands.
+#
 #   scripts/run.sh health [--refresh] [--ttl seconds] [--stall seconds]
 #       Print only the current HEALTHY / anomaly verdict from the board renderer.
 #
@@ -202,6 +207,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
+  python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py" || fail=1
   return "$fail"
 }
 
@@ -663,6 +669,10 @@ cmd_health() {
   cmd_board --health "$@"
 }
 
+cmd_ratchet_migration_dry_run() {
+  python3 -B "$ROOT/scripts/ratchet_migration_slicer.py" --repo-root "$ROOT" "$@"
+}
+
 cmd_supervise() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
@@ -745,6 +755,7 @@ main() {
     doctor) shift; cmd_doctor "$@" ;;
     board) shift; resolve_bin; ensure_fresh_bin; cmd_board "$@" ;;
     health) shift; resolve_bin; ensure_fresh_bin; cmd_health "$@" ;;
+    ratchet-migration-dry-run) shift; cmd_ratchet_migration_dry_run "$@" ;;
     test) shift
       # Quiet cmd_check's advisory warnings during a test run unless verbose;
       # surface its full output only when it hard-fails (non-zero). `run.sh check`
