@@ -9,6 +9,17 @@ release PR, and frozen into a permanent entry once the release is tagged. Do not
 edit released sections by hand.
 
 <!-- BEGIN PENDING -->
+## v0.2.1 — 2026-06-17
+
+## Fixed
+
+- Few technical bugs fixed
+
+## New Feature
+
+## Changed
+
+- Technical enhancement
 <!-- END PENDING -->
 
 ## v0.2.0 — 2026-06-17
