@@ -5,8 +5,13 @@ return function(M, h)
   local budget = h.budget
   local timeout = h.timeout
   local liveness = h.liveness
+  local watchdog = h.watchdog
+  local actionable_epoch = h.actionable_epoch
   return {
     from_state = "review-meta",
+    liveness_class_id = "review_meta.actionable",
+    watchdog = watchdog("row-budget-bounds-receiver", 90),
+    actionable_epoch = actionable_epoch("state_entry:v1"),
     terminal = false,
     to_states = { "fixing", "blocked" },
     driving_queue = "devloop_review_meta",

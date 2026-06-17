@@ -5,8 +5,11 @@ return function(M, h)
   local budget = h.budget
   local timeout = h.timeout
   local liveness = h.liveness
+  local watchdog = h.watchdog
   return {
     from_state = "reviewing",
+    liveness_class_id = "reviewing.active",
+    watchdog = watchdog("live-defer", 150),
     terminal = false,
     to_states = { "merge-ready", "fixing", "review-meta", "blocked" },
     driving_queue = "devloop_reviewing",

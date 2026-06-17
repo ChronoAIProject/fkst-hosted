@@ -5,8 +5,11 @@ return function(M, h)
   local budget = h.budget
   local timeout = h.timeout
   local liveness = h.liveness
+  local watchdog = h.watchdog
   return {
     from_state = "ready",
+    liveness_class_id = "ready.actionable",
+    watchdog = watchdog("live-defer", 45),
     terminal = false,
     to_states = { "implementing" },
     driving_queue = "devloop_ready",

@@ -351,6 +351,11 @@ function M.liveness_contract_errors(rows)
       end
     end
   end
+  if #errors == 0 then
+    for _, err in ipairs(M.restart_liveness_inventory_errors(table_rows)) do
+      table.insert(errors, err)
+    end
+  end
   return errors
 end
 
