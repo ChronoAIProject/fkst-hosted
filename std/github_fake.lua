@@ -107,6 +107,30 @@ function M.new(model)
       tostring(login),
     }, timeout, "gh issue unassign")
   end
+  function handle.issue_add_label(repo, issue_number, label, timeout)
+    return handle._exec({
+      "gh",
+      "issue",
+      "edit",
+      tostring(issue_number),
+      "--repo",
+      tostring(repo),
+      "--add-label",
+      tostring(label),
+    }, timeout, "gh issue add label")
+  end
+  function handle.issue_remove_label(repo, issue_number, label, timeout)
+    return handle._exec({
+      "gh",
+      "issue",
+      "edit",
+      tostring(issue_number),
+      "--repo",
+      tostring(repo),
+      "--remove-label",
+      tostring(label),
+    }, timeout, "gh issue remove label")
+  end
   require("std.github.graphql").install(handle)
   return handle
 end

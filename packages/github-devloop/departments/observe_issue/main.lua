@@ -177,7 +177,7 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
 end
 
 local function ensure_managed_issue_claim(issue, proposal_id, current, state)
-  local claim_state = core.issue_claim_state(current.assignees, core.claim_owner())
+  local claim_state = core.issue_claim_state(current.assignees, core.claim_owner(), current.labels)
   if claim_state == "other" then
     core.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
     return false

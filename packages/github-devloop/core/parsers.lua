@@ -534,15 +534,17 @@ function M.parse_pr_view_head_state(stdout)
 end
 
 local function comment_author_login(comment)
+  -- Normalize the comment author login so an author read as "<slug>[bot]" (REST)
+  -- matches a bare-"<slug>" configured bot login (GraphQL). No-op for ordinary logins.
   if type(comment) == "table" then
     if comment.author_login ~= nil then
-      return comment.author_login
+      return M.strip_bot_login_suffix(comment.author_login)
     end
     if type(comment.author) == "table" and comment.author.login ~= nil then
-      return tostring(comment.author.login)
+      return M.strip_bot_login_suffix(comment.author.login)
     end
     if type(comment.user) == "table" and comment.user.login ~= nil then
-      return tostring(comment.user.login)
+      return M.strip_bot_login_suffix(comment.user.login)
     end
   end
   return M._test_bot_login
