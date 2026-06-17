@@ -24,6 +24,25 @@ pub struct WorkerEntry {
     pub running_sessions: Vec<String>,
 }
 
+/// A read-only, time-resolved view of one worker for the observability surface
+/// (`GET /api/v1/admin/state`, #144). It resolves the registry's monotonic
+/// `Instant` `last_seen` into a wall-clock AGE (whole seconds since the last
+/// heartbeat) at snapshot time, plus an `alive` flag (age within the liveness
+/// TTL), so the route handler never has to reason about `Instant`s. Carries no
+/// secret material — pure liveness, exactly as [`WorkerEntry`] does.
+#[derive(Debug, Clone)]
+pub struct WorkerSnapshot {
+    pub worker_id: String,
+    pub capacity: u32,
+    pub lifecycle_state: LifecycleState,
+    /// Whole seconds since this worker's last heartbeat, at snapshot time.
+    pub last_heartbeat_age_secs: u64,
+    /// Whether the worker is still within the liveness TTL (not yet expired).
+    pub alive: bool,
+    /// The worker's self-reported running session ids (non-secret identifiers).
+    pub running_sessions: Vec<String>,
+}
+
 /// The controller's in-memory map of worker_id -> liveness. A worker whose
 /// `last_seen` is older than `liveness_ttl` is considered dead.
 ///
@@ -150,6 +169,31 @@ impl WorkerRegistry {
         map.values()
             .filter(|e| now.duration_since(e.last_seen) <= self.liveness_ttl)
             .cloned()
+            .collect()
+    }
+
+    /// Read-only snapshot of EVERY tracked worker (live AND not-yet-swept), with
+    /// each one's heartbeat age resolved to whole seconds and an `alive` flag,
+    /// for the observability surface (#144). Unlike [`live_workers`](Self::live_workers)
+    /// this does NOT filter out stale workers — the admin view wants to see a
+    /// worker that has gone silent but not yet been expired by the sweeper.
+    /// Carries only liveness fields (never the outbound dispatch queue), so it
+    /// can never serialize a secret.
+    pub async fn snapshot(&self) -> Vec<WorkerSnapshot> {
+        let map = self.inner.read().await;
+        let now = Instant::now();
+        map.values()
+            .map(|e| {
+                let age = now.duration_since(e.last_seen);
+                WorkerSnapshot {
+                    worker_id: e.worker_id.clone(),
+                    capacity: e.capacity,
+                    lifecycle_state: e.lifecycle_state,
+                    last_heartbeat_age_secs: age.as_secs(),
+                    alive: age <= self.liveness_ttl,
+                    running_sessions: e.running_sessions.clone(),
+                }
+            })
             .collect()
     }
 
@@ -288,6 +332,28 @@ mod tests {
             r.take_control("w1").await.is_empty(),
             "expired worker's queue must be cleared"
         );
+    }
+
+    #[tokio::test]
+    async fn snapshot_reports_age_and_liveness_for_every_worker() {
+        // A long TTL keeps the worker `alive`; a tiny TTL flips it to not-alive
+        // WITHOUT removing it from the snapshot (unlike `live_workers`).
+        let r = WorkerRegistry::new(Duration::from_secs(30));
+        r.register(&reg("w1")).await;
+        let snap = r.snapshot().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].worker_id, "w1");
+        assert_eq!(snap[0].capacity, 4);
+        assert!(snap[0].alive, "fresh heartbeat is within the TTL");
+        assert_eq!(snap[0].lifecycle_state, LifecycleState::Active);
+
+        // A stale worker stays in the snapshot but reads `alive = false`.
+        let stale = WorkerRegistry::new(Duration::from_millis(1));
+        stale.register(&reg("w2")).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let snap = stale.snapshot().await;
+        assert_eq!(snap.len(), 1, "stale worker is still listed (not swept)");
+        assert!(!snap[0].alive, "past-TTL worker reads not-alive");
     }
 
     #[tokio::test]

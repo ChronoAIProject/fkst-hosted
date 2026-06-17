@@ -94,6 +94,8 @@ async fn auth_app() -> AuthTestApp {
         goals,
         vault,
         ornn: None,
+        claims: None,
+        worker_registry: None,
     })
     .expect("router");
     AuthTestApp { router }
@@ -115,6 +117,8 @@ async fn no_auth_app() -> axum::Router {
         goals,
         vault,
         ornn: None,
+        claims: None,
+        worker_registry: None,
     })
     .expect("router")
 }
@@ -295,6 +299,8 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
         goals,
         vault,
         ornn: None,
+        claims: None,
+        worker_registry: None,
     };
 
     let test_router = axum::Router::new()

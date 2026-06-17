@@ -1,8 +1,11 @@
 //! Shared application state passed to every handler.
 
+use std::sync::Arc;
+
 use crate::auth::AuthMode;
 use crate::authz::Authorizer;
 use crate::config::Config;
+use crate::controller::{ClaimMap, WorkerRegistry};
 use crate::github_app::GithubAppTokens;
 use crate::goals::GoalIssueStore;
 use crate::sessions::SessionService;
@@ -45,4 +48,15 @@ pub struct AppState {
     /// endpoints then answer `503`. The catalog forwards the caller's NyxID
     /// token to Ornn, which enforces all visibility; fkst-hosted adds no policy.
     pub ornn: Option<crate::ornn::OrnnClient>,
+    /// The controller's in-memory claim authority (#135/#198-ii), shared with the
+    /// observability surface (`GET /api/v1/admin/state` + `GET /metrics`, #144).
+    /// `None` in a minimal/test build that never enabled the controller — the
+    /// admin/metrics routes then report an empty claim set. The same `Arc` the
+    /// session service and the internal router hold, so the live view is exact.
+    pub claims: Option<Arc<ClaimMap>>,
+    /// The controller's in-memory worker registry (#134), shared with the
+    /// observability surface (#144). `None` in a minimal/test build with no
+    /// controller wired. Snapshotted (liveness only, never the dispatch queue)
+    /// by the admin/metrics routes.
+    pub worker_registry: Option<WorkerRegistry>,
 }

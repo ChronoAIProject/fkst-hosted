@@ -1,15 +1,16 @@
-# PodDisruptionBudget for the CONTROL-PLANE (issue #145).
+# PodDisruptionBudget for the CONTROL-PLANE (issue #145, datastore-free #143/#144).
 #
-# (The worker fleet gets its own elasticity/drain policy in #140; no PDB here.)
-# Keeps at least 2 pods available during VOLUNTARY disruptions (node drains,
-# kubectl rollout, cluster upgrades) so the API never drops below 2-pod
-# capacity while one pod is being recycled. With the 3..5 operating range this
-# always leaves headroom (minAvailable: 2 vs replicas >= 3). It does NOT guard
-# against involuntary loss (hard pod/node death) — that path is covered by the
-# distribution layer's lease expiry + reaper takeover.
+# The controller is a SINGLE authoritative replica (the in-memory claim authority
+# is single-writer), so there is no multi-pod floor to guard — `minAvailable: 2`
+# would be unsatisfiable and would WEDGE every voluntary disruption (node drains,
+# rollouts, upgrades). Instead `maxUnavailable: 1` explicitly ALLOWS the single
+# pod to be evicted/recycled during a drain: a brief gap is acceptable (the worker
+# fleet keeps running, and the restarted controller rebuilds its in-memory state
+# from worker self-reports + claimed goal-issue labels). It does NOT guard against
+# involuntary loss (hard pod/node death) — the same redo-on-restart path covers it.
 #
-# minAvailable (not maxUnavailable) is used so the floor stays fixed at 2
-# regardless of how the replica count is scaled within the range.
+# (The worker fleet gets its own elasticity/drain policy + HPA in
+# backend/fkst-worker/k8s_sample.)
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -20,7 +21,7 @@ metadata:
     app.kubernetes.io/component: control-plane
     app.kubernetes.io/part-of: fkst-hosted
 spec:
-  minAvailable: 2
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: fkst-control-plane

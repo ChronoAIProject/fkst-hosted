@@ -1,7 +1,8 @@
-# fkst-control-plane: the controller deployable (public REST API). 3 replicas,
-# safe-takeover RollingUpdate. SAMPLE manifest — every value here is an example;
-# the config loaders (backend/fkst-control-plane/src/config.rs et al.) are the
-# canonical source of truth for the env contract.
+# fkst-control-plane: the controller deployable (public REST API). SINGLE
+# authoritative replica (datastore-free, #143/#144). SAMPLE manifest — every
+# value here is an example; the config loaders
+# (backend/fkst-control-plane/src/config.rs et al.) are the canonical source of
+# truth for the env contract.
 #
 # TRANSITIONAL (until #151): engine execution still lives in the control-plane
 # crate today, so this Deployment still spawns engine children and therefore
@@ -12,22 +13,21 @@
 # carries no engine — and (b) keeps the `runtime`+`tmp` emptyDir volumes below.
 # When #151 moves engine execution onto the worker: switch this image to the
 # slim `fkst-control-plane` image and drop the `runtime` volume + its mount, and
-# the `FKST_HOSTED_ENGINE_*` ConfigMap keys move to the worker. The database-free
-# pivot (#143/#144) collapses this to a SINGLE authoritative controller replica;
-# until then it stays at 3.
+# the `FKST_HOSTED_ENGINE_*` ConfigMap keys move to the worker.
 #
-# Cross-pod execution is serialized by the distribution layer's MongoDB lease +
-# fencing token, NOT by the deployment strategy: at most one pod holds a given
-# package's lease at a time, and every engine spawn / session write is tagged
-# with the holder's fencing token so a stale (taken-over) holder is fenced out.
-# That makes a RollingUpdate safe where the old single-instance contract needed
-# Recreate — a terminating pod self-fences its own engine and releases its
-# leases on graceful shutdown (SIGTERM), so a surviving pod takes over without
-# two engines ever running the same package concurrently.
+# Single-writer claim authority — NOT a lease store. The database-free pivot
+# (#143/#198) made the controller the SOLE authority for at-most-one-engine
+# mutual exclusion: an in-memory `ClaimMap` (single replica, single writer), so
+# there is no cross-pod lease / fencing-token arbitration to serialize anymore.
+# The controller runs as exactly ONE replica; on restart it rebuilds its
+# in-memory state from the live workers' self-reports + the claimed goal-issue
+# labels (never a datastore). The worker fleet — not the controller — scales
+# horizontally (see backend/fkst-worker/k8s_sample, with its HPA).
 #
-# maxUnavailable: 0 keeps full capacity during a rollout (no request gap);
-# maxSurge: 1 rolls one extra pod at a time. The replica operating range is
-# 3..5 — adjust via the `replicas:` edit-point in kustomization.yaml.
+# Recreate strategy: with a single authoritative writer, a second (surging) pod
+# must NOT come up while the old one still holds the in-memory claim map, so the
+# rollout terminates the old pod first. `terminationGracePeriodSeconds: 30` +
+# `preStop: sleep 2` drain in-flight requests + SIGTERM live engines first.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,12 +38,15 @@ metadata:
     app.kubernetes.io/component: control-plane
     app.kubernetes.io/part-of: fkst-hosted
 spec:
-  replicas: 3
+  replicas: 1
+  # Recreate (not RollingUpdate): the controller is the SINGLE in-memory claim
+  # authority, so a surging second pod would run a second, independent claim map
+  # — a split-brain. Recreate terminates the old pod before starting the new one,
+  # so at most one controller ever owns the authority. A brief gap during a
+  # rollout is acceptable; the worker fleet keeps running, and the new controller
+  # rebuilds its state from worker self-reports + goal-issue labels.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate
   # Selector is immutable after creation — keep it minimal (name only) so
   # label additions never force a Deployment recreate.
   selector:
@@ -85,31 +88,9 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 30
-      # TRANSITIONAL until #143 removes MongoDB: the server is FAIL-CLOSED at
-      # startup (it pings Mongo and exits if the store is unreachable), so
-      # first-boot ordering would otherwise crash-loop the API while Mongo
-      # initializes. Waiting for the TCP port absorbs that ordering without
-      # weakening the fail-closed contract. When #143 lands, this initContainer
-      # disappears together with the Mongo Service/StatefulSet.
-      initContainers:
-        - name: wait-for-mongodb
-          image: busybox:1.37
-          command:
-            - sh
-            - -c
-            - until nc -z -w 2 mongodb-0.mongodb 27017; do sleep 2; done
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              cpu: 100m
-              memory: 32Mi
+      # Datastore-free (#143): no `wait-for-mongodb` initContainer. The controller
+      # has no store to ping at startup — a process that can answer /health is
+      # ready — so there is no first-boot ordering dependency to absorb.
       containers:
         - name: fkst-control-plane
           # tag managed by kustomization.yaml images. TRANSITIONAL: build this
@@ -121,10 +102,11 @@ spec:
               containerPort: 8080
           # Pod identity is an INTENTIONAL contract, not the ambient HOSTNAME
           # coincidence: FKST_POD_ID is sourced explicitly from the downward
-          # API (metadata.name) so the distribution layer's holder_pod / pod_id
-          # is the pod's stable, unique name. (The config loader's fallback is
-          # FKST_POD_ID -> HOSTNAME -> local-<uuid>; wiring it explicitly here
-          # is defense-in-depth so identity never silently degrades.)
+          # API (metadata.name) so the controller's advisory pod_id (stamped on
+          # in-memory claims for journaling/load reflection) is the pod's stable,
+          # unique name. (The config loader's fallback is FKST_POD_ID -> HOSTNAME
+          # -> local-<uuid>; wiring it explicitly here is defense-in-depth so
+          # identity never silently degrades.)
           env:
             - name: FKST_POD_ID
               valueFrom:
@@ -138,8 +120,8 @@ spec:
           # Belt-and-suspenders drain: sleep before SIGTERM so the Service /
           # endpoints controller deregisters this pod (readiness still passing
           # at this instant) and in-flight requests stop arriving BEFORE the
-          # process begins its graceful-shutdown (self-fence + lease release).
-          # Bounded well under terminationGracePeriodSeconds (30s).
+          # process begins its graceful shutdown (SIGTERM live engines, bounded
+          # drain). Bounded well under terminationGracePeriodSeconds (30s).
           lifecycle:
             preStop:
               exec:
@@ -157,10 +139,10 @@ spec:
               mountPath: /var/lib/fkst/runtime # = FKST_RUNTIME_ROOT (image env)
             - name: tmp
               mountPath: /tmp
-          # /health pings Mongo (bounded by MONGODB_SERVER_SELECTION_TIMEOUT_MS
-          # = 5s), so probe timeouts are 7s to let a degraded 503 arrive
-          # instead of timing out. Liveness is TCP-only: it MUST NOT depend on
-          # Mongo, or a DB blip would restart-loop the API.
+          # Datastore-free (#143): /health probes no store — it reports ready
+          # iff the process can serve, so readiness == liveness in practice.
+          # Liveness stays TCP-only (cheap, no dependency); the 7s readiness
+          # timeout is generous headroom, not a DB-coupled bound anymore.
           startupProbe:
             httpGet:
               path: /health

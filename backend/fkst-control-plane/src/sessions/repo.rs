@@ -107,6 +107,18 @@ impl SessionRepo {
         Ok(found)
     }
 
+    /// Read-only snapshot of every session document for the observability
+    /// surface (`GET /api/v1/admin/state`, #144). The caller projects each doc
+    /// to a redacted view: a `SessionDoc` carries NO secret values (only ids,
+    /// status, the owner-user id, the goal id, and the owner/repo refs), but the
+    /// admin route deliberately reduces it to presence booleans + non-secret
+    /// identifiers rather than leaking the full document shape.
+    pub async fn snapshot(&self) -> Vec<SessionDoc> {
+        let docs: Vec<SessionDoc> = self.lock().values().cloned().collect();
+        tracing::debug!(count = docs.len(), "session store snapshot taken");
+        docs
+    }
+
     /// Atomic compare-and-swap: apply `set` to the session iff its current
     /// status is one of `from`. Returns the post-update document, or `None` when
     /// the filter missed (the document is absent or its status moved on). Callers

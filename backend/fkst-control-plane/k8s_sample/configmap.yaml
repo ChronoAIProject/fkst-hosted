@@ -1,12 +1,11 @@
 # Non-secret runtime configuration for the CONTROL-PLANE — SAMPLE values.
 #
 # Every key below is enumerated from the controller's config loaders, which are
-# the canonical source of truth (NOT this file):
-#   backend/fkst-control-plane/src/config.rs           HTTP / Mongo / journal /
-#                                                       auth / LLM / vault / codex /
-#                                                       NyxID / worker-liveness
-#   backend/fkst-control-plane/src/leases/config.rs     FKST_LEASE_TTL_SECS
-#   backend/fkst-control-plane/src/distribution/config.rs  renew/takeover/placement
+# the canonical source of truth (NOT this file). The controller is datastore-free
+# (#143): there are no MongoDB / lease / takeover keys.
+#   backend/fkst-control-plane/src/config.rs           HTTP / journal / auth / LLM /
+#                                                       vault / codex / NyxID /
+#                                                       worker-liveness / placement
 #   backend/fkst-control-plane/src/reconcile/config.rs     orphan-dir sweep
 #   backend/fkst-control-plane/src/github_app/config.rs    FKST_GITHUB_APP_*
 #   backend/fkst-engine/src/config.rs                   FKST_HOSTED_ENGINE_*
@@ -15,8 +14,8 @@
 #
 # IMAGE-BAKED ENV — set by the Dockerfile, NOT by any manifest, so do not add
 # them here:
-#   FKST_ROLE, FKST_HOSTED_PORT=8080, FKST_HOSTED_BIND_ADDR=0.0.0.0  (both runtime
-#       images bake these); FKST_RUNTIME_ROOT=/var/lib/fkst/runtime is baked into
+#   FKST_HOSTED_PORT=8080, FKST_HOSTED_BIND_ADDR=0.0.0.0  (both runtime images
+#       bake these); FKST_RUNTIME_ROOT=/var/lib/fkst/runtime is baked into
 #       the engine-laden image the control-plane TRANSITIONALLY runs from until
 #       #151 moves engine execution onto the worker (then the controller switches
 #       to the slim image and FKST_HOSTED_ENGINE_* below moves to the worker).
@@ -40,10 +39,9 @@ data:
   FKST_HOSTED_LOG_LEVEL: "info,fkst_control_plane=debug,tower_http=info"
   FKST_HOSTED_REQUEST_TIMEOUT_SECS: "30" # >= 1
 
-  # --- MongoDB (non-secret); MONGODB_URI is in the Secret ---
-  MONGODB_DB: "fkst_hosted" # removed by #143/#144
-  # >= 1; bounds the startup ping + /health (coupled to the 7s probe timeout).
-  MONGODB_SERVER_SELECTION_TIMEOUT_MS: "5000" # removed by #143/#144
+  # The controller is datastore-free (#143): no MONGODB_* keys. The durable
+  # audit trail is GitHub Issues; the live in-memory state is observable at
+  # /api/v1/admin/state (#144).
 
   # --- Authentication (NyxID JWT / proxy-trust) ---
   # FKST_AUTH_ENABLED is fail-closed (default true). When enabled,
@@ -91,14 +89,11 @@ data:
   # bool (true/false/1/0/yes/no/on/off); audit mode.
   FKST_HOSTED_RECONCILE_DRY_RUN: "false"
 
-  # --- Lease + takeover cadences (likely removed by #143/#144 DB-free) ---
-  # Constraints (fail-closed): TTL in 1..=86400; 0 < RENEW and RENEW*2 < TTL;
-  # SCAN > 0; GRACE >= 0; MAX_LOAD 0 = uncapped. All set to in-code defaults.
-  FKST_LEASE_TTL_SECS: "30" # likely removed by #143/#144
-  FKST_LEASE_RENEW_INTERVAL_SECS: "10" # likely removed by #143/#144
-  FKST_TAKEOVER_SCAN_INTERVAL_SECS: "5" # likely removed by #143/#144
-  FKST_TAKEOVER_GRACE_SECS: "2" # likely removed by #143/#144
-  FKST_PLACEMENT_MAX_LOAD: "0" # likely removed by #143/#144
+  # --- Worker-dispatch placement (#198-ii) ---
+  # Per-worker active-session cap used by worker-dispatch placement. 0 =
+  # uncapped (the default); only consulted under dispatch mode. The lease store
+  # is gone (datastore-free, #143), so there are no lease/takeover cadences.
+  FKST_PLACEMENT_MAX_LOAD: "0"
 
   # --- GitHub App (optional; module disabled unless FKST_GITHUB_APP_ID set) ---
   # FKST_GITHUB_APP_ID: "12345"
