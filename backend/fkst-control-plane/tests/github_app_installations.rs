@@ -1,6 +1,6 @@
-//! GitHub App installation lifecycle integration tests against an ephemeral
-//! Mongo container (testcontainers, for the Mongo-backed session repo) and the
-//! real `build_router(AppState)` for the webhook endpoint.
+//! GitHub App installation lifecycle integration tests against the real
+//! `build_router(AppState)` for the webhook endpoint, backed by the in-memory
+//! session repo (datastore-free controller, #143 — no Mongo/Docker required).
 //!
 //! Installation resolution is STATELESS (#141): there is no durable installation
 //! store. These tests exercise the externally-observable webhook behavior — the
@@ -9,9 +9,6 @@
 //! - A signed `installation deleted` (enumerating the affected repo) evicts the
 //!   in-memory caches and fails an active session on that repo (no persistence).
 //! - A malformed signed body answers `202` (never a 5xx / redelivery storm).
-//!
-//! Self-skips when Docker is unavailable so `cargo test` stays green on runners
-//! without a Docker daemon.
 
 use async_trait::async_trait;
 use axum::body::Body;
@@ -19,7 +16,6 @@ use axum::http::{Request, StatusCode};
 use fkst_control_plane::auth::AuthMode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::github_app::api::{GithubApi, InstallationToken, InstallationTokenRequest};
 use fkst_control_plane::github_app::{GithubAppConfig, GithubAppTokens, InstallationId};
@@ -34,46 +30,11 @@ use sha2::Sha256;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
 mod support;
 
-const MONGO_TAG: &str = "7";
 const WEBHOOK_SECRET: &str = "whsec_integration_test_secret";
-
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-async fn mongo() -> (ContainerAsync<Mongo>, Db) {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
-    db.ensure_indexes().await.expect("ensure indexes");
-    (container, db)
-}
 
 /// A deterministic test RSA PEM so `GithubAppTokens` can be built. Generated at
 /// runtime (NOT a real key).
@@ -146,7 +107,7 @@ fn webhook_signature(secret: &[u8], body: &[u8]) -> String {
 /// real cache-bust + session-fail path against the in-memory session repo. The
 /// returned handle shares the SAME store as the router's service (cloning shares
 /// the Arc-backed map), so the test can seed/inspect what the webhook touches.
-fn router_with_webhook(db: Db) -> (axum::Router, SessionRepo) {
+fn router_with_webhook() -> (axum::Router, SessionRepo) {
     let session_repo = SessionRepo::new();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(session_repo.clone(), EngineConfig::default());
@@ -155,10 +116,9 @@ fn router_with_webhook(db: Db) -> (axum::Router, SessionRepo) {
         Arc::new(FakeApi::default()),
     )
     .expect("github app");
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     let router = build_router(AppState {
         config: Config::default(),
-        db,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
@@ -196,12 +156,7 @@ async fn post_webhook(
 
 #[tokio::test]
 async fn webhook_rejects_invalid_signature_401() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
-    let (_c, db) = mongo().await;
-    let (router, _) = router_with_webhook(db);
+    let (router, _) = router_with_webhook();
 
     let body = br#"{"action":"created","installation":{"id":1,"account":{"login":"acme"}},"repositories":[]}"#;
     // A signature computed with the WRONG secret.
@@ -216,12 +171,7 @@ async fn webhook_rejects_invalid_signature_401() {
 
 #[tokio::test]
 async fn webhook_malformed_body_is_202_not_5xx() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
-    let (_c, db) = mongo().await;
-    let (router, _) = router_with_webhook(db);
+    let (router, _) = router_with_webhook();
 
     // A correctly-signed but malformed JSON body: the handler must log + answer
     // 202 (never a 5xx, which would trigger a GitHub redelivery storm).
@@ -237,12 +187,7 @@ async fn webhook_malformed_body_is_202_not_5xx() {
 
 #[tokio::test]
 async fn webhook_deleted_evicts_and_fails_active_session_without_persistence() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
-    let (_c, db) = mongo().await;
-    let (router, session_repo) = router_with_webhook(db.clone());
+    let (router, session_repo) = router_with_webhook();
 
     // Seed an ACTIVE (running) session targeting acme/site.
     let session_id = bson::Uuid::new();

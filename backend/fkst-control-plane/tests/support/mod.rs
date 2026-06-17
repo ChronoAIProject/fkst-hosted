@@ -22,14 +22,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use fkst_control_plane::db::Db;
 use fkst_control_plane::vault::{VaultLimits, VaultService};
 
 /// Build the in-memory `VaultService` (#138) with the default per-scope limits.
-/// The `db` is accepted (and ignored) so every harness can call `test_vault(&db)`
-/// uniformly alongside the other `&db`-taking helpers; the vault no longer has a
-/// datastore.
-pub fn test_vault(_db: &Db) -> VaultService {
+/// The controller is datastore-free (#143), so this takes no handle.
+pub fn test_vault() -> VaultService {
     VaultService::new(VaultLimits::default())
 }
 

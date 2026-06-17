@@ -1,13 +1,13 @@
 //! Integration tests for the unified `POST /api/v1/goals/submit` endpoint (#178)
 //! driven through the REAL `build_router(AppState)` via `tower::ServiceExt`.
 //!
-//! These exercise the end-to-end inline-source path (which reaches
-//! `SessionService::create_for_goal`, hence needs a Mongo container) and so
-//! self-skip when Docker is unavailable — keeping `cargo test` green on runners
-//! without a daemon. The Docker-FREE behaviour (parsers, DTOs, `adopt_issue`,
-//! the permission gate, secret redaction) is covered by the in-crate unit tests
-//! in `src/routes/goals_submit.rs`, `src/goals/issue_parse.rs`, and
-//! `src/goals/issue_store.rs`.
+//! These exercise the end-to-end inline-source path, which reaches
+//! `SessionService::create_for_goal`. Sessions are now in-memory (#143,
+//! datastore-free controller), so there is no datastore container and these
+//! tests run unconditionally. The narrower behaviour (parsers, DTOs,
+//! `adopt_issue`, the permission gate, secret redaction) is also covered by the
+//! in-crate unit tests in `src/routes/goals_submit.rs`,
+//! `src/goals/issue_parse.rs`, and `src/goals/issue_store.rs`.
 
 use std::sync::{Arc, Mutex};
 
@@ -17,7 +17,6 @@ use axum::http::{header, Request, StatusCode};
 use fkst_control_plane::auth::AuthMode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::error::AppError;
 use fkst_control_plane::goals::issue_store::{IssueApi, IssuePatch};
@@ -27,25 +26,9 @@ use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::mongo::Mongo;
 use tower::ServiceExt;
 
 mod support;
-
-const MONGO_TAG: &str = "7";
-
-/// True when a Docker daemon answers `docker info`.
-fn docker_available() -> bool {
-    std::process::Command::new("docker")
-        .args(["info"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
 
 /// One recorded `create_issue` call: `(title, body, labels)`.
 type Created = (String, String, Vec<String>);
@@ -114,7 +97,6 @@ impl IssueApi for RecordingIssueApi {
 }
 
 struct TestApp {
-    _container: ContainerAsync<Mongo>,
     router: axum::Router,
     issue_api: Arc<RecordingIssueApi>,
 }
@@ -171,30 +153,15 @@ async fn app() -> TestApp {
 /// Build the test app, optionally wiring a fake [`OrnnClient`] so the submit
 /// pre-flight (#179) Ornn-availability gate can be exercised end-to-end.
 async fn app_with_ornn(ornn: Option<fkst_control_plane::ornn::OrnnClient>) -> TestApp {
-    let container = Mongo::default()
-        .with_tag(MONGO_TAG)
-        .start()
-        .await
-        .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
+    // Sessions are in-memory (#143), so the harness needs no datastore.
+    let config = Config::default();
 
     let issue_api = Arc::new(RecordingIssueApi::default());
     let goals = GoalIssueStore::with_api(issue_api.clone());
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
-    let vault = support::test_vault(&db);
+    let vault = support::test_vault();
     let router = build_router(AppState {
         config,
-        db: db.clone(),
         sessions,
         // Disabled => the dev AuthContext carries `fkst:admin`, which bypasses
         // both action gates and the object check, so the 202 path is reachable
@@ -209,11 +176,7 @@ async fn app_with_ornn(ornn: Option<fkst_control_plane::ornn::OrnnClient>) -> Te
     })
     .expect("router");
 
-    TestApp {
-        _container: container,
-        router,
-        issue_api,
-    }
+    TestApp { router, issue_api }
 }
 
 async fn post_submit(router: &axum::Router, body: &Value) -> (StatusCode, String) {
@@ -242,10 +205,6 @@ async fn post_submit(router: &axum::Router, body: &Value) -> (StatusCode, String
 /// never the goal prompt (`description`) and never any secret value.
 #[tokio::test]
 async fn inline_source_returns_202_and_files_one_non_sensitive_issue() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let app = app().await;
 
     let body = json!({
@@ -306,10 +265,6 @@ async fn inline_source_returns_202_and_files_one_non_sensitive_issue() {
 /// A malformed inline repo URL is a 422 (the new parsers' contract), not a 400.
 #[tokio::test]
 async fn inline_malformed_repo_url_is_422() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let app = app().await;
     let body = json!({
         "source": "inline",
@@ -330,10 +285,6 @@ async fn inline_malformed_repo_url_is_422() {
 /// A malformed issue URL is a 422 before any GitHub fetch.
 #[tokio::test]
 async fn issue_source_malformed_url_is_422() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     let app = app().await;
     let body = json!({
         "source": "issue",
@@ -354,10 +305,6 @@ async fn issue_source_malformed_url_is_422() {
 /// `github_app: None` the package check is skipped, isolating the Ornn gate.
 #[tokio::test]
 async fn submit_with_unavailable_ornn_version_is_gated_with_422() {
-    if !docker_available() {
-        eprintln!("SKIP: docker unavailable");
-        return;
-    }
     // The catalog only offers `fmt@2.0`; the submission pins `fmt@1.0`.
     let transport = Arc::new(FakeOrnnTransport::new(vec![(
         "/skills/fmt/versions",

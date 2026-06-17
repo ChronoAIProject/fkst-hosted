@@ -8,14 +8,14 @@
 //! makes "the worker never touches the database" a compiler-enforced fact.
 //!
 //! What lives here:
-//! - [`models`] — wire/domain document shapes (`RepoRef`, `SessionDoc`,
-//!   `LeaseDoc`, the GitHub-installation doc); `bson`-shaped but driver-free.
+//! - [`models`] — wire/domain document shapes (`RepoRef`, `SessionDoc`);
+//!   `bson`-shaped but driver-free.
 //! - [`nyxid`] — the NyxID credential-proxy transport client.
 //! - [`llm`] — the `LlmGateway` seam and its NyxID-backed implementation.
 //! - [`ornn`] — the Ornn pin DTOs (`types`); the on-disk injector and the
 //!   `AppError`-coupled client stay control-plane for now.
-//! - [`vault`] — the persisted vault data model (`model`); the encrypting
-//!   service + Mongo repo stay control-plane (KEK never leaves).
+//! - [`vault`] — the vault data model (`model`); the in-memory vault service
+//!   stays control-plane.
 //! - [`protocol`] — the internal controller<->worker wire types (#134).
 
 pub mod llm;

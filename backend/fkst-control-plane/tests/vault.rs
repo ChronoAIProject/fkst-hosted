@@ -7,16 +7,14 @@
 //! repo overlay, repo wins, key-sorted), and (2) the removed HTTP CRUD route is
 //! gone (404) through the real `build_router(AppState)`.
 //!
-//! No Mongo is needed: the router builds over a lazily-constructed `Db` (parsed
-//! but never connected) and the vault has no datastore — so these run on any
-//! host, with or without Docker.
+//! No datastore is needed: the controller is datastore-free (#143) and the
+//! vault has no datastore — so these run on any host, with or without Docker.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_control_plane::auth::AuthMode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::router::build_router;
@@ -25,12 +23,6 @@ use fkst_control_plane::state::AppState;
 use fkst_control_plane::vault::{EnvKind, EnvScopeRef, VaultLimits, VaultService};
 use secrecy::{ExposeSecret, SecretString};
 use tower::ServiceExt;
-
-/// A lazy `Db`: parses the URI and builds the client but never connects, so a
-/// router can be assembled for a routing assertion with no Mongo running.
-async fn lazy_db() -> Db {
-    Db::from_config(&Config::default()).await.expect("lazy db")
-}
 
 /// One inline secret tuple for `set_inline`.
 fn secret(key: &str, value: &str) -> (String, EnvKind, SecretString) {
@@ -41,13 +33,12 @@ fn secret(key: &str, value: &str) -> (String, EnvKind, SecretString) {
     )
 }
 
-/// Build a router (auth disabled: the dev context owns everything) over `db`.
-fn router(db: Db, vault: VaultService) -> axum::Router {
+/// Build a router (auth disabled: the dev context owns everything).
+fn router(vault: VaultService) -> axum::Router {
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     build_router(AppState {
         config: Config::default(),
-        db,
         sessions,
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
@@ -119,8 +110,7 @@ async fn clear_inline_drops_scope_after_teardown() {
 
 #[tokio::test]
 async fn removed_vault_crud_route_returns_404() {
-    let db = lazy_db().await;
-    let app = router(db, VaultService::new(VaultLimits::default()));
+    let app = router(VaultService::new(VaultLimits::default()));
 
     let requests = [
         Request::get("/api/v1/vault/entries")

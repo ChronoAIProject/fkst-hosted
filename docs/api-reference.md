@@ -167,14 +167,15 @@ to the client).
 | `429` | `rate_limited` | Upstream (GitHub) rate-limited the request | `Retry-After: <seconds>` |
 | `500` | `internal` | Unexpected server error | |
 | `502` | `upstream_error` | An upstream provider (GitHub via proxy) returned an unexpected error | |
-| `503` | `unavailable` | A dependency (database, NyxID, LLM gateway, credential proxy) is unavailable | |
+| `503` | `unavailable` | A dependency (NyxID, LLM gateway, credential proxy) is unavailable | |
 | `408` | — | Request exceeded the server timeout | |
 
 ---
 
 ## Health
 
-Liveness plus a real database ping. **No authentication required.**
+Liveness for the datastore-free controller. There is no datastore to probe, so
+the controller reports ready whenever it can serve. **No authentication required.**
 
 ### `GET /health` · `GET /api/v1/health`
 
@@ -185,12 +186,11 @@ Liveness plus a real database ping. **No authentication required.**
 
 | Status | Body |
 |--------|------|
-| `200 OK` | `{ "status": "ok", "mongo": "up", "version": "<build version>" }` |
-| `503 Service Unavailable` | `{ "status": "degraded", "mongo": "down", "version": "<build version>" }` |
+| `200 OK` | `{ "status": "ok", "version": "<build version>" }` |
 
 ```sh
 curl "$FKST_API/health"
-# {"status":"ok","mongo":"up","version":"0.0.0"}
+# {"status":"ok","version":"0.0.0"}
 ```
 
 ---
