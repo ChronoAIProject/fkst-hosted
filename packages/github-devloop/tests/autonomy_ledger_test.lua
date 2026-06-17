@@ -191,9 +191,8 @@ return {
       record.head_sha,
       { repo = "owner/repo", merge_commit_sha = "def456" }
     )
-    t.eq(fact.valid_autonomous_merge, "true")
-    t.eq(fact.gates.post_merge_probe, "pass")
-    t.eq(fact.audited_valid_autonomous_merge, "invalid_self_attested")
+    t.eq(fact.valid_autonomous_merge, "invalid_self_attested")
+    t.eq(fact.gates.post_merge_probe, "fail")
     t.eq(fact.audit_reason, "missing-status-rollup")
     t.eq(fact.audit_gates.post_merge_probe, "fail")
   end,

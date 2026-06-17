@@ -411,9 +411,14 @@ function M.autonomy_audited_result_fact(comments, proposal_id, pr_number, versio
     if not audit_states[state] then
       state = "invalid_self_attested"
     end
-    fact.audited_valid_autonomous_merge = state
+    fact.valid_autonomous_merge = state
     fact.audit_reason = audit.reason
     fact.audit_gates = audit.gates
+    if type(audit.gates) == "table" and type(fact.gates) == "table" then
+      for name, value in pairs(audit.gates) do
+        fact.gates[name] = normalize_gate_state(value)
+      end
+    end
   end
   return fact
 end
