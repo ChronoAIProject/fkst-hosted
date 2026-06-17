@@ -12,6 +12,32 @@ local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+local function shell_quote_argv(value)
+  local text = tostring(value or "")
+  if text:find("^[%w_%-%./:=]+$") ~= nil then
+    return text
+  end
+  return "'" .. text:gsub("'", "'\"'\"'") .. "'"
+end
+
+local function rendered_command(cmd)
+  if type(cmd) ~= "table" then
+    return tostring(cmd)
+  end
+  if cmd.cmd ~= nil then
+    return tostring(cmd.cmd)
+  end
+  local argv = cmd.argv
+  if type(argv) ~= "table" then
+    return ""
+  end
+  local parts = {}
+  for _, arg in ipairs(argv) do
+    table.insert(parts, shell_quote_argv(arg))
+  end
+  return table.concat(parts, " ")
+end
+
 local function exec_with_env(root, fixtures)
   local state = fixtures or {}
   state.calls = state.calls or {}
@@ -21,7 +47,7 @@ local function exec_with_env(root, fixtures)
   state.pr_output = state.pr_output or '{"title":"Bundle PR","body":"PR body","headRefName":"devloop-owner-repo-42","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n'
   state.diff_output = state.diff_output or "diff --git a/file.lua b/file.lua\n+return true\n"
   return function(cmd)
-    local rendered = type(cmd) == "table" and cmd.cmd or tostring(cmd)
+    local rendered = rendered_command(cmd)
     table.insert(state.calls, rendered)
     if rendered == core.read_runtime_root_cmd() then
       return { stdout = root, stderr = "", exit_code = 0 }

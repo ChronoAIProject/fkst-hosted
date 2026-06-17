@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local gh_argv = require("tests.gh_argv_mock_helpers")
 
 local function opts(name, extra)
   local env = {
@@ -148,7 +149,7 @@ local function mock_issue_view(comments, state, extra)
     comments = comments,
     assignees = extra.assignees or {},
     author_login = extra.author or "fkst-test-bot",
-  }, "title,comments,state")
+  }, "title,comments,state,stateReason,assignees,author")
 end
 
 local function mock_pr_view(comments, extra)
@@ -168,7 +169,7 @@ end
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       count = count + 1
     end
   end
@@ -181,9 +182,7 @@ end
 
 local function first_call(needle)
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
-      return call.rendered
-    end
+    if gh_argv.call_contains(call, needle) then return call end
   end
   return nil
 end
@@ -191,7 +190,7 @@ end
 local function calls_matching(needle)
   local calls = {}
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       table.insert(calls, call)
     end
   end
@@ -288,8 +287,11 @@ local function dashboard_hash(body)
 end
 
 local function command_input_path(command)
-  return tostring(command or ""):match("%-%-input '([^']+)'")
+  if type(command) == "table" then return gh_argv.argv_value_after(command, "--input") end
+  return tostring(command or ""):match("%-%-input '([^']+)'") or tostring(command or ""):match("%-%-input%s+([^%s]+)")
 end
+
+local function command_body_file(command) return gh_argv.argv_value_after(command, "--body-file") end
 
 local function dashboard_issue_list_command()
   return "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dashboard&per_page=100'"
@@ -507,9 +509,9 @@ return {
     local result = run_observability(opts("observability-reap-closed-parent", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-"), 1)
-    t.eq(count_calls("gh pr close '7' --repo 'owner/repo'"), 1)
-    local input_path = first_call("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-"):match("%-%-body%-file '([^']+)'")
+    t.eq(count_calls("gh pr comment 7 --repo owner/repo --body-file /tmp/fkst-github-devloop-reap-"), 1)
+    t.eq(count_calls("gh pr close 7 --repo owner/repo"), 1)
+    local input_path = command_body_file(first_call("gh pr comment 7 --repo owner/repo --body-file /tmp/fkst-github-devloop-reap-"))
     local written = file.read(input_path)
     t.is_true(written:find("Parent: #42", 1, true) ~= nil)
     t.is_true(written:find("Reason: Parent issue #42 is closed.", 1, true) ~= nil)
@@ -619,7 +621,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr close '7' --repo 'owner/repo'"), 1)
-    local input_path = first_call("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-"):match("%-%-body%-file '([^']+)'")
+    local input_path = command_body_file(first_call("gh pr comment 7 --repo owner/repo --body-file /tmp/fkst-github-devloop-reap-"))
     local written = file.read(input_path)
     t.is_true(written:find("Successors: #132, #146", 1, true) ~= nil)
     t.is_true(written:find('reason="parent-decomposed"', 1, true) ~= nil)

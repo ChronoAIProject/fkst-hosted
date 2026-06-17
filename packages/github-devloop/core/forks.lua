@@ -149,7 +149,7 @@ function M.fork_origin_fact(entity)
 end
 
 function M.rederive_issue_state(repo, issue_number)
-  local view = M.gh_exec({ cmd = M.gh_issue_view_state_cmd(repo, issue_number), timeout = 30 })
+  local view = M.gh_issue_view_state(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue source_ref state recheck failed: " .. tostring(view.stderr))
   end

@@ -1,11 +1,12 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local gh_argv = require("tests.gh_argv_mock_helpers")
 
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
-    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       count = count + 1
     end
   end

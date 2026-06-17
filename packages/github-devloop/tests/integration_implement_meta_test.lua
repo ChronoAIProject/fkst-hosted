@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local gh_argv = require("tests.gh_argv_mock_helpers")
 local action_label = h.action_label
 local reason_label = h.reason_label
 local has_value = h.has_value
@@ -456,9 +457,9 @@ return {
     local reset_before_merge = false
     local reset_seen = false
     for _, call in ipairs(t.command_calls()) do
-      if call.rendered:find("git -C '" .. worktree .. "' reset --hard", 1, true) ~= nil then
+      if gh_argv.argv_contains(call, { "git", "-C", worktree, "reset", "--hard" }) then
         reset_seen = true
-      elseif call.rendered:find("git -C '" .. worktree .. "' merge --no-edit 'abc123'", 1, true) ~= nil then
+      elseif gh_argv.argv_contains(call, { "git", "-C", worktree, "merge", "--no-edit", "abc123" }) then
         reset_before_merge = reset_seen
       end
     end

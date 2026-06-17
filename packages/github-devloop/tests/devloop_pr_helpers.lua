@@ -6,6 +6,7 @@ local reason_label = base.reason_label
 local json_string = base.json_string
 local render_comment = base.render_comment
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local gh_argv = require("tests.gh_argv_mock_helpers")
 local last_merge_comments = nil
 
 local function json_literal(value)
@@ -355,7 +356,7 @@ end
 
 local function has_call(needle)
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       return true
     end
   end

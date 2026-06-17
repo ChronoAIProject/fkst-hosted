@@ -64,6 +64,22 @@ function M.sweep_exec(cmd_or_opts, limits, deadline, error_class, exec)
   if timeout <= 0 then
     return M.sweep_deadline_deferred_result(error_class)
   end
+  if type(exec) == "function" then
+    local opts
+    if type(cmd_or_opts) == "table" then
+      opts = {}
+      for key, value in pairs(cmd_or_opts) do
+        opts[key] = value
+      end
+      opts.timeout = opts.timeout or timeout
+    else
+      opts = { cmd = cmd_or_opts, timeout = timeout }
+    end
+    return exec(opts)
+  end
+  if type(cmd_or_opts) == "table" and type(cmd_or_opts.run) == "function" then
+    return cmd_or_opts.run(cmd_or_opts.timeout or timeout)
+  end
   local opts
   if type(cmd_or_opts) == "table" then
     opts = {}

@@ -86,7 +86,11 @@ function M.require_observe_bot(core)
 end
 
 function M.fetch_issue(core, repo, issue_number, limits, deadline)
-  local view = core.observability_run_cmd(core.gh_issue_view_observe_cmd(repo, issue_number), limits, deadline, "observability issue view")
+  local view = core.observability_run_cmd({
+    run = function(timeout)
+      return core.gh_issue_view_observe(repo, issue_number, timeout)
+    end,
+  }, limits, deadline, "observability issue view")
   if core.observability_result_deferred(view) then
     return nil
   end
@@ -94,7 +98,11 @@ function M.fetch_issue(core, repo, issue_number, limits, deadline)
 end
 
 function M.fetch_pr(core, repo, pr_number, limits, deadline)
-  local view = core.observability_run_cmd(core.gh_pr_view_observe_cmd(repo, pr_number), limits, deadline, "observability PR view")
+  local view = core.observability_run_cmd({
+    run = function(timeout)
+      return core.gh_pr_view_observe(repo, pr_number, timeout)
+    end,
+  }, limits, deadline, "observability PR view")
   if core.observability_result_deferred(view) then
     return nil
   end

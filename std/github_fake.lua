@@ -40,6 +40,7 @@ function M.new(model)
   end
   require("std.github.entities").install(handle)
   require("std.github.comments").install(handle)
+  require("std.github.workflows").install(handle)
   function handle.issue_view(repo, issue_number, fields, timeout)
     return handle._exec({
       "gh",

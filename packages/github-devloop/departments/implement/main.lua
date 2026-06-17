@@ -78,11 +78,11 @@ local function raise_open_pr_from_fact(repo, issue_number, ready, fact, reason)
 end
 
 local function remote_branch_fact(branch, base_branch, source_fact)
-  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", branch), timeout = 60 })
+  local fetch_result = core.git_fetch_branch("origin", branch, 60)
   if fetch_result.exit_code ~= 0 then
     return nil
   end
-  local head_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", branch), timeout = 30 })
+  local head_result = core.git_remote_branch_head("origin", branch, 30)
   if head_result.exit_code ~= 0 then
     if head_result.exit_code == 1 then
       return nil
@@ -110,7 +110,7 @@ local function remote_branch_fact(branch, base_branch, source_fact)
 end
 
 local function local_branch_fact(base_head, branch, base_branch, dedup_key)
-  local branch_ref = exec_sync({ cmd = core.git_show_ref_branch_cmd(branch), timeout = 30 })
+  local branch_ref = core.git_show_ref_branch(branch, 30)
   if branch_ref.exit_code ~= 0 then
     if branch_ref.exit_code == 1 then
       return nil
@@ -192,7 +192,7 @@ local function implementing_mismatch_is_durable(current, proposal_id, state)
 end
 
 implemented_branch_head = function(base_head, branch)
-  local ahead_result = exec_sync({ cmd = core.git_branch_ahead_count_cmd(base_head, branch), timeout = 30 })
+  local ahead_result = core.git_branch_ahead_count(base_head, branch, 30)
   if ahead_result.exit_code ~= 0 then
     error("github-devloop: git branch ahead check failed: " .. tostring(ahead_result.stderr))
   end
@@ -201,7 +201,7 @@ implemented_branch_head = function(base_head, branch)
     return nil
   end
 
-  local head_result = exec_sync({ cmd = core.git_branch_head_cmd(branch), timeout = 30 })
+  local head_result = core.git_branch_head(branch, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git branch head failed: " .. tostring(head_result.stderr))
   end
@@ -213,7 +213,7 @@ implemented_branch_head = function(base_head, branch)
 end
 
 local function merge_integration_for_implementation(worktree, integration_branch, base_head)
-  local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
+  local merge_result = core.git_worktree_merge_no_edit(worktree, base_head, 120)
   if merge_result.exit_code ~= 0 then
     local unmerged_result = core.git_unmerged_paths(worktree, 30)
     if unmerged_result.exit_code ~= 0 then
@@ -231,11 +231,11 @@ local function merge_integration_for_implementation(worktree, integration_branch
 end
 
 local function prepare_base(branches)
-  local fetch_result = exec_sync({ cmd = core.git_fetch_branch_cmd("origin", branches.integration), timeout = 60 })
+  local fetch_result = core.git_fetch_branch("origin", branches.integration, 60)
   if fetch_result.exit_code ~= 0 then
     error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
   end
-  local base_result = exec_sync({ cmd = core.git_remote_branch_head_cmd("origin", branches.integration), timeout = 30 })
+  local base_result = core.git_remote_branch_head("origin", branches.integration, 30)
   if base_result.exit_code ~= 0 then
     error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
   end
@@ -247,11 +247,11 @@ local function prepare_base(branches)
 end
 
 local function reconcile_worktree_to_branch(worktree, branch)
-  local reset_result = exec_sync({ cmd = core.git_worktree_reset_hard_cmd(worktree, branch), timeout = 60 })
+  local reset_result = core.git_worktree_reset_hard(worktree, branch, 60)
   if reset_result.exit_code ~= 0 then
     error("github-devloop: git worktree reset failed: " .. tostring(reset_result.stderr))
   end
-  local clean_result = exec_sync({ cmd = core.git_worktree_clean_cmd(worktree), timeout = 60 })
+  local clean_result = core.git_worktree_clean(worktree, 60)
   if clean_result.exit_code ~= 0 then
     error("github-devloop: git worktree clean failed: " .. tostring(clean_result.stderr))
   end
@@ -263,7 +263,7 @@ local function remove_stale_worktree(path)
     error("github-devloop: git worktree path check failed: " .. tostring(dir_result.stderr))
   end
   if dir_result.exit_code == 1 then
-    local prune_result = exec_sync({ cmd = core.git_worktree_prune_cmd(), timeout = 60 })
+    local prune_result = core.git_worktree_prune(60)
     if prune_result.exit_code ~= 0 then
       error("github-devloop: git worktree prune failed: " .. tostring(prune_result.stderr))
     end
@@ -276,7 +276,7 @@ local function remove_stale_worktree(path)
 end
 
 local function prepare_worktree(repo, issue_number, ready, branch, base_head)
-  local branch_ref = exec_sync({ cmd = core.git_show_ref_branch_cmd(branch), timeout = 30 })
+  local branch_ref = core.git_show_ref_branch(branch, 30)
   local branch_exists = branch_ref.exit_code == 0
   if branch_ref.exit_code ~= 0 and branch_ref.exit_code ~= 1 then
     error("github-devloop: git branch ref check failed: " .. tostring(branch_ref.stderr))
@@ -288,7 +288,7 @@ local function prepare_worktree(repo, issue_number, ready, branch, base_head)
   end
   local worktree = core.implement_worktree_path(runtime_result.stdout, repo, issue_number, ready.dedup_key)
   if branch_exists then
-    local list_result = exec_sync({ cmd = core.git_worktree_list_cmd(), timeout = 30 })
+    local list_result = core.git_worktree_list(30)
     if list_result.exit_code ~= 0 then
       error("github-devloop: git worktree list failed: " .. tostring(list_result.stderr))
     end
@@ -311,15 +311,21 @@ local function prepare_worktree(repo, issue_number, ready, branch, base_head)
         "reason=reusing current-runtime deterministic worktree",
       })
     else
-      exec_sync({ cmd = core.git_worktree_force_clean_cmd(worktree), timeout = 60 })
-      local worktree_result = exec_sync({ cmd = core.git_worktree_add_existing_branch_cmd(worktree, branch), timeout = 60 })
+      local clean_result = core.git_worktree_force_clean(worktree, 60)
+      if clean_result.exit_code ~= 0 then
+        error("github-devloop: git worktree cleanup failed: " .. tostring(clean_result.stderr))
+      end
+      local worktree_result = core.git_worktree_add_existing_branch(worktree, branch, 60)
       if worktree_result.exit_code ~= 0 then
         error("github-devloop: git worktree add failed: " .. tostring(worktree_result.stderr))
       end
     end
   else
-    exec_sync({ cmd = core.git_worktree_force_clean_cmd(worktree), timeout = 60 })
-    local worktree_result = exec_sync({ cmd = core.git_worktree_add_new_branch_cmd(worktree, branch, base_head), timeout = 60 })
+    local clean_result = core.git_worktree_force_clean(worktree, 60)
+    if clean_result.exit_code ~= 0 then
+      error("github-devloop: git worktree cleanup failed: " .. tostring(clean_result.stderr))
+    end
+    local worktree_result = core.git_worktree_add_new_branch(worktree, branch, base_head, 60)
     if worktree_result.exit_code ~= 0 then
       error("github-devloop: git worktree add failed: " .. tostring(worktree_result.stderr))
     end
@@ -369,7 +375,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   end
   core.log_codex_result("implement", ready.proposal_id, "implement", result, "result=completed", nil)
 
-  local status = exec_sync({ cmd = core.git_status_cmd(worktree), timeout = 30 })
+  local status = core.git_status(worktree, 30)
   if status.exit_code ~= 0 then
     error("github-devloop: git status failed: " .. tostring(status.stderr))
   end
@@ -419,23 +425,20 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     }
   end
 
-  local add_result = exec_sync({ cmd = core.git_add_all_cmd(worktree), timeout = 30 })
+  local add_result = core.git_add_all(worktree, 30)
   if add_result.exit_code ~= 0 then
     error("github-devloop: git add failed: " .. tostring(add_result.stderr))
   end
 
-  local commit_result = exec_sync({
-    cmd = core.git_commit_cmd(worktree, core.implement_commit_subject(
+  local commit_result = core.git_commit(worktree, core.implement_commit_subject(
       issue_number,
       core.commit_issue_subject_snapshot(repo, issue_number)
-    )),
-    timeout = 60,
-  })
+    ), 60)
   if commit_result.exit_code ~= 0 then
     error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))
   end
 
-  local branch_result = exec_sync({ cmd = core.git_current_branch_cmd(worktree), timeout = 30 })
+  local branch_result = core.git_current_branch(worktree, 30)
   if branch_result.exit_code ~= 0 then
     error("github-devloop: git branch fact failed: " .. tostring(branch_result.stderr))
   end
@@ -447,7 +450,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     error("github-devloop: unsafe implementing branch")
   end
 
-  local head_result = exec_sync({ cmd = core.git_head_sha_cmd(worktree), timeout = 30 })
+  local head_result = core.git_head_sha(worktree, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
   end
@@ -499,7 +502,7 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
 end
 
 local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
-  local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
+  local view = core.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
@@ -547,7 +550,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
 end
 
 local function precheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
-  local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
+  local view = core.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
@@ -623,7 +626,7 @@ local function process_ready_event(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local view = core.gh_exec({ cmd = core.gh_issue_view_implement_cmd(repo, issue_number), timeout = 30 })
+    local view = core.gh_issue_view_implement(repo, issue_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue implement view failed: " .. tostring(view.stderr))
     end

@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local gh_argv = require("tests.gh_argv_mock_helpers")
 
 local function opts(name)
   return {
@@ -102,7 +103,7 @@ local function mock_issue_view(comments, number)
     title = "Observed issue",
     state = "OPEN",
     comments = comments,
-  }, "title,comments,state")
+  }, "title,comments,state,stateReason,assignees,author")
 end
 
 local function mock_pr_view(comments)
@@ -151,7 +152,7 @@ end
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       count = count + 1
     end
   end

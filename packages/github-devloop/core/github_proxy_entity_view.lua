@@ -452,7 +452,12 @@ function M.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
       return { stdout = cached:sub(sep + 1), exit_code = 0, cached = true }
     end
   end
-  local result = M.gh_exec(cmd, nil, exec)
+  local result
+  if type(cmd) == "function" then
+    result = cmd()
+  else
+    result = M.gh_exec(cmd, nil, exec)
+  end
   if type(result) == "table" and tonumber(result.exit_code) == 0 then
     cache_set(cache_key, tostring(now() + (ttl_seconds or 60)) .. "\n" .. tostring(result.stdout or ""))
   end

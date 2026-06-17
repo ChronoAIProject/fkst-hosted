@@ -1,5 +1,7 @@
 local t = fkst.test
 local core = require("core")
+local gh_argv = require("tests.gh_argv_mock_helpers")
+gh_argv.install(t, core)
 
 local function opts(name, extra)
   local env = {
@@ -149,7 +151,7 @@ end
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
+    if gh_argv.call_contains(call, needle) then
       count = count + 1
     end
   end
@@ -158,8 +160,8 @@ end
 
 local function first_call(needle)
   for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
-      return call.rendered
+    if gh_argv.call_contains(call, needle) then
+      return gh_argv.call_rendered(call)
     end
   end
   return nil

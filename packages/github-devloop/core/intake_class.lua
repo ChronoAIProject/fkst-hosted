@@ -130,7 +130,7 @@ local function class_identity_label(class_key)
 end
 
 function M.fetch_recent_closed_intake_class_issues(repo)
-  local listed = M.gh_exec({ cmd = M.gh_issue_list_recent_closed_cmd(repo, 30), timeout = 30 })
+  local listed = M.gh_issue_list_recent_closed(repo, 30, 30)
   if listed.exit_code ~= 0 then
     error("github-devloop: gh issue intake class sibling lookup failed: " .. tostring(listed.stderr))
   end
@@ -157,7 +157,7 @@ function M.find_open_intake_class_carrier(repo, issue_number, current, class_key
   local wanted_marker = M.intake_class_carrier_marker(class_key)
   local wanted_title = M.intake_class_issue_title(current, issue_number, class_key)
   local fallback_title = M.intake_class_issue_title(current, issue_number)
-  local listed = M.gh_exec({ cmd = M.gh_issue_list_intake_cmd(repo, 100), timeout = 30 })
+  local listed = M.gh_issue_list_intake(repo, 100, 30)
   if listed.exit_code ~= 0 then
     error("github-devloop: gh issue intake class lookup failed: " .. tostring(listed.stderr))
   end

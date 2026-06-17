@@ -115,7 +115,7 @@ function M.linked_entity_snapshot(repo, proposal_id, issue_comments, opts)
         return snapshot
       end
     else
-      pr_view = M.gh_exec({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
+      pr_view = M.gh_pr_view_observe(repo, pr_number, 30)
     end
     if pr_view.exit_code ~= 0 then
       if command_indicates_not_found(pr_view) then
