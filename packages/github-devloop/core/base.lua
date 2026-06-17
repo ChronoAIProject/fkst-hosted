@@ -866,6 +866,9 @@ function M.gh_exec_opts(cmd_or_opts, timeout)
   end
   opts.timeout = opts.timeout or timeout or 30
   opts.rate_pool = M.gh_rate_pool()
+  if type(M.github_capability_exec_opts) == "function" then
+    opts = M.github_capability_exec_opts(opts)
+  end
   return opts
 end
 

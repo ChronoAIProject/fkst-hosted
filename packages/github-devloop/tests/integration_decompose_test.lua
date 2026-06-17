@@ -141,7 +141,12 @@ local function mock_decompose_codex(stdout)
     stderr = "",
     exit_code = 0,
   })
-  for _ = 1, 5 do
+  t.mock_command("gh pr diff '7' --repo 'owner/repo' --name-only", {
+    stdout = "file.lua\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  for _ = 1, 6 do
     t.mock_command(" > ", { stdout = "", stderr = "", exit_code = 0 })
   end
   t.mock_command("python3 -c", {
