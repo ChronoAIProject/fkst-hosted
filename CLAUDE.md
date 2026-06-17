@@ -98,6 +98,18 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 参考案例：#550（根因）/ #551（harness 硬化）。这是「先找 harness」doctrine 的硬化：安全网已成熟,活性网才是自驱系统反复栽跟头的盲区。
 
+## 第三轴 competence：测「做得对」，不只测「跑得动」（competence ⟂ liveness ⟂ safety）
+
+活性 ⟂ 安全是两轴（safety 抓「发生的坏事」、liveness 抓「该发生的好事没发生」），但漏了**第三轴 competence（正确性/胜任度）：发生的那件好事，是「对」的那件，还是只是「看起来对、CI 绿、consensus 通过」的 plausible 那件？** crash-only / watchdog / 盲重投 / codex 兜底证明 pipeline **流动且终止**，**不证明产出正确**——crash-only 解决 stuck，不解决 wrong。这是最隐蔽的盲区：**静默合并一个 plausible-but-wrong 的 patch 不产生任何错误事实、不卡死、CI 还是绿的**，liveness/safety 双网都抓不到。且 **codex consensus 不是独立 oracle**：同模型族 / 同上下文 / 同「让 CI 绿」目标函数会 **correlated failure**（一起接受错误抽象、一起忽略没测试的 happy-path patch、一起被 PR 自信叙事污染）。`issues closed` / `PRs merged` / `CI green` / `autonomous loops` 是 **Goodhart vanity metrics**（指标一旦成为目标就不再是好指标）——度量「跑得动」，不度量「做得对」。
+
+对策——把质量从「人肉每轮诊断」变成**机械度量**（否则是没仪表盘地踩油门）：
+
+- **唯一真标尺是 AVM（Autonomous Valid Merge），不是 merged**：`merged && 零人工介入 && evidence manifest 存在 && 必需 tests/conformance 过 && post-merge probe 绿 && N 天内无 revert/reopen/fix-forward && cost ≤ budget && 无 duplicate worker / lease conflict`。按**任务等级**（L0 docs → L1 局部 bugfix → L2 跨模块 → L3 engine/scheduler/recovery/conformance → L4 cross-repo/API/security）分别报 AVM-rate / cost-per-AVM / revert-rate / median-rounds / false-consensus-rate，**绝不报一个总成功率**（L0/L1 高而 L3/L4 低 = 「自动 junior maintainer」，不是「自治软件公司」）。
+- **审证据不审叙事（evidence-gated, not narrative-gated）**：reviewer 判「证据是否足够支持 merge」，不判「这段话听起来对不对」。每个 PR 带 evidence manifest（claimed intent / risk-tier / tests-changed / conformance-results / post-merge-probe-plan / no-test-reason）；code 改无测试必须有显式 no-test-reason；engine/scheduler/recovery/conformance 改动必须过 replay/conformance gate。reviewer **角色分化**（invariants / test-adequacy / blast-radius / cost / security-&-prompt-injection）对抗 correlated consensus failure；统计 `false_consensus_rate`（consensus 通过但事后 revert/reopen）。**默认 bot 会被 prompt-injected**：issue/PR 文本是 attacker-controllable 输入，PR body 里的指令不得覆盖 system policy，CI 脚本 / dependency / workflow / auth / scheduler 改动进 high-risk tier。
+- **held-out challenge suite（像 ML 的 train/test split）**：dogfood-only 会**过拟合当前系统**（像只在训练集上评估模型）。须有一组固定的 L0-L4 fixture issue、每个带机械 oracle、每晚从 clean checkout 跑、不许据失败人工改题——这是 held-out 测试集。**challenge score（受控 benchmark 能力）+ dogfood AVM（真实生存能力），两者缺一不可**（只 dogfood 过拟合当前系统，只 benchmark 失真实复杂度）。
+
+**诚实纪律**：liveness/safety 已被反复生产验证；competence **尚未机械度量**——当前真相是「operator 仍是 evaluator 与 task-decomposer，系统只把 implementation 外包给了 bot」。**别把『高可用地合并 plausible patch』自称为 competent autonomy。** 在 competence 被机械度量之前，任何「加更多 repo / 更大并发 / 更聪明 prompt」都是在扩大系统、而非验证能力。这是「让问题都在测试解决」的升维：从「safety/liveness 都在测试网里」扩到「**competence 也被测试机械度量**」——把 AVM ledger / evidence manifest / challenge suite 做成框架一等公民，而非靠 operator 每轮人肉判断。
+
 ## 全状态转移强制 saga 化（无例外、可审计、harness 化）
 
 **每一次状态转移——无论内部程序态（marker / version / round 计数 / durable 投递 / CAS）还是外部 forge 态（issue / PR / label / comment）——都是一个 saga step，强制按 saga 处理，禁止例外。** 没有「这个 loop 简单」「这条快路径不需要」「这是内部计数不算转移」的豁免。这是「活性 ⟂ 安全双检测」的结构性收口：安全网抓「发生的坏事」，saga 预算 + 保证终止抓「该终止而没终止」。saga step 的硬契约：
