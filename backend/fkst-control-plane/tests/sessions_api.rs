@@ -52,7 +52,11 @@ const MONGO_TAG: &str = "7";
 struct TestApp {
     _container: ContainerAsync<Mongo>,
     router: axum::Router,
-    db: Db,
+    /// The same in-memory session store the router's `SessionService` holds, so
+    /// a test can seed/inspect the documents the API serves (the orphan sweep).
+    /// With the db-free store two `SessionRepo::new()` calls are DISTINCT maps,
+    /// so the handle must be cloned from the one the service was built with.
+    repo: SessionRepo,
 }
 
 /// Start an ephemeral Mongo and build the real application router over it. No
@@ -76,7 +80,10 @@ async fn app() -> TestApp {
     let db = Db::connect(&config).await.expect("connect + ping");
 
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    // One in-memory store shared between the router's service and the test's
+    // seed/inspect handle (cloning shares the Arc-backed map).
+    let repo = SessionRepo::new();
+    let sessions = SessionService::new(repo.clone(), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
@@ -94,7 +101,7 @@ async fn app() -> TestApp {
     TestApp {
         _container: container,
         router,
-        db,
+        repo,
     }
 }
 
@@ -220,7 +227,7 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         return;
     }
     let app = app().await;
-    let repo = SessionRepo::new(&app.db);
+    let repo = app.repo.clone();
 
     let mk = |status: SessionStatus| SessionDoc {
         id: bson::Uuid::new(),

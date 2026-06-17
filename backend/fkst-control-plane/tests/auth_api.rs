@@ -113,7 +113,7 @@ async fn auth_app() -> AuthTestApp {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let auth_mode = AuthMode::Enabled(NyxIdAuthSettings {
         base_url: "https://nyxid.example.test".to_string(),
     });
@@ -156,7 +156,7 @@ async fn no_auth_app() -> (testcontainers::ContainerAsync<Mongo>, axum::Router) 
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,
@@ -387,7 +387,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault(&db);
     let state = AppState {
         config,

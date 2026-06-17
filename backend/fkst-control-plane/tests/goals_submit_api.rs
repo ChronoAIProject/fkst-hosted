@@ -190,7 +190,7 @@ async fn app_with_ornn(ornn: Option<fkst_control_plane::ornn::OrnnClient>) -> Te
 
     let issue_api = Arc::new(RecordingIssueApi::default());
     let goals = GoalIssueStore::with_api(issue_api.clone());
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,

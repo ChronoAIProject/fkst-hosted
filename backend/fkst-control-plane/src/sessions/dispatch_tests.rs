@@ -197,17 +197,10 @@ fn github_config() -> GithubAppConfig {
     }
 }
 
-/// A `SessionService` whose `Db` handle is never touched (resolve_dispatch reads
-/// no session from Mongo — it takes the `SessionDoc` directly). The service is
-/// only the carrier for the wired `Inner`.
+/// A `SessionService` carrying the wired `Inner` for resolve_dispatch tests; the
+/// in-memory session store needs no datastore.
 async fn base_service() -> SessionService {
-    let db = crate::db::Db {
-        database: mongodb::Client::with_uri_str("mongodb://localhost:27017")
-            .await
-            .expect("client")
-            .database("dispatch_unit_test"),
-    };
-    SessionService::new(SessionRepo::new(&db), EngineConfig::default())
+    SessionService::new(SessionRepo::new(), EngineConfig::default())
 }
 
 /// Enable goal support with the fake GitHub API and seed `goal` into the store.

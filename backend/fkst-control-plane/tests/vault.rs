@@ -44,7 +44,7 @@ fn secret(key: &str, value: &str) -> (String, EnvKind, SecretString) {
 /// Build a router (auth disabled: the dev context owns everything) over `db`.
 fn router(db: Db, vault: VaultService) -> axum::Router {
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     build_router(AppState {
         config: Config::default(),
         db,

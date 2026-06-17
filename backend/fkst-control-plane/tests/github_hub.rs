@@ -126,7 +126,7 @@ async fn app(server: MockServer) -> TestApp {
     };
     let db = Db::connect(&config).await.expect("connect + ping");
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
 
     let nyxid = NyxIdClient::new(
         &server.uri(),

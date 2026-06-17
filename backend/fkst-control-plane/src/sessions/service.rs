@@ -3384,16 +3384,9 @@ mod tests {
     #[tokio::test]
     async fn resolve_env_profile_is_empty_when_no_vault_wired() {
         // A service that never had `enable_vault` called resolves an EMPTY
-        // profile — the pre-#102 behaviour for tests / minimal runs. The Db
-        // handle is built lazily and never touched (no vault => early return),
-        // so this needs no live Mongo.
-        let db = crate::db::Db {
-            database: mongodb::Client::with_uri_str("mongodb://localhost:27017")
-                .await
-                .expect("client")
-                .database("sessions_unit_test"),
-        };
-        let service = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+        // profile — the pre-#102 behaviour for tests / minimal runs. The session
+        // store is in-memory, so this needs no datastore.
+        let service = SessionService::new(SessionRepo::new(), EngineConfig::default());
         let session = env_test_session();
         let profile = resolve_env_profile(&service.inner, &session)
             .await
@@ -3428,13 +3421,7 @@ mod tests {
     /// its cooldown gate + stamps `last_attempt` before the (absent) mint, so
     /// this exercises the gating without any GitHub/Mongo wiring.
     async fn no_goal_support_service() -> SessionService {
-        let db = crate::db::Db {
-            database: mongodb::Client::with_uri_str("mongodb://localhost:27017")
-                .await
-                .expect("client")
-                .database("sessions_unit_test"),
-        };
-        SessionService::new(SessionRepo::new(&db), EngineConfig::default())
+        SessionService::new(SessionRepo::new(), EngineConfig::default())
     }
 
     fn goal_drive_with(minted_ago: Duration, last_attempt_ago: Duration) -> GoalDrive {

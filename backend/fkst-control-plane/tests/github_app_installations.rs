@@ -143,9 +143,11 @@ fn webhook_signature(secret: &[u8], body: &[u8]) -> String {
 
 /// Build a full router with the github_app (fake API, stateless — no store) and
 /// the webhook secret wired, so the webhook route is mounted and exercises the
-/// real cache-bust + session-fail path against the Mongo-backed session repo.
+/// real cache-bust + session-fail path against the in-memory session repo. The
+/// returned handle shares the SAME store as the router's service (cloning shares
+/// the Arc-backed map), so the test can seed/inspect what the webhook touches.
 fn router_with_webhook(db: Db) -> (axum::Router, SessionRepo) {
-    let session_repo = SessionRepo::new(&db);
+    let session_repo = SessionRepo::new();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(session_repo.clone(), EngineConfig::default());
     let github_app = GithubAppTokens::with_api(

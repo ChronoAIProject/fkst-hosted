@@ -21,9 +21,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::mongo::Mongo;
 
-use fkst_control_plane::config::Config;
 use fkst_control_plane::controller::{ClaimMap, ControllerHandle, WorkerRegistry};
-use fkst_control_plane::db::Db;
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::github_app::api::{
     GithubApi, InstallationId, InstallationToken, InstallationTokenRequest,
@@ -160,19 +158,11 @@ async fn harness(goal: &GoalDoc) -> Harness {
         .start()
         .await
         .expect("start mongo");
-    let host = container.get_host().await.expect("container host");
-    let port = container
-        .get_host_port_ipv4(27017)
-        .await
-        .expect("container port");
-    let config = Config {
-        mongodb_uri: format!("mongodb://{host}:{port}"),
-        mongodb_server_selection_timeout_ms: 5000,
-        ..Config::default()
-    };
-    let db = Db::connect(&config).await.expect("connect + ping");
-
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    // The session store is now in-memory (#198): the SessionRepo no longer takes a
+    // `Db`, so this harness no longer connects to the container. The container is
+    // still started (kept alive via `_container`) so the suite's docker self-skip
+    // gate stays meaningful and the wiring is ready for the rest of AppState.
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let github_app =
         GithubAppTokens::with_api(&github_config(), Arc::new(FakeGithubApi::default()))
             .expect("github app");
