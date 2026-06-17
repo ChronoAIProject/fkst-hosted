@@ -721,7 +721,8 @@ function M.restart_observe_timeout_due(row, surface, state, facts, now_seconds)
   end
   local due = M.liveness_timeout_due_with_facts(row, state, facts, now_seconds) == true
   if not due then
-    return false
+    local scan = surface == "liveness_scan" or surface == "issue_liveness_scan"
+    return scan and M.liveness_timeout_decision_with_facts(row, state, facts, now_seconds).action == "redrive"
   end
   if type(row.timeout_surfaces) == "table" and row.timeout_surfaces[tostring(surface or "")] == true then
     return true
@@ -872,11 +873,11 @@ end
 
 function M.liveness_timeout_decision_with_facts(row, state, facts, now_seconds)
   local due, age = M.liveness_timeout_due_with_facts(row, state, facts, now_seconds)
+  local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or max_timeout_attempts
+  local heartbeat = M.actionable_epoch_heartbeat_decision(row, state, facts, due, age, limit)
+  if heartbeat ~= nil then return heartbeat end
   if not due then
-    return {
-      action = "wait",
-      age_minutes = age,
-    }
+    return { action = "wait", age_minutes = age }
   end
   return timeout_escalation(row, state, age, facts)
 end

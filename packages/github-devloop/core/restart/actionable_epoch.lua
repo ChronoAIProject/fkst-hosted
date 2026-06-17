@@ -209,6 +209,45 @@ local function resolve_live_defer_epoch(row, state, facts, now_seconds)
   return invalid("live-defer marker absent but no durable clear fact or never-deferred proof exists")
 end
 
+local function heartbeat_freshness_minutes(row)
+  local freshness_ms = tonumber(row and row.defer and row.defer.freshness_ms)
+  if freshness_ms == nil or freshness_ms <= 0 then
+    return nil
+  end
+  return freshness_ms / (60 * 1000)
+end
+
+local function resolve_live_defer_heartbeat(row, state, facts, now_seconds)
+  if type(M.restart_row_liveness_signal) ~= "function" then
+    return invalid("heartbeat liveness signal resolver is unavailable")
+  end
+  local signal = M.restart_row_liveness_signal(row, state, facts, now_seconds)
+  local freshness_minutes = heartbeat_freshness_minutes(row)
+  local now_ms = tonumber(now_seconds) and tonumber(now_seconds) * 1000 or nil
+  if freshness_minutes == nil or now_ms == nil then
+    return invalid("heartbeat defer freshness is invalid")
+  end
+  if signal.age_minutes ~= nil then
+    if signal.age_minutes < freshness_minutes then
+      local eval = deferred("heartbeat marker fresh")
+      eval.heartbeat_age_minutes = signal.age_minutes
+      return eval
+    end
+    local heartbeat_ms = now_ms - (signal.age_minutes * 60 * 1000)
+    local stale_ms = heartbeat_ms + (freshness_minutes * 60 * 1000)
+    local eval = actionable(row, state, stale_ms, tostring(row.defer.producer) .. ":stale", "heartbeat marker stale")
+    eval.heartbeat_age_minutes = signal.age_minutes
+    return eval
+  end
+  local entry_ms = state_entry_ms(state)
+  if entry_ms == nil then
+    return invalid("heartbeat marker absent and state entry epoch is missing")
+  end
+  local eval = actionable(row, state, entry_ms + (freshness_minutes * 60 * 1000), tostring(row.defer.producer) .. ":missing", "heartbeat marker missing")
+  eval.heartbeat_age_minutes = nil
+  return eval
+end
+
 function M.actionable_epoch_generation_key(row, state, eval)
   if type(eval) ~= "table" or eval.status ~= "actionable" then
     return nil
@@ -230,6 +269,9 @@ function M.actionable_epoch_resolve(row, state, facts, now_seconds)
   if row.actionable_epoch.source == "live_defer_epoch:v1" then
     return resolve_live_defer_epoch(row, state, facts, now_seconds)
   end
+  if row.actionable_epoch.source == "live_defer_heartbeat:v1" then
+    return resolve_live_defer_heartbeat(row, state, facts, now_seconds)
+  end
   return invalid("unsupported actionable_epoch.source")
 end
 
@@ -237,6 +279,22 @@ function M.actionable_epoch_timeout_due(row, state, facts, now_seconds)
   local eval = M.actionable_epoch_resolve(row, state, facts, now_seconds)
   if type(facts) == "table" then
     facts.actionable_epoch_eval = eval
+  end
+  if row.actionable_epoch.source == "live_defer_heartbeat:v1" then
+    if eval.status ~= "actionable" then
+      return false, eval.heartbeat_age_minutes
+    end
+    local now_ms = tonumber(now_seconds) and tonumber(now_seconds) * 1000 or nil
+    local epoch_ms = tonumber(eval.epoch_ms)
+    if now_ms == nil or epoch_ms == nil or now_ms < epoch_ms then
+      return false, eval.heartbeat_age_minutes
+    end
+    local age = math.floor((now_ms - epoch_ms) / 60000)
+    local budget = row.budget and tonumber(row.budget.minutes) or nil
+    if budget == nil or age < budget then
+      return false, eval.heartbeat_age_minutes or age
+    end
+    return true, eval.heartbeat_age_minutes or age
   end
   if eval.status ~= "actionable" then
     return false, nil
@@ -262,18 +320,65 @@ function M.actionable_epoch_timeout_attempt(row, state, facts)
   local comments = facts and facts.current and facts.current.comments or nil
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
   local current = M.timeout_attempt_v2_round(comments, proposal_id, row, eval.generation_key)
+  if row and row.actionable_epoch and row.actionable_epoch.source == "live_defer_heartbeat:v1" then
+    return math.max(
+      current,
+      M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0,
+      M.version_timeout_round(state and state.version, row and row.from_state) or 0
+    )
+  end
   if tostring(eval.generation_opened_by or ""):find("^state%-entry:v1:") then
     return math.max(current, M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0, M.version_timeout_round(state and state.version, row and row.from_state) or 0)
   end
   return current
 end
 
+function M.actionable_epoch_heartbeat_decision(row, state, facts, due, age, limit)
+  local eval = facts and facts.actionable_epoch_eval
+  if not (row
+    and row.actionable_epoch
+    and row.actionable_epoch.source == "live_defer_heartbeat:v1"
+    and type(eval) == "table"
+    and eval.status == "actionable") then
+    return nil
+  end
+  local missing = tostring(eval.generation_opened_by or ""):find(":missing$", 1, false) ~= nil
+  if missing then
+    if age == nil then return { action = "wait", age_minutes = age } end
+    if due then return nil end
+    local attempt = M.liveness_timeout_attempt(row, state, facts)
+    return {
+      action = "redrive",
+      attempt = attempt + 1,
+      age_minutes = age,
+      version = M.next_liveness_timeout_version(row, state, facts),
+    }
+  end
+  if not due then
+    if M.liveness_timeout_attempt(row, state, facts) <= 0 then
+      return {
+        action = "redrive",
+        attempt = 1,
+        age_minutes = age,
+        version = M.next_liveness_timeout_version(row, state, facts),
+      }
+    end
+    return { action = "wait", age_minutes = age }
+  end
+  return {
+    action = "escalate",
+    attempt = limit,
+    age_minutes = age,
+  }
+end
+
 function M.restart_row_has_registered_actionable_epoch(row)
   if type(row) ~= "table" or type(row.actionable_epoch) ~= "table" then
     return false
   end
-  return row.actionable_epoch.source == "live_defer_epoch:v1"
-    and M.restart_liveness_epoch_sources()[row.actionable_epoch.source] ~= nil
+  local source = row.actionable_epoch.source
+  return (source == "live_defer_epoch:v1" or source == "live_defer_heartbeat:v1")
+    and M.restart_liveness_epoch_sources()[source] ~= nil
 end
 
 end

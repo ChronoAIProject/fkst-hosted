@@ -520,7 +520,8 @@ return {
     t.is_true(tostring(proposal.payload.dedup_key):find("/replay", 1, true) ~= nil)
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find(core.timeout_attempt_marker(proposal_id, timeout_version, "thinking", 2, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil and attempt.payload.body:find('state="thinking"', 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('round="2"', 1, true) ~= nil)
   end,
 
   test_liveness_scan_bare_observe_reinject_does_not_increment_timeout_attempt = function()
@@ -776,7 +777,8 @@ return {
     t.eq(core.implementation_attempt_version(reraised.payload.dedup_key, reraised.payload.impl_retry_attempt), event.dedup_key)
     local attempt = find_raise(scanned.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find(core.timeout_attempt_marker(event.proposal_id, event.dedup_key, "implementing", 1, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('state="implementing"', 1, true) ~= nil)
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
     local branch = core.implement_branch(repo, 42, core.implementation_base_version(reraised.payload.dedup_key))

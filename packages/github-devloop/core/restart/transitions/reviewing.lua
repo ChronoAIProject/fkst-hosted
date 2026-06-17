@@ -14,7 +14,27 @@ return function(M, h)
       birth_from = "pr-open",
     },
     liveness_class_id = "reviewing.active",
-    watchdog = watchdog("live-defer", 150),
+    watchdog = {
+      mode = "live-defer",
+      budget_ms = 150 * 60 * 1000,
+      on_stale = {
+        op = "redrive_receiver",
+        producer = "review-converge-round",
+      },
+    },
+    actionable_epoch = {
+      source = "live_defer_heartbeat:v1",
+      generation_source = "same_as_actionable_epoch",
+      live_marker = "review-converge-round:v1",
+      producer = "review-converge-round",
+    },
+    defer = {
+      kind = "heartbeat",
+      live_marker = "review-converge-round:v1",
+      producer = "review-converge-round",
+      freshness_ms = 120 * 60 * 1000,
+      redrive_opens_generation = true,
+    },
     terminal = false,
     to_states = { "merge-ready", "fixing", "review-meta", "blocked" },
     driving_queue = "devloop_reviewing",

@@ -458,6 +458,12 @@ local function pipeline_timeout(event)
     end
     local due, age_minutes = core.liveness_timeout_due_with_facts(row, state, timeout_facts, now())
     local decision = core.liveness_timeout_decision_with_facts(row, state, timeout_facts, now())
+    if row
+      and row.actionable_epoch
+      and row.actionable_epoch.source == "live_defer_heartbeat:v1" then
+      local signal = core.restart_row_liveness_signal(row, state, timeout_facts, now())
+      age_minutes = signal.age_minutes or age_minutes
+    end
     local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or nil
     if not due or decision.action ~= "escalate" or tonumber(decision.attempt) < tonumber(reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(no-longer-over-budget)", "current marker is no longer at timeout escalation threshold")

@@ -10,7 +10,27 @@ return function(M, h)
   return {
     from_state = "thinking",
     liveness_class_id = "thinking.active",
-    watchdog = watchdog("live-defer", 150),
+    watchdog = {
+      mode = "live-defer",
+      budget_ms = 150 * 60 * 1000,
+      on_stale = {
+        op = "redrive_receiver",
+        producer = "converge-round",
+      },
+    },
+    actionable_epoch = {
+      source = "live_defer_heartbeat:v1",
+      generation_source = "same_as_actionable_epoch",
+      live_marker = "converge-round:v1",
+      producer = "converge-round",
+    },
+    defer = {
+      kind = "heartbeat",
+      live_marker = "converge-round:v1",
+      producer = "converge-round",
+      freshness_ms = 120 * 60 * 1000,
+      redrive_opens_generation = true,
+    },
     terminal = false,
     to_states = { "ready", "blocked" },
     driving_queue = "consensus.proposal",

@@ -10,7 +10,27 @@ return function(M, h)
   return {
     from_state = "implementing",
     liveness_class_id = "implementing.active",
-    watchdog = watchdog("live-defer", 45),
+    watchdog = {
+      mode = "live-defer",
+      budget_ms = 45 * 60 * 1000,
+      on_stale = {
+        op = "redrive_receiver",
+        producer = "implement-attempt",
+      },
+    },
+    actionable_epoch = {
+      source = "live_defer_heartbeat:v1",
+      generation_source = "same_as_actionable_epoch",
+      live_marker = "implement-attempt:v1",
+      producer = "implement-attempt",
+    },
+    defer = {
+      kind = "heartbeat",
+      live_marker = "implement-attempt:v1",
+      producer = "implement-attempt",
+      freshness_ms = 120 * 60 * 1000,
+      redrive_opens_generation = true,
+    },
     terminal = false,
     to_states = { "pr-open", "impl-failed" },
     driving_queue = "devloop_ready",

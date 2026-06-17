@@ -17,6 +17,7 @@ return function(M, h)
       allows_state_entry_if_never_deferred = true,
     },
     defer = {
+      kind = "release_gate",
       live_marker = "dependency-wait:v1",
       freshness_ms = 525600 * 60 * 1000,
       clear_fact = "dependency-release:v1",

@@ -64,6 +64,7 @@ local function synthetic_live_defer_row()
       budget_ms = 45 * 60 * 1000,
     },
     defer = {
+      kind = "release_gate",
       live_marker = "synthetic-live:v1",
       freshness_ms = 60 * 60 * 1000,
       clear_fact = "synthetic-clear:v1",
@@ -73,6 +74,49 @@ local function synthetic_live_defer_row()
     budget = {
       minutes = 45,
       receiver_max_work_justification = "Synthetic fixture only.",
+    },
+  }
+end
+
+local function synthetic_heartbeat_row()
+  return {
+    from_state = "synthetic-heartbeat",
+    terminal = false,
+    liveness_class_id = "synthetic.heartbeat",
+    watchdog = {
+      mode = "live-defer",
+      budget_ms = 45 * 60 * 1000,
+      on_stale = {
+        op = "redrive_receiver",
+        producer = "implement-attempt",
+      },
+    },
+    actionable_epoch = {
+      source = "live_defer_heartbeat:v1",
+      generation_source = "same_as_actionable_epoch",
+      live_marker = "implement-attempt:v1",
+      producer = "implement-attempt",
+    },
+    defer = {
+      kind = "heartbeat",
+      live_marker = "implement-attempt:v1",
+      producer = "implement-attempt",
+      freshness_ms = 45 * 60 * 1000,
+      redrive_opens_generation = true,
+    },
+    budget = {
+      minutes = 45,
+      receiver_max_work_justification = "Synthetic fixture only.",
+    },
+    liveness_contract = {
+      mode = "live-defer",
+      signal = {
+        family = "implement-attempt",
+        producer = "implement-attempt",
+        surface = "issue-comment-stream",
+        version_form = "raw",
+        max_age_minutes = 120,
+      },
     },
   }
 end
@@ -98,6 +142,16 @@ return {
     t.eq(sources["live_defer_epoch:v1"].requires_live_marker, true)
     t.eq(sources["live_defer_epoch:v1"].requires_clear_fact, true)
     t.eq(sources["live_defer_epoch:v1"].requires_observed_fact, true)
+    t.eq(sources["live_defer_heartbeat:v1"].durable, true)
+    t.eq(sources["live_defer_heartbeat:v1"].opens_generation, "spawn_or_redrive_only")
+    t.eq(sources["live_defer_heartbeat:v1"].excludes_deferred_time, true)
+    t.eq(sources["live_defer_heartbeat:v1"].requires_live_marker, true)
+    t.eq(sources["live_defer_heartbeat:v1"].requires_producer, true)
+    t.eq(sources["live_defer_heartbeat:v1"].requires_freshness_ms, true)
+    t.eq(sources["live_defer_heartbeat:v1"].requires_redrive_opens_generation, true)
+    t.eq(sources["live_defer_heartbeat:v1"].forbids_clear_fact, true)
+    t.eq(sources["live_defer_heartbeat:v1"].forbids_observed_fact, true)
+    t.eq(sources["live_defer_heartbeat:v1"].forbids_clear_opens_generation, true)
   end,
 
   test_row_budget_rows_declare_state_entry_actionable_epoch = function()
@@ -115,30 +169,18 @@ return {
 
   test_known_liveness_contract_violations_inventory_is_exact = function()
     local inventory = core.known_liveness_contract_violations()
-    assert_inventory_errors(inventory, "reviewing", {
-      ["reviewing: live-defer row must declare actionable_epoch.source"] = true,
-      ["reviewing: live-defer row must declare defer"] = true,
-    })
-    assert_inventory_errors(inventory, "implementing", {
-      ["implementing: live-defer row must declare actionable_epoch.source"] = true,
-      ["implementing: live-defer row must declare defer"] = true,
-    })
-    assert_inventory_errors(inventory, "thinking", {
-      ["thinking: live-defer row must declare actionable_epoch.source"] = true,
-      ["thinking: live-defer row must declare defer"] = true,
-    })
     local count = 0
     for _ in pairs(inventory) do
       count = count + 1
     end
-    t.eq(count, 3)
+    t.eq(count, 0)
   end,
 
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
     local strict = core.strict_restart_liveness_contract_errors()
     for _, state in ipairs({ "reviewing", "implementing", "thinking" }) do
-      t.is_true(core.liveness_contract_inventory_is_listed_violation(state, strict), state)
+      t.eq(core.liveness_contract_inventory_is_listed_violation(state, strict), false, state)
     end
     t.eq(core.liveness_contract_inventory_is_listed_violation("ready", strict), false)
   end,
@@ -150,18 +192,11 @@ return {
     local errors = core.restart_liveness_inventory_errors(rows)
     t.is_true(contains_error(errors, "pr-open: non-terminal row must declare actionable_epoch.source"))
 
-    by_state.reviewing.actionable_epoch = {
-      source = "live_defer_epoch:v1",
-      generation_source = "same_as_actionable_epoch",
-    }
-    by_state.reviewing.defer = {
-      live_marker = "review-converge-round:v1",
-      freshness_ms = 150 * 60 * 1000,
-      clear_fact = "review-converge-clear:v1",
-      observed_fact = "review-converge-observed:v1",
-      clear_opens_generation = true,
-    }
-    errors = core.restart_liveness_inventory_errors(rows)
+    errors = core.restart_liveness_inventory_errors(core.restart_transition_table(), {
+      reviewing = {
+        ["reviewing: live-defer row must declare actionable_epoch.source"] = true,
+      },
+    })
     t.is_true(contains_error(errors, "reviewing: listed known_liveness_contract_violations entry is stale and must be removed"))
   end,
 
@@ -175,6 +210,7 @@ return {
 
   test_887_ready_model_fixture_uses_dependency_release_epoch_after_p2 = function()
     local ready = rows_by_state(core.restart_transition_table()).ready
+    t.eq(ready.defer.kind, "release_gate")
     local errors = core.strict_restart_liveness_contract_errors({ ready })
     t.eq(#errors, 0)
 
@@ -239,5 +275,56 @@ return {
     local errors = core.strict_restart_liveness_contract_errors({ row })
     t.is_true(contains_error(errors, "synthetic-live-defer-bad: live-defer row declares state_entry epoch source which cannot exclude deferred time"))
     t.is_true(contains_error(errors, "synthetic-live-defer-bad: state_entry:v1 is illegal for live-defer rows because deferred time can accrue before actionability"))
+  end,
+
+  test_heartbeat_deferred_rows_pass_strict_contract = function()
+    local by_state = rows_by_state(core.restart_transition_table())
+    local expected = {
+      implementing = "implement-attempt",
+      reviewing = "review-converge-round",
+      thinking = "converge-round",
+    }
+    for state, producer in pairs(expected) do
+      local row = by_state[state]
+      t.eq(row.actionable_epoch.source, "live_defer_heartbeat:v1", state)
+      t.eq(row.defer.kind, "heartbeat", state)
+      t.eq(row.defer.producer, producer, state)
+      t.eq(row.defer.live_marker, producer .. ":v1", state)
+      t.eq(row.defer.freshness_ms, row.liveness_contract.signal.max_age_minutes * 60 * 1000, state)
+      t.eq(row.defer.redrive_opens_generation, true, state)
+      t.eq(row.watchdog.on_stale.op, "redrive_receiver", state)
+      t.eq(row.watchdog.on_stale.producer, producer, state)
+      t.eq(#core.strict_restart_liveness_contract_errors({ row }), 0, state)
+    end
+  end,
+
+  test_heartbeat_defer_rejects_clear_fact_shape = function()
+    local row = synthetic_heartbeat_row()
+    row.defer.clear_fact = "synthetic-clear:v1"
+    local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "synthetic-heartbeat: heartbeat defer must not declare clear_fact"))
+  end,
+
+  test_release_gate_still_requires_clear_fact_and_passes_when_declared = function()
+    local ready = rows_by_state(core.restart_transition_table()).ready
+    t.eq(#core.strict_restart_liveness_contract_errors({ ready }), 0)
+    local row = copy_value(ready)
+    row.defer.clear_fact = nil
+    local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "ready: release_gate defer must declare durable clear_fact"))
+  end,
+
+  test_heartbeat_defer_rejects_missing_redrive_generation = function()
+    local row = synthetic_heartbeat_row()
+    row.defer.redrive_opens_generation = nil
+    local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "synthetic-heartbeat: heartbeat defer.redrive_opens_generation must be true"))
+  end,
+
+  test_heartbeat_defer_rejects_missing_stale_redrive = function()
+    local row = synthetic_heartbeat_row()
+    row.watchdog.on_stale = nil
+    local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "synthetic-heartbeat: heartbeat defer must declare watchdog.on_stale.op=redrive_receiver"))
   end,
 }

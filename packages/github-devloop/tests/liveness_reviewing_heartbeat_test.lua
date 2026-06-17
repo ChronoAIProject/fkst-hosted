@@ -186,7 +186,7 @@ return {
     t.eq(find_pr_comment_with(result, "fkst:github-devloop:timeout-attempt:v1"), nil)
   end,
 
-  test_liveness_scan_reviewing_stale_pr_converge_round_climbs_to_blocked = function()
+  test_liveness_scan_reviewing_stale_past_budget_pr_converge_round_climbs_to_blocked = function()
     local timeout_version = version .. "/timeout/reviewing/3"
     local result = run_with_pr_comments("liveness-scan-reviewing-pr-heartbeat-stale", {
       core.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", version, "dev"),
@@ -246,7 +246,7 @@ return {
     t.eq(find_pr_comment_with(result, "fkst:github-devloop:timeout-attempt:v1"), nil)
   end,
 
-  test_observe_pr_reviewing_stale_pr_converge_round_escalates_timeout = function()
+  test_observe_pr_reviewing_stale_past_budget_pr_converge_round_escalates_timeout = function()
     local timeout_version = version .. "/timeout/reviewing/2"
     local result = run_observe_with_pr_comments("observe-pr-reviewing-pr-heartbeat-stale", {
       core.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", version, "dev"),

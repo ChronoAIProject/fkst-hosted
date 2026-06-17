@@ -29,22 +29,21 @@ local epoch_sources = {
     requires_clear_fact = true,
     requires_observed_fact = true,
   },
+  ["live_defer_heartbeat:v1"] = {
+    durable = true,
+    opens_generation = "spawn_or_redrive_only",
+    excludes_deferred_time = true,
+    requires_live_marker = true,
+    requires_producer = true,
+    requires_freshness_ms = true,
+    requires_redrive_opens_generation = true,
+    forbids_clear_fact = true,
+    forbids_observed_fact = true,
+    forbids_clear_opens_generation = true,
+  },
 }
 
-local known_liveness_contract_violations = {
-  reviewing = {
-    ["reviewing: live-defer row must declare actionable_epoch.source"] = true,
-    ["reviewing: live-defer row must declare defer"] = true,
-  },
-  implementing = {
-    ["implementing: live-defer row must declare actionable_epoch.source"] = true,
-    ["implementing: live-defer row must declare defer"] = true,
-  },
-  thinking = {
-    ["thinking: live-defer row must declare actionable_epoch.source"] = true,
-    ["thinking: live-defer row must declare defer"] = true,
-  },
-}
+local known_liveness_contract_violations = {}
 
 local function copy_table(map)
   local out = {}
@@ -122,13 +121,103 @@ local function validate_epoch(row, errors)
   if source.durable ~= true then
     table.insert(errors, state .. ": actionable_epoch.source must be durable: " .. tostring(epoch.source))
   end
-  if source.opens_generation ~= true then
+  if source.opens_generation ~= true and source.opens_generation ~= "spawn_or_redrive_only" then
     table.insert(errors, state .. ": actionable_epoch.source must open a generation: " .. tostring(epoch.source))
   end
   if epoch.generation_source ~= "same_as_actionable_epoch" then
     table.insert(errors, state .. ": actionable_epoch.generation_source must be same_as_actionable_epoch")
   end
   return epoch, source
+end
+
+local function validate_release_gate_defer(row, source, errors)
+  local state = state_name(row)
+  local defer = row and row.defer or nil
+  if not non_empty_string(defer.live_marker) then
+    table.insert(errors, state .. ": release_gate defer must declare live_marker")
+  end
+  if tonumber(defer.freshness_ms) == nil or tonumber(defer.freshness_ms) <= 0 then
+    table.insert(errors, state .. ": release_gate defer must declare freshness_ms")
+  end
+  if not non_empty_string(defer.clear_fact) then
+    table.insert(errors, state .. ": release_gate defer must declare durable clear_fact")
+  end
+  if not non_empty_string(defer.observed_fact) then
+    table.insert(errors, state .. ": release_gate defer must declare durable observed_fact")
+  end
+  if defer.clear_opens_generation ~= true then
+    table.insert(errors, state .. ": release_gate defer.clear_opens_generation must be true")
+  end
+  if defer.redrive_opens_generation ~= nil then
+    table.insert(errors, state .. ": release_gate defer must not declare redrive_opens_generation")
+  end
+  local epoch_source = row and row.actionable_epoch and row.actionable_epoch.source
+  if epoch_source ~= "live_defer_epoch:v1" and epoch_source ~= "defer_clear_fact:v1" then
+    table.insert(errors, state .. ": release_gate defer must use live_defer_epoch:v1 or defer_clear_fact:v1")
+  end
+  if source ~= nil and source.excludes_deferred_time ~= true then
+    table.insert(errors, state .. ": live-defer row declares state_entry epoch source which cannot exclude deferred time")
+  end
+  if source ~= nil and source.allowed_when == "no_defer_possible" then
+    table.insert(errors, state .. ": state_entry:v1 is illegal for live-defer rows because deferred time can accrue before actionability")
+  end
+end
+
+local function registered_heartbeat_producer(row, defer)
+  local signal = row and row.liveness_contract and row.liveness_contract.signal
+  if type(signal) ~= "table" then
+    return false
+  end
+  if signal.producer ~= defer.producer then
+    return false
+  end
+  if signal.family ~= defer.producer then
+    return false
+  end
+  local binding = type(M.liveness_signal_producer_contract) == "function"
+    and M.liveness_signal_producer_contract(defer.producer)
+    or nil
+  return type(binding) == "table"
+end
+
+local function validate_heartbeat_defer(row, errors)
+  local state = state_name(row)
+  local defer = row and row.defer or nil
+  local epoch = row and row.actionable_epoch or nil
+  if not non_empty_string(defer.live_marker) then
+    table.insert(errors, state .. ": heartbeat defer must declare live_marker")
+  end
+  if not non_empty_string(defer.producer) then
+    table.insert(errors, state .. ": heartbeat defer must declare producer")
+  end
+  if tonumber(defer.freshness_ms) == nil or tonumber(defer.freshness_ms) <= 0 then
+    table.insert(errors, state .. ": heartbeat defer must declare freshness_ms")
+  end
+  if defer.redrive_opens_generation ~= true then
+    table.insert(errors, state .. ": heartbeat defer.redrive_opens_generation must be true")
+  end
+  if epoch == nil or epoch.source ~= "live_defer_heartbeat:v1" then
+    table.insert(errors, state .. ": heartbeat defer must use live_defer_heartbeat:v1")
+  end
+  if defer.clear_fact ~= nil then
+    table.insert(errors, state .. ": heartbeat defer must not declare clear_fact")
+  end
+  if defer.observed_fact ~= nil then
+    table.insert(errors, state .. ": heartbeat defer must not declare observed_fact")
+  end
+  if defer.clear_opens_generation ~= nil then
+    table.insert(errors, state .. ": heartbeat defer must not declare clear_opens_generation")
+  end
+  local on_stale = row and row.watchdog and row.watchdog.on_stale
+  if type(on_stale) ~= "table" or on_stale.op ~= "redrive_receiver" then
+    table.insert(errors, state .. ": heartbeat defer must declare watchdog.on_stale.op=redrive_receiver")
+  end
+  if type(on_stale) == "table" and on_stale.producer ~= nil and on_stale.producer ~= defer.producer then
+    table.insert(errors, state .. ": heartbeat defer watchdog.on_stale producer must match defer.producer")
+  end
+  if not registered_heartbeat_producer(row, defer) then
+    table.insert(errors, state .. ": heartbeat defer producer is not a registered live-defer producer: " .. tostring(defer.producer))
+  end
 end
 
 local function validate_defer(row, source, errors)
@@ -138,27 +227,15 @@ local function validate_defer(row, source, errors)
     table.insert(errors, state .. ": live-defer row must declare defer")
     return
   end
-  if not non_empty_string(defer.live_marker) then
-    table.insert(errors, state .. ": live-defer defer must declare live_marker")
+  if defer.kind == "release_gate" then
+    validate_release_gate_defer(row, source, errors)
+    return
   end
-  if tonumber(defer.freshness_ms) == nil or tonumber(defer.freshness_ms) <= 0 then
-    table.insert(errors, state .. ": live-defer defer must declare freshness_ms")
+  if defer.kind == "heartbeat" then
+    validate_heartbeat_defer(row, errors)
+    return
   end
-  if not non_empty_string(defer.clear_fact) then
-    table.insert(errors, state .. ": live-defer row may clear defer but has no durable defer-clear epoch source")
-  end
-  if not non_empty_string(defer.observed_fact) then
-    table.insert(errors, state .. ": live-defer defer must declare durable observed_fact")
-  end
-  if defer.clear_opens_generation ~= true then
-    table.insert(errors, state .. ": live-defer defer.clear_opens_generation must be true")
-  end
-  if source ~= nil and source.excludes_deferred_time ~= true then
-    table.insert(errors, state .. ": live-defer row declares state_entry epoch source which cannot exclude deferred time")
-  end
-  if source ~= nil and source.allowed_when == "no_defer_possible" then
-    table.insert(errors, state .. ": state_entry:v1 is illegal for live-defer rows because deferred time can accrue before actionability")
-  end
+  table.insert(errors, state .. ": live-defer defer.kind must be release_gate or heartbeat")
 end
 
 local function validate_row(row, errors)
@@ -211,6 +288,8 @@ local function validate_runtime_provenance(row, errors)
         body = M.dependency_release_marker("github-devloop/issue/provenance/repo/1", "restart-liveness-provenance"),
       },
     }
+  elseif row.actionable_epoch.source == "live_defer_heartbeat:v1" then
+    now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   end
   local ok, eval = pcall(M.actionable_epoch_resolve, row, {
     state = row.from_state,

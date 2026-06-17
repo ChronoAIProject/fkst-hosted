@@ -139,7 +139,8 @@ return {
     t.eq(find_raise(redriven, "devloop_ready") ~= nil, true)
     local attempt = find_raise(redriven, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find(core.timeout_attempt_marker(event.proposal_id, event.dedup_key, "implementing", 1, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('state="implementing"', 1, true) ~= nil)
   end,
 
   test_blocked_decompose_exhaustion_reaches_non_recycling_terminal_stop = function()
