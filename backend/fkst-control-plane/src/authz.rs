@@ -146,22 +146,28 @@ impl Authorizer {
             return Ok(());
         }
 
-        // Need to check org role.
+        // Need to check org role. Owner-only (#219): the NyxID client is built
+        // whenever auth is enabled, but org-role is an SA-only lookup — skip it
+        // (treat as non-member) when no service account is configured, exactly
+        // as the pre-#219 `None`-client owner-only branch did. Never issue an
+        // empty-credential SA call.
         let org_role = match (res.org_id, &self.nyxid) {
-            (Some(org_id), Some(client)) => match client.org_role(org_id, &ctx.user_id).await {
-                Ok(role) => role,
-                Err(error) => {
-                    tracing::error!(
-                        org_id,
-                        user_id = %ctx.user_id,
-                        error = %error,
-                        "nyxid org-role lookup failed; failing closed"
-                    );
-                    return Err(AppError::Unavailable(
-                        "authorization service unavailable".to_string(),
-                    ));
+            (Some(org_id), Some(client)) if client.has_service_account() => {
+                match client.org_role(org_id, &ctx.user_id).await {
+                    Ok(role) => role,
+                    Err(error) => {
+                        tracing::error!(
+                            org_id,
+                            user_id = %ctx.user_id,
+                            error = %error,
+                            "nyxid org-role lookup failed; failing closed"
+                        );
+                        return Err(AppError::Unavailable(
+                            "authorization service unavailable".to_string(),
+                        ));
+                    }
                 }
-            },
+            }
             _ => None,
         };
 
@@ -226,22 +232,27 @@ impl Authorizer {
         if ctx.has_permission(permissions::ADMIN) {
             return Ok(());
         }
+        // Owner-only (#219): org-role is SA-only; without a service account the
+        // owner-only client cannot resolve it, so treat the caller as a
+        // non-member (Forbidden) rather than issuing an empty-credential call.
         let role = match &self.nyxid {
-            Some(client) => match client.org_role(org_id, &ctx.user_id).await {
-                Ok(role) => role,
-                Err(error) => {
-                    tracing::error!(
-                        org_id,
-                        user_id = %ctx.user_id,
-                        error = %error,
-                        "nyxid org-role lookup failed during require_org_writer"
-                    );
-                    return Err(AppError::Unavailable(
-                        "authorization service unavailable".to_string(),
-                    ));
+            Some(client) if client.has_service_account() => {
+                match client.org_role(org_id, &ctx.user_id).await {
+                    Ok(role) => role,
+                    Err(error) => {
+                        tracing::error!(
+                            org_id,
+                            user_id = %ctx.user_id,
+                            error = %error,
+                            "nyxid org-role lookup failed during require_org_writer"
+                        );
+                        return Err(AppError::Unavailable(
+                            "authorization service unavailable".to_string(),
+                        ));
+                    }
                 }
-            },
-            None => None,
+            }
+            _ => None,
         };
         match role {
             Some(OrgRole::Admin | OrgRole::Member) => Ok(()),
@@ -411,6 +422,49 @@ mod tests {
             .await
             .expect_err("must fail");
         assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn owner_only_client_skips_org_role_lookup() {
+        // Owner-only (#219): the NyxID client is built (so per-session token +
+        // Ornn work) but carries NO service account. A cross-org Read must NOT
+        // issue the SA-only org-role lookup — if it did, the unreachable host
+        // would surface as Unavailable. Instead the caller is treated as a
+        // non-member and the Read denial maps to anti-enumeration NotFound,
+        // byte-identical to the pre-#219 `None`-client owner-only branch.
+        let client = NyxIdClient::new_owner_only(
+            "http://127.0.0.1:1",
+            "api-github",
+            std::time::Duration::from_secs(30),
+        )
+        .expect("owner-only client");
+        let authz = Authorizer::new(Some(client));
+        let ctx = ctx("bob", &[]);
+        let res = own(Some("alice"), Some("org-1"));
+        let err = authz
+            .authorize(&ctx, res, Action::Read, "package", "pkg-1")
+            .await
+            .expect_err("must deny");
+        assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn owner_only_client_require_org_writer_is_forbidden_not_unavailable() {
+        // The org-writer gate likewise treats an owner-only client as a
+        // non-member (Forbidden), never an SA-call outage (Unavailable).
+        let client = NyxIdClient::new_owner_only(
+            "http://127.0.0.1:1",
+            "api-github",
+            std::time::Duration::from_secs(30),
+        )
+        .expect("owner-only client");
+        let authz = Authorizer::new(Some(client));
+        let ctx = ctx("bob", &[]);
+        let err = authz
+            .require_org_writer(&ctx, "org-1")
+            .await
+            .expect_err("must deny");
+        assert!(matches!(err, AppError::Forbidden(_)), "got {err:?}");
     }
 
     // ---- #142: DB-free goal/session ownership (sub-keyed) ----

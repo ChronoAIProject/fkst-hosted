@@ -102,6 +102,12 @@ pub enum NyxIdError {
     /// logging the token itself.
     #[error("nyxid user token rejected for api-key mint")]
     UserTokenRejected,
+    /// An SA-only operation (`service_token`, `exchange_token`, or an org-role /
+    /// member lookup) was invoked on an owner-only client built WITHOUT a
+    /// service account (#219). Returned instead of panicking so callers can
+    /// surface a clear misconfiguration; the user-token paths never hit this.
+    #[error("nyxid service account not configured")]
+    ServiceAccountUnconfigured,
 }
 
 // ---- DTOs ----
@@ -242,8 +248,15 @@ struct Inner {
     /// build the generic `/api/v1/proxy/s/{slug}` shape, which needs the raw
     /// slug rather than the legacy `/api/v1/proxy/{slug}` path.
     github_proxy_slug: String,
-    client_id: String,
-    client_secret: SecretString,
+    /// Service-account credentials for the OAuth client-credentials grant.
+    /// `None` in owner-only mode (#219): the user-token paths (per-session key
+    /// mint, Ornn proxy, github_hub, repo-create) all authenticate with the
+    /// forwarded user token via `bearer_auth`, so a deploy needs no service
+    /// account just to enable them. The SA-only operations (`service_token`,
+    /// `exchange_token`, org-role / member lookups) are reachable only when this
+    /// is `Some`; called without it they fail with a clear error, never a panic.
+    client_id: Option<String>,
+    client_secret: Option<SecretString>,
     http: reqwest::Client,
     /// Service-token cache.
     token_cache: RwLock<Option<CachedToken>>,
@@ -269,7 +282,10 @@ impl fmt::Debug for NyxIdClient {
         f.debug_struct("NyxIdClient")
             .field("base_url", &self.inner.base_url)
             .field("client_id", &self.inner.client_id)
-            .field("client_secret", &"<redacted>")
+            .field(
+                "client_secret",
+                &self.inner.client_secret.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }
@@ -307,17 +323,58 @@ fn with_via_selector(github_path: &str, connection_id: &str) -> String {
 }
 
 impl NyxIdClient {
-    /// Build a new NyxIdClient. `base_url` is the NyxID issuer base (injectable
-    /// for wiremock testing). `github_proxy_slug` is the downstream-service slug
-    /// NyxID resolves to inject the user's GitHub credential; the full proxy
-    /// base path `/api/v1/proxy/{slug}` is built once here so the route shape
-    /// stays configurable per deployment (default [`DEFAULT_GITHUB_PROXY_SLUG`]).
-    /// `cache_ttl` controls how long org-role and user-orgs results are cached.
+    /// Build a new NyxIdClient WITH a service account. `base_url` is the NyxID
+    /// issuer base (injectable for wiremock testing). `github_proxy_slug` is the
+    /// downstream-service slug NyxID resolves to inject the user's GitHub
+    /// credential; the full proxy base path `/api/v1/proxy/{slug}` is built once
+    /// here so the route shape stays configurable per deployment (default
+    /// [`DEFAULT_GITHUB_PROXY_SLUG`]). `cache_ttl` controls how long org-role and
+    /// user-orgs results are cached.
+    ///
+    /// Use [`Self::new_owner_only`] when no service account is configured (#219):
+    /// the user-token paths work identically, but the SA-only operations
+    /// (`service_token`, `exchange_token`, org-role lookups) become unavailable.
     pub fn new(
         base_url: &str,
         github_proxy_slug: &str,
         client_id: String,
         client_secret: SecretString,
+        cache_ttl: Duration,
+    ) -> Result<Self, NyxIdError> {
+        Self::build(
+            base_url,
+            github_proxy_slug,
+            Some(client_id),
+            Some(client_secret),
+            cache_ttl,
+        )
+    }
+
+    /// Build a NyxIdClient WITHOUT a service account (owner-only mode, #219).
+    ///
+    /// Constructed from the NyxID base URL alone, this client drives every path
+    /// that authenticates with the forwarded user token (`bearer_auth`):
+    /// per-session key mint, the Ornn proxy, the github_hub connections lookups,
+    /// and repo-create. The SA-only operations (`service_token`,
+    /// `exchange_token`, org-role / member lookups) are disabled and return
+    /// [`NyxIdError::ServiceAccountUnconfigured`] rather than panicking, so the
+    /// `Authorizer`'s owner-only branch never issues an empty-credential SA call.
+    pub fn new_owner_only(
+        base_url: &str,
+        github_proxy_slug: &str,
+        cache_ttl: Duration,
+    ) -> Result<Self, NyxIdError> {
+        Self::build(base_url, github_proxy_slug, None, None, cache_ttl)
+    }
+
+    /// Shared construction for both the SA-backed [`Self::new`] and the
+    /// owner-only [`Self::new_owner_only`]. Credentials ride as `Option`s so a
+    /// single code path builds either client shape.
+    fn build(
+        base_url: &str,
+        github_proxy_slug: &str,
+        client_id: Option<String>,
+        client_secret: Option<SecretString>,
         cache_ttl: Duration,
     ) -> Result<Self, NyxIdError> {
         let http = reqwest::Client::builder()
@@ -340,6 +397,25 @@ impl NyxIdClient {
                 cache_ttl,
             }),
         })
+    }
+
+    /// Whether this client carries a service account (#219). Owner-only clients
+    /// (built via [`Self::new_owner_only`]) return `false`, letting SA-gated
+    /// callers (e.g. the `Authorizer`'s org-role path) skip the SA-only call
+    /// entirely rather than issue it and fail closed.
+    pub fn has_service_account(&self) -> bool {
+        self.inner.client_id.is_some() && self.inner.client_secret.is_some()
+    }
+
+    /// Resolve the configured service-account credentials, or return
+    /// [`NyxIdError::ServiceAccountUnconfigured`] for an owner-only client
+    /// (#219). Confines the "both-or-neither" assumption (enforced at config
+    /// load) to one place so SA-only call sites read cleanly.
+    fn service_credentials(&self) -> Result<(&str, &SecretString), NyxIdError> {
+        match (&self.inner.client_id, &self.inner.client_secret) {
+            (Some(id), Some(secret)) => Ok((id.as_str(), secret)),
+            _ => Err(NyxIdError::ServiceAccountUnconfigured),
+        }
     }
 
     /// Obtain a valid service token (client-credentials grant). Cached;
@@ -366,6 +442,9 @@ impl NyxIdClient {
                 }
             }
         }
+        // Owner-only clients (#219) carry no service account: refuse loudly with
+        // a typed error rather than minting against empty credentials.
+        let (client_id, client_secret) = self.service_credentials()?;
         let url = format!("{}{}", self.inner.base_url, TOKEN_PATH);
         let response = self
             .inner
@@ -373,8 +452,8 @@ impl NyxIdClient {
             .post(&url)
             .form(&[
                 ("grant_type", "client_credentials"),
-                ("client_id", &self.inner.client_id),
-                ("client_secret", self.inner.client_secret.expose_secret()),
+                ("client_id", client_id),
+                ("client_secret", client_secret.expose_secret()),
             ])
             .send()
             .await
@@ -547,6 +626,10 @@ impl NyxIdClient {
         &self,
         subject_token: &SecretString,
     ) -> Result<DelegatedToken, NyxIdError> {
+        // RFC 8693 exchange is an SA-authenticated grant: an owner-only client
+        // (#219) cannot perform it. Fail with the same typed error as the
+        // client-credentials grant rather than sending empty credentials.
+        let (client_id, client_secret) = self.service_credentials()?;
         let url = format!("{}{}", self.inner.base_url, TOKEN_PATH);
         let response = self
             .inner
@@ -562,8 +645,8 @@ impl NyxIdClient {
                     "subject_token_type",
                     "urn:ietf:params:oauth:token-type:access_token",
                 ),
-                ("client_id", &self.inner.client_id),
-                ("client_secret", self.inner.client_secret.expose_secret()),
+                ("client_id", client_id),
+                ("client_secret", client_secret.expose_secret()),
             ])
             .send()
             .await
@@ -1047,6 +1130,73 @@ mod tests {
             Duration::from_secs(30),
         )
         .expect("client build")
+    }
+
+    /// Owner-only client (#219): built from the base URL alone, no SA creds.
+    fn owner_only_client(server_uri: &str) -> NyxIdClient {
+        NyxIdClient::new_owner_only(
+            server_uri,
+            DEFAULT_GITHUB_PROXY_SLUG,
+            Duration::from_secs(30),
+        )
+        .expect("owner-only client build")
+    }
+
+    // ---- owner-only (#219) ----
+
+    #[test]
+    fn sa_client_reports_service_account_present() {
+        let client = test_client("http://localhost");
+        assert!(client.has_service_account());
+    }
+
+    #[test]
+    fn owner_only_client_reports_no_service_account() {
+        let client = owner_only_client("http://localhost");
+        assert!(!client.has_service_account());
+    }
+
+    #[tokio::test]
+    async fn owner_only_service_token_errors_without_calling_nyxid() {
+        // The mock asserts ZERO requests: an owner-only client must short-circuit
+        // before any network call, returning the typed misconfiguration error.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let client = owner_only_client(&server.uri());
+        let err = client.service_token().await.expect_err("must refuse");
+        assert!(matches!(err, NyxIdError::ServiceAccountUnconfigured));
+    }
+
+    #[tokio::test]
+    async fn owner_only_exchange_token_errors_without_calling_nyxid() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let client = owner_only_client(&server.uri());
+        let err = client
+            .exchange_token(&SecretString::from("user_tok".to_string()))
+            .await
+            .expect_err("must refuse");
+        assert!(matches!(err, NyxIdError::ServiceAccountUnconfigured));
+    }
+
+    #[test]
+    fn owner_only_client_debug_omits_secret_marker() {
+        // The Debug projection must show `client_secret: None` (no `<redacted>`
+        // marker) for an owner-only client, and never leak any secret material.
+        let client = owner_only_client("http://localhost");
+        let debug = format!("{client:?}");
+        assert!(debug.contains("client_secret: None"), "got: {debug}");
+        assert!(!debug.contains("<redacted>"), "got: {debug}");
     }
 
     // ---- service_token ----

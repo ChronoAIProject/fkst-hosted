@@ -13,6 +13,7 @@ use fkst_control_plane::nyxid::NyxIdClient;
 use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
 use fkst_control_plane::router::{build_router, mount_internal};
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
+use fkst_control_plane::startup::build_nyxid_client;
 use fkst_control_plane::state::AppState;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -142,37 +143,40 @@ async fn main() -> ExitCode {
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let auth_mode = config.auth.clone();
 
-    // Build the NyxID client ONCE for the Authorizer. Only construct a
-    // NyxIdClient when auth is enabled AND both service-account credentials
-    // are present.
-    let nyxid_client: Option<NyxIdClient> = match (
+    // Build the NyxID client ONCE for the Authorizer and the user-token paths.
+    // Owner-only model (#219): the client is built from `AuthMode::Enabled`
+    // ALONE (which carries the NyxID base URL), because every feature it drives
+    // by default — per-session key mint, Ornn proxy, github_hub, repo-create —
+    // authenticates with the FORWARDED USER TOKEN, not the service account. The
+    // service account (`NYXID_CLIENT_ID/SECRET`) stays OPTIONAL: when present it
+    // also enables the SA-only org features; when absent the user-token paths
+    // are unaffected and SA-only calls fail with a typed error (never a panic).
+    let nyxid_client: Option<NyxIdClient> = match build_nyxid_client(
         &auth_mode,
-        &config.nyxid_client_id,
-        &config.nyxid_client_secret,
+        config.nyxid_client_id.as_deref(),
+        config.nyxid_client_secret.as_ref(),
+        &config.nyxid_github_proxy_slug,
+        std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
     ) {
-        (fkst_control_plane::auth::AuthMode::Enabled(settings), Some(id), Some(secret)) => {
-            match NyxIdClient::new(
-                &settings.base_url,
-                &config.nyxid_github_proxy_slug,
-                id.clone(),
-                secret.clone(),
-                std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
-            ) {
-                Ok(client) => {
-                    tracing::info!("NyxID org features enabled");
-                    Some(client)
-                }
-                Err(error) => {
-                    tracing::error!(error = %error, "failed to build NyxID client");
-                    return ExitCode::FAILURE;
-                }
+        Ok(client) => {
+            if let Some(ref client) = client {
+                let sa = client.has_service_account();
+                tracing::info!(
+                    service_account = sa,
+                    "NyxID client built (org features {})",
+                    if sa {
+                        "enabled"
+                    } else {
+                        "disabled (owner-only)"
+                    }
+                );
             }
+            client
         }
-        (fkst_control_plane::auth::AuthMode::Enabled(_), None, None) => {
-            tracing::warn!("NyxID org features disabled: NYXID_CLIENT_ID/SECRET not configured");
-            None
+        Err(error) => {
+            tracing::error!(error = %error, "failed to build NyxID client");
+            return ExitCode::FAILURE;
         }
-        _ => None,
     };
 
     // The Authorizer is given the (optional) NyxID client. Share-aware package
@@ -273,9 +277,10 @@ async fn main() -> ExitCode {
     //         self-expires after FKST_SESSION_KEY_TTL_SECS — no service-account
     //         revoke at teardown (NyxID rejects it on a human-minted key). The
     //         origin is the NyxID issuer base URL (the SAME host that issues the
-    //         inbound user JWTs we mint against). Requires the NyxID service
-    //         client (built above) AND an enabled auth mode (which carries the
-    //         base URL); when either is absent, provisioning stays disabled and
+    //         inbound user JWTs we mint against). Owner-only (#219): this is
+    //         gated on AUTH BEING ENABLED, not on the service account — the key
+    //         is minted with the user's own token, so `NYXID_CLIENT_ID/SECRET`
+    //         is not required. When auth is disabled, provisioning stays off and
     //         the driver behaves exactly as pre-#111.
     match (&nyxid_client, &auth_mode) {
         (Some(client), fkst_control_plane::auth::AuthMode::Enabled(settings)) => {
@@ -287,10 +292,7 @@ async fn main() -> ExitCode {
             tracing::info!("per-session nyxid token provisioning enabled");
         }
         _ => {
-            tracing::info!(
-                "per-session nyxid token provisioning disabled \
-                 (requires auth enabled with NYXID_CLIENT_ID/SECRET)"
-            );
+            tracing::info!("per-session nyxid token provisioning disabled (requires auth enabled)");
         }
     }
 
@@ -299,8 +301,10 @@ async fn main() -> ExitCode {
     //         the session user (via the #111 NyxID token through the `ornn-api`
     //         proxy) and installs them into the per-session CODEX_HOME (#112)
     //         before the engine spawns. The catalog API consumes the same
-    //         client. Requires the NyxID service client (the proxy host); when
-    //         absent, injection stays disabled and the catalog answers 503.
+    //         client. Owner-only (#219): the Ornn proxy is reached with the
+    //         session user's token, so this needs only the NyxID client (built
+    //         whenever auth is enabled), NOT the service account. When auth is
+    //         disabled, injection stays off and the catalog answers 503.
     let ornn_client: Option<fkst_control_plane::ornn::OrnnClient> = match &nyxid_client {
         Some(client) => match fkst_control_plane::ornn::OrnnClient::with_nyxid(
             client.clone(),
@@ -317,9 +321,7 @@ async fn main() -> ExitCode {
             }
         },
         None => {
-            tracing::info!(
-                "ornn skill injection + catalog disabled (requires NYXID_CLIENT_ID/SECRET)"
-            );
+            tracing::info!("ornn skill injection + catalog disabled (requires auth enabled)");
             None
         }
     };
