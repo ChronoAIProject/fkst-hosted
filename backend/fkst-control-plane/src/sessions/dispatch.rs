@@ -162,10 +162,15 @@ pub(super) async fn resolve_dispatch(
         .await
         .map_err(DispatchError::EnvProfile)?;
     if let (Some(setup), Some(token)) = (inner.nyxid.get(), raw_token) {
-        let (_handle, entries) =
-            nyxid_token::provision(&setup.client, session_id, &setup.origin, token)
-                .await
-                .map_err(DispatchError::NyxidProvision)?;
+        let (_handle, entries) = nyxid_token::provision(
+            &setup.client,
+            session_id,
+            &setup.origin,
+            token,
+            setup.key_ttl,
+        )
+        .await
+        .map_err(DispatchError::NyxidProvision)?;
         // The two entries (the secret key + the non-secret origin) are non-reserved
         // and survive the engine env filter, so merge them into the profile the
         // run starts with — identical to drive_inner's B4 merge.

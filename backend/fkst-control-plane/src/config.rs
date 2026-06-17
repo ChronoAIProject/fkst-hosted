@@ -91,6 +91,15 @@ mod defaults {
         30
     }
 
+    /// TTL (seconds) for a per-session NyxID agent key (#216). The key carries
+    /// `expires_at = now + this`, so it SELF-EXPIRES rather than relying on a
+    /// service-account revoke NyxID rejects. Default 24h: long enough for any
+    /// realistic engine run, short enough to bound a leaked key's blast radius.
+    /// Must be > 0.
+    pub(super) fn session_key_ttl_secs() -> u64 {
+        86_400
+    }
+
     /// Liveness TTL for the in-memory worker registry (#134): a worker whose
     /// last heartbeat is older than this is dropped from `live_workers` and
     /// expired by the sweeper. Must be > 0.
@@ -248,6 +257,8 @@ struct AuthVars {
     auth_nyxid_base_url: Option<String>,
     #[serde(default = "defaults::nyxid_org_cache_ttl_secs")]
     nyxid_org_cache_ttl_secs: u64,
+    #[serde(default = "defaults::session_key_ttl_secs")]
+    session_key_ttl_secs: u64,
     #[serde(default = "defaults::nyxid_github_proxy_slug")]
     nyxid_github_proxy_slug: String,
 }
@@ -317,6 +328,11 @@ pub struct Config {
     /// TTL in seconds for the NyxID org-role and user-orgs caches.
     /// Env: `FKST_NYXID_ORG_CACHE_TTL_SECS`. Default 30, zero rejected.
     pub nyxid_org_cache_ttl_secs: u64,
+    /// TTL in seconds for a per-session NyxID agent key (#216): the key is
+    /// minted with `expires_at = now + this`, so it self-expires (the primary
+    /// cleanup mechanism — the service-account revoke route NyxID rejects).
+    /// Env: `FKST_SESSION_KEY_TTL_SECS`. Default 86400 (24h), zero rejected.
+    pub session_key_ttl_secs: u64,
     /// Downstream-service slug NyxID resolves to inject the user's GitHub
     /// credential on proxied requests; the client builds the proxy base path
     /// `/api/v1/proxy/{slug}` from it. Env: `FKST_NYXID_GITHUB_PROXY_SLUG`.
@@ -398,6 +414,7 @@ impl fmt::Debug for Config {
                 &self.nyxid_client_secret.as_ref().map(|_| "<redacted>"),
             )
             .field("nyxid_org_cache_ttl_secs", &self.nyxid_org_cache_ttl_secs)
+            .field("session_key_ttl_secs", &self.session_key_ttl_secs)
             .field("nyxid_github_proxy_slug", &self.nyxid_github_proxy_slug)
             // The vault master key never reaches any Debug/log output.
             .field("vault_value_byte_cap", &self.vault_value_byte_cap)
@@ -444,6 +461,7 @@ impl Default for Config {
             nyxid_client_id: None,
             nyxid_client_secret: None,
             nyxid_org_cache_ttl_secs: defaults::nyxid_org_cache_ttl_secs(),
+            session_key_ttl_secs: defaults::session_key_ttl_secs(),
             nyxid_github_proxy_slug: defaults::nyxid_github_proxy_slug(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
@@ -539,6 +557,14 @@ impl Config {
                 "FKST_NYXID_ORG_CACHE_TTL_SECS must be at least 1".to_string(),
             ));
         }
+        // A zero session-key TTL would mint an already-expired key, breaking
+        // every engine run at startup — reject it loudly, mirroring the guards
+        // above. The key self-expires after this many seconds (#216).
+        if auth.session_key_ttl_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_SESSION_KEY_TTL_SECS must be at least 1".to_string(),
+            ));
+        }
         // Fail-closed: a blank slug builds `/api/v1/proxy/` which NyxID cannot
         // resolve to a downstream GitHub credential, so reject it loudly rather
         // than degrade GitHub proxying silently. `trim` also rejects whitespace.
@@ -616,6 +642,7 @@ impl Config {
             nyxid_client_id,
             nyxid_client_secret,
             nyxid_org_cache_ttl_secs: auth.nyxid_org_cache_ttl_secs,
+            session_key_ttl_secs: auth.session_key_ttl_secs,
             nyxid_github_proxy_slug: auth.nyxid_github_proxy_slug,
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
@@ -1026,6 +1053,36 @@ mod tests {
         assert!(matches!(err, AppError::Config(_)));
         assert!(
             err.to_string().contains("FKST_NYXID_ORG_CACHE_TTL_SECS"),
+            "error must name the variable, got: {err}"
+        );
+    }
+
+    #[test]
+    fn session_key_ttl_defaults_to_one_day() {
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        assert_eq!(config.session_key_ttl_secs, 86_400);
+    }
+
+    #[test]
+    fn session_key_ttl_is_overridable() {
+        let config = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_SESSION_KEY_TTL_SECS", "3600"),
+        ]))
+        .expect("override");
+        assert_eq!(config.session_key_ttl_secs, 3600);
+    }
+
+    #[test]
+    fn zero_session_key_ttl_is_a_config_error_naming_the_variable() {
+        let err = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_SESSION_KEY_TTL_SECS", "0"),
+        ]))
+        .expect_err("zero TTL must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_SESSION_KEY_TTL_SECS"),
             "error must name the variable, got: {err}"
         );
     }

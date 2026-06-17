@@ -492,4 +492,53 @@ mod tests {
             .expect_err("stranger read must deny");
         assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
     }
+
+    // ---- #216: owner-only / no-SA mode never calls NyxID on the happy path ----
+
+    #[tokio::test]
+    async fn owner_path_makes_no_nyxid_call_even_when_a_client_is_present() {
+        // Owner-only authorization must short-circuit BEFORE any NyxID lookup so
+        // it never hits the service-account human-only endpoints NyxID rejects
+        // (#216). Wire a NyxID client pointed at an unreachable address: if the
+        // owner fast-path leaked into an `org_role` call it would fail with
+        // Unavailable; instead the owner is authorized with no IO.
+        let client = NyxIdClient::new(
+            "http://127.0.0.1:1",
+            "api-github",
+            "sa_test".to_string(),
+            SecretString::from("sas_test".to_string()),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("client");
+        let authz = Authorizer::new(Some(client));
+        let ctx = ctx("alice", &[]);
+        // No org_id at all: the owner branch decides without consulting NyxID.
+        let res = own(Some("alice"), Some("org-1"));
+        assert!(authz
+            .authorize(&ctx, res, Action::Manage, "session", "s-1")
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn legacy_no_owner_path_makes_no_nyxid_call() {
+        // A legacy doc with no owner is allowed without any NyxID lookup, even
+        // when a (broken) client is configured — proving the None/owner-only
+        // branch issues no service-account call (#216).
+        let client = NyxIdClient::new(
+            "http://127.0.0.1:1",
+            "api-github",
+            "sa_test".to_string(),
+            SecretString::from("sas_test".to_string()),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("client");
+        let authz = Authorizer::new(Some(client));
+        let ctx = ctx("anyone", &[]);
+        let res = own(None, Some("org-1"));
+        assert!(authz
+            .authorize(&ctx, res, Action::Write, "goal", "g-1")
+            .await
+            .is_ok());
+    }
 }

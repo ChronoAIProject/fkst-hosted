@@ -913,9 +913,16 @@ impl NyxIdClient {
     /// Mint a per-user agent API key on the caller's behalf by presenting the
     /// user's OWN first-party access token as the bearer (NyxID's mint route
     /// is human-only and binds the new key to that user). The body carries the
-    /// key `name`, its `scopes`, and `allow_all_services`; `expires_at` is
-    /// deliberately OMITTED so the key is non-expiring (no refresh treadmill —
-    /// the session revokes it at teardown instead).
+    /// key `name`, its `scopes`, and `allow_all_services`.
+    ///
+    /// `expires_at` is an optional RFC 3339 timestamp (e.g.
+    /// `2026-04-01T00:00:00Z`) forwarded verbatim to NyxID's
+    /// `CreateApiKeyRequest.expires_at` (verified against NyxID `main`:
+    /// `handlers/api_keys.rs` parses RFC 3339 or `YYYY-MM-DD`). When `Some`, the
+    /// minted key SELF-EXPIRES — the primary cleanup mechanism for per-session
+    /// keys (#216), since the service-account revoke route NyxID rejects on
+    /// human-minted keys. `None` keeps the key non-expiring (used only where a
+    /// caller deliberately opts out of TTL).
     ///
     /// Returns [`CreatedKey`] with the one-time-visible `full_key`. A 401/403
     /// maps to the DISTINCT [`NyxIdError::UserTokenRejected`] (the user token
@@ -927,18 +934,25 @@ impl NyxIdClient {
         name: &str,
         scopes: &str,
         allow_all_services: bool,
+        expires_at: Option<&str>,
     ) -> Result<CreatedKey, NyxIdError> {
         let url = format!("{}{API_KEYS_PATH}", self.inner.base_url);
+        // Build the body, adding `expires_at` only when a TTL is requested so
+        // the field is omitted (NyxID treats absent as non-expiring) otherwise.
+        let mut payload = serde_json::json!({
+            "name": name,
+            "scopes": scopes,
+            "allow_all_services": allow_all_services,
+        });
+        if let Some(expiry) = expires_at {
+            payload["expires_at"] = serde_json::Value::String(expiry.to_string());
+        }
         let response = self
             .inner
             .http
             .post(&url)
             .bearer_auth(raw_token.expose_secret())
-            .json(&serde_json::json!({
-                "name": name,
-                "scopes": scopes,
-                "allow_all_services": allow_all_services,
-            }))
+            .json(&payload)
             .send()
             .await
             .map_err(|e| http_err("api-key mint", e))?;
@@ -978,10 +992,16 @@ impl NyxIdClient {
     }
 
     /// Soft-revoke a previously minted agent API key by its id
-    /// (`DELETE {API_KEYS_PATH}/{id}`, NyxID flips `is_active=false`). Uses the
-    /// service token so revoke works at teardown even after the user's own
-    /// token has expired. Accepts both 200 and 204; a missing key (404) is
-    /// treated as already-gone (`Ok`) so a double teardown is idempotent.
+    /// (`DELETE {API_KEYS_PATH}/{id}`, NyxID flips `is_active=false`) using the
+    /// service token. Accepts both 200 and 204; a missing key (404) is treated
+    /// as already-gone (`Ok`) so a repeated call is idempotent.
+    ///
+    /// NOTE (#216): this is NO LONGER the per-session teardown path. NyxID's
+    /// human-only key store rejects the service-account token on a user-minted
+    /// key, so the session driver now relies on a self-expiring TTL
+    /// (`mint_user_api_key`'s `expires_at`) instead of revoking here. The method
+    /// is retained for the owner-only credential cleanup (#257) and stays
+    /// service-token-based to keep that single removal site self-contained.
     pub async fn revoke_api_key(&self, id: &str) -> Result<(), NyxIdError> {
         let token = self.service_token().await?;
         let url = format!("{}{API_KEYS_PATH}/{id}", self.inner.base_url);
@@ -1638,6 +1658,9 @@ mod tests {
             .and(body_string_contains("fkst-session-abc"))
             .and(body_string_contains("proxy"))
             .and(body_string_contains("allow_all_services"))
+            // The requested TTL must reach NyxID as `expires_at` (#216).
+            .and(body_string_contains("expires_at"))
+            .and(body_string_contains("2026-04-01T00:00:00Z"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": "key-id-1",
                 "full_key": "nyxid_ag_deadbeefdeadbeefdeadbeef",
@@ -1650,7 +1673,13 @@ mod tests {
         let client = test_client(&server.uri());
         let raw = SecretString::from("user_raw_tok".to_string());
         let created = client
-            .mint_user_api_key(&raw, "fkst-session-abc", "proxy", true)
+            .mint_user_api_key(
+                &raw,
+                "fkst-session-abc",
+                "proxy",
+                true,
+                Some("2026-04-01T00:00:00Z"),
+            )
             .await
             .expect("mint");
         assert_eq!(created.id, "key-id-1");
@@ -1677,10 +1706,38 @@ mod tests {
         let client = test_client(&server.uri());
         let raw = SecretString::from("tok".to_string());
         let created = client
-            .mint_user_api_key(&raw, "n", "proxy", true)
+            .mint_user_api_key(&raw, "n", "proxy", true, None)
             .await
             .expect("mint 200");
         assert_eq!(created.id, "k2");
+    }
+
+    #[tokio::test]
+    async fn mint_user_api_key_omits_expires_at_when_no_ttl_requested() {
+        use wiremock::matchers::body_json;
+        let server = MockServer::start().await;
+        // With `expires_at = None` the field must NOT appear in the body so
+        // NyxID treats the key as non-expiring; assert the exact JSON shape.
+        Mock::given(method("POST"))
+            .and(path(API_KEYS_PATH))
+            .and(body_json(serde_json::json!({
+                "name": "n",
+                "scopes": "proxy",
+                "allow_all_services": true,
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "k3", "full_key": "nyxid_ag_03"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = test_client(&server.uri());
+        let raw = SecretString::from("tok".to_string());
+        let created = client
+            .mint_user_api_key(&raw, "n", "proxy", true, None)
+            .await
+            .expect("mint without ttl");
+        assert_eq!(created.id, "k3");
     }
 
     #[tokio::test]
@@ -1693,7 +1750,13 @@ mod tests {
             .await;
         let client = test_client(&server.uri());
         let err = client
-            .mint_user_api_key(&SecretString::from("bad".to_string()), "n", "proxy", true)
+            .mint_user_api_key(
+                &SecretString::from("bad".to_string()),
+                "n",
+                "proxy",
+                true,
+                None,
+            )
             .await
             .expect_err("must fail");
         assert!(matches!(err, NyxIdError::UserTokenRejected), "got {err:?}");
@@ -1716,6 +1779,7 @@ mod tests {
                 "n",
                 "proxy",
                 true,
+                None,
             )
             .await
             .expect_err("must fail");
@@ -1732,7 +1796,13 @@ mod tests {
             .await;
         let client = test_client(&server.uri());
         let err = client
-            .mint_user_api_key(&SecretString::from("tok".to_string()), "n", "proxy", true)
+            .mint_user_api_key(
+                &SecretString::from("tok".to_string()),
+                "n",
+                "proxy",
+                true,
+                None,
+            )
             .await
             .expect_err("must fail");
         assert!(matches!(err, NyxIdError::Http(_)), "got {err:?}");
@@ -1814,6 +1884,7 @@ mod tests {
                 "n",
                 "proxy",
                 true,
+                Some("2026-04-01T00:00:00Z"),
             )
             .await
             .expect_err("unreachable");
