@@ -16,6 +16,13 @@ local gate_states = {
   pending = true,
 }
 
+local audit_states = {
+  ["true"] = true,
+  ["false"] = true,
+  pending = true,
+  invalid_self_attested = true,
+}
+
 local required_gate_names = {
   "human_touch",
   "pre_merge_ci",
@@ -331,6 +338,84 @@ function M.autonomy_result_fact(comments, proposal_id, pr_number, version, head_
     end
   end
   return nil
+end
+
+function M.autonomy_audit_valid_autonomous_merge(fact, opts)
+  if type(fact) ~= "table" then
+    return nil
+  end
+  local repo = tostring((type(opts) == "table" and opts.repo) or fact.repo or "")
+  local head_sha = tostring((type(opts) == "table" and opts.merge_commit_sha) or fact.merge_commit_sha or fact.head_sha or "")
+  if repo == "" or not M._is_git_sha(head_sha) then
+    return {
+      valid_autonomous_merge = "invalid_self_attested",
+      reason = "missing-audit-source",
+    }
+  end
+  local pr = {
+    head_sha = head_sha,
+    status_check_rollup = type(opts) == "table" and opts.status_check_rollup or {},
+  }
+  local green, reason = M.evaluate_ci_status_gate(pr, {
+    repo = repo,
+    dept = "autonomy-auditor",
+    proposal_id = tostring(fact.proposal_id or ""),
+  })
+  local claimed_probe = normalize_gate_state(type(fact.gates) == "table" and fact.gates.post_merge_probe or nil)
+  if green then
+    return {
+      valid_autonomous_merge = M.autonomy_valid_autonomous_merge({
+        human_touch = type(fact.gates) == "table" and fact.gates.human_touch or nil,
+        pre_merge_ci = type(fact.gates) == "table" and fact.gates.pre_merge_ci or nil,
+        evidence_manifest = type(fact.gates) == "table" and fact.gates.evidence_manifest or nil,
+        post_merge_probe = "pass",
+        no_revert_reopen = type(fact.gates) == "table" and fact.gates.no_revert_reopen or nil,
+        cost_budget = type(fact.gates) == "table" and fact.gates.cost_budget or nil,
+      }),
+      reason = "audited",
+      gates = {
+        post_merge_probe = "pass",
+      },
+    }
+  end
+  if claimed_probe == "pass" then
+    return {
+      valid_autonomous_merge = "invalid_self_attested",
+      reason = tostring(reason or "missing-post-merge-probe-run"),
+      gates = {
+        post_merge_probe = "fail",
+      },
+    }
+  end
+  local state = "pending"
+  if tostring(reason or "") == "rollup-red" then
+    state = "invalid_self_attested"
+  end
+  return {
+    valid_autonomous_merge = state,
+    reason = tostring(reason or "post-merge-probe-not-green"),
+    gates = {
+      post_merge_probe = "fail",
+    },
+  }
+end
+
+function M.autonomy_audited_result_fact(comments, proposal_id, pr_number, version, head_sha, opts)
+  local fact = M.autonomy_result_fact(comments, proposal_id, pr_number, version, head_sha)
+  if fact == nil then
+    return nil
+  end
+  local audit = M.autonomy_audit_valid_autonomous_merge(fact, opts or {})
+  if type(audit) == "table" and audit.valid_autonomous_merge ~= nil then
+    local state = tostring(audit.valid_autonomous_merge)
+    if not audit_states[state] then
+      state = "invalid_self_attested"
+    end
+    fact.audited_valid_autonomous_merge = state
+    fact.audit_reason = audit.reason
+    fact.audit_gates = audit.gates
+  end
+  return fact
 end
 
 end
