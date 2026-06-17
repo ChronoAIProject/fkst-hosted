@@ -8,6 +8,7 @@ M.spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "devloop_reviewing",
+    "devloop_review_meta",
   },
   stall_window = "10m",
 }
@@ -247,6 +248,32 @@ local function bounded_fix_summary(value)
   return text
 end
 
+local function raise_review_meta(repo, issue_number, fix, reason, detail)
+  local comment_request = core.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
+  local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
+  local add_labels, remove_labels = core.state_label_changes("review-meta")
+  core.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_label_request",
+    "devloop_review_meta",
+  })
+  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if issue_number ~= nil then
+    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+  core.log_raise("fix", fix.proposal_id, "devloop_review_meta", {
+    schema = "github-devloop.review-meta.v1",
+    proposal_id = fix.proposal_id,
+    review_proposal_id = fix.review_proposal_id,
+    review_dedup_key = fix.review_dedup_key,
+    version = fix.version,
+    pr_number = fix.pr_number,
+    n = 0,
+    dedup_key = fix.dedup_key,
+    source_ref = fix.source_ref,
+  })
+end
+
 local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
   core.raise_fix_reviewing({
     dept = "fix",
@@ -408,12 +435,10 @@ local function run_fix_attempt(plan)
       terminal = false,
     })
     return {
-      kind = "reviewing",
+      kind = "review-meta",
       reason = "codex-failed",
-      old_head_sha = plan.fix.reviewed_head_sha,
-      new_head_sha = plan.fix.reviewed_head_sha,
-      summary = stderr,
-      outcome = "rereview: codex-failed",
+      detail = stderr,
+      outcome = "failed: codex-failed",
       started_at = codex_started_at,
       finished_at = now(),
     }
@@ -447,12 +472,10 @@ local function run_fix_attempt(plan)
       terminal = false,
     })
     return {
-      kind = "reviewing",
+      kind = "review-meta",
       reason = "no-fix",
-      old_head_sha = plan.fix.reviewed_head_sha,
-      new_head_sha = plan.fix.reviewed_head_sha,
-      summary = result.stdout or result.stderr,
-      outcome = "rereview: no-fix",
+      detail = result.stdout or result.stderr,
+      outcome = "escalated: no-fix",
       started_at = codex_started_at,
       finished_at = now(),
     }
@@ -489,12 +512,10 @@ local function run_fix_attempt(plan)
   end
   if new_head_sha == plan.fix.reviewed_head_sha then
     return {
-      kind = "reviewing",
+      kind = "review-meta",
       reason = "no-new-head",
-      old_head_sha = plan.fix.reviewed_head_sha,
-      new_head_sha = plan.fix.reviewed_head_sha,
-      summary = result.stdout or result.stderr,
-      outcome = "rereview: no-new-head",
+      detail = result.stdout or result.stderr,
+      outcome = "escalated: no-new-head",
       started_at = codex_started_at,
       finished_at = now(),
     }
@@ -514,7 +535,7 @@ end
 local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_prefix, fail_closed)
   local rechecked_state = core.current_entity_state(pr.comments, fix.proposal_id)
   if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", "skip-stale(write-gate)", tostring(reason_prefix) .. " issue state changed")
+    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", tostring(reason_prefix) .. " issue state changed")
     return nil
   end
   if tostring(pr.state or ""):lower() ~= "open"
@@ -522,7 +543,7 @@ local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_pr
     or tostring(pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
     or not core.is_same_repo_pr_head(pr, repo) then
     local outcome = fail_closed and "fail-closed(write-gate)" or "skip-stale(write-gate)"
-    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
+    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
     if fail_closed then
       error("github-devloop: write-time PR fact changed or head repository missing")
     end
@@ -568,13 +589,12 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     )
     return
   end
+  if outcome.kind == "review-meta" then
+    raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)
+    return
+  end
   if outcome.kind ~= "reviewing" then
     error("github-devloop: unknown fix outcome")
-  end
-
-  if tostring(outcome.new_head_sha or "") == tostring(outcome.old_head_sha or "") then
-    raise_reviewing(repo, issue_number, fix, outcome.old_head_sha, outcome.new_head_sha, outcome.reason, outcome.summary)
-    return
   end
 
   local push = exec_sync({ cmd = core.git_push_branch_cmd(branch), timeout = 120 })
@@ -600,14 +620,14 @@ function pipeline(event)
   local fix = event.payload or {}
   if not core.is_supported_fixing(fix) then
     core.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
-    core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing", "skip-foreign(payload)", "unsupported event payload")
+    core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
   core.log_entry("fix", event, fix.proposal_id, fix.dedup_key)
   local entity = core.parse_entity_proposal_id(fix.proposal_id)
   if entity == nil then
-    core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
   local repo = entity.repo
@@ -618,7 +638,7 @@ function pipeline(event)
 
   local lock_key = core.transition_lock_key(fix.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing", "skip-foreign(proposal_id)", "no transition lock key")
+    core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
 

@@ -502,16 +502,15 @@ return {
     })
     mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
 
-    local result = run_fix(event, opts("fix-no-changes-reviewing", { FKST_GITHUB_WRITE = "1" }))
+    local result = run_fix(event, opts("fix-no-changes-review-meta", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 3)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:review-meta")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
-    t.is_true(comment_body:find(core.fix_marker(event.proposal_id, event.review_proposal_id, event.review_dedup_key, "def456", "def456"), 1, true) ~= nil)
-    t.is_true(comment_body:find("No viable fix.", 1, true) ~= nil)
-    t.eq(find_raise(result.raises, "devloop_review_meta"), nil)
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
-    t.eq(reviewing_raise.payload.version, core.next_fix_version(event.version))
+    t.is_true(comment_body:find("github-devloop fix escalated to review-meta: no-fix", 1, true) ~= nil)
+    t.is_true(comment_body:find("fkst:github-devloop:review-meta:v1", 1, true) ~= nil)
+    t.is_true(comment_body:find('dedup="' .. event.review_dedup_key .. '"', 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "devloop_review_meta").payload.schema, "github-devloop.review-meta.v1")
   end,
 
   test_fix_clean_worktree_with_existing_ahead_commit_reuses_it = function()
