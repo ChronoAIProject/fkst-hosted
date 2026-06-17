@@ -113,12 +113,6 @@ return {
     assert_inventory_errors(inventory, "merge-ready", {
       ["merge-ready: non-terminal row must declare responsibility_signature"] = true,
     })
-    assert_inventory_errors(inventory, "implementing", {
-      ["implementing: non-terminal row must declare responsibility_signature"] = true,
-    })
-    assert_inventory_errors(inventory, "fixing", {
-      ["fixing: non-terminal row must declare responsibility_signature"] = true,
-    })
     assert_inventory_errors(inventory, "blocked", {
       ["blocked: non-terminal row must declare responsibility_signature"] = true,
     })
@@ -126,22 +120,24 @@ return {
     for _ in pairs(inventory) do
       count = count + 1
     end
-    t.eq(count, 6)
+    t.eq(count, 4)
   end,
 
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
     local strict = core.strict_restart_responsibility_contract_errors()
-    for _, state in ipairs({ "ready", "reviewing", "merge-ready", "implementing", "fixing", "blocked" }) do
+    for _, state in ipairs({ "ready", "reviewing", "merge-ready", "blocked" }) do
       t.is_true(core.responsibility_contract_inventory_is_listed_violation(state, strict), state)
     end
+    t.eq(core.responsibility_contract_inventory_is_listed_violation("implementing", strict), false)
+    t.eq(core.responsibility_contract_inventory_is_listed_violation("fixing", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("pr-open", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("merging", strict), false)
   end,
 
   test_clean_single_responsibility_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    for _, state in ipairs({ "thinking", "impl-failed", "pr-open", "review-meta", "merging" }) do
+    for _, state in ipairs({ "thinking", "implementing", "impl-failed", "pr-open", "review-meta", "merging", "fixing" }) do
       local errors = core.strict_restart_responsibility_contract_errors({ by_state[state] })
       t.eq(#errors, 0, state .. ": " .. joined_errors(errors))
     end
