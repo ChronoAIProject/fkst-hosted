@@ -114,8 +114,9 @@ pub async fn create_repo(
     );
 
     // Serialize the request body to bytes for the buffered proxy helper.
-    let body_bytes = serde_json::to_vec(&body)
-        .map_err(|e| CreateRepoError::Malformed(format!("failed to serialize request body: {e}")))?;
+    let body_bytes = serde_json::to_vec(&body).map_err(|e| {
+        CreateRepoError::Malformed(format!("failed to serialize request body: {e}"))
+    })?;
 
     let response = nyxid
         .proxy_github_user(
