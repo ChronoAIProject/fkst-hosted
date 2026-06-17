@@ -1,5 +1,0 @@
----
-"fkst-hosted": patch
----
-
-Split the single multi-stage `backend/Dockerfile` into two per-deployable Dockerfiles (#164): `backend/fkst-control-plane/Dockerfile` (the slim, engine-free controller image — only `fkst-control-plane` + `ca-certificates`) and `backend/fkst-worker/Dockerfile` (the engine-laden worker image — carries the `fkst-substrate` engine built from the pinned `backend/engine.ref`, the codex + nyxid CLIs, the runtime volume, and the `io.fkst.engine.*` provenance). The shared builder stages (codex/engine/cli/server) are carried over verbatim; each file's final stage builds only its own binary (`cargo build -p …`), and the worker image drops the transitional `fkst-control-plane` binary copy now that the controller has its own image (Option A — the control-plane Deployment runs from the worker image until #151, documented in the README). The `docker-build` CI workflow is re-pointed at the two files (no `--target`); the manifest-first workspace dep-cache layering and the `FKST_SUBSTRATE_REF` guard / engine-provenance assertions are preserved.

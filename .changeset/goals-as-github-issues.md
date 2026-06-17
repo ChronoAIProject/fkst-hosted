@@ -1,5 +1,0 @@
----
-"fkst-hosted": minor
----
-
-Make goals database-free (issue #137): replace the Mongo-backed `GoalRepo` with `GoalIssueStore`, which represents a goal as a **GitHub Issue** (durable, human-visible mirror labelled `fkst-hosted:goal` + `status:<status>`) plus **authoritative controller in-memory state** for what must not live in a public issue — the engine prompt/description, the goal↔session link, and the issue-number mapping. Reads are served from memory (never round-tripping GitHub, so the Search budget is untouched); issue writes are the durable mirror and are best-effort. The user-facing Goals API contract (`GoalView` shape, status lifecycle, mutability rules) is unchanged. The prompt/description is **never** written to GitHub; deleting a goal **closes** its issue (GitHub issues cannot be REST-deleted). A goal hidden HTML-comment marker carries the structured fields on the issue body for reconciliation. Single-trigger atomicity remains the controller claim's job (#135) — the `status:*` label only reflects state.

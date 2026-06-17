@@ -1,5 +1,0 @@
----
-"fkst-hosted": minor
----
-
-Reorganize the backend into a three-crate Cargo workspace as the compiler-enforced foundation of the control-plane/worker split (database-free pivot, #145). The single `fkst-hosted-api` crate becomes: `fkst-shared` (role-neutral models + transport clients — depends on `bson`, never on the `mongodb` driver or `axum`), `fkst-control-plane` (the controller — today's full app, renamed) and `fkst-worker` (the worker deployable — a compiling skeleton until engine execution moves to it). `cargo tree -p fkst-worker` carries no `mongodb` and no path-dependency on the control-plane, so "the worker never touches the database" is a structural guarantee. The one Dockerfile now produces two images via `--target` — an engine-laden `worker-runtime` and a slim `control-plane-runtime` — and the Kubernetes deploy splits into control-plane + worker Deployments. Behaviour-preserving: same routes, same tests; engine execution still lives in the control-plane crate (it relocates to the worker in a later issue).

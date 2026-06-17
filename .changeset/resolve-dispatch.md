@@ -1,5 +1,0 @@
----
-"fkst-hosted": patch
----
-
-Add the dormant controller-side `SessionService::resolve_dispatch` (#169, increment 3 of #151): it resolves a session's credentials/config into the serializable `ResolvedDispatch` the worker needs to start an engine — the merged env profile, the first GitHub-App installation token (+expiry), the rendered codex `config.toml`, the resolved Ornn plan, and the mint nonce. It reuses the exact existing resolution helpers (`resolve_env_profile`, `token_with_expiry_for_repo`, `nyxid_token::provision`, the codex render) so it is behaviour-equivalent to the in-process driver, which stays the live, byte-identical code path. The one new factoring is `ornn::resolve_plan` (the resolve half of `inject_pins`, producing an `OrnnPlan` of presigned-URL skills + AGENTS.md appends; the install half is unchanged); `generate_mint_nonce` is lifted to a public `fkst-engine` fn so the nonce scheme is not duplicated. Nothing live calls `resolve_dispatch` yet, so behaviour is unchanged; no secret appears in any `Debug`/log.
