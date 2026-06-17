@@ -183,11 +183,15 @@ pub(crate) async fn execute_dispatch_with(
         start_session_journaler(dispatch, cloned.package_roots.first().map(|p| p.as_path())).await;
     journal::journal_lifecycle(&mut journaler, Transition::Validating).await;
 
-    // (3) Per-session CODEX_HOME (#112/#114): rendered ONLY when the dispatch
-    // carries codex config OR an ornn plan — exactly `prepare_codex_home`'s
-    // condition. Order inside mirrors the driver: 0700 dir, then 0600
-    // config.toml, then each ornn skill install, then each AGENTS.md append.
-    let codex_home = prepare_codex_home(base, dispatch, http).await?;
+    // (3) Per-session CODEX_HOME (#112/#114/#182): rendered when the dispatch
+    // carries codex config OR an ornn plan OR the cloned repo ships a
+    // `.fkst/AGENTS.md` base — exactly `prepare_codex_home`'s widened gate.
+    // Order inside mirrors the driver: 0700 dir, then 0600 config.toml, then each
+    // ornn skill install, then the composed AGENTS.md (repo base above Ornn
+    // blocks). `cloned.project_root` is the worker-owned working tree, so the
+    // repo base is read with ZERO extra GitHub call and NO new dispatch field.
+    let codex_home =
+        prepare_codex_home(base, dispatch, cloned.project_root.as_path(), http).await?;
     let codex_home_path = codex_home.as_ref().map(|guard| guard.path().to_path_buf());
 
     // (4) Build the GoalContext from the resolved dispatch. `description` is the
@@ -257,16 +261,37 @@ pub(crate) async fn execute_dispatch_with(
     })
 }
 
-/// Render the per-session CODEX_HOME, or `None` when the dispatch carries neither
-/// codex config nor an ornn plan (matching `prepare_codex_home`'s gate). Creates
-/// a 0700 dir under `base`, writes a 0600 `config.toml` when present, installs
-/// each ornn skill, and appends each AGENTS.md entry — in the driver's order.
+/// Render the per-session CODEX_HOME, or `None` when the dispatch carries no
+/// codex config, no ornn plan, AND the cloned repo ships no `.fkst/AGENTS.md`
+/// base (the widened #182 gate). Creates a 0700 dir under `base`, writes a 0600
+/// `config.toml` when present, installs each ornn skill, then writes the composed
+/// `AGENTS.md` — the repo base first (verbatim), the Ornn marker blocks below it.
+///
+/// The repo base is read from `project_root` (the worker-owned cloned working
+/// tree) through `fkst_engine::read_repo_agents_md`, which is containment-guarded
+/// via `safe_join` and size-capped; its content is never logged.
 async fn prepare_codex_home(
     base: &Path,
     dispatch: &ResolvedDispatch,
+    project_root: &Path,
     http: &reqwest::Client,
 ) -> Result<Option<TempDir>, ExecError> {
-    if dispatch.codex_config_toml.is_none() && dispatch.ornn.is_none() {
+    // Read the repo's `.fkst/AGENTS.md` base FIRST so it can both widen the gate
+    // (a base alone now warrants a CODEX_HOME) and seed AGENTS.md below. A
+    // containment escape is a trust-boundary rejection (InvalidDispatch); an IO
+    // failure maps through the existing runner-IO mapper.
+    let repo_base = match fkst_engine::read_repo_agents_md(project_root) {
+        Ok(base) => base,
+        Err(RunnerError::InvalidPackage(message)) => {
+            return Err(ExecError::InvalidDispatch(format!(
+                "repo .fkst/AGENTS.md rejected: {message}"
+            )));
+        }
+        Err(other) => return Err(runner_io_to_exec(other)),
+    };
+
+    // Widened gate (#182): a repo base alone now also produces a CODEX_HOME.
+    if dispatch.codex_config_toml.is_none() && dispatch.ornn.is_none() && repo_base.is_none() {
         return Ok(None);
     }
 
@@ -292,20 +317,35 @@ async fn prepare_codex_home(
         .map_err(ExecError::Io)?;
     }
 
-    // Ornn install: each skill (fetched per its source) then each AGENTS.md
-    // append — the same order `inject_pins` applies (skills first, instructions
-    // after). The single install implementation now lives in `fkst-engine`.
-    if let Some(plan) = &dispatch.ornn {
+    // Ornn install: each skill (fetched per its source), the same order
+    // `inject_pins` applies (skills first). The install implementation lives in
+    // `fkst-engine`. The marker-block appends are NOT written here — they are
+    // composed below, on top of the repo base, so precedence lives in one place.
+    let ornn_tail = if let Some(plan) = &dispatch.ornn {
         install_ornn_plan(guard.path(), plan, http).await?;
+        plan.agents_md_appends.join("\n\n")
+    } else {
+        String::new()
+    };
+
+    // Compose AGENTS.md: the repo base first (verbatim), then the Ornn marker
+    // blocks below it (#182). `compose_agents_md` is the single assembly rule
+    // shared with the in-process driver, so both paths emit identical bytes. Only
+    // write when the body is non-empty — a config-only CODEX_HOME (no base, no
+    // ornn) leaves AGENTS.md absent, exactly as before #182.
+    let body = fkst_engine::compose_agents_md(repo_base.as_deref(), &ornn_tail);
+    if !body.is_empty() {
+        std::fs::write(guard.path().join("AGENTS.md"), body).map_err(ExecError::Io)?;
     }
 
     Ok(Some(guard))
 }
 
-/// Install every resolved Ornn skill into `codex_home/skills/<name>/`, then
-/// append every skillset instruction to `codex_home/AGENTS.md`. A presigned-URL
-/// skill is fetched DIRECTLY (no auth) — the URL is sensitive and is never
-/// logged; an inline base64 zip is decoded in-process (no network).
+/// Install every resolved Ornn skill into `codex_home/skills/<name>/`. A
+/// presigned-URL skill is fetched DIRECTLY (no auth) — the URL is sensitive and
+/// is never logged; an inline base64 zip is decoded in-process (no network). The
+/// skillset instruction blocks are composed into AGENTS.md by the caller
+/// (`prepare_codex_home`), layered below any repo `.fkst/AGENTS.md` base (#182).
 async fn install_ornn_plan(
     codex_home: &Path,
     plan: &OrnnPlan,
@@ -327,16 +367,6 @@ async fn install_ornn_plan(
         };
         fkst_engine::install_skill(codex_home, &skill.name, &zip)
             .map_err(|e| ExecError::Ornn(format!("skill {:?}: {e}", skill.name)))?;
-    }
-    // The controller's `resolve_plan` already rendered each append as a full,
-    // named `ornn-skillset:<name>` marker block (the IDENTICAL bytes the
-    // in-process injector writes), so the worker writes them VERBATIM into the
-    // fresh AGENTS.md — separated by a blank line + trailing newline, matching
-    // the in-process `append_instructions` append format exactly. CODEX_HOME is
-    // freshly created per session, so there is no prior content to preserve.
-    if !plan.agents_md_appends.is_empty() {
-        let body = format!("{}\n", plan.agents_md_appends.join("\n\n"));
-        std::fs::write(codex_home.join("AGENTS.md"), body).map_err(ExecError::Io)?;
     }
     Ok(())
 }

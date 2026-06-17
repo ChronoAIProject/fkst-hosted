@@ -41,5 +41,7 @@ pub use materialize::{is_department_main, materialize_helper_script, PreparedPac
 pub use process::{is_pid_alive, GoalEnv};
 pub use runner::{GoalContext, LiveStatus, RunningSession, SessionRunner, StartSpec};
 pub use runtime::{dir_age, RUNTIME_DIR_PREFIX};
-pub use skills::{append_instructions, install_skill, render_marker_block};
+pub use skills::{
+    append_instructions, compose_agents_md, install_skill, read_repo_agents_md, render_marker_block,
+};
 pub use util::is_valid_name;

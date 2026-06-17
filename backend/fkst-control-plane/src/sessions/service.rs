@@ -1640,6 +1640,63 @@ async fn drive_inner(
         }
     }
 
+    // (B5b) Seed the repo's own `.fkst/AGENTS.md` (#182) as the VERBATIM base of
+    // the per-session CODEX_HOME/AGENTS.md, BEFORE the Ornn injection below. The
+    // Ornn marker blocks (B6) `upsert` into existing content via
+    // `append_instructions`, so they layer BELOW this base — producing bytes
+    // identical to the ACTIVE worker path (`compose_agents_md` there assembles the
+    // same base + blocks in one shot; both share the engine helper). `base` is
+    // read from the worker-owned cloned tree (`cloned_project_root`) through the
+    // containment-guarded, size-capped `read_repo_agents_md`; its content is NEVER
+    // logged. A render/IO failure FAILS the start, matching `prepare_codex_home`.
+    // Only the seed-when-CODEX_HOME-exists case is wired for this DORMANT path:
+    // the in-process `prepare_codex_home` renders a CODEX_HOME only when codex
+    // config is present, so a base-only CODEX_HOME (the worker's widened gate) is
+    // intentionally NOT added here — the ACTIVE worker path (#182 step 2) is
+    // production and covers base-only; wiring it into the dormant driver is
+    // disproportionate to its value.
+    if let Some(codex_dir) = codex_home.as_ref() {
+        match fkst_engine::read_repo_agents_md(&cloned_project_root) {
+            Ok(base) => {
+                let body = fkst_engine::compose_agents_md(base.as_deref(), "");
+                if !body.is_empty() {
+                    if let Err(error) = std::fs::write(codex_dir.join("AGENTS.md"), body) {
+                        tracing::error!(session_id = %id, error = %error, "failed to seed repo AGENTS.md base");
+                        let reason = "failed to seed repo .fkst/AGENTS.md base";
+                        journal_finish(
+                            &mut journaler,
+                            Transition::Failed {
+                                exit_code: None,
+                                error: reason.to_string(),
+                            },
+                        )
+                        .await;
+                        fail_session(inner, id, &fence, reason, goal_info).await;
+                        return true;
+                    }
+                    tracing::info!(session_id = %id, "seeded repo .fkst/AGENTS.md as CODEX_HOME base");
+                }
+            }
+            Err(error) => {
+                // A containment escape or IO failure on the repo base FAILS the
+                // start (consistent with `prepare_codex_home` error handling). The
+                // message is client-safe; the file content is never logged.
+                tracing::error!(session_id = %id, error = %error, "failed to read repo .fkst/AGENTS.md");
+                let reason = "failed to read repo .fkst/AGENTS.md";
+                journal_finish(
+                    &mut journaler,
+                    Transition::Failed {
+                        exit_code: None,
+                        error: reason.to_string(),
+                    },
+                )
+                .await;
+                fail_session(inner, id, &fence, reason, goal_info).await;
+                return true;
+            }
+        }
+    }
+
     // (B6) Per-session Ornn skill injection (#114): when the session pinned
     // Ornn skills/skillsets, fetch them as the session user (the #111 NyxID
     // token already merged into `env_profile`) through the `ornn-api` proxy and

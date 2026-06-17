@@ -21,12 +21,64 @@ use secrecy::SecretString;
 
 use super::*;
 
+/// What `.fkst/AGENTS.md` (if anything) the fake cloner plants in the cloned tree
+/// — the #182 repo base. The default (`None`) is the pre-#182 posture (no base).
+#[derive(Clone, Default)]
+enum RepoAgentsMd {
+    /// No `.fkst/AGENTS.md` at all (pre-#182 behavior).
+    #[default]
+    Absent,
+    /// A plain `.fkst/AGENTS.md` carrying `&'static str`.
+    Present(&'static str),
+    /// A `.fkst/AGENTS.md` strictly larger than the engine's 256 KiB cap, so the
+    /// reader truncates it with a logged warning.
+    Oversize,
+    /// `.fkst` is a symlink pointing OUTSIDE the cloned tree — the containment
+    /// escape `read_repo_agents_md` must reject.
+    SymlinkEscape,
+}
+
+/// One byte over the engine's 256 KiB repo-base cap, so the worker proves the
+/// reader truncated (and still produced a CODEX_HOME from the base alone).
+const CAP_BYTES: usize = 256 * 1024;
+
 /// A fake cloner: materializes a `<root>/.fkst/packages/<name>` tree (a minimal
 /// runnable package the engine stub's conformance branch accepts) on a `TempDir`
 /// and returns it as the handle's drop-guard, so the rest of `execute_dispatch`
 /// runs offline. The `TempDir` IS the guard, so the offline test also proves the
-/// clone-dir cleanup path.
-struct FakeCloner;
+/// clone-dir cleanup path. `agents_md` optionally plants the #182 repo base.
+#[derive(Clone, Default)]
+struct FakeCloner {
+    agents_md: RepoAgentsMd,
+}
+
+impl FakeCloner {
+    /// The default fake cloner: no repo `.fkst/AGENTS.md` (pre-#182 posture).
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// A fake cloner that plants a `.fkst/AGENTS.md` base in the cloned tree.
+    fn with_repo_base(body: &'static str) -> Self {
+        Self {
+            agents_md: RepoAgentsMd::Present(body),
+        }
+    }
+
+    /// A fake cloner that plants an oversized (> cap) `.fkst/AGENTS.md`.
+    fn with_oversize_repo_base() -> Self {
+        Self {
+            agents_md: RepoAgentsMd::Oversize,
+        }
+    }
+
+    /// A fake cloner whose `.fkst` is a symlink escaping the cloned tree.
+    fn with_escaping_fkst() -> Self {
+        Self {
+            agents_md: RepoAgentsMd::SymlinkEscape,
+        }
+    }
+}
 
 #[async_trait]
 impl Cloner for FakeCloner {
@@ -42,7 +94,30 @@ impl Cloner for FakeCloner {
             .prefix("fake-clone-")
             .tempdir_in(base)
             .map_err(RunnerError::Io)?;
-        let packages_root = guard.path().join(".fkst/packages");
+
+        // For the escape posture `.fkst` is a symlink to a dir OUTSIDE the tree,
+        // so the package tree (and the AGENTS.md) live in that escaped dir and
+        // resolve THROUGH the symlink. Otherwise `.fkst` is a real dir in-tree.
+        let fkst_dir = match &self.agents_md {
+            RepoAgentsMd::SymlinkEscape => {
+                let outside = tempfile::Builder::new()
+                    .prefix("fake-escape-")
+                    .tempdir_in(base)
+                    .map_err(RunnerError::Io)?;
+                let escaped = outside.keep();
+                std::fs::write(escaped.join("AGENTS.md"), b"escaped").map_err(RunnerError::Io)?;
+                std::os::unix::fs::symlink(&escaped, guard.path().join(".fkst"))
+                    .map_err(RunnerError::Io)?;
+                escaped
+            }
+            _ => {
+                let dir = guard.path().join(".fkst");
+                std::fs::create_dir_all(&dir).map_err(RunnerError::Io)?;
+                dir
+            }
+        };
+
+        let packages_root = fkst_dir.join("packages");
         let mut roots = Vec::new();
         for name in package_names {
             let dir = packages_root.join(name);
@@ -61,6 +136,20 @@ impl Cloner for FakeCloner {
             .map_err(RunnerError::Io)?;
             roots.push(dir.canonicalize().map_err(RunnerError::Io)?);
         }
+
+        // Plant the #182 repo base for the `Present`/`Oversize` postures (the
+        // `Absent` and `SymlinkEscape` postures write no in-tree AGENTS.md).
+        match &self.agents_md {
+            RepoAgentsMd::Present(body) => {
+                std::fs::write(fkst_dir.join("AGENTS.md"), body).map_err(RunnerError::Io)?;
+            }
+            RepoAgentsMd::Oversize => {
+                let big = "x".repeat(CAP_BYTES + 1);
+                std::fs::write(fkst_dir.join("AGENTS.md"), big).map_err(RunnerError::Io)?;
+            }
+            RepoAgentsMd::Absent | RepoAgentsMd::SymlinkEscape => {}
+        }
+
         let project_root = guard.path().canonicalize().map_err(RunnerError::Io)?;
         Ok(ClonedHandle::new(project_root, roots, Box::new(guard)))
     }
@@ -178,7 +267,7 @@ async fn execute_dispatch_spawns_engine_and_writes_session_files() {
     };
     let dispatch = dispatch_with(env, Some(plan));
 
-    let mut session = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner)
+    let mut session = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner::new())
         .await
         .expect("dispatch executes");
 
@@ -238,8 +327,10 @@ async fn execute_dispatch_spawns_engine_and_writes_session_files() {
         codex_dir.join("skills/demo-skill/SKILL.md").is_file(),
         "ornn skill installed"
     );
+    // Ornn-only (no repo `.fkst/AGENTS.md`): AGENTS.md is byte-identical to the
+    // pre-#182 worker write — the joined appends plus a single trailing newline.
     let agents = std::fs::read_to_string(codex_dir.join("AGENTS.md")).expect("AGENTS.md");
-    assert!(agents.contains("Use the dispatched skill."));
+    assert_eq!(agents, "Use the dispatched skill.\n");
 
     // Stop cleanly so the test never leaks a live engine.
     let runner = SessionRunner::new(cfg.clone());
@@ -260,7 +351,7 @@ async fn execute_dispatch_without_codex_or_ornn_skips_codex_home() {
     let mut dispatch = dispatch_with(BTreeMap::new(), None);
     dispatch.codex_config_toml = None;
 
-    let mut session = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner)
+    let mut session = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner::new())
         .await
         .expect("dispatch executes");
 
@@ -287,7 +378,7 @@ async fn execute_dispatch_rejects_a_bad_goal_id() {
     let mut dispatch = dispatch_with(BTreeMap::new(), None);
     dispatch.goal.goal_id = "not-a-uuid".into();
 
-    let err = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner)
+    let err = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner::new())
         .await
         .expect_err("bad goal id must fail");
     assert!(matches!(err, ExecError::InvalidDispatch(_)), "got {err:?}");
@@ -312,8 +403,14 @@ async fn execute_dispatch_rejects_a_bad_base64_skill() {
     };
     let dispatch = dispatch_with(BTreeMap::new(), Some(plan));
 
-    let err = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner)
+    let err = execute_dispatch_with(&cfg, &dispatch, &http, &FakeCloner::new())
         .await
         .expect_err("bad base64 must fail");
     assert!(matches!(err, ExecError::InvalidDispatch(_)), "got {err:?}");
 }
+
+/// Issue #182 AGENTS.md seeding/layering tests, kept in their own file so this
+/// suite stays under the 500-line budget; they reuse this module's test support
+/// via `super`.
+#[path = "executor_agents_md_tests.rs"]
+mod agents_md;
