@@ -1,6 +1,6 @@
 {
   "name": "fkst-hosted",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Unified version source of truth for fkst-hosted (backend + frontend). Managed by Changesets; the version is mirrored into Cargo.toml / the frontend package.json once those exist.",
   "scripts": {

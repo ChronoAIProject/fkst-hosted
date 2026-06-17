@@ -9,6 +9,20 @@ release PR, and frozen into a permanent entry once the release is tagged. Do not
 edit released sections by hand.
 
 <!-- BEGIN PENDING -->
+## v0.2.0 — 2026-06-17
+
+## Fixed
+
+- Worker pods start without an explicit pod-identity env var
+- Few technical bugs fixed
+
+## New Feature
+
+- OpenAPI 3 specification now served at `/openapi.json`
+
+## Changed
+
+- Technical enhancement
 <!-- END PENDING -->
 
 ## v0.1.0 — 2026-06-17
