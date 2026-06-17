@@ -4,11 +4,12 @@
 //! `X-NyxID-Identity-Token` (decoded, not verified) granting `fkst:admin` so it
 //! clears the per-route `fkst:github:*` action gate, PLUS the user's
 //! `Authorization: Bearer` (captured as `user_access_token`) which the proxy
-//! seam exchanges. A single wiremock `MockServer` plays NyxID itself — the
-//! RFC 8693 token-exchange, the connections listing, and the GitHub
-//! credential-injection proxy — so the real
-//! `NyxIdGithubProxy::from_context` → `exchange_token` → `proxy_github_for`
-//! path is exercised end-to-end; no part of the proxy seam is mocked away.
+//! seam forwards DIRECTLY to NyxID (no RFC 8693 exchange, #256). A single
+//! wiremock `MockServer` plays NyxID itself — the connections listing and the
+//! GitHub credential-injection proxy — so the real
+//! `NyxIdGithubProxy::from_context` → `github_connections_user` →
+//! `proxy_github_user_for` path is exercised end-to-end with the forwarded user
+//! token as the bearer; no part of the proxy seam is mocked away.
 //!
 //! The controller is datastore-free (#143), so these tests need no Docker and
 //! run unconditionally; wiremock still drives the fake GitHub/NyxID endpoints.
@@ -32,7 +33,7 @@ use http_body_util::BodyExt;
 use secrecy::SecretString;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 mod support;
@@ -42,9 +43,11 @@ const HEADER_IDENTITY_TOKEN: &str = "X-NyxID-Identity-Token";
 
 /// GitHub-proxy base path the wiremock matchers expect, built from the default
 /// slug so the integration suite tracks the production path shape after the
-/// slug was made configurable. The `app(...)` helper builds its `NyxIdClient`
-/// with `DEFAULT_GITHUB_PROXY_SLUG`, so this must agree with it.
-const GITHUB_PROXY_PATH: &str = "/api/v1/proxy/api-github";
+/// slug was made configurable. The forwarded-user-token helper targets NyxID's
+/// generic `/api/v1/proxy/s/{slug}` credential proxy (#256), so this carries the
+/// `/s/` segment. The `app(...)` helper builds its `NyxIdClient` with
+/// `DEFAULT_GITHUB_PROXY_SLUG`, so this must agree with it.
+const GITHUB_PROXY_PATH: &str = "/api/v1/proxy/s/api-github";
 // Compile-time guard: keep the literal above in lockstep with the public
 // default slug, so a future slug change cannot silently desync these matchers.
 const _: () = assert!(matches!(
@@ -54,9 +57,9 @@ const _: () = assert!(matches!(
 
 // ---- Identity / bearer helpers ----
 
-/// The user's `Authorization: Bearer` token captured as `user_access_token` and
-/// fed to the RFC 8693 exchange. Any string works (the proxy is trusted; the
-/// exchange mock returns the delegated token regardless of the input value).
+/// The user's `Authorization: Bearer` token captured as `user_access_token`.
+/// The proxy seam forwards it DIRECTLY to NyxID (no exchange, #256), so this is
+/// the exact bearer the connections-listing and proxy matchers assert.
 const USER_ACCESS_TOKEN: &str = "user-inbound-token";
 
 /// A proxy-injected identity token (decode-only; signature never checked). It
@@ -83,17 +86,9 @@ struct TestApp {
 
 /// Build the full app with auth ENABLED (proxy-trusted identity) and a real
 /// `NyxIdClient` wired into the authorizer, pointed at `server` (which plays
-/// NyxID's exchange / connections / proxy endpoints).
+/// NyxID's connections / proxy endpoints). No token-exchange mock: the seam
+/// forwards the user's bearer directly (#256).
 async fn app(server: MockServer) -> TestApp {
-    // RFC 8693 token exchange — returns a delegated bearer the proxy will use.
-    Mock::given(method("POST"))
-        .and(path("/oauth/token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "access_token": "delegated_tok", "token_type": "Bearer", "expires_in": 300
-        })))
-        .mount(&server)
-        .await;
-
     let config = Config::default();
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
@@ -131,10 +126,16 @@ async fn app(server: MockServer) -> TestApp {
     }
 }
 
-/// Mount the connections listing returning the given JSON array.
+/// Mount the connections listing returning the given JSON array. The matcher
+/// asserts the forwarded user token is the bearer reaching NyxID (#256): the
+/// seam presents the caller's own token, not an exchanged delegated one.
 async fn mount_connections(server: &MockServer, body: Value) {
     Mock::given(method("GET"))
         .and(path("/api/v1/connections"))
+        .and(header(
+            "authorization",
+            format!("Bearer {USER_ACCESS_TOKEN}").as_str(),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(body))
         .mount(server)
         .await;
@@ -228,10 +229,15 @@ async fn issues_aggregate_merges_two_accounts_with_partial_failure() {
     let server = MockServer::start().await;
     mount_connections(&server, two_connections()).await;
 
-    // octocat succeeds with one issue.
+    // octocat succeeds with one issue. Assert the forwarded user token is the
+    // bearer reaching the proxy (#256), alongside the per-account selector.
     Mock::given(method("GET"))
         .and(path(format!("{GITHUB_PROXY_PATH}/issues")))
         .and(query_param("_nyxid_via", "c-octo"))
+        .and(header(
+            "authorization",
+            format!("Bearer {USER_ACCESS_TOKEN}").as_str(),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
             "id": 1, "number": 7, "title": "octo issue", "state": "open",
             "comments": 0, "html_url": "https://github.com/acme/site/issues/7",
