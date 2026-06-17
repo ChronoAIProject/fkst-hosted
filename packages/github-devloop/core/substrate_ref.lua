@@ -8,6 +8,7 @@ local substrate_branch = "dev"
 local bump_branch = "chore/substrate-ref-bump"
 local bump_title = "chore: bump fkst-substrate pin"
 local lifecycle_version_prefix = "substrate-ref-bump"
+local validate_bump_pr
 
 local function require_repo(repo)
   local value = tostring(repo or "")
@@ -327,6 +328,21 @@ local function lifecycle_proposal_id(repo, pr_number_value)
   return M.pr_proposal_id(repo, pr_number_value)
 end
 
+local function extract_bump_pr_number(text)
+  local body = tostring(text or "")
+  for _, pattern in ipairs({
+    "[Pp][Rr]%s*:%s*#(%d+)",
+    "[Pp]ull%s+[Rr]equest%s*:%s*#(%d+)",
+    "github%.com/[^%s)]+/pull/(%d+)",
+  }) do
+    local value = body:match(pattern)
+    if pr_number(value) ~= nil then
+      return pr_number(value)
+    end
+  end
+  return nil
+end
+
 function M.is_substrate_ref_lifecycle(proposal_id, pr_number_value, version)
   local repo, proposal_pr = M.parse_pr_proposal_id(proposal_id)
   local head_sha = tostring(version or ""):match("^" .. lifecycle_version_prefix .. "/(%x+)$")
@@ -335,7 +351,83 @@ function M.is_substrate_ref_lifecycle(proposal_id, pr_number_value, version)
     and M._is_git_sha(head_sha)
 end
 
-local function validate_bump_pr(repo, base_branch, pr)
+function M.substrate_ref_backing_issue_pr_number(issue)
+  if type(issue) ~= "table" then
+    return nil
+  end
+  local title = tostring(issue.title or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if title ~= bump_title then
+    return nil
+  end
+  local body = tostring(issue.body or "")
+  local normalized = body:lower()
+  if normalized:find("backing issue for the autonomous fkst%-substrate pin bump pr", 1, false) == nil then
+    return nil
+  end
+  if normalized:find("%.fkst/substrate%-ref", 1, false) == nil
+    and normalized:find("fkst%-substrate pin bump", 1, false) == nil then
+    return nil
+  end
+  return extract_bump_pr_number(body)
+end
+
+function M.is_substrate_ref_backing_issue(issue)
+  return M.substrate_ref_backing_issue_pr_number(issue) ~= nil
+end
+
+local function backing_issue_lifecycle_comment(repo, issue, pr, version)
+  local proposal_id = M.proposal_id(repo, issue.number)
+  return table.concat({
+    "github-devloop substrate-ref backing issue handoff: existing PR review",
+    "",
+    "This backing issue is bound to the existing `chore/substrate-ref-bump` PR. It does not enter feature implementation.",
+    "",
+    M.pr_origin_marker(proposal_id, issue.number, bump_branch, version, pr.base_ref_name),
+    M.state_marker(proposal_id, "reviewing", version),
+    "⟦AI:FKST⟧",
+  }, "\n")
+end
+
+function M.maybe_raise_substrate_ref_backing_issue_review(dept, repo, issue, pr_number_value, source_ref)
+  local pr = read_pr(pr_number_value, repo)
+  local ok, reason = validate_bump_pr(repo, pr.base_ref_name, pr)
+  local proposal_id = M.proposal_id(repo, issue and issue.number)
+  if not ok then
+    M.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "backing-issue", "reviewing", "skip-substrate-ref-backing-pr(" .. tostring(reason) .. ")", "referenced substrate-ref bump PR failed validation")
+    return nil
+  end
+
+  local version = lifecycle_version(pr.head_sha)
+  local origin = M.pr_origin_fact(pr.comments)
+  if not M.has_state_marker(pr.comments, proposal_id, "reviewing", version)
+    or origin == nil
+    or tostring(origin.proposal_id or "") ~= tostring(proposal_id)
+    or tostring(origin.branch or "") ~= bump_branch
+    or tostring(origin.impl_version or "") ~= version then
+    local comment_request = M.build_entity_comment_request({
+      kind = "pr",
+      repo = repo,
+      number = pr.number,
+    }, backing_issue_lifecycle_comment(repo, issue, pr, version), M._dedup_key({
+      "substrate-ref-backing",
+      "reviewing",
+      M.safe_repo(repo),
+      tostring(issue and issue.number or ""),
+      tostring(pr.number),
+      tostring(pr.head_sha),
+    }), M.normalize_source_ref(source_ref) or M.pr_source_ref(repo, pr.number))
+    M.log_raise(dept, proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  end
+
+  local payload = M.build_devloop_reviewing_payload({
+    proposal_id = proposal_id,
+    impl_version = version,
+  }, pr.number, M.pr_source_ref(repo, pr.number), version)
+  M.log_raise(dept, proposal_id, "devloop_reviewing", payload)
+  return payload
+end
+
+validate_bump_pr = function(repo, base_branch, pr)
   if type(pr) ~= "table" then
     return false, "missing-pr"
   end
