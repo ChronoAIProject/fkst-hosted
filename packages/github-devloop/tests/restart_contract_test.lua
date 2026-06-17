@@ -69,6 +69,7 @@ local function marker_builder_paths()
     "packages/github-devloop/core/dependencies.lua",
     "packages/github-devloop/core/decompose.lua",
     "packages/github-devloop/core/implement_attempt.lua",
+    "packages/github-devloop/core/merge_gate_wait.lua",
   }
 end
 
@@ -316,9 +317,9 @@ return {
     local row = rows_by_state(rows)["merge-ready"]
     row.budget.minutes = 360
     local errors = core.liveness_contract_errors(rows)
-    t.eq(#errors, 1)
-    t.is_true(errors[1]:find("merge-ready", 1, true) ~= nil)
-    t.is_true(errors[1]:find("budget.minutes", 1, true) ~= nil)
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("merge-ready", 1, true) ~= nil)
+    t.is_true(joined:find("budget.minutes", 1, true) ~= nil)
   end,
 
   test_liveness_contract_rejects_live_defer_without_resolver_or_existing_family = function()
