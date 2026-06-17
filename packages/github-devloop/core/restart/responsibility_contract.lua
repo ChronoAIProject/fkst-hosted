@@ -14,9 +14,6 @@ local known_god_states = {
   ready = {
     ["ready: non-terminal row must declare responsibility_signature"] = "dependency gate and implementation kickoff are still fused until the ready split.",
   },
-  ["merge-ready"] = {
-    ["merge-ready: non-terminal row must declare responsibility_signature"] = "Worst god-state: CI wait, merge start, review carry-over/backward review, fix fallback, and block fallback are still fused.",
-  },
   blocked = {
     ["blocked: non-terminal row must declare responsibility_signature"] = "Terminal hold, operator reentry, and decomposition fanout are still fused until the blocked split.",
   },
@@ -302,6 +299,34 @@ local function validate_phase_monotonicity(row, signature, edges, errors)
   end
 end
 
+local function generation_entry_requires_bump(policy, from_state)
+  if policy == nil then
+    return false
+  end
+  if policy == "always" then
+    return true
+  end
+  if type(policy) ~= "table" then
+    return false
+  end
+  if policy.birth_from == from_state then
+    return false
+  end
+  return policy.reentry_bump == true
+end
+
+local function validate_generation_entry_policy(row, edges, all_rows, errors)
+  local state = state_name(row)
+  for _, edge in ipairs(edges or {}) do
+    local target = all_rows[edge.state]
+    -- Target rows are the sole source for generation-entry requirements.
+    local policy = target and target.generation_entry
+    if generation_entry_requires_bump(policy, state) and edge.bump ~= true then
+      table.insert(errors, state .. ": generation-bearing successor requires generation bump: " .. tostring(edge.state))
+    end
+  end
+end
+
 local function canonical_value(value)
   if type(value) ~= "table" then
     return tostring(value)
@@ -357,6 +382,7 @@ local function validate_row(row, seen, all_rows, errors)
   validate_output_family(row, signature, actual_edges, errors)
   validate_kind_fanout(row, signature, actual_edges, errors)
   validate_phase_monotonicity(row, signature, actual_edges, errors)
+  validate_generation_entry_policy(row, actual_edges, all_rows, errors)
   validate_unique_signature(row, signature, seen, errors)
 end
 

@@ -37,6 +37,15 @@ local function contains_error(errors, needle)
   return joined_errors(errors):find(needle, 1, true) ~= nil
 end
 
+local function successor_by_state(row, state)
+  for _, edge in ipairs(row.responsibility_signature and row.responsibility_signature.successors or {}) do
+    if edge.state == state then
+      return edge
+    end
+  end
+  return nil
+end
+
 local function assert_inventory_errors(inventory, state, expected)
   local listed = inventory[state]
   t.eq(type(listed), "table", state)
@@ -107,9 +116,6 @@ return {
     assert_inventory_errors(inventory, "ready", {
       ["ready: non-terminal row must declare responsibility_signature"] = true,
     })
-    assert_inventory_errors(inventory, "merge-ready", {
-      ["merge-ready: non-terminal row must declare responsibility_signature"] = true,
-    })
     assert_inventory_errors(inventory, "blocked", {
       ["blocked: non-terminal row must declare responsibility_signature"] = true,
     })
@@ -117,15 +123,16 @@ return {
     for _ in pairs(inventory) do
       count = count + 1
     end
-    t.eq(count, 3)
+    t.eq(count, 2)
   end,
 
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
     local strict = core.strict_restart_responsibility_contract_errors()
-    for _, state in ipairs({ "ready", "merge-ready", "blocked" }) do
+    for _, state in ipairs({ "ready", "blocked" }) do
       t.is_true(core.responsibility_contract_inventory_is_listed_violation(state, strict), state)
     end
+    t.eq(core.responsibility_contract_inventory_is_listed_violation("merge-ready", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("reviewing", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("implementing", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("fixing", strict), false)
@@ -135,7 +142,7 @@ return {
 
   test_clean_single_responsibility_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    for _, state in ipairs({ "thinking", "implementing", "impl-failed", "pr-open", "reviewing", "review-meta", "merging", "fixing" }) do
+    for _, state in ipairs({ "thinking", "implementing", "impl-failed", "pr-open", "reviewing", "review-meta", "merge-ready", "merging", "fixing" }) do
       local errors = core.strict_restart_responsibility_contract_errors({ by_state[state] })
       t.eq(#errors, 0, state .. ": " .. joined_errors(errors))
     end
@@ -171,6 +178,37 @@ return {
     t.eq(by_state.blocked.postcondition_family, nil)
   end,
 
+  test_merge_ready_is_clean_merge_eligibility_gate_signature = function()
+    local row = rows_by_state(core.restart_transition_table())["merge-ready"]
+    local signature = row.responsibility_signature
+    t.eq(signature.state_kind, "gate")
+    t.eq(signature.receiver_kind, "merge-controller")
+    t.eq(signature.driving_queue, "devloop_merge_ready")
+    t.eq(signature.liveness_class, "merge_ready.actionable")
+    t.eq(signature.output_postcondition_family, "merge_eligibility_decided")
+    t.eq(signature.decision_type, "MergeEligibility")
+    local by_state = {}
+    for _, edge in ipairs(signature.successors) do
+      by_state[edge.state] = edge
+    end
+    t.eq(by_state.merging.output_variant, "eligible_now")
+    t.eq(by_state.merging.decision_type, "MergeEligibility")
+    t.eq(by_state.merging.postcondition_family, "merge_eligibility_decided")
+    t.eq(by_state.merging.monotonic, true)
+    t.eq(by_state.reviewing.output_variant, "approval_stale")
+    t.eq(by_state.reviewing.decision_type, "MergeEligibility")
+    t.eq(by_state.reviewing.postcondition_family, "merge_eligibility_decided")
+    t.eq(by_state.reviewing.bump, true)
+    t.eq(by_state.fixing.output_variant, "code_repair_needed")
+    t.eq(by_state.fixing.decision_type, "MergeEligibility")
+    t.eq(by_state.fixing.postcondition_family, "merge_eligibility_decided")
+    t.eq(by_state.fixing.bump, true)
+    t.eq(by_state.blocked.output_variant, "watchdog_reconcile_terminal")
+    t.eq(by_state.blocked.terminal, true)
+    t.eq(by_state.blocked.decision_type, nil)
+    t.eq(by_state.blocked.postcondition_family, nil)
+  end,
+
   test_pr_open_is_clean_viability_decision_signature = function()
     local row = rows_by_state(core.restart_transition_table())["pr-open"]
     local signature = row.responsibility_signature
@@ -191,7 +229,7 @@ return {
     t.eq(by_state.fixing.output_variant, "not_mergeable_repair")
     t.eq(by_state.fixing.decision_type, "PrViability")
     t.eq(by_state.fixing.postcondition_family, "pr_viability_routed")
-    t.eq(by_state.fixing.monotonic, true)
+    t.eq(by_state.fixing.bump, true)
   end,
 
   test_terminal_escape_to_non_terminal_state_fails = function()
@@ -272,15 +310,6 @@ return {
     end
     t.is_true(contains_error(errors, "synthetic-terminal-escape: terminal-escape successor must point to a terminal-class state: synthetic-forward"), joined_errors(errors))
     t.is_true(not contains_error(errors, "synthetic-terminal-escape: terminal-escape successor must point to a terminal-class state: blocked"), joined_errors(errors))
-  end,
-
-  test_merge_ready_is_flagged_as_worst_god_state = function()
-    local row = rows_by_state(core.restart_transition_table())["merge-ready"]
-    t.eq(row.responsibility_signature, nil)
-    t.eq(#row.to_states, 4)
-    t.is_true(contains_error(core.strict_restart_responsibility_contract_errors({ row }), "merge-ready: non-terminal row must declare responsibility_signature"))
-    t.is_true(row.to_states[1] == "reviewing")
-    t.is_true(core.stage_rank("reviewing") < core.stage_rank("merge-ready"))
   end,
 
   test_negative_control_unrelated_families_backward_edge_and_two_receivers_fail = function()
@@ -440,6 +469,64 @@ return {
     }
     local errors = core.strict_restart_responsibility_contract_errors({ row })
     t.is_true(contains_error(errors, "merge-ready: backward successor requires generation bump: reviewing"), joined_errors(errors))
+  end,
+
+  test_generation_entry_policy_rejects_merge_ready_fixing_without_bump = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table())["merge-ready"])
+    local fixing = successor_by_state(row, "fixing")
+    t.eq(type(fixing), "table")
+    fixing.bump = nil
+    fixing.monotonic = true
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "merge-ready: generation-bearing successor requires generation bump: fixing"), joined_errors(errors))
+  end,
+
+  test_generation_entry_policy_rejects_synthetic_fixing_entry_without_bump = function()
+    local row = clean_row()
+    row.from_state = "synthetic-fixing-entry"
+    row.to_states = { "fixing" }
+    row.driving_queue = "synthetic_fixing_entry"
+    row.liveness_class_id = "synthetic.fixing_entry"
+    row.responsibility_signature.driving_queue = "synthetic_fixing_entry"
+    row.responsibility_signature.liveness_class = "synthetic.fixing_entry"
+    row.responsibility_signature.phase_rank = 1
+    row.responsibility_signature.successors = {
+      {
+        state = "fixing",
+        output_variant = "repair",
+        postcondition_family = "synthetic-output",
+        monotonic = true,
+      },
+    }
+    local original_stage_rank = core.stage_rank
+    core.stage_rank = function(state)
+      if state == "synthetic-fixing-entry" then
+        return 1
+      end
+      return original_stage_rank(state)
+    end
+    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    core.stage_rank = original_stage_rank
+    if not ok then
+      error(errors)
+    end
+    t.is_true(contains_error(errors, "synthetic-fixing-entry: generation-bearing successor requires generation bump: fixing"), joined_errors(errors))
+  end,
+
+  test_generation_entry_policy_allows_pr_open_reviewing_birth_edge = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table())["pr-open"])
+    local fixing = successor_by_state(row, "fixing")
+    t.eq(type(fixing), "table")
+    fixing.bump = nil
+    fixing.monotonic = true
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "pr-open: generation-bearing successor requires generation bump: fixing"), joined_errors(errors))
+    t.is_true(not contains_error(errors, "pr-open: generation-bearing successor requires generation bump: reviewing"), joined_errors(errors))
+  end,
+
+  test_real_restart_responsibility_table_passes_generation_entry_policy = function()
+    local errors = core.restart_responsibility_inventory_errors()
+    t.eq(#errors, 0, joined_errors(errors))
   end,
 
   test_legit_forward_decision_row_passes = function()

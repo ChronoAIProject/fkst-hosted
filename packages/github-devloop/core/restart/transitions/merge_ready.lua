@@ -7,6 +7,7 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "merge-ready",
     liveness_class_id = "merge_ready.actionable",
@@ -32,6 +33,46 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_merge_ready"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "merge-controller",
+      driving_queue = "devloop_merge_ready",
+      state_kind = "gate",
+      liveness_class = "merge_ready.actionable",
+      input_fact_family = "head-bound-merge-authorization",
+      output_postcondition_family = "merge_eligibility_decided",
+      decision_type = "MergeEligibility",
+      phase_rank = M.stage_rank("merge-ready"),
+      lineage_keys = { "merge-ready.version", "merge-ready.pr", "merge-ready.head_sha", "merge-ready.review_dedup", "source_ref" },
+      successors = {
+        {
+          state = "reviewing",
+          output_variant = "approval_stale",
+          postcondition_family = "merge_eligibility_decided",
+          decision_type = "MergeEligibility",
+          bump = true,
+        },
+        {
+          state = "merging",
+          output_variant = "eligible_now",
+          postcondition_family = "merge_eligibility_decided",
+          decision_type = "MergeEligibility",
+          monotonic = true,
+        },
+        {
+          state = "fixing",
+          output_variant = "code_repair_needed",
+          postcondition_family = "merge_eligibility_decided",
+          decision_type = "MergeEligibility",
+          bump = true,
+        },
+        {
+          state = "blocked",
+          output_variant = "watchdog_reconcile_terminal",
+          terminal = true,
+          monotonic = true,
+        },
+      },
+    }),
     payload_builder = M.build_devloop_merge_ready_payload,
     dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>/<current_head>",
     required_facts = {

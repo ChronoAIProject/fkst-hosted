@@ -54,7 +54,7 @@ return function(M, h)
           output_variant = "not_mergeable_repair",
           postcondition_family = "pr_viability_routed",
           decision_type = "PrViability",
-          monotonic = true,
+          bump = true,
         },
       },
     }),

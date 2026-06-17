@@ -9,6 +9,10 @@ return function(M, h)
   local responsibility_signature = h.responsibility_signature
   return {
     from_state = "reviewing",
+    generation_entry = {
+      reentry_bump = true,
+      birth_from = "pr-open",
+    },
     liveness_class_id = "reviewing.active",
     watchdog = watchdog("live-defer", 150),
     terminal = false,

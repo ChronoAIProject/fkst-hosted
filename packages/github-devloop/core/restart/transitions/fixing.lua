@@ -10,6 +10,7 @@ return function(M, h)
   local responsibility_signature = h.responsibility_signature
   return {
     from_state = "fixing",
+    generation_entry = "always",
     liveness_class_id = "fixing.actionable",
     watchdog = watchdog("row-budget-bounds-receiver", 120),
     actionable_epoch = actionable_epoch("state_entry:v1"),

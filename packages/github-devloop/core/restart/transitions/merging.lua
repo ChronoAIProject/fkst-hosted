@@ -57,7 +57,7 @@ return function(M, h)
           postcondition_family = "merge-gate-result",
           decision_type = "merge-gate-result",
           failure = true,
-          monotonic = true,
+          bump = true,
         },
         {
           state = "blocked",
