@@ -30,7 +30,6 @@ use fkst_control_plane::router::build_router;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
-use secrecy::SecretString;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 use wiremock::matchers::{header, method, path, query_param};
@@ -96,8 +95,6 @@ async fn app(server: MockServer) -> TestApp {
     let nyxid = NyxIdClient::new(
         &server.uri(),
         DEFAULT_GITHUB_PROXY_SLUG,
-        "sa_test_client".to_string(),
-        SecretString::from("sas_test_secret".to_string()),
         Duration::from_secs(30),
     )
     .expect("nyxid client");

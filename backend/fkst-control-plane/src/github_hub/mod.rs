@@ -142,28 +142,18 @@ impl NyxIdGithubProxy {
     /// Map a NyxID error onto a credential-free [`ProxyError`].
     ///
     /// On the forwarded-user-token path a rejected token surfaces as
-    /// [`NyxIdError::UserTokenRejected`] (a 401-class [`ProxyError::UserToken`]);
-    /// the [`NyxIdError::ExchangeRejected`] arm is the legacy connections-listing
-    /// rejection shape (`github_connections_user` reuses it) and likewise maps to
-    /// the user-token rejection, since both mean the caller's credential was
-    /// refused — not a proxy outage.
+    /// [`NyxIdError::UserTokenRejected`] (a 401-class [`ProxyError::UserToken`]),
+    /// raised both by the api-key mint and by the connections listing, since both
+    /// mean the caller's credential was refused — not a proxy outage.
     fn map_nyxid(err: NyxIdError, listing: bool) -> ProxyError {
         match err {
-            NyxIdError::UserTokenRejected | NyxIdError::ExchangeRejected(_) => {
-                ProxyError::UserToken
-            }
+            NyxIdError::UserTokenRejected => ProxyError::UserToken,
             NyxIdError::Http(detail) | NyxIdError::Malformed(detail) => {
                 if listing {
                     ProxyError::ConnectionListing
                 } else {
                     ProxyError::Transport(detail)
                 }
-            }
-            // The github-proxy path never uses the service account, so neither
-            // the SA-rejection nor the owner-only "no SA configured" (#219)
-            // variant can arise here; map both to delegation for safety.
-            NyxIdError::ServiceAuth | NyxIdError::ServiceAccountUnconfigured => {
-                ProxyError::Delegation
             }
         }
     }
@@ -249,13 +239,11 @@ mod tests {
     #[test]
     fn map_nyxid_user_token_rejected_is_user_token() {
         // A forwarded user token refused by NyxID is a 401-class credential
-        // rejection, NOT the 503 "delegation failed".
+        // rejection, NOT the 503 "delegation failed". The same refusal arises on
+        // both the request and the connections-listing paths.
         let rejected = NyxIdGithubProxy::map_nyxid(NyxIdError::UserTokenRejected, false);
         assert!(matches!(rejected, ProxyError::UserToken));
-        // The connections-listing path surfaces the same refusal as
-        // `ExchangeRejected`; it too maps to a user-token rejection.
-        let listing =
-            NyxIdGithubProxy::map_nyxid(NyxIdError::ExchangeRejected("denied".to_string()), true);
+        let listing = NyxIdGithubProxy::map_nyxid(NyxIdError::UserTokenRejected, true);
         assert!(matches!(listing, ProxyError::UserToken));
     }
 

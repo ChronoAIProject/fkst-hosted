@@ -202,14 +202,8 @@ mod tests {
     const API_KEYS_PATH: &str = "/api/v1/api-keys";
 
     fn client(uri: &str) -> NyxIdClient {
-        NyxIdClient::new(
-            uri,
-            "api-github",
-            "sa_client".to_string(),
-            SecretString::from("sa_secret".to_string()),
-            std::time::Duration::from_secs(30),
-        )
-        .expect("client build")
+        NyxIdClient::new(uri, "api-github", std::time::Duration::from_secs(30))
+            .expect("client build")
     }
 
     #[test]

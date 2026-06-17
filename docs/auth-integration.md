@@ -24,9 +24,7 @@ The following matrix covers all environment variables supported by the backend a
 | **`FKST_AUTH_ISSUER`** | No | `nyxid` | `nyxid` | — | Expected JWT `iss` claim in the incoming token. |
 | **`FKST_AUTH_AUDIENCE`** | No | base URL | `https://nyx.chrono-ai.fun` | — | Expected JWT `aud` claim (defaults to base URL). |
 | **`FKST_AUTH_JWKS_CACHE_TTL_SECS`** | No | `300` | `300` | — | JWKS key cache TTL in seconds. |
-| **`NYXID_CLIENT_ID`** | No (Both-or-none)| — | `sa_REPLACE_ME_prod` | — | NyxID service-account client ID for org membership check. |
-| **`NYXID_CLIENT_SECRET`** | No (Both-or-none)| — | `sa_sec_REPLACE_ME_prod` | — | NyxID service-account client secret. |
-| **`FKST_NYXID_ORG_CACHE_TTL_SECS`** | No | `30` | `30` | — | Cache TTL for NyxID org membership queries. |
+| **`FKST_NYXID_ORG_CACHE_TTL_SECS`** | No | `30` | `30` | — | Cache TTL for NyxID user-orgs queries (forwarded user token). |
 | **`FKST_SESSION_KEY_TTL_SECS`** | No | `86400` | `86400` | — | TTL (s) for the per-session NyxID agent key; the key self-expires after this (the cleanup mechanism — no service-account revoke). Must be >= 1. |
 | **`FKST_GITHUB_APP_ID`** | No (app enabled) | — | `123456` | — | Numeric ID of the fkst-hosted GitHub App. |
 | **`FKST_GITHUB_APP_PRIVATE_KEY_PEM`** | If ID set (no PATH)| — | `"-----BEGIN RSA..."` | — | Inline PEM key content with `\n` normalization. |

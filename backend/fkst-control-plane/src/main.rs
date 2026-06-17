@@ -144,32 +144,18 @@ async fn main() -> ExitCode {
     let auth_mode = config.auth.clone();
 
     // Build the NyxID client ONCE for the Authorizer and the user-token paths.
-    // Owner-only model (#219): the client is built from `AuthMode::Enabled`
+    // Owner-only model (#257): the client is built from `AuthMode::Enabled`
     // ALONE (which carries the NyxID base URL), because every feature it drives
-    // by default — per-session key mint, Ornn proxy, github_hub, repo-create —
-    // authenticates with the FORWARDED USER TOKEN, not the service account. The
-    // service account (`NYXID_CLIENT_ID/SECRET`) stays OPTIONAL: when present it
-    // also enables the SA-only org features; when absent the user-token paths
-    // are unaffected and SA-only calls fail with a typed error (never a panic).
+    // — per-session key mint, Ornn proxy, github_hub, repo-create —
+    // authenticates with the FORWARDED USER TOKEN. There is no service account.
     let nyxid_client: Option<NyxIdClient> = match build_nyxid_client(
         &auth_mode,
-        config.nyxid_client_id.as_deref(),
-        config.nyxid_client_secret.as_ref(),
         &config.nyxid_github_proxy_slug,
         std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
     ) {
         Ok(client) => {
-            if let Some(ref client) = client {
-                let sa = client.has_service_account();
-                tracing::info!(
-                    service_account = sa,
-                    "NyxID client built (org features {})",
-                    if sa {
-                        "enabled"
-                    } else {
-                        "disabled (owner-only)"
-                    }
-                );
+            if client.is_some() {
+                tracing::info!("NyxID client built (owner-only, forwarded user token)");
             }
             client
         }
@@ -277,11 +263,11 @@ async fn main() -> ExitCode {
     //         self-expires after FKST_SESSION_KEY_TTL_SECS — no service-account
     //         revoke at teardown (NyxID rejects it on a human-minted key). The
     //         origin is the NyxID issuer base URL (the SAME host that issues the
-    //         inbound user JWTs we mint against). Owner-only (#219): this is
-    //         gated on AUTH BEING ENABLED, not on the service account — the key
-    //         is minted with the user's own token, so `NYXID_CLIENT_ID/SECRET`
-    //         is not required. When auth is disabled, provisioning stays off and
-    //         the driver behaves exactly as pre-#111.
+    //         inbound user JWTs we mint against). Owner-only (#257): this is
+    //         gated on AUTH BEING ENABLED — the key is minted with the user's own
+    //         token, and the control plane carries no service-account credential.
+    //         When auth is disabled, provisioning stays off and the driver
+    //         behaves exactly as pre-#111.
     match (&nyxid_client, &auth_mode) {
         (Some(client), fkst_control_plane::auth::AuthMode::Enabled(settings)) => {
             sessions.enable_nyxid_token(

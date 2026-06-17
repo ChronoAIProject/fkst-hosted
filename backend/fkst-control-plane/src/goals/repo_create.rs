@@ -240,14 +240,8 @@ mod tests {
     /// Build a NyxID client pointed at `uri`. Centralized so the wiremock tests
     /// stay focused on the GitHub response shape, not client boilerplate.
     fn test_client(uri: &str) -> crate::nyxid::NyxIdClient {
-        crate::nyxid::NyxIdClient::new(
-            uri,
-            "api-github",
-            "test_client".to_string(),
-            secrecy::SecretString::from("test_secret".to_string()),
-            std::time::Duration::from_secs(30),
-        )
-        .expect("client build")
+        crate::nyxid::NyxIdClient::new(uri, "api-github", std::time::Duration::from_secs(30))
+            .expect("client build")
     }
 
     /// The forwarded user token presented directly to the api-github proxy.
