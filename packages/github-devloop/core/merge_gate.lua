@@ -54,6 +54,17 @@ function M.commit_check_runs_merge_gate(repo, head_sha, opts)
   return green, reason, runs
 end
 
+local function fetch_commit_check_runs(repo, head_sha)
+  if tostring(repo or "") == "" or not M.is_safe_head_sha(head_sha) then
+    return nil, "ci-unknown"
+  end
+  local result = M.gh_exec({ cmd = M.gh_commit_check_runs_cmd(repo, head_sha), timeout = 30 })
+  if result.exit_code ~= 0 then
+    return nil, "ci-unknown"
+  end
+  return M.parse_commit_check_runs(result.stdout), nil
+end
+
 local function check_run_id(run)
   local id = type(run) == "table" and (run.id or run.databaseId or run.database_id) or nil
   local text = tostring(id or "")
@@ -99,6 +110,115 @@ local function check_run_head_sha(run)
   return nil
 end
 
+local function check_run_name(run)
+  if type(run) ~= "table" then
+    return ""
+  end
+  return tostring(run.name or run.context or run.workflowName or run.workflow_name or "")
+end
+
+local function check_run_state(run)
+  if type(run) ~= "table" then
+    return "", ""
+  end
+  return tostring(run.state or run.status or ""):upper(), tostring(run.conclusion or ""):upper()
+end
+
+local green_required_check_conclusions = {
+  SUCCESS = true,
+  NEUTRAL = true,
+  SKIPPED = true,
+}
+
+local function required_head_check_run_status(runs, head_sha)
+  if type(runs) ~= "table" or not M.is_safe_head_sha(head_sha) then
+    return "unknown"
+  end
+  local required_names = M._required_check_run_names or {}
+  local required = {}
+  for _, name in ipairs(required_names) do
+    required[tostring(name)] = false
+  end
+  local expected = tostring(head_sha):lower()
+  for _, run in ipairs(runs) do
+    local name = check_run_name(run)
+    if required[name] ~= nil then
+      local run_head = check_run_head_sha(run)
+      if run_head == nil or run_head == expected then
+        required[name] = true
+        local state, conclusion = check_run_state(run)
+        if state == "COMPLETED" then
+          if not green_required_check_conclusions[conclusion] then
+            return "red"
+          end
+        else
+          return "pending"
+        end
+      end
+    end
+  end
+  for _, name in ipairs(required_names) do
+    if required[tostring(name)] ~= true then
+      return "unknown"
+    end
+  end
+  return "green"
+end
+
+local function ci_classification(kind, reason, extra)
+  local result = extra or {}
+  result.kind = kind
+  result.reason = reason
+  result.merge_blocking = kind ~= "OK"
+  result.actionable = kind == "OWN_CI_RED"
+  return result
+end
+
+local function integration_or_external_red(pr, head_sha, runs)
+  local gate_sha = M.rollup_failure_gate_sha(pr)
+  if gate_sha ~= nil and tostring(gate_sha):lower() ~= tostring(head_sha):lower() then
+    return ci_classification("INTEGRATION_RED", "integration-ci-red", { check_runs = runs })
+  end
+  return ci_classification("EXTERNAL_CI_RED", "external-ci-red", { check_runs = runs })
+end
+
+function M.classify_pr_ci_gate(pr, opts)
+  local green, reason = M.pr_rollup_green(pr)
+  if green then
+    return ci_classification("OK", "rollup-green")
+  end
+  if reason == "rollup-pending" then
+    return ci_classification("CHECKS_PENDING", "checks-pending")
+  end
+  local repo = opts and opts.repo or nil
+  local head_sha = tostring(pr and pr.head_sha or "")
+  if not M.is_safe_head_sha(head_sha) then
+    return ci_classification("CI_UNKNOWN", "ci-unknown")
+  end
+  if tostring(repo or "") == "" then
+    return ci_classification("CI_UNKNOWN", "ci-unknown")
+  end
+  local runs, fetch_reason = fetch_commit_check_runs(repo, head_sha)
+  if runs == nil then
+    return ci_classification("CI_UNKNOWN", fetch_reason or "ci-unknown")
+  end
+  log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
+  local head_status = required_head_check_run_status(runs, head_sha)
+  if head_status == "red" then
+    return ci_classification("OWN_CI_RED", "own-ci-red", { check_runs = runs })
+  end
+  if head_status == "pending" then
+    return ci_classification("CHECKS_PENDING", "checks-pending", { check_runs = runs })
+  end
+  if head_status == "unknown" then
+    return ci_classification("CI_UNKNOWN", "ci-unknown", { check_runs = runs })
+  end
+  if reason == "rollup-red" then
+    return integration_or_external_red(pr, head_sha, runs)
+  end
+  return ci_classification("OK", "rollup-green", { check_runs = runs })
+end
+
 function M.rerunnable_check_run_ids_for_head(runs, head_sha)
   if type(runs) ~= "table" or not M.is_safe_head_sha(head_sha) then
     return {}
@@ -138,6 +258,10 @@ function M.evaluate_ci_merge_gate(pr, opts)
   end
   local green, green_reason = M.evaluate_ci_status_gate(pr, opts)
   if not green then
+    if green_reason == "rollup-red" then
+      local classification = M.classify_pr_ci_gate(pr, opts)
+      return false, classification.reason
+    end
     return false, green_reason
   end
   return true, "merge-gate-ok"
@@ -170,7 +294,7 @@ function M.merge_gate_reason_requires_pr_merge_product(reason)
   if row ~= nil then
     return row.requires_pr_merge_product == true
   end
-  return M.merge_gate_reason_class(reason) == "rollup-red"
+  return false
 end
 
 function M.ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_seconds, grace_seconds)

@@ -79,6 +79,36 @@ local function build_timeout_reconcile_pr_comment_request(repo, pr_number, recon
   }), reconcile.source_ref)
 end
 
+local function merge_wait_timeout_reason_class(reconcile, state, comments, current_pr)
+  if reconcile.state ~= "merge-ready" and reconcile.state ~= "merging" then
+    return "state-output-obligation-timeout"
+  end
+  local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
+  local head_sha = current_pr and current_pr.head_sha or nil
+  if pr_number == nil or not core._is_git_sha(head_sha) then
+    return "state-output-obligation-timeout"
+  end
+  local wait = core.merge_gate_wait_fact(comments, reconcile.proposal_id, state.version, pr_number, head_sha)
+  if wait == nil then
+    return "state-output-obligation-timeout"
+  end
+  local reason_class = core.merge_gate_reason_class(wait.reason)
+  local wait_kind = tostring(wait.kind or "")
+  if core.is_ci_red_reason(reason_class) or core.is_not_mergeable_reason(reason_class) then
+    return "state-output-obligation-timeout"
+  end
+  if reason_class == "ci-wait"
+    or core.is_ci_wait_reason(reason_class)
+    or wait_kind == "CI_WAIT"
+    or wait_kind == "CHECKS_PENDING"
+    or wait_kind == "CI_UNKNOWN"
+    or wait_kind == "EXTERNAL_CI_RED"
+    or wait_kind == "INTEGRATION_RED" then
+    return "external-ci-wait-expired"
+  end
+  return "state-output-obligation-timeout"
+end
+
 local function pipeline_thinking(event)
   local reconcile = event.payload or {}
   if not core.is_supported_reconcile(reconcile) then
@@ -319,6 +349,8 @@ local function pipeline_timeout(event)
     core.assert_trusted_bot_configured()
 
     local comments
+    local current_pr
+    local current_issue
     if pr_number ~= nil then
       if not core.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
         return
@@ -327,15 +359,15 @@ local function pipeline_timeout(event)
       if view.exit_code ~= 0 then
         error("github-devloop: gh pr timeout reconcile view failed: " .. tostring(view.stderr))
       end
-      local current_pr = core.parse_pr_view_origin(view.stdout)
+      current_pr = core.parse_pr_view_origin(view.stdout)
       comments = current_pr.comments
     else
       local view = core.gh_exec({ cmd = core.gh_issue_view_loop_cmd(repo, issue_number), timeout = 30 })
       if view.exit_code ~= 0 then
         error("github-devloop: gh issue timeout reconcile view failed: " .. tostring(view.stderr))
       end
-      local current = core.parse_issue_view_loop(view.stdout)
-      comments = current.comments
+      current_issue = core.parse_issue_view_loop(view.stdout)
+      comments = current_issue.comments
     end
 
     core.log_forged_markers("reconcile", reconcile.proposal_id, comments)
@@ -363,11 +395,18 @@ local function pipeline_timeout(event)
     end
 
     local row = core.restart_transition_row(reconcile.state)
-    local due, age_minutes = core.liveness_timeout_due(row, state, now())
-    local decision = core.liveness_timeout_decision_with_facts(row, state, {
+    local timeout_facts = {
       proposal_id = reconcile.proposal_id,
       current = { comments = comments },
-    }, now())
+      current_pr = current_pr,
+      source_ref = reconcile.source_ref,
+      head_sha = current_pr and current_pr.head_sha or nil,
+    }
+    if current_issue ~= nil then
+      timeout_facts.current = current_issue
+    end
+    local due, age_minutes = core.liveness_timeout_due_with_facts(row, state, timeout_facts, now())
+    local decision = core.liveness_timeout_decision_with_facts(row, state, timeout_facts, now())
     local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or nil
     if not due or decision.action ~= "escalate" or tonumber(decision.attempt) < tonumber(reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(no-longer-over-budget)", "current marker is no longer at timeout escalation threshold")
@@ -404,6 +443,7 @@ local function pipeline_timeout(event)
     local reason_prefix = row and row.on_timeout and row.on_timeout.on_escalate and row.on_timeout.on_escalate.reason
       or "state-output-obligation-timeout"
     local reason = tostring(reason_prefix) .. "-after-" .. tostring(decision.attempt) .. "-attempts"
+    local reason_class = merge_wait_timeout_reason_class(reconcile, state, comments, current_pr)
     local why_fields = {
       from_state = reconcile.state,
       from_version = state.version,
@@ -413,7 +453,7 @@ local function pipeline_timeout(event)
       attempt = decision.attempt,
       attempt_limit = limit,
       driving_queue = row and row.driving_queue or nil,
-      reason_class = "state-output-obligation-timeout",
+      reason_class = reason_class,
       source_ref = core.normalize_source_ref(reconcile.source_ref),
     }
     local comment_request = pr_number ~= nil

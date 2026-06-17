@@ -1,5 +1,6 @@
 local core = require("core")
 local runtime_files = require("departments.merge.runtime_files")
+local ci_wait = require("departments.merge.ci_wait")
 
 local M = {}
 M.spec = {
@@ -48,42 +49,7 @@ local function gate_baseline_sha_from_pr(pr)
   return baseline_sha
 end
 
-local function is_rollup_red_fix_reason(reason)
-  return core.merge_gate_reason_class(reason) == "rollup-red"
-end
-local function fetch_pr_merge_product_sha(pr_number)
-  local fetch_result = exec_sync({ cmd = core.git_fetch_pr_merge_ref_cmd("origin", pr_number), timeout = 60 })
-  if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
-  end
-  local head_result = exec_sync({ cmd = core.git_fetch_head_commit_cmd(), timeout = 30 })
-  if head_result.exit_code ~= 0 then
-    error("github-devloop: git PR merge ref head failed: " .. tostring(head_result.stderr))
-  end
-  local merge_product_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(merge_product_sha) then
-    error("github-devloop: unsafe PR merge product sha")
-  end
-  return merge_product_sha
-end
-
-local function gate_baseline_sha_for_reason(proposal_id, pr_number, pr, reason)
-  if is_rollup_red_fix_reason(reason) then
-    local gate_sha = tostring(core.rollup_failure_gate_sha(pr) or "")
-    if not core.is_safe_head_sha(gate_sha) then
-      core.log_line("info", "merge", proposal_id, "GATE", {
-        "outcome=degrade",
-        "reason=rollup gate sha underivable from statusCheckRollup; fix will merge current integration",
-        "pr=" .. tostring(pr_number),
-      })
-      return nil
-    end
-    local merge_product_sha = fetch_pr_merge_product_sha(pr_number)
-    if merge_product_sha ~= gate_sha then
-      error("github-devloop: statusCheckRollup sha does not match PR merge product sha")
-    end
-    return merge_product_sha
-  end
+local function gate_baseline_sha_for_reason(_proposal_id, _pr_number, pr, _reason)
   return gate_baseline_sha_from_pr(pr)
 end
 
@@ -635,6 +601,21 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     proposal_id = merge_ready.proposal_id,
   })
   if not rollup_green then
+    if rollup_reason == "rollup-red" then
+      local classification = core.classify_pr_ci_gate(current_pr, {
+        repo = repo,
+        dept = "merge",
+        proposal_id = merge_ready.proposal_id,
+      })
+      if classification.kind ~= "OWN_CI_RED" then
+        log_gate(merge_ready, "hold", classification.reason)
+        ci_wait.hold(core, merge_ready, repo, current_pr, classification)
+        return
+      end
+      log_gate(merge_ready, "fixing", classification.reason)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, classification.reason, queue_position)
+      return
+    end
     if not core.is_ci_red_reason(rollup_reason) then
       if rollup_reason == "missing-status-rollup" then
         local healed, heal_reason = core.ci_selfheal_once(
@@ -655,9 +636,8 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       end
       error("github-devloop: merge wait on " .. tostring(rollup_reason) .. "; retrying")
     end
-    local fix_reason = core.rollup_red_fix_reason(current_pr, rollup_reason)
-    log_gate(merge_ready, "fixing", fix_reason)
-    raise_fixing(repo, issue_number, merge_ready, state, current_pr, fix_reason, queue_position)
+    log_gate(merge_ready, "fixing", rollup_reason)
+    raise_fixing(repo, issue_number, merge_ready, state, current_pr, rollup_reason, queue_position)
     return
   end
 
@@ -731,9 +711,16 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
   if not merge_ok and core.is_ci_red_reason(merge_reason) then
-    local fix_reason = core.rollup_red_fix_reason(merge_rechecked_pr, merge_reason)
-    log_gate(merge_ready, "fixing", fix_reason)
-    raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, fix_reason, queue_position)
+    log_gate(merge_ready, "fixing", merge_reason)
+    raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason, queue_position)
+    return
+  end
+  if not merge_ok and core.is_ci_wait_reason(merge_reason) then
+    log_gate(merge_ready, "hold", merge_reason)
+    ci_wait.hold(core, merge_ready, repo, merge_rechecked_pr or rechecked_pr_for_gate, {
+      kind = "CI_WAIT",
+      reason = merge_reason,
+    })
     return
   end
   if not merge_ok and core.is_not_mergeable_reason(merge_reason) then

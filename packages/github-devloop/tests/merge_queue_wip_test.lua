@@ -519,6 +519,7 @@ return {
     mock_queue_pr_red(older, "2026-06-03T01:00:00Z")
     mock_queue_pr(current, "2026-06-03T02:00:00Z")
     mock_merge_pr_view(older, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    h.mock_required_check_runs_for(older.reviewed_head_sha, "failure")
     mock_claimed_issue_for_event(older, 1)
     t.mock_command("git fetch origin 'pull/9/merge'", {
       stdout = "",
@@ -881,6 +882,7 @@ return {
     mock_queue_list({})
     mock_claimed_issue_for_event(second, 1)
     mock_merge_pr_view(second, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    h.mock_required_check_runs_for(second.reviewed_head_sha, "failure")
     mock_queue_list({ 8 })
     mock_queue_pr(second, "2026-06-03T01:01:00Z", "fixing", second.version .. "/fix/1")
 
@@ -925,6 +927,7 @@ return {
     mock_queue_list({})
     mock_claimed_issue_for_event(second, 1)
     mock_merge_pr_view(second, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
+    h.mock_required_check_runs_for(second.reviewed_head_sha, "failure")
     mock_queue_list({ 8, 9 })
     mock_queue_pr(second, "2026-06-03T01:01:00Z", "fixing", second.version .. "/fix/1")
     mock_queue_pr(third, "2026-06-03T01:02:00Z")

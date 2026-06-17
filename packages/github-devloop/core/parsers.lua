@@ -833,15 +833,6 @@ function M.rollup_failure_gate_sha(pr)
   return gate_sha
 end
 
-function M.rollup_red_fix_reason(pr, reason)
-  local base_reason = tostring(reason or "rollup-red")
-  local failure_summary = M.pr_rollup_failure_summary(pr)
-  if failure_summary == "" then
-    return base_reason
-  end
-  return base_reason .. ": " .. failure_summary
-end
-
 M._max_rollup_check_name_len = max_rollup_check_name_len
 M._max_rollup_failure_summary_len = max_rollup_failure_summary_len
 M._required_check_run_names = required_check_run_names
@@ -877,7 +868,16 @@ function M.pr_mergeable(pr)
 end
 
 function M.is_ci_red_reason(reason)
-  return tostring(reason or "") == "rollup-red"
+  return tostring(reason or "") == "own-ci-red"
+end
+
+function M.is_ci_wait_reason(reason)
+  local text = tostring(reason or "")
+  return text == "external-ci-red"
+    or text == "integration-ci-red"
+    or text == "ci-unknown"
+    or text == "checks-pending"
+    or text == "rollup-pending"
 end
 
 function M.is_not_mergeable_reason(reason)

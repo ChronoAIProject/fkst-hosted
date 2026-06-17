@@ -1,0 +1,103 @@
+local S = {}
+local strings = require("std.strings")
+
+function S.install(M)
+local wait_bucket_seconds = 1800
+
+local function wait_bucket(now_seconds)
+  local seconds = tonumber(now_seconds) or now()
+  return tostring(math.floor(seconds / wait_bucket_seconds))
+end
+
+function M.merge_gate_wait_version_lineage(version)
+  local text = tostring(version or "")
+  local previous = nil
+  while previous ~= text do
+    previous = text
+    text = text
+      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
+      :gsub("/timeout/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
+  end
+  return text
+end
+
+function M.merge_gate_wait_marker(issue_proposal_id, pr_number, version, head_sha, reason, kind)
+  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid merge-gate-wait marker")
+  end
+  return '<!-- fkst:github-devloop:merge-gate-wait:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" kind="' .. tostring(strings.sanitize_key(kind or "CI_WAIT", false):gsub("/", "-"))
+    .. '" reason="' .. tostring(strings.sanitize_key(reason or "ci-wait", false):gsub("/", "-"))
+    .. '" -->'
+end
+
+function M.build_merge_gate_wait_comment_request(repo, merge_ready, reason, kind, source_ref)
+  local safe_reason = tostring(strings.sanitize_key(reason or "ci-wait", false):gsub("/", "-"))
+  local wait_version = M.merge_gate_wait_version_lineage(merge_ready.version)
+  local marker = M.merge_gate_wait_marker(
+    merge_ready.proposal_id,
+    merge_ready.pr_number,
+    wait_version,
+    merge_ready.reviewed_head_sha,
+    safe_reason,
+    kind
+  )
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = merge_ready.pr_number,
+  }, "github-devloop merge gate wait: " .. safe_reason
+    .. "\n\n" .. marker, M._dedup_key({
+    "merge",
+    "wait",
+    tostring(merge_ready.proposal_id),
+    tostring(wait_version),
+    tostring(merge_ready.reviewed_head_sha),
+    safe_reason,
+    wait_bucket(now()),
+  }), source_ref)
+end
+
+function M.merge_gate_wait_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local wait_version = M.merge_gate_wait_version_lineage(issue_version)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate%-wait:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker:match('proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_head_sha = marker:match('head_sha="([^"]+)"')
+      local marker_kind = marker:match('kind="([^"]+)"')
+      local marker_reason = marker:match('reason="([^"]+)"')
+      if marker_issue == tostring(issue_proposal_id)
+        and tostring(marker_pr) == tostring(pr_number)
+        and marker_version == tostring(wait_version)
+        and tostring(marker_head_sha) == tostring(head_sha)
+        and M._is_git_sha(marker_head_sha)
+        and M._is_bounded_string(marker_kind, M._max_key_len)
+        and M._is_bounded_string(marker_reason, M._max_key_len) then
+        return {
+          proposal_id = marker_issue,
+          pr_number = tonumber(marker_pr),
+          version = marker_version,
+          head_sha = marker_head_sha,
+          kind = marker_kind,
+          reason = marker_reason,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+end
+
+return S

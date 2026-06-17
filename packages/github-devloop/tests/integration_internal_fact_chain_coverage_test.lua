@@ -533,16 +533,17 @@ return {
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_pr_merge_rollup(merge_comments(event), '[{"__typename":"CheckRun","completedAt":"2026-06-03T02:04:04Z","conclusion":"FAILURE","detailsUrl":"https://example.invalid/checks/test","name":"test","startedAt":"2026-06-03T02:03:04Z","status":"COMPLETED","workflowName":"ci"}]')
+    h.mock_required_check_runs_for(event.reviewed_head_sha, "failure")
 
     local red = run_merge(event, opts("internal-chain-merge-red-direct", { FKST_GITHUB_WRITE = "1" }))
     t.eq(red.exit_code, 0)
     local direct_fix = find_raise(red.raises, "devloop_fixing")
     t.eq(direct_fix.payload.schema, "github-devloop.fixing.v1")
-    t.eq(direct_fix.payload.gate_baseline_sha, nil)
+    t.eq(direct_fix.payload.gate_baseline_sha, "abc123")
     t.eq(count_calls("gh pr merge"), 0)
 
     local merge_gate_comment = find_raise(red.raises, "github-proxy.github_pr_comment_request").payload.body
-    t.is_true(merge_gate_comment:find("gate_baseline_sha", 1, true) == nil)
+    t.is_true(merge_gate_comment:find('gate_baseline_sha="abc123"', 1, true) ~= nil)
     mock_pr_origin({
       origin_marker,
       core.state_marker(event.proposal_id, "fixing", direct_fix.payload.version),

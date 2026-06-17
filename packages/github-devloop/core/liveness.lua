@@ -97,6 +97,9 @@ local liveness_resolver_families = {
   ["implement-attempt"] = {
     ["implement-attempt"] = true,
   },
+  ["merge-gate-wait"] = {
+    ["merge-gate-wait"] = true,
+  },
   ["review-converge-round"] = {
     ["review-converge-round"] = true,
   },
@@ -196,14 +199,38 @@ local function validate_liveness_signal_producer(M, state, signal, family, resol
     return
   end
   local marker_source = binding.marker_source or "core/requests.lua"
+  local request_source = binding.request_source or "core/requests.lua"
   if not (source_contains(binding.producer, binding.marker_builder) or source_contains(marker_source, binding.marker_builder))
-    or not source_contains("core/requests.lua", binding.request_builder)
+    or not source_contains(request_source, binding.request_builder)
     or not source_contains(binding.producer, binding.request_builder) then
     table.insert(errors, state .. ": live-defer producer binding is not reachable from declared producer: " .. tostring(producer_key))
   end
   if not source_contains(binding.producer, binding.queue) then
     table.insert(errors, state .. ": live-defer producer binding does not emit declared queue: " .. tostring(producer_key))
   end
+end
+
+local function validate_liveness_signal_shape(M, state, signal, label, errors)
+  local family = signal.family
+  local resolver = signal.resolver or family
+  if type(family) ~= "string" or family == "" then
+    table.insert(errors, state .. ": " .. label .. " must declare an existing marker family")
+  elseif M.restart_durable_marker_fields()[family] == nil then
+    table.insert(errors, state .. ": " .. label .. " marker family does not exist: " .. tostring(family))
+  end
+  if liveness_resolver_families[resolver] == nil then
+    table.insert(errors, state .. ": " .. label .. " has no resolver: " .. tostring(resolver))
+  end
+  if numeric_minutes(signal.max_age_minutes) == nil then
+    table.insert(errors, state .. ": " .. label .. " must declare finite max_age_minutes")
+  end
+  if signal.surface ~= "issue-comment-stream" and signal.surface ~= "pr-comment-stream" then
+    table.insert(errors, state .. ": " .. label .. " must declare surface")
+  end
+  if signal.version_form ~= "raw" and signal.version_form ~= "safe_version_segment" then
+    table.insert(errors, state .. ": " .. label .. " must declare version_form")
+  end
+  validate_liveness_signal_producer(M, state, signal, family, resolver, errors)
 end
 
 local function validate_liveness_contract(M, row, errors)
@@ -228,6 +255,13 @@ local function validate_liveness_contract(M, row, errors)
     if budget_minutes == nil or budget_minutes < bound + liveness_contract_margin_minutes then
       table.insert(errors, state .. ": budget.minutes must be at least max(declared receiver/external bounds) + margin")
     end
+    if contract.progress_signal ~= nil then
+      validate_liveness_signal_shape(M, state, contract.progress_signal, "row-budget progress_signal", errors)
+      local signal_max_age = numeric_minutes(contract.progress_signal.max_age_minutes)
+      if budget_minutes ~= nil and signal_max_age ~= nil and signal_max_age >= budget_minutes then
+        table.insert(errors, state .. ": row-budget progress_signal max_age_minutes must be less than budget.minutes")
+      end
+    end
     return
   end
 
@@ -236,26 +270,7 @@ local function validate_liveness_contract(M, row, errors)
     table.insert(errors, state .. ": live-defer must declare a signal")
     return
   end
-  local family = signal.family
-  local resolver = signal.resolver or family
-  if type(family) ~= "string" or family == "" then
-    table.insert(errors, state .. ": live-defer signal must declare an existing marker family")
-  elseif M.restart_durable_marker_fields()[family] == nil then
-    table.insert(errors, state .. ": live-defer signal marker family does not exist: " .. tostring(family))
-  end
-  if liveness_resolver_families[resolver] == nil then
-    table.insert(errors, state .. ": live-defer signal has no resolver: " .. tostring(resolver))
-  end
-  if numeric_minutes(signal.max_age_minutes) == nil then
-    table.insert(errors, state .. ": live-defer signal must declare finite max_age_minutes")
-  end
-  if signal.surface ~= "issue-comment-stream" and signal.surface ~= "pr-comment-stream" then
-    table.insert(errors, state .. ": live-defer signal must declare surface")
-  end
-  if signal.version_form ~= "raw" and signal.version_form ~= "safe_version_segment" then
-    table.insert(errors, state .. ": live-defer signal must declare version_form")
-  end
-  validate_liveness_signal_producer(M, state, signal, family, resolver, errors)
+  validate_liveness_signal_shape(M, state, signal, "live-defer signal", errors)
 end
 
 function M.liveness_contract_errors(rows)
@@ -406,8 +421,45 @@ local function live_signal_version(M, signal, version)
   return M.liveness_heartbeat_version(version, signal)
 end
 
+local function liveness_contract_signal(contract)
+  if type(contract) ~= "table" then
+    return nil
+  end
+  if contract.mode == "live-defer" then
+    return contract.signal
+  end
+  if contract.mode == "row-budget-bounds-receiver" then
+    return contract.progress_signal
+  end
+  return nil
+end
+
+local function row_liveness_signal(row)
+  return liveness_contract_signal(row and row.liveness_contract)
+end
+
+local function merge_gate_wait_identity(M, facts, state)
+  local source_repo, source_pr = M.parse_pr_source_ref(facts and facts.source_ref)
+  local pr_number = source_pr
+  local head_sha = facts and facts.head_sha or nil
+  if facts and facts.current_pr ~= nil then
+    head_sha = facts.current_pr.head_sha or head_sha
+  end
+  if pr_number == nil and facts and facts.current_pr ~= nil then
+    pr_number = facts.current_pr.number
+  end
+  if pr_number == nil and facts and facts.link ~= nil then
+    pr_number = facts.link.pr_number
+  end
+  return (facts and facts.proposal_id) or (state and state.proposal_id),
+    M.merge_gate_wait_version_lineage(state and state.version),
+    pr_number,
+    head_sha,
+    source_repo
+end
+
 local function live_signal_age(M, row, state, facts, now_seconds)
-  local signal = row and row.liveness_contract and row.liveness_contract.signal
+  local signal = row_liveness_signal(row)
   local resolver = signal and (signal.resolver or signal.family) or nil
   local comments = live_signal_comments(signal, facts)
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
@@ -470,17 +522,33 @@ local function live_signal_age(M, row, state, facts, now_seconds)
         and marker_attr(marker, "source_ref") == tostring(sr_digest)
     end, now_seconds)
   end
+  if resolver == "merge-gate-wait" then
+    local wait_proposal_id, wait_version, pr_number, head_sha = merge_gate_wait_identity(M, facts, state)
+    if wait_proposal_id == nil or pr_number == nil or not M._is_git_sha(head_sha) then
+      return nil
+    end
+    return newest_matching_marker_age(M, comments, "merge-gate-wait", function(marker)
+      return marker_attr(marker, "proposal") == tostring(wait_proposal_id)
+        and marker_attr(marker, "version") == tostring(wait_version)
+        and marker_attr(marker, "pr") == tostring(pr_number)
+        and marker_attr(marker, "head_sha") == tostring(head_sha)
+    end, now_seconds)
+  end
   return nil
 end
 
 function M.restart_row_liveness_signal(row, state, facts, now_seconds)
   local contract = row and row.liveness_contract
-  if type(contract) ~= "table" or contract.mode ~= "live-defer" then
-    return { live = false, reason = "no-live-defer-contract" }
+  if type(contract) ~= "table" then
+    return { live = false, reason = "missing-contract" }
   end
-  local max_age = numeric_minutes(contract.signal and contract.signal.max_age_minutes)
+  local signal_contract = liveness_contract_signal(contract)
+  if type(signal_contract) ~= "table" then
+    return { live = false, reason = "no-liveness-signal" }
+  end
+  local max_age = numeric_minutes(signal_contract.max_age_minutes)
   if max_age == nil then
-    return { live = false, reason = "invalid-live-defer-contract" }
+    return { live = false, reason = "invalid-liveness-signal" }
   end
   local age = live_signal_age(M, row, state, facts, now_seconds)
   if age ~= nil and age < max_age then
@@ -488,16 +556,16 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
       live = true,
       age_minutes = age,
       max_age_minutes = max_age,
-      family = contract.signal.family,
-      resolver = contract.signal.resolver or contract.signal.family,
+      family = signal_contract.family,
+      resolver = signal_contract.resolver or signal_contract.family,
     }
   end
   return {
     live = false,
     age_minutes = age,
     max_age_minutes = max_age,
-    family = contract.signal.family,
-    resolver = contract.signal.resolver or contract.signal.family,
+    family = signal_contract.family,
+    resolver = signal_contract.resolver or signal_contract.family,
   }
 end
 
@@ -522,6 +590,35 @@ function M.restart_row_receiver_liveness(row, state, facts, now_seconds)
     }
   end
   if contract.mode == "row-budget-bounds-receiver" then
+    local absolute_due, state_age = M.liveness_timeout_due(row, state, now_seconds)
+    if absolute_due then
+      return {
+        action = "stuck",
+        reason = "row-budget-absolute-cap",
+        age_minutes = state_age,
+        receiver_bound_minutes = contract.receiver_bound_minutes,
+        external_wait_bound_minutes = contract.external_wait_bound_minutes,
+      }
+    end
+    if type(contract.progress_signal) == "table" then
+      local signal = M.restart_row_liveness_signal(row, state, facts, now_seconds)
+      if signal.live then
+        return {
+          action = "defer",
+          reason = "live-signal",
+          signal = signal,
+          receiver_bound_minutes = contract.receiver_bound_minutes,
+          external_wait_bound_minutes = contract.external_wait_bound_minutes,
+        }
+      end
+      return {
+        action = "stuck",
+        reason = "signal-stale-or-missing",
+        signal = signal,
+        receiver_bound_minutes = contract.receiver_bound_minutes,
+        external_wait_bound_minutes = contract.external_wait_bound_minutes,
+      }
+    end
     return {
       action = "stuck",
       reason = "row-budget-bounds-receiver",
@@ -597,7 +694,7 @@ function M.restart_observe_timeout_due(row, surface, state, facts, now_seconds)
   if M.restart_row_liveness_deferred(row, state, facts, now_seconds) then
     return false
   end
-  local due = M.liveness_timeout_due(row, state, now_seconds) == true
+  local due = M.liveness_timeout_due_with_facts(row, state, facts, now_seconds) == true
   if not due then
     return false
   end
@@ -664,6 +761,31 @@ function M.liveness_timeout_due(row, state, now_seconds)
   return true, age
 end
 
+local function live_signal_max_age(row)
+  return numeric_minutes(row_liveness_signal(row) and row_liveness_signal(row).max_age_minutes)
+end
+
+function M.liveness_timeout_due_with_facts(row, state, facts, now_seconds)
+  if row == nil or row.terminal == true then
+    return false, nil
+  end
+  local contract = row.liveness_contract
+  if type(contract) == "table" and contract.mode == "row-budget-bounds-receiver" then
+    return M.liveness_timeout_due(row, state, now_seconds)
+  end
+  local signal_max_age = live_signal_max_age(row)
+  if signal_max_age ~= nil then
+    local signal = M.restart_row_liveness_signal(row, state, facts, now_seconds)
+    if signal.age_minutes ~= nil then
+      if signal.age_minutes < signal_max_age then
+        return false, signal.age_minutes
+      end
+      return true, signal.age_minutes
+    end
+  end
+  return M.liveness_timeout_due(row, state, now_seconds)
+end
+
 local function timeout_escalation(row, state, age, facts)
   local attempt = M.liveness_timeout_attempt(row, state, facts)
   local limit = tonumber(row.on_timeout and row.on_timeout.escalate_after_attempts) or max_timeout_attempts
@@ -717,7 +839,7 @@ function M.liveness_timeout_decision(row, state, now_seconds)
 end
 
 function M.liveness_timeout_decision_with_facts(row, state, facts, now_seconds)
-  local due, age = M.liveness_timeout_due(row, state, now_seconds)
+  local due, age = M.liveness_timeout_due_with_facts(row, state, facts, now_seconds)
   if not due then
     return {
       action = "wait",
