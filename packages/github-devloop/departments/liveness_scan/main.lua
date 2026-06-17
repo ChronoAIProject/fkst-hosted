@@ -124,6 +124,16 @@ local function maybe_timeout_action(entity, state, facts)
   if row == nil or row.terminal == true then
     return nil
   end
+  local epoch = row.actionable_epoch
+  if type(epoch) == "table"
+    and epoch.allows_state_entry_if_never_deferred == true
+    and type(facts.dependency_gate) ~= "table" then
+    facts.dependency_gate = core.dependency_gate(entity and entity.repo, entity and entity.number, {
+      proposal_id = facts.proposal_id or state.proposal_id,
+      version = state and state.version,
+      comments = facts.current and facts.current.comments,
+    })
+  end
   local proposal_id = facts.proposal_id or state.proposal_id
   if core.restart_row_liveness_deferred(row, state, facts, facts.now_seconds or now()) then
     core.log_cas_decision("liveness_scan", proposal_id, state, row.from_state, row.driving_queue, "skip-active-output-obligation", "receiver liveness contract signal is still fresh")

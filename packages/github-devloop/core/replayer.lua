@@ -479,13 +479,13 @@ local function replay_ready(dept, issue, state, row, facts)
   })
   local ready_payload = facts.ready_payload or M.build_devloop_ready_payload({
     proposal_id = fields.proposal_id,
-    dedup_key = fields.dedup_key,
+    dedup_key = M.strip_transition_version_suffixes(fields.dedup_key),
     source_ref = fields.source_ref,
   })
   local current = facts.current
   local command = facts.command
   local dependency_hold = M.dependency_hold_fact(current.comments, proposal_id)
-  local gate = M.dependency_gate(issue.repo, issue.number, {
+  local gate = facts.dependency_gate or M.dependency_gate(issue.repo, issue.number, {
     proposal_id = proposal_id,
     version = state.version,
     comments = current.comments,

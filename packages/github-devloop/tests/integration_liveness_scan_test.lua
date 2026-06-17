@@ -491,7 +491,10 @@ return {
     t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find(core.timeout_attempt_marker(proposal_id, version, "ready", 1, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('state="ready"', 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('liveness_class_id="ready.actionable"', 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('round="1"', 1, true) ~= nil)
   end,
 
   test_liveness_scan_over_budget_thinking_redrives_live_version_and_writes_attempt = function()
@@ -671,6 +674,7 @@ return {
     mock_issue_reconcile({ "fkst-dev:ready" }, {
       timeout_state_comment("ready", live_version, "2026-06-03T00:02:00Z"),
     })
+    mock_blocked_by(42, {})
     local reconciled = run_timeout_reconcile(reconcile.payload, opts("liveness-scan-ready-timeout-reconcile-applies"))
     t.eq(reconciled.exit_code, 0)
     local comment = find_raise(reconciled.raises, "github-proxy.github_issue_comment_request")
@@ -711,6 +715,7 @@ return {
     mock_issue_reconcile({ "fkst-dev:ready" }, {
       timeout_state_comment("ready", live_version, "2026-06-03T00:02:00Z"),
     })
+    mock_blocked_by(42, {})
 
     local reconciled = run_timeout_reconcile(payload, opts("liveness-scan-ready-timeout-reconcile-live-stale-applies"))
     t.eq(reconciled.exit_code, 0)

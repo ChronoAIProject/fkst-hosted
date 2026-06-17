@@ -405,6 +405,14 @@ local function pipeline_timeout(event)
     if current_issue ~= nil then
       timeout_facts.current = current_issue
     end
+    local epoch = row and row.actionable_epoch
+    if type(epoch) == "table" and epoch.allows_state_entry_if_never_deferred == true then
+      timeout_facts.dependency_gate = core.dependency_gate(repo, issue_number, {
+        proposal_id = reconcile.proposal_id,
+        version = state.version,
+        comments = comments,
+      })
+    end
     local due, age_minutes = core.liveness_timeout_due_with_facts(row, state, timeout_facts, now())
     local decision = core.liveness_timeout_decision_with_facts(row, state, timeout_facts, now())
     local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or nil

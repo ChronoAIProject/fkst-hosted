@@ -575,6 +575,30 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
 end
 
 function M.restart_row_receiver_liveness(row, state, facts, now_seconds)
+  if M.restart_row_has_registered_actionable_epoch(row)
+    and row
+    and row.watchdog
+    and row.watchdog.mode == "live-defer" then
+    local eval = M.actionable_epoch_resolve(row, state, facts, now_seconds)
+    if type(facts) == "table" then
+      facts.actionable_epoch_eval = eval
+    end
+    if eval.status == "deferred" then
+      return {
+        action = "defer",
+        reason = "actionable-epoch-deferred",
+        signal = {
+          family = row.defer and row.defer.live_marker,
+          resolver = row.actionable_epoch and row.actionable_epoch.source,
+        },
+      }
+    end
+    return {
+      action = "stuck",
+      reason = eval.status == "contract_invalid" and "actionable-epoch-contract-invalid" or "actionable-epoch-actionable",
+      actionable_epoch = eval,
+    }
+  end
   local contract = row and row.liveness_contract
   if type(contract) ~= "table" then
     return { action = "stuck", reason = "missing-contract" }
@@ -633,7 +657,6 @@ function M.restart_row_receiver_liveness(row, state, facts, now_seconds)
   end
   return { action = "stuck", reason = "unsupported-contract" }
 end
-
 function M.restart_row_liveness_deferred(row, state, facts, now_seconds)
   return M.restart_row_receiver_liveness(row, state, facts, now_seconds).action == "defer"
 end
@@ -729,6 +752,10 @@ function M.liveness_state_age_minutes(state, now_seconds)
 end
 
 function M.liveness_timeout_attempt(row, state, facts)
+  local eval = facts and facts.actionable_epoch_eval
+  if M.restart_row_has_registered_actionable_epoch(row) then
+    return M.actionable_epoch_timeout_attempt(row, state, facts)
+  end
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
   local comments = facts and facts.current and facts.current.comments or nil
   local from_state = row and row.from_state
@@ -773,6 +800,9 @@ end
 function M.liveness_timeout_due_with_facts(row, state, facts, now_seconds)
   if row == nil or row.terminal == true then
     return false, nil
+  end
+  if M.restart_row_has_registered_actionable_epoch(row) then
+    return M.actionable_epoch_timeout_due(row, state, facts, now_seconds)
   end
   local contract = row.liveness_contract
   if type(contract) == "table" and contract.mode == "row-budget-bounds-receiver" then
@@ -885,8 +915,15 @@ local function emit_timeout_attempt_marker(dept, entity, state, row, facts, prop
   local target = timeout_attempt_target(entity, facts)
   local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
   if target ~= nil then
-    local attempt_request = M.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt)
-    M.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", attempt_request)
+    local eval = facts and facts.actionable_epoch_eval
+    if M.restart_row_has_registered_actionable_epoch(row)
+      and type(eval) == "table"
+      and eval.status == "actionable"
+      and eval.generation_key ~= nil then
+      M.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", M.build_timeout_attempt_v2_comment_request(target, proposal_id, state, row, source_ref, attempt, eval.generation_key))
+    else
+      M.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", M.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt))
+    end
   end
 end
 

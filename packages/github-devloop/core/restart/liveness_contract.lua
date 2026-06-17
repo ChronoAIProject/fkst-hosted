@@ -32,10 +32,6 @@ local epoch_sources = {
 }
 
 local known_liveness_contract_violations = {
-  ready = {
-    ["ready: live-defer row must declare actionable_epoch.source"] = true,
-    ["ready: live-defer row must declare defer"] = true,
-  },
   reviewing = {
     ["reviewing: live-defer row must declare actionable_epoch.source"] = true,
     ["reviewing: live-defer row must declare defer"] = true,
@@ -193,6 +189,47 @@ local function validate_row(row, errors)
   end
 end
 
+local function validate_runtime_provenance(row, errors)
+  if row == nil or row.terminal == true or type(row.actionable_epoch) ~= "table" then
+    return
+  end
+  if epoch_sources[row.actionable_epoch.source] == nil then
+    return
+  end
+  if type(M.actionable_epoch_resolve) ~= "function" then
+    return
+  end
+  local state = state_name(row)
+  local comments = {}
+  local now_seconds = 0
+  if row.actionable_epoch.source == "live_defer_epoch:v1" then
+    now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
+    comments = {
+      {
+        author_login = M.trusted_bot_login(),
+        created_at = "2026-06-03T00:00:00Z",
+        body = M.dependency_release_marker("github-devloop/issue/provenance/repo/1", "restart-liveness-provenance"),
+      },
+    }
+  end
+  local ok, eval = pcall(M.actionable_epoch_resolve, row, {
+    state = row.from_state,
+    version = "restart-liveness-provenance",
+    proposal_id = "github-devloop/issue/provenance/repo/1",
+    marker_created_at = "2026-06-03T00:00:00Z",
+  }, {
+    proposal_id = "github-devloop/issue/provenance/repo/1",
+    current = { comments = comments },
+  }, now_seconds)
+  if not ok or type(eval) ~= "table" then
+    table.insert(errors, state .. ": actionable_epoch resolver failed runtime provenance check")
+    return
+  end
+  if eval.status == "actionable" and eval.epoch_source ~= row.actionable_epoch.source then
+    table.insert(errors, state .. ": actionable_epoch runtime provenance must match declared source")
+  end
+end
+
 function M.normalized_restart_liveness_rows(rows)
   local normalized = {}
   for _, row in ipairs(rows or M.restart_transition_table()) do
@@ -205,6 +242,7 @@ function M.strict_restart_liveness_contract_errors(rows)
   local errors = {}
   for _, row in ipairs(M.normalized_restart_liveness_rows(rows)) do
     validate_row(row, errors)
+    validate_runtime_provenance(row, errors)
   end
   return errors
 end

@@ -127,6 +127,16 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     snapshot = snapshot,
     event_ts = event_ts,
   }
+  local epoch = row and row.actionable_epoch
+  if issue.source == "liveness-scan"
+    and type(epoch) == "table"
+    and epoch.allows_state_entry_if_never_deferred == true then
+    facts.dependency_gate = core.dependency_gate(issue.repo, issue.number, {
+      proposal_id = proposal_id,
+      version = state.version,
+      comments = current.comments,
+    })
+  end
   local state_is_issue_local = issue_state ~= nil
     and issue_state.state == state.state
     and tostring(issue_state.version or "") == tostring(state.version or "")

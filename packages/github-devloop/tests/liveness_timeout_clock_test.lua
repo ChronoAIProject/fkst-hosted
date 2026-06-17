@@ -47,6 +47,10 @@ local function timeout_attempt_comment(state_name, state_version, round, source_
   return trusted_comment(core.timeout_attempt_marker(proposal_id, state_version, state_name, round, source_ref), "2026-06-03T00:00:00Z")
 end
 
+local function timeout_attempt_v2_comment(row, generation_key, round, source_ref)
+  return trusted_comment(core.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, round, source_ref), "2026-06-03T00:00:00Z")
+end
+
 local function capture_raises(fn)
   local raised = {}
   local original_log_raise = core.log_raise
@@ -246,6 +250,148 @@ return {
     }, now())
     t.eq(due, false)
     t.is_true(age ~= nil and age < 2)
+  end,
+
+  test_live_defer_clear_opens_fresh_timeout_generation = function()
+    local row = core.restart_transition_row("ready")
+    local source_ref = core.issue_source_ref(repo, 42)
+    local state = {
+      state = "ready",
+      version = version,
+      proposal_id = proposal_id,
+      marker_created_at = "2026-06-03T09:45:00Z",
+    }
+    local old_generation = core._dedup_key({
+      "restart-liveness:v2",
+      proposal_id,
+      "ready",
+      "ready.actionable",
+      "state_entry:v1",
+      "old-state-entry",
+      tostring(core.iso_timestamp_epoch_seconds("2026-06-03T09:45:00Z") * 1000),
+    })
+    local comments = {
+      state_comment("ready", version, "2026-06-03T09:45:00Z"),
+      trusted_comment(core.dependency_wait_marker(proposal_id, version, { 7 }), "2026-06-03T09:45:01Z"),
+      trusted_comment(core.dependency_release_marker(proposal_id, version), "2026-06-03T10:33:00Z"),
+      timeout_attempt_comment("ready", version, 1, source_ref),
+      timeout_attempt_comment("ready", version, 2, source_ref),
+      timeout_attempt_comment("ready", version, 3, source_ref),
+      timeout_attempt_v2_comment(row, old_generation, 1, source_ref),
+      timeout_attempt_v2_comment(row, old_generation, 2, source_ref),
+      timeout_attempt_v2_comment(row, old_generation, 3, source_ref),
+    }
+    local facts = {
+      proposal_id = proposal_id,
+      source_ref = source_ref,
+      current = { comments = comments },
+      now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z"),
+    }
+    local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+    t.eq(eval.status, "actionable")
+    t.eq(eval.epoch_source, "live_defer_epoch:v1")
+    t.eq(eval.epoch_ms, core.iso_timestamp_epoch_seconds("2026-06-03T10:33:00Z") * 1000)
+    t.is_true(tostring(eval.generation_opened_by):find("dependency%-release:v1", 1, false) ~= nil)
+    local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
+    t.eq(due, false)
+    t.eq(age, 0)
+    t.eq(core.liveness_timeout_attempt(row, state, facts), 0)
+    t.eq(state.marker_created_at, "2026-06-03T09:45:00Z")
+
+    local raised = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = repo,
+        number = 42,
+        source_ref = source_ref,
+      }, state, row, facts)
+      t.eq(applied, false)
+    end)
+    t.eq(#raised, 0)
+
+    facts.now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T11:18:01Z")
+    facts.actionable_epoch_eval = nil
+    due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
+    t.eq(due, true)
+    t.eq(age, 45)
+    t.eq(core.liveness_timeout_attempt(row, state, facts), 0)
+    raised = capture_raises(function()
+      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+        repo = repo,
+        number = 42,
+        source_ref = source_ref,
+      }, state, row, facts)
+      t.eq(applied, true)
+    end)
+    t.eq(#raised, 1)
+    local attempt = nil
+    for _, item in ipairs(raised) do
+      if item.queue == "github-proxy.github_issue_comment_request" then
+        attempt = item
+      end
+    end
+    t.is_true(attempt ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('state="ready"', 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('liveness_class_id="ready.actionable"', 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('generation_key="' .. eval.generation_key .. '"', 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('round="1"', 1, true) ~= nil)
+    t.eq(state.marker_created_at, "2026-06-03T09:45:00Z")
+  end,
+
+  test_live_defer_absent_marker_uses_state_entry_only_when_gate_satisfied = function()
+    local row = core.restart_transition_row("ready")
+    local state = {
+      state = "ready",
+      version = version,
+      proposal_id = proposal_id,
+      marker_created_at = "2026-06-03T09:45:00Z",
+    }
+    local facts = {
+      proposal_id = proposal_id,
+      current = {
+        comments = {
+          state_comment("ready", version, "2026-06-03T09:45:00Z"),
+        },
+      },
+      dependency_gate = {
+        ok = true,
+        kind = "satisfied",
+        reason = "satisfied",
+      },
+      now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:30:01Z"),
+    }
+    local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+    t.eq(eval.status, "actionable")
+    t.eq(eval.epoch_ms, core.iso_timestamp_epoch_seconds("2026-06-03T09:45:00Z") * 1000)
+    t.eq(eval.generation_opened_by, "state-entry:v1:" .. version)
+  end,
+
+  test_live_defer_absent_clear_with_unsatisfied_gate_is_contract_invalid = function()
+    local row = core.restart_transition_row("ready")
+    local state = {
+      state = "ready",
+      version = version,
+      proposal_id = proposal_id,
+      marker_created_at = "2026-06-03T09:45:00Z",
+    }
+    local facts = {
+      proposal_id = proposal_id,
+      current = {
+        comments = {
+          state_comment("ready", version, "2026-06-03T09:45:00Z"),
+        },
+      },
+      dependency_gate = {
+        ok = false,
+        kind = "waiting",
+        reason = "waiting-on-dependency",
+        unmet = { 7 },
+      },
+      now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:30:01Z"),
+    }
+    local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+    t.eq(eval.status, "contract_invalid")
+    t.eq(eval.reason, "live-defer-clear-absent-after-dependency-gate:waiting-on-dependency")
   end,
 
   test_timeout_reconcile_why_reports_effective_heartbeat_age = function()

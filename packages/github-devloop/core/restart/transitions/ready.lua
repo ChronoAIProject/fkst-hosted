@@ -6,10 +6,23 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
+  local actionable_epoch = h.actionable_epoch
   return {
     from_state = "ready",
     liveness_class_id = "ready.actionable",
     watchdog = watchdog("live-defer", 45),
+    actionable_epoch = {
+      source = "live_defer_epoch:v1",
+      generation_source = "same_as_actionable_epoch",
+      allows_state_entry_if_never_deferred = true,
+    },
+    defer = {
+      live_marker = "dependency-wait:v1",
+      freshness_ms = 525600 * 60 * 1000,
+      clear_fact = "dependency-release:v1",
+      observed_fact = "dependency-wait-observed:v1",
+      clear_opens_generation = true,
+    },
     terminal = false,
     to_states = { "implementing" },
     driving_queue = "devloop_ready",
