@@ -1,6 +1,5 @@
 local M = {}
 local core = require("core")
-local strings = require("std.strings")
 
 local function encode_json_string(value)
   return tostring(value or "")
@@ -55,6 +54,13 @@ local function encode_assignees_json(assignees)
   return table.concat(rendered, ",")
 end
 
+local function fixture_comment_body(comment)
+  if type(comment) == "table" then
+    return comment.body
+  end
+  return comment
+end
+
 local function comment_author(comment)
   if type(comment) == "table" then
     if comment.author_login ~= nil then return comment.author_login end
@@ -85,7 +91,7 @@ function M.view_comment_json(comment)
   local id = comment_id(comment)
   local id_field = id ~= nil and tostring(id) ~= "" and '"id":' .. encode_json_value(id) .. "," or ""
   return "{" .. id_field
-    .. '"body":' .. encode_json_value(strings.comment_body(comment))
+    .. '"body":' .. encode_json_value(fixture_comment_body(comment))
     .. ',"author":{"login":' .. encode_json_value(comment_author(comment)) .. "}"
     .. ',"createdAt":' .. encode_json_value(comment_created_at(comment) or "2026-06-03T01:00:00Z")
     .. "}"
@@ -103,7 +109,7 @@ local function rest_comment_json(comment, index)
       .. "}"
   end
   return '{"id":' .. encode_json_value(comment_id(comment) or index)
-    .. ',"body":' .. encode_json_value(strings.comment_body(comment))
+    .. ',"body":' .. encode_json_value(fixture_comment_body(comment))
     .. ',"user":{"login":' .. encode_json_value(comment_author(comment)) .. "}"
     .. ',"created_at":' .. encode_json_value(comment_created_at(comment) or "2026-06-03T01:00:00Z")
     .. "}"

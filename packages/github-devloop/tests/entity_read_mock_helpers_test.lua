@@ -115,6 +115,16 @@ return {
     t.eq(first(view.comments).createdAt, first(comments).created_at)
   end,
 
+  test_comment_body_fixture_preserves_raw_json_body_value = function()
+    local table_nil = seam.view_comment_json({ body = nil })
+    local scalar_nil = seam.view_comment_json(nil)
+    local numeric = decode(seam.view_comment_json({ body = 123 }))
+
+    t.is_true(table_nil:find('"body":null', 1, true) ~= nil)
+    t.is_true(scalar_nil:find('"body":null', 1, true) ~= nil)
+    t.eq(numeric.body, 123)
+  end,
+
   test_unregistered_entity_read_fails_closed = function()
     local ok = pcall(function()
       core.fetch_issue_view("owner/repo", 404, "2026-06-14T00:00:00Z", { consumer = "unregistered" })
