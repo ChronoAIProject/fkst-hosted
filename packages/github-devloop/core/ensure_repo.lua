@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local strings = require("std.strings")
 local dashboard_title = "fkst-dev board"
 local dashboard_label = "fkst-dashboard"
 local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"
@@ -31,21 +32,6 @@ local function require_repo(repo)
     error("github-devloop: FKST_GITHUB_REPO is required for ensure_repo")
   end
   return value
-end
-
-local function encode_json_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\")
-  text = text:gsub('"', '\\"')
-  text = text:gsub("\b", "\\b")
-  text = text:gsub("\f", "\\f")
-  text = text:gsub("\n", "\\n")
-  text = text:gsub("\r", "\\r")
-  text = text:gsub("\t", "\\t")
-  text = text:gsub("[%z\1-\31]", function(char)
-    return string.format("\\u%04x", char:byte())
-  end)
-  return '"' .. text .. '"'
 end
 
 local function run_gh(fn, timeout, error_class)
@@ -108,9 +94,9 @@ local function write_dashboard_anchor_input(repo)
     dedup_key = "dashboard-anchor",
   })
   file.write(path, "{"
-    .. '"title":' .. encode_json_string(dashboard_title)
-    .. ',"body":' .. encode_json_string(body)
-    .. ',"labels":[' .. encode_json_string(dashboard_label) .. "]"
+    .. '"title":' .. strings.json_string(dashboard_title)
+    .. ',"body":' .. strings.json_string(body)
+    .. ',"labels":[' .. strings.json_string(dashboard_label) .. "]"
     .. "}\n")
   return path
 end

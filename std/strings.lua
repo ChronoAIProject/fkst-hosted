@@ -20,6 +20,25 @@ function S.comment_body(comment)
   return tostring(comment or "")
 end
 
+-- std.strings.json_string is a temporary byte-identical stopgap for #976 only:
+-- canonical JSON encoding remains deferred to a dedicated encoder boundary.
+-- Keep this body matched to the folded github-devloop encode_json_string copies;
+-- do not extend it into a partial general JSON serializer.
+function S.json_string(value)
+  local text = tostring(value or "")
+  text = text:gsub("\\", "\\\\")
+  text = text:gsub('"', '\\"')
+  text = text:gsub("\b", "\\b")
+  text = text:gsub("\f", "\\f")
+  text = text:gsub("\n", "\\n")
+  text = text:gsub("\r", "\\r")
+  text = text:gsub("\t", "\\t")
+  text = text:gsub("[%z\1-\31]", function(char)
+    return string.format("\\u%04x", char:byte())
+  end)
+  return '"' .. text .. '"'
+end
+
 function S.is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end

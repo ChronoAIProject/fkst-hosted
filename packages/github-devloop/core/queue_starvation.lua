@@ -35,25 +35,10 @@ local function snapshot_path(repo, window_key)
   return "/tmp/fkst-github-devloop-queue-starvation-" .. safe_repo .. "-" .. safe_window .. ".json"
 end
 
-local function encode_json_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\")
-  text = text:gsub('"', '\\"')
-  text = text:gsub("\b", "\\b")
-  text = text:gsub("\f", "\\f")
-  text = text:gsub("\n", "\\n")
-  text = text:gsub("\r", "\\r")
-  text = text:gsub("\t", "\\t")
-  text = text:gsub("[%z\1-\31]", function(char)
-    return string.format("\\u%04x", char:byte())
-  end)
-  return '"' .. text .. '"'
-end
-
 local function json_array(values)
   local parts = {}
   for _, value in ipairs(values or {}) do
-    table.insert(parts, encode_json_string(value))
+    table.insert(parts, strings.json_string(value))
   end
   return "[" .. table.concat(parts, ",") .. "]"
 end
@@ -61,22 +46,22 @@ end
 local function issue_json(issue)
   return "{"
     .. '"number":' .. tostring(tonumber(issue.number) or 0)
-    .. ',"title":' .. encode_json_string(issue.title)
-    .. ',"closedAt":' .. encode_json_string(issue.closed_at)
+    .. ',"title":' .. strings.json_string(issue.title)
+    .. ',"closedAt":' .. strings.json_string(issue.closed_at)
     .. ',"labels":' .. json_array(issue.labels)
     .. "}"
 end
 
 local function entity_json(entity, age_minutes)
   return "{"
-    .. '"proposal_id":' .. encode_json_string(entity and entity.proposal_id or "")
-    .. ',"issue_number":' .. encode_json_string(entity and entity.issue_number or "")
-    .. ',"pr_number":' .. encode_json_string(entity and entity.pr_number or "")
-    .. ',"title":' .. encode_json_string(entity and entity.title or "")
-    .. ',"state":' .. encode_json_string(entity and entity.state and entity.state.state or "")
-    .. ',"version":' .. encode_json_string(entity and entity.state and entity.state.version or "")
-    .. ',"head_sha":' .. encode_json_string(entity and entity.head_sha or "")
-    .. ',"source":' .. encode_json_string(entity and entity.source or "")
+    .. '"proposal_id":' .. strings.json_string(entity and entity.proposal_id or "")
+    .. ',"issue_number":' .. strings.json_string(entity and entity.issue_number or "")
+    .. ',"pr_number":' .. strings.json_string(entity and entity.pr_number or "")
+    .. ',"title":' .. strings.json_string(entity and entity.title or "")
+    .. ',"state":' .. strings.json_string(entity and entity.state and entity.state.state or "")
+    .. ',"version":' .. strings.json_string(entity and entity.state and entity.state.version or "")
+    .. ',"head_sha":' .. strings.json_string(entity and entity.head_sha or "")
+    .. ',"source":' .. strings.json_string(entity and entity.source or "")
     .. ',"age_minutes":' .. tostring(tonumber(age_minutes) or 0)
     .. "}"
 end
@@ -88,13 +73,13 @@ local function write_snapshot(repo, window_key, evidence)
     table.insert(closed, issue_json(issue))
   end
   file.write(path, "{"
-    .. '"detector":' .. encode_json_string(detector)
-    .. ',"repo":' .. encode_json_string(repo)
-    .. ',"window":' .. encode_json_string(window_key)
-    .. ',"generated_at":' .. encode_json_string(format_timestamp(evidence.now_seconds))
+    .. '"detector":' .. strings.json_string(detector)
+    .. ',"repo":' .. strings.json_string(repo)
+    .. ',"window":' .. strings.json_string(window_key)
+    .. ',"generated_at":' .. strings.json_string(format_timestamp(evidence.now_seconds))
     .. ',"queue_head":' .. entity_json(evidence.queue_head, evidence.queue_head_age_minutes)
     .. ',"threshold_minutes":' .. tostring(evidence.threshold_minutes)
-    .. ',"last_merge_age_minutes":' .. encode_json_string(evidence.last_merge_age_minutes or "none")
+    .. ',"last_merge_age_minutes":' .. strings.json_string(evidence.last_merge_age_minutes or "none")
     .. ',"recent_closed":[' .. table.concat(closed, ",") .. "]"
     .. "}\n")
   return path
