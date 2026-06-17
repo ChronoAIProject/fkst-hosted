@@ -155,12 +155,6 @@ impl NyxIdGithubProxy {
                     ProxyError::Transport(detail)
                 }
             }
-            // The github-proxy path never uses the service account, so neither
-            // the SA-rejection nor the owner-only "no SA configured" (#219)
-            // variant can arise here; map both to delegation for safety.
-            NyxIdError::ServiceAuth | NyxIdError::ServiceAccountUnconfigured => {
-                ProxyError::Delegation
-            }
         }
     }
 }

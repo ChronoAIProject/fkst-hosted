@@ -144,32 +144,18 @@ async fn main() -> ExitCode {
     let auth_mode = config.auth.clone();
 
     // Build the NyxID client ONCE for the Authorizer and the user-token paths.
-    // Owner-only model (#219): the client is built from `AuthMode::Enabled`
+    // Owner-only model (#257): the client is built from `AuthMode::Enabled`
     // ALONE (which carries the NyxID base URL), because every feature it drives
-    // by default — per-session key mint, Ornn proxy, github_hub, repo-create —
-    // authenticates with the FORWARDED USER TOKEN, not the service account. The
-    // service account (`NYXID_CLIENT_ID/SECRET`) stays OPTIONAL: when present it
-    // also enables the SA-only org features; when absent the user-token paths
-    // are unaffected and SA-only calls fail with a typed error (never a panic).
+    // — per-session key mint, Ornn proxy, github_hub, repo-create —
+    // authenticates with the FORWARDED USER TOKEN. There is no service account.
     let nyxid_client: Option<NyxIdClient> = match build_nyxid_client(
         &auth_mode,
-        config.nyxid_client_id.as_deref(),
-        config.nyxid_client_secret.as_ref(),
         &config.nyxid_github_proxy_slug,
         std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
     ) {
         Ok(client) => {
-            if let Some(ref client) = client {
-                let sa = client.has_service_account();
-                tracing::info!(
-                    service_account = sa,
-                    "NyxID client built (org features {})",
-                    if sa {
-                        "enabled"
-                    } else {
-                        "disabled (owner-only)"
-                    }
-                );
+            if client.is_some() {
+                tracing::info!("NyxID client built (owner-only, forwarded user token)");
             }
             client
         }
