@@ -4,6 +4,9 @@ function M.persistence_class()
   return "saga"
 end
 
+-- Recurrence/API waiver: `parse_name_only_paths` stays package-root API because
+-- it is shared by package-root modules that receive only the installed `M`
+-- surface, and `scripts/check_repo.py` forbids reintroducing local copies.
 function M.parse_name_only_paths(stdout)
   local paths = {}
   local seen = {}
