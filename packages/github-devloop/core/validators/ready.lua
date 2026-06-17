@@ -6,6 +6,14 @@ function M.is_supported_ready(payload)
     and payload.schema == "github-devloop.ready.v1"
     and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
     and (payload.framing == nil or M._is_bounded_string(payload.framing, M._max_framing_len))
+    and (payload.operator_reentry == nil
+      or (type(payload.operator_reentry) == "table"
+        and payload.operator_reentry.command == "reimplement"
+        and payload.operator_reentry.from_state == "blocked"
+        and M._is_positive_pr_number(payload.operator_reentry.pr_number)
+        and M.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.impl_version)
+        and M.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.state_version)
+        and payload.operator_reentry.impl_version == payload.dedup_key))
     and (payload.ready_hand_off == nil
       or (payload.impl_retry_attempt == nil
         and M.is_own_state_marker_hand_off(payload.ready_hand_off, {
