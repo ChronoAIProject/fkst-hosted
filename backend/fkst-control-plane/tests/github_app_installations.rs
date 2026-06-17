@@ -267,6 +267,7 @@ async fn webhook_deleted_evicts_and_fails_active_session_without_persistence() {
         nyxid_key_id: None,
         nyxid_key_prefix: None,
         ornn_skills: None,
+        terminal_cause: None,
         created_at: bson::DateTime::now(),
         started_at: Some(bson::DateTime::now()),
         stopped_at: None,

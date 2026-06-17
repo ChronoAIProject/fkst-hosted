@@ -109,6 +109,7 @@ fn sample_session() -> SessionDoc {
         nyxid_key_id: None,
         nyxid_key_prefix: None,
         ornn_skills: None,
+        terminal_cause: None,
         created_at: bson::DateTime::from_millis(1_700_000_000_000),
         started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
         stopped_at: None,

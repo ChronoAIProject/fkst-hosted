@@ -56,6 +56,10 @@ type Created = (String, String, Vec<String>);
 struct RecordingIssueApi {
     created: Mutex<Vec<Created>>,
     patched: Mutex<Vec<(u64, IssuePatch)>>,
+    /// Live per-issue label state (seeded on create, replaced on a
+    /// `labels: Some` patch — mirroring GitHub's replace-set PATCH) so the
+    /// read-then-replace label updater (#180) returns the current set.
+    labels_by_issue: Mutex<std::collections::HashMap<u64, Vec<String>>>,
 }
 
 #[async_trait]
@@ -71,6 +75,10 @@ impl IssueApi for RecordingIssueApi {
             .lock()
             .unwrap()
             .push((title.to_string(), body.to_string(), labels.to_vec()));
+        self.labels_by_issue
+            .lock()
+            .unwrap()
+            .insert(101, labels.to_vec());
         Ok(101)
     }
 
@@ -80,8 +88,28 @@ impl IssueApi for RecordingIssueApi {
         number: u64,
         patch: IssuePatch,
     ) -> Result<(), AppError> {
+        if let Some(labels) = &patch.labels {
+            self.labels_by_issue
+                .lock()
+                .unwrap()
+                .insert(number, labels.clone());
+        }
         self.patched.lock().unwrap().push((number, patch));
         Ok(())
+    }
+
+    async fn get_issue_labels(
+        &self,
+        _repo: &RepoRef,
+        number: u64,
+    ) -> Result<Vec<String>, AppError> {
+        Ok(self
+            .labels_by_issue
+            .lock()
+            .unwrap()
+            .get(&number)
+            .cloned()
+            .unwrap_or_default())
     }
 }
 
@@ -266,8 +294,12 @@ async fn inline_source_returns_202_and_files_one_non_sensitive_issue() {
         "the filed body carries the hidden server marker: {filed_body}"
     );
     assert!(
-        labels.iter().any(|l| l == "fkst-hosted:goal"),
-        "the filed issue carries the goal label: {labels:?}"
+        labels.iter().any(|l| l == "fkst-goal"),
+        "the filed issue carries the goal label (#180): {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("status:")),
+        "no status:* label on a fresh goal (#180): {labels:?}"
     );
 }
 

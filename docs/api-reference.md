@@ -261,6 +261,10 @@ pending → validating → running → stopping → stopped
   "package_names": ["billing-pipeline"],   // always ≥ 1 entry
   "status": "running",
   "error": null,                            // populated when status is "failed"
+  // Why the session ended (omitted while live): "terminated" (the triggerer
+  // stopped it), "completed" (the engine finished cleanly on its own, exit 0),
+  // or "failed" (an error). Maps 1:1 onto the goal issue's terminal labels.
+  "terminal_cause": null,
   "owner_user_id": "user-123",
   "org_id": null,
   "goal_id": null,                          // set for goal-triggered sessions
@@ -348,13 +352,34 @@ status**: `not_started`, `stopped`, or `failed`. Title and description are
 editable in any status.
 
 > **Durable representation.** A goal with a target repo is mirrored as a
-> **GitHub Issue** on that repo, labelled `fkst-hosted:goal` and
-> `status:<status>` (the label tracks the lifecycle above). The issue body
-> carries only a non-sensitive summary (title, package count, repo slug) — the
-> **prompt/description is never written to GitHub**; it lives only in controller
-> memory, which is authoritative for reads. A goal created without a repo is
-> held in memory until a repo is set (at trigger time), which materialises the
-> issue. Deleting a goal **closes** its issue (GitHub issues cannot be deleted).
+> **GitHub Issue** on that repo. The issue body carries only a non-sensitive
+> summary (title, package count, repo slug) — the **prompt/description is never
+> written to GitHub**; it lives only in controller memory, which is
+> authoritative for reads. A goal created without a repo is held in memory
+> until a repo is set (at trigger time), which materialises the issue. Deleting
+> a goal **closes** its issue (GitHub issues cannot be deleted).
+>
+> **Issue labels (session-lifecycle scheme).** The issue is labelled to reflect
+> the lifecycle of the session spawned from the goal — goal status itself is
+> in-memory only and is no longer mirrored as a `status:*` label. Labels are
+> updated read-then-replace (unrelated labels you add by hand are preserved),
+> best-effort (a label write never affects the run):
+>
+> | Label | Meaning |
+> |-------|---------|
+> | `fkst-goal` | the issue is an fkst goal (stamped on submit / adopt / server-create) |
+> | `fkst-session-<session_id>` | links the issue to the concrete spawned session |
+> | `fkst-running` | the linked session is Running (removed at the terminal) |
+> | `fkst-terminated` | the session ended because the triggerer terminated it |
+> | `fkst-completed` | the session finished gracefully on its own (clean exit 0) |
+> | `fkst-failed` | the session ended with an error |
+>
+> The three terminal labels (`fkst-terminated` / `fkst-completed` /
+> `fkst-failed`) map 1:1 onto the three terminal causes and mirror the session's
+> [`terminal_cause`](#get-apiv1sessionsid--fetch-session-status) field. The
+> hidden `fkst-hosted:goal` **server marker** in the issue *body* (an HTML
+> comment) is a DISTINCT, unchanged mechanism — not the visible `fkst-goal`
+> label.
 
 **Data shape**
 

@@ -158,6 +158,7 @@ fn goal_session(goal_id: bson::Uuid, with_pins: bool) -> SessionDoc {
                 },
             ]
         }),
+        terminal_cause: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,
