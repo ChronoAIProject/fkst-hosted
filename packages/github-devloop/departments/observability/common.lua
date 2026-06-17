@@ -1,3 +1,5 @@
+local strings = require("std.strings")
+
 local M = {}
 
 M.dept = "observability"
@@ -21,20 +23,7 @@ M.stall_suspect_threshold_minutes = {
 function M.install_common(_core)
 end
 
-function M.json_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\")
-  text = text:gsub('"', '\\"')
-  text = text:gsub("\b", "\\b")
-  text = text:gsub("\f", "\\f")
-  text = text:gsub("\n", "\\n")
-  text = text:gsub("\r", "\\r")
-  text = text:gsub("\t", "\\t")
-  text = text:gsub("[%z\1-\31]", function(char)
-    return string.format("\\u%04x", char:byte())
-  end)
-  return '"' .. text .. '"'
-end
+M.json_string = strings.json_string
 
 function M.stderr_http_status(stderr)
   local text = tostring(stderr or "")

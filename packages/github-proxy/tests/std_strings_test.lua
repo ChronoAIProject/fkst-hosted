@@ -37,6 +37,22 @@ return {
     t.eq(strings.comment_body(nil), "")
   end,
 
+  test_json_string_wraps_and_escapes_json_string_boundaries = function()
+    t.eq(strings.json_string(nil), '""')
+    t.eq(strings.json_string('a"b\\c'), '"a\\"b\\\\c"')
+  end,
+
+  test_json_string_escapes_c0_control_characters = function()
+    t.eq(strings.json_string("\b\f\n\r\t"), '"\\b\\f\\n\\r\\t"')
+    t.eq(strings.json_string("x" .. string.char(0) .. string.char(31) .. "y"), '"x\\u0000\\u001fy"')
+  end,
+
+  test_json_string_documents_temporary_canonical_encoder_waiver = function()
+    local source = file.read("std/strings.lua")
+    t.is_true(source:find("std.strings.json_string is a temporary byte-identical stopgap", 1, true) ~= nil)
+    t.is_true(source:find("canonical JSON encoding remains deferred to a dedicated encoder boundary", 1, true) ~= nil)
+  end,
+
   test_bounded_string_requires_non_empty_string_under_limit = function()
     t.is_true(strings.is_bounded_string("abc", 3))
     t.eq(strings.is_bounded_string("abcd", 3), false)
