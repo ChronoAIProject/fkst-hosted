@@ -1,5 +1,6 @@
 local M = {}
 local env = require("std.env")
+local source_ref = require("std.source_ref")
 local strings = require("std.strings")
 
 require("core.error_facts").install(M)
@@ -409,35 +410,12 @@ local function version_review_meta_action_round(version)
   return max_n
 end
 
-local function version_order_key(version)
-  local text = tostring(version or "")
-  local rest = text
-  if rest:sub(1, #"consensus:") == "consensus:" then
-    rest = rest:sub(#"consensus:" + 1)
-  elseif rest:sub(1, #"ready/") == "ready/" then
-    rest = rest:sub(#"ready/" + 1):gsub("^consensus%-", "")
-  end
-
-  local timestamp = nil
-  for found in rest:gmatch("(%d%d%d%d%-%d%d%-%d%dT%d%d[%-:]%d%d[%-:]%d%dZ)") do
-    timestamp = found
-  end
-  if timestamp ~= nil then
-    local _, end_pos = rest:find(timestamp, 1, true)
-    local suffix = end_pos and rest:sub(end_pos + 1) or ""
-    local loop_n = tonumber(suffix:match("/loop/(%d+)$")) or 0
-    local suffix_tie = suffix:gsub("/loop/%d+$", "")
-    return timestamp:gsub(":", "-") .. "/loop/" .. string.format("%012d", loop_n) .. suffix_tie
-  end
-  return rest
-end
-
 local function version_primary_key(version)
   local updated_at = version_updated_at(version)
   if updated_at ~= "" then
     return updated_at
   end
-  return version_order_key(version)
+  return source_ref.version_order_key(version)
 end
 
 local function version_sort_key(version, stage_rank)

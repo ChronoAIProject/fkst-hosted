@@ -7,6 +7,13 @@ local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 
 local verdict_summary_label = "Three-angle verdicts: "
 
 return {
+  test_version_order_key_public_surface_delegates_to_std_contract = function()
+    t.eq(
+      core.version_order_key("ready/consensus-2026-06-17T22:18:19Z/loop/12"),
+      "2026-06-17T22-18-19Z/loop/000000000012"
+    )
+  end,
+
   test_marker_label_and_comment_builders = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local thinking_marker = core.state_marker(proposal_id, "thinking", "v1")
