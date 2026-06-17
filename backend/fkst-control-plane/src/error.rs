@@ -158,10 +158,20 @@ impl From<crate::engine::EngineConfigError> for AppError {
 }
 
 /// Stable JSON error envelope: `{"error": "<code>", "message": "<text>"}`.
-#[derive(Debug, Serialize)]
-struct ErrorEnvelope {
-    error: &'static str,
-    message: String,
+///
+/// Public + `ToSchema` so the generated OpenAPI spec can reference it as the
+/// body of every documented 4xx/5xx response. `error` is one of the fixed code
+/// strings (`invalid_request`, `not_found`, `conflict`, `unauthorized`,
+/// `forbidden`, `unprocessable`, `rate_limited`, `upstream_error`, `unavailable`,
+/// `internal`); `message` is a client-safe human description.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ErrorEnvelope {
+    /// Stable machine-readable error code.
+    #[schema(value_type = String, example = "invalid_request")]
+    pub error: &'static str,
+    /// Human-readable, client-safe description of the failure.
+    #[schema(example = "invalid request: title must not be empty")]
+    pub message: String,
 }
 
 /// Map auth-domain errors onto the unified type.

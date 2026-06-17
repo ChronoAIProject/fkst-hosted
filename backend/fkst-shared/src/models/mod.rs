@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 /// GitHub repository reference: `owner/name`. Shared by sessions (via
 /// [`SessionDoc::repo`]) and goals; re-exported by `goals/model.rs`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct RepoRef {
     pub owner: String,
     pub name: String,
@@ -29,6 +30,7 @@ pub struct RepoRef {
 
 /// Lifecycle state of a session. Serializes lowercase on the wire.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum SessionStatus {
     Pending,
@@ -47,6 +49,7 @@ pub enum SessionStatus {
 /// issue's three terminal labels (`fkst-terminated`/`fkst-completed`/
 /// `fkst-failed`). Serializes snake_case on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalCause {
     Terminated,

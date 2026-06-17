@@ -19,13 +19,15 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
-use axum::{Json, Router};
+use axum::Json;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
-use crate::error::AppError;
+use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::{GithubAppError, GithubAppTokens, InstallationProbe};
 use crate::github_hub::{commit_files, ContentsWriteError};
 use crate::routes::extract::AppJson;
@@ -39,7 +41,8 @@ const SCAFFOLD_COMMIT_MESSAGE: &str = "fkst: initialize fkst context";
 const FKST_DIR: &str = ".fkst";
 
 /// Query parameters for the setup endpoint.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SetupQuery {
     /// Re-commit the scaffold over an existing `.fkst` (overwriting only the
     /// three scaffold paths, never deleting other `.fkst` content). Default
@@ -50,24 +53,26 @@ pub struct SetupQuery {
 
 /// Optional request body. Mirrors `goals::create`'s `org_id`: when present, the
 /// caller must be a writer of that org.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetupRequest {
     #[serde(default)]
     pub org_id: Option<String>,
 }
 
-/// `{ owner, name }` echoed back in the response.
-#[derive(Debug, Serialize, PartialEq, Eq)]
-pub struct RepoRef {
+/// `{ owner, name }` echoed back in the response. Named `SetupRepoRef` (not
+/// `RepoRef`) so it does not collide, in the generated spec, with the shared
+/// `models::RepoRef` schema.
+#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
+pub struct SetupRepoRef {
     pub owner: String,
     pub name: String,
 }
 
 /// Response body for the setup endpoint.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 pub struct SetupResponse {
-    pub repo: RepoRef,
+    pub repo: SetupRepoRef,
     pub default_branch: Option<String>,
     pub commit_sha: Option<String>,
     pub created_paths: Vec<String>,
@@ -76,6 +81,33 @@ pub struct SetupResponse {
 
 /// `POST /repos/:owner/:name/fkst-setup`: scaffold `.fkst/` onto the repo's
 /// default branch. See the module docs for the authorization model.
+#[utoipa::path(
+    post,
+    path = "/repos/{owner}/{name}/fkst-setup",
+    tag = "repos",
+    operation_id = "fkst_setup_repo",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("owner" = String, Path, description = "GitHub repository owner"),
+        ("name" = String, Path, description = "GitHub repository name"),
+        SetupQuery
+    ),
+    request_body(
+        content = SetupRequest,
+        description = "Optional org binding ({\"org_id\":...}); the whole body may be omitted"
+    ),
+    responses(
+        (status = 200, description = "Already initialized (no-op), or forced re-commit", body = SetupResponse),
+        (status = 201, description = ".fkst scaffold committed to a fresh repo", body = SetupResponse),
+        (status = 400, description = "Malformed owner/name", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks repo setup permission", body = ErrorEnvelope),
+        (status = 404, description = "Repository not found", body = ErrorEnvelope),
+        (status = 409, description = "Default branch moved during scaffolding", body = ErrorEnvelope),
+        (status = 422, description = "GitHub App not installed/configured for the repo", body = ErrorEnvelope),
+        (status = 502, description = "GitHub rejected the scaffold commit", body = ErrorEnvelope)
+    )
+)]
 async fn fkst_setup(
     State(state): State<AppState>,
     Path((owner, name)): Path<(String, String)>,
@@ -152,7 +184,7 @@ async fn run_fkst_setup(
         return Ok((
             StatusCode::OK,
             SetupResponse {
-                repo: RepoRef {
+                repo: SetupRepoRef {
                     owner: owner.to_string(),
                     name: name.to_string(),
                 },
@@ -179,7 +211,7 @@ async fn run_fkst_setup(
     Ok((
         status,
         SetupResponse {
-            repo: RepoRef {
+            repo: SetupRepoRef {
                 owner: owner.to_string(),
                 name: name.to_string(),
             },
@@ -250,8 +282,8 @@ fn map_write_error(owner_repo: &str, error: ContentsWriteError) -> AppError {
 }
 
 /// Repo routes, nested under `/api/v1`.
-pub fn router() -> Router<AppState> {
-    Router::new().route("/repos/:owner/:name/fkst-setup", post(fkst_setup))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(fkst_setup))
 }
 
 #[cfg(test)]
