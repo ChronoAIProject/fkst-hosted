@@ -171,6 +171,29 @@ return {
     t.eq(by_state.blocked.postcondition_family, nil)
   end,
 
+  test_pr_open_is_clean_viability_decision_signature = function()
+    local row = rows_by_state(core.restart_transition_table())["pr-open"]
+    local signature = row.responsibility_signature
+    t.eq(signature.state_kind, "decision")
+    t.eq(signature.receiver_kind, "pr-viability-router")
+    t.eq(signature.driving_queue, "devloop_reviewing")
+    t.eq(signature.liveness_class, "pr_open.actionable")
+    t.eq(signature.output_postcondition_family, "pr_viability_routed")
+    t.eq(signature.decision_type, "PrViability")
+    local by_state = {}
+    for _, edge in ipairs(signature.successors) do
+      by_state[edge.state] = edge
+    end
+    t.eq(by_state.reviewing.output_variant, "review_requested")
+    t.eq(by_state.reviewing.decision_type, "PrViability")
+    t.eq(by_state.reviewing.postcondition_family, "pr_viability_routed")
+    t.eq(by_state.reviewing.monotonic, true)
+    t.eq(by_state.fixing.output_variant, "not_mergeable_repair")
+    t.eq(by_state.fixing.decision_type, "PrViability")
+    t.eq(by_state.fixing.postcondition_family, "pr_viability_routed")
+    t.eq(by_state.fixing.monotonic, true)
+  end,
+
   test_terminal_escape_to_non_terminal_state_fails = function()
     local row = {
       from_state = "synthetic-terminal-escape",

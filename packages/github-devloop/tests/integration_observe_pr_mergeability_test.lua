@@ -67,7 +67,7 @@ local function run_observe_pr_mergeability(name)
   }, opts(name))
 end
 
-local function assert_reviewing_conflict_redrive(result)
+local function assert_conflict_redrive(result, expected_from_state)
   t.eq(result.exit_code, 0)
   local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
   local issue_label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
@@ -88,29 +88,20 @@ local function assert_reviewing_conflict_redrive(result)
   t.eq(fixing_raise.payload.version, version .. "/fix/1")
   t.eq(fixing_raise.payload.reviewed_head_sha, "def456")
   t.eq(fixing_raise.payload.gate_failure_excerpt, "mergeable-conflicting")
-  t.is_true(tostring(fixing_raise.payload.review_proposal_id):find("reviewing", 1, true) == nil)
+  t.is_true(tostring(fixing_raise.payload.review_proposal_id):find(expected_from_state, 1, true) == nil)
 end
 
 return {
   test_observe_pr_reviewing_conflict_redrives_to_fixing = function()
     mock_pr("reviewing", "CONFLICTING", "DIRTY")
-    assert_reviewing_conflict_redrive(run_observe_pr_mergeability("observe-pr-reviewing-conflict"))
+    assert_conflict_redrive(run_observe_pr_mergeability("observe-pr-reviewing-conflict"), "reviewing")
   end,
 
-  test_observe_pr_pr_open_conflict_moves_forward_to_reviewing_first = function()
+  test_observe_pr_pr_open_conflict_redrives_to_fixing_before_reviewing = function()
     mock_pr("pr-open", "CONFLICTING", "DIRTY")
     local result = run_observe_pr_mergeability("observe-pr-pr-open-conflict")
-    t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
-    t.is_true(find_raise(result.raises, "devloop_reviewing") ~= nil)
-    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local pr_label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
-      return tostring(payload.target_kind or "") == "pr"
-    end)
-    t.is_true(comment_raise ~= nil)
-    t.is_true(pr_label_raise ~= nil)
-    t.eq(pr_label_raise.payload.expected_state, "reviewing")
-    t.eq(pr_label_raise.payload.expected_version, version)
+    assert_conflict_redrive(result, "pr-open")
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
   end,
 
   test_observe_pr_fixing_conflict_replays_current_fixing_round = function()
