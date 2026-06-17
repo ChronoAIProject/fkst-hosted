@@ -1,5 +1,5 @@
 local h = require("tests.devloop_core_helpers")
-local core = h.core
+local gate = require("tests.competence_gate_helpers")
 local t = h.t
 
 local function by_id(values)
@@ -16,7 +16,7 @@ end
 
 return {
   test_competence_gate_clean_tree_has_no_false_rejects = function()
-    local report = core.competence_gate_report()
+    local report = gate.competence_gate_report()
     t.eq(report.schema, "github-devloop.competence-gate-report.v1")
     t.eq(report.framing, "evidence-carrying adversarial review for durable state-machine changes")
     t.eq(#report.clean_errors, 0, joined_errors(report.clean_errors))
@@ -24,7 +24,7 @@ return {
   end,
 
   test_competence_gate_rejects_all_held_out_ready_split_bugs = function()
-    local report = core.competence_gate_report()
+    local report = gate.competence_gate_report()
     t.eq(#report.challenges, 7)
     for _, challenge in ipairs(report.challenges) do
       t.eq(challenge.rejected, true, challenge.id .. ": " .. joined_errors(challenge.errors))
@@ -35,7 +35,7 @@ return {
   end,
 
   test_competence_gate_negative_control_inventory_is_exact = function()
-    local report = core.competence_gate_report()
+    local report = gate.competence_gate_report()
     local controls = by_id(report.negative_controls)
     local expected = {
       "001-release-replay-uses-split-version",
@@ -53,7 +53,7 @@ return {
   end,
 
   test_competence_gate_challenge_error_classes_are_stable = function()
-    local challenges = by_id(core.competence_gate_report().challenges)
+    local challenges = by_id(gate.competence_gate_report().challenges)
     t.eq(challenges["001"].bug_class, "strand")
     t.eq(challenges["002"].bug_class, "grader-weakening")
     t.eq(challenges["003"].bug_class, "false-terminal")

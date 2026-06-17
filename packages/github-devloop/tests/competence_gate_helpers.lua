@@ -1,6 +1,5 @@
-local S = {}
-
-function S.install(M)
+local core = require("core")
+local M = setmetatable({}, { __index = core })
 
 local required_negative_controls = {
   "001-release-replay-uses-split-version",
@@ -358,6 +357,4 @@ function M.competence_gate_report()
   }
 end
 
-end
-
-return S
+return M
