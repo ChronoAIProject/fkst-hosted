@@ -5,6 +5,21 @@ function S.trim(value)
   return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+function S.split_repo(repo)
+  local owner, name = tostring(repo or ""):match("^([^/]+)/([^/]+)$")
+  if owner == nil or owner == "" or name == nil or name == "" then
+    return nil, nil
+  end
+  return owner, name
+end
+
+function S.comment_body(comment)
+  if type(comment) == "table" then
+    return tostring(comment.body or "")
+  end
+  return tostring(comment or "")
+end
+
 function S.is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end

@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local env = require("std.env")
 local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_REPO = true,
@@ -43,25 +44,13 @@ local function env_present_command(name)
   return 'if [ -n "${' .. name .. ':-}" ]; then printf present; fi'
 end
 
-function M.read_env_command(name)
-  return read_env_command(name)
-end
+M.read_env_command = read_env_command
 
 function M.env_present_command(name)
   return env_present_command(name)
 end
 
-function M.read_env(name, exec)
-  local run = exec or exec_sync
-  if type(run) ~= "function" then
-    return nil
-  end
-  local ok, out = pcall(run, read_env_command(name))
-  if not ok or type(out) ~= "table" or out.exit_code ~= 0 or out.stdout == "" then
-    return nil
-  end
-  return out.stdout
-end
+M.read_env = env.read_env(read_env_command)
 
 function M.env_present(name, exec)
   local run = exec or exec_sync
