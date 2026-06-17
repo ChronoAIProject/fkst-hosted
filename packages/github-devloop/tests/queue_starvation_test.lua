@@ -185,7 +185,7 @@ end
 local function mock_closed_merged_issue(number, closed_minutes_ago, trusted)
   local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(number)
   mock_recent_closed("[" .. recent_closed_item(number, closed_at_minutes_ago(closed_minutes_ago), { core._merged_label }) .. "]\n")
-  entity_read_mocks.mock_issue_view_raw_selector(t, { number = number }, "title,comments,state,stateReason", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, { number = number }, "title,comments,state,stateReason,assignees,author", {
     stdout = '{"title":"Merged issue","state":"CLOSED","comments":['
       .. render_comment(core.merged_marker(proposal_id, 9, "v1", "abcdef123456"), trusted == false and "mallory" or "fkst-test-bot")
       .. "]}\n",

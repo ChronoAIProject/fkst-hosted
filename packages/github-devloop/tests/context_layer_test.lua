@@ -4,6 +4,7 @@ require("tests.board_digest_probe_helpers")
 local core = h.core
 local t = h.t
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local gh_argv = require("tests.gh_argv_mock_helpers")
 
 local function assert_language_preamble(prompt)
   t.is_true(prompt:find("Write all output in English; quote code identifiers and cited originals verbatim.", 1, true) ~= nil)
@@ -134,13 +135,7 @@ local function mock_board_title(title, repo)
 end
 
 local function count_calls(needle)
-  local count = 0
-  for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
-      count = count + 1
-    end
-  end
-  return count
+  return gh_argv.count_calls(t, needle)
 end
 
 local function find_raise(raises, queue)
@@ -271,9 +266,9 @@ return {
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.is_true(proposal.body:find("GitHub issue", 1, true) ~= nil)
     t.is_nil(proposal.body:find("#101 ", 1, true))
-    t.eq(count_calls(core.gh_issue_list_board_digest_cmd("owner/repo")), 0)
-    t.eq(count_calls(core.gh_pr_list_board_digest_cmd("owner/repo")), 0)
-    t.eq(count_calls("gh issue list --repo 'owner/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 0)
+    t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("owner/repo"))), 0)
+    t.eq(count_calls(h.argv_rendered(core.gh_pr_list_board_digest_cmd("owner/repo"))), 0)
+    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels"), 0)
     t.eq(find_raise(second.raises, "consensus.proposal").payload.body, proposal.body)
   end,
 
@@ -299,10 +294,10 @@ return {
     t.is_true(first:find("fingerprint:widget-sync", 1, true) ~= nil)
     t.is_nil(first:find("#2 [fkst-dev:thinking] Issue title number 2", 1, true))
     t.is_true(second:find("#2 [fkst-dev:thinking] Issue title number 2", 1, true) ~= nil)
-    t.eq(count_calls(core.gh_issue_list_board_digest_cmd("owner/repo")), 1)
-    t.eq(count_calls("gh issue list --repo 'owner/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
-    t.eq(count_calls(core.gh_issue_list_board_digest_cmd("other/repo")), 1)
-    t.eq(count_calls("gh issue list --repo 'other/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
+    t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("owner/repo"))), 1)
+    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels"), 1)
+    t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("other/repo"))), 1)
+    t.eq(count_calls("gh issue list --repo other/repo --state closed --limit 30 --json number,title,closedAt,labels"), 1)
   end,
 
   test_board_digest_feeds_existing_context_path_from_local_board_command = function()
@@ -326,8 +321,8 @@ return {
     t.is_true(body:find("Board feed-through from FKST_DEVLOOP_BOARD_CMD:", 1, true) ~= nil)
     t.is_true(body:find("fkst-dev local board", 1, true) ~= nil)
     t.is_true(body:find("source=observe", 1, true) ~= nil)
-    t.eq(count_calls(core.gh_issue_list_board_digest_cmd("owner/repo")), 0)
-    t.eq(count_calls(core.gh_pr_list_board_digest_cmd("owner/repo")), 0)
+    t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("owner/repo"))), 0)
+    t.eq(count_calls(h.argv_rendered(core.gh_pr_list_board_digest_cmd("owner/repo"))), 0)
   end,
 
   test_board_digest_keeps_open_context_when_closed_digest_fetch_fails = function()
@@ -462,7 +457,7 @@ return {
     end
     t.eq(loop.round, 2)
     t.eq(review_loop.round, 3)
-    t.eq(count_calls(core.gh_issue_list_board_digest_cmd("owner/repo")), 1)
-    t.eq(count_calls("gh issue list --repo 'owner/repo' --state closed --limit 30 --json number,title,closedAt,labels"), 1)
+    t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("owner/repo"))), 1)
+    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels"), 1)
   end,
 }

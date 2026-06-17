@@ -245,7 +245,9 @@ local function assert_no_observe_reinject(result)
 end
 
 local function issue_rest_view_number(rendered)
-  return tostring(rendered or ""):match("gh api 'repos/owner/repo/issues/(%d+)'$")
+  local text = tostring(rendered or "")
+  return text:match("gh api 'repos/owner/repo/issues/(%d+)'$")
+    or text:match("gh api repos/owner/repo/issues/(%d+)$")
 end
 
 return {

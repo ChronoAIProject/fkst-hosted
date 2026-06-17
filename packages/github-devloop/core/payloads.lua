@@ -1,6 +1,18 @@
 local S = {}
+local github_handle = nil
 
 function S.install(M)
+local function github()
+  if github_handle ~= nil then
+    return github_handle
+  end
+  if type(exec_argv) ~= "function" then
+    error("github-devloop: GitHub adapter requires exec_argv")
+  end
+  github_handle = require("std.github").new(exec_argv)
+  return github_handle
+end
+
 local function bounded_framing(M, framing)
   if framing == nil then
     return nil
@@ -170,17 +182,6 @@ local function bounded_commit_subject(M, prefix, issue_number, current)
   return subject
 end
 
-local function recent_closed_issue_list_cmd(M, repo)
-  if type(M.gh_issue_list_recent_closed_cmd) == "function" then
-    return M.gh_issue_list_recent_closed_cmd(repo, 30)
-  end
-  return "gh issue list"
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --state closed"
-    .. " --limit 30"
-    .. " --json number,title,closedAt,labels"
-end
-
 local function board_feed_cmd(M)
   local cmd = M.read_env("FKST_DEVLOOP_BOARD_CMD")
   if cmd == nil or M._trim(cmd) == "" then
@@ -334,9 +335,10 @@ function M.board_digest_block(repo, tick)
     return feed
   end
 
-  local ok_issue, issue_result = pcall(M.gh_exec, { cmd = M.gh_issue_list_board_digest_cmd(repo), timeout = 30 })
-  local ok_pr, pr_result = pcall(M.gh_exec, { cmd = M.gh_pr_list_board_digest_cmd(repo), timeout = 30 })
-  local ok_closed, closed_result = pcall(M.gh_exec, { cmd = recent_closed_issue_list_cmd(M, repo), timeout = 30 })
+  local github_port = github()
+  local ok_issue, issue_result = pcall(github_port.issue_list_board_digest, repo, 30)
+  local ok_pr, pr_result = pcall(github_port.pr_list_board_digest, repo, 30)
+  local ok_closed, closed_result = pcall(github_port.issue_list_recent_closed, repo, 30, 30)
   if not ok_issue or not ok_pr
     or type(issue_result) ~= "table" or issue_result.exit_code ~= 0
     or type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
@@ -473,8 +475,8 @@ local function state_marker_comment_verified(M, repo, hand_off)
   if type(hand_off) ~= "table" or not M.is_safe_comment_id(hand_off.comment_id) then
     return false, "missing-comment-id"
   end
-  local result = M.gh_exec({ cmd = M.gh_issue_comment_get_cmd(repo, hand_off.comment_id), timeout = 30 })
-  if result.exit_code ~= 0 then
+  local ok_result, result = pcall(github().comment_get, repo, hand_off.comment_id, 30)
+  if not ok_result or type(result) ~= "table" then
     return false, "comment-get-failed"
   end
   local ok, decoded = pcall(json.decode, result.stdout or "{}")

@@ -1,5 +1,7 @@
 local t = fkst.test
 local core = require("core")
+local gh_argv = require("tests.gh_argv_mock_helpers")
+gh_argv.install(t, core)
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local testing = require("std.testing")
 local run_fake = testing.run_fake
@@ -978,4 +980,5 @@ return {
   mock_issue_fix_for_event = mock_issue_fix_for_event,
   mock_issue_review_meta = mock_issue_review_meta,
   mock_issue_merge = mock_issue_merge,
+  argv_rendered = gh_argv.argv_rendered,
 }

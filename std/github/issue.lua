@@ -284,6 +284,10 @@ function M.issue_view_cache_key(repo, issue_number)
 end
 
 function M.install(handle)
+  function handle.issue_view(repo, issue_number, fields, timeout)
+    return handle._exec(gh_issue_view_argv(repo, issue_number, fields), timeout, "gh issue view")
+  end
+
   local function fetch_issue_view_stdout(repo, number, timeout, opts)
     local issue = handle._exec(gh_issue_rest_argv(repo, number), timeout, "gh issue view")
     local comments = handle._exec(gh_issue_comments_rest_argv(repo, number), timeout, "gh issue comments")

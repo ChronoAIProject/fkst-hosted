@@ -1,7 +1,5 @@
 packages/github-devloop/core/base.lua:
   - gh
-packages/github-devloop/core/claims.lua:
-  - gh issue
 packages/github-devloop/core/commands.lua:
   - gh api
   - gh issue
@@ -27,16 +25,8 @@ packages/github-devloop/core/error_facts.lua:
   - git
 packages/github-devloop/core/github_graphql.lua:
   - gh api
-packages/github-devloop/core/github_proxy_entity_view.lua:
-  - gh api
-  - gh issue
-  - gh pr
 packages/github-devloop/core/observability_bounds.lua:
   - gh observability
-packages/github-devloop/core/payloads.lua:
-  - gh issue
-packages/github-devloop/core/queue_starvation.lua:
-  - gh recent
 packages/github-devloop/core/release_notes.lua:
   - gh pr
 packages/github-devloop/core/substrate_ref.lua:

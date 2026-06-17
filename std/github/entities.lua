@@ -14,6 +14,38 @@ local function issue_list_argv(repo)
   return { "gh", "api", "--paginate", "--slurp", "repos/" .. tostring(repo) .. "/issues?state=open&per_page=100" }
 end
 
+local function issue_list_cli_argv(repo, state, limit, fields)
+  return {
+    "gh",
+    "issue",
+    "list",
+    "--repo",
+    tostring(repo),
+    "--state",
+    tostring(state),
+    "--limit",
+    tostring(limit),
+    "--json",
+    tostring(fields),
+  }
+end
+
+local function pr_list_cli_argv(repo, state, limit, fields)
+  return {
+    "gh",
+    "pr",
+    "list",
+    "--repo",
+    tostring(repo),
+    "--state",
+    tostring(state),
+    "--limit",
+    tostring(limit),
+    "--json",
+    tostring(fields),
+  }
+end
+
 local function pr_list_argv(repo)
   return { "gh", "api", "--paginate", "--slurp", "repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100" }
 end
@@ -123,8 +155,32 @@ function M.install(handle)
     return handle._exec(issue_list_argv(repo), timeout, "gh issue list")
   end
 
+  function handle.issue_list_cli(repo, state, limit, fields, timeout)
+    return handle._exec(issue_list_cli_argv(repo, state, limit, fields), timeout, "gh issue list")
+  end
+
+  function handle.issue_list_recent_closed(repo, limit, timeout)
+    local bounded_limit = tonumber(limit or 30)
+    if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then
+      error("std.github.entities: invalid closed issue list limit")
+    end
+    return handle.issue_list_cli(repo, "closed", math.floor(bounded_limit), "number,title,closedAt,labels", timeout)
+  end
+
+  function handle.issue_list_board_digest(repo, timeout)
+    return handle.issue_list_cli(repo, "open", 100, "number,title,labels", timeout)
+  end
+
   function handle.pr_list(repo, timeout)
     return handle._exec(pr_list_argv(repo), timeout, "gh pr list")
+  end
+
+  function handle.pr_list_cli(repo, state, limit, fields, timeout)
+    return handle._exec(pr_list_cli_argv(repo, state, limit, fields), timeout, "gh pr list")
+  end
+
+  function handle.pr_list_board_digest(repo, timeout)
+    return handle.pr_list_cli(repo, "open", 100, "number,title,labels", timeout)
   end
 
   function handle.pr_list_head(repo, branch, base_branch, timeout)

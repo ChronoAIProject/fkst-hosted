@@ -37,6 +37,19 @@ local function comment_update_argv(repo, comment_id, body_file)
   }
 end
 
+local function comment_get_argv(repo, comment_id)
+  if comment_id == nil or tostring(comment_id) == "" then
+    error("std.github.comments: invalid comment id")
+  end
+  return {
+    "gh",
+    "api",
+    "--method",
+    "GET",
+    "repos/" .. tostring(repo) .. "/issues/comments/" .. tostring(comment_id),
+  }
+end
+
 local function cli_comment_argv(kind, repo, number, body_file)
   return {
     "gh",
@@ -69,6 +82,10 @@ function M.install(handle)
 
   function handle.comment_update(repo, comment_id, body_file, timeout)
     return handle._exec(comment_update_argv(repo, comment_id, body_file), timeout, "gh comment edit")
+  end
+
+  function handle.comment_get(repo, comment_id, timeout)
+    return handle._exec(comment_get_argv(repo, comment_id), timeout, "gh comment get")
   end
 
   function handle.issue_comment(repo, issue_number, body_file, timeout)

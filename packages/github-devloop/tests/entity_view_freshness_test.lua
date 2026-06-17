@@ -2,21 +2,19 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local seam = require("tests.entity_read_mock_helpers")
+local gh_argv = require("tests.gh_argv_mock_helpers")
 
 local function count_calls(needle)
-  local count = 0
-  for _, call in ipairs(t.command_calls()) do
-    if call.rendered:find(needle, 1, true) ~= nil then
-      count = count + 1
-    end
-  end
-  return count
+  return gh_argv.count_calls(t, needle)
 end
 
 local function count_exact_calls(command)
   local count = 0
+  local expected = h.argv_rendered(command)
   for _, call in ipairs(t.command_calls()) do
-    if tostring(call.rendered or "") == command then
+    local rendered = tostring(call.rendered or "")
+    local normalized = h.argv_rendered(rendered)
+    if normalized == expected then
       count = count + 1
     end
   end
@@ -30,17 +28,16 @@ local function decode(text)
 end
 
 local function issue_rest_command(repo, number)
-  return "gh api '" .. tostring("repos/" .. repo .. "/issues/" .. tostring(number)):gsub("'", "'\\''") .. "'"
+  return "gh api repos/" .. tostring(repo) .. "/issues/" .. tostring(number)
 end
 
 local function pr_rest_command(repo, number)
-  return "gh api '" .. tostring("repos/" .. repo .. "/pulls/" .. tostring(number)):gsub("'", "'\\''") .. "'"
+  return "gh api repos/" .. tostring(repo) .. "/pulls/" .. tostring(number)
 end
 
 local function comments_rest_command(repo, number)
-  return "gh api --paginate --slurp '"
-    .. tostring("repos/" .. repo .. "/issues/" .. tostring(number) .. "/comments?per_page=100"):gsub("'", "'\\''")
-    .. "'"
+  return "gh api --paginate --slurp "
+    .. "repos/" .. tostring(repo) .. "/issues/" .. tostring(number) .. "/comments?per_page=100"
 end
 
 local function encode_json_string(value)
@@ -63,34 +60,30 @@ end
 
 return {
   test_marker_issue_state_reader_accepts_explicit_timeout = function()
-    local seen_timeout = nil
-    local old_gh_exec = core.gh_exec
-    core.gh_exec = function(cmd_or_opts, timeout)
-      if type(cmd_or_opts) == "table" then
-        seen_timeout = cmd_or_opts.timeout
-      else
-        seen_timeout = timeout
-      end
-      return {
-        stdout = seam.issue_view_stdout({
-          title = "Timeout",
-          updated_at = "2026-06-03T01:02:03Z",
-        }),
-        stderr = "",
-        exit_code = 0,
-      }
-    end
+    seam.mock_issue_read_forms(t, {
+      repo = "owner/repo",
+      number = 42,
+      title = "Timeout",
+      updated_at = "2026-06-03T01:02:03Z",
+      register_all_views = true,
+      times = 1,
+    })
 
     local ok, result = pcall(function()
       return core.fetch_issue_view_state("owner/repo", 42, "2026-06-03T01:02:03Z", {
         timeout = 10,
       })
     end)
-    core.gh_exec = old_gh_exec
 
     t.eq(ok, true, tostring(result))
     t.eq(result.exit_code, 0)
-    t.eq(seen_timeout, 10)
+    local seen_rest_read = 0
+    for _, call in ipairs(t.command_calls()) do
+      if tostring(call.rendered or "") == issue_rest_command("owner/repo", 42) then
+        seen_rest_read = seen_rest_read + 1
+      end
+    end
+    t.eq(seen_rest_read, 1)
   end,
 
   test_validator_match_serves_cached_issue_view_without_graphql = function()
@@ -254,33 +247,24 @@ return {
     })
     local view_calls = 0
     local probe_calls = 0
-    local old_gh_exec = core.gh_exec
-    core.gh_exec = function(cmd_or_opts, timeout)
-      local rendered = type(cmd_or_opts) == "table" and cmd_or_opts.cmd or cmd_or_opts
-      if rendered == view_command then
-        view_calls = view_calls + 1
-      end
-      if rendered == probe_command then
-        probe_calls = probe_calls + 1
-        return {
-          stdout = updated_at .. "\n",
-          stderr = "",
-          exit_code = 0,
-        }
-      end
-      return old_gh_exec(cmd_or_opts, timeout)
-    end
-
     local ok, probed = pcall(function()
       return core.fetch_pr_view_origin(repo, pr_number, nil, {
         consumer = "probe-reader",
       })
     end)
-    core.gh_exec = old_gh_exec
 
     t.eq(ok, true, tostring(probed))
     t.eq(probed.exit_code, 0)
     t.is_true(probed.stdout:find('"abc123"', 1, true) ~= nil)
+    for _, call in ipairs(t.command_calls()) do
+      local rendered = tostring(call.rendered or "")
+      if rendered == view_command then
+        view_calls = view_calls + 1
+      end
+      if h.argv_rendered(rendered) == h.argv_rendered(probe_command) then
+        probe_calls = probe_calls + 1
+      end
+    end
     t.eq(view_calls, 0)
     t.eq(probe_calls, 1)
     t.eq(count_calls(view_command), 0)

@@ -61,23 +61,31 @@ local function shell_quote(value)
 end
 
 local function issue_rest_command(repo, number)
-  return "gh api " .. shell_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(number))
+  return "gh api repos/" .. tostring(repo) .. "/issues/" .. tostring(number)
 end
 
 local function comments_rest_command(repo, number)
   return "gh api --paginate --slurp "
-    .. shell_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(number) .. "/comments?per_page=100")
+    .. "repos/" .. tostring(repo) .. "/issues/" .. tostring(number) .. "/comments?per_page=100"
+end
+
+local function issue_claim_command(repo, number)
+  return "gh issue view " .. tostring(number)
+    .. " --repo " .. tostring(repo)
+    .. " --json"
 end
 
 local function count_exact_calls(command)
   local count = 0
   local read_prefix = "GH_TOKEN=${FKST_GITHUB_READ_TOKEN:-} GITHUB_TOKEN=${FKST_GITHUB_READ_TOKEN:-} "
+  local expected = h.argv_rendered(command)
   for _, call in ipairs(t.command_calls()) do
     local rendered = tostring(call.rendered or "")
     if rendered:sub(1, #read_prefix) == read_prefix then
       rendered = rendered:sub(#read_prefix + 1)
     end
-    if rendered == command then
+    local normalized = h.argv_rendered(rendered)
+    if normalized == expected then
       count = count + 1
     end
   end
@@ -300,9 +308,9 @@ return {
   test_observe_claim_acquire_read_bypasses_same_validator_cache = function()
     local run_opts = shared_opts("observe-claim-force-fresh")
     local updated_at = "2026-06-03T01:02:03Z"
-    local view_command = core.gh_issue_view_entity_cmd("owner/repo", 42)
     local rest_command = issue_rest_command("owner/repo", 42)
     local comments_command = comments_rest_command("owner/repo", 42)
+    local claim_command = issue_claim_command("owner/repo", 42)
     seed_cache(seed_cached_issue_view("owner/repo", 42, entity_read_mocks.issue_view_stdout({
       repo = "owner/repo",
       number = 42,
@@ -329,18 +337,18 @@ return {
     }), run_opts)
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls(view_command), 0)
     t.eq(count_exact_calls(rest_command), 1)
     t.eq(count_exact_calls(comments_command), 1)
+    t.eq(count_calls(claim_command), 1)
   end,
 
   test_observe_marker_idempotency_read_bypasses_same_validator_cache = function()
     local run_opts = shared_opts("observe-marker-force-fresh")
     local updated_at = "2026-06-03T01:02:03Z"
     local proposal_id = "github-devloop/issue/owner/repo/42"
-    local view_command = core.gh_issue_view_entity_cmd("owner/repo", 42)
     local rest_command = issue_rest_command("owner/repo", 42)
     local comments_command = comments_rest_command("owner/repo", 42)
+    local claim_command = issue_claim_command("owner/repo", 42)
     seed_cache(seed_cached_issue_view("owner/repo", 42, entity_read_mocks.issue_view_stdout({
       repo = "owner/repo",
       number = 42,
@@ -370,9 +378,9 @@ return {
     }), run_opts)
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls(view_command), 0)
     t.eq(count_exact_calls(rest_command), 1)
     t.eq(count_exact_calls(comments_command), 1)
+    t.eq(count_calls(claim_command), 0)
   end,
 
   test_open_pr_write_gate_claim_read_bypasses_same_validator_cache = function()
@@ -381,9 +389,9 @@ return {
     })
     local updated_at = "2026-06-03T01:02:03Z"
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local view_command = core.gh_issue_view_entity_cmd("owner/repo", 42)
     local rest_command = issue_rest_command("owner/repo", 42)
     local comments_command = comments_rest_command("owner/repo", 42)
+    local claim_command = issue_claim_command("owner/repo", 42)
     seed_cache(seed_cached_issue_view("owner/repo", 42, entity_read_mocks.issue_view_stdout({
       repo = "owner/repo",
       number = 42,
@@ -414,9 +422,9 @@ return {
     }), run_opts)
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls(view_command), 0)
     t.eq(count_exact_calls(rest_command), 1)
     t.eq(count_exact_calls(comments_command), 1)
+    t.eq(count_calls(claim_command), 0)
   end,
 
   test_validated_issue_view_is_fresh_across_event_driven_departments = function()

@@ -1,10 +1,22 @@
 local S = {}
+local github_handle = nil
 
 function S.install(M)
 local strings = require("std.strings")
 local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
 local recent_closed_limit = 30
+
+local function github()
+  if github_handle ~= nil then
+    return github_handle
+  end
+  if type(exec_argv) ~= "function" then
+    error("github-devloop: GitHub adapter requires exec_argv")
+  end
+  github_handle = require("std.github").new(exec_argv)
+  return github_handle
+end
 
 local function format_timestamp(seconds)
   return os.date("!%Y-%m-%dT%H:%M:%SZ", tonumber(seconds) or now())
@@ -127,12 +139,29 @@ local function has_label(issue, label)
   return false
 end
 
+local function run_observability_adapter(read_fn, limits, deadline, error_class)
+  local label = error_class or "GitHub observability command"
+  local timeout = M.observability_call_timeout(limits, deadline)
+  if timeout <= 0 then
+    local deferred = M.observability_deadline_deferred_result(label)
+    deferred.stderr = "observability deadline exhausted"
+    return deferred
+  end
+  local ok, result = pcall(read_fn, timeout)
+  if not ok then
+    error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result))
+  end
+  return result
+end
+
 function M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
-  local listed = M.observability_run_cmd(
-    M.gh_issue_list_recent_closed_cmd(repo, recent_closed_limit),
+  local listed = run_observability_adapter(
+    function(timeout)
+      return github().issue_list_recent_closed(repo, recent_closed_limit, timeout)
+    end,
     limits,
     deadline,
-    "gh recent closed merged issue list"
+    "GitHub recent closed merged issue list"
   )
   if M.observability_result_deferred(listed) then
     return nil, nil, "deadline"
@@ -142,11 +171,13 @@ function M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
   for _, issue in ipairs(issues) do
     local fact = nil
     if has_label(issue, M._merged_label) then
-      local view = M.observability_run_cmd(
-        M.gh_issue_view_observe_cmd(repo, issue.number),
+      local view = run_observability_adapter(
+        function(timeout)
+          return github().issue_view(repo, issue.number, "title,comments,state,stateReason,assignees,author", timeout)
+        end,
         limits,
         deadline,
-        "gh recent closed merged issue view"
+        "GitHub recent closed merged issue view"
       )
       if M.observability_result_deferred(view) then
         return nil, nil, "deadline"

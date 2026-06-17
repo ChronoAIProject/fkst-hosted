@@ -1,5 +1,7 @@
 local core = require("core")
 local t = fkst.test
+local gh_argv = require("tests.gh_argv_mock_helpers")
+gh_argv.install(t, core)
 
 local function has_value(values, expected)
   for _, value in ipairs(values or {}) do
@@ -76,4 +78,5 @@ return {
   issue = issue,
   reached = reached,
   unresolved = unresolved,
+  argv_rendered = gh_argv.argv_rendered,
 }

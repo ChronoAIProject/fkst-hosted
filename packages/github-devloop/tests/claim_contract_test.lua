@@ -153,8 +153,8 @@ return {
     )
 
     t.eq(ok, true)
-    t.eq(count_calls("--add-assignee 'fkst-test-bot'"), 1)
-    t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 0)
+    t.eq(count_calls("--add-assignee fkst-test-bot"), 1)
+    t.eq(count_calls("--remove-assignee fkst-test-bot"), 0)
   end,
 
   test_claim_loss_unassigns_only_self_and_skips = function()
@@ -184,8 +184,8 @@ return {
     )
 
     t.eq(ok, false)
-    t.eq(count_calls("--remove-assignee 'fkst-test-bot'"), 1)
-    t.eq(count_calls("--remove-assignee 'other-bot'"), 0)
+    t.eq(count_calls("--remove-assignee fkst-test-bot"), 1)
+    t.eq(count_calls("--remove-assignee other-bot"), 0)
   end,
 
   test_non_self_assignee_is_never_touched = function()

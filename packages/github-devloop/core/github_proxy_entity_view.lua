@@ -1,5 +1,6 @@
 local S = {}
 local github_view = require("std.github_view")
+local github_handle = nil
 
 function S.install(M)
 local parse_view_updated_at = github_view.parse_view_updated_at
@@ -16,6 +17,17 @@ local repo_owner_login = github_view.repo_owner_login
 local decode_comments_json = function(stdout) return github_view.decode_comments_json(stdout, "github-devloop: REST") end
 
 local max_cache_key_segment_len = 120
+
+local function github()
+  if github_handle ~= nil then
+    return github_handle
+  end
+  if type(exec_argv) ~= "function" then
+    error("github-devloop: GitHub adapter requires exec_argv")
+  end
+  github_handle = require("std.github").new(exec_argv)
+  return github_handle
+end
 
 local function sanitize_cache_segment(value, allow_slash)
   local pattern = allow_slash and "[^%w%._%-%/]" or "[^%w%._%-]"
@@ -52,45 +64,6 @@ local function entity_view_cache_key(repo, kind, number)
     .. sanitize_cache_segment(number, false)
 end
 
-local function issue_view_cmd(repo, issue_number)
-  return "gh issue view " .. M._shell_single_quote(issue_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json title,body,comments,labels,state,updatedAt,assignees,author"
-end
-
-local function pr_view_cmd(repo, pr_number)
-  return "gh pr view " .. M._shell_single_quote(pr_number)
-    .. " --repo " .. M._shell_single_quote(repo)
-    .. " --json headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
-end
-
-local function entity_updated_at_cmd(repo, kind, number)
-  local path_kind = kind == "pr" and "pulls" or "issues"
-  return "gh api "
-    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/" .. path_kind .. "/" .. tostring(number))
-    .. " --jq " .. M._shell_single_quote(".updated_at // .updatedAt // \"\"")
-end
-
-local function entity_view_cmd(repo, kind, number)
-  if kind == "pr" then
-    return pr_view_cmd(repo, number)
-  end
-  return issue_view_cmd(repo, number)
-end
-
-local function issue_rest_view_cmd(repo, issue_number)
-  return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number))
-end
-
-local function pr_rest_view_cmd(repo, pr_number)
-  return "gh api " .. M._shell_single_quote("repos/" .. tostring(repo) .. "/pulls/" .. tostring(pr_number))
-end
-
-local function issue_comments_api_cmd(repo, issue_number)
-  return "gh api --paginate --slurp "
-    .. M._shell_single_quote("repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100")
-end
-
 local function decode_cached_view(encoded)
   local ok, decoded = pcall(json.decode, encoded or "")
   if not ok or type(decoded) ~= "table" then
@@ -121,6 +94,13 @@ local function rest_pr_merge_state_status(value)
     return "UNKNOWN"
   end
   return tostring(value):upper()
+end
+
+local function adapter_error_result(err)
+  if type(err) == "table" and type(err.result) == "table" then
+    return err.result
+  end
+  error(err)
 end
 
 local function decode_json(stdout)
@@ -237,13 +217,14 @@ local function rest_pr_to_view_json(pr_stdout, comments_stdout)
 end
 
 local function rest_issue_view_result(repo, issue_number, timeout)
-  local issue = M.gh_exec(issue_rest_view_cmd(repo, issue_number), timeout)
-  if issue.exit_code ~= 0 then
-    return issue
+  local github_port = github()
+  local ok_issue, issue = pcall(github_port.issue_rest_view, repo, issue_number, timeout)
+  if not ok_issue then
+    return adapter_error_result(issue)
   end
-  local comments = M.gh_exec(issue_comments_api_cmd(repo, issue_number), timeout)
-  if comments.exit_code ~= 0 then
-    return comments
+  local ok_comments, comments = pcall(github_port.issue_comments, repo, issue_number, timeout)
+  if not ok_comments then
+    return adapter_error_result(comments)
   end
   local ok, view_json = pcall(rest_issue_to_view_json, issue.stdout, comments.stdout)
   if not ok then
@@ -261,13 +242,14 @@ local function rest_issue_view_result(repo, issue_number, timeout)
 end
 
 local function rest_pr_view_result(repo, pr_number, timeout)
-  local pr = M.gh_exec(pr_rest_view_cmd(repo, pr_number), timeout)
-  if pr.exit_code ~= 0 then
-    return pr
+  local github_port = github()
+  local ok_pr, pr = pcall(github_port.pr_rest_view, repo, pr_number, timeout)
+  if not ok_pr then
+    return adapter_error_result(pr)
   end
-  local comments = M.gh_exec(issue_comments_api_cmd(repo, pr_number), timeout)
-  if comments.exit_code ~= 0 then
-    return comments
+  local ok_comments, comments = pcall(github_port.pr_comments, repo, pr_number, timeout)
+  if not ok_comments then
+    return adapter_error_result(comments)
   end
   local ok, view_json = pcall(rest_pr_to_view_json, pr.stdout, comments.stdout)
   if not ok then
@@ -343,9 +325,9 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   end
 
   if cached ~= nil then
-    local current = M.gh_exec(entity_updated_at_cmd(repo, selected_kind, number), timeout)
-    if current.exit_code ~= 0 then
-      return current
+    local ok_current, current = pcall(github().entity_updated_at, repo, selected_kind, number, timeout)
+    if not ok_current then
+      return adapter_error_result(current)
     end
     if parse_updated_at_stdout(current.stdout) == cached.updated_at then
       return success_from_cache(cached)
@@ -377,22 +359,6 @@ function M.invalidate_entity_after_write(repo, kind, number)
     cache_set(entity_key, "")
     cache_set(view_key, "")
   end)
-end
-
-function M.gh_issue_view_entity_cmd(repo, issue_number)
-  return issue_view_cmd(repo, issue_number)
-end
-
-function M.gh_pr_view_entity_cmd(repo, pr_number)
-  return pr_view_cmd(repo, pr_number)
-end
-
-function M.gh_entity_updated_at_cmd(repo, kind, number)
-  local selected_kind = tostring(kind or "")
-  if selected_kind ~= "issue" and selected_kind ~= "pr" then
-    error("github-devloop: invalid entity updatedAt kind")
-  end
-  return entity_updated_at_cmd(repo, selected_kind, number)
 end
 
 function M.fetch_entity_view(repo, kind, number, updated_at, opts)
@@ -435,8 +401,8 @@ function M.commit_issue_subject_snapshot(repo, issue_number)
   if issue_number == nil then
     return {}
   end
-  local ok, view = pcall(M.gh_exec, { cmd = M.gh_issue_view_commit_subject_cmd(repo, issue_number), timeout = 30 })
-  if not ok or type(view) ~= "table" or view.exit_code ~= 0 then
+  local ok, view = pcall(github().issue_view, repo, issue_number, "number,title", 30)
+  if not ok or type(view) ~= "table" then
     return {}
   end
   local decoded_ok, decoded = pcall(json.decode, view.stdout or "{}")
@@ -459,7 +425,7 @@ end
 -- not gate an irreversible action and is re-checked on the next poll. Authority
 -- reads (merge gate CI/mergeability, version-CAS write gates, claim/head
 -- verification, review/fix/implement decisions) MUST NOT use this -- they call
--- M.gh_exec directly so they always see current truth. The cache value is
+-- adapter force-fresh reads so they always see current truth. The cache value is
 -- "<expiry_epoch>\n<stdout>"; only exit_code==0 results are cached. The key must
 -- encode the read VARIANT (field-set) so two reads with different fields never
 -- share a slot. This collapses the dominant GraphQL drain: the same entity
