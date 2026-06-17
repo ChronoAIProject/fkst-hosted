@@ -70,9 +70,11 @@ spec:
           ports:
             - name: http
               containerPort: 8090 # = FKST_WORKER_PORT (ConfigMap)
-          # Pod identity is an INTENTIONAL contract: the worker id (= FKST_POD_ID,
-          # REQUIRED, fail-closed) is sourced explicitly from the downward API.
-          # FKST_ROLE is also image-baked; pinned here as defense-in-depth.
+          # Pod identity: the worker id is sourced explicitly from the downward
+          # API (FKST_POD_ID = metadata.name) — the preferred, exact value. If a
+          # deployment cannot wire this, the worker falls back to the container
+          # HOSTNAME (also the pod name), so it still starts. FKST_ROLE is
+          # image-baked; pinned here as defense-in-depth.
           env:
             - name: FKST_ROLE
               value: worker

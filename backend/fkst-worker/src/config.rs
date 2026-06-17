@@ -28,7 +28,9 @@ pub struct WorkerConfig {
     pub controller_url: String,
     /// Shared secret on every internal request. Required. Redacted in Debug.
     pub internal_auth_token: SecretString,
-    /// This worker's id; defaults to the k8s pod name. Required, non-empty.
+    /// This worker's unique id. Resolved from `FKST_POD_ID` (the k8s downward-API
+    /// pod name) when set, else the container `HOSTNAME` (also the pod name).
+    /// Always non-empty.
     pub worker_id: String,
     /// Bind address for the worker-local HTTP server. Default `0.0.0.0`.
     pub bind_addr: String,
@@ -76,15 +78,38 @@ impl WorkerConfig {
         let map: HashMap<String, String> = vars.into_iter().collect();
 
         let required = |key: &str| -> anyhow::Result<String> {
-            match map.get(key) {
-                Some(v) if !v.trim().is_empty() => Ok(v.clone()),
-                _ => anyhow::bail!("{key} must be set (non-empty) for the worker role"),
-            }
+            non_empty(&map, key)
+                .ok_or_else(|| anyhow::anyhow!("{key} must be set (non-empty) for the worker role"))
         };
 
         let controller_url = required("CONTROLLER_URL")?;
         let internal_auth_token = SecretString::from(required("FKST_INTERNAL_AUTH_TOKEN")?);
-        let worker_id = required("FKST_POD_ID")?;
+
+        // Worker identity. Prefer the explicit `FKST_POD_ID` (in Kubernetes the
+        // downward-API pod name — exact even when the name exceeds the 63-char
+        // hostname limit). When it is absent — e.g. a deployment that can only
+        // edit the ConfigMap/Secret and cannot wire the downward API into the Pod
+        // spec — fall back to the container `HOSTNAME`, which every mainstream
+        // runtime sets to the pod name, so each replica still gets a unique,
+        // stable id. Fail closed only when NEITHER is available (a static shared
+        // id would collide across replicas in the controller's registry).
+        let worker_id = match non_empty(&map, "FKST_POD_ID") {
+            Some(id) => id,
+            None => match non_empty(&map, "HOSTNAME") {
+                Some(host) => {
+                    tracing::info!(
+                        worker_id = %host,
+                        "FKST_POD_ID not set; derived worker id from the container HOSTNAME"
+                    );
+                    host
+                }
+                None => anyhow::bail!(
+                    "worker id unresolved: set FKST_POD_ID (non-empty) for the worker role — \
+                     in Kubernetes inject it from the downward API (env valueFrom fieldRef \
+                     metadata.name); the container HOSTNAME is used as a fallback when present"
+                ),
+            },
+        };
 
         let bind_addr = map
             .get("FKST_WORKER_BIND_ADDR")
@@ -131,6 +156,12 @@ impl WorkerConfig {
             worker_drain_grace_secs,
         })
     }
+}
+
+/// Return the value of `key` from `map` when present and not blank (the
+/// original, untrimmed string), or `None` when absent or whitespace-only.
+fn non_empty(map: &HashMap<String, String>, key: &str) -> Option<String> {
+    map.get(key).filter(|v| !v.trim().is_empty()).cloned()
 }
 
 /// Parse a numeric env var or fall back to `default`; a malformed value is a
@@ -206,6 +237,64 @@ mod tests {
                 "error must name {missing}"
             );
         }
+    }
+
+    #[test]
+    fn worker_id_falls_back_to_hostname_when_pod_id_absent() {
+        // A deployment that cannot wire the downward API still gets a unique id
+        // from the runtime-provided HOSTNAME (= the pod name).
+        let vars: Vec<(String, String)> = base()
+            .into_iter()
+            .filter(|(k, _)| k != "FKST_POD_ID")
+            .chain([("HOSTNAME".to_string(), "fkst-worker-7d9-abcde".to_string())])
+            .collect();
+        let c = WorkerConfig::from_vars(vars).unwrap();
+        assert_eq!(c.worker_id, "fkst-worker-7d9-abcde");
+    }
+
+    #[test]
+    fn explicit_pod_id_wins_over_hostname() {
+        // base() sets FKST_POD_ID = worker-0; an also-present HOSTNAME must lose.
+        let mut vars = base();
+        vars.push(("HOSTNAME".into(), "fkst-worker-7d9-abcde".into()));
+        let c = WorkerConfig::from_vars(vars).unwrap();
+        assert_eq!(c.worker_id, "worker-0", "explicit FKST_POD_ID must win");
+    }
+
+    #[test]
+    fn blank_pod_id_falls_back_to_hostname() {
+        let vars: Vec<(String, String)> = base()
+            .into_iter()
+            .map(|(k, v)| {
+                if k == "FKST_POD_ID" {
+                    (k, "   ".into())
+                } else {
+                    (k, v)
+                }
+            })
+            .chain([("HOSTNAME".to_string(), "pod-xyz".to_string())])
+            .collect();
+        let c = WorkerConfig::from_vars(vars).unwrap();
+        assert_eq!(c.worker_id, "pod-xyz");
+    }
+
+    #[test]
+    fn missing_both_pod_id_and_hostname_fails_closed() {
+        // Neither FKST_POD_ID nor HOSTNAME present (base() carries no HOSTNAME).
+        let vars: Vec<(String, String)> = base()
+            .into_iter()
+            .filter(|(k, _)| k != "FKST_POD_ID")
+            .collect();
+        let err = WorkerConfig::from_vars(vars).expect_err("must fail closed");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("FKST_POD_ID"),
+            "error must name FKST_POD_ID: {msg}"
+        );
+        assert!(
+            msg.to_lowercase().contains("hostname"),
+            "error should mention the HOSTNAME fallback: {msg}"
+        );
     }
 
     #[test]
