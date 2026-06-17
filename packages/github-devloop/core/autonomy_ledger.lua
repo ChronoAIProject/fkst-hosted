@@ -144,7 +144,7 @@ function M.autonomy_result_record(repo, issue_number, merge_ready, issue)
   }
 end
 
-function M.autonomy_result_marker(record)
+local function autonomy_result_parts(record)
   if type(record) ~= "table" then
     error("github-devloop: invalid autonomy result record")
   end
@@ -183,25 +183,118 @@ function M.autonomy_result_marker(record)
     end
     codex_calls_value = tostring(parsed)
   end
-  return '<!-- fkst:github-devloop:autonomy-result:v1 proposal="' .. proposal_id
-    .. '" repo="' .. repo
-    .. '" issue="' .. issue_number
-    .. '" pr="' .. pr_number
-    .. '" version="' .. version
-    .. '" head_sha="' .. head_sha
-    .. '" task_class="' .. task_class
-    .. '" human_touch_count="' .. tostring(human_touch_count)
-    .. '" pre_merge_ci="' .. normalize_gate_state(gates.pre_merge_ci)
-    .. '" rounds="' .. tostring(rounds)
-    .. '" retry_count="' .. tostring(retry_count)
-    .. '" codex_calls="' .. codex_calls_value
-    .. '" gate_human_touch="' .. normalize_gate_state(gates.human_touch)
-    .. '" gate_evidence_manifest="' .. normalize_gate_state(gates.evidence_manifest)
-    .. '" gate_post_merge_probe="' .. normalize_gate_state(gates.post_merge_probe)
-    .. '" gate_no_revert_reopen="' .. normalize_gate_state(gates.no_revert_reopen)
-    .. '" gate_cost_budget="' .. normalize_gate_state(gates.cost_budget)
-    .. '" valid_autonomous_merge="' .. valid
-    .. '" -->'
+  return {
+    proposal_id = proposal_id,
+    repo = repo,
+    issue_number = issue_number,
+    pr_number = pr_number,
+    version = version,
+    head_sha = head_sha,
+    task_class = task_class,
+    human_touch_count = human_touch_count,
+    rounds = rounds,
+    retry_count = retry_count,
+    codex_calls_value = codex_calls_value,
+    gates = gates,
+    valid = valid,
+  }
+end
+
+function M.autonomy_result_marker_attrs(record)
+  local parts = autonomy_result_parts(record)
+  return ' repo="' .. parts.repo
+    .. '" issue="' .. parts.issue_number
+    .. '" task_class="' .. parts.task_class
+    .. '" human_touch_count="' .. tostring(parts.human_touch_count)
+    .. '" pre_merge_ci="' .. normalize_gate_state(parts.gates.pre_merge_ci)
+    .. '" rounds="' .. tostring(parts.rounds)
+    .. '" retry_count="' .. tostring(parts.retry_count)
+    .. '" codex_calls="' .. parts.codex_calls_value
+    .. '" gate_human_touch="' .. normalize_gate_state(parts.gates.human_touch)
+    .. '" gate_evidence_manifest="' .. normalize_gate_state(parts.gates.evidence_manifest)
+    .. '" gate_post_merge_probe="' .. normalize_gate_state(parts.gates.post_merge_probe)
+    .. '" gate_no_revert_reopen="' .. normalize_gate_state(parts.gates.no_revert_reopen)
+    .. '" gate_cost_budget="' .. normalize_gate_state(parts.gates.cost_budget)
+    .. '" valid_autonomous_merge="' .. parts.valid .. '"'
+end
+
+function M.autonomy_result_marker(record)
+  local parts = autonomy_result_parts(record)
+  return '<!-- fkst:github-devloop:autonomy-result:v1 proposal="' .. parts.proposal_id
+    .. '" repo="' .. parts.repo
+    .. '" issue="' .. parts.issue_number
+    .. '" pr="' .. parts.pr_number
+    .. '" version="' .. parts.version
+    .. '" head_sha="' .. parts.head_sha
+    .. '" task_class="' .. parts.task_class
+    .. '" human_touch_count="' .. tostring(parts.human_touch_count)
+    .. '" pre_merge_ci="' .. normalize_gate_state(parts.gates.pre_merge_ci)
+    .. '" rounds="' .. tostring(parts.rounds)
+    .. '" retry_count="' .. tostring(parts.retry_count)
+    .. '" codex_calls="' .. parts.codex_calls_value
+    .. '" gate_human_touch="' .. normalize_gate_state(parts.gates.human_touch)
+    .. '" gate_evidence_manifest="' .. normalize_gate_state(parts.gates.evidence_manifest)
+    .. '" gate_post_merge_probe="' .. normalize_gate_state(parts.gates.post_merge_probe)
+    .. '" gate_no_revert_reopen="' .. normalize_gate_state(parts.gates.no_revert_reopen)
+    .. '" gate_cost_budget="' .. normalize_gate_state(parts.gates.cost_budget)
+    .. '" valid_autonomous_merge="' .. parts.valid .. '"'
+    .. ' -->'
+end
+
+function M.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
+  local marker_proposal = marker:match('proposal="([^"]+)"')
+  local marker_pr = marker:match('pr="([^"]+)"')
+  local marker_version = marker:match('version="([^"]*)"')
+  local marker_head_sha = marker:match('head_sha="([^"]+)"')
+  local task_class = normalize_task_class(marker:match('task_class="([^"]+)"'))
+  local valid = marker:match('valid_autonomous_merge="([^"]+)"')
+  local human_touch_count = tonumber(marker:match('human_touch_count="(%d+)"'))
+  local rounds = tonumber(marker:match('rounds="(%d+)"'))
+  local retry_count = tonumber(marker:match('retry_count="(%d+)"'))
+  local codex_calls_raw = marker:match('codex_calls="([^"]+)"')
+  local gates = {
+    human_touch = normalize_gate_state(marker:match('gate_human_touch="([^"]+)"')),
+    pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
+    evidence_manifest = normalize_gate_state(marker:match('gate_evidence_manifest="([^"]+)"')),
+    post_merge_probe = normalize_gate_state(marker:match('gate_post_merge_probe="([^"]+)"')),
+    no_revert_reopen = normalize_gate_state(marker:match('gate_no_revert_reopen="([^"]+)"')),
+    cost_budget = normalize_gate_state(marker:match('gate_cost_budget="([^"]+)"')),
+  }
+  if marker_proposal == tostring(proposal_id)
+    and tostring(marker_pr) == tostring(pr_number)
+    and tostring(marker_version) == tostring(version)
+    and tostring(marker_head_sha) == tostring(head_sha)
+    and M._is_git_sha(marker_head_sha)
+    and human_touch_count ~= nil
+    and rounds ~= nil
+    and retry_count ~= nil
+    and (valid == "true" or valid == "false" or valid == "pending") then
+    local codex_calls = nil
+    if codex_calls_raw ~= "null" then
+      codex_calls = tonumber(codex_calls_raw)
+      if codex_calls == nil or codex_calls < 0 or codex_calls % 1 ~= 0 then
+        return nil
+      end
+    end
+    return {
+      proposal_id = marker_proposal,
+      repo = marker:match('repo="([^"]+)"'),
+      issue_number = tonumber(marker:match('issue="(%d+)"')),
+      pr_number = tonumber(marker_pr),
+      version = marker_version,
+      head_sha = marker_head_sha,
+      task_class = task_class,
+      human_touch_count = human_touch_count,
+      pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
+      rounds = rounds,
+      retry_count = retry_count,
+      codex_calls = codex_calls,
+      gates = gates,
+      valid_autonomous_merge = M.autonomy_valid_autonomous_merge(gates),
+      comment_created_at = M._comment_created_at(comment),
+    }
+  end
+  return nil
 end
 
 function M.autonomy_result_fact(comments, proposal_id, pr_number, version, head_sha)
@@ -211,57 +304,9 @@ function M.autonomy_result_fact(comments, proposal_id, pr_number, version, head_
   local marker_pattern = "<!%-%- fkst:github%-devloop:autonomy%-result:v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_pr = marker:match('pr="([^"]+)"')
-      local marker_version = marker:match('version="([^"]*)"')
-      local marker_head_sha = marker:match('head_sha="([^"]+)"')
-      local task_class = normalize_task_class(marker:match('task_class="([^"]+)"'))
-      local valid = marker:match('valid_autonomous_merge="([^"]+)"')
-      local human_touch_count = tonumber(marker:match('human_touch_count="(%d+)"'))
-      local rounds = tonumber(marker:match('rounds="(%d+)"'))
-      local retry_count = tonumber(marker:match('retry_count="(%d+)"'))
-      local codex_calls_raw = marker:match('codex_calls="([^"]+)"')
-      local gates = {
-        human_touch = normalize_gate_state(marker:match('gate_human_touch="([^"]+)"')),
-        pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
-        evidence_manifest = normalize_gate_state(marker:match('gate_evidence_manifest="([^"]+)"')),
-        post_merge_probe = normalize_gate_state(marker:match('gate_post_merge_probe="([^"]+)"')),
-        no_revert_reopen = normalize_gate_state(marker:match('gate_no_revert_reopen="([^"]+)"')),
-        cost_budget = normalize_gate_state(marker:match('gate_cost_budget="([^"]+)"')),
-      }
-      if marker_proposal == tostring(proposal_id)
-        and tostring(marker_pr) == tostring(pr_number)
-        and tostring(marker_version) == tostring(version)
-        and tostring(marker_head_sha) == tostring(head_sha)
-        and M._is_git_sha(marker_head_sha)
-        and human_touch_count ~= nil
-        and rounds ~= nil
-        and retry_count ~= nil
-        and (valid == "true" or valid == "false" or valid == "pending") then
-        local codex_calls = nil
-        if codex_calls_raw ~= "null" then
-          codex_calls = tonumber(codex_calls_raw)
-          if codex_calls == nil or codex_calls < 0 or codex_calls % 1 ~= 0 then
-            return nil
-          end
-        end
-        return {
-          proposal_id = marker_proposal,
-          repo = marker:match('repo="([^"]+)"'),
-          issue_number = tonumber(marker:match('issue="(%d+)"')),
-          pr_number = tonumber(marker_pr),
-          version = marker_version,
-          head_sha = marker_head_sha,
-          task_class = task_class,
-          human_touch_count = human_touch_count,
-          pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
-          rounds = rounds,
-          retry_count = retry_count,
-          codex_calls = codex_calls,
-          gates = gates,
-          valid_autonomous_merge = M.autonomy_valid_autonomous_merge(gates),
-          comment_created_at = M._comment_created_at(comment),
-        }
+      local fact = M.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
+      if fact ~= nil then
+        return fact
       end
     end
   end

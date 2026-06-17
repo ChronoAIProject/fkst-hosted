@@ -14,6 +14,7 @@ return {
   { module = "implementing", key = "implementing" },
   { module = "merge_gate", key = "merge-gate" },
   { module = "merge_ready", key = "merge-ready" },
+  { module = "merged", key = "merged" },
   { module = "merging", key = "merging" },
   { module = "pr_link", key = "pr-link" },
   { module = "review_carry_over", key = "review-carry-over" },
