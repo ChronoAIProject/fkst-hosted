@@ -127,6 +127,8 @@ fn router_with_webhook() -> (axum::Router, SessionRepo) {
         goals,
         vault,
         ornn: None,
+        claims: None,
+        worker_registry: None,
     })
     .expect("router");
     (router, session_repo)

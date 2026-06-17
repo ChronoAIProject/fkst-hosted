@@ -45,7 +45,7 @@ use fkst_shared::protocol::{
 };
 
 pub use internal_auth::InternalAuth;
-pub use registry::{WorkerEntry, WorkerRegistry};
+pub use registry::{WorkerEntry, WorkerRegistry, WorkerSnapshot};
 
 /// Shared state for the internal handlers.
 #[derive(Clone)]

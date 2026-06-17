@@ -1,7 +1,12 @@
 # `kubectl apply -k backend/fkst-control-plane/k8s_sample` brings up the
-# control-plane stack (plus the transitional Mongo pair and the shared
-# Namespace). This is a convenience entry — the directory is primarily the
-# authoritative SAMPLE set; the config loaders are the source of truth for keys.
+# datastore-free control-plane stack (plus the shared Namespace). This is a
+# convenience entry — the directory is primarily the authoritative SAMPLE set;
+# the config loaders are the source of truth for keys.
+#
+# The controller is datastore-free (#143): there is no MongoDB Service /
+# StatefulSet to apply, no DB Secret, and no `wait-for-mongodb` ordering. The
+# single authoritative controller rebuilds its in-memory state on restart from
+# the live workers' self-reports and the claimed goal-issue labels.
 #
 # secret.example.yaml is DELIBERATELY excluded: the real fkst-control-plane-secret
 # is created by the operator first (see secret.example.yaml header), and an
@@ -18,9 +23,6 @@ resources:
   - service.yaml
   - deployment.yaml
   - pdb.yaml
-  # TRANSITIONAL until #143 removes MongoDB:
-  - mongodb-service.yaml
-  - mongodb-statefulset.yaml
 # Image-tag seam: change the deployed control-plane tag in one place.
 # TRANSITIONAL until #151: the control plane still drives the engine, so point
 # this at the engine-laden `fkst-worker` image (with a command override) until
@@ -29,9 +31,11 @@ resources:
 images:
   - name: fkst-control-plane
     newTag: dev
-# Replica edit-point. The control-plane range is 3..5 (keep >= 3 so the PDB
-# minAvailable:2 has headroom); the database-free pivot (#143/#144) collapses it
-# to a single authoritative controller.
+# Replica edit-point. The database-free pivot (#143/#144) makes this a SINGLE
+# authoritative controller (the claim authority is in-memory and single-writer),
+# so the controller runs as exactly one replica. The worker fleet — not the
+# controller — is what scales horizontally (see backend/fkst-worker/k8s_sample,
+# with its HPA).
 replicas:
   - name: fkst-control-plane
-    count: 3
+    count: 1

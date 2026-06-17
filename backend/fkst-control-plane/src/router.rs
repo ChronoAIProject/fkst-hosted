@@ -46,7 +46,11 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         .merge(routes::goals::router())
         .merge(routes::github::router())
         .merge(routes::catalog::router())
-        .merge(routes::repos::router());
+        .merge(routes::repos::router())
+        // Admin live-state view (#144): inside the `/api/v1` nest so it sits
+        // behind the proxy-trusted identity layer; the handler itself gates on
+        // the `fkst:admin` permission.
+        .merge(routes::admin_state::router());
 
     let api_routes = match &state.auth_mode {
         AuthMode::Enabled(settings) => {
@@ -73,7 +77,11 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         // The literal /api/v1/health route coexists with the /api/v1 nest:
         // axum nesting registers the inner routes individually (no catch-all),
         // so /api/v1/health keeps answering (asserted by integration test).
-        .route("/api/v1/health", get(routes::health::health));
+        .route("/api/v1/health", get(routes::health::health))
+        // `/metrics` (#144) is TOP-level and UNAUTHENTICATED like `/health`: it
+        // carries only counts (no secret) and is served on the ClusterIP-only
+        // surface, so Prometheus scrapes it without a NyxID identity.
+        .merge(routes::metrics::router());
     if state.github_app_webhook_secret.is_some() {
         top = top.merge(routes::github_app_webhook::router());
         tracing::info!("github app webhook endpoint mounted (signature-verified, unauthenticated)");

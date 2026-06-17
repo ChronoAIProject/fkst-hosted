@@ -89,9 +89,15 @@ on the control plane) and pulls work every `FKST_WORKER_PULL_INTERVAL_SECS`.
 
 ## 4. Scaling
 
-Workers scale freely. The `replicas:` count in `kustomization.yaml` is the floor
-a fresh apply starts from; once `#140` lands, the HorizontalPodAutoscaler
-governs the live range on the pending-work metric. For an immediate change:
+The **worker fleet is the elastic tier** — the control-plane is a single
+datastore-free replica (#143/#144), so all horizontal scaling lives here. Workers
+scale freely; the `replicas:` count in `kustomization.yaml` is the floor a fresh
+apply starts from; once `#140` lands, the HorizontalPodAutoscaler governs the
+live range on the pending-work metric (`fkst_pending_work`, exposed by the
+controller's `/metrics`). Because the worker fleet self-registers and heartbeats
+UP to the controller, a controller restart simply **rebuilds its in-memory state
+from the live workers' self-reports** (and the claimed goal-issue labels) — the
+fleet keeps running across a controller recycle. For an immediate change:
 
 ```sh
 kubectl --context docker-desktop -n fkst-hosted scale deployment/fkst-worker --replicas=4

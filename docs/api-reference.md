@@ -1011,6 +1011,70 @@ for the value-size and per-scope caps.
 
 ---
 
+## Observability
+
+The controller is **datastore-free** — there is **no database to inspect**. The
+**durable audit trail is GitHub Issues** (each goal's issue, its labels, and the
+committed journal file). These two endpoints expose the controller's **live,
+ephemeral in-memory state** for operators and metrics scraping.
+
+### `GET /api/v1/admin/state` — live controller state
+
+A point-in-time snapshot of the controller's three in-memory authorities: the
+**claim map** (the at-most-one-engine authority), the **worker registry** (fleet
+liveness), and the in-memory **session store**. This is the live view the
+controller rebuilds from worker self-reports + claimed goal-issue labels on
+restart; nothing here is persisted.
+
+- **Auth:** requires the platform-admin permission **`fkst:admin`** (which
+  bypasses every other gate). With `FKST_AUTH_ENABLED=false` (local dev) the dev
+  identity carries `fkst:admin`, so the route is open.
+- **Redaction:** this endpoint **never serializes a secret value.** Held session
+  tokens, inline secrets, and minted credentials are unreachable through it;
+  ownership is reported as a **presence boolean** (`owner_present`), never the
+  value.
+
+**Response** (`200 OK`) — three top-level keys:
+
+| Key | Each entry |
+|-----|------------|
+| `claims` | `lease_key`, `session_id`, `owner_worker`, `status`, `fencing_id`, `goal_id` |
+| `workers` | `worker_id`, `last_heartbeat_age_secs`, `capacity`, `current_load` (active claim count), `lifecycle_state`, `alive` |
+| `sessions` | map of `session_id` → `{ status, goal_id, owner_present (bool), worker }` |
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_TOKEN" "$FKST_API/api/v1/admin/state"
+# { "claims": [...], "workers": [...], "sessions": { "<id>": { "status": "running", "owner_present": true, ... } } }
+```
+
+| Status | When |
+|--------|------|
+| `200 OK` | snapshot returned |
+| `403 Forbidden` | caller lacks `fkst:admin` |
+
+### `GET /metrics` — Prometheus exposition
+
+Hand-rendered Prometheus text (format version `0.0.4`) for the controller's live
+gauges. **No authentication** (like `/health`): it carries only counts and is
+served on the ClusterIP-only surface, so Prometheus scrapes it without a NyxID
+identity.
+
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `fkst_pending_work` | gauge | Claims in the `pending` (unplaced) state awaiting placement |
+| `fkst_workers_registered` | gauge | Workers currently tracked by the controller registry |
+| `fkst_workers_alive` | gauge | Of those, the workers within the liveness TTL (heartbeating) |
+
+```sh
+curl "$FKST_API/metrics"
+# # HELP fkst_pending_work Claims in the pending (unplaced) state awaiting placement.
+# # TYPE fkst_pending_work gauge
+# fkst_pending_work 0
+# ...
+```
+
+---
+
 ## Appendix: data types & limits
 
 ### Enumerations

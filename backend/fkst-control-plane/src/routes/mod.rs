@@ -1,5 +1,6 @@
 //! HTTP route handlers.
 
+pub mod admin_state;
 pub mod catalog;
 pub mod extract;
 pub mod github;
@@ -8,6 +9,7 @@ pub mod goals;
 pub mod goals_submit;
 pub mod goals_submit_dto;
 pub mod health;
+pub mod metrics;
 pub mod repos;
 pub mod repos_scaffold;
 pub mod sessions;

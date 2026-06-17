@@ -335,34 +335,17 @@ async fn main() -> ExitCode {
     let worker_liveness_ttl_secs = config.worker_liveness_ttl_secs;
     let dispatch_mode_enabled = config.dispatch_mode_enabled;
 
-    let app = match build_router(AppState {
-        config,
-        sessions: sessions.clone(),
-        auth_mode,
-        authz,
-        github_app,
-        github_app_webhook_secret,
-        goals,
-        vault,
-        ornn: ornn_client,
-    }) {
-        Ok(router) => router,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to build router");
-            return ExitCode::FAILURE;
-        }
-    };
-    tracing::info!("router built");
-
     // 5a-quater. Controller-backed placement (#135, #198-ii): the in-memory
     //     `ClaimMap` is the SINGLE claim authority for placement, so it is built
     //     and enabled UNCONDITIONALLY — the in-process default path claims
-    //     through it, and dispatch mode places workers through it. The registry
-    //     is built here too so the controller handle and `mount_internal` (below)
-    //     share the SAME registry + claims: a dispatch queued via the handle is
-    //     drained by the heartbeat handler, and the fence a worker echoes is
-    //     checked against the live claim map. `dispatch_mode` rides on the handle
-    //     so `create_for_goal` picks in-process vs worker-dispatch off it.
+    //     through it, and dispatch mode places workers through it. Built BEFORE
+    //     the router so the SAME `Arc<ClaimMap>` + registry can be handed to the
+    //     observability surface (`AppState.claims` / `worker_registry`, #144) as
+    //     well as to the session service and `mount_internal` (below): a dispatch
+    //     queued via the handle is drained by the heartbeat handler, the fence a
+    //     worker echoes is checked against the live claim map, and the admin /
+    //     metrics routes read that same live state. `dispatch_mode` rides on the
+    //     handle so `create_for_goal` picks in-process vs worker-dispatch off it.
     let ttl = std::time::Duration::from_secs(worker_liveness_ttl_secs);
     let registry = WorkerRegistry::new(ttl);
     let claims = std::sync::Arc::new(ClaimMap::new());
@@ -377,6 +360,30 @@ async fn main() -> ExitCode {
         max_load = dispatch_max_load,
         "controller-backed placement enabled (in-memory claim authority)"
     );
+
+    let app = match build_router(AppState {
+        config,
+        sessions: sessions.clone(),
+        auth_mode,
+        authz,
+        github_app,
+        github_app_webhook_secret,
+        goals,
+        vault,
+        ornn: ornn_client,
+        // The observability surface (#144) reads the SAME live claim authority +
+        // registry the controller placement uses, so the admin/metrics view is
+        // exact (never a copy that can drift).
+        claims: Some(claims.clone()),
+        worker_registry: Some(registry.clone()),
+    }) {
+        Ok(router) => router,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to build router");
+            return ExitCode::FAILURE;
+        }
+    };
+    tracing::info!("router built");
 
     // 5b. Internal worker protocol (issue #134): when the shared secret is set,
     //     spawn the stale-worker expiry sweeper (cancelled on shutdown) and merge

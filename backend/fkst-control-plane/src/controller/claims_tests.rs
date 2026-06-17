@@ -245,3 +245,32 @@ fn lease_key_for_session_resolves_the_bound_entry() {
     // An unknown session resolves to nothing.
     assert_eq!(m.lease_key_for_session(uuid()), None);
 }
+
+#[test]
+fn pending_count_counts_only_pending_claims() {
+    let m = ClaimMap::new();
+    // Fresh claims start `Pending`.
+    let a = m.claim("a", uuid(), None, "w1").unwrap();
+    m.claim("b", uuid(), None, "w1").unwrap();
+    assert_eq!(m.pending_count(), 2, "both fresh claims are pending");
+
+    // Advancing one out of Pending drops the count.
+    assert!(m.set_status(
+        "a",
+        a.fencing_id,
+        &[ClaimStatus::Pending],
+        ClaimStatus::Running
+    ));
+    assert_eq!(m.pending_count(), 1, "only the still-pending claim counts");
+}
+
+#[test]
+fn snapshot_returns_every_entry() {
+    let m = ClaimMap::new();
+    m.claim("a", uuid(), None, "w1").unwrap();
+    m.claim("b", uuid(), None, "w2").unwrap();
+    let snap = m.snapshot();
+    assert_eq!(snap.len(), 2);
+    // The snapshot is the same data `list` returns (an alias for the consumers).
+    assert_eq!(snap.len(), m.list().len());
+}

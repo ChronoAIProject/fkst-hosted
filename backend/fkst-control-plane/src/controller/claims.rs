@@ -284,6 +284,28 @@ impl ClaimMap {
             .collect()
     }
 
+    /// Read-only snapshot of every claim for the observability surface (#144);
+    /// an alias of [`list`](Self::list) named for the admin/metrics consumers. A
+    /// [`ClaimEntry`] never carries secret material (only ids, the owner worker,
+    /// the status, and the fence), so it is safe to serialize as-is.
+    pub fn snapshot(&self) -> Vec<ClaimEntry> {
+        self.list()
+    }
+
+    /// Count of claims in the `Pending` (unplaced / awaiting dispatch) state —
+    /// the `fkst_pending_work` gauge for the Prometheus surface (#144). A
+    /// `Pending` claim is one the controller has accepted but whose engine has
+    /// not yet reported `Validating`/`Running`, i.e. backlog awaiting placement
+    /// pickup.
+    pub fn pending_count(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("claim map poisoned")
+            .values()
+            .filter(|e| e.status == ClaimStatus::Pending)
+            .count()
+    }
+
     /// Every ACTIVE entry owned by `worker_id` (used by the reassignment driver
     /// to enumerate a dead/draining worker's in-flight work).
     pub fn owned_by(&self, worker_id: &str) -> Vec<ClaimEntry> {

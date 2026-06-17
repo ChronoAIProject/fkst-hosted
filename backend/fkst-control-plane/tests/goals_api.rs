@@ -45,6 +45,8 @@ async fn app() -> TestApp {
         goals: goals.clone(),
         vault,
         ornn: None,
+        claims: None,
+        worker_registry: None,
     })
     .expect("router");
     TestApp { router, goals }
