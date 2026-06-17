@@ -242,6 +242,7 @@ async fn orphan_sweep_fails_only_pre_terminal_sessions_and_is_idempotent() {
         nyxid_key_id: None,
         nyxid_key_prefix: None,
         ornn_skills: None,
+        terminal_cause: None,
         created_at: bson::DateTime::now(),
         started_at: None,
         stopped_at: None,

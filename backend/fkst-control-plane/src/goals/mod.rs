@@ -12,6 +12,7 @@
 
 pub mod issue_parse;
 pub mod issue_store;
+pub mod labels;
 pub mod marker;
 pub mod model;
 pub mod preflight;

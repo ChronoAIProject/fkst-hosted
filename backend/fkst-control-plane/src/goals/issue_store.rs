@@ -9,8 +9,12 @@
 //! lives in memory and the issue is reconciled later).
 //!
 //! Single-trigger atomicity is the controller claim's job (#135), NOT a label
-//! CAS — the `status:*` label only REFLECTS state. The engine prompt is NEVER
-//! written to GitHub (only a non-sensitive title + package count + repo slug).
+//! CAS. The visible label set is the session-lifecycle scheme (#180, see
+//! [`crate::goals::labels`]): `fkst-goal` + the `fkst-session-<id>` link + one
+//! lifecycle word, driven read-then-replace by the session driver — goal
+//! status is in-memory only and no longer mirrored as a `status:*` label. The
+//! engine prompt is NEVER written to GitHub (only a non-sensitive title +
+//! package count + repo slug).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -20,11 +24,10 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::error::AppError;
 use crate::github_app::GithubAppTokens;
+use crate::goals::labels;
 use crate::goals::marker::render_marker;
 use crate::goals::model::{GoalDoc, GoalStatus, RepoRef};
 
-/// The label every fkst-hosted goal issue carries (alongside the `status:*`).
-pub const GOAL_LABEL: &str = "fkst-hosted:goal";
 /// Default GitHub REST base.
 const GITHUB_API_BASE: &str = "https://api.github.com";
 
@@ -68,6 +71,11 @@ pub trait IssueApi: Send + Sync {
         number: u64,
         patch: IssuePatch,
     ) -> Result<(), AppError>;
+
+    /// Read the current label names on an issue. GitHub's issue PATCH replaces
+    /// the WHOLE label set, so the label updater reads the current set first to
+    /// merge (never blind-PATCH). Returns `labels[].name` from the issue.
+    async fn get_issue_labels(&self, repo: &RepoRef, number: u64) -> Result<Vec<String>, AppError>;
 }
 
 /// The production [`IssueApi`]: mints the App installation token per write and
@@ -185,6 +193,51 @@ impl IssueApi for HttpIssueApi {
         }
         Ok(())
     }
+
+    async fn get_issue_labels(&self, repo: &RepoRef, number: u64) -> Result<Vec<String>, AppError> {
+        let token = self.token(repo).await?;
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            self.api_base, repo.owner, repo.name, number
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", token.expose_secret()))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| AppError::Upstream(format!("github issue read transport error: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            tracing::error!(
+                issue = number,
+                status = status.as_u16(),
+                "github issue read failed"
+            );
+            return Err(AppError::Upstream(format!(
+                "github returned {} reading the goal issue labels",
+                status.as_u16()
+            )));
+        }
+        let value: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| AppError::Upstream(format!("github issue read decode error: {e}")))?;
+        // `labels` is an array of objects each with a `name`; tolerate a missing
+        // or non-array field by treating it as "no labels".
+        let names = value
+            .get("labels")
+            .and_then(serde_json::Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|l| l.get("name").and_then(serde_json::Value::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(names)
+    }
 }
 
 /// No-op [`IssueApi`] used when the GitHub App is disabled: goals live in
@@ -211,6 +264,14 @@ impl IssueApi for NoopIssueApi {
     ) -> Result<(), AppError> {
         Ok(())
     }
+    async fn get_issue_labels(
+        &self,
+        _repo: &RepoRef,
+        _number: u64,
+    ) -> Result<Vec<String>, AppError> {
+        // App disabled: no GitHub mirror, so there are no labels to read.
+        Ok(vec![])
+    }
 }
 
 /// In-memory state for one goal: the full `GoalDoc` (incl. the prompt) + the
@@ -226,23 +287,6 @@ struct GoalEntry {
 pub struct GoalIssueStore {
     issues: Arc<dyn IssueApi>,
     store: Arc<Mutex<HashMap<bson::Uuid, GoalEntry>>>,
-}
-
-/// The `status:<value>` label for a goal status (snake_case, 1:1 with the wire).
-pub fn status_label(status: GoalStatus) -> String {
-    let v = match status {
-        GoalStatus::NotStarted => "not_started",
-        GoalStatus::Triggered => "triggered",
-        GoalStatus::Running => "running",
-        GoalStatus::Stopped => "stopped",
-        GoalStatus::Failed => "failed",
-    };
-    format!("status:{v}")
-}
-
-/// The full label set for a goal issue at `status`.
-fn labels_for(status: GoalStatus) -> Vec<String> {
-    vec![GOAL_LABEL.to_string(), status_label(status)]
 }
 
 /// A NON-sensitive one-line summary for the issue body — title + package count
@@ -311,7 +355,7 @@ impl GoalIssueStore {
                     &repo,
                     &goal.title,
                     &issue_body(goal),
-                    &labels_for(goal.status),
+                    &labels::initial_labels(),
                 )
                 .await?;
             if let Some(entry) = self.lock().get_mut(&goal.id) {
@@ -459,10 +503,16 @@ impl GoalIssueStore {
         Ok(Some(doc))
     }
 
-    /// Status-label CAS: iff the current status is in `from_statuses`, swap the
-    /// `status:*` label on the issue + update memory; optionally clear the
+    /// Goal-status CAS (memory only): iff the current status is in
+    /// `from_statuses`, set it to `new_status` and optionally clear the
     /// active-session link. Single-trigger atomicity is the controller claim's
-    /// job (#135) — this only REFLECTS state. `Ok(None)` on a CAS miss.
+    /// job (#135). `Ok(None)` on a CAS miss.
+    ///
+    /// Since #180 this NO LONGER touches the issue's visible labels — the goal
+    /// status is in-memory only, and the issue's session-lifecycle labels are
+    /// driven separately by the session driver via [`Self::update_labels`]
+    /// (read-then-replace), which can never drop `fkst-goal` or the
+    /// `fkst-session-<id>` link.
     pub async fn transition_status(
         &self,
         id: bson::Uuid,
@@ -470,38 +520,86 @@ impl GoalIssueStore {
         new_status: GoalStatus,
         clear_active: bool,
     ) -> Result<Option<GoalDoc>, AppError> {
-        let (doc, issue, repo) = {
-            let mut map = self.lock();
-            let Some(entry) = map.get_mut(&id) else {
-                return Ok(None);
-            };
-            if !from_statuses.contains(&entry.doc.status) {
-                return Ok(None);
-            }
-            entry.doc.status = new_status;
-            if clear_active {
-                entry.doc.active_session_id = None;
-            }
-            entry.doc.updated_at = bson::DateTime::now();
-            (
-                entry.doc.clone(),
-                entry.issue_number,
-                entry.doc.repo.clone(),
-            )
+        let mut map = self.lock();
+        let Some(entry) = map.get_mut(&id) else {
+            return Ok(None);
         };
-        if let (Some(number), Some(repo)) = (issue, repo) {
-            self.issues
-                .patch_issue(
-                    &repo,
-                    number,
-                    IssuePatch {
-                        labels: Some(labels_for(new_status)),
-                        ..Default::default()
-                    },
-                )
-                .await?;
+        if !from_statuses.contains(&entry.doc.status) {
+            return Ok(None);
         }
-        Ok(Some(doc))
+        entry.doc.status = new_status;
+        if clear_active {
+            entry.doc.active_session_id = None;
+        }
+        entry.doc.updated_at = bson::DateTime::now();
+        Ok(Some(entry.doc.clone()))
+    }
+
+    /// Read-then-replace label updater (#180) for a goal's issue: ADD `add`,
+    /// REMOVE `remove`, preserving every unrelated label (including `fkst-goal`
+    /// and the `fkst-session-<id>` link). Best-effort by contract — a label
+    /// failure MUST NEVER fail or stall the session — so EVERY error path logs
+    /// (`goal_id` + `session_id`, never a secret) and returns `Ok(())`.
+    ///
+    /// No-ops (returns `Ok(())` having done nothing) when the goal is unknown,
+    /// has no materialized issue (`issue_number == None`: create_new not yet
+    /// filed, or `NoopIssueApi` / App disabled), or has no repo.
+    ///
+    /// `session_id` is for log correlation only; it is not written to GitHub.
+    pub async fn update_labels(
+        &self,
+        goal_id: bson::Uuid,
+        session_id: bson::Uuid,
+        add: &[&str],
+        remove: &[&str],
+    ) -> Result<(), AppError> {
+        let (number, repo) = {
+            let map = self.lock();
+            let Some(entry) = map.get(&goal_id) else {
+                return Ok(());
+            };
+            match (entry.issue_number, entry.doc.repo.clone()) {
+                (Some(number), Some(repo)) => (number, repo),
+                // No materialized issue (or no repo): nothing to label.
+                _ => return Ok(()),
+            }
+        };
+        let current = match self.issues.get_issue_labels(&repo, number).await {
+            Ok(labels) => labels,
+            Err(error) => {
+                tracing::warn!(
+                    goal_id = %goal_id,
+                    session_id = %session_id,
+                    error = %error,
+                    "goal-issue label read failed (swallowed; labels left unchanged)"
+                );
+                return Ok(());
+            }
+        };
+        let next = labels::merge_labels(&current, add, remove);
+        if next == current {
+            return Ok(());
+        }
+        if let Err(error) = self
+            .issues
+            .patch_issue(
+                &repo,
+                number,
+                IssuePatch {
+                    labels: Some(next),
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            tracing::warn!(
+                goal_id = %goal_id,
+                session_id = %session_id,
+                error = %error,
+                "goal-issue label write failed (swallowed)"
+            );
+        }
+        Ok(())
     }
 
     /// Write the goal->session link into memory (authoritative) iff the goal is
@@ -540,7 +638,12 @@ impl GoalIssueStore {
             None => {
                 let number = self
                     .issues
-                    .create_issue(repo, &doc.title, &issue_body(&doc), &labels_for(doc.status))
+                    .create_issue(
+                        repo,
+                        &doc.title,
+                        &issue_body(&doc),
+                        &labels::initial_labels(),
+                    )
                     .await?;
                 if let Some(entry) = self.lock().get_mut(&goal_id) {
                     entry.issue_number = Some(number);
@@ -607,9 +710,9 @@ impl GoalIssueStore {
                 issue_number: Some(issue_number),
             },
         );
-        // TODO(milestone-#5 label-lifecycle): use the canonical fkst-goal const
-        // + transitions (this stamps the placeholder `GOAL_LABEL` alongside the
-        // status label until that sibling issue lands).
+        // Stamp the canonical `fkst-goal` label (#180) alongside the marker so
+        // reconciliation can find it. Session-lifecycle labels are added later
+        // by the driver via the read-then-replace updater, never here.
         self.issues
             .patch_issue(
                 repo,
@@ -617,7 +720,7 @@ impl GoalIssueStore {
                 IssuePatch {
                     title: None,
                     body: Some(issue_body(goal)),
-                    labels: Some(labels_for(goal.status)),
+                    labels: Some(labels::initial_labels()),
                     state: None,
                 },
             )
@@ -635,16 +738,21 @@ impl GoalIssueStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::goals::labels::GOAL_LABEL;
     use crate::goals::marker::parse_marker;
 
     /// One recorded `create_issue` call: `(repo, title, body, labels)`.
     type CreatedIssue = (RepoRef, String, String, Vec<String>);
 
-    /// Recording fake IssueApi.
+    /// Recording fake IssueApi. Also keeps a per-issue label state (seeded on
+    /// create, replaced on a `labels: Some` patch — mirroring GitHub's
+    /// replace-set PATCH) so [`IssueApi::get_issue_labels`] returns the live set
+    /// and the read-then-replace updater can be exercised end to end.
     #[derive(Default)]
     struct FakeIssueApi {
         created: Mutex<Vec<CreatedIssue>>,
         patched: Mutex<Vec<(u64, IssuePatch)>>,
+        labels_by_issue: Mutex<HashMap<u64, Vec<String>>>,
         next_number: Mutex<u64>,
     }
 
@@ -665,6 +773,10 @@ mod tests {
             ));
             let mut n = self.next_number.lock().unwrap();
             *n += 1;
+            self.labels_by_issue
+                .lock()
+                .unwrap()
+                .insert(*n, labels.to_vec());
             Ok(*n)
         }
 
@@ -674,12 +786,76 @@ mod tests {
             number: u64,
             patch: IssuePatch,
         ) -> Result<(), AppError> {
+            if let Some(labels) = &patch.labels {
+                // GitHub PATCH replaces the WHOLE label set.
+                self.labels_by_issue
+                    .lock()
+                    .unwrap()
+                    .insert(number, labels.clone());
+            }
             self.patched.lock().unwrap().push((number, patch));
             Ok(())
+        }
+
+        async fn get_issue_labels(
+            &self,
+            _repo: &RepoRef,
+            number: u64,
+        ) -> Result<Vec<String>, AppError> {
+            Ok(self
+                .labels_by_issue
+                .lock()
+                .unwrap()
+                .get(&number)
+                .cloned()
+                .unwrap_or_default())
         }
     }
 
     fn store_with(fake: Arc<FakeIssueApi>) -> GoalIssueStore {
+        GoalIssueStore::with_api(fake)
+    }
+
+    /// A fake whose `get_issue_labels` always errors, to exercise the
+    /// best-effort label-read failure path (logs + `Ok(())`, never a PATCH).
+    #[derive(Default)]
+    struct FailingReadIssueApi {
+        patched: Mutex<Vec<(u64, IssuePatch)>>,
+        next_number: Mutex<u64>,
+    }
+
+    #[async_trait]
+    impl IssueApi for FailingReadIssueApi {
+        async fn create_issue(
+            &self,
+            _repo: &RepoRef,
+            _title: &str,
+            _body: &str,
+            _labels: &[String],
+        ) -> Result<u64, AppError> {
+            let mut n = self.next_number.lock().unwrap();
+            *n += 1;
+            Ok(*n)
+        }
+        async fn patch_issue(
+            &self,
+            _repo: &RepoRef,
+            number: u64,
+            patch: IssuePatch,
+        ) -> Result<(), AppError> {
+            self.patched.lock().unwrap().push((number, patch));
+            Ok(())
+        }
+        async fn get_issue_labels(
+            &self,
+            _repo: &RepoRef,
+            _number: u64,
+        ) -> Result<Vec<String>, AppError> {
+            Err(AppError::Upstream("github read boom".to_string()))
+        }
+    }
+
+    fn store_with_failing_read(fake: Arc<FailingReadIssueApi>) -> GoalIssueStore {
         GoalIssueStore::with_api(fake)
     }
 
@@ -712,15 +888,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_existing_repo_posts_issue_with_status_label() {
+    async fn insert_existing_repo_posts_issue_with_goal_label_only() {
         let fake = Arc::new(FakeIssueApi::default());
         let store = store_with(fake.clone());
         store.insert(&goal(Some(repo()))).await.unwrap();
         let created = fake.created.lock().unwrap();
         assert_eq!(created.len(), 1);
         let (_repo, _title, body, labels) = &created[0];
-        assert!(labels.contains(&"status:not_started".to_string()));
-        assert!(labels.contains(&GOAL_LABEL.to_string()));
+        // #180: a fresh goal carries ONLY the goal label — no `status:*`.
+        assert_eq!(labels, &vec![GOAL_LABEL.to_string()]);
+        assert!(
+            !labels.iter().any(|l| l.starts_with("status:")),
+            "no status:* label on a fresh goal: {labels:?}"
+        );
         assert!(
             !body.contains("SECRET-PROMPT"),
             "prompt never in the issue body"
@@ -801,12 +981,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transition_status_swaps_label() {
+    async fn transition_status_is_memory_only_no_label_patch() {
+        // #180: goal-status CAS no longer mirrors a `status:*` label, so it must
+        // not PATCH the issue at all — the visible labels are the driver's job.
         let fake = Arc::new(FakeIssueApi::default());
         let store = store_with(fake.clone());
         let g = goal(Some(repo()));
         store.insert(&g).await.unwrap();
-        store
+        let before = fake.patched.lock().unwrap().len();
+        let r = store
             .transition_status(
                 g.id,
                 &[GoalStatus::NotStarted],
@@ -815,9 +998,102 @@ mod tests {
             )
             .await
             .unwrap();
-        let patched = fake.patched.lock().unwrap();
-        let labels = patched.last().unwrap().1.labels.as_ref().unwrap();
-        assert!(labels.contains(&"status:triggered".to_string()));
+        assert!(r.is_some(), "the memory CAS still applies");
+        assert_eq!(r.unwrap().status, GoalStatus::Triggered);
+        assert_eq!(
+            fake.patched.lock().unwrap().len(),
+            before,
+            "transition_status performs no issue PATCH"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_labels_running_to_completed_keeps_goal_and_session() {
+        // running → completed: removes fkst-running, adds fkst-completed, keeps
+        // fkst-goal and the fkst-session-<id> link (the read-then-replace math).
+        let fake = Arc::new(FakeIssueApi::default());
+        let store = store_with(fake.clone());
+        let g = goal(Some(repo()));
+        store.insert(&g).await.unwrap();
+        let sid = bson::Uuid::new();
+        let session = labels::session_label(sid);
+
+        // Spawn link + Running, then the completed terminal swap.
+        store
+            .update_labels(g.id, sid, &[&session, labels::LABEL_RUNNING], &[])
+            .await
+            .unwrap();
+        store
+            .update_labels(
+                g.id,
+                sid,
+                &[labels::LABEL_COMPLETED],
+                &[
+                    labels::LABEL_RUNNING,
+                    labels::LABEL_TERMINATED,
+                    labels::LABEL_FAILED,
+                ],
+            )
+            .await
+            .unwrap();
+
+        let number = store.issue_number(g.id).await.unwrap();
+        let live = fake
+            .labels_by_issue
+            .lock()
+            .unwrap()
+            .get(&number)
+            .cloned()
+            .unwrap();
+        assert!(live.contains(&GOAL_LABEL.to_string()), "{live:?}");
+        assert!(live.contains(&session), "session link kept: {live:?}");
+        assert!(
+            live.contains(&labels::LABEL_COMPLETED.to_string()),
+            "{live:?}"
+        );
+        assert!(
+            !live.contains(&labels::LABEL_RUNNING.to_string()),
+            "{live:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_labels_noops_when_issue_not_materialized() {
+        // A create_new goal with no issue yet: best-effort no-op, no PATCH.
+        let fake = Arc::new(FakeIssueApi::default());
+        let store = store_with(fake.clone());
+        let g = goal(None);
+        store.insert(&g).await.unwrap();
+        store
+            .update_labels(g.id, bson::Uuid::new(), &[labels::LABEL_RUNNING], &[])
+            .await
+            .unwrap();
+        assert!(
+            fake.patched.lock().unwrap().is_empty(),
+            "no PATCH without a materialized issue"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_labels_swallows_read_error_and_does_not_patch() {
+        // Best-effort contract: a read failure logs + returns Ok, never patches.
+        let fake = Arc::new(FailingReadIssueApi::default());
+        let store = store_with_failing_read(fake.clone());
+        store.insert(&goal(Some(repo()))).await.unwrap();
+        let g = store
+            .list("user-1", &[], None, 1, 0)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        let r = store
+            .update_labels(g.id, bson::Uuid::new(), &[labels::LABEL_RUNNING], &[])
+            .await;
+        assert!(r.is_ok(), "a label read failure must not fail the caller");
+        assert!(
+            fake.patched.lock().unwrap().is_empty(),
+            "a read failure aborts before the PATCH"
+        );
     }
 
     #[tokio::test]

@@ -35,6 +35,21 @@ pub enum SessionStatus {
     Failed,
 }
 
+/// Why a session reached its terminal state (#180). Distinguishes the three
+/// real terminal causes that `SessionStatus` alone collapses: a user-initiated
+/// stop (`Terminated`), a graceful engine completion (`Completed`, an
+/// uncommanded clean exit 0), and an error (`Failed`). Persisted ONLY on a
+/// terminal write; `None` while the session is live. Maps 1:1 onto the goal
+/// issue's three terminal labels (`fkst-terminated`/`fkst-completed`/
+/// `fkst-failed`). Serializes snake_case on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalCause {
+    Terminated,
+    Completed,
+    Failed,
+}
+
 /// `sessions` collection: `_id` is a UUID stored as BSON Binary subtype 4.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionDoc {
@@ -102,6 +117,14 @@ pub struct SessionDoc {
     /// the session pinned no skills (the common case) or on a pre-#114 document.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ornn_skills: Option<Vec<crate::ornn::OrnnSkillPin>>,
+    /// Why this session reached its terminal state (#180): user-stop
+    /// (`Terminated`), graceful engine completion (`Completed`), or error
+    /// (`Failed`). DELIBERATE exception to the explicit-null convention: the
+    /// field is OMITTED while the session is live (and on pre-#180 documents)
+    /// so non-terminal docs round-trip byte-identically; it is stamped only on
+    /// the terminal CAS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cause: Option<TerminalCause>,
     pub created_at: bson::DateTime,
     pub started_at: Option<bson::DateTime>,
     pub stopped_at: Option<bson::DateTime>,
@@ -173,6 +196,7 @@ mod tests {
             nyxid_key_id: None,
             nyxid_key_prefix: None,
             ornn_skills: None,
+            terminal_cause: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: Some(bson::DateTime::from_millis(1_700_000_000_500)),
             stopped_at: None,
@@ -277,6 +301,36 @@ mod tests {
         assert_eq!(raw.get_str("run_key").expect("run_key"), "ab".repeat(32));
         let back: SessionDoc = bson::from_document(raw).expect("deserialize");
         assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn terminal_cause_is_omitted_when_absent_and_round_trips_when_set() {
+        // Omitted (not null) while live: pre-#180 documents and live ones stay
+        // byte-identical until the terminal CAS stamps the cause.
+        let raw = bson::to_document(&sample_session()).expect("serialize");
+        assert!(
+            !raw.contains_key("terminal_cause"),
+            "terminal_cause must be omitted while live"
+        );
+        // Old documents (no field at all) still deserialize.
+        let mut without = raw.clone();
+        without.remove("terminal_cause");
+        let back: SessionDoc = bson::from_document(without).expect("deserialize");
+        assert_eq!(back.terminal_cause, None);
+
+        // Each terminal cause round-trips and serializes snake_case.
+        for (cause, wire) in [
+            (TerminalCause::Terminated, "terminated"),
+            (TerminalCause::Completed, "completed"),
+            (TerminalCause::Failed, "failed"),
+        ] {
+            let mut doc = sample_session();
+            doc.terminal_cause = Some(cause);
+            let raw = bson::to_document(&doc).expect("serialize");
+            assert_eq!(raw.get_str("terminal_cause").expect("terminal_cause"), wire);
+            let back: SessionDoc = bson::from_document(raw).expect("deserialize");
+            assert_eq!(back, doc);
+        }
     }
 
     #[test]

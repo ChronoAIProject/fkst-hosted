@@ -47,6 +47,9 @@ use crate::engine::{
 };
 use crate::error::AppError;
 use crate::github_app::GithubAppTokens;
+use crate::goals::labels::{
+    session_label, LABEL_COMPLETED, LABEL_FAILED, LABEL_RUNNING, LABEL_TERMINATED,
+};
 use crate::goals::{GoalIssueStore, GoalStatus, RepoRef};
 use crate::journal::model::LogRef;
 use crate::journal::parse::{parse_raised_line, ParsedLine};
@@ -55,12 +58,12 @@ use crate::journal::{
     Transition,
 };
 use crate::leases::RenewOutcome;
-use crate::models::{SessionDoc, SessionStatus};
+use crate::models::{SessionDoc, SessionStatus, TerminalCause};
 use crate::nyxid::NyxIdClient;
 use crate::ornn::OrnnClient;
 use crate::sessions::codex_provider::{self, AssumeConnected, ChronoLlmCheck};
 use crate::sessions::nyxid_token::{self, NyxidTokenHandle};
-use crate::sessions::repo::{status_bson, SessionRepo};
+use crate::sessions::repo::{status_bson, terminal_cause_bson, SessionRepo};
 use crate::vault::{EnvScopeRef, VaultService};
 
 /// Ownership information stamped onto a new session.
@@ -600,6 +603,9 @@ impl SessionService {
             // Persisted (resolved, non-secret) so a failover rebuild re-injects
             // the identical pin set (#114). Empty is normalized to `None`.
             ornn_skills: trigger.ornn_skills.clone().filter(|p| !p.is_empty()),
+            // Live: no terminal cause yet (#180); the supervise loop stamps it
+            // on the terminal CAS (terminated / completed / failed).
+            terminal_cause: None,
             created_at: now,
             started_at: None,
             stopped_at: None,
@@ -840,6 +846,18 @@ impl SessionService {
                 "active_session_id CAS missed; session is still created"
             );
         }
+        // Link the session to the goal's issue (#180): ADD `fkst-session-<id>`.
+        // Best-effort + logged inside `update_labels` (a label failure never
+        // fails the trigger). NOTE: the worker-dispatch path's equivalent is
+        // deferred to #193 — this is the in-process default path.
+        let _ = goals
+            .update_labels(
+                trigger.goal_id,
+                session.id,
+                &[&session_label(session.id)],
+                &[],
+            )
+            .await;
 
         // Step 8: Return result.
         tracing::info!(
@@ -1155,7 +1173,10 @@ fn describe_runner_error(error: &RunnerError) -> String {
 /// Describe a terminal [`LiveStatus`] for the persisted `error` field.
 fn describe_exit(status: LiveStatus, session: &RunningSession) -> String {
     let exit = match status {
-        LiveStatus::Stopped => "engine exited unexpectedly (clean exit)".to_string(),
+        // A clean exit is a graceful completion (#180), not an error; the
+        // terminal site no longer routes `Stopped` here, but keep the wording
+        // honest for any diagnostic caller.
+        LiveStatus::Stopped => "engine exited cleanly (exit 0)".to_string(),
         LiveStatus::Failed { code, signal } => match (code, signal) {
             (Some(code), _) => format!("engine exited unexpectedly (code {code})"),
             (None, Some(signal)) => format!("engine killed by signal {signal}"),
@@ -1764,6 +1785,7 @@ async fn drive_inner(
         if let Err(error) = &stop_result {
             tracing::error!(session_id = %id, error = %error, "failed to stop freshly-started engine");
         }
+        // Terminal cause = terminated (#180): a stop won the spawn race.
         let _ = inner
             .repo
             .transition_guarded(
@@ -1772,10 +1794,16 @@ async fn drive_inner(
                 fence.clone(),
                 doc! {
                     "status": status_bson(SessionStatus::Stopped),
+                    "terminal_cause": terminal_cause_bson(TerminalCause::Terminated),
                     "stopped_at": now(),
                 },
             )
             .await;
+        // Label swap (#180): the session never reached Running, so REMOVE
+        // RUNNING (harmless if absent) and ADD TERMINATED.
+        if let Some(ref gi) = goal_info {
+            goal_label_sync(inner, gi.goal_id, id, &[LABEL_TERMINATED], &[LABEL_RUNNING]).await;
+        }
         journal_finish(&mut journaler, Transition::Stopped { exit_code: None }).await;
         return true;
     }
@@ -1791,6 +1819,17 @@ async fn drive_inner(
             id,
             &[GoalStatus::Triggered],
             GoalStatus::Running,
+        )
+        .await;
+        // Goal-issue label sync (#180): ADD fkst-running, REMOVE the terminal
+        // labels (a re-run reuses the issue). `terminal_cause` stays None while
+        // running. Separate best-effort call from the status sync above.
+        goal_label_sync(
+            inner,
+            gi.goal_id,
+            id,
+            &[LABEL_RUNNING],
+            &[LABEL_TERMINATED, LABEL_COMPLETED, LABEL_FAILED],
         )
         .await;
     }
@@ -1896,6 +1935,8 @@ async fn drive_inner(
                         // stop having CAS'd the document to `stopping`; a
                         // commanded stop arrives as `stopping`. Either way
                         // this stop was driver-performed and is `stopped`.
+                        // Terminal cause = terminated (#180): the triggerer
+                        // stopped it. Persisted in the SAME update doc.
                         let _ = inner
                             .repo
                             .transition_guarded(
@@ -1904,6 +1945,7 @@ async fn drive_inner(
                                 fence.clone(),
                                 doc! {
                                     "status": status_bson(SessionStatus::Stopped),
+                                    "terminal_cause": terminal_cause_bson(TerminalCause::Terminated),
                                     "stopped_at": now(),
                                 },
                             )
@@ -1919,6 +1961,15 @@ async fn drive_inner(
                                 GoalStatus::Stopped,
                             )
                             .await;
+                            // Label swap (#180): RUNNING -> TERMINATED.
+                            goal_label_sync(
+                                inner,
+                                gi.goal_id,
+                                id,
+                                &[LABEL_TERMINATED],
+                                &[LABEL_RUNNING],
+                            )
+                            .await;
                         }
                         journal_finish(&mut journaler, Transition::Stopped { exit_code: None })
                             .await;
@@ -1926,6 +1977,9 @@ async fn drive_inner(
                     Err(error) => {
                         // Host-side detail (paths, signalling internals)
                         // stays in the logs; the served field is generic.
+                        // The STOP itself failed — a real error, not a graceful
+                        // termination — so the cause is `failed`, not
+                        // `terminated` (#180).
                         tracing::error!(session_id = %id, error = %error, "engine stop failed");
                         let _ = inner
                             .repo
@@ -1935,11 +1989,23 @@ async fn drive_inner(
                                 fence.clone(),
                                 doc! {
                                     "status": status_bson(SessionStatus::Failed),
+                                    "terminal_cause": terminal_cause_bson(TerminalCause::Failed),
                                     "error": "engine stop failed",
                                     "stopped_at": now(),
                                 },
                             )
                             .await;
+                        // Label swap (#180): RUNNING -> FAILED.
+                        if let Some(ref gi) = goal_info {
+                            goal_label_sync(
+                                inner,
+                                gi.goal_id,
+                                id,
+                                &[LABEL_FAILED],
+                                &[LABEL_RUNNING],
+                            )
+                            .await;
+                        }
                         journal_finish(
                             &mut journaler,
                             Transition::Failed {
@@ -2067,9 +2133,14 @@ async fn drive_inner(
                     LiveStatus::Failed { code, .. } => code,
                     LiveStatus::Running => None,
                 };
-                // Terminal engine state. A commanded stop converges to
-                // `stopped`; an uncommanded exit (even a clean one) is a
-                // failure of the supervised contract.
+                // Terminal engine state (#180). Three real terminal causes map
+                // 1:1 onto the three labels:
+                //  - a commanded stop -> Stopped + `terminated`;
+                //  - an uncommanded CLEAN exit (LiveStatus::Stopped, exit 0) ->
+                //    Stopped + `completed` (a graceful engine finish, NOT a
+                //    failure of the supervised contract);
+                //  - an uncommanded non-zero / signal exit (LiveStatus::Failed)
+                //    -> Failed + `failed`.
                 if *stop_rx.borrow() {
                     // `running` in the from-set: a shutdown-driven stop
                     // signal never CAS'd the document to `stopping`.
@@ -2081,6 +2152,7 @@ async fn drive_inner(
                             fence.clone(),
                             doc! {
                                 "status": status_bson(SessionStatus::Stopped),
+                                "terminal_cause": terminal_cause_bson(TerminalCause::Terminated),
                                 "stopped_at": now(),
                             },
                         )
@@ -2096,10 +2168,88 @@ async fn drive_inner(
                             GoalStatus::Stopped,
                         )
                         .await;
+                        // Label swap (#180): RUNNING -> TERMINATED.
+                        goal_label_sync(
+                            inner,
+                            gi.goal_id,
+                            id,
+                            &[LABEL_TERMINATED],
+                            &[LABEL_RUNNING],
+                        )
+                        .await;
                     }
                     journal_finish(&mut journaler, Transition::Stopped { exit_code }).await;
                     return true;
                 }
+                if live == LiveStatus::Stopped {
+                    // Uncommanded CLEAN exit (exit 0): the engine finished its
+                    // work and exited on its own. Graceful completion, NOT a
+                    // failure — persist Stopped + `completed`.
+                    let completed = inner
+                        .repo
+                        .transition_guarded(
+                            id,
+                            &[SessionStatus::Running],
+                            fence.clone(),
+                            doc! {
+                                "status": status_bson(SessionStatus::Stopped),
+                                "terminal_cause": terminal_cause_bson(TerminalCause::Completed),
+                                "stopped_at": now(),
+                            },
+                        )
+                        .await;
+                    if matches!(completed, Ok(None)) {
+                        // A stop request slipped in between the exit and the
+                        // CAS (doc is `Stopping`): honor it as a stop.
+                        let _ = inner
+                            .repo
+                            .transition_guarded(
+                                id,
+                                &[SessionStatus::Stopping],
+                                fence.clone(),
+                                doc! {
+                                    "status": status_bson(SessionStatus::Stopped),
+                                    "terminal_cause": terminal_cause_bson(
+                                        TerminalCause::Terminated,
+                                    ),
+                                    "stopped_at": now(),
+                                },
+                            )
+                            .await;
+                    }
+                    let slipped_stop = matches!(completed, Ok(None));
+                    tracing::info!(session_id = %id, "session completed (engine exited cleanly on its own)");
+                    journal_finish(&mut journaler, Transition::Stopped { exit_code }).await;
+                    if let Some(ref gi) = goal_info {
+                        goal_status_sync(
+                            inner,
+                            gi.goal_id,
+                            id,
+                            &[GoalStatus::Triggered, GoalStatus::Running],
+                            GoalStatus::Stopped,
+                        )
+                        .await;
+                        // Label swap (#180): RUNNING -> COMPLETED on a clean
+                        // finish; -> TERMINATED if a stop slipped in first.
+                        let terminal_label = if slipped_stop {
+                            LABEL_TERMINATED
+                        } else {
+                            LABEL_COMPLETED
+                        };
+                        goal_label_sync(
+                            inner,
+                            gi.goal_id,
+                            id,
+                            &[terminal_label],
+                            &[LABEL_RUNNING],
+                        )
+                        .await;
+                    }
+                    // Reap/cleanup the exited engine's dirs.
+                    let _ = inner.runner.stop(&mut session).await;
+                    return true;
+                }
+                // Uncommanded non-zero / signal exit (LiveStatus::Failed).
                 let error = describe_exit(live, &session);
                 tracing::warn!(session_id = %id, ?live, "engine exited uncommanded");
                 let failed = inner
@@ -2110,12 +2260,14 @@ async fn drive_inner(
                         fence.clone(),
                         doc! {
                             "status": status_bson(SessionStatus::Failed),
+                            "terminal_cause": terminal_cause_bson(TerminalCause::Failed),
                             "error": truncate_error(&error),
                             "stopped_at": now(),
                         },
                     )
                     .await;
-                if matches!(failed, Ok(None)) {
+                let slipped_stop = matches!(failed, Ok(None));
+                if slipped_stop {
                     // A stop request slipped in between the exit and the
                     // CAS: honor it as a stop, not a failure.
                     let _ = inner
@@ -2126,6 +2278,7 @@ async fn drive_inner(
                             fence.clone(),
                             doc! {
                                 "status": status_bson(SessionStatus::Stopped),
+                                "terminal_cause": terminal_cause_bson(TerminalCause::Terminated),
                                 "stopped_at": now(),
                             },
                         )
@@ -2139,14 +2292,27 @@ async fn drive_inner(
                     },
                 )
                 .await;
-                // Goal-status sync: {triggered,running} -> failed.
+                // Goal-status sync + label swap (#180).
                 if let Some(ref gi) = goal_info {
+                    let (goal_target, terminal_label) = if slipped_stop {
+                        (GoalStatus::Stopped, LABEL_TERMINATED)
+                    } else {
+                        (GoalStatus::Failed, LABEL_FAILED)
+                    };
                     goal_status_sync(
                         inner,
                         gi.goal_id,
                         id,
                         &[GoalStatus::Triggered, GoalStatus::Running],
-                        GoalStatus::Failed,
+                        goal_target,
+                    )
+                    .await;
+                    goal_label_sync(
+                        inner,
+                        gi.goal_id,
+                        id,
+                        &[terminal_label],
+                        &[LABEL_RUNNING],
                     )
                     .await;
                 }
@@ -2486,6 +2652,40 @@ async fn goal_status_sync(
             "goal-status sync write failed (swallowed)"
         ),
     }
+}
+
+/// Best-effort goal-issue label sync (#180), the visible-label counterpart of
+/// [`goal_status_sync`]. ADDs `add` and REMOVEs `remove` on the goal's issue
+/// via the store's read-then-replace updater (which preserves `fkst-goal` + the
+/// `fkst-session-<id>` link and is itself best-effort + logged). A no-op when
+/// goal support is disabled. Like the status sync it is GATED on this session
+/// still being the goal's active session, so a stale terminal swap from a
+/// superseded run can never relabel a newer trigger's issue.
+///
+/// NOTE: worker-dispatch path label sync is deferred to #193 — this is wired
+/// only into the in-process driver (`drive_inner`), the default path.
+async fn goal_label_sync(
+    inner: &Inner,
+    goal_id: bson::Uuid,
+    session_id: bson::Uuid,
+    add: &[&str],
+    remove: &[&str],
+) {
+    let Some(gs) = inner.goal_support.get() else {
+        return;
+    };
+    let goals = &gs.goals;
+    if goals.active_session(goal_id).await != Some(session_id) {
+        tracing::debug!(
+            goal_id = %goal_id,
+            session_id = %session_id,
+            "goal-issue label sync skipped (not the goal's active session)"
+        );
+        return;
+    }
+    // `update_labels` is best-effort internally (logs + Ok on any GitHub error),
+    // so a label failure here never affects the session lifecycle.
+    let _ = goals.update_labels(goal_id, session_id, add, remove).await;
 }
 
 /// Build the [`GoalContext`] for a goal session: load the goal (for its
@@ -3039,6 +3239,7 @@ mod tests {
             nyxid_key_id: None,
             nyxid_key_prefix: None,
             ornn_skills: None,
+            terminal_cause: None,
             created_at: bson::DateTime::now(),
             started_at: None,
             stopped_at: None,

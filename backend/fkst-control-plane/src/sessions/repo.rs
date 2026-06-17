@@ -13,7 +13,7 @@ use mongodb::Collection;
 
 use crate::db::Db;
 use crate::error::AppError;
-use crate::models::{SessionDoc, SessionStatus};
+use crate::models::{SessionDoc, SessionStatus, TerminalCause};
 
 /// Error text stamped onto sessions orphaned by a pod restart.
 pub const ORPHANED_ERROR: &str = "orphaned by pod restart";
@@ -29,6 +29,13 @@ pub struct SessionRepo {
 /// with `rename_all = "lowercase"`).
 pub(crate) fn status_bson(status: SessionStatus) -> Bson {
     bson::to_bson(&status).expect("SessionStatus serializes to a string")
+}
+
+/// Serialize a terminal cause to its BSON string form (#180), for stamping
+/// `terminal_cause` in a terminal `transition_guarded` update doc (infallible
+/// for a unit enum with `rename_all = "snake_case"`).
+pub(crate) fn terminal_cause_bson(cause: TerminalCause) -> Bson {
+    bson::to_bson(&cause).expect("TerminalCause serializes to a string")
 }
 
 impl SessionRepo {

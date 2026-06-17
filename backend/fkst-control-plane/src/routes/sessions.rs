@@ -21,7 +21,7 @@ use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
 use crate::authz::{Action, Ownership};
 use crate::error::AppError;
-use crate::models::{SessionDoc, SessionStatus};
+use crate::models::{SessionDoc, SessionStatus, TerminalCause};
 use crate::routes::rfc3339;
 use crate::state::AppState;
 
@@ -46,6 +46,11 @@ pub struct SessionView {
     pub pid: Option<i32>,
     pub runtime_dir: Option<String>,
     pub error: Option<String>,
+    /// Why the session reached its terminal state (#180): `terminated`
+    /// (user-stop), `completed` (graceful engine finish), or `failed` (error).
+    /// Omitted while the session is still live.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_cause: Option<TerminalCause>,
     /// Owner user ID (explicit null for legacy sessions).
     pub owner_user_id: Option<String>,
     /// Organization ID (explicit null for personal sessions).
@@ -83,6 +88,7 @@ impl TryFrom<&SessionDoc> for SessionView {
             pid: doc.pid,
             runtime_dir: doc.runtime_dir.clone(),
             error: doc.error.clone(),
+            terminal_cause: doc.terminal_cause,
             owner_user_id: doc.owner_user_id.clone(),
             org_id: doc.org_id.clone(),
             goal_id: doc.goal_id.map(|id| id.to_string()),
@@ -253,6 +259,7 @@ mod tests {
             nyxid_key_id: None,
             nyxid_key_prefix: None,
             ornn_skills: None,
+            terminal_cause: None,
             created_at: bson::DateTime::from_millis(1_700_000_000_000),
             started_at: None,
             stopped_at: None,
