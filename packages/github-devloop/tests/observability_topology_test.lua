@@ -310,6 +310,25 @@ return {
     t.eq(rendered.hash, rerendered.hash)
   end,
 
+  test_dashboard_topology_states_operator_question_it_answers = function()
+    local rendered = core.render_observability_dashboard({
+      entities = {},
+      counts = {},
+      stalls = {},
+      state_gap_report = {},
+      now_seconds = 1780000000,
+      topology_mermaid = topology.render_mermaid(topology_fixture()),
+    })
+
+    t.is_true(rendered.body:find(
+      "Operator orientation: this collapses raw `graph_json()` nodes and queues into the package lanes and message path needed to read the live work sections below.",
+      1,
+      true
+    ) ~= nil)
+    t.is_true(rendered.body:find("## System topology", 1, true) < rendered.body:find("```mermaid", 1, true))
+    t.is_true(rendered.body:find("```mermaid", 1, true) < rendered.body:find("## Now working", 1, true))
+  end,
+
   test_dashboard_omits_topology_when_graph_unavailable = function()
     local rendered = core.render_observability_dashboard({
       entities = {},
