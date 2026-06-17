@@ -91,7 +91,6 @@ end
 
 local function allowed_extra_transition(state, next_state)
   return (state == "reviewing" and next_state == "blocked")
-    or (state == "pr-open" and next_state == "fixing")
     or (state == "impl-failed" and next_state == "implementing")
 end
 

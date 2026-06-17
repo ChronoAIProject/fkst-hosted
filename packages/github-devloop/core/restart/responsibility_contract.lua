@@ -14,9 +14,6 @@ local known_god_states = {
   ready = {
     ["ready: non-terminal row must declare responsibility_signature"] = "dependency gate and implementation kickoff are still fused until the ready split.",
   },
-  ["pr-open"] = {
-    ["pr-open: non-terminal row must declare responsibility_signature"] = "PR observation kickoff and not-mergeable repair recovery are still fused until the pr-open split.",
-  },
   reviewing = {
     ["reviewing: non-terminal row must declare responsibility_signature"] = "Review decision, convergence heartbeat, failure, and meta fallback are still fused until the reviewing split.",
   },

@@ -46,14 +46,14 @@ return {
     t.eq(#core.liveness_contract_errors(), 0)
   end,
 
-  test_pr_not_mergeable_recovery_is_declared_by_restart_rows = function()
+  test_pr_not_mergeable_recovery_is_owned_by_reviewing = function()
     local by_state = table_by_state()
-    for _, state in ipairs({ "pr-open", "reviewing" }) do
-      local recovery = by_state[state].pr_recovery.not_mergeable
-      t.eq(recovery.to_state, "fixing")
-      t.eq(recovery.queue, "devloop_fixing")
-      t.is_true(has_value(by_state[state].to_states, "fixing"))
-    end
+    t.eq(by_state["pr-open"].pr_recovery, nil)
+    t.eq(has_value(by_state["pr-open"].to_states, "fixing"), false)
+    local recovery = by_state.reviewing.pr_recovery.not_mergeable
+    t.eq(recovery.to_state, "fixing")
+    t.eq(recovery.queue, "devloop_fixing")
+    t.is_true(has_value(by_state.reviewing.to_states, "fixing"))
     t.eq(by_state.fixing.pr_recovery, nil)
     t.eq(by_state["merge-ready"].pr_recovery, nil)
   end,

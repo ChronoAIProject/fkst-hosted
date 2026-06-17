@@ -7,22 +7,17 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "pr-open",
     liveness_class_id = "pr_open.actionable",
     watchdog = watchdog("row-budget-bounds-receiver", 30),
     actionable_epoch = actionable_epoch("state_entry:v1"),
     terminal = false,
-    to_states = { "reviewing", "fixing" },
+    to_states = { "reviewing" },
     driving_queue = "devloop_reviewing",
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     timeout_surfaces = { issue_liveness_scan = true, pr = true, liveness_scan = true },
-    pr_recovery = {
-      not_mergeable = {
-        to_state = "fixing",
-        queue = "devloop_fixing",
-      },
-    },
     output_obligation = obligation({ "state:v1 reviewing", "devloop_reviewing" }, { "reviewing" }),
     budget = budget(30, "No long receiver work is expected; the row uses the standard 30 minute watchdog margin after PR creation."),
     liveness_contract = liveness({
@@ -30,6 +25,24 @@ return function(M, h)
       receiver_bound_minutes = 0,
     }),
     on_timeout = timeout("devloop_reviewing"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "pr-observation-kickoff",
+      driving_queue = "devloop_reviewing",
+      state_kind = "queue_wait",
+      liveness_class = "pr_open.actionable",
+      input_fact_family = "pr-link",
+      output_postcondition_family = "review_requested",
+      phase_rank = M.stage_rank("pr-open"),
+      lineage_keys = { "pr-link.impl_version", "pr-link.pr", "source_ref" },
+      successors = {
+        {
+          state = "reviewing",
+          output_variant = "review-requested",
+          postcondition_family = "review_requested",
+          monotonic = true,
+        },
+      },
+    }),
     payload_builder = M.build_devloop_reviewing_payload,
     dedup_shape = "reviewing/<proposal_id>/<impl_version>/<pr>",
     required_facts = {
