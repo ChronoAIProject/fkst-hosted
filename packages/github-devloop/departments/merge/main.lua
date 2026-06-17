@@ -238,9 +238,11 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
   if current_origin == nil then
     current_origin = core.pr_native_origin(repo, merge_ready.pr_number, pr)
   end
+  local origin_issue_matches = (issue_number == nil and current_origin.pr_native == true)
+    or tostring(current_origin.issue_number) == tostring(issue_number)
   if current_origin.proposal_id ~= merge_ready.proposal_id
     or current_origin.repo ~= repo
-    or tostring(current_origin.issue_number) ~= tostring(issue_number)
+    or not origin_issue_matches
     or tostring(current_origin.branch) ~= tostring(origin.branch)
     or tostring(current_origin.impl_version) ~= tostring(origin.impl_version)
     or tostring(current_origin.base_branch) ~= tostring(origin.base_branch)
@@ -403,12 +405,19 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
-  if tostring(entity.repo or "") ~= tostring(repo or "")
-    or tostring(entity.issue_number or "") ~= tostring(issue_number or "") then
+  local entity_matches = tostring(entity.repo or "") == tostring(repo or "")
+    and ((entity.kind == "issue" and tostring(entity.issue_number or "") == tostring(issue_number or ""))
+      or (entity.kind == "pr" and issue_number == nil and tostring(entity.pr_number or "") == tostring(merge_ready.pr_number or "")))
+  if not entity_matches then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
-  if not core.verify_pr_review_issue_claim("merge", repo, issue_number, nil, merge_ready.proposal_id) then
+  if issue_number == nil
+    and not core.is_substrate_ref_lifecycle(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version) then
+    core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "claim", "claim", "skip-not-owned", "backing issue is absent")
+    return
+  end
+  if issue_number ~= nil and not core.verify_pr_review_issue_claim("merge", repo, issue_number, nil, merge_ready.proposal_id) then
     return
   end
   if options ~= nil and type(options.queue_starvation_cause) == "table" then
@@ -690,9 +699,11 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       if recheck_origin == nil then
         recheck_origin = core.pr_native_origin(repo, merge_ready.pr_number, rechecked_pr)
       end
+      local recheck_origin_issue_matches = (issue_number == nil and recheck_origin.pr_native == true)
+        or tostring(recheck_origin.issue_number) == tostring(issue_number)
       if recheck_origin.proposal_id ~= merge_ready.proposal_id
         or recheck_origin.repo ~= repo
-        or tostring(recheck_origin.issue_number) ~= tostring(issue_number)
+        or not recheck_origin_issue_matches
         or tostring(recheck_origin.branch) ~= tostring(origin.branch)
         or tostring(recheck_origin.impl_version) ~= tostring(origin.impl_version)
         or tostring(recheck_origin.base_branch) ~= tostring(origin.base_branch)
