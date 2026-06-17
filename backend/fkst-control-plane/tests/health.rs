@@ -36,7 +36,7 @@ async fn test_router() -> axum::Router {
         .await
         .expect("lazy handle must build without I/O");
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault(&db);
     build_router(AppState {
         config,

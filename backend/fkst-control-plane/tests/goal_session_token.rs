@@ -144,7 +144,6 @@ fn test_github_config() -> GithubAppConfig {
 /// Everything a test needs, with the container kept alive for its lifetime.
 struct TestCtx {
     _container: ContainerAsync<Mongo>,
-    db: Db,
     sessions: SessionService,
     goals: GoalIssueStore,
     github_api: Arc<CountingFakeApi>,
@@ -175,7 +174,7 @@ async fn ctx() -> TestCtx {
     // PackageRepository is no longer an arg to SessionService::new (#115);
     // packages are resolved from the goal repo clone at spawn, not from Mongo.
     let sessions = SessionService::new(
-        SessionRepo::new(&db),
+        SessionRepo::new(),
         // Default engine config -> framework_bin is the absent
         // /usr/local/bin/fkst-framework, so the engine start fails (downstream
         // of the token mint). That is the expected terminal state here.
@@ -194,7 +193,6 @@ async fn ctx() -> TestCtx {
 
     TestCtx {
         _container: container,
-        db,
         sessions,
         goals,
         github_api,
@@ -284,7 +282,10 @@ async fn goal_session_mints_github_token_at_startup() {
         .await
         .expect("create_for_goal");
 
-    let repo_handle = SessionRepo::new(&ctx.db);
+    // Poll via the SAME in-memory store the service drives (cloning shares the
+    // Arc-backed map); a fresh `SessionRepo::new()` would be a distinct empty
+    // map and never see the driven session (db-free store, #198).
+    let repo_handle = ctx.sessions.repo().clone();
     let doc = poll_until_settled(&repo_handle, result.session_id).await;
 
     // The driver minted a token for the goal's repo BEFORE starting the engine.

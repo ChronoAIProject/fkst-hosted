@@ -236,7 +236,7 @@ async fn health_endpoints_reflect_mongo_liveness() {
     // Short selection timeout so the post-stop request fails fast.
     let (container, config, db) = mongo_db(500).await;
     let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,

@@ -65,7 +65,7 @@ async fn app() -> TestApp {
     let db = Db::connect(&config).await.expect("connect + ping");
     let goals = GoalIssueStore::new(None);
     // Package validation is now format-only (#115); no PackageRepository needed.
-    let sessions = SessionService::new(SessionRepo::new(&db), EngineConfig::default());
+    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault(&db);
     let router = build_router(AppState {
         config,

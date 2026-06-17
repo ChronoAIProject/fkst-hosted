@@ -151,11 +151,8 @@ async fn main() -> ExitCode {
     //     to an engine process that died with the previous pod and must be
     //     failed — and its lease released — before clients can observe
     //     stale "running" state.
-    let sessions = SessionService::with_distribution(
-        SessionRepo::new(&db),
-        engine_config,
-        distributor.clone(),
-    );
+    let sessions =
+        SessionService::with_distribution(SessionRepo::new(), engine_config, distributor.clone());
     // Session-progress journaling (issue #25): the committed GitHub file is
     // the sole machine-truth (#139). GitHub sync per the FKST_JOURNAL_* config
     // (absent repo/token degrades to no-durable-floor with a warn).
