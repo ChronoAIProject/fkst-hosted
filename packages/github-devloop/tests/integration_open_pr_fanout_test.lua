@@ -71,8 +71,13 @@ end
 
 local function count_exact_calls(command)
   local count = 0
+  local read_prefix = "GH_TOKEN=${FKST_GITHUB_READ_TOKEN:-} GITHUB_TOKEN=${FKST_GITHUB_READ_TOKEN:-} "
   for _, call in ipairs(t.command_calls()) do
-    if tostring(call.rendered or "") == command then
+    local rendered = tostring(call.rendered or "")
+    if rendered:sub(1, #read_prefix) == read_prefix then
+      rendered = rendered:sub(#read_prefix + 1)
+    end
+    if rendered == command then
       count = count + 1
     end
   end

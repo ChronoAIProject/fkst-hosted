@@ -25,6 +25,9 @@ local allowed_env = {
 local allowed_presence_env = {
   GH_TOKEN = true,
   GITHUB_TOKEN = true,
+  FKST_GITHUB_READ_TOKEN = true,
+  FKST_GITHUB_WRITE_TOKEN = true,
+  FKST_GITHUB_MERGE_TOKEN = true,
 }
 
 local function read_env_command(name)

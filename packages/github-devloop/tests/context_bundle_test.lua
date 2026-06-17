@@ -78,7 +78,7 @@ return {
   test_context_bundle_files_round_trip_from_different_cwd = function()
     local result = run_probe("round_trip", runtime_root("round-trip"))
 
-    t.eq(#result.paths, 5)
+    t.eq(#result.paths, 6)
     t.is_true(result.manifest:find("UNTRUSTED-NOTICE.txt", 1, true) ~= nil)
     t.is_true(result.manifest:find("bytes):", 1, true) ~= nil)
     t.is_true(result.manifest:find("Files may be large; read them in segments as needed.", 1, true) ~= nil)

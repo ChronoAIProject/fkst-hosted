@@ -31,6 +31,11 @@
 #       Uses .fkst/run/board-cache.json by default as a TTL cache; --refresh forces
 #       a read from the engine. The cache is local only and never authoritative.
 #
+#   scripts/run.sh ratchet-migration-dry-run <891|892> [--slice-size N]
+#       Print a deterministic child issue body for a code-owned allowlist ratchet
+#       parent. This is read-only and never creates issues, writes comments, closes
+#       parents, or runs issue-provided inventory commands.
+#
 #   scripts/run.sh health [--refresh] [--ttl seconds] [--stall seconds]
 #       Print only the current HEALTHY / anomaly verdict from the board renderer.
 #
@@ -202,6 +207,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
+  python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py" || fail=1
   return "$fail"
 }
 
@@ -257,6 +263,37 @@ PY
 
   rm -f "$expected" "$actual" "$missing"
   echo "OK: G5 every *_test.lua produced an engine report-json pass"
+}
+
+check_hostile_canary_execution() {
+  local report_dir="$1"
+  python3 - "$report_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report_dir = Path(sys.argv[1])
+target = (
+    "github-devloop",
+    "tests/integration_prompt_injection_canary_test.lua",
+    "test_held_out_hostile_canary_runs_through_intake_judge_path",
+)
+for report_path in sorted(report_dir.glob("*.json")):
+    with report_path.open(encoding="utf-8") as handle:
+        report = json.load(handle)
+    for test in report.get("tests", []):
+        seen = (
+            test.get("owner_namespace"),
+            test.get("file"),
+            test.get("name"),
+        )
+        if seen == target and test.get("status") == "pass":
+            raise SystemExit(0)
+raise SystemExit(
+    "error: held-out hostile canary was not executed by scripts/run.sh test"
+)
+PY
+  echo "OK: held-out hostile canary executed in github-devloop intake path"
 }
 
 check_sdk_primitives() {
@@ -428,6 +465,11 @@ cmd_test() {
     fi
     if [ "$fail" -eq 0 ]; then
       if ! check_test_file_coverage "$report_dir"; then
+        fail=$((fail + 1))
+      fi
+    fi
+    if [ "$fail" -eq 0 ]; then
+      if ! check_hostile_canary_execution "$report_dir"; then
         fail=$((fail + 1))
       fi
     fi
@@ -663,6 +705,10 @@ cmd_health() {
   cmd_board --health "$@"
 }
 
+cmd_ratchet_migration_dry_run() {
+  python3 -B "$ROOT/scripts/ratchet_migration_slicer.py" --repo-root "$ROOT" "$@"
+}
+
 cmd_supervise() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
@@ -745,6 +791,7 @@ main() {
     doctor) shift; cmd_doctor "$@" ;;
     board) shift; resolve_bin; ensure_fresh_bin; cmd_board "$@" ;;
     health) shift; resolve_bin; ensure_fresh_bin; cmd_health "$@" ;;
+    ratchet-migration-dry-run) shift; cmd_ratchet_migration_dry_run "$@" ;;
     test) shift
       # Quiet cmd_check's advisory warnings during a test run unless verbose;
       # surface its full output only when it hard-fails (non-zero). `run.sh check`
