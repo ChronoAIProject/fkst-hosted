@@ -259,6 +259,37 @@ PY
   echo "OK: G5 every *_test.lua produced an engine report-json pass"
 }
 
+check_hostile_canary_execution() {
+  local report_dir="$1"
+  python3 - "$report_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report_dir = Path(sys.argv[1])
+target = (
+    "github-devloop",
+    "tests/integration_prompt_injection_canary_test.lua",
+    "test_held_out_hostile_canary_runs_through_intake_judge_path",
+)
+for report_path in sorted(report_dir.glob("*.json")):
+    with report_path.open(encoding="utf-8") as handle:
+        report = json.load(handle)
+    for test in report.get("tests", []):
+        seen = (
+            test.get("owner_namespace"),
+            test.get("file"),
+            test.get("name"),
+        )
+        if seen == target and test.get("status") == "pass":
+            raise SystemExit(0)
+raise SystemExit(
+    "error: held-out hostile canary was not executed by scripts/run.sh test"
+)
+PY
+  echo "OK: held-out hostile canary executed in github-devloop intake path"
+}
+
 check_sdk_primitives() {
   local probe_dir report_file
   probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-sdk-probe.XXXXXX")"
@@ -428,6 +459,11 @@ cmd_test() {
     fi
     if [ "$fail" -eq 0 ]; then
       if ! check_test_file_coverage "$report_dir"; then
+        fail=$((fail + 1))
+      fi
+    fi
+    if [ "$fail" -eq 0 ]; then
+      if ! check_hostile_canary_execution "$report_dir"; then
         fail=$((fail + 1))
       fi
     fi
