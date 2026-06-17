@@ -142,9 +142,9 @@ async fn main() -> ExitCode {
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let auth_mode = config.auth.clone();
 
-    // Build the NyxID client ONCE and share it across the Authorizer and the
-    // LLM gateway. Only construct a NyxIdClient when auth is enabled AND both
-    // service-account credentials are present.
+    // Build the NyxID client ONCE for the Authorizer. Only construct a
+    // NyxIdClient when auth is enabled AND both service-account credentials
+    // are present.
     let nyxid_client: Option<NyxIdClient> = match (
         &auth_mode,
         &config.nyxid_client_id,
