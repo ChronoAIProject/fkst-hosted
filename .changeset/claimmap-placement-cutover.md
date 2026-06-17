@@ -1,5 +1,0 @@
----
-"fkst-hosted": minor
----
-
-Unify session placement on the in-memory `ClaimMap` and delete the Mongo lease/distribution/reaper machinery (completes #198). The in-process driver path now claims a goal through the controller's in-memory `ClaimMap` (the at-most-one-engine authority) instead of acquiring a Mongo package lease, and releases it on every terminal exit; `drive_inner` loses the lease renewal / lease-loss-self-fence / reaper lifecycle entirely, because a single authoritative controller never loses its own claim. `create_for_goal` claims locally for in-process execution (and still places on a worker when `FKST_DISPATCH_MODE` is on); the controller/`ClaimMap` is now wired unconditionally. The `leases/` and `distribution/` modules (the multi-replica lease scaffolding the db-free single-controller model replaces) are removed. The load-bearing no-stranded-claim invariant — every terminal/error path releases the claim so the goal is re-triggerable — is proven by an end-to-end test. Mongo's `Db` handle + the `mongodb` dependency remain until the residual-deletion increment (#143).

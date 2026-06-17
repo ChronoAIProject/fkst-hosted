@@ -9,6 +9,8 @@ release PR, and frozen into a permanent entry once the release is tagged. Do not
 edit released sections by hand.
 
 <!-- BEGIN PENDING -->
+<!-- END PENDING -->
+
 ## v0.1.0 — 2026-06-17
 
 ## Fixed
@@ -40,4 +42,3 @@ edit released sections by hand.
 - Kubernetes-only deployment; docker-compose removed
 - Authentication trusts the NyxID proxy with `fkst:*` permissions
 - Technical enhancement
-<!-- END PENDING -->

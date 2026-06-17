@@ -1,5 +1,0 @@
----
-"fkst-hosted": minor
----
-
-Session progress journaling to GitHub (GitHub = single source of truth; clean redo): the engine runner's stdout is tapped for `RAISED: <base64-json>` lines and, together with lifecycle transitions and framework-child log watermarks, journaled append-only into a new Mongo `session_progress` collection (unique partial `run_key+idem_key` index = local idempotency) with a per-logical-run `run_journals` head. A content-derived `idem_key`/`run_key` (sha256 over the configured identity-pointer projection / package fingerprint) makes records identical across pods, and a debounced, fencing-token-guarded CAS loop commits the per-run progress record to `.fkst-hosted/journal/<run_key>.json` via the GitHub Contents API. On redo, the driver loads the GitHub `completed[]` as a skip-set (fail-open to safe re-execution when GitHub is unreachable) and mirrors it locally so re-emitted events are no-ops. Configured via `FKST_JOURNAL_*` / `FKST_RAISED_*` / `GITHUB_TOKEN` (secret, redacted everywhere); journaling never changes session disposition.
