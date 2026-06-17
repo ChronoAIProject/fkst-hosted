@@ -276,43 +276,27 @@ local function render_comment(body)
   )
 end
 
-local function substrate_review_proposal()
-  return core.pr_review_proposal_id("owner/repo", pr_number, "substrate-ref-bump/" .. pr_head_sha, pr_head_sha)
-end
-
-local function substrate_review_dedup()
-  return core._dedup_key({
-    "substrate-ref-bump",
-    "review",
-    core.safe_repo("owner/repo"),
-    tostring(pr_number),
-    pr_head_sha,
-  })
-end
-
-local function substrate_proposal_id()
-  return core.pr_proposal_id("owner/repo", pr_number)
-end
-
-local function substrate_lifecycle_comment()
-  local proposal_id = substrate_proposal_id()
-  local version = "substrate-ref-bump/" .. pr_head_sha
-  local review_proposal = substrate_review_proposal()
-  local review_dedup = substrate_review_dedup()
-  return table.concat({
-    core.state_marker(proposal_id, "merge-ready", version),
-    core.review_result_marker(review_proposal, proposal_id, "approve", review_dedup),
-    core.merge_ready_marker(proposal_id, pr_number, version, review_proposal, review_dedup, pr_head_sha),
-  }, "\n")
-end
-
-local function mock_bump_pr_view(comments)
+local function mock_bump_pr_view(comments, extra)
+  extra = extra or {}
+  local state = extra.state or "OPEN"
+  local merged_at = extra.merged_at or ""
+  local head_sha = extra.head_sha or pr_head_sha
+  local is_draft = extra.is_draft == true and "true" or "false"
+  local mergeable = extra.mergeable or "MERGEABLE"
+  local merge_state = extra.merge_state or "CLEAN"
+  local rollup = extra.rollup or '[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]'
   t.mock_command("gh pr view '27' --repo 'owner/repo' --json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", {
     stdout = string.format(
-      '{"headRefName":"chore/substrate-ref-bump","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"OPEN","updatedAt":"2026-06-16T22:10:00Z","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}\n',
-      pr_head_sha,
+      '{"headRefName":"chore/substrate-ref-bump","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-16T22:10:00Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
+      head_sha,
       base_sha,
-      comments and render_comment(comments) or ""
+      state,
+      is_draft,
+      merged_at,
+      comments and render_comment(comments) or "",
+      mergeable,
+      merge_state,
+      rollup
     ),
     stderr = "",
     exit_code = 0,
@@ -324,6 +308,36 @@ local function mock_bump_diff(path)
     stdout = (path or ".fkst/substrate-ref") .. "\n",
     stderr = "",
     exit_code = 0,
+  })
+end
+
+local function mock_branch_head_for_merge(sha, pin)
+  t.mock_command("git fetch 'origin' 'chore/substrate-ref-bump'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git rev-parse --verify refs/remotes/'origin'/'chore/substrate-ref-bump'^{commit}", {
+    stdout = tostring(sha or pr_head_sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git show '" .. tostring(sha or pr_head_sha) .. ":.fkst/substrate-ref'", {
+    stdout = tostring(pin or target_sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_merge_success()
+  t.mock_command("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  mock_bump_pr_view(nil, {
+    state = "MERGED",
+    merged_at = "2026-06-16T22:30:00Z",
   })
 end
 
@@ -416,21 +430,26 @@ return {
     mock_pr_create()
     mock_bump_pr_view()
     mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_bump_pr_view()
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_merge_success()
 
     local result = run_scan(opts("substrate-create", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 1)
     t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
-    local lifecycle_raise = result.raises[1]
-    t.eq(lifecycle_raise.queue, "github-proxy.github_pr_comment_request")
-    t.eq(lifecycle_raise.payload.pr_number, pr_number)
-    t.is_true(lifecycle_raise.payload.body:find('proposal="' .. substrate_proposal_id() .. '"', 1, true) ~= nil)
-    t.is_true(lifecycle_raise.payload.body:find('state="merge-ready"', 1, true) ~= nil)
-    t.is_true(lifecycle_raise.payload.body:find("github-devloop substrate-ref bump lifecycle: PR-owned approval", 1, true) ~= nil)
+    t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 1)
+    local audit_raise = result.raises[1]
+    t.eq(audit_raise.queue, "github-proxy.github_pr_comment_request")
+    t.eq(audit_raise.payload.pr_number, pr_number)
+    t.is_true(audit_raise.payload.body:find("github-devloop substrate-ref deterministic merge audit", 1, true) ~= nil)
+    t.is_true(audit_raise.payload.body:find("fkst:github-devloop:substrate-ref-merge:v1", 1, true) ~= nil)
+    t.is_true(audit_raise.payload.body:find('target_sha="' .. target_sha .. '"', 1, true) ~= nil)
     t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
     t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
-    t.eq(count_calls("gh pr merge"), 0)
   end,
 
   test_real_mode_updates_existing_bump_pr_branch_without_creating_second_pr = function()
@@ -446,17 +465,22 @@ return {
     mock_worktree_commands(true)
     mock_bump_pr_view()
     mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_bump_pr_view()
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_merge_success()
 
     local result = run_scan(opts("substrate-update", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 1)
+    t.eq(count_calls("gh pr merge"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
+    t.is_true(result.raises[1].payload.body:find("substrate-ref-merge:v1", 1, true) ~= nil)
     t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
     t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
-    t.is_true(result.raises[1].payload.body:find('proposal="' .. substrate_proposal_id() .. '"', 1, true) ~= nil)
-    t.is_true(result.raises[1].payload.body:find('state="merge-ready"', 1, true) ~= nil)
   end,
 
   test_real_mode_rechecks_pr_under_lock_before_create = function()
@@ -471,6 +495,11 @@ return {
     mock_worktree_commands(false)
     mock_bump_pr_view()
     mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_bump_pr_view()
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_merge_success()
 
     local result = run_scan(opts("substrate-recheck", { FKST_GITHUB_WRITE = "1" }))
 
@@ -478,6 +507,7 @@ return {
     t.eq(count_calls(core.gh_pr_list_head_cmd("owner/repo", "chore/substrate-ref-bump")), 1)
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
+    t.eq(count_calls("gh pr merge"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
     t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
     t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
@@ -490,8 +520,13 @@ return {
     mock_existing_pr()
     mock_branch_present()
     mock_branch_pin(target_sha)
-    mock_bump_pr_view(substrate_lifecycle_comment())
+    mock_bump_pr_view()
     mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_bump_pr_view()
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_merge_success()
 
     local result = run_scan(opts("substrate-already-current", { FKST_GITHUB_WRITE = "1" }))
 
@@ -499,9 +534,68 @@ return {
     t.eq(count_calls("gh pr create"), 0)
     t.eq(count_calls("git worktree"), 0)
     t.eq(count_calls("git push"), 0)
-    t.eq(result.raises[1].queue, "devloop_merge_ready")
-    t.eq(result.raises[1].payload.proposal_id, substrate_proposal_id())
-    t.eq(result.raises[1].payload.review_proposal_id, substrate_review_proposal())
+    t.eq(count_calls("gh pr merge"), 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
+  end,
+
+  test_real_mode_holds_existing_bump_pr_when_diff_is_not_exact_pin_file = function()
+    mock_env("1")
+    mock_current_pin(current_pin)
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin(target_sha)
+    mock_bump_pr_view()
+    mock_bump_diff(".fkst/substrate-ref\nREADME.md")
+
+    local result = run_scan(opts("substrate-unexpected-diff", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_raises(result, "github-proxy.github_pr_comment_request"), 0)
+  end,
+
+  test_real_mode_holds_existing_bump_pr_when_pin_is_not_current_substrate_head = function()
+    mock_env("1")
+    mock_current_pin(current_pin)
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin(target_sha)
+    mock_bump_pr_view()
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, current_pin)
+
+    local result = run_scan(opts("substrate-pin-mismatch", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_raises(result, "github-proxy.github_pr_comment_request"), 0)
+  end,
+
+  test_real_mode_holds_existing_bump_pr_when_ci_is_not_green = function()
+    mock_env("1")
+    mock_current_pin(current_pin)
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin(target_sha)
+    mock_bump_pr_view(nil, {
+      rollup = '[{"name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]',
+    })
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_bump_pr_view(nil, {
+      rollup = '[{"name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]',
+    })
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+
+    local result = run_scan(opts("substrate-ci-red", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh pr merge"), 0)
+    t.eq(count_raises(result, "github-proxy.github_pr_comment_request"), 0)
   end,
 
   test_real_mode_removes_stale_checked_out_bump_branch_worktree_before_update = function()
@@ -517,6 +611,11 @@ return {
     mock_worktree_commands(true)
     mock_bump_pr_view()
     mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_bump_pr_view()
+    mock_bump_diff()
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_merge_success()
 
     local result = run_scan(opts("substrate-stale-worktree", { FKST_GITHUB_WRITE = "1" }))
 

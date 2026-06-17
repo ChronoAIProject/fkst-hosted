@@ -412,8 +412,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
-  if issue_number == nil
-    and not core.is_substrate_ref_lifecycle(merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version) then
+  if issue_number == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "claim", "claim", "skip-not-owned", "backing issue is absent")
     return
   end
