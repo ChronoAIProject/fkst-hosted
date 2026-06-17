@@ -252,7 +252,7 @@ function core.render_observability_dashboard(args)
   if topology_mermaid ~= nil and tostring(topology_mermaid) ~= "" then
     table.insert(lines, "## System topology")
     table.insert(lines, "")
-    table.insert(lines, "Operator orientation: this collapses raw `graph_json()` nodes and queues into the package lanes and message path needed to read the live work sections below.")
+    table.insert(lines, "Operator orientation: this projects `graph_json()` nodes into package lanes and queue-mediated message paths needed to read the live work sections below.")
     table.insert(lines, "")
     table.insert(lines, "```mermaid")
     table.insert(lines, tostring(topology_mermaid))
