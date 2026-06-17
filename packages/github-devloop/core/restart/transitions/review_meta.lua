@@ -7,6 +7,7 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "review-meta",
     liveness_class_id = "review_meta.actionable",
@@ -23,6 +24,33 @@ return function(M, h)
       receiver_bound_minutes = 60,
     }),
     on_timeout = timeout("devloop_review_meta"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "review-meta-judge",
+      driving_queue = "devloop_review_meta",
+      state_kind = "decision",
+      liveness_class = "review_meta.actionable",
+      input_fact_family = "review-convergence-gap",
+      output_postcondition_family = "review-meta-decision",
+      decision_type = "review-meta-decision",
+      phase_rank = M.stage_rank("review-meta"),
+      lineage_keys = { "state.version", "review-converge-round.proposal", "review-converge-round.dedup", "source_ref" },
+      successors = {
+        {
+          state = "fixing",
+          output_variant = "fix",
+          postcondition_family = "review-meta-decision",
+          decision_type = "review-meta-decision",
+          bump = true,
+        },
+        {
+          state = "blocked",
+          output_variant = "block",
+          postcondition_family = "review-meta-decision",
+          decision_type = "review-meta-decision",
+          monotonic = true,
+        },
+      },
+    }),
     payload_builder = M.build_devloop_review_meta_payload,
     dedup_shape = "review-meta/<proposal_id>/<version>/<pr>/<n>/<review_dedup>",
     required_facts = {

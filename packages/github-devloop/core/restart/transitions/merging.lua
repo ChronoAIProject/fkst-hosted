@@ -7,6 +7,7 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "merging",
     liveness_class_id = "merging.actionable",
@@ -32,6 +33,43 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_merge_ready"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "merge-gate-worker",
+      driving_queue = "devloop_merge_ready",
+      state_kind = "gate",
+      liveness_class = "merging.actionable",
+      input_fact_family = "head-bound-merge-authorization",
+      output_postcondition_family = "merge-gate-result",
+      decision_type = "merge-gate-result",
+      phase_rank = M.stage_rank("merging"),
+      lineage_keys = { "merge-ready.version", "merge-ready.head_sha", "source_ref" },
+      successors = {
+        {
+          state = "merged",
+          output_variant = "merge-completed",
+          postcondition_family = "merge-gate-result",
+          decision_type = "merge-gate-result",
+          monotonic = true,
+        },
+        {
+          state = "fixing",
+          output_variant = "merge-needs-fix",
+          postcondition_family = "merge-gate-result",
+          decision_type = "merge-gate-result",
+          failure = true,
+          monotonic = true,
+        },
+        {
+          state = "blocked",
+          output_variant = "merge-blocked",
+          postcondition_family = "merge-gate-result",
+          decision_type = "merge-gate-result",
+          failure = true,
+          terminal = true,
+          monotonic = true,
+        },
+      },
+    }),
     payload_builder = M.build_devloop_merge_ready_payload,
     dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>/<current_head>",
     required_facts = {

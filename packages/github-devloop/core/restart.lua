@@ -84,6 +84,10 @@ local function actionable_epoch(source)
   }
 end
 
+local function responsibility_signature(signature)
+  return signature
+end
+
 local transition_table = registry.load_indexed_array("core.restart.transitions.index", "from_state", M, {
   fact = fact,
   obligation = obligation,
@@ -93,6 +97,7 @@ local transition_table = registry.load_indexed_array("core.restart.transitions.i
   liveness = liveness,
   watchdog = watchdog,
   actionable_epoch = actionable_epoch,
+  responsibility_signature = responsibility_signature,
 })
 
 local audit_by_state = {}

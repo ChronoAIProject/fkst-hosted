@@ -7,6 +7,7 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "impl-failed",
     liveness_class_id = "impl_failed.operator_reentry",
@@ -25,6 +26,24 @@ return function(M, h)
       external_wait_bound_minutes = 1410,
     }),
     on_timeout = timeout("devloop_ready"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "operator-reentry",
+      driving_queue = "devloop_ready",
+      state_kind = "queue_wait",
+      liveness_class = "impl_failed.operator_reentry",
+      input_fact_family = "retryable-implementation-failure",
+      output_postcondition_family = "implementation-retry",
+      phase_rank = M.stage_rank("impl-failed"),
+      lineage_keys = { "state.version", "impl-failure.dedup", "source_ref" },
+      successors = {
+        {
+          state = "implementing",
+          output_variant = "retry-implementation",
+          postcondition_family = "implementation-retry",
+          bump = true,
+        },
+      },
+    }),
     payload_builder = M.build_devloop_ready_payload,
     dedup_shape = "ready/<impl-failure inner dedup> with impl_retry_attempt=<impl-failure.attempt+1>",
     required_facts = { fact("state", "marker-read"), fact("impl-failure", "marker-read"), fact("dependency-release", "marker-read") },

@@ -6,6 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "thinking",
     liveness_class_id = "thinking.active",
@@ -28,6 +29,31 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("consensus.proposal"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "consensus-worker",
+      driving_queue = "consensus.proposal",
+      state_kind = "worker",
+      liveness_class = "thinking.active",
+      input_fact_family = "issue-proposal",
+      output_postcondition_family = "issue-consensus",
+      phase_rank = M.stage_rank("thinking"),
+      lineage_keys = { "state.version", "source_ref" },
+      successors = {
+        {
+          state = "ready",
+          output_variant = "consensus-reached",
+          postcondition_family = "issue-consensus",
+          monotonic = true,
+        },
+        {
+          state = "blocked",
+          output_variant = "consensus-stalled",
+          failure = true,
+          terminal = true,
+          monotonic = true,
+        },
+      },
+    }),
     payload_builder = M.build_proposal,
     dedup_shape = "proposal:<proposal_id>/<updated_at> or consensus:<base_version>/loop/<n>",
     required_facts = { fact("state", "marker-read") },
