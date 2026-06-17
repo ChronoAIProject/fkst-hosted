@@ -172,6 +172,7 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 - **模式服务当前问题**：只有当重复形状已经出现、边界已经稳定、测试能证明收益时才引入设计模式；不要为了命名完整而提前套 Factory、Strategy、Observer 等模板。
 - **三次法则（Rule of Three，与上条互为两半）**：等重复出现的前提是**数得到重复**。同类问题第 1 次点状修复；第 2 次点状修复并显式登记模式关联（链接兄弟案）；第 3 次**必须**升维到类级成熟方案（或留下显式豁免理由）——不数重复的「等重复」等于永远点状修复。判断管线须能看见近期已关闭案摘要，使「第 N 次」对新生 codex 可见。**升维=在管线内把方案想大想全，绝非搁置**（用户裁定 2026-06-12）：升级出口必须保持流动——要么本案作为类载体 enable（类级 framing 进共识、实现做全类方案），要么归并链接到 OPEN 的类载体；不存在「停车无后续」的合法出口；引用已关闭的类=回归残留=plain enable；载体与 expedite 实例不递归升级。
+- **伞/类载体的机械生命周期（防累积；「升维必须流动、无停车无后续」的机械落地）**：自驱管线**不实现也不关闭 umbrella**（无 auto-split，伞是 human-tracked），所以 open umbrella 若无机械关闭条件就长生不死、污染上条「是否已有 OPEN 类载体」的判断。规则：**open umbrella/class-carrier 只能是 native-linked finite manifest，不是 prose roadmap**——① 进度只认 **GitHub native sub-issue**（纯 `#N` 文本引用不计，否则伞永远读 0/0、永不自然关闭）；② 正文必须有 scope / non-scope / close-condition（DoD）；③ 24h grace 内须挂第一个 native child，否则关；④ native children 全 close（且当下不新增 child）→ **立即关伞**，「以后可能还有」不是 open 理由——要么立刻挂新 native child，要么关；⑤ 每 repo WIP **≤2 个 open umbrella**。roadmap / 长期方向文本进 doc / GitHub Project，不常驻 open issue；具体后续 → 新的 actionable issue 或挂到 live carrier 的 native child。**不把多个空/旧伞 consolidate 成一个更大的伞**（只是把 N 个噪声变成一个黑洞 issue）。来源：sshx 4 视角（3 codex thinking triplet + ChatGPT Pro 跨模型族）近一致收敛，2026-06-17。
 - **显式优先**：Lua package 中优先使用普通函数、table 和清晰数据流表达模式；避免隐藏控制流的全局注册表、自动发现、动态 monkey patch 和深层 metatable。
 - **边界模式固定**：外部系统接入优先用 Adapter，把 `gh`、`codex exec`、文件和网络形态转成包内稳定结构；副作用边界集中，业务函数保持可单测。
 - **分支策略清晰**：当同一流程因类型、来源或目标变化产生分支时，优先用 Strategy 形态的小函数表或显式 dispatch table；每个分支要有窄测试，不把条件散落在 `pipeline` 多处。
