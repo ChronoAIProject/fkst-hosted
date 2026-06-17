@@ -203,6 +203,20 @@ function M.converge_angles_digest(angle_digests)
   return digest(M, "a", table.concat(parts, "\n"))
 end
 
+function M.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key)
+  local copied = {}
+  for _, fact in ipairs(facts or {}) do
+    table.insert(copied, fact)
+  end
+  table.insert(copied, {
+    round = round,
+    question = M.converge_question_digest(narrowed_question),
+    verdicts = M.converge_verdicts_digest(angle_digests),
+    dedup = dedup_key,
+  })
+  return copied
+end
+
 function M.converge_base_version(consensus_dedup)
   return (tostring(consensus_dedup or ""):gsub("/loop/%d+$", ""))
 end
