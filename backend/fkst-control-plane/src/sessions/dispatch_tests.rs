@@ -310,7 +310,11 @@ async fn resolve_dispatch_full_merges_env_codex_and_ornn() {
         Duration::from_secs(30),
     )
     .expect("nyxid client");
-    service.enable_nyxid_token(nyxid_client, "https://nyxid.test".to_string());
+    service.enable_nyxid_token(
+        nyxid_client,
+        "https://nyxid.test".to_string(),
+        Duration::from_secs(3600),
+    );
 
     // Codex: operator-pinned defaults; with the vault wired this renders.
     service.enable_codex(
@@ -429,7 +433,11 @@ async fn resolve_dispatch_never_leaks_a_secret_in_debug() {
         Duration::from_secs(30),
     )
     .expect("nyxid client");
-    service.enable_nyxid_token(nyxid_client, "https://nyxid.test".to_string());
+    service.enable_nyxid_token(
+        nyxid_client,
+        "https://nyxid.test".to_string(),
+        Duration::from_secs(3600),
+    );
 
     let session = goal_session(goal_id, false);
     let raw = SecretString::from("user-raw-token");

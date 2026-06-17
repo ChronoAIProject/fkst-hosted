@@ -267,9 +267,11 @@ async fn main() -> ExitCode {
     tracing::info!("per-session codex provider config enabled");
 
     // 5a-ter-ter. Wire per-session NyxID token provisioning into the driver
-    //         (issue #111): every session mints a per-session agent key on the
-    //         triggering user's behalf and injects NYXID_ACCESS_TOKEN +
-    //         NYXID_URL into the engine env, then revokes it at teardown. The
+    //         (issue #111; TTL cleanup #216): every session mints a per-session
+    //         agent key on the triggering user's behalf and injects
+    //         NYXID_ACCESS_TOKEN + NYXID_URL into the engine env. The key
+    //         self-expires after FKST_SESSION_KEY_TTL_SECS — no service-account
+    //         revoke at teardown (NyxID rejects it on a human-minted key). The
     //         origin is the NyxID issuer base URL (the SAME host that issues the
     //         inbound user JWTs we mint against). Requires the NyxID service
     //         client (built above) AND an enabled auth mode (which carries the
@@ -277,7 +279,11 @@ async fn main() -> ExitCode {
     //         the driver behaves exactly as pre-#111.
     match (&nyxid_client, &auth_mode) {
         (Some(client), fkst_control_plane::auth::AuthMode::Enabled(settings)) => {
-            sessions.enable_nyxid_token(client.clone(), settings.base_url.clone());
+            sessions.enable_nyxid_token(
+                client.clone(),
+                settings.base_url.clone(),
+                std::time::Duration::from_secs(config.session_key_ttl_secs),
+            );
             tracing::info!("per-session nyxid token provisioning enabled");
         }
         _ => {

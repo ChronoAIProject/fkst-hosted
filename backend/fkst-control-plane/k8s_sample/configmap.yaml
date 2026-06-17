@@ -50,6 +50,9 @@ data:
   FKST_AUTH_NYXID_BASE_URL: "https://nyx.chrono-ai.fun"
   # NyxID org-role / user-orgs cache TTL (seconds). >= 1.
   FKST_NYXID_ORG_CACHE_TTL_SECS: "30"
+  # Per-session NyxID agent-key TTL (seconds). The key self-expires after this
+  # (it is the cleanup mechanism — there is no service-account revoke). >= 1.
+  FKST_SESSION_KEY_TTL_SECS: "86400"
   # Slug of the NyxID GitHub proxy service. Non-blank (fail-closed).
   FKST_NYXID_GITHUB_PROXY_SLUG: "api-github"
 
