@@ -75,6 +75,55 @@ return {
     t.eq(spec.rate_pool.name, "gh")
     t.eq(spec.rate_pool.burst, nil)
     t.eq(spec.rate_pool.refill_per_hour, nil)
+    t.eq(spec.github_capability.role, "read-audit")
+    t.eq(spec.github_write_denied, true)
+  end,
+  test_github_capability_split_scopes_read_write_and_merge_tokens = function()
+    local read = core.gh_exec_opts({ cmd = core.gh_issue_view_implement_cmd("owner/repo", 42), timeout = 30, github_token_split = "force" })
+    t.eq(read.github_capability.role, "read-audit")
+    t.eq(read.github_capability.token_env, "FKST_GITHUB_READ_TOKEN")
+    t.eq(read.github_write_denied, true)
+    t.is_true(read.cmd:find("FKST_GITHUB_READ_TOKEN", 1, true) ~= nil)
+    t.eq(read.cmd:find("FKST_GITHUB_WRITE_TOKEN", 1, true), nil)
+    t.eq(read.cmd:find("FKST_GITHUB_MERGE_TOKEN", 1, true), nil)
+
+    local write = core.gh_exec_opts({ cmd = core.gh_pr_comment_cmd("owner/repo", 7, "/tmp/body.md"), timeout = 30, github_token_split = "force" })
+    t.eq(write.github_capability.role, "write")
+    t.eq(write.github_capability.token_env, "FKST_GITHUB_WRITE_TOKEN")
+    t.eq(write.github_capability.scope.repo, "owner/repo")
+    t.eq(write.github_capability.scope.stage, "comment")
+    t.eq(write.github_write_denied, false)
+    t.is_true(write.cmd:find("FKST_GITHUB_WRITE_TOKEN", 1, true) ~= nil)
+    t.eq(write.cmd:find("FKST_GITHUB_READ_TOKEN", 1, true), nil)
+    t.eq(write.cmd:find("FKST_GITHUB_MERGE_TOKEN", 1, true), nil)
+
+    local merge = core.gh_exec_opts({ cmd = core.gh_pr_merge_cmd("owner/repo", 7, "def456"), timeout = 120, github_token_split = "force" })
+    t.eq(merge.github_capability.role, "merge")
+    t.eq(merge.github_capability.token_env, "FKST_GITHUB_MERGE_TOKEN")
+    t.eq(merge.github_capability.scope.repo, "owner/repo")
+    t.eq(merge.github_capability.scope.stage, "merge")
+    t.eq(merge.github_write_denied, false)
+    t.is_true(merge.cmd:find("FKST_GITHUB_MERGE_TOKEN", 1, true) ~= nil)
+    t.eq(merge.cmd:find("FKST_GITHUB_READ_TOKEN", 1, true), nil)
+    t.eq(merge.cmd:find("FKST_GITHUB_WRITE_TOKEN", 1, true), nil)
+  end,
+  test_github_high_risk_paths_cover_ci_auth_dependency_and_scheduler_surfaces = function()
+    local high = core.github_high_risk_paths({
+      ".github/workflows/ci.yml",
+      "Cargo.lock",
+      "scripts/run.sh",
+      "packages/github-devloop/core.lua",
+    })
+    t.eq(#high, 3)
+    t.eq(high[1], ".github/workflows/ci.yml")
+    t.eq(high[2], "Cargo.lock")
+    t.eq(high[3], "scripts/run.sh")
+  end,
+  test_hostile_issue_canary_contract_fails_on_leak_write_or_false_success = function()
+    t.eq(core.github_prompt_injection_canary_result({}).passed, true)
+    t.eq(core.github_prompt_injection_canary_result({ secret_leaked = true }).passed, false)
+    t.eq(core.github_prompt_injection_canary_result({ unintended_write = true }).passed, false)
+    t.eq(core.github_prompt_injection_canary_result({ false_success_without_tests = true }).passed, false)
   end,
   test_core_shared_surface_keeps_two_copy_helpers_local = function()
     t.is_nil(core.age_minutes)

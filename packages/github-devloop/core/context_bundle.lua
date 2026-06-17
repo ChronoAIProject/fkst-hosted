@@ -6,6 +6,7 @@ function S.install(M)
 local max_bundle_file_len = 10 * 1024 * 1024
 local max_context_cache_key_len = 180
 local notice_file_name = "UNTRUSTED-NOTICE.txt"
+local risk_file_name = "risk.txt"
 local context_bundle_cache_prefix = "github-devloop/context-bundle/"
 local context_bundle_manifest_cache_prefix = "github-devloop/context-bundle-manifest/"
 local stale_generation_context_error_class = "stale_generation_context"
@@ -152,6 +153,7 @@ local function bundle_paths(dir, has_pr)
     issue_path = path_join(dir, "issue.json"),
     pr_path = has_pr and path_join(dir, "pr.json") or nil,
     diff_path = has_pr and path_join(dir, "diff.patch") or nil,
+    risk_path = has_pr and path_join(dir, risk_file_name) or nil,
     board_path = path_join(dir, "board.txt"),
   }
 end
@@ -161,6 +163,7 @@ local function hydrate_bundle_sizes(bundle, exec)
   bundle.issue_bytes = file_size(bundle.issue_path, exec)
   bundle.pr_bytes = bundle.pr_path ~= nil and file_size(bundle.pr_path, exec) or nil
   bundle.diff_bytes = bundle.diff_path ~= nil and file_size(bundle.diff_path, exec) or nil
+  bundle.risk_bytes = bundle.risk_path ~= nil and file_size(bundle.risk_path, exec) or nil
   bundle.board_bytes = file_size(bundle.board_path, exec)
   return bundle
 end
@@ -252,6 +255,35 @@ local function fetch_cmd(cmd, label, exec)
   return result.stdout or ""
 end
 
+local function parse_name_only_paths(stdout)
+  local paths = {}
+  for line in tostring(stdout or ""):gmatch("([^\r\n]+)") do
+    local path = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if path ~= "" then
+      table.insert(paths, path)
+    end
+  end
+  return paths
+end
+
+local function risk_report(paths)
+  local high = M.github_high_risk_paths(paths)
+  local lines = {
+    "PR risk tier: " .. (#high > 0 and "high" or "normal"),
+    "High-risk rule: CI/auth/dependency/scheduler changes require stronger evidence before merge-ready.",
+  }
+  if #high > 0 then
+    table.insert(lines, "High-risk paths:")
+    for _, path in ipairs(high) do
+      table.insert(lines, "- " .. path)
+    end
+  else
+    table.insert(lines, "High-risk paths: none")
+  end
+  table.insert(lines, "")
+  return table.concat(lines, "\n")
+end
+
 function M.context_bundle_key(proposal_id, version)
   local version_segment = bounded_cache_segment(version, "version", 60, false)
   local proposal_limit = max_context_cache_key_len - #context_bundle_cache_prefix - 1 - #version_segment
@@ -286,6 +318,9 @@ function M.context_bundle_manifest(bundle)
   end
   if bundle.diff_path ~= nil then
     table.insert(lines, sized("PR diff patch", bundle.diff_path, bundle.diff_bytes))
+  end
+  if bundle.risk_path ~= nil then
+    table.insert(lines, sized("PR risk classification (high-risk surfaces, if any)", bundle.risk_path, bundle.risk_bytes))
   end
   return table.concat(lines, "\n")
 end
@@ -398,6 +433,11 @@ function M.build_context_bundle(args)
     diff = truncate_if_needed(diff, args.dept, proposal_id, "diff.patch")
     write_file(tmp_bundle.diff_path, diff, args.exec)
     tmp_bundle.diff_bytes = #diff
+    local names = fetch_cmd(M.gh_pr_diff_name_only_cmd(repo, args.pr_number), "pr diff name-only fetch", args.exec)
+    local risk = risk_report(parse_name_only_paths(names))
+    risk = truncate_if_needed(risk, args.dept, proposal_id, risk_file_name)
+    write_file(tmp_bundle.risk_path, risk, args.exec)
+    tmp_bundle.risk_bytes = #risk
   end
 
   local board = M.board_digest_block(repo, args.tick)
@@ -417,6 +457,7 @@ function M.build_context_bundle(args)
   final_bundle.issue_bytes = tmp_bundle.issue_bytes
   final_bundle.pr_bytes = tmp_bundle.pr_bytes
   final_bundle.diff_bytes = tmp_bundle.diff_bytes
+  final_bundle.risk_bytes = tmp_bundle.risk_bytes
   final_bundle.board_bytes = tmp_bundle.board_bytes
 
   cache_set(manifest_key, M.context_bundle_manifest(final_bundle))

@@ -618,7 +618,7 @@ return {
     t.is_true(proposal.body:find("Reviewed PR head: def456", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.eq(core.validate_proposal(proposal), true)
-    t.eq(count_calls("gh pr diff"), 1)
+    t.eq(count_calls("gh pr diff"), 2)
   end,
 
   test_review_pr_gate_reject_reached_routes_to_fixing = function()
@@ -692,7 +692,7 @@ return {
     local proposal = result.raises[1].payload
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
     t.is_nil(proposal.content_fetch:find("gh pr", 1, true))
-    t.eq(count_calls("gh pr diff"), 1)
+    t.eq(count_calls("gh pr diff"), 2)
   end,
 
   test_review_pr_does_not_put_diff_markers_in_payload = function()
@@ -856,7 +856,7 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus.proposal")
     t.eq(count_calls("repos/owner/repo/issues/comments/IC_reviewing_1"), 1)
-    t.eq(count_calls("gh pr diff"), 1)
+    t.eq(count_calls("gh pr diff"), 2)
   end,
 
 }
