@@ -11,7 +11,7 @@ description: >-
   guess. Invoke when the user says "create a repo via the control plane",
   "bootstrap .fkst", "trigger a substrate session", "start/stop a fkst session",
   "check my sessions", or "drive the fkst control plane through nyxid".
-version: 0.1.0
+version: "0.1"
 homepage: https://github.com/ChronoAIProject/fkst-hosted
 user-invocable: /fkst-control-plane-operation-manual
 metadata:
