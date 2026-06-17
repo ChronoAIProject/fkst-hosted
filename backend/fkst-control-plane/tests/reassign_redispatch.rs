@@ -182,7 +182,9 @@ async fn place_and_dispatch(
     let claims = Arc::new(ClaimMap::new());
     // Only WORKER_A is live at trigger time, so placement lands there.
     registry.register(&reg(WORKER_A)).await;
-    let handle = ControllerHandle::new(claims.clone(), registry.clone(), 0);
+    // dispatch_mode = true: this suite exercises the worker-dispatch +
+    // reassignment path, so placement must route to a worker (#198-ii).
+    let handle = ControllerHandle::new(claims.clone(), registry.clone(), 0, true);
     h.sessions.enable_controller(handle);
 
     let result = h

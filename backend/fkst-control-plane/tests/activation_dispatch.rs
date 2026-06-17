@@ -4,8 +4,8 @@
 //! when `enable_controller` is wired, a goal trigger PLACES the session on a live
 //! worker, RESOLVES a [`ResolvedDispatch`], and ENQUEUES it onto that worker's
 //! outbound control queue (delivered on the worker's next heartbeat) — instead of
-//! spawning the engine in-process. The negative case proves the default (no
-//! controller) path enqueues NOTHING (the byte-identical pre-#151 behaviour).
+//! spawning the engine in-process. The negative case proves the no-controller
+//! fallback enqueues NOTHING (it spawns the driver in-process, #198-ii).
 //!
 //! `create_for_goal` inserts + transitions real session documents, so this needs
 //! a Mongo. It uses an ephemeral testcontainers Mongo and self-skips when Docker
@@ -183,9 +183,10 @@ async fn harness(goal: &GoalDoc) -> Harness {
 fn one_worker_controller() -> (WorkerRegistry, ControllerHandle) {
     let registry = WorkerRegistry::new(Duration::from_secs(60));
     let claims = Arc::new(ClaimMap::new());
-    // max_load 0 == uncapped (the in-process distributor's default), matching the
-    // production wiring in main.rs.
-    let handle = ControllerHandle::new(claims, registry.clone(), 0);
+    // max_load 0 == uncapped (the default), matching the production wiring in
+    // main.rs. dispatch_mode = true so the trigger takes the worker-dispatch path
+    // (this suite asserts a ResolvedDispatch is enqueued, #198-ii).
+    let handle = ControllerHandle::new(claims, registry.clone(), 0, true);
     (registry, handle)
 }
 
@@ -243,9 +244,9 @@ async fn controller_enabled_trigger_enqueues_a_dispatch_to_the_worker() {
     );
 }
 
-/// Without the controller (the default), the SAME trigger takes the in-process
-/// distributor/single-pod path and enqueues NOTHING — the worker's queue stays
-/// empty (the byte-identical pre-#151 behaviour, OFF by default).
+/// Without a controller wired, the SAME trigger spawns the driver in-process and
+/// enqueues NOTHING — the worker's queue stays empty (the no-controller
+/// fallback, #198-ii).
 #[tokio::test]
 async fn controller_disabled_trigger_enqueues_nothing() {
     if !docker_available() {
