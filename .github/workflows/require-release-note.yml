@@ -39,7 +39,16 @@ jobs:
           # (e.g. the first release: hundreds of changed files) can hide the
           # release note past the cap and fail this gate spuriously. Page the
           # full file list via the API instead.
-          NOTE=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].path' \
+          # NOTE: the REST "list PR files" endpoint returns `filename` (NOT
+          # `path` — that field only exists on `gh pr view --json files`). Using
+          # `.path` here yields all-null and the gate never finds the note.
+          # Filter to `status == "added"`: a release-prepare PR ADDS exactly one
+          # dated note, while every release also REMOVES the previous release's
+          # note (it was consumed and cleaned from develop). Without this filter,
+          # `head -1` picks the older removed note (its timestamp sorts first),
+          # which is absent from the checkout, and the gate fails spuriously.
+          NOTE=$(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+            --jq '.[] | select(.status == "added") | .filename' \
             | grep -E '^release-notes/release-note-[0-9]{8}-[0-9]{4}\.md$' | head -1 || true)
 
           if [ -z "$NOTE" ]; then
