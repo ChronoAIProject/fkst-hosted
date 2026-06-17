@@ -56,6 +56,9 @@ return {
   test_commands_helpers_execute_github_via_argv_adapter = function()
     local calls = with_exec_argv(function()
       core.gh_issue_view_implement("owner/repo", 42, 31)
+      core.gh_issue_view("owner/repo", 43, "meta", 34)
+      core.gh_issue_view("owner/repo", 44, "title,state", 35)
+      core.gh_issue_view("owner/repo", 45, "state", 36)
       core.gh_pr_merge("owner/repo", 7, "def456", 32)
       core.gh_check_run_rerequest("owner/repo", 123, 33)
     end)
@@ -72,6 +75,36 @@ return {
     })
     assert_argv_equal(calls[2].argv, {
       "gh",
+      "issue",
+      "view",
+      "43",
+      "--repo",
+      "owner/repo",
+      "--json",
+      "title,labels,comments",
+    })
+    assert_argv_equal(calls[3].argv, {
+      "gh",
+      "issue",
+      "view",
+      "44",
+      "--repo",
+      "owner/repo",
+      "--json",
+      "title,state",
+    })
+    assert_argv_equal(calls[4].argv, {
+      "gh",
+      "issue",
+      "view",
+      "45",
+      "--repo",
+      "owner/repo",
+      "--json",
+      "state",
+    })
+    assert_argv_equal(calls[5].argv, {
+      "gh",
       "pr",
       "merge",
       "7",
@@ -81,7 +114,7 @@ return {
       "--match-head-commit",
       "def456",
     })
-    assert_argv_equal(calls[3].argv, {
+    assert_argv_equal(calls[6].argv, {
       "gh",
       "api",
       "--method",
@@ -90,10 +123,15 @@ return {
     })
     for index, call in ipairs(calls) do
       t.eq(call.argv[1], "gh")
-      t.eq(call.timeout, index + 30)
       t.is_nil(call.cmd)
       t.is_nil(call.rate_pool)
     end
+    t.eq(calls[1].timeout, 31)
+    t.eq(calls[2].timeout, 34)
+    t.eq(calls[3].timeout, 35)
+    t.eq(calls[4].timeout, 36)
+    t.eq(calls[5].timeout, 32)
+    t.eq(calls[6].timeout, 33)
   end,
 
   test_commands_helpers_execute_git_via_argv_adapter = function()

@@ -39,6 +39,51 @@ local function list_helpers_without_observe_coalesce()
 end
 
 return {
+  test_command_helper_modules_keep_cohesive_exports = function()
+    local validators = require("core.commands.validators")
+    local observe_lists = require("core.commands.observe_lists")
+    local git_ops = require("core.commands.git_ops")
+
+    local validator_exports = {
+      bounded_limit = true,
+      validate_fields = true,
+      require_safe_branch = true,
+      require_safe_remote = true,
+      require_safe_sha = true,
+      require_positive_pr_number = true,
+      require_label_name = true,
+      require_label_color = true,
+      require_dashboard_label = true,
+      install = true,
+    }
+
+    for key, value in pairs(validators) do
+      t.eq(validator_exports[key], true, key)
+      t.eq(type(value), "function", key)
+    end
+
+    for _, key in ipairs({
+      "bounded_page_number",
+      "observe_list_page_key",
+      "observe_list_repo_key",
+      "observe_list_label_key",
+      "observe_list_read_coalesce",
+      "read_coalesce_key_segment",
+    }) do
+      t.eq(type(observe_lists[key]), "function", key)
+      t.eq(validators[key], nil, key)
+    end
+
+    for _, key in ipairs({
+      "worktree_parent_dir",
+      "run_mkdir",
+      "run_path_is_directory",
+    }) do
+      t.eq(type(git_ops[key]), "function", key)
+      t.eq(validators[key], nil, key)
+    end
+  end,
+
   test_gh_issue_view_state_command_and_parse = function()
     t.eq(
       core.gh_issue_list_intake_cmd("owner/repo", 50),
