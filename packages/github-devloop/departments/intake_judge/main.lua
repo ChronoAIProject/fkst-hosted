@@ -9,6 +9,8 @@ M.spec = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_create_request",
     "github-proxy.github_issue_label_request",
+    "github-proxy.github_pr_comment_request",
+    "devloop_reviewing",
   },
   stall_window = "2m",
 }
@@ -120,6 +122,8 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
   end
 
   local current = core.parse_issue_view_intake_judge(view.stdout)
+  current.repo = repo
+  current.number = issue_number
   core.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
   if current.state ~= "OPEN" then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
@@ -128,6 +132,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
   local bump_pr_number = core.substrate_ref_backing_issue_pr_number(current)
   if bump_pr_number ~= nil then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-substrate-ref-backing-issue", "substrate-ref bump backing issue is PR-owned by #" .. tostring(bump_pr_number))
+    core.maybe_raise_substrate_ref_backing_issue_review("intake_judge", repo, current, bump_pr_number, candidate.source_ref)
     return nil
   end
   if not core.claim_issue_for_management("intake_judge", repo, issue_number, current, candidate.proposal_id) then

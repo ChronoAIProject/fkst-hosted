@@ -11,7 +11,9 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
+    "github-proxy.github_pr_comment_request",
     "devloop_open_pr",
+    "devloop_reviewing",
   },
   stall_window = "10m",
 }
@@ -637,6 +639,7 @@ local function process_ready_event(event)
     local bump_pr_number = core.substrate_ref_backing_issue_pr_number(current)
     if bump_pr_number ~= nil then
       core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-substrate-ref-backing-issue", "substrate-ref bump backing issue is PR-owned by #" .. tostring(bump_pr_number))
+      core.maybe_raise_substrate_ref_backing_issue_review("implement", repo, current, bump_pr_number, ready.source_ref)
       return
     end
     local original_closed, origin = backing_original_closed(current)
