@@ -178,6 +178,28 @@ return {
     t.eq(facts[1].question, core.converge_question_digest(last_question))
   end,
 
+  test_append_converge_round_fact_preserves_existing_facts_and_appends_digest_fact = function()
+    local existing = {
+      fact(1, "q-one", "v-one"),
+    }
+    local question = "  Which boundary\nshould narrow next?  "
+    local angle_digests = angles()
+    local appended = core.append_converge_round_fact(
+      existing,
+      2,
+      question,
+      angle_digests,
+      base_version .. "/loop/2"
+    )
+
+    t.eq(#appended, 2)
+    t.eq(appended[1], existing[1])
+    t.eq(appended[2].round, 2)
+    t.eq(appended[2].question, core.converge_question_digest(question))
+    t.eq(appended[2].verdicts, core.converge_verdicts_digest(angle_digests))
+    t.eq(appended[2].dedup, base_version .. "/loop/2")
+  end,
+
   test_converge_budget_round_counts_proposal_across_drift = function()
     local source_a = core.source_ref_digest(source_ref)
     local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })

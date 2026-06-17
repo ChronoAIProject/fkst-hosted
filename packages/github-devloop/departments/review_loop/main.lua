@@ -16,20 +16,6 @@ M.spec = {
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
-local function append_round_fact(facts, round, narrowed_question, angle_digests, dedup_key)
-  local copied = {}
-  for _, fact in ipairs(facts or {}) do
-    table.insert(copied, fact)
-  end
-  table.insert(copied, {
-    round = round,
-    question = core.converge_question_digest(narrowed_question),
-    verdicts = core.converge_verdicts_digest(angle_digests),
-    dedup = dedup_key,
-  })
-  return copied
-end
-
 local function review_truth_table_unapproved(unresolved)
   if tonumber(unresolved.round) == nil or tonumber(unresolved.round) < 1 then
     return false
@@ -164,7 +150,7 @@ function pipeline(event)
       unresolved.narrowed_question,
       unresolved.angle_digests
     )
-    local facts_with_current = append_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
+    local facts_with_current = core.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local budget_round = math.max(round, core.review_converge_budget_round(current_pr.comments, unresolved.proposal_id, origin.proposal_id))
     local hit_round_cap = budget_round >= core.max_converge_rounds()
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
