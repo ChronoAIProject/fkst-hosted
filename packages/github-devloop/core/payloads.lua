@@ -434,6 +434,9 @@ function M.build_devloop_ready_payload(source)
     end
     payload.impl_retry_attempt = attempt
   end
+  if source.operator_reentry ~= nil then
+    payload.operator_reentry = source.operator_reentry
+  end
   return payload
 end
 

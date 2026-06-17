@@ -387,7 +387,7 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
   return true
 end
 
-local function maybe_apply_issue_reimplement_command(issue, proposal_id, current, state)
+local function maybe_apply_issue_reimplement_command(issue, proposal_id, current, state, snapshot)
   local command = core.operator_command_fact(current.comments, "reimplement")
   if command == nil then
     return false
@@ -396,13 +396,15 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
     core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
-  if state.state ~= "impl-failed" then
-    core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed state")
+  local link = core.pr_link_fact(current.comments, proposal_id)
+  local blocked_reentry = state.state == "blocked" and linked_open_pr(snapshot, link and link.pr_number) ~= nil
+  if state.state ~= "impl-failed" and not blocked_reentry then
+    core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed or blocked state with an open linked PR")
     local refusal = core.build_operator_issue_command_refusal_request(
       issue.repo,
       issue.number,
       command,
-      "reimplement requires impl-failed state",
+      "reimplement requires impl-failed or blocked state with an open linked PR",
       issue.source_ref
     )
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
@@ -413,13 +415,26 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
   local failure = core.impl_failure_fact(current.comments, proposal_id, state.version)
   if failure ~= nil then
     attempt = tonumber(failure.attempt or 1) + 1
+  elseif blocked_reentry then
+    attempt = (core.implementation_retry_attempt(link.impl_version) or 1) + 1
   end
-  local payload = core.build_devloop_ready_payload({
+  local retry_version = blocked_reentry and link.impl_version or state.version
+  local payload_source = {
     proposal_id = proposal_id,
-    dedup_key = core.ready_payload_inner_version(state.version),
+    dedup_key = core.ready_payload_inner_version(retry_version),
     source_ref = issue.source_ref,
     impl_retry_attempt = attempt,
-  })
+  }
+  if blocked_reentry then
+    payload_source.operator_reentry = {
+      command = "reimplement",
+      from_state = "blocked",
+      pr_number = link.pr_number,
+      state_version = state.version,
+      impl_version = link.impl_version,
+    }
+  end
+  local payload = core.build_devloop_ready_payload(payload_source)
   local comment_request = core.build_operator_issue_reimplement_comment_request(
     issue.repo,
     issue.number,
@@ -427,7 +442,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
     attempt,
     issue.source_ref
   )
-  core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "applied(operator-reimplement)", "trusted operator command requested implementation retry")
+  core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)", "implementing", "applied(operator-reimplement)", "trusted operator command requested implementation retry")
   core.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
     "github-proxy.github_issue_comment_request",
     "devloop_ready",
@@ -487,7 +502,7 @@ local function process_issue_event(event)
       if maybe_apply_issue_dependency_waiver_command(issue, proposal_id, current, state) then
         return
       end
-      if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state) then
+      if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state, snapshot) then
         return
       end
       local label_state = issue_label_projection_state(state, issue_state, link, snapshot)
