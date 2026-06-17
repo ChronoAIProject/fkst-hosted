@@ -33,7 +33,11 @@ use fkst_shared::models::RepoRef;
 
 /// Reserved package basename the substrate engine owns; a repo package may never
 /// claim it.
-const RESERVED_PACKAGE_NAME: &str = "host";
+///
+/// `pub` so submit-time pre-flight (#179) can reject the reserved name BY
+/// REFERENCE to this single source of truth instead of duplicating the literal.
+/// Pure re-export: the value and every use site here are unchanged.
+pub const RESERVED_PACKAGE_NAME: &str = "host";
 
 /// Relative directory, inside a cloned repo, that holds the repo-scoped packages.
 const PACKAGES_SUBDIR: &str = ".fkst/packages";
@@ -246,6 +250,17 @@ fn resolve_package_roots(
         roots.push(canonical);
     }
     Ok(roots)
+}
+
+/// True when `name` is a valid repo-scoped package name (the engine's identity
+/// rule `^[A-Za-z0-9_-]+$`).
+///
+/// Thin `pub` alias over [`crate::util::is_valid_name`], named for submit-time
+/// pre-flight (#179) so callers checking a *package* name read against the same
+/// predicate `resolve_package_roots` enforces here. Pure re-export, no behavior
+/// change: it forwards verbatim to the single name-rule implementation.
+pub fn is_valid_package_name(name: &str) -> bool {
+    is_valid_name(name)
 }
 
 /// The credential-helper script file name, re-exported for callers wiring the

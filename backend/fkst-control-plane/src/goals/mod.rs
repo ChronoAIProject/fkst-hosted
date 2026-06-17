@@ -14,6 +14,8 @@ pub mod issue_parse;
 pub mod issue_store;
 pub mod marker;
 pub mod model;
+pub mod preflight;
+mod preflight_ornn;
 pub mod repo_create;
 mod repo_create_classify;
 
@@ -23,4 +25,5 @@ pub use model::{
     validate_goal_fields, GoalDoc, GoalStatus, RepoRef, MAX_GOAL_DESCRIPTION_BYTES,
     MAX_GOAL_PACKAGES, MAX_GOAL_TITLE_CHARS, MAX_PACKAGE_NAME_BYTES,
 };
+pub use preflight::{validate_submission, FieldError, PackageError, PinError, SubmissionErrors};
 pub use repo_create::{CreateRepoError, CreateRepoSpec};

@@ -18,6 +18,7 @@
 
 pub mod api;
 pub mod config;
+pub mod contents;
 pub mod jwt;
 
 use std::collections::HashMap;
@@ -36,6 +37,10 @@ pub use config::GithubAppConfig;
 
 /// Re-export API types for downstream consumers.
 pub use api::{InstallationId, InstallationToken, TokenPermissions};
+
+/// Re-export the Contents READ helper types (#179): the `get_contents` result
+/// shapes + the injectable `ContentsReader` abstraction the pre-flight uses.
+pub use contents::{ContentsEntry, ContentsListing, ContentsReader};
 
 // `InstallationProbe` is defined in this module; it is `pub` already and needs
 // no re-export.
@@ -84,6 +89,8 @@ pub enum GithubAppError {
     },
     #[error("github app installation vanished for {owner_repo}")]
     InstallationGone { owner_repo: String },
+    #[error("github contents path not found: {owner_repo}/{path}")]
+    NotFound { owner_repo: String, path: String },
     #[error("github app auth failed (key or app id rejected)")]
     AppAuth,
     #[error("github rate limited; reset in {0}s")]
@@ -112,6 +119,11 @@ impl std::fmt::Debug for GithubAppError {
             Self::InstallationGone { owner_repo } => f
                 .debug_struct("InstallationGone")
                 .field("owner_repo", owner_repo)
+                .finish(),
+            Self::NotFound { owner_repo, path } => f
+                .debug_struct("NotFound")
+                .field("owner_repo", owner_repo)
+                .field("path", path)
                 .finish(),
             Self::AppAuth => write!(f, "AppAuth"),
             Self::RateLimited(secs) => f.debug_tuple("RateLimited").field(secs).finish(),
@@ -244,6 +256,10 @@ struct Inner {
     app_id: u64,
     encoding_key: jsonwebtoken::EncodingKey,
     app_slug: Option<String>,
+    /// GitHub REST base URL, retained so the Contents READ helper (#179) can
+    /// build its direct-`reqwest` transport against the SAME base the `api`
+    /// transport uses (trailing `/` trimmed).
+    api_base: String,
     api: std::sync::Arc<dyn GithubApi>,
     /// Cross-worker eviction fan-out (#141). `evict_repo` calls this after the
     /// local cache bust so the eviction reaches every other worker. Defaults to
@@ -308,6 +324,7 @@ impl GithubAppTokens {
                 app_id: config.app_id,
                 encoding_key,
                 app_slug: config.app_slug.clone(),
+                api_base: config.api_base.trim_end_matches('/').to_string(),
                 api,
                 eviction_broadcaster,
                 token_cache: Mutex::new(HashMap::new()),
@@ -443,6 +460,12 @@ impl GithubAppTokens {
         }
 
         Ok((token_result.token, expires_at))
+    }
+
+    /// The configured GitHub REST base URL (trailing `/` trimmed). Used by the
+    /// Contents READ helper (#179) to build its transport against the same base.
+    pub(crate) fn api_base(&self) -> String {
+        self.inner.api_base.clone()
     }
 
     /// The install URL for this app (if slug is configured).

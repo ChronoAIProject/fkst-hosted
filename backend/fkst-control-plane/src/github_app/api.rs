@@ -122,7 +122,10 @@ impl HttpGithubApi {
 
 /// Seconds until the rate-limit reset, from `retry-after` or
 /// `x-ratelimit-reset`. Defaults to 60s when unparseable.
-fn reset_seconds(headers: &reqwest::header::HeaderMap) -> u64 {
+///
+/// `pub(super)` so the Contents READ helper (#179) reuses the same rate-limit
+/// classification as the token/installation transport.
+pub(super) fn reset_seconds(headers: &reqwest::header::HeaderMap) -> u64 {
     if let Some(retry_after) = headers
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
@@ -145,7 +148,10 @@ fn reset_seconds(headers: &reqwest::header::HeaderMap) -> u64 {
 }
 
 /// True when a 403 carries rate-limit evidence.
-fn is_rate_limited(headers: &reqwest::header::HeaderMap) -> bool {
+///
+/// `pub(super)` so the Contents READ helper (#179) shares the same 403
+/// disambiguation (rate-limit vs auth failure).
+pub(super) fn is_rate_limited(headers: &reqwest::header::HeaderMap) -> bool {
     let remaining_zero = headers
         .get("x-ratelimit-remaining")
         .and_then(|v| v.to_str().ok())
