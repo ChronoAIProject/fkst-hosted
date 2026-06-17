@@ -24,12 +24,8 @@ function M.run(exec, argv, timeout, context)
     misuse_error(argv, context)
   end
   local result = exec({ argv = argv, timeout = timeout })
-  if type(result) ~= "table" or tonumber(result.exit_code) ~= 0 then
-    error({
-      class = "git-command-failed",
-      result = result,
-      message = "std.git: " .. tostring(context) .. " failed",
-    })
+  if type(result) ~= "table" then
+    error("std.git: " .. tostring(context) .. " failed: missing result")
   end
   return result
 end

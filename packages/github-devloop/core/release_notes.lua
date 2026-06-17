@@ -113,6 +113,10 @@ function M.release_notes_publish_policy(cfg)
 end
 
 function M.gh_pr_create_body_cmd(repo, head, base, title, body)
+  error("github-devloop: release notes PR create uses std.github adapter")
+end
+
+function M.gh_pr_create_body(repo, head, base, title, body, timeout)
   if not M._is_git_ref_safe(head) then
     error("github-devloop: invalid PR head branch")
   end
@@ -125,11 +129,16 @@ function M.gh_pr_create_body_cmd(repo, head, base, title, body)
     target = "pr:" .. tostring(repo) .. "#new",
     dedup_key = tostring(head) .. "->" .. tostring(base),
   })
-  return "gh pr create --repo " .. M._shell_single_quote(repo)
-    .. " --head " .. M._shell_single_quote(head)
-    .. " --base " .. M._shell_single_quote(base)
-    .. " --title " .. M._shell_single_quote(title)
-    .. " --body " .. M._shell_single_quote(normalized_body)
+  local ok, result_or_error = pcall(function()
+    return require("std.github").new(exec_argv).pr_create_body(repo, head, base, title, normalized_body, timeout or 60)
+  end)
+  if ok then
+    return result_or_error
+  end
+  if type(result_or_error) == "table" and result_or_error.result ~= nil then
+    return result_or_error.result
+  end
+  error(result_or_error)
 end
 
 function M.draft_release_notes(args)

@@ -36,7 +36,7 @@ function M.observability_has_budget(deadline)
 end
 
 function M.observability_deadline_deferred_result(error_class)
-  return M.sweep_deadline_deferred_result(error_class or "gh observability command", "observability deadline exhausted")
+  return M.sweep_deadline_deferred_result(error_class or "observability command", "observability deadline exhausted")
 end
 
 function M.observability_result_deferred(result)
@@ -44,7 +44,7 @@ function M.observability_result_deferred(result)
 end
 
 function M.observability_exec(cmd_or_opts, limits, deadline, error_class, exec)
-  local result = M.sweep_exec(cmd_or_opts, limits, deadline, error_class or "gh observability command", exec)
+  local result = M.sweep_exec(cmd_or_opts, limits, deadline, error_class or "observability command", exec)
   if M.sweep_result_deferred(result) then
     result.stderr = "observability deadline exhausted"
   end
@@ -52,7 +52,7 @@ function M.observability_exec(cmd_or_opts, limits, deadline, error_class, exec)
 end
 
 function M.observability_run_cmd(cmd_or_opts, limits, deadline, error_class, exec)
-  local label = error_class or "gh observability command"
+  local label = error_class or "observability command"
   local result = M.observability_exec(cmd_or_opts, limits, deadline, label, exec)
   if M.observability_result_deferred(result) then
     return result
@@ -230,7 +230,7 @@ function M.observability_list_issue_candidates(repo, labels, limits, deadline, s
       limits,
       deadline,
       tostring(seed or "") .. "/issue/" .. tostring(label or ""),
-      "gh observability issue list",
+      "observability issue list",
       exec
     )
     deferred_pages = deferred_pages + deferred
@@ -251,7 +251,7 @@ function M.observability_list_pr_candidates(repo, limits, deadline, seed, exec)
     limits,
     deadline,
     tostring(seed or "") .. "/pr",
-    "gh observability PR list",
+    "observability PR list",
     exec
   )
 end

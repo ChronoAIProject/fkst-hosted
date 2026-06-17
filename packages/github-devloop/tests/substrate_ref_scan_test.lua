@@ -31,6 +31,17 @@ local function run_scan(run_opts)
   }, run_opts or opts("substrate-ref"))
 end
 
+local function shell_quote(value)
+  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function ensure_dir(path)
+  local ok = os.execute("mkdir -p " .. shell_quote(path))
+  if ok ~= true and ok ~= 0 then
+    error("github-devloop: test directory setup failed")
+  end
+end
+
 local function mock_env(write_mode)
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
     stdout = "dev",
@@ -69,6 +80,11 @@ local function mock_env(write_mode)
 end
 
 local function mock_substrate_head(sha)
+  t.mock_command("git ls-remote https://github.com/ChronoAIProject/fkst-substrate.git refs/heads/dev", {
+    stdout = tostring(sha) .. "\trefs/heads/dev\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git ls-remote 'https://github.com/ChronoAIProject/fkst-substrate.git' 'refs/heads/dev'", {
     stdout = tostring(sha) .. "\trefs/heads/dev\n",
     stderr = "",
@@ -77,7 +93,7 @@ local function mock_substrate_head(sha)
 end
 
 local function mock_current_pin(sha)
-  t.mock_command(core.git_show_substrate_ref_pin_cmd(), {
+  t.mock_command("git show HEAD:.fkst/substrate-ref", {
     stdout = tostring(sha) .. "\n",
     stderr = "",
     exit_code = 0,
@@ -85,7 +101,7 @@ local function mock_current_pin(sha)
 end
 
 local function mock_missing_pin()
-  t.mock_command(core.git_show_substrate_ref_pin_cmd(), {
+  t.mock_command("git show HEAD:.fkst/substrate-ref", {
     stdout = "",
     stderr = "fatal: path '.fkst/substrate-ref' does not exist in 'HEAD'\n",
     exit_code = 128,
@@ -93,7 +109,7 @@ local function mock_missing_pin()
 end
 
 local function mock_pin_read_failure()
-  t.mock_command(core.git_show_substrate_ref_pin_cmd(), {
+  t.mock_command("git show HEAD:.fkst/substrate-ref", {
     stdout = "",
     stderr = "fatal: bad object HEAD\n",
     exit_code = 128,
@@ -138,6 +154,11 @@ local function mock_runtime_root(name)
 end
 
 local function mock_branch_missing()
+  t.mock_command("git fetch origin chore/substrate-ref-bump", {
+    stdout = "",
+    stderr = "fatal: couldn't find remote ref chore/substrate-ref-bump\n",
+    exit_code = 128,
+  })
   t.mock_command("git fetch 'origin' 'chore/substrate-ref-bump'", {
     stdout = "",
     stderr = "fatal: couldn't find remote ref chore/substrate-ref-bump\n",
@@ -146,6 +167,21 @@ local function mock_branch_missing()
 end
 
 local function mock_branch_present()
+  t.mock_command("git fetch origin chore/substrate-ref-bump", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git rev-parse --verify refs/remotes/origin/chore/substrate-ref-bump^{commit}", {
+    stdout = old_branch_sha .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/chore/substrate-ref-bump^{commit}'", {
+    stdout = old_branch_sha .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git fetch 'origin' 'chore/substrate-ref-bump'", {
     stdout = "",
     stderr = "",
@@ -159,6 +195,21 @@ local function mock_branch_present()
 end
 
 local function mock_branch_present_at(sha)
+  t.mock_command("git fetch origin chore/substrate-ref-bump", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git rev-parse --verify refs/remotes/origin/chore/substrate-ref-bump^{commit}", {
+    stdout = tostring(sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/chore/substrate-ref-bump^{commit}'", {
+    stdout = tostring(sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git fetch 'origin' 'chore/substrate-ref-bump'", {
     stdout = "",
     stderr = "",
@@ -172,6 +223,11 @@ local function mock_branch_present_at(sha)
 end
 
 local function mock_branch_pin(sha)
+  t.mock_command("git show " .. old_branch_sha .. ":.fkst/substrate-ref", {
+    stdout = tostring(sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git show '" .. old_branch_sha .. ":.fkst/substrate-ref'", {
     stdout = tostring(sha) .. "\n",
     stderr = "",
@@ -180,6 +236,11 @@ local function mock_branch_pin(sha)
 end
 
 local function mock_branch_pin_for_head(head_sha, pin)
+  t.mock_command("git show " .. tostring(head_sha) .. ":.fkst/substrate-ref", {
+    stdout = tostring(pin) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git show '" .. tostring(head_sha) .. ":.fkst/substrate-ref'", {
     stdout = tostring(pin) .. "\n",
     stderr = "",
@@ -188,6 +249,11 @@ local function mock_branch_pin_for_head(head_sha, pin)
 end
 
 local function mock_branch_pin_missing()
+  t.mock_command("git show " .. old_branch_sha .. ":.fkst/substrate-ref", {
+    stdout = "",
+    stderr = "fatal: path '.fkst/substrate-ref' exists on disk, but not in '" .. old_branch_sha .. "'\n",
+    exit_code = 128,
+  })
   t.mock_command("git show '" .. old_branch_sha .. ":.fkst/substrate-ref'", {
     stdout = "",
     stderr = "fatal: path '.fkst/substrate-ref' exists on disk, but not in '" .. old_branch_sha .. "'\n",
@@ -225,33 +291,43 @@ local function mock_checked_out_bump_branch()
   })
 end
 
-local function mock_worktree_commands(push_with_lease, expected_old_sha)
-  t.mock_command("if [ -d '/tmp/fkst-packages-test/github-devloop/", {
+local function mock_worktree_commands(runtime_name, push_with_lease, expected_old_sha)
+  local worktree = "/tmp/fkst-packages-test/github-devloop/"
+    .. tostring(runtime_name)
+    .. "/worktrees/substrate-ref-owner-repo-"
+    .. target_sha:sub(1, 12)
+  ensure_dir(worktree .. "/.fkst")
+  t.mock_command("test -d /tmp/fkst-packages-test/github-devloop/", {
+    stdout = "",
+    stderr = "",
+    exit_code = 1,
+  })
+  t.mock_command("mkdir -p /tmp/fkst-packages-test/github-devloop/", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git worktree add -B 'chore/substrate-ref-bump'", {
+  t.mock_command("git worktree add -B chore/substrate-ref-bump", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("printf %s '" .. target_sha .. "\n' > ", {
+  t.mock_command("mkdir -p /tmp/fkst-packages-test/github-devloop/", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git -C ", {
+  t.mock_command("git -C /tmp/fkst-packages-test/github-devloop/", {
     stdout = ".fkst/substrate-ref\n",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(" add -A", {
+  t.mock_command("git -C /tmp/fkst-packages-test/github-devloop/", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(" commit -m 'chore: bump fkst-substrate pin'", {
+  t.mock_command("git -C /tmp/fkst-packages-test/github-devloop/", {
     stdout = "[chore/substrate-ref-bump 5555555] chore: bump fkst-substrate pin\n",
     stderr = "",
     exit_code = 0,
@@ -263,6 +339,11 @@ local function mock_worktree_commands(push_with_lease, expected_old_sha)
       exit_code = 0,
     })
   else
+    t.mock_command("git -C ", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
     t.mock_command(" push origin HEAD:refs/heads/chore/substrate-ref-bump", {
       stdout = "",
       stderr = "",
@@ -277,6 +358,16 @@ local function mock_worktree_commands(push_with_lease, expected_old_sha)
 end
 
 local function mock_pr_create()
+  t.mock_command("gh pr create --repo owner/repo --head chore/substrate-ref-bump --base dev --title 'chore: bump fkst-substrate pin'", {
+    stdout = "https://github.com/owner/repo/pull/27\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh pr create --repo owner/repo --head chore/substrate-ref-bump --base dev --title chore: bump fkst-substrate pin", {
+    stdout = "https://github.com/owner/repo/pull/27\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("gh pr create --repo 'owner/repo' --head 'chore/substrate-ref-bump' --base 'dev' --title 'chore: bump fkst-substrate pin'", {
     stdout = "https://github.com/owner/repo/pull/27\n",
     stderr = "",
@@ -323,6 +414,22 @@ local function mock_bump_pr_view(comments, extra)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("gh pr view 27 --repo owner/repo --json 'headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup'", {
+    stdout = string.format(
+      '{"headRefName":"chore/substrate-ref-bump","headRefOid":"%s","baseRefName":"dev","baseRefOid":"%s","state":"%s","updatedAt":"2026-06-16T22:10:00Z","isDraft":%s,"mergedAt":"%s","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"%s","mergeStateStatus":"%s","statusCheckRollup":%s}\n',
+      head_sha,
+      base_sha,
+      state,
+      is_draft,
+      merged_at,
+      comments and render_comment(comments) or "",
+      mergeable,
+      merge_state,
+      rollup
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_bump_diff(path)
@@ -331,16 +438,36 @@ local function mock_bump_diff(path)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("gh pr diff 27 --repo owner/repo --name-only", {
+    stdout = (path or ".fkst/substrate-ref") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_branch_head_for_merge(sha, pin)
+  t.mock_command("git fetch origin chore/substrate-ref-bump", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git fetch 'origin' 'chore/substrate-ref-bump'", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/chore/substrate-ref-bump^{commit}'", {
+    stdout = tostring(sha or pr_head_sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git rev-parse --verify refs/remotes/'origin'/'chore/substrate-ref-bump'^{commit}", {
     stdout = tostring(sha or pr_head_sha) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git show " .. tostring(sha or pr_head_sha) .. ":.fkst/substrate-ref", {
+    stdout = tostring(pin or target_sha) .. "\n",
     stderr = "",
     exit_code = 0,
   })
@@ -352,6 +479,11 @@ local function mock_branch_head_for_merge(sha, pin)
 end
 
 local function mock_substrate_pin_ancestor(pin, exit_code)
+  t.mock_command("git fetch https://github.com/ChronoAIProject/fkst-substrate.git refs/heads/dev:refs/remotes/fkst-substrate/dev", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git fetch 'https://github.com/ChronoAIProject/fkst-substrate.git' 'refs/heads/dev:refs/remotes/fkst-substrate/dev'", {
     stdout = "",
     stderr = "",
@@ -391,6 +523,21 @@ local function count_calls(needle)
   return count
 end
 
+local function count_git_write_calls()
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    local rendered = tostring(call.rendered or "")
+    if rendered:find("git worktree add", 1, true) ~= nil
+      or rendered:find(" git add ", 1, true) ~= nil
+      or rendered:find(" commit ", 1, true) ~= nil
+      or rendered:find("git push", 1, true) ~= nil
+      or rendered:find(" push origin ", 1, true) ~= nil then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local function count_raises(result, queue)
   local count = 0
   for _, raised in ipairs(result.raises or {}) do
@@ -401,6 +548,12 @@ local function count_raises(result, queue)
   return count
 end
 
+local function eq_zero(value, label)
+  if value ~= 0 then
+    error(tostring(label) .. ": expected 0, got " .. tostring(value))
+  end
+end
+
 return {
   test_missing_substrate_ref_pin_is_benign_noop = function()
     mock_env("")
@@ -409,13 +562,11 @@ return {
     local result = run_scan(opts("substrate-no-pin"))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls(core.git_show_substrate_ref_pin_cmd()), 1)
+    t.eq(count_calls("git show HEAD:.fkst/substrate-ref"), 1)
     t.eq(count_calls("git ls-remote"), 0)
     t.eq(count_calls("gh api"), 0)
     t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls("git worktree add"), 0)
-    t.eq(count_calls("git worktree remove --force"), 0)
-    t.eq(count_calls("git push"), 0)
+    t.eq(count_git_write_calls(), 0)
   end,
 
   test_pin_read_git_failure_still_fails_closed = function()
@@ -439,8 +590,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api"), 0)
     t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls("git worktree"), 0)
-    t.eq(count_calls("git push"), 0)
+    t.eq(count_git_write_calls(), 0)
   end,
 
   test_dry_run_plans_singleton_bump_without_writes = function()
@@ -454,8 +604,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls(core.gh_pr_list_head_cmd("owner/repo", "chore/substrate-ref-bump")), 1)
     t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls("git worktree"), 0)
-    t.eq(count_calls("git push"), 0)
+    t.eq(count_git_write_calls(), 0)
   end,
 
   test_real_mode_creates_single_bump_pr_for_new_dev_head = function()
@@ -467,13 +616,13 @@ return {
     mock_base_head()
     mock_runtime_root("substrate-create")
     mock_no_checked_out_bump_branch()
-    mock_worktree_commands(false)
+    mock_worktree_commands("substrate-create", false)
     mock_pr_create()
     mock_bump_pr_view()
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, target_sha)
+    mock_branch_head_for_merge(pr_head_sha, target_sha)
     mock_substrate_pin_ancestor(target_sha)
-    mock_bump_pr_view()
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, target_sha)
     mock_substrate_pin_ancestor(target_sha)
@@ -491,8 +640,8 @@ return {
     t.is_true(audit_raise.payload.body:find("github-devloop substrate-ref deterministic merge audit", 1, true) ~= nil)
     t.is_true(audit_raise.payload.body:find("fkst:github-devloop:substrate-ref-merge:v1", 1, true) ~= nil)
     t.is_true(audit_raise.payload.body:find('target_sha="' .. target_sha .. '"', 1, true) ~= nil)
-    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
-    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
+    eq_zero(count_raises(result, "github-proxy.github_issue_create_request"), "create raises after new bump")
+    eq_zero(count_raises(result, "github-proxy.github_issue_label_request"), "label raises after new bump")
   end,
 
   test_real_mode_merges_existing_green_bump_pr_with_own_valid_pin_before_repinning = function()
@@ -504,7 +653,6 @@ return {
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, older_valid_pin)
     mock_substrate_pin_ancestor(older_valid_pin)
-    mock_bump_pr_view()
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, older_valid_pin)
     mock_substrate_pin_ancestor(older_valid_pin)
@@ -513,15 +661,15 @@ return {
     local result = run_scan(opts("substrate-update", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("git worktree add"), 0)
-    t.eq(count_calls("git worktree remove --force"), 0)
-    t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. old_branch_sha), 0)
+    eq_zero(count_calls("git worktree add"), "worktree add for valid existing bump")
+    eq_zero(count_calls("git worktree remove --force"), "worktree remove for valid existing bump")
+    eq_zero(count_calls("gh pr create"), "PR create for valid existing bump")
+    eq_zero(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. old_branch_sha), "push lease for valid existing bump")
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
     t.is_true(result.raises[1].payload.body:find("substrate-ref-merge:v1", 1, true) ~= nil)
-    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
-    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
+    eq_zero(count_raises(result, "github-proxy.github_issue_create_request"), "create raises after valid existing bump")
+    eq_zero(count_raises(result, "github-proxy.github_issue_label_request"), "label raises after valid existing bump")
   end,
 
   test_real_mode_rechecks_pr_under_lock_before_update = function()
@@ -533,7 +681,6 @@ return {
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, target_sha)
     mock_substrate_pin_ancestor(target_sha)
-    mock_bump_pr_view()
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, target_sha)
     mock_substrate_pin_ancestor(target_sha)
@@ -543,14 +690,14 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls(core.gh_pr_list_head_cmd("owner/repo", "chore/substrate-ref-bump")), 1)
-    t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 0)
-    t.eq(count_calls("git worktree add"), 0)
-    t.eq(count_calls("git worktree remove --force"), 0)
+    eq_zero(count_calls("gh pr create"), "PR create during recheck")
+    eq_zero(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), "quoted push during recheck")
+    eq_zero(count_calls("git worktree add"), "worktree add during recheck")
+    eq_zero(count_calls("git worktree remove --force"), "worktree remove during recheck")
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
-    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
-    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
+    eq_zero(count_raises(result, "github-proxy.github_issue_create_request"), "create raises during recheck")
+    eq_zero(count_raises(result, "github-proxy.github_issue_label_request"), "label raises during recheck")
   end,
 
   test_real_mode_merges_existing_green_bump_pr_before_checking_already_current_branch = function()
@@ -562,7 +709,6 @@ return {
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, target_sha)
     mock_substrate_pin_ancestor(target_sha)
-    mock_bump_pr_view()
     mock_bump_diff()
     mock_branch_head_for_merge(pr_head_sha, target_sha)
     mock_substrate_pin_ancestor(target_sha)
@@ -571,10 +717,10 @@ return {
     local result = run_scan(opts("substrate-already-current", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls("git worktree add"), 0)
-    t.eq(count_calls("git worktree remove --force"), 0)
-    t.eq(count_calls("git push"), 0)
+    eq_zero(count_calls("gh pr create"), "PR create before already-current merge")
+    eq_zero(count_calls("git worktree add"), "worktree add before already-current merge")
+    eq_zero(count_calls("git worktree remove --force"), "worktree remove before already-current merge")
+    eq_zero(count_calls("git push"), "git push before already-current merge")
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
   end,
@@ -592,8 +738,8 @@ return {
     local result = run_scan(opts("substrate-unexpected-diff", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 0)
-    t.eq(count_raises(result, "github-proxy.github_pr_comment_request"), 0)
+    eq_zero(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), "merge call for unexpected diff")
+    eq_zero(count_raises(result, "github-proxy.github_pr_comment_request"), "comment raises for unexpected diff")
   end,
 
   test_real_mode_repins_existing_bump_pr_when_pin_is_not_substrate_dev_ancestor = function()
@@ -611,7 +757,7 @@ return {
     mock_base_head()
     mock_runtime_root("substrate-pin-mismatch")
     mock_no_checked_out_bump_branch()
-    mock_worktree_commands(true, pr_head_sha)
+    mock_worktree_commands("substrate-pin-mismatch", true, pr_head_sha)
     mock_existing_pr()
     mock_bump_pr_view(nil, {
       rollup = '[{"name":"ci","status":"IN_PROGRESS","conclusion":""}]',
@@ -625,8 +771,8 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. pr_head_sha), 1)
-    t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 0)
-    t.eq(count_raises(result, "github-proxy.github_pr_comment_request"), 0)
+    eq_zero(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), "merge call after repin")
+    eq_zero(count_raises(result, "github-proxy.github_pr_comment_request"), "comment raises after repin")
   end,
 
   test_real_mode_holds_existing_bump_pr_when_ci_is_not_green = function()
@@ -652,8 +798,8 @@ return {
     local result = run_scan(opts("substrate-ci-red", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("gh pr merge"), 0)
-    t.eq(count_raises(result, "github-proxy.github_pr_comment_request"), 0)
+    eq_zero(count_calls("gh pr merge"), "merge call for red CI")
+    eq_zero(count_raises(result, "github-proxy.github_pr_comment_request"), "comment raises for red CI")
   end,
 
   test_real_mode_removes_stale_checked_out_bump_branch_worktree_before_update = function()
@@ -671,7 +817,7 @@ return {
     mock_base_head()
     mock_runtime_root("substrate-stale-worktree")
     mock_checked_out_bump_branch()
-    mock_worktree_commands(true, pr_head_sha)
+    mock_worktree_commands("substrate-stale-worktree", true, pr_head_sha)
     mock_existing_pr()
     mock_bump_pr_view(nil, {
       rollup = '[{"name":"ci","status":"IN_PROGRESS","conclusion":""}]',
@@ -686,8 +832,8 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("git worktree remove --force /tmp/fkst-packages-test/github-devloop/stale-substrate"), 1)
     t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. pr_head_sha), 1)
-    t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 0)
-    t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
-    t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)
+    eq_zero(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), "merge call after stale-worktree repin")
+    eq_zero(count_raises(result, "github-proxy.github_issue_create_request"), "create raises after stale-worktree repin")
+    eq_zero(count_raises(result, "github-proxy.github_issue_label_request"), "label raises after stale-worktree repin")
   end,
 }

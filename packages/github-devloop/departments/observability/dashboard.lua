@@ -11,24 +11,23 @@ local dashboard_marker_prefix = common.dashboard_marker_prefix
 local max_dashboard_body_len = common.max_dashboard_body_len
 local max_dashboard_section_items = common.max_dashboard_section_items
 local max_dashboard_title_len = common.max_dashboard_title_len
-
 local function dashboard_deferred_if_deadline(deadline)
   return common.dashboard_deferred_if_deadline(core, deadline)
 end
 
 local function ensure_dashboard_label(repo, limits, deadline)
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
-  local existing = core.observability_exec(core.gh_dashboard_label_get_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label get")
+  local existing = core.observability_exec(core.gh_dashboard_label_get_cmd(repo, dashboard_label), limits, deadline, "dashboard label get")
   if core.observability_result_deferred(existing) then return "deferred" end
   if existing.exit_code == 0 then
     return "exists"
   end
   if not common.command_indicates_not_found(existing) then
-    error("github-devloop: gh dashboard label get failed: " .. tostring(existing.stderr))
+    error("github-devloop: dashboard label get failed: " .. tostring(existing.stderr))
   end
 
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
-  local created = core.observability_exec(core.gh_dashboard_label_create_cmd(repo, dashboard_label), limits, deadline, "gh dashboard label create")
+  local created = core.observability_exec(core.gh_dashboard_label_create_cmd(repo, dashboard_label), limits, deadline, "dashboard label create")
   if core.observability_result_deferred(created) then return "deferred" end
   if created.exit_code == 0 then
     log.info("github-devloop dept=observability tag=DASHBOARD_LABEL_CREATED label=" .. dashboard_label)
@@ -37,7 +36,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
   if common.command_indicates_already_exists(created) then
     return "exists"
   end
-  error("github-devloop: gh dashboard label create failed: " .. tostring(created.stderr))
+  error("github-devloop: dashboard label create failed: " .. tostring(created.stderr))
 end
 
 local function dashboard_input_path(repo, version, hash)
@@ -306,7 +305,7 @@ function core.render_observability_dashboard(args)
 end
 
 local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
-  local listed = core.observability_exec(core.gh_dashboard_issue_list_cmd(repo, dashboard_label), limits, deadline, "gh dashboard issue list")
+  local listed = core.observability_exec(core.gh_dashboard_issue_list_cmd(repo, dashboard_label), limits, deadline, "dashboard issue list")
   if core.observability_result_deferred(listed) then
     return "deferred"
   end
@@ -317,11 +316,11 @@ local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
       .. " auth_mode=" .. common.gh_auth_mode(core)
       .. " http_status=" .. common.stderr_http_status(listed.stderr)
       .. " exit_code=" .. tostring(listed.exit_code))
-    error("github-devloop: gh dashboard issue list failed: " .. tostring(listed.stderr))
+    error("github-devloop: dashboard issue list failed: " .. tostring(listed.stderr))
   end
   if tostring(listed.stdout or ""):match("^%s*$") then
     log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED locator=label-list label=" .. dashboard_label .. " reason=empty-output")
-    error("github-devloop: gh dashboard issue list failed: empty output")
+    error("github-devloop: dashboard issue list failed: empty output")
   end
   for _, issue in ipairs(core.parse_dashboard_issue_list(listed.stdout)) do
     if issue.author_login == bot_login
@@ -333,7 +332,7 @@ local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
 end
 
 local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login, limits, deadline)
-  local view = core.observability_run_cmd(core.gh_dashboard_issue_get_cmd(repo, issue_number), limits, deadline, "gh dashboard issue get")
+  local view = core.observability_run_cmd(core.gh_dashboard_issue_get_cmd(repo, issue_number), limits, deadline, "dashboard issue get")
   if core.observability_result_deferred(view) then
     return "deferred"
   end
@@ -387,7 +386,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   if current == nil then
     deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
     local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
-    local created = core.observability_run_cmd(core.gh_dashboard_issue_create_cmd(repo, path), limits, deadline, "gh dashboard issue create")
+    local created = core.observability_run_cmd(core.gh_dashboard_issue_create_cmd(repo, path), limits, deadline, "dashboard issue create")
     if core.observability_result_deferred(created) then return "deferred" end
     log.info("github-devloop dept=observability tag=DASHBOARD_CREATED hash=" .. tostring(dashboard.hash))
     return "created"
@@ -429,7 +428,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   end
   local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
-  local updated = core.observability_exec(core.gh_dashboard_issue_update_cmd(repo, current.number, path), limits, deadline, "gh dashboard issue update")
+  local updated = core.observability_exec(core.gh_dashboard_issue_update_cmd(repo, current.number, path), limits, deadline, "dashboard issue update")
   if core.observability_result_deferred(updated) then return "deferred" end
   if updated.exit_code ~= 0 then
     local stderr = tostring(updated.stderr or "")
@@ -441,7 +440,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
         .. " hash=" .. tostring(dashboard.hash))
       return "cas-mismatch"
     end
-    error("github-devloop: gh dashboard issue update failed: " .. stderr)
+    error("github-devloop: dashboard issue update failed: " .. stderr)
   end
   log.info("github-devloop dept=observability tag=DASHBOARD_UPDATED issue=" .. tostring(current.number)
     .. " hash=" .. tostring(dashboard.hash))

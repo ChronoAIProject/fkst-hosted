@@ -9,6 +9,8 @@ local bump_branch = "chore/substrate-ref-bump"
 local bump_title = "chore: bump fkst-substrate pin"
 local substrate_dev_ref = "refs/remotes/fkst-substrate/dev"
 local validate_bump_pr
+local git_handle
+local github_handle
 
 local function require_repo(repo)
   local value = tostring(repo or "")
@@ -18,12 +20,43 @@ local function require_repo(repo)
   return value
 end
 
-local function run_cmd(cmd, timeout, label)
-  local result = exec_sync({ cmd = cmd, timeout = timeout or 30 })
+local function git()
+  if git_handle == nil then
+    git_handle = require("std.git").new(exec_argv)
+  end
+  return git_handle
+end
+
+local function github()
+  if github_handle == nil then
+    github_handle = require("std.github").new(exec_argv)
+  end
+  return github_handle
+end
+
+local function run_adapter(fn, label)
+  local ok, result_or_error = pcall(fn)
+  if ok then
+    return result_or_error
+  end
+  if type(result_or_error) == "table" and result_or_error.result ~= nil then
+    return result_or_error.result
+  end
+  error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result_or_error))
+end
+
+local function run_cmd(fn, label)
+  local result = run_adapter(fn, label)
   if result.exit_code ~= 0 then
     error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
   end
   return result
+end
+
+local function run_argv(argv, timeout, label)
+  return run_adapter(function()
+    return exec_argv({ argv = argv, timeout = timeout or 30 })
+  end, label)
 end
 
 local function is_missing_substrate_ref_pin(result)
@@ -35,8 +68,8 @@ local function is_missing_substrate_ref_pin(result)
     or stderr:find("path '" .. substrate_ref_path .. "' exists on disk, but not in", 1, true) ~= nil
 end
 
-local function run_gh(cmd, timeout, label)
-  local result = M.gh_exec({ cmd = cmd, timeout = timeout or 30 })
+local function run_gh(fn, label)
+  local result = run_adapter(fn, label)
   if result.exit_code ~= 0 then
     error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
   end
@@ -44,7 +77,9 @@ local function run_gh(cmd, timeout, label)
 end
 
 local function read_runtime_root()
-  local result = run_cmd(M.read_runtime_root_cmd(), 30, "runtime root read")
+  local result = run_cmd(function()
+    return exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+  end, "runtime root read")
   local root = M._trim(result.stdout)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: FKST_RUNTIME_ROOT is required for substrate-ref bump")
@@ -53,16 +88,18 @@ local function read_runtime_root()
 end
 
 function M.git_show_substrate_ref_pin_cmd()
-  return "git show " .. M._shell_single_quote("HEAD:" .. substrate_ref_path)
+  return "substrate-ref pin read"
 end
 
 local function read_pin()
-  local result = exec_sync({ cmd = M.git_show_substrate_ref_pin_cmd(), timeout = 30 })
+  local result = run_adapter(function()
+    return git().show_file("HEAD", substrate_ref_path, 30)
+  end, "substrate-ref pin read")
   if is_missing_substrate_ref_pin(result) then
     return nil
   end
   if result.exit_code ~= 0 then
-    error("github-devloop: git show substrate-ref pin failed: " .. tostring(result.stderr))
+    error("github-devloop: substrate-ref pin read failed: " .. tostring(result.stderr))
   end
   local pin = M._trim(result.stdout)
   if not M._is_git_sha(pin) then
@@ -81,22 +118,24 @@ end
 
 local function fetch_substrate_dev_head()
   local result = run_cmd(
-    M.git_ls_remote_branch_cmd(substrate_remote, substrate_branch),
-    60,
-    "git ls-remote fkst-substrate dev"
+    function()
+      return git().ls_remote_branch(substrate_remote, substrate_branch, 60)
+    end,
+    "substrate upstream head read"
   )
   local sha = parse_ls_remote(result.stdout)
   if sha == nil then
-    error("github-devloop: git ls-remote did not return a valid fkst-substrate dev head")
+    error("github-devloop: substrate upstream head read returned an invalid dev head")
   end
   return sha
 end
 
 local function fetch_substrate_dev_ref()
   local result = run_cmd(
-    M.git_fetch_remote_branch_to_tracking_ref_cmd(substrate_remote, substrate_branch, substrate_dev_ref),
-    60,
-    "git fetch fkst-substrate dev"
+    function()
+      return git().fetch_remote_branch_to_tracking_ref(substrate_remote, substrate_branch, substrate_dev_ref, 60)
+    end,
+    "substrate upstream tracking ref fetch"
   )
   return result
 end
@@ -110,9 +149,10 @@ local function substrate_pin_is_dev_ancestor(pin, target_sha)
   end
   fetch_substrate_dev_ref()
   local head = run_cmd(
-    M.git_rev_parse_ref_commit_cmd(substrate_dev_ref),
-    30,
-    "git fkst-substrate dev ref"
+    function()
+      return git().rev_parse_ref_commit(substrate_dev_ref, 30)
+    end,
+    "substrate upstream tracking ref read"
   )
   local fetched_head = M._trim(head.stdout)
   if not M._is_git_sha(fetched_head) then
@@ -155,7 +195,9 @@ local function pr_number(value)
 end
 
 local function existing_bump_pr(repo)
-  local result = run_gh(M.gh_pr_list_head_cmd(repo, bump_branch), 30, "gh substrate-ref PR list")
+  local result = run_gh(function()
+    return github().pr_list_head(repo, bump_branch, nil, 30)
+  end, "substrate-ref PR list")
   local prs = parse_pr_list(result.stdout)
   if #prs > 1 then
     error("github-devloop: multiple open substrate-ref bump PRs found")
@@ -177,6 +219,27 @@ local function bump_worktree_path(runtime_root, repo, head_sha)
     slug = slug:sub(1, 90):gsub("%-+$", "")
   end
   return runtime_root .. "/worktrees/" .. slug .. "-" .. tostring(head_sha):sub(1, 12)
+end
+
+local function ensure_parent_dir(path)
+  local value = tostring(path or "")
+  local parent = value:gsub("/+$", ""):match("^(.*)/[^/]+$") or "."
+  local result = run_argv({ "mkdir", "-p", parent }, 30, "substrate-ref directory create")
+  if result.exit_code ~= 0 then
+    error("github-devloop: substrate-ref directory create failed: " .. tostring(result.stderr))
+  end
+end
+
+local function remove_worktree_if_present(worktree)
+  local value = tostring(worktree or "")
+  local dir = run_argv({ "test", "-d", value }, 30, "substrate-ref worktree presence check")
+  if dir.exit_code ~= 0 then
+    return
+  end
+  local remove = M.git_worktree_remove(value, 60)
+  if remove.exit_code ~= 0 then
+    error("github-devloop: git stale substrate-ref worktree remove failed: " .. tostring(remove.stderr))
+  end
 end
 
 local function write_pr_body(repo, current_pin, target_sha)
@@ -201,11 +264,15 @@ local function write_pr_body(repo, current_pin, target_sha)
 end
 
 local function fetch_bump_branch_head()
-  local fetch = exec_sync({ cmd = M.git_fetch_branch_cmd("origin", bump_branch), timeout = 60 })
+  local fetch = run_adapter(function()
+    return git().fetch_branch("origin", bump_branch, 60)
+  end, "substrate-ref bump branch fetch")
   if fetch.exit_code ~= 0 then
     return nil
   end
-  local head = run_cmd(M.git_remote_branch_head_cmd("origin", bump_branch), 30, "git substrate-ref bump branch head")
+  local head = run_cmd(function()
+    return git().remote_branch_head("origin", bump_branch, 30)
+  end, "substrate-ref bump branch head")
   local sha = M._trim(head.stdout)
   if not M._is_git_sha(sha) then
     error("github-devloop: invalid substrate-ref bump branch head")
@@ -217,10 +284,9 @@ local function remote_bump_branch_pin(branch_head)
   if branch_head == nil then
     return nil
   end
-  local result = exec_sync({
-    cmd = "git show " .. M._shell_single_quote(tostring(branch_head) .. ":" .. substrate_ref_path),
-    timeout = 30,
-  })
+  local result = run_adapter(function()
+    return git().show_file(branch_head, substrate_ref_path, 30)
+  end, "substrate-ref bump branch pin read")
   if result.exit_code ~= 0 then
     return nil
   end
@@ -232,18 +298,28 @@ local function remote_bump_branch_pin(branch_head)
 end
 
 local function remove_existing_branch_worktree(branch)
-  local list = run_cmd(M.git_worktree_list_cmd(), 30, "git substrate-ref worktree list")
+  local list = run_adapter(function()
+    return git().worktree_list(30)
+  end, "substrate-ref worktree list")
+  if list.exit_code ~= 0 then
+    error("github-devloop: substrate-ref worktree list failed exit="
+      .. tostring(list.exit_code)
+      .. " stderr="
+      .. tostring(list.stderr))
+  end
   local existing = M.find_worktree_for_branch(list.stdout, branch)
   if existing ~= nil then
     local remove = M.git_worktree_remove(existing, 60)
     if remove.exit_code ~= 0 then
-      error("github-devloop: git stale substrate-ref branch worktree remove failed: " .. tostring(remove.stderr))
+      error("github-devloop: stale substrate-ref branch worktree remove failed: " .. tostring(remove.stderr))
     end
   end
 end
 
 local function pin_delta_state(worktree)
-  local diff = run_cmd("git -C " .. M._shell_single_quote(worktree) .. " diff --name-only HEAD", 30, "git diff name-only")
+  local diff = run_cmd(function()
+    return git().diff_name_only(worktree, "HEAD", 30)
+  end, "substrate-ref changed paths")
   local name = M._trim(diff.stdout)
   if name == "" then
     return "empty"
@@ -266,35 +342,44 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
   local runtime_root = read_runtime_root()
   local worktree = bump_worktree_path(runtime_root, repo, target_sha)
   remove_existing_branch_worktree(bump_branch)
-  run_cmd(M.git_worktree_remove_if_present_cmd(worktree), 60, "git stale substrate-ref worktree remove")
+  remove_worktree_if_present(worktree)
+  ensure_parent_dir(worktree)
   local action = "updated"
   local added = false
   local ok, err = pcall(function()
-    run_cmd(M.git_worktree_add_reset_branch_cmd(worktree, bump_branch, base_head), 120, "git substrate-ref worktree add")
+    run_cmd(function()
+      return git().worktree_add_reset_branch(worktree, bump_branch, base_head, 120)
+    end, "substrate-ref worktree add")
     added = true
-    run_cmd(M.git_write_file_cmd(worktree, substrate_ref_path, target_sha .. "\n"), 30, "write substrate-ref pin")
+    local pin_path = worktree:gsub("/+$", "") .. "/" .. substrate_ref_path
+    ensure_parent_dir(pin_path)
+    file.write(pin_path, target_sha .. "\n")
     if pin_delta_state(worktree) == "empty" then
       action = "base-current"
       return
     end
-    run_cmd(M.git_add_all_cmd(worktree), 30, "git substrate-ref add")
-    run_cmd(M.git_commit_cmd(worktree, "chore: bump fkst-substrate pin"), 60, "git substrate-ref commit")
+    run_cmd(function()
+      return git().add_all(worktree, 30)
+    end, "substrate-ref add")
+    run_cmd(function()
+      return git().commit_message(worktree, "chore: bump fkst-substrate pin", 60)
+    end, "substrate-ref commit")
     if old_branch_head == nil then
       local push = M.git_push_worktree_branch_update(worktree, bump_branch, 120)
       if push.exit_code ~= 0 then
-        error("github-devloop: git substrate-ref push failed: " .. tostring(push.stderr))
+        error("github-devloop: substrate-ref push failed: " .. tostring(push.stderr))
       end
     else
       local push = M.git_push_worktree_branch_update_with_lease(worktree, bump_branch, old_branch_head, 120)
       if push.exit_code ~= 0 then
-        error("github-devloop: git substrate-ref push failed: " .. tostring(push.stderr))
+        error("github-devloop: substrate-ref push failed: " .. tostring(push.stderr))
       end
     end
   end)
   if added then
     local remove = M.git_worktree_remove(worktree, 60)
     if ok and remove.exit_code ~= 0 then
-      error("github-devloop: git substrate-ref worktree remove failed: " .. tostring(remove.stderr))
+      error("github-devloop: substrate-ref worktree remove failed: " .. tostring(remove.stderr))
     end
   end
   if not ok then
@@ -305,7 +390,9 @@ end
 
 local function create_pr(repo, base_branch, current_pin, target_sha)
   local body_file = write_pr_body(repo, current_pin, target_sha)
-  local result = run_gh(M.gh_pr_create_cmd(repo, bump_branch, base_branch, bump_title, body_file), 60, "gh substrate-ref PR create")
+  local result = run_gh(function()
+    return github().pr_create(repo, bump_branch, base_branch, bump_title, body_file, 60)
+  end, "substrate-ref PR create")
   local number = tostring(result.stdout or ""):match("/pull/(%d+)")
   return pr_number(number)
 end
@@ -333,14 +420,23 @@ local function parse_name_only_paths(stdout)
 end
 
 local function read_pr(pr_number_value, repo)
-  local viewed = run_gh(M.gh_pr_view_merge_cmd(repo, pr_number_value), 30, "gh substrate-ref PR view")
+  local viewed = run_gh(function()
+    return github().pr_cli_view(
+      repo,
+      pr_number_value,
+      "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup",
+      30
+    )
+  end, "substrate-ref PR view")
   local pr = M.parse_pr_view_merge(viewed.stdout)
   pr.number = pr_number_value
   return pr
 end
 
 local function changed_paths(repo, pr_number_value)
-  local diff = run_gh(M.gh_pr_diff_name_only_cmd(repo, pr_number_value), 30, "gh substrate-ref PR diff")
+  local diff = run_gh(function()
+    return github().pr_diff_name_only(repo, pr_number_value, 30)
+  end, "substrate-ref PR diff")
   return parse_name_only_paths(diff.stdout)
 end
 

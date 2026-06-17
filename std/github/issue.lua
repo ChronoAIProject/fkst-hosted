@@ -335,6 +335,10 @@ function M.install(handle)
     return handle._exec(gh_issue_rest_argv(repo, issue_number), timeout, "gh issue REST view")
   end
 
+  function handle.issue_view(repo, issue_number, fields, timeout)
+    return handle._exec(gh_issue_view_argv(repo, issue_number, fields), timeout, "gh issue view")
+  end
+
   function handle.issue_updated_at(repo, issue_number, timeout)
     return handle._exec(gh_issue_updated_at_argv(repo, issue_number), timeout, "gh issue updated_at")
   end

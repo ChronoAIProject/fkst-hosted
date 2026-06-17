@@ -184,6 +184,19 @@ local function find_call(needle)
   return nil
 end
 
+local function argv_option(call, name)
+  local argv = { call.program }
+  for _, arg in ipairs(call.args or {}) do
+    table.insert(argv, arg)
+  end
+  for index, value in ipairs(argv) do
+    if value == name then
+      return argv[index + 1]
+    end
+  end
+  return nil
+end
+
 return {
   test_rollup_scan_integration_equal_upstream_noops = function()
     mock_env("", "auto", "dev")
@@ -229,11 +242,12 @@ return {
     end
     t.is_true(saw_prompt_range)
     t.is_true(saw_prompt_issue_fetch)
-    t.is_true(h.has_call("--head 'integration/dev'"))
-    t.is_true(h.has_call("--base 'dev'"))
+    t.is_true(h.has_call("--head integration/dev"))
+    t.is_true(h.has_call("--base dev"))
     local create_call = find_call("gh pr create")
-    t.is_true(create_call.rendered:find("--body 'Release highlights", 1, true) ~= nil)
-    t.is_true(create_call.rendered:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
+    local body = argv_option(create_call, "--body")
+    t.is_true(body:find("Release highlights", 1, true) ~= nil)
+    t.is_true(body:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
     t.eq(h.count_calls("mktemp '/tmp/fkst-github-devloop-rollup.XXXXXX'"), 0)
     t.eq(h.count_calls("rm -f --"), 0)
   end,
@@ -283,10 +297,11 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr create"), 1)
     local create_call = find_call("gh pr create")
-    t.is_true(create_call.rendered:find("--body 'Automated rollup", 1, true) ~= nil)
-    t.is_true(create_call.rendered:find("Zh: zi dong", 1, true) == nil)
-    t.is_true(create_call.rendered:find(zh_summary, 1, true) ~= nil)
-    t.is_true(create_call.rendered:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
+    local body = argv_option(create_call, "--body")
+    t.is_true(body:find("Automated rollup", 1, true) ~= nil)
+    t.is_true(body:find("Zh: zi dong", 1, true) == nil)
+    t.is_true(body:find(zh_summary, 1, true) ~= nil)
+    t.is_true(body:find(core._release_notes_ai_sentinel, 1, true) ~= nil)
     t.eq(h.count_calls("rm -f --"), 0)
   end,
 

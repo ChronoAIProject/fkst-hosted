@@ -207,7 +207,7 @@ return {
     core.gh_exec = old_gh_exec
 
     t.eq(ok, false)
-    t.is_true(tostring(err):find("gh dashboard issue list failed: empty output", 1, true) ~= nil)
+    t.is_true(tostring(err):find("dashboard issue list failed: empty output", 1, true) ~= nil)
     t.eq(create_calls, 0)
   end,
 

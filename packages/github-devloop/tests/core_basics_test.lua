@@ -19,7 +19,7 @@ return {
       ['printf %s "$FKST_GITHUB_WRITE"'] = { stdout = "", exit_code = 0 },
     }
     local function exec(cmd)
-      local rendered = type(cmd) == "table" and cmd.cmd or cmd
+      local rendered = type(cmd) == "table" and (cmd.cmd or table.concat(cmd.argv or {}, " ")) or cmd
       return responses[rendered] or { stdout = "", stderr = "unexpected " .. tostring(rendered), exit_code = 1 }
     end
     local config = core.devloop_config(exec)
