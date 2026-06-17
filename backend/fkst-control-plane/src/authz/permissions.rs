@@ -54,6 +54,16 @@ pub const GITHUB_WRITE: &str = "fkst:github:write";
 /// Read the skill catalog — all `GET /api/v1/catalog/*` routes (#114).
 pub const CATALOG_READ: &str = "fkst:catalog:read";
 
+/// Initialize a repo for fkst use (scaffold `.fkst/`) —
+/// `POST /api/v1/repos/:owner/:name/fkst-setup` (#181).
+///
+/// A dedicated capability rather than a reuse of [`GOAL_CREATE`]: scaffolding
+/// WRITES file contents into a repo (a strictly broader action class than
+/// authoring a goal), so it is separately grantable — NyxID can hand it out on
+/// its own (least privilege). Admin gets it via the [`ADMIN`] bypass; grant it
+/// to Member roles that should scaffold.
+pub const REPO_SETUP: &str = "fkst:repo:setup";
+
 // The persistent vault CRUD (`fkst:vault:*`) was removed in the DB-free pivot
 // (#138): secrets are supplied inline at goal trigger and held in memory only,
 // so there is no HTTP surface — and therefore no permission — for a persistent
@@ -125,6 +135,20 @@ mod tests {
         let ctx = ctx_with(&[]);
         assert!(require_permission(&ctx, SESSION_READ).is_err());
         assert!(require_permission(&ctx, CATALOG_READ).is_err());
+    }
+
+    #[test]
+    fn repo_setup_is_a_distinct_grantable_permission() {
+        // #181: scaffolding is gated by its own `fkst:repo:setup`, NOT by
+        // `fkst:goal:create` — granting goal creation must NOT grant scaffolding.
+        assert_eq!(REPO_SETUP, "fkst:repo:setup");
+        let goal_only = ctx_with(&[GOAL_CREATE]);
+        assert!(require_permission(&goal_only, REPO_SETUP).is_err());
+        let setup = ctx_with(&[REPO_SETUP]);
+        assert!(require_permission(&setup, REPO_SETUP).is_ok());
+        // Admin bypasses it like every other permission.
+        let admin = ctx_with(&[ADMIN]);
+        assert!(require_permission(&admin, REPO_SETUP).is_ok());
     }
 
     #[test]

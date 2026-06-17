@@ -9,9 +9,14 @@
 //!
 //! Security: issue bodies and tokens are NEVER logged — only counts and sizes.
 
+pub mod contents;
 pub mod fanout;
 pub mod service;
 pub mod types;
+
+// The Git Data API WRITER (#181): the first contents-write surface in the repo.
+// It uses the GitHub App installation token (NOT the read-only `GithubProxy`).
+pub use contents::{commit_files, CommitResult, ContentsWriteError, ScaffoldFile};
 
 use axum::body::Bytes;
 use reqwest::header::HeaderMap;
