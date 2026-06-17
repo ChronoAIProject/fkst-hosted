@@ -34,7 +34,8 @@ use crate::routes::extract::AppJson;
 use crate::state::AppState;
 
 /// Build the per-request NyxID-backed proxy. A missing credential proxy is a
-/// 503; a rejected token exchange is mapped (401/503) without leaking the token.
+/// 503; a missing/rejected forwarded user token is a 401, without leaking the
+/// token.
 async fn build_proxy(state: &AppState, ctx: &AuthContext) -> Result<NyxIdGithubProxy, AppError> {
     NyxIdGithubProxy::from_context(&state.authz, ctx).await
 }

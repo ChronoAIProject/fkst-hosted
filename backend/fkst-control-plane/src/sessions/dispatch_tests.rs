@@ -302,15 +302,13 @@ async fn resolve_dispatch_full_merges_env_codex_and_ornn() {
         })))
         .mount(&nyxid_server)
         .await;
-    let nyxid_client = NyxIdClient::new(
-        &nyxid_server.uri(),
-        "api-github",
-        "sa_client".to_string(),
-        SecretString::from("sa_secret".to_string()),
-        Duration::from_secs(30),
-    )
-    .expect("nyxid client");
-    service.enable_nyxid_token(nyxid_client, "https://nyxid.test".to_string());
+    let nyxid_client = NyxIdClient::new(&nyxid_server.uri(), "api-github", Duration::from_secs(30))
+        .expect("nyxid client");
+    service.enable_nyxid_token(
+        nyxid_client,
+        "https://nyxid.test".to_string(),
+        Duration::from_secs(3600),
+    );
 
     // Codex: operator-pinned defaults; with the vault wired this renders.
     service.enable_codex(
@@ -421,15 +419,13 @@ async fn resolve_dispatch_never_leaks_a_secret_in_debug() {
         })))
         .mount(&nyxid_server)
         .await;
-    let nyxid_client = NyxIdClient::new(
-        &nyxid_server.uri(),
-        "api-github",
-        "sa_client".to_string(),
-        SecretString::from("sa_secret".to_string()),
-        Duration::from_secs(30),
-    )
-    .expect("nyxid client");
-    service.enable_nyxid_token(nyxid_client, "https://nyxid.test".to_string());
+    let nyxid_client = NyxIdClient::new(&nyxid_server.uri(), "api-github", Duration::from_secs(30))
+        .expect("nyxid client");
+    service.enable_nyxid_token(
+        nyxid_client,
+        "https://nyxid.test".to_string(),
+        Duration::from_secs(3600),
+    );
 
     let session = goal_session(goal_id, false);
     let raw = SecretString::from("user-raw-token");

@@ -9,6 +9,24 @@ release PR, and frozen into a permanent entry once the release is tagged. Do not
 edit released sections by hand.
 
 <!-- BEGIN PENDING -->
+## v0.2.2 — 2026-06-17
+
+## Fixed
+
+- Per-session NyxID keys now self-expire, ending a credential leak.
+
+## New Feature
+
+- Run owner-only: deploy with no NyxID service account.
+- Configurable per-session key lifetime for engine runs.
+
+## Changed
+
+- GitHub and NyxID actions now use your forwarded access token.
+- Removed the unused server-side LLM package-generation gateway.
+- Technical enhancement.
+<!-- END PENDING -->
+
 ## v0.2.1 — 2026-06-17
 
 ## Fixed
@@ -20,7 +38,6 @@ edit released sections by hand.
 ## Changed
 
 - Technical enhancement
-<!-- END PENDING -->
 
 ## v0.2.0 — 2026-06-17
 

@@ -280,6 +280,9 @@ pub(super) struct NyxidSetup {
     pub(super) client: NyxIdClient,
     /// The NyxID origin the engine talks to, injected as `NYXID_URL`.
     pub(super) origin: String,
+    /// TTL for the self-expiring per-session key (#216);
+    /// `FKST_SESSION_KEY_TTL_SECS`.
+    pub(super) key_ttl: std::time::Duration,
 }
 
 /// Journaling wiring shared by every driver this service spawns.
@@ -432,19 +435,38 @@ impl SessionService {
         tracing::info!("session env injection enabled (vault wired into the driver)");
     }
 
-    /// Enable per-session NyxID token provisioning (issue #111): the driver
-    /// mints a per-session agent key on the triggering user's behalf and
-    /// injects it as `NYXID_ACCESS_TOKEN` (+ `NYXID_URL`) into the engine env,
-    /// then revokes it at teardown. `origin` is the NyxID issuer base URL.
-    /// Call once at startup, before any session is created; a second call is a
-    /// logged no-op. When never called the driver skips provisioning entirely
-    /// (legacy behaviour for tests / minimal runs).
-    pub fn enable_nyxid_token(&self, client: NyxIdClient, origin: String) {
-        if self.inner.nyxid.set(NyxidSetup { client, origin }).is_err() {
+    /// Enable per-session NyxID token provisioning (issue #111; TTL cleanup
+    /// #216): the driver mints a per-session agent key on the triggering user's
+    /// behalf and injects it as `NYXID_ACCESS_TOKEN` (+ `NYXID_URL`) into the
+    /// engine env. The key SELF-EXPIRES after `key_ttl` — there is no
+    /// service-account revoke at teardown (NyxID rejects it on a human-minted
+    /// key). `origin` is the NyxID issuer base URL. Call once at startup, before
+    /// any session is created; a second call is a logged no-op. When never
+    /// called the driver skips provisioning entirely (legacy behaviour for
+    /// tests / minimal runs).
+    pub fn enable_nyxid_token(
+        &self,
+        client: NyxIdClient,
+        origin: String,
+        key_ttl: std::time::Duration,
+    ) {
+        if self
+            .inner
+            .nyxid
+            .set(NyxidSetup {
+                client,
+                origin,
+                key_ttl,
+            })
+            .is_err()
+        {
             tracing::warn!("nyxid token provisioning already enabled; ignoring the second call");
             return;
         }
-        tracing::info!("per-session nyxid token provisioning enabled (wired into the driver)");
+        tracing::info!(
+            key_ttl_secs = key_ttl.as_secs(),
+            "per-session nyxid token provisioning enabled (self-expiring key, wired into the driver)"
+        );
     }
 
     /// Enable per-session codex LLM-provider config (issue #112): every driver
@@ -1473,7 +1495,9 @@ async fn drive_inner(
     if let Some(setup) = inner.nyxid.get() {
         match &raw_token {
             Some(token) => {
-                match nyxid_token::provision(&setup.client, id, &setup.origin, token).await {
+                match nyxid_token::provision(&setup.client, id, &setup.origin, token, setup.key_ttl)
+                    .await
+                {
                     Ok((handle, entries)) => {
                         // The two entries are SECRETS (the key) and a non-secret
                         // origin; neither is reserved, so both survive the engine

@@ -25,9 +25,9 @@ pub enum AppError {
     /// The request conflicts with the current state. Renders as 409.
     #[error("conflict: {0}")]
     Conflict(String),
-    /// A required dependency (e.g. NyxID, the LLM gateway, or the credential
-    /// proxy) is unreachable. Renders as 503. The message must be safe for
-    /// clients (no connection detail).
+    /// A required dependency (e.g. NyxID or the credential proxy) is
+    /// unreachable. Renders as 503. The message must be safe for clients
+    /// (no connection detail).
     #[error("unavailable: {0}")]
     Unavailable(String),
     /// BSON serialization failure. Renders as 500.
@@ -70,7 +70,6 @@ pub enum AppError {
 /// - OrgPolicy -> 422 Unprocessable (org-policy hint)
 /// - RateLimited -> 503 Unavailable
 /// - NyxIdUnavailable -> 503 Unavailable
-/// - ExchangeRejected -> 401 Unauthorized
 /// - Upstream -> 502 Bad Gateway (mapped as 503 Unavailable)
 /// - Malformed -> 500 Internal
 ///
@@ -122,12 +121,6 @@ impl From<crate::goals::CreateRepoError> for AppError {
                 tracing::error!(detail = %detail, "nyxid unavailable during repo creation");
                 AppError::Unavailable(
                     "credential proxy unavailable; cannot create repository".to_string(),
-                )
-            }
-            CreateRepoError::ExchangeRejected(detail) => {
-                tracing::warn!(detail = %detail, "token exchange rejected during repo creation");
-                AppError::Unauthorized(
-                    "token exchange rejected: cannot create repository".to_string(),
                 )
             }
             CreateRepoError::Upstream { status, message } => {

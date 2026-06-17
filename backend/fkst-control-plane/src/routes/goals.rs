@@ -1218,10 +1218,10 @@ fn install_hint_message(
 /// Create a new GitHub repo via the NyxID proxy and persist it on the goal.
 ///
 /// This function:
-/// 1. Exchanges the user's token for a delegated token via NyxID.
-/// 2. Proxies a "create repo" request through NyxID to GitHub.
-/// 3. Persists the resulting [`RepoRef`] onto the goal document.
-/// 4. Returns the [`RepoRef`] for use in the rest of the trigger flow.
+/// 1. Proxies a "create repo" request through NyxID to GitHub, presenting the
+///    forwarded user token directly to the api-github proxy.
+/// 2. Persists the resulting [`RepoRef`] onto the goal document.
+/// 3. Returns the [`RepoRef`] for use in the rest of the trigger flow.
 async fn create_new_repo(
     state: &AppState,
     ctx: &AuthContext,
@@ -1235,17 +1235,13 @@ async fn create_new_repo(
         )
     })?;
 
-    // Exchange the user's inbound token for a delegated token. Creating a repo
-    // acts AS the caller against GitHub, so the forwarded user token is required;
-    // in "headers mode" (no bearer forwarded) the exchange cannot run -> 401.
+    // Creating a repo acts AS the caller against GitHub, so the forwarded user
+    // token is required and presented DIRECTLY to the api-github proxy; in
+    // "headers mode" (no bearer forwarded) there is no token to present -> 401.
     let user_token = ctx.require_user_token()?;
-    let delegated = nyxid.exchange_token(user_token).await.map_err(|e| {
-        // Map NyxID errors to CreateRepoError, then AppError.
-        crate::goals::CreateRepoError::from(e)
-    })?;
 
-    // Create the repository via the GitHub proxy.
-    let created_repo = crate::goals::repo_create::create_repo(nyxid, &delegated, &spec).await?;
+    // Create the repository via the GitHub proxy using the forwarded user token.
+    let created_repo = crate::goals::repo_create::create_repo(nyxid, user_token, &spec).await?;
 
     // Persist the created repo onto the goal (CAS: only if status is triggered).
     // Note: at this point the goal is still in its pre-trigger status, so

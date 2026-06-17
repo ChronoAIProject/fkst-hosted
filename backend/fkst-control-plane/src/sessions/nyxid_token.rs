@@ -1,11 +1,18 @@
-//! Per-session NyxID token provisioning (issue #111).
+//! Per-session NyxID token provisioning (issue #111; TTL cleanup #216).
 //!
-//! At session start the driver mints ONE per-session, non-expiring NyxID
+//! At session start the driver mints ONE per-session, SELF-EXPIRING NyxID
 //! agent API key on the triggering user's behalf and injects it into the
 //! engine environment as `NYXID_ACCESS_TOKEN` (plus the `NYXID_URL` origin),
 //! so the engine's `nyxid` CLI and its codex LLM provider both authenticate
-//! to NyxID as that user — with no fkst-substrate engine change. The key is
-//! revoked at session teardown to bound its blast radius.
+//! to NyxID as that user — with no fkst-substrate engine change.
+//!
+//! Key cleanup is a self-expiring TTL (#216): the key is minted with
+//! `expires_at = now + FKST_SESSION_KEY_TTL_SECS`, so NyxID disables it on its
+//! own once the run is over. This replaces the former service-account
+//! revoke-at-teardown, which NyxID rejects on a human-minted key (the SA token
+//! is refused by the human-only key store). A background janitor sweep that
+//! deletes already-expired keys is a follow-up backstop (out of scope here);
+//! the TTL is the primary and sufficient fix.
 //!
 //! Secret hygiene (load-bearing):
 //! - The full key (`nyxid_ag_…`) lives ONLY in the returned `SecretString` env
@@ -14,6 +21,8 @@
 //!   for diagnostics) is held by the driver and persisted onto `SessionDoc`.
 //! - The user's `raw_token` is transient in-memory; it never reaches here from
 //!   anything but a live HTTP request context.
+
+use std::time::{Duration, SystemTime};
 
 use secrecy::{ExposeSecret, SecretString};
 
@@ -58,19 +67,29 @@ pub struct NyxidTokenHandle {
 ///
 /// The key is named `fkst-session-<id>` (so an operator can correlate a key
 /// to its session and an orphan-sweep can match by prefix), scoped `proxy`,
-/// and `allow_all_services=true`; it is non-expiring (the session revokes it
-/// at teardown). On a user-token rejection (expired/revoked/delegated) this
-/// returns `Unauthorized`; any other NyxID failure returns `Unavailable`. The
-/// minted key is never logged here — only the non-secret id/prefix are.
+/// and `allow_all_services=true`. It SELF-EXPIRES after `ttl`: the key is
+/// minted with `expires_at = now + ttl` (#216), so NyxID disables it on its
+/// own — there is no service-account revoke (NyxID rejects it on a human-minted
+/// key). On a user-token rejection (expired/revoked/delegated) this returns
+/// `Unauthorized`; any other NyxID failure returns `Unavailable`. The minted
+/// key is never logged here — only the non-secret id/prefix are.
 pub async fn provision(
     client: &NyxIdClient,
     session_id: bson::Uuid,
     origin: &str,
     raw_token: &SecretString,
+    ttl: Duration,
 ) -> Result<(NyxidTokenHandle, Vec<(String, SecretString)>), AppError> {
     let name = format!("fkst-session-{session_id}");
+    let expires_at = expires_at_rfc3339(session_id, ttl)?;
     let created = client
-        .mint_user_api_key(raw_token, &name, SESSION_KEY_SCOPES, true)
+        .mint_user_api_key(
+            raw_token,
+            &name,
+            SESSION_KEY_SCOPES,
+            true,
+            Some(&expires_at),
+        )
         .await
         .map_err(|err| map_mint_error(session_id, err))?;
 
@@ -83,7 +102,8 @@ pub async fn provision(
         session_id = %session_id,
         key_id = %handle.key_id,
         key_prefix = %handle.key_prefix,
-        "provisioned per-session nyxid token"
+        expires_at = %expires_at,
+        "provisioned per-session nyxid token (self-expiring)"
     );
 
     let env = vec![
@@ -96,22 +116,20 @@ pub async fn provision(
     Ok((handle, env))
 }
 
-/// Best-effort revoke of a previously provisioned session key at teardown.
-/// A revoke failure is logged (with the non-secret id) and swallowed: teardown
-/// must never be blocked by NyxID being briefly unreachable, and the key is
-/// non-expiring so a janitor sweep is the backstop.
-pub async fn revoke(client: &NyxIdClient, handle: &NyxidTokenHandle) {
-    match client.revoke_api_key(&handle.key_id).await {
-        Ok(()) => tracing::info!(
-            key_id = %handle.key_id,
-            "revoked per-session nyxid token"
-        ),
-        Err(error) => tracing::warn!(
-            key_id = %handle.key_id,
-            error = %error,
-            "failed to revoke per-session nyxid token (swallowed; key is non-expiring, sweep is the backstop)"
-        ),
-    }
+/// Teardown hook for a previously provisioned session key.
+///
+/// NO LONGER calls NyxID (#216): the key is minted self-expiring, and the only
+/// revoke route is the service-account `DELETE` NyxID rejects on a human-minted
+/// key. Cleanup is therefore the TTL — this hook just records that teardown ran
+/// and that the key will lapse on its own. Kept as a function (rather than
+/// deleted at the call sites) so a future janitor backstop has one place to
+/// land, and so the teardown path stays symmetric with `provision`. The
+/// `client` is unused now but retained in the signature for that backstop.
+pub async fn revoke(_client: &NyxIdClient, handle: &NyxidTokenHandle) {
+    tracing::info!(
+        key_id = %handle.key_id,
+        "per-session nyxid token left to self-expire (no service-account revoke; TTL is the cleanup)"
+    );
 }
 
 /// Map a mint error onto an `AppError`. The DISTINCT user-token rejection is a
@@ -149,6 +167,32 @@ fn derive_prefix(full_key: &str) -> String {
     full_key.chars().take(KEY_PREFIX_LEN).collect()
 }
 
+/// Render the absolute key expiry (`now + ttl`) as an RFC 3339 timestamp string
+/// — the exact shape NyxID's `CreateApiKeyRequest.expires_at` accepts (verified
+/// against NyxID `main`: it parses RFC 3339 or `YYYY-MM-DD`). Uses
+/// `bson::DateTime` (already a dependency) so no new crate is pulled in. A TTL
+/// so large it overflows `SystemTime` is mapped to `Unavailable` rather than
+/// panicking — a misconfiguration, not a user error.
+fn expires_at_rfc3339(session_id: bson::Uuid, ttl: Duration) -> Result<String, AppError> {
+    let when = SystemTime::now().checked_add(ttl).ok_or_else(|| {
+        tracing::error!(
+            session_id = %session_id,
+            "session key TTL overflowed the system clock; refusing to mint"
+        );
+        AppError::Unavailable("session key TTL is out of range".to_string())
+    })?;
+    bson::DateTime::from_system_time(when)
+        .try_to_rfc3339_string()
+        .map_err(|error| {
+            tracing::error!(
+                session_id = %session_id,
+                error = %error,
+                "failed to render the session key expiry timestamp"
+            );
+            AppError::Unavailable("could not compute session key expiry".to_string())
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,17 +200,10 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const API_KEYS_PATH: &str = "/api/v1/api-keys";
-    const TOKEN_PATH: &str = "/oauth/token";
 
     fn client(uri: &str) -> NyxIdClient {
-        NyxIdClient::new(
-            uri,
-            "api-github",
-            "sa_client".to_string(),
-            SecretString::from("sa_secret".to_string()),
-            std::time::Duration::from_secs(30),
-        )
-        .expect("client build")
+        NyxIdClient::new(uri, "api-github", std::time::Duration::from_secs(30))
+            .expect("client build")
     }
 
     #[test]
@@ -181,6 +218,9 @@ mod tests {
         assert_eq!(derive_prefix("short"), "short");
     }
 
+    /// A representative session-key TTL for the provision tests (#216).
+    const TEST_TTL: Duration = Duration::from_secs(3600);
+
     #[tokio::test]
     async fn provision_mints_and_returns_handle_plus_env_entries() {
         let server = MockServer::start().await;
@@ -190,6 +230,8 @@ mod tests {
             .and(header("authorization", "Bearer user_raw_tok"))
             .and(body_string_contains(format!("fkst-session-{session_id}")))
             .and(body_string_contains("proxy"))
+            // The TTL must reach NyxID as a self-expiring `expires_at` (#216).
+            .and(body_string_contains("expires_at"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": "key-1",
                 "full_key": "nyxid_ag_supersecretkeyvalue000"
@@ -204,6 +246,7 @@ mod tests {
             session_id,
             "https://nyxid.test",
             &raw,
+            TEST_TTL,
         )
         .await
         .expect("provision");
@@ -236,9 +279,15 @@ mod tests {
             .mount(&server)
             .await;
         let raw = SecretString::from("bad".to_string());
-        let err = provision(&client(&server.uri()), bson::Uuid::new(), "o", &raw)
-            .await
-            .expect_err("must fail");
+        let err = provision(
+            &client(&server.uri()),
+            bson::Uuid::new(),
+            "o",
+            &raw,
+            TEST_TTL,
+        )
+        .await
+        .expect_err("must fail");
         assert!(matches!(err, AppError::Unauthorized(_)), "got {err:?}");
     }
 
@@ -251,9 +300,15 @@ mod tests {
             .mount(&server)
             .await;
         let raw = SecretString::from("delegated".to_string());
-        let err = provision(&client(&server.uri()), bson::Uuid::new(), "o", &raw)
-            .await
-            .expect_err("must fail");
+        let err = provision(
+            &client(&server.uri()),
+            bson::Uuid::new(),
+            "o",
+            &raw,
+            TEST_TTL,
+        )
+        .await
+        .expect_err("must fail");
         assert!(matches!(err, AppError::Unauthorized(_)), "got {err:?}");
     }
 
@@ -266,9 +321,15 @@ mod tests {
             .mount(&server)
             .await;
         let raw = SecretString::from("tok".to_string());
-        let err = provision(&client(&server.uri()), bson::Uuid::new(), "o", &raw)
-            .await
-            .expect_err("must fail");
+        let err = provision(
+            &client(&server.uri()),
+            bson::Uuid::new(),
+            "o",
+            &raw,
+            TEST_TTL,
+        )
+        .await
+        .expect_err("must fail");
         assert!(matches!(err, AppError::Unavailable(_)), "got {err:?}");
     }
 
@@ -283,9 +344,15 @@ mod tests {
             .mount(&server)
             .await;
         let raw = SecretString::from("tok".to_string());
-        let (handle, env) = provision(&client(&server.uri()), bson::Uuid::new(), "o", &raw)
-            .await
-            .expect("provision");
+        let (handle, env) = provision(
+            &client(&server.uri()),
+            bson::Uuid::new(),
+            "o",
+            &raw,
+            TEST_TTL,
+        )
+        .await
+        .expect("provision");
         // The handle's Debug must not contain the secret tail.
         assert!(!format!("{handle:?}").contains("NEVER_LOG_THIS_VALUE"));
         // The secret lives only inside a SecretString, whose Debug is redacted.
@@ -297,50 +364,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoke_is_best_effort_and_swallows_failures() {
+    async fn revoke_makes_no_nyxid_call_and_returns_unit() {
+        // #216: the key self-expires via its TTL, so teardown must NOT hit
+        // NyxID at all. Mount a server that rejects EVERY request: if revoke
+        // tried to call the (rejected) service-account DELETE, the 418 would
+        // make `revoke_api_key` error — but revoke no longer calls it, so the
+        // hook completes cleanly without touching the server.
         let server = MockServer::start().await;
-        // Service token (revoke uses it) then a failing DELETE — revoke must
-        // not panic or propagate.
-        Mock::given(method("POST"))
-            .and(path(TOKEN_PATH))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "svc", "token_type": "Bearer", "expires_in": 3600
-            })))
-            .mount(&server)
-            .await;
-        Mock::given(method("DELETE"))
-            .and(path(format!("{API_KEYS_PATH}/k")))
-            .respond_with(ResponseTemplate::new(500))
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(418))
+            .expect(0)
             .mount(&server)
             .await;
         let handle = NyxidTokenHandle {
             key_id: "k".to_string(),
             key_prefix: "nyxid_ag_xxx".to_string(),
         };
-        // Returns unit regardless of the upstream failure.
+        // Returns unit and issues no HTTP request (the `expect(0)` above is
+        // verified on server drop).
         revoke(&client(&server.uri()), &handle).await;
     }
 
-    #[tokio::test]
-    async fn revoke_succeeds_on_204() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path(TOKEN_PATH))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "svc", "token_type": "Bearer", "expires_in": 3600
-            })))
-            .mount(&server)
-            .await;
-        Mock::given(method("DELETE"))
-            .and(path(format!("{API_KEYS_PATH}/k")))
-            .respond_with(ResponseTemplate::new(204))
-            .expect(1)
-            .mount(&server)
-            .await;
-        let handle = NyxidTokenHandle {
-            key_id: "k".to_string(),
-            key_prefix: "p".to_string(),
-        };
-        revoke(&client(&server.uri()), &handle).await;
+    #[test]
+    fn expires_at_rfc3339_renders_a_parseable_rfc3339_timestamp() {
+        // The expiry must be a well-formed RFC 3339 string NyxID can parse, and
+        // it must lie in the future for a positive TTL.
+        let before = bson::DateTime::now();
+        let rendered =
+            expires_at_rfc3339(bson::Uuid::new(), Duration::from_secs(3600)).expect("render");
+        let parsed = bson::DateTime::parse_rfc3339_str(&rendered).expect("valid rfc3339");
+        assert!(
+            parsed.timestamp_millis() > before.timestamp_millis(),
+            "expiry must be in the future, got {rendered}"
+        );
     }
 }

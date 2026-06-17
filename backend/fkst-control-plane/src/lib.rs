@@ -28,8 +28,7 @@ pub mod goals;
 pub use fkst_journal as journal;
 pub mod journal_config;
 // Role-neutral leaves extracted to `fkst-shared` (issue #145). Re-exported here
-// so every existing `crate::{llm,models,nyxid}::…` path and test still resolves.
-pub use fkst_shared::llm;
+// so every existing `crate::{models,nyxid}::…` path and test still resolves.
 pub use fkst_shared::models;
 pub use fkst_shared::nyxid;
 // `ornn` and `vault` are split modules: their role-neutral leaves
@@ -43,5 +42,6 @@ pub mod reconcile;
 pub mod router;
 pub mod routes;
 pub mod sessions;
+pub mod startup;
 pub mod state;
 pub mod vault;

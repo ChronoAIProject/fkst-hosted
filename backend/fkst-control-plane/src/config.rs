@@ -3,10 +3,10 @@
 //! Several envy passes over the same snapshot of variables:
 //! 1. the `FKST_HOSTED_*`-prefixed HTTP/server settings,
 //! 2. the `FKST_*`-prefixed journaling + auth settings, and
-//! 3. the unprefixed platform settings (the `GITHUB_TOKEN` /
-//!    `NYXID_CLIENT_ID` / `NYXID_CLIENT_SECRET` secrets and the internal
-//!    worker-protocol knobs). The controller is datastore-free (#143), so
-//!    there is no MongoDB configuration to load.
+//! 3. the unprefixed platform settings (the `GITHUB_TOKEN` secret and the
+//!    internal worker-protocol knobs). The owner-only NyxID client (#257)
+//!    needs no service-account credential. The controller is datastore-free
+//!    (#143), so there is no MongoDB configuration to load.
 
 use std::fmt;
 
@@ -91,6 +91,15 @@ mod defaults {
         30
     }
 
+    /// TTL (seconds) for a per-session NyxID agent key (#216). The key carries
+    /// `expires_at = now + this`, so it SELF-EXPIRES rather than relying on a
+    /// service-account revoke NyxID rejects. Default 24h: long enough for any
+    /// realistic engine run, short enough to bound a leaked key's blast radius.
+    /// Must be > 0.
+    pub(super) fn session_key_ttl_secs() -> u64 {
+        86_400
+    }
+
     /// Liveness TTL for the in-memory worker registry (#134): a worker whose
     /// last heartbeat is older than this is dropped from `live_workers` and
     /// expired by the sweeper. Must be > 0.
@@ -119,14 +128,6 @@ mod defaults {
         // `DefaultServiceSeed`); kept in sync with
         // `crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG`.
         crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG.to_string()
-    }
-
-    pub(super) fn llm_timeout_secs() -> u64 {
-        20
-    }
-
-    pub(super) fn llm_max_output_bytes() -> usize {
-        1_048_576
     }
 
     pub(super) fn vault_value_byte_cap() -> usize {
@@ -161,23 +162,6 @@ struct HttpVars {
     log_level: String,
     #[serde(default = "defaults::request_timeout_secs")]
     request_timeout_secs: u64,
-    /// NyxID LLM-gateway base URL for package generation. Absent => generation
-    /// is disabled (the endpoint answers 503). Env: `FKST_HOSTED_LLM_GATEWAY_URL`.
-    #[serde(default)]
-    llm_gateway_url: Option<String>,
-    /// LLM model name routed by the gateway. Required when the gateway URL is
-    /// set. Env: `FKST_HOSTED_LLM_MODEL`.
-    #[serde(default)]
-    llm_model: Option<String>,
-    /// Per-request timeout (seconds) for one LLM completion call.
-    /// Env: `FKST_HOSTED_LLM_TIMEOUT_SECS`. Default 20, zero rejected.
-    #[serde(default = "defaults::llm_timeout_secs")]
-    llm_timeout_secs: u64,
-    /// Max bytes accepted from a single LLM completion before the draft is
-    /// rejected. Env: `FKST_HOSTED_LLM_MAX_OUTPUT_BYTES`. Default 1 MiB,
-    /// zero rejected.
-    #[serde(default = "defaults::llm_max_output_bytes")]
-    llm_max_output_bytes: usize,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     #[serde(default = "defaults::vault_value_byte_cap")]
@@ -194,8 +178,7 @@ struct HttpVars {
     codex_model: String,
     /// NyxID proxy base URL for the chrono-llm DEFAULT codex provider (#112).
     /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
-    /// slug; blank rejected at load. Non-secret (it is a route, like
-    /// `llm_gateway_url`).
+    /// slug; blank rejected at load. Non-secret (it is a route).
     #[serde(default = "defaults::chrono_llm_base_url")]
     chrono_llm_base_url: String,
 }
@@ -203,17 +186,12 @@ struct HttpVars {
 /// Unprefixed platform variables. The controller is datastore-free (#143), so
 /// no MongoDB settings ride this pass. `GITHUB_TOKEN` is here (secret; optional
 /// — without it GitHub journaling degrades to no-durable-floor with a warn).
-/// `NYXID_CLIENT_ID` / `NYXID_CLIENT_SECRET` also ride this pass (platform
-/// credentials are unprefixed, following the `GITHUB_TOKEN` precedent).
-/// Both-or-neither: only one set is a config error naming the missing var.
+/// The owner-only NyxID client (#257) needs no service-account credential, so
+/// none rides this pass.
 #[derive(Deserialize)]
 struct PlatformVars {
     #[serde(default)]
     github_token: Option<String>,
-    #[serde(default)]
-    nyxid_client_id: Option<String>,
-    #[serde(default)]
-    nyxid_client_secret: Option<String>,
     /// Shared secret authenticating internal controller<->worker requests
     /// (#134). Env `FKST_INTERNAL_AUTH_TOKEN`. Optional on the controller: when
     /// absent, the internal routes are not mounted (closed by default).
@@ -274,6 +252,8 @@ struct AuthVars {
     auth_nyxid_base_url: Option<String>,
     #[serde(default = "defaults::nyxid_org_cache_ttl_secs")]
     nyxid_org_cache_ttl_secs: u64,
+    #[serde(default = "defaults::session_key_ttl_secs")]
+    session_key_ttl_secs: u64,
     #[serde(default = "defaults::nyxid_github_proxy_slug")]
     nyxid_github_proxy_slug: String,
 }
@@ -333,37 +313,20 @@ pub struct Config {
     /// Authentication mode: disabled (local dev) or enabled with NyxID
     /// settings. Env: `FKST_AUTH_ENABLED` (default true = fail-closed).
     pub auth: AuthMode,
-    /// NyxID service-account client ID for org APIs. Env: `NYXID_CLIENT_ID`.
-    /// Both-or-neither with `nyxid_client_secret`. Optional: absent means
-    /// org features degrade gracefully (owner-only policy).
-    pub nyxid_client_id: Option<String>,
-    /// NyxID service-account client secret (SECRET). Env:
-    /// `NYXID_CLIENT_SECRET`. Both-or-neither with `nyxid_client_id`.
-    pub nyxid_client_secret: Option<SecretString>,
-    /// TTL in seconds for the NyxID org-role and user-orgs caches.
+    /// TTL in seconds for the NyxID user-orgs cache.
     /// Env: `FKST_NYXID_ORG_CACHE_TTL_SECS`. Default 30, zero rejected.
     pub nyxid_org_cache_ttl_secs: u64,
+    /// TTL in seconds for a per-session NyxID agent key (#216): the key is
+    /// minted with `expires_at = now + this`, so it self-expires (the primary
+    /// cleanup mechanism — the service-account revoke route NyxID rejects).
+    /// Env: `FKST_SESSION_KEY_TTL_SECS`. Default 86400 (24h), zero rejected.
+    pub session_key_ttl_secs: u64,
     /// Downstream-service slug NyxID resolves to inject the user's GitHub
     /// credential on proxied requests; the client builds the proxy base path
     /// `/api/v1/proxy/{slug}` from it. Env: `FKST_NYXID_GITHUB_PROXY_SLUG`.
     /// Default `api-github` (the slug NyxID `main`/v0.7.0 seeds). Rejected when
     /// blank (fail-closed: an empty slug yields an unresolvable proxy route).
     pub nyxid_github_proxy_slug: String,
-    /// NyxID LLM-gateway base URL for package generation. `None` => the
-    /// generate endpoint is disabled (answers 503). Env:
-    /// `FKST_HOSTED_LLM_GATEWAY_URL`. Non-secret (the route is logged): a set
-    /// URL requires both NyxID service-account credentials and a model name.
-    pub llm_gateway_url: Option<String>,
-    /// LLM model name the gateway routes by; required when the gateway URL is
-    /// set (fail-closed). Env: `FKST_HOSTED_LLM_MODEL`.
-    pub llm_model: Option<String>,
-    /// Per-request timeout (seconds) for one LLM completion call.
-    /// Env: `FKST_HOSTED_LLM_TIMEOUT_SECS`. Default 20, zero rejected.
-    pub llm_timeout_secs: u64,
-    /// Max bytes accepted from a single LLM completion before the generated
-    /// draft is rejected (a retry budget guard against a runaway model).
-    /// Env: `FKST_HOSTED_LLM_MAX_OUTPUT_BYTES`. Default 1 MiB, zero rejected.
-    pub llm_max_output_bytes: usize,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     pub vault_value_byte_cap: usize,
@@ -433,18 +396,9 @@ impl fmt::Debug for Config {
                 &self.github_token.as_ref().map(|_| "<redacted>"),
             )
             .field("auth", &self.auth)
-            .field("nyxid_client_id", &self.nyxid_client_id)
-            .field(
-                "nyxid_client_secret",
-                &self.nyxid_client_secret.as_ref().map(|_| "<redacted>"),
-            )
             .field("nyxid_org_cache_ttl_secs", &self.nyxid_org_cache_ttl_secs)
+            .field("session_key_ttl_secs", &self.session_key_ttl_secs)
             .field("nyxid_github_proxy_slug", &self.nyxid_github_proxy_slug)
-            // URL/model/numbers are non-secret routing config — show them.
-            .field("llm_gateway_url", &self.llm_gateway_url)
-            .field("llm_model", &self.llm_model)
-            .field("llm_timeout_secs", &self.llm_timeout_secs)
-            .field("llm_max_output_bytes", &self.llm_max_output_bytes)
             // The vault master key never reaches any Debug/log output.
             .field("vault_value_byte_cap", &self.vault_value_byte_cap)
             .field(
@@ -487,14 +441,9 @@ impl Default for Config {
             raised_max_line_bytes: defaults::raised_max_line_bytes(),
             github_token: None,
             auth: AuthMode::Disabled,
-            nyxid_client_id: None,
-            nyxid_client_secret: None,
             nyxid_org_cache_ttl_secs: defaults::nyxid_org_cache_ttl_secs(),
+            session_key_ttl_secs: defaults::session_key_ttl_secs(),
             nyxid_github_proxy_slug: defaults::nyxid_github_proxy_slug(),
-            llm_gateway_url: None,
-            llm_model: None,
-            llm_timeout_secs: defaults::llm_timeout_secs(),
-            llm_max_output_bytes: defaults::llm_max_output_bytes(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             codex_model: defaults::codex_model(),
@@ -524,19 +473,6 @@ impl Config {
         if http.request_timeout_secs == 0 {
             return Err(AppError::Config(
                 "FKST_HOSTED_REQUEST_TIMEOUT_SECS must be at least 1".to_string(),
-            ));
-        }
-        // A zero LLM timeout would fail every completion instantly and a zero
-        // output cap would reject every draft — reject both loudly, mirroring
-        // the request-timeout guard above.
-        if http.llm_timeout_secs == 0 {
-            return Err(AppError::Config(
-                "FKST_HOSTED_LLM_TIMEOUT_SECS must be at least 1".to_string(),
-            ));
-        }
-        if http.llm_max_output_bytes == 0 {
-            return Err(AppError::Config(
-                "FKST_HOSTED_LLM_MAX_OUTPUT_BYTES must be at least 1".to_string(),
             ));
         }
 
@@ -576,22 +512,6 @@ impl Config {
                 "FKST_WORKER_LIVENESS_TTL_SECS must be at least 1".to_string(),
             ));
         }
-        // Both-or-neither: NYXID_CLIENT_ID and NYXID_CLIENT_SECRET.
-        let (nyxid_client_id, nyxid_client_secret) =
-            match (platform.nyxid_client_id, platform.nyxid_client_secret) {
-                (Some(id), Some(secret)) => (Some(id), Some(SecretString::from(secret))),
-                (None, None) => (None, None),
-                (Some(_), None) => {
-                    return Err(AppError::Config(
-                        "NYXID_CLIENT_SECRET must be set when NYXID_CLIENT_ID is set".to_string(),
-                    ));
-                }
-                (None, Some(_)) => {
-                    return Err(AppError::Config(
-                        "NYXID_CLIENT_ID must be set when NYXID_CLIENT_SECRET is set".to_string(),
-                    ));
-                }
-            };
 
         // Authentication settings pass (FKST_AUTH_* with the FKST_ prefix).
         let auth: AuthVars = envy::prefixed(JOURNAL_ENV_PREFIX)
@@ -600,6 +520,14 @@ impl Config {
         if auth.nyxid_org_cache_ttl_secs == 0 {
             return Err(AppError::Config(
                 "FKST_NYXID_ORG_CACHE_TTL_SECS must be at least 1".to_string(),
+            ));
+        }
+        // A zero session-key TTL would mint an already-expired key, breaking
+        // every engine run at startup — reject it loudly, mirroring the guards
+        // above. The key self-expires after this many seconds (#216).
+        if auth.session_key_ttl_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_SESSION_KEY_TTL_SECS must be at least 1".to_string(),
             ));
         }
         // Fail-closed: a blank slug builds `/api/v1/proxy/` which NyxID cannot
@@ -627,25 +555,6 @@ impl Config {
         } else {
             AuthMode::Disabled
         };
-
-        // Fail-closed wiring for LLM package generation: a configured gateway
-        // is useless without the service-account credentials that mint its
-        // bearer token, and the gateway routes by model name, so an unset model
-        // would be an unroutable call. Reject both at startup, naming the var.
-        if http.llm_gateway_url.is_some()
-            && (nyxid_client_id.is_none() || nyxid_client_secret.is_none())
-        {
-            return Err(AppError::Config(
-                "FKST_HOSTED_LLM_GATEWAY_URL requires NYXID_CLIENT_ID and NYXID_CLIENT_SECRET"
-                    .to_string(),
-            ));
-        }
-        if http.llm_gateway_url.is_some() && http.llm_model.is_none() {
-            return Err(AppError::Config(
-                "FKST_HOSTED_LLM_MODEL must be set when FKST_HOSTED_LLM_GATEWAY_URL is set"
-                    .to_string(),
-            ));
-        }
 
         // Vault key/cap validation (fail-closed): the vault is always-on, so a
         // missing or invalid master-key source is a startup error. The inline
@@ -695,14 +604,9 @@ impl Config {
             raised_max_line_bytes: journal.raised_max_line_bytes,
             github_token: platform.github_token.map(SecretString::from),
             auth: auth_mode,
-            nyxid_client_id,
-            nyxid_client_secret,
             nyxid_org_cache_ttl_secs: auth.nyxid_org_cache_ttl_secs,
+            session_key_ttl_secs: auth.session_key_ttl_secs,
             nyxid_github_proxy_slug: auth.nyxid_github_proxy_slug,
-            llm_gateway_url: http.llm_gateway_url,
-            llm_model: http.llm_model,
-            llm_timeout_secs: http.llm_timeout_secs,
-            llm_max_output_bytes: http.llm_max_output_bytes,
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
@@ -1020,72 +924,6 @@ mod tests {
         }
     }
 
-    // ---- NyxID client credential tests ----------------------------------------
-
-    #[test]
-    fn nyxid_creds_both_set_are_accepted() {
-        let config = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("NYXID_CLIENT_ID", "sa_test"),
-            ("NYXID_CLIENT_SECRET", "sas_test"),
-        ]))
-        .expect("both set");
-        assert_eq!(config.nyxid_client_id.as_deref(), Some("sa_test"));
-        assert!(config.nyxid_client_secret.is_some());
-    }
-
-    #[test]
-    fn nyxid_creds_neither_set_is_accepted() {
-        let config =
-            Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("neither set");
-        assert!(config.nyxid_client_id.is_none());
-        assert!(config.nyxid_client_secret.is_none());
-    }
-
-    #[test]
-    fn nyxid_client_id_without_secret_is_a_config_error() {
-        let err = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("NYXID_CLIENT_ID", "sa_test"),
-        ]))
-        .expect_err("id without secret must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("NYXID_CLIENT_SECRET"),
-            "error must name the missing variable, got: {err}"
-        );
-    }
-
-    #[test]
-    fn nyxid_client_secret_without_id_is_a_config_error() {
-        let err = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("NYXID_CLIENT_SECRET", "sas_test"),
-        ]))
-        .expect_err("secret without id must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("NYXID_CLIENT_ID"),
-            "error must name the missing variable, got: {err}"
-        );
-    }
-
-    #[test]
-    fn nyxid_client_secret_never_appears_in_debug() {
-        let config = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("NYXID_CLIENT_ID", "sa_test"),
-            ("NYXID_CLIENT_SECRET", "sas_should_not_leak"),
-        ]))
-        .expect("both set");
-        let rendered = format!("{config:?}");
-        assert!(
-            !rendered.contains("sas_should_not_leak"),
-            "secret leaked in debug"
-        );
-        assert!(rendered.contains("<redacted>"));
-    }
-
     #[test]
     fn nyxid_org_cache_ttl_defaults_to_30() {
         let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
@@ -1112,6 +950,36 @@ mod tests {
         assert!(matches!(err, AppError::Config(_)));
         assert!(
             err.to_string().contains("FKST_NYXID_ORG_CACHE_TTL_SECS"),
+            "error must name the variable, got: {err}"
+        );
+    }
+
+    #[test]
+    fn session_key_ttl_defaults_to_one_day() {
+        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
+        assert_eq!(config.session_key_ttl_secs, 86_400);
+    }
+
+    #[test]
+    fn session_key_ttl_is_overridable() {
+        let config = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_SESSION_KEY_TTL_SECS", "3600"),
+        ]))
+        .expect("override");
+        assert_eq!(config.session_key_ttl_secs, 3600);
+    }
+
+    #[test]
+    fn zero_session_key_ttl_is_a_config_error_naming_the_variable() {
+        let err = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_SESSION_KEY_TTL_SECS", "0"),
+        ]))
+        .expect_err("zero TTL must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(
+            err.to_string().contains("FKST_SESSION_KEY_TTL_SECS"),
             "error must name the variable, got: {err}"
         );
     }
@@ -1144,129 +1012,6 @@ mod tests {
             err.to_string().contains("FKST_NYXID_GITHUB_PROXY_SLUG"),
             "error must name the variable, got: {err}"
         );
-    }
-
-    // ---- LLM gateway configuration tests --------------------------------------
-
-    /// Service-account credentials any test enabling the gateway needs.
-    const NYXID_CREDS: [(&str, &str); 2] = [
-        ("NYXID_CLIENT_ID", "sa_test"),
-        ("NYXID_CLIENT_SECRET", "sas_test"),
-    ];
-
-    #[test]
-    fn llm_defaults_when_gateway_unset() {
-        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
-        assert!(config.llm_gateway_url.is_none());
-        assert!(config.llm_model.is_none());
-        assert_eq!(config.llm_timeout_secs, 20);
-        assert_eq!(config.llm_max_output_bytes, 1_048_576);
-    }
-
-    #[test]
-    fn llm_vars_are_all_overridable() {
-        let mut pairs = vec![
-            ("FKST_AUTH_ENABLED", "false"),
-            (
-                "FKST_HOSTED_LLM_GATEWAY_URL",
-                "https://nyxid.example.com/llm",
-            ),
-            ("FKST_HOSTED_LLM_MODEL", "claude-sonnet"),
-            ("FKST_HOSTED_LLM_TIMEOUT_SECS", "45"),
-            ("FKST_HOSTED_LLM_MAX_OUTPUT_BYTES", "2048"),
-        ];
-        pairs.extend_from_slice(&NYXID_CREDS);
-        let config = Config::from_vars(vars(&pairs)).expect("overrides");
-        assert_eq!(
-            config.llm_gateway_url.as_deref(),
-            Some("https://nyxid.example.com/llm")
-        );
-        assert_eq!(config.llm_model.as_deref(), Some("claude-sonnet"));
-        assert_eq!(config.llm_timeout_secs, 45);
-        assert_eq!(config.llm_max_output_bytes, 2048);
-    }
-
-    #[test]
-    fn zero_llm_timeout_is_a_config_error_naming_the_var() {
-        let err = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_HOSTED_LLM_TIMEOUT_SECS", "0"),
-        ]))
-        .expect_err("zero LLM timeout must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("FKST_HOSTED_LLM_TIMEOUT_SECS"),
-            "error must name the var, got: {err}"
-        );
-    }
-
-    #[test]
-    fn zero_llm_max_output_bytes_is_a_config_error_naming_the_var() {
-        let err = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_HOSTED_LLM_MAX_OUTPUT_BYTES", "0"),
-        ]))
-        .expect_err("zero LLM output cap must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("FKST_HOSTED_LLM_MAX_OUTPUT_BYTES"),
-            "error must name the var, got: {err}"
-        );
-    }
-
-    #[test]
-    fn llm_gateway_without_nyxid_creds_is_a_config_error() {
-        let err = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            (
-                "FKST_HOSTED_LLM_GATEWAY_URL",
-                "https://nyxid.example.com/llm",
-            ),
-            ("FKST_HOSTED_LLM_MODEL", "claude-sonnet"),
-        ]))
-        .expect_err("gateway without creds must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("NYXID_CLIENT_ID"),
-            "error must name the credential vars, got: {err}"
-        );
-    }
-
-    #[test]
-    fn llm_gateway_without_model_is_a_config_error() {
-        let mut pairs = vec![
-            ("FKST_AUTH_ENABLED", "false"),
-            (
-                "FKST_HOSTED_LLM_GATEWAY_URL",
-                "https://nyxid.example.com/llm",
-            ),
-        ];
-        pairs.extend_from_slice(&NYXID_CREDS);
-        let err = Config::from_vars(vars(&pairs)).expect_err("gateway without model must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("FKST_HOSTED_LLM_MODEL"),
-            "error must name the var, got: {err}"
-        );
-    }
-
-    #[test]
-    fn llm_gateway_with_creds_and_model_is_accepted() {
-        let mut pairs = vec![
-            ("FKST_AUTH_ENABLED", "false"),
-            (
-                "FKST_HOSTED_LLM_GATEWAY_URL",
-                "https://nyxid.example.com/llm",
-            ),
-            ("FKST_HOSTED_LLM_MODEL", "claude-sonnet"),
-        ];
-        pairs.extend_from_slice(&NYXID_CREDS);
-        let config = Config::from_vars(vars(&pairs)).expect("fully configured gateway");
-        assert_eq!(
-            config.llm_gateway_url.as_deref(),
-            Some("https://nyxid.example.com/llm")
-        );
-        assert_eq!(config.llm_model.as_deref(), Some("claude-sonnet"));
     }
 
     // ---- vault configuration tests --------------------------------------------

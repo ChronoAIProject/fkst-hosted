@@ -66,14 +66,13 @@ kubectl --context docker-desktop apply -f backend/fkst-control-plane/k8s_sample/
 
 TOK="$(openssl rand -hex 32)"   # share TOK with the worker Secret (#134)
 kubectl --context docker-desktop -n fkst-hosted create secret generic fkst-control-plane-secret \
-  --from-literal=NYXID_CLIENT_ID="..." \
-  --from-literal=NYXID_CLIENT_SECRET="..." \
   --from-literal=FKST_INTERNAL_AUTH_TOKEN="$TOK"
 ```
 
 **Consistency rule.** `FKST_INTERNAL_AUTH_TOKEN` MUST equal the worker Secret's
-value (the controller↔worker shared bearer). There are **no MongoDB credentials**
-— the controller is datastore-free (#143).
+value (the controller↔worker shared bearer). The owner-only NyxID client (#257)
+needs **no service-account credential**. There are **no MongoDB credentials** —
+the controller is datastore-free (#143).
 
 *Filled-file alternative:* copy `secret.example.yaml` to `secret.yaml`
 (git-ignored — only the `.example` template stays tracked), replace every

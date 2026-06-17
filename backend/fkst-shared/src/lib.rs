@@ -11,14 +11,12 @@
 //! - [`models`] — wire/domain document shapes (`RepoRef`, `SessionDoc`);
 //!   `bson`-shaped but driver-free.
 //! - [`nyxid`] — the NyxID credential-proxy transport client.
-//! - [`llm`] — the `LlmGateway` seam and its NyxID-backed implementation.
 //! - [`ornn`] — the Ornn pin DTOs (`types`); the on-disk injector and the
 //!   `AppError`-coupled client stay control-plane for now.
 //! - [`vault`] — the vault data model (`model`); the in-memory vault service
 //!   stays control-plane.
 //! - [`protocol`] — the internal controller<->worker wire types (#134).
 
-pub mod llm;
 pub mod models;
 pub mod nyxid;
 pub mod ornn;
