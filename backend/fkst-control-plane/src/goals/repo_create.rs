@@ -9,7 +9,7 @@
 
 use super::repo_create_classify as classify;
 use crate::models::RepoRef;
-use crate::nyxid::{DelegatedToken, NyxIdClient};
+use crate::nyxid::NyxIdClient;
 
 /// Specification for a new GitHub repository.
 #[derive(Debug, Clone)]
@@ -67,9 +67,6 @@ pub enum CreateRepoError {
     /// NyxID is unavailable or returned an error.
     #[error("nyxid unavailable: {0}")]
     NyxIdUnavailable(String),
-    /// NyxID token exchange was rejected.
-    #[error("token exchange rejected: {0}")]
-    ExchangeRejected(String),
     /// An upstream HTTP error with status and message.
     #[error("upstream error {status}: {message}")]
     Upstream { status: u16, message: String },
@@ -80,14 +77,17 @@ pub enum CreateRepoError {
 
 /// Create a GitHub repository by proxying through NyxID.
 ///
-/// The `delegated_token` must be obtained via
-/// [`NyxIdClient::exchange_token`] before calling this function.
+/// The forwarded `user_token` (the caller's inbound NyxID identity bearer) is
+/// presented DIRECTLY to the api-github proxy — no RFC 8693 token exchange and
+/// no control-plane client credential. The user's api-github connection must
+/// carry the `repo` OAuth scope; a missing scope surfaces as
+/// [`CreateRepoError::InsufficientScope`].
 ///
 /// Returns a [`RepoRef`] with `owner` and `name` extracted from the 201
 /// Created response body.
 pub async fn create_repo(
     nyxid: &NyxIdClient,
-    delegated_token: &DelegatedToken,
+    user_token: &secrecy::SecretString,
     spec: &CreateRepoSpec,
 ) -> Result<RepoRef, CreateRepoError> {
     // Build the GitHub API path.
@@ -113,24 +113,25 @@ pub async fn create_repo(
         "creating repository via NyxID GitHub proxy"
     );
 
+    // Serialize the request body to bytes for the buffered proxy helper.
+    let body_bytes = serde_json::to_vec(&body)
+        .map_err(|e| CreateRepoError::Malformed(format!("failed to serialize request body: {e}")))?;
+
     let response = nyxid
-        .proxy_github(
-            delegated_token,
+        .proxy_github_user(
+            user_token,
             reqwest::Method::POST,
             &github_path,
-            Some(body),
+            Some(body_bytes),
         )
         .await
         .map_err(|e| CreateRepoError::NyxIdUnavailable(e.to_string()))?;
 
-    let status = response.status();
+    let status = response.status;
 
-    // Classify error responses before consuming the body.
     if status == reqwest::StatusCode::CREATED {
-        // Success path: parse owner.login + name.
-        let body: serde_json::Value = response
-            .json()
-            .await
+        // Success path: parse owner.login + name from the buffered body.
+        let body: serde_json::Value = serde_json::from_slice(&response.body)
             .map_err(|e| CreateRepoError::Malformed(format!("failed to parse 201 body: {e}")))?;
 
         let owner = body
@@ -155,12 +156,12 @@ pub async fn create_repo(
         return Ok(RepoRef { owner, name });
     }
 
-    // Error classification. Capture the scope/SSO signal headers BEFORE the
-    // body is consumed — `response.text()` takes the response by value, after
-    // which `headers()` is no longer reachable. Classification rules live in
-    // the sibling `repo_create_classify` module.
-    let signals = classify::ScopeSignals::from_headers(response.headers());
-    let error_body = response.text().await.unwrap_or_default();
+    // Error classification. The buffered `ProxyResponse` already carries both
+    // headers and body, so the scope/SSO signals and the error text are read
+    // independently. Classification rules live in the sibling
+    // `repo_create_classify` module.
+    let signals = classify::ScopeSignals::from_headers(&response.headers);
+    let error_body = String::from_utf8_lossy(&response.body).into_owned();
 
     match status {
         reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
@@ -225,18 +226,14 @@ pub(super) fn truncate_error_body(body: &str) -> String {
 /// Map NyxID errors to CreateRepoError for use in the trigger handler.
 impl From<crate::nyxid::NyxIdError> for CreateRepoError {
     fn from(err: crate::nyxid::NyxIdError) -> Self {
-        use crate::nyxid::NyxIdError;
-        match err {
-            NyxIdError::ExchangeRejected(detail) => CreateRepoError::ExchangeRejected(detail),
-            other => CreateRepoError::NyxIdUnavailable(other.to_string()),
-        }
+        CreateRepoError::NyxIdUnavailable(err.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// Build a NyxID client pointed at `uri`. Centralized so the wiremock tests
@@ -252,11 +249,9 @@ mod tests {
         .expect("client build")
     }
 
-    fn delegated() -> DelegatedToken {
-        DelegatedToken {
-            access_token: secrecy::SecretString::from("delegated_tok".to_string()),
-            expires_in: 300,
-        }
+    /// The forwarded user token presented directly to the api-github proxy.
+    fn user_token() -> secrecy::SecretString {
+        secrecy::SecretString::from("user_tok".to_string())
     }
 
     /// A personal-account spec (no org) with the given name.
@@ -312,12 +307,15 @@ mod tests {
         let server = MockServer::start().await;
         let client = test_client(&server.uri());
 
+        // Forwarded user token hits the generic `/api/v1/proxy/s/{slug}` shape
+        // (NOT the legacy `/api/v1/proxy/{slug}` path) under a USER bearer.
         Mock::given(method("POST"))
             .and(path(format!(
-                "/api/v1/proxy/{}{}",
+                "/api/v1/proxy/s/{}{}",
                 crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG,
                 "/user/repos"
             )))
+            .and(header("authorization", "Bearer user_tok"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "owner": { "login": "testuser" },
                 "name": "my-repo"
@@ -325,7 +323,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let repo = create_repo(&client, &delegated(), &personal_spec("my-repo"))
+        let repo = create_repo(&client, &user_token(), &personal_spec("my-repo"))
             .await
             .expect("create should succeed");
         assert_eq!(repo.owner, "testuser");
@@ -339,10 +337,11 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path(format!(
-                "/api/v1/proxy/{}{}",
+                "/api/v1/proxy/s/{}{}",
                 crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG,
                 "/orgs/acme/repos"
             )))
+            .and(header("authorization", "Bearer user_tok"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "owner": { "login": "acme" },
                 "name": "org-repo"
@@ -350,11 +349,40 @@ mod tests {
             .mount(&server)
             .await;
 
-        let repo = create_repo(&client, &delegated(), &org_spec("org-repo", "acme", true))
+        let repo = create_repo(&client, &user_token(), &org_spec("org-repo", "acme", true))
             .await
             .expect("create should succeed");
         assert_eq!(repo.owner, "acme");
         assert_eq!(repo.name, "org-repo");
+    }
+
+    #[tokio::test]
+    async fn create_repo_succeeds_with_no_exchange_mock() {
+        // Proves the forwarded user token is presented DIRECTLY: only the
+        // api-github proxy endpoint is mocked — there is NO `/oauth/token`
+        // exchange mock, so an RFC 8693 exchange would 404 and fail here.
+        let server = MockServer::start().await;
+        let client = test_client(&server.uri());
+
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/api/v1/proxy/s/{}{}",
+                crate::nyxid::DEFAULT_GITHUB_PROXY_SLUG,
+                "/user/repos"
+            )))
+            .and(header("authorization", "Bearer user_tok"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "owner": { "login": "testuser" },
+                "name": "direct-repo"
+            })))
+            .mount(&server)
+            .await;
+
+        let repo = create_repo(&client, &user_token(), &personal_spec("direct-repo"))
+            .await
+            .expect("create should succeed without any token exchange");
+        assert_eq!(repo.owner, "testuser");
+        assert_eq!(repo.name, "direct-repo");
     }
 
     #[tokio::test]
@@ -369,7 +397,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = create_repo(&client, &delegated(), &personal_spec("taken-repo"))
+        let err = create_repo(&client, &user_token(), &personal_spec("taken-repo"))
             .await
             .expect_err("should fail");
         assert!(
@@ -391,7 +419,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = create_repo(&client, &delegated(), &personal_spec("forbidden-repo"))
+        let err = create_repo(&client, &user_token(), &personal_spec("forbidden-repo"))
             .await
             .expect_err("should fail");
         assert!(matches!(err, CreateRepoError::AuthFailed(_)), "got {err:?}");
@@ -414,7 +442,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = create_repo(&client, &delegated(), &personal_spec("scope-repo"))
+        let err = create_repo(&client, &user_token(), &personal_spec("scope-repo"))
             .await
             .expect_err("should fail");
         assert!(
@@ -448,7 +476,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = create_repo(&client, &delegated(), &org_spec("sso-repo", "acme", false))
+        let err = create_repo(&client, &user_token(), &org_spec("sso-repo", "acme", false))
             .await
             .expect_err("should fail");
         match &err {
@@ -484,7 +512,7 @@ mod tests {
 
         let err = create_repo(
             &client,
-            &delegated(),
+            &user_token(),
             &org_spec("policy-repo", "acme", false),
         )
         .await
@@ -514,7 +542,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = create_repo(&client, &delegated(), &org_spec("vis-repo", "acme", true))
+        let err = create_repo(&client, &user_token(), &org_spec("vis-repo", "acme", true))
             .await
             .expect_err("should fail");
         assert!(matches!(err, CreateRepoError::OrgPolicy(_)), "got {err:?}");
@@ -532,7 +560,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = create_repo(&client, &delegated(), &personal_spec("rate-limited-repo"))
+        let err = create_repo(&client, &user_token(), &personal_spec("rate-limited-repo"))
             .await
             .expect_err("should fail");
         assert!(matches!(err, CreateRepoError::RateLimited), "got {err:?}");
@@ -551,7 +579,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = create_repo(&client, &delegated(), &personal_spec("my-repo"))
+        let err = create_repo(&client, &user_token(), &personal_spec("my-repo"))
             .await
             .expect_err("should fail");
         assert!(matches!(err, CreateRepoError::Malformed(_)), "got {err:?}");
@@ -562,7 +590,7 @@ mod tests {
         // Point at nothing to trigger a transport error.
         let client = test_client("http://127.0.0.1:1");
 
-        let err = create_repo(&client, &delegated(), &personal_spec("unreachable-repo"))
+        let err = create_repo(&client, &user_token(), &personal_spec("unreachable-repo"))
             .await
             .expect_err("should fail");
         assert!(
