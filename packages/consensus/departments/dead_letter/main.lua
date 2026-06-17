@@ -14,7 +14,7 @@ function pipeline(event)
   local payload = event.payload or {}
   local error_class = error_facts.one_line(payload.error_class or "dead-letter")
   local error_message = payload.error or payload.message or error_class
-  local fields = core.error_fact_fields(error_class, payload.queue, payload.dept, error_message, {
+  local fields = error_facts.error_fact_fields(error_class, payload.queue, payload.dept, error_message, {
     source_ref = payload.source_ref or (type(payload.payload) == "table" and payload.payload.source_ref or nil),
     attempt = payload.attempt,
     terminal = true,
