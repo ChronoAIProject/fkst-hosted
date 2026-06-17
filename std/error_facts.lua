@@ -44,4 +44,33 @@ function F.error_fingerprint(error_class, queue, dept, message)
   }, "|"))
 end
 
+function F.error_fact_fields(error_class, queue, dept, message, context)
+  local fields = {
+    "error_class=" .. F.one_line(error_class or "unknown-error"),
+    "fingerprint=" .. F.error_fingerprint(error_class, queue, dept, message),
+  }
+  local source_ref = F.source_ref_field(context and context.source_ref)
+  if source_ref ~= nil and source_ref ~= "" then
+    table.insert(fields, "source_ref=" .. source_ref)
+  end
+  if context and context.attempt ~= nil then
+    table.insert(fields, "attempt=" .. F.one_line(context.attempt))
+  end
+  if context and context.terminal ~= nil then
+    table.insert(fields, "terminal=" .. tostring(context.terminal == true))
+  end
+  return fields
+end
+
+function F.event_source_ref(event)
+  if type(event) == "table" and event.source_ref ~= nil then
+    return event.source_ref
+  end
+  local payload = type(event) == "table" and event.payload or nil
+  if type(payload) == "table" then
+    return payload.source_ref
+  end
+  return nil
+end
+
 return F

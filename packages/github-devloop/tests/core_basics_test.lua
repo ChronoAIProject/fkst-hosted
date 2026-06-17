@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
+local error_facts = require("std.error_facts")
 local t = h.t
 local source_ref = h.source_ref
 local issue = h.issue
@@ -316,7 +317,7 @@ return {
     t.is_nil(core.parse_proposal_id("autochrono/issue/owner/repo/42"))
   end,
   test_error_fact_fields_include_available_delivery_context = function()
-    local fields = core.error_fact_fields(
+    local fields = error_facts.error_fact_fields(
       "codex-failed",
       "devloop_ready",
       "implement",
@@ -329,7 +330,7 @@ return {
     )
 
     t.eq(fields[1], "error_class=codex-failed")
-    t.eq(fields[2], "fingerprint=" .. core.error_fingerprint(
+    t.eq(fields[2], "fingerprint=" .. error_facts.error_fingerprint(
       "codex-failed",
       "devloop_ready",
       "implement",
@@ -340,7 +341,7 @@ return {
     t.eq(fields[5], "terminal=false")
   end,
   test_error_fact_fields_omit_unavailable_delivery_context = function()
-    local fields = core.error_fact_fields("codex-failed", "devloop_ready", "implement", "codex failed", {})
+    local fields = error_facts.error_fact_fields("codex-failed", "devloop_ready", "implement", "codex failed", {})
 
     t.eq(#fields, 2)
     t.eq(fields[1], "error_class=codex-failed")
