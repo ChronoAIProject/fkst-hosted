@@ -72,6 +72,12 @@ fkst-packages 是 fkst 的**包库**（"库 B"），承载跑在 **fkst-substrat
 
 **边界（防过度统一）：这张表治的是「生命周期状态」（marker-as-fact 状态机），不吞掉整个系统。** 事件路由（fanout/dispatch）、内容回源（source_ref→fetch）、ports/adapters egress、consensus 编排是**正交纪律**，各有各的成熟范式，不塞进这张表——硬塞违背「模式服务当前问题」。表统一 lifecycle，ports 治 egress，saga 治持久，codex 治长尾。
 
+## 随时可重启 supervise（crash-only restart contract）
+
+**部署即重启、随时可重启：`supervise` 必须能在任何时刻被 SIGKILL + 重启而不丢工作、不造成永久停滞。** 这是 crash-only software（Candea & Fox，见上一节）的硬契约，不是「尽量」。系统不做 drain / 优雅关停 / 在途排空；恢复靠两条既有机制：① **durable 投递**（redb at-least-once + lease/fencing + retry）让在途事件重启后续投；② **从 marker / git / 外部源回源 re-derive**（真相不在内存态）让任何中间态被重新推导、重驱。被重启杀掉的在途 codex（implement / fix / review）由其状态的 live-defer 心跳变陈后**重新 spawn**——所有工作幂等、可重入。重启因此是**无害的常规运营动作**（部署新代码、清运行态、换 BIN），随时可做，不需攒批次、不需等"安全窗口"。
+
+**铁律：重启永不作为问题的解释。** 看到重启后某 strand 没进展时，**默认归因不是「重启 churn 掉了它」**——这是违背本契约的偷懒归因，会掩盖真缺陷（活性盲区）。crash-only 下重启理应被 durable + re-derive 吸收；若重启**确实**导致永久丢失/停滞，那必然是一个**活性契约缺陷**（durable 没续投、re-derive 没重导、或「心跳变陈 → re-spawn」链断了），要 root-cause + 提 issue，绝不用「重启影响了它」搪塞，也绝不为「避免 churn」去不重启 / 攒批次（那让进程长跑陈旧代码，反害——见 dogfood「立即重启别攒批次」）。运营随时重启；把工作活下来是**系统的责任**，不是运营的小心翼翼。实证（2026-06-17）：误把一个 fixing-loop 停滞甩锅给「我反复 restart churn 掉 fix codex」，实查发现重启后 fix codex 已被正常 re-spawn（crash-only 生效），真信号是另一处 marker-visibility version-desync——偷懒归因差点掩盖真缺陷。
+
 ## 错误处理三级模型（codex-as-catch）
 
 任何流程 `A → func1 → B` 的失败处理分三级；**catch 的产出是「立项」而非「当场修」**（prior art：OTP 监督树要求快路径 supervisor 简单确定；AIOps 异常→工单；LLM 自愈模式的已知失败形态是不确定性与副作用越界）：
