@@ -70,7 +70,6 @@ pub enum AppError {
 /// - OrgPolicy -> 422 Unprocessable (org-policy hint)
 /// - RateLimited -> 503 Unavailable
 /// - NyxIdUnavailable -> 503 Unavailable
-/// - ExchangeRejected -> 401 Unauthorized
 /// - Upstream -> 502 Bad Gateway (mapped as 503 Unavailable)
 /// - Malformed -> 500 Internal
 ///
@@ -122,12 +121,6 @@ impl From<crate::goals::CreateRepoError> for AppError {
                 tracing::error!(detail = %detail, "nyxid unavailable during repo creation");
                 AppError::Unavailable(
                     "credential proxy unavailable; cannot create repository".to_string(),
-                )
-            }
-            CreateRepoError::ExchangeRejected(detail) => {
-                tracing::warn!(detail = %detail, "token exchange rejected during repo creation");
-                AppError::Unauthorized(
-                    "token exchange rejected: cannot create repository".to_string(),
                 )
             }
             CreateRepoError::Upstream { status, message } => {
