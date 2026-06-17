@@ -405,20 +405,6 @@ local function log_scan(action, fields)
   M.log_line("info", "substrate_ref_scan", "repo-management-plane", "SUBSTRATE_REF", parts)
 end
 
-local function parse_name_only_paths(stdout)
-  local paths = {}
-  local seen = {}
-  for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
-    local path = line:gsub("^%s+", ""):gsub("%s+$", "")
-    if path ~= "" and not seen[path] then
-      table.insert(paths, path)
-      seen[path] = true
-    end
-  end
-  table.sort(paths)
-  return paths
-end
-
 local function read_pr(pr_number_value, repo)
   local viewed = run_gh(function()
     return github().pr_cli_view(
@@ -437,7 +423,7 @@ local function changed_paths(repo, pr_number_value)
   local diff = run_gh(function()
     return github().pr_diff_name_only(repo, pr_number_value, 30)
   end, "substrate-ref PR diff")
-  return parse_name_only_paths(diff.stdout)
+  return M.parse_name_only_paths(diff.stdout)
 end
 
 validate_bump_pr = function(repo, base_branch, pr)

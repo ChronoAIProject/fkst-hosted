@@ -4,6 +4,23 @@ function M.persistence_class()
   return "saga"
 end
 
+-- Recurrence/API waiver: `parse_name_only_paths` stays package-root API because
+-- it is shared by package-root modules that receive only the installed `M`
+-- surface, and `scripts/check_repo.py` forbids reintroducing local copies.
+function M.parse_name_only_paths(stdout)
+  local paths = {}
+  local seen = {}
+  for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
+    local path = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if path ~= "" and not seen[path] then
+      table.insert(paths, path)
+      seen[path] = true
+    end
+  end
+  table.sort(paths)
+  return paths
+end
+
 require("core.base").install(M)
 require("core.config").install(M)
 require("std.github_debug_stamp").install(M)

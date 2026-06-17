@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_perm
+import check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -776,6 +776,11 @@ def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
             )
 
 
+def check_github_devloop_name_only_path_helper(root: Path, violations: list[str]) -> None:
+    for message in check_repo_github_devloop_helpers.repository_messages(root, packages_root(root), read_text, rel, strip_lua_comments_and_strings):
+        add(violations, "G14", message)
+
+
 def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
     packages = root / "packages"
     if not packages.exists():
@@ -963,35 +968,24 @@ def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list
     violations.extend(saga_handler_ratchet_violations(sources, allowlist, base_allowlist))
 
 def main() -> int:
-    root = repo_root()
-    violations: list[str] = []
-    warnings: list[str] = []
-
-    check_line_limit(root, violations, warnings)
-    check_test_shape(root, violations, warnings)
-    check_helper_reachability(root, violations)
-    check_graphql_connection_guards(root, warnings)
-    check_rest_pagination_guards(root, warnings)
-    check_hidden_text_encoded_literals(root, violations)
-    check_gh_rate_pool_sizing(root, violations)
-    check_error_class_prefixes(root, warnings)
-    check_ownership_gate_claim_owner(root, violations)
-    check_persistence_classes(root, violations)
-    check_cross_package_require(root, violations)
-    check_entity_read_count_assertions(root, violations)
-    check_convergence_budget_caps(root, violations)
+    root = repo_root(); violations: list[str] = []; warnings: list[str] = []
+    check_line_limit(root, violations, warnings); check_test_shape(root, violations, warnings)
+    check_helper_reachability(root, violations); check_graphql_connection_guards(root, warnings)
+    check_rest_pagination_guards(root, warnings); check_hidden_text_encoded_literals(root, violations)
+    check_gh_rate_pool_sizing(root, violations); check_error_class_prefixes(root, warnings)
+    check_ownership_gate_claim_owner(root, violations); check_persistence_classes(root, violations)
+    check_cross_package_require(root, violations); check_entity_read_count_assertions(root, violations)
+    check_convergence_budget_caps(root, violations); check_github_devloop_name_only_path_helper(root, violations)
     for message in check_repo_ingress.scoped_file_watch_ingress_messages(root, packages_root(root), read_text, rel):
         add(violations, "G13", message)
     check_no_permission_control(root, violations)
     check_gh_git_adapter_ratchet(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
 
-    for warning in warnings:
-        print(f"warning: {warning}", file=sys.stderr)
+    for warning in warnings: print(f"warning: {warning}", file=sys.stderr)
     if violations:
         print("repository check failed:", file=sys.stderr)
-        for violation in violations:
-            print(f"  {violation}", file=sys.stderr)
+        for violation in violations: print(f"  {violation}", file=sys.stderr)
         return 1
 
     print("OK: repository checks passed")

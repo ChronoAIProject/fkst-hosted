@@ -255,7 +255,7 @@ local function fetch_result(fn, label)
   return result.stdout or ""
 end
 
-local function parse_name_only_paths(stdout)
+local function parse_name_lines(stdout)
   local paths = {}
   for line in tostring(stdout or ""):gmatch("([^\r\n]+)") do
     local path = line:gsub("^%s+", ""):gsub("%s+$", "")
@@ -442,7 +442,7 @@ function M.build_context_bundle(args)
     local names = fetch_result(function(timeout)
       return M.gh_pr_diff_name_only(repo, args.pr_number, timeout, args.exec)
     end, "pr diff name-only fetch")
-    local risk = risk_report(parse_name_only_paths(names))
+    local risk = risk_report(parse_name_lines(names))
     risk = truncate_if_needed(risk, args.dept, proposal_id, risk_file_name)
     write_file(tmp_bundle.risk_path, risk, args.exec)
     tmp_bundle.risk_bytes = #risk
