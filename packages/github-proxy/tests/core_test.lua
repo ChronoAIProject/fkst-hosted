@@ -1,4 +1,5 @@
 local core = require("core")
+local error_facts = require("std.error_facts")
 local t = fkst.test
 
 local raw_mock_command = t.mock_command
@@ -641,7 +642,7 @@ return {
   end,
 
   test_error_fact_fields_include_available_delivery_context = function()
-    local fields = core.error_fact_fields(
+    local fields = error_facts.error_fact_fields(
       "gh-command-failed",
       "github_issue_comment_request",
       "github_comment",
@@ -654,7 +655,7 @@ return {
     )
 
     t.eq(fields[1], "error_class=gh-command-failed")
-    t.eq(fields[2], "fingerprint=" .. core.error_fingerprint(
+    t.eq(fields[2], "fingerprint=" .. error_facts.error_fingerprint(
       "gh-command-failed",
       "github_issue_comment_request",
       "github_comment",
@@ -666,7 +667,7 @@ return {
   end,
 
   test_error_fact_fields_omit_unavailable_delivery_context = function()
-    local fields = core.error_fact_fields("caught-failure", "github_poll_tick", "github_poll", "poll failed", {})
+    local fields = error_facts.error_fact_fields("caught-failure", "github_poll_tick", "github_poll", "poll failed", {})
 
     t.eq(#fields, 2)
     t.eq(fields[1], "error_class=caught-failure")
