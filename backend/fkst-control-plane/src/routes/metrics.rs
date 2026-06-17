@@ -18,8 +18,8 @@
 
 use axum::extract::State;
 use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::Router;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::state::AppState;
 
@@ -77,6 +77,20 @@ fn render_metrics(pending_work: u64, workers_registered: u64, workers_alive: u64
 }
 
 /// `GET /metrics`: the controller's Prometheus gauges. Unauthenticated.
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    tag = "system",
+    operation_id = "metrics",
+    responses(
+        (
+            status = 200,
+            description = "Prometheus text exposition (version 0.0.4) of the controller's live gauges",
+            content_type = "text/plain",
+            body = String
+        )
+    )
+)]
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     // Pending work: count of `Pending` claims (0 when no controller is wired).
     let pending_work = state
@@ -103,8 +117,8 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// `/metrics` route, mounted at the TOP level (unauthenticated, like `/health`).
-pub fn router() -> Router<AppState> {
-    Router::new().route("/metrics", get(metrics))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(metrics))
 }
 
 #[cfg(test)]

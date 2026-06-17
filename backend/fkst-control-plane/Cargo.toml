@@ -5,7 +5,11 @@ edition.workspace = true
 
 [dependencies]
 # Role-neutral models + transport clients shared with the worker (issue #145).
-fkst-shared = { path = "../fkst-shared" }
+# The `schema` feature pulls in the optional `utoipa::ToSchema` derives on the
+# shared wire types so they appear, full-fidelity, in the generated OpenAPI spec
+# served at /openapi.json. The worker links fkst-shared WITHOUT this feature, so
+# it stays free of utoipa.
+fkst-shared = { path = "../fkst-shared", features = ["schema"] }
 # The engine integration (the session runner), extracted from this crate so the
 # worker can drive it too (issue #151). `crate::engine` is now a re-export of
 # this crate; links neither `mongodb` nor `axum`.
@@ -16,6 +20,14 @@ fkst-engine = { path = "../fkst-engine" }
 fkst-journal = { path = "../fkst-journal" }
 async-trait = "0.1"
 axum = "0.7"
+# Runtime OpenAPI 3 generation for the public HTTP surface, served at
+# /openapi.json (no static spec; the live route table IS the spec). `utoipa`
+# carries the `#[utoipa::path]`/`ToSchema`/`IntoParams` derives; `utoipa-axum`'s
+# `OpenApiRouter` collects paths+schemas from the routes as they are registered,
+# so the documented path and the axum route are one and the same. `utoipa-axum`
+# 0.1 targets axum 0.7 (0.2+ moved to axum 0.8); both track utoipa 5.
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-axum = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "fs"] }
 tokio-util = "0.7"
 tower = "0.5"

@@ -3,17 +3,19 @@
 use std::time::Duration;
 
 use axum::http::{Method, StatusCode};
-use axum::routing::get;
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::middleware;
 use crate::auth::AuthMode;
 use crate::error::AppError;
+use crate::openapi;
 use crate::routes;
 use crate::state::AppState;
 
@@ -33,6 +35,13 @@ fn cors_layer() -> CorsLayer {
 }
 
 /// Build the application router.
+///
+/// The public surface is assembled on a [`utoipa_axum`](utoipa_axum) router so
+/// every `#[utoipa::path]` operation registered here also lands in the OpenAPI
+/// document; the assembled spec is then split out and served verbatim at
+/// `GET /openapi.json` (top-level, unauthenticated — see [`crate::openapi`]).
+/// The fleet-only `/internal/v1/*` routes are mounted AFTER this function (in
+/// `main.rs`), so they never enter the spec.
 ///
 /// When authentication is enabled, all `/api/v1/*` routes (except health) are
 /// wrapped with the proxy-trusted identity middleware (issue #113): it reads the
@@ -71,13 +80,15 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // raw body. It must therefore live OUTSIDE the `protect()` nest (like
     // `/health`). It is only mounted when a webhook secret is configured; with
     // no secret there is nothing to verify against, so the route is absent and
-    // installation resolution degrades to on-demand (a warning is logged).
-    let mut top = Router::new()
-        .route("/health", get(routes::health::health))
+    // installation resolution degrades to on-demand (a warning is logged). When
+    // unmounted it is likewise absent from the generated spec (the spec reflects
+    // what is actually served).
+    let mut top = OpenApiRouter::with_openapi(openapi::api_doc())
+        .routes(routes!(routes::health::health))
         // The literal /api/v1/health route coexists with the /api/v1 nest:
         // axum nesting registers the inner routes individually (no catch-all),
         // so /api/v1/health keeps answering (asserted by integration test).
-        .route("/api/v1/health", get(routes::health::health))
+        .routes(routes!(routes::health::health_v1))
         // `/metrics` (#144) is TOP-level and UNAUTHENTICATED like `/health`: it
         // carries only counts (no secret) and is served on the ClusterIP-only
         // surface, so Prometheus scrapes it without a NyxID identity.
@@ -92,17 +103,25 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         );
     }
 
-    Ok(top.nest("/api/v1", api_routes).with_state(state).layer(
-        ServiceBuilder::new()
-            .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-            .layer(TraceLayer::new_for_http())
-            .layer(PropagateRequestIdLayer::x_request_id())
-            .layer(cors_layer())
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                timeout,
-            )),
-    ))
+    // Nest the protected API, then split the assembled router from its OpenAPI
+    // document. The spec is rendered + served by a top-level `/openapi.json`
+    // route (no identity required), merged back onto the concrete axum router.
+    let (router, spec) = top.nest("/api/v1", api_routes).split_for_parts();
+
+    Ok(router
+        .merge(openapi::spec_route(spec)?)
+        .with_state(state)
+        .layer(
+            ServiceBuilder::new()
+                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+                .layer(TraceLayer::new_for_http())
+                .layer(PropagateRequestIdLayer::x_request_id())
+                .layer(cors_layer())
+                .layer(TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    timeout,
+                )),
+        ))
 }
 
 /// Merge the internal worker-protocol routes onto the top-level router (#134).

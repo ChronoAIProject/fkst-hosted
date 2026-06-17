@@ -9,8 +9,12 @@
 # them here:
 #   FKST_ROLE=worker; FKST_RUNTIME_ROOT=/var/lib/fkst/runtime (read by the loader
 #   as `engine_temp_root`); FKST_HOSTED_PORT / FKST_HOSTED_BIND_ADDR.
-#   FKST_POD_ID (= worker_id, REQUIRED, fail-closed) is downward-API only
-#   (Deployment env fieldRef metadata.name). NOT set here.
+#   FKST_POD_ID (= worker_id) is the downward-API pod name (Deployment env
+#   fieldRef metadata.name) — preferred and exact. NOT set here. When a
+#   deployment cannot wire the downward API, the worker falls back to the
+#   container HOSTNAME (also the pod name), so it still starts without
+#   FKST_POD_ID. Do NOT set a static FKST_POD_ID here: it would be shared across
+#   replicas and collide in the controller's worker registry.
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -32,20 +32,22 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::Json;
 use serde::Serialize;
+use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
-use crate::error::AppError;
+use crate::error::{AppError, ErrorEnvelope};
 use crate::state::AppState;
 
 /// One claim row in the admin view: the lease/goal key, the bound session, the
 /// owning worker, the controller-authoritative status, and the run fence. No
 /// secret material — a [`ClaimEntry`](crate::controller::ClaimEntry) carries
 /// none.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ClaimView {
     /// The lease key (`<package>` classic / `goal-<uuid>` goal).
     pub lease_key: String,
@@ -63,7 +65,7 @@ pub struct ClaimView {
 /// controller-authoritative current load (active claim count), and its
 /// lifecycle + liveness. No secret material — a
 /// [`WorkerSnapshot`](crate::controller::WorkerSnapshot) is pure liveness.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct WorkerView {
     pub worker_id: String,
     /// Whole seconds since this worker's last heartbeat, at snapshot time.
@@ -84,8 +86,12 @@ pub struct WorkerView {
 /// owner-PRESENCE boolean (never the owner id value), and the owning worker /
 /// pod. This is where redaction is most visible — the owner is reported as a
 /// boolean, and NO token / secret / env value is present.
-#[derive(Debug, Serialize)]
-pub struct SessionView {
+///
+/// Named `AdminSessionView` (not `SessionView`) so it does not collide, in the
+/// generated spec, with the public [`super::sessions::SessionView`] — a
+/// different, fuller projection.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AdminSessionView {
     pub status: crate::models::SessionStatus,
     pub goal_id: Option<String>,
     /// Presence of an owner-user binding (the value is intentionally NOT
@@ -96,15 +102,27 @@ pub struct SessionView {
 }
 
 /// The full admin-state response: the three live in-memory authorities.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AdminStateView {
     pub claims: Vec<ClaimView>,
     pub workers: Vec<WorkerView>,
     /// Session id -> projected (redacted) view.
-    pub sessions: BTreeMap<String, SessionView>,
+    pub sessions: BTreeMap<String, AdminSessionView>,
 }
 
 /// `GET /api/v1/admin/state`: the live controller state snapshot. Admin-gated.
+#[utoipa::path(
+    get,
+    path = "/admin/state",
+    tag = "admin",
+    operation_id = "admin_state",
+    security(("NyxIdIdentity" = [])),
+    responses(
+        (status = 200, description = "Live snapshot of claims, workers, and sessions", body = AdminStateView),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks the fkst:admin permission", body = ErrorEnvelope)
+    )
+)]
 async fn get_state(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -176,7 +194,7 @@ async fn get_state(
         .map(|doc| {
             (
                 doc.id.to_string(),
-                SessionView {
+                AdminSessionView {
                     status: doc.status,
                     goal_id: doc.goal_id.map(|g| g.to_string()),
                     owner_present: doc.owner_user_id.is_some(),
@@ -199,6 +217,6 @@ async fn get_state(
 }
 
 /// Admin-state route, nested under `/api/v1`.
-pub fn router() -> Router<AppState> {
-    Router::new().route("/admin/state", get(get_state))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(get_state))
 }

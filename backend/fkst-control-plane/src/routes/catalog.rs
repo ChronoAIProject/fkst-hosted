@@ -14,13 +14,15 @@
 //! not wired (auth disabled / no service client) the endpoints answer `503`.
 
 use axum::extract::{Path, Query, State};
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::Json;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
-use crate::error::AppError;
+use crate::error::{AppError, ErrorEnvelope};
 use crate::ornn::client::OrnnClient;
 use crate::ornn::types::{SearchPage, VersionRow};
 use crate::state::AppState;
@@ -31,7 +33,8 @@ use crate::state::AppState;
 /// (`any` | `only` | `exclude`) further filters skills by their system flag
 /// (skillsets have no system flag, so `system` is ignored there). `kind`,
 /// `tags`, `q`, and `page` are forwarded to Ornn's search verbatim.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct CatalogQuery {
     #[serde(default)]
     pub scope: Option<String>,
@@ -49,13 +52,13 @@ pub struct CatalogQuery {
 
 /// Aggregated catalog response (per issue #114 §5). One of `skills` /
 /// `skillsets` is populated depending on the endpoint; the other is empty.
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Default, ToSchema)]
 pub struct CatalogResponse {
     pub data: CatalogData,
 }
 
 /// The `data` envelope of a catalog response.
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Default, ToSchema)]
 pub struct CatalogData {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<crate::ornn::types::SearchRow>,
@@ -67,12 +70,12 @@ pub struct CatalogData {
 }
 
 /// Versions response for the lazy picker (`.../:name/versions`).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct VersionsResponse {
     pub data: VersionsData,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct VersionsData {
     pub name: String,
     pub versions: Vec<VersionRow>,
@@ -166,6 +169,21 @@ fn as_pairs(params: &[(String, String)]) -> Vec<(&str, &str)> {
 }
 
 /// `GET /api/v1/catalog/skills` — forward to Ornn `skill-search` per scope.
+#[utoipa::path(
+    get,
+    path = "/catalog/skills",
+    tag = "catalog",
+    operation_id = "list_catalog_skills",
+    security(("NyxIdIdentity" = [])),
+    params(CatalogQuery),
+    responses(
+        (status = 200, description = "A page of skills from the Ornn registry", body = CatalogResponse),
+        (status = 400, description = "Invalid scope/system filter", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks catalog read", body = ErrorEnvelope),
+        (status = 503, description = "NyxID/Ornn not configured", body = ErrorEnvelope)
+    )
+)]
 async fn list_skills(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -181,6 +199,21 @@ async fn list_skills(
 }
 
 /// `GET /api/v1/catalog/skillsets` — forward to Ornn `skillset-search` per scope.
+#[utoipa::path(
+    get,
+    path = "/catalog/skillsets",
+    tag = "catalog",
+    operation_id = "list_catalog_skillsets",
+    security(("NyxIdIdentity" = [])),
+    params(CatalogQuery),
+    responses(
+        (status = 200, description = "A page of skillsets from the Ornn registry", body = CatalogResponse),
+        (status = 400, description = "Invalid scope filter", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks catalog read", body = ErrorEnvelope),
+        (status = 503, description = "NyxID/Ornn not configured", body = ErrorEnvelope)
+    )
+)]
 async fn list_skillsets(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -196,6 +229,23 @@ async fn list_skillsets(
 }
 
 /// `GET /api/v1/catalog/skills/:name/versions` — lazy version list.
+#[utoipa::path(
+    get,
+    path = "/catalog/skills/{name}/versions",
+    tag = "catalog",
+    operation_id = "list_catalog_skill_versions",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("name" = String, Path, description = "Skill name")
+    ),
+    responses(
+        (status = 200, description = "Newest-first version list for the skill", body = VersionsResponse),
+        (status = 400, description = "Malformed skill name", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks catalog read", body = ErrorEnvelope),
+        (status = 503, description = "NyxID/Ornn not configured", body = ErrorEnvelope)
+    )
+)]
 async fn skill_versions(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -212,6 +262,23 @@ async fn skill_versions(
 }
 
 /// `GET /api/v1/catalog/skillsets/:name/versions` — lazy version list.
+#[utoipa::path(
+    get,
+    path = "/catalog/skillsets/{name}/versions",
+    tag = "catalog",
+    operation_id = "list_catalog_skillset_versions",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("name" = String, Path, description = "Skillset name")
+    ),
+    responses(
+        (status = 200, description = "Newest-first version list for the skillset", body = VersionsResponse),
+        (status = 400, description = "Malformed skillset name", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks catalog read", body = ErrorEnvelope),
+        (status = 503, description = "NyxID/Ornn not configured", body = ErrorEnvelope)
+    )
+)]
 async fn skillset_versions(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -266,12 +333,12 @@ fn into_skillsets_response(page: SearchPage) -> CatalogResponse {
 }
 
 /// Catalog routes, nested under `/api/v1`.
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/catalog/skills", get(list_skills))
-        .route("/catalog/skillsets", get(list_skillsets))
-        .route("/catalog/skills/:name/versions", get(skill_versions))
-        .route("/catalog/skillsets/:name/versions", get(skillset_versions))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list_skills))
+        .routes(routes!(list_skillsets))
+        .routes(routes!(skill_versions))
+        .routes(routes!(skillset_versions))
 }
 
 #[cfg(test)]

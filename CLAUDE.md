@@ -47,6 +47,25 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 | Backend   | Rust  | Hosted backend service, public APIs, user-facing endpoints |
 | Frontend  | React | User-facing web interface |
 
+## API Contract (OpenAPI)
+
+The control plane (`backend/fkst-control-plane`) serves a **dynamically generated OpenAPI 3.1 document at `GET /openapi.json`**. It is assembled at runtime from the live Axum routes and Rust types via `utoipa` + `utoipa-axum` — there is **no static / checked-in spec file**, and the route registration *is* the documented path (`utoipa-axum`'s `OpenApiRouter` + `routes!`), so the spec never drifts from the code. The assembly + serving lives in `src/openapi.rs`; `src/router.rs::build_router` composes the routers and `split_for_parts()` yields `(Router, OpenApi)`.
+
+When you add or change a **public** HTTP endpoint, the spec does **not** auto-reflect the handler signature — you must keep it in sync:
+
+- **Annotate the handler** with `#[utoipa::path(method, path = "/x/{id}", tag, operation_id, params(...), request_body = ..., responses(...))]`. The `path` here is the single source of truth (`utoipa-axum` maps `{id}` → axum's `:id`). A handler without this annotation will NOT appear in the spec.
+- **Register via `OpenApiRouter`**: every `routes::*::router()` returns `utoipa_axum::router::OpenApiRouter<AppState>` and adds routes with `.routes(routes!(handler, ...))` (group same-path handlers in one `routes!`). Do not introduce a bare `axum::Router` for a public route module.
+- **Derive schemas**: `#[derive(ToSchema)]` on every request/response DTO; `#[derive(IntoParams)]` + `#[into_params(parameter_in = Query)]` on typed query structs. Error responses reference the public `error::ErrorEnvelope`.
+- **Security**: protected `/api/v1/*` operations carry `security(("NyxIdIdentity" = []))`; the public surface (`/health`, `/metrics`, `/openapi.json`, the signature-verified GitHub App webhook) carries none.
+
+Cross-crate and scope constraints:
+
+- **Shared wire types** live in `fkst-shared` and derive `ToSchema` behind an **off-by-default `schema` feature** (`#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]`). The control plane enables `fkst-shared/schema`; the **worker must NOT** (so `utoipa` stays out of the worker binary). A new shared type used in a control-plane DTO needs that `cfg_attr`, or the build breaks.
+- **Scope is the public surface only**: `/api/v1/*`, `/health`, `/metrics`, and the GitHub App webhook (only when a webhook secret is configured — the spec tracks live config). The fleet-only `/internal/v1/*` worker protocol is mounted **after** `build_router`, so it is intentionally excluded.
+- **Component names** are derived from the Rust type identifier, so duplicate idents collide in the spec — give colliding types distinct names (e.g. `AdminSessionView`, `SetupRepoRef`) or consolidate them into one shared type.
+- **Version pins**: `utoipa = "5"`, `utoipa-axum = "0.1"` (the axum-0.7 line; `utoipa-axum` 0.2+ targets axum 0.8 — do not bump it until axum itself is upgraded).
+- **Keep `tests/openapi.rs` green**: it drives the real `build_router` and asserts the spec's paths/schemas/security and that no `/internal/*` path ever leaks.
+
 ## Git Workflow
 
 ### Commit Rules
@@ -151,6 +170,7 @@ graph LR
 ## Quick Rules Summary
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
+- The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; `fkst-shared` wire types derive `ToSchema` behind its off-by-default `schema` feature (the worker stays utoipa-free); pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
 - The fkst deployables run exclusively on Kubernetes (per-deployable `k8s_sample/` dirs); `docker-compose` is not used in this repo.
 - Treat the upstream engine and packages repos as read-only references.
 - Keep commits small and self-contained.

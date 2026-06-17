@@ -13,6 +13,7 @@
 //! validation, which keeps `validate_goal_fields`'s 400 (`AppError::Validation`).
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::error::AppError;
 use crate::goals::{validate_goal_fields, GoalStatus, RepoRef};
@@ -134,7 +135,7 @@ pub(crate) fn validate_repo_grammar(repo: &RepoRefBody) -> Result<(), AppError> 
 
 /// Request body for `POST /api/v1/goals/submit`. A tagged enum on `source`:
 /// `issue` adopts an existing GitHub issue; `inline` carries all goal args.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case", tag = "source", deny_unknown_fields)]
 pub enum SubmitSessionRequest {
     /// Start from an existing user-authored GitHub issue. The issue body is
@@ -160,7 +161,7 @@ pub enum SubmitSessionRequest {
 }
 
 /// An issue reference: either a full GitHub issue URL or the structured triple.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum IssueRef {
     /// `{ "url": "https://github.com/{o}/{n}/issues/{num}" }` (parsed at runtime).
@@ -196,7 +197,7 @@ impl IssueRef {
 
 /// A repo reference for the inline source: either a URL/`owner/name` string or
 /// the structured `{ owner, name }`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum RepoSpecBody {
     /// `{ "url": "<repo url or owner/name>" }` (parsed via `parse_repo_ref`).
@@ -224,13 +225,14 @@ impl RepoSpecBody {
 
 /// Response body for `POST /api/v1/goals/submit` (202). Mirrors `TriggerResponse`
 /// (`goal_status` + a `&'static str` `session_status`) plus the issue locator.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SubmitSessionResponse {
     pub goal_id: String,
     pub session_id: String,
     pub issue_number: u64,
     pub issue_url: String,
     pub goal_status: GoalStatus,
+    #[schema(value_type = String, example = "pending")]
     pub session_status: &'static str,
 }
 

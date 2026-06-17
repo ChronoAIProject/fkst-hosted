@@ -32,7 +32,7 @@ pub const MAX_PACKAGE_NAME_BYTES: usize = 128;
 /// Full lifecycle of a goal. All five variants are defined NOW; only
 /// `NotStarted` is written in this issue. The trigger issue adds the
 /// transitions without schema changes.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GoalStatus {
     NotStarted,

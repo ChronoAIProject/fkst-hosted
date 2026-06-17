@@ -27,6 +27,17 @@ regex = "1"
 secrecy = "0.10"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# OpenAPI schema derives, OFF by default (the `schema` feature). Only the
+# control-plane — which serves /openapi.json — enables it; the worker links this
+# crate with default features and so pulls NO utoipa (stays lean). The version
+# tracks the control-plane's utoipa so a single `utoipa` resolves workspace-wide.
+utoipa = { version = "5", optional = true }
+
+[features]
+# Derive `utoipa::ToSchema` on the wire types that surface in the public HTTP
+# API so the control-plane's runtime-generated OpenAPI spec documents them with
+# full fidelity (real enum variants + serde renames), with zero drift.
+schema = ["dep:utoipa"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

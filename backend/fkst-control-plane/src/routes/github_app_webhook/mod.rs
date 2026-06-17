@@ -31,10 +31,10 @@ mod verify;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::post;
-use axum::Router;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::state::AppState;
 
@@ -111,6 +111,24 @@ enum Handled {
 /// `POST /api/v1/github/app/webhook`. See the module docs for the strict
 /// verify-then-parse ordering. The route is only mounted when a webhook secret
 /// is configured (see `router.rs`), so a `None` secret here is defensive.
+#[utoipa::path(
+    post,
+    path = "/api/v1/github/app/webhook",
+    tag = "webhooks",
+    operation_id = "github_app_webhook",
+    request_body(
+        content = serde_json::Value,
+        content_type = "application/json",
+        description = "Raw GitHub App webhook event (installation / installation_repositories). \
+            Authenticated by the `X-Hub-Signature-256` HMAC over the exact body — NOT by a NyxID identity."
+    ),
+    responses(
+        (status = 200, description = "Event handled (e.g. installation caches busted)"),
+        (status = 202, description = "Event accepted (no action required)"),
+        (status = 401, description = "Missing or mismatched webhook signature"),
+        (status = 503, description = "Webhook secret not configured")
+    )
+)]
 async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> StatusCode {
     // The secret must be configured for this route to do anything; the router
     // only mounts the route when it is set, so this is a defensive 503.
@@ -354,8 +372,8 @@ fn canonical(full_name: &str) -> String {
 
 /// The webhook route, mounted UNAUTHENTICATED in `router.rs` (outside the
 /// `/api/v1` auth nest) but signature-verified inside the handler.
-pub fn router() -> Router<AppState> {
-    Router::new().route("/api/v1/github/app/webhook", post(webhook))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(webhook))
 }
 
 #[cfg(test)]
