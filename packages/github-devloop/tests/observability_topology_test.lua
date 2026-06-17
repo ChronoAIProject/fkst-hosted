@@ -1,0 +1,343 @@
+local h = require("tests.devloop_core_helpers")
+local core = h.core
+local t = h.t
+local topology = require("departments.observability.topology")
+
+local function split_id(canonical)
+  local package, name = tostring(canonical):match("^([^%.]+)%.(.+)$")
+  return package or "", name or canonical
+end
+
+local function graph_builder()
+  local nodes = {}
+  local edges = {}
+  local queues = {}
+
+  local function queue(canonical)
+    if queues[canonical] then
+      return
+    end
+    queues[canonical] = true
+    local package, name = split_id(canonical)
+    table.insert(nodes, {
+      kind = "queue",
+      id = "queue:" .. canonical,
+      name = name,
+      package = package,
+      fanout = false,
+    })
+  end
+
+  local function raiser(canonical, produces)
+    local package, name = split_id(canonical)
+    queue(produces)
+    table.insert(nodes, {
+      kind = "raiser",
+      id = "raiser:" .. canonical,
+      name = name,
+      package = package,
+      source = { type = "cron", interval = "5m" },
+    })
+    table.insert(edges, {
+      from = "raiser:" .. canonical,
+      to = "queue:" .. produces,
+      relation = "raises",
+    })
+  end
+
+  local function department(canonical, consumes, produces)
+    local package, name = split_id(canonical)
+    table.insert(nodes, {
+      kind = "department",
+      id = "department:" .. canonical,
+      name = name,
+      package = package,
+      consumes = consumes or {},
+      produces = produces or {},
+      ephemeral = {},
+      stall_window = "30s",
+    })
+    for _, consumed in ipairs(consumes or {}) do
+      queue(consumed)
+      table.insert(edges, {
+        from = "queue:" .. consumed,
+        to = "department:" .. canonical,
+        relation = "consumes",
+      })
+    end
+    for _, produced in ipairs(produces or {}) do
+      queue(produced)
+      table.insert(edges, {
+        from = "department:" .. canonical,
+        to = "queue:" .. produced,
+        relation = "produces",
+      })
+    end
+  end
+
+  return {
+    raiser = raiser,
+    department = department,
+    graph = function()
+      return {
+        schema = "fkst.graph.v1",
+        nodes = nodes,
+        edges = edges,
+      }
+    end,
+  }
+end
+
+local function topology_fixture()
+  local b = graph_builder()
+
+  b.raiser("github-proxy.github_poll", "github-proxy.github_poll_tick")
+  b.raiser("github-devloop.intake_poll", "github-devloop.devloop_intake_tick")
+  b.raiser("github-devloop.intake_probe_poll", "github-devloop.devloop_intake_probe_tick")
+  b.raiser("github-devloop.branch_poll", "github-devloop.devloop_branch_tick")
+  b.raiser("github-devloop.merge_queue_poll", "github-devloop.devloop_merge_queue_tick")
+  b.raiser("github-devloop.observability_poll", "github-devloop.devloop_observe_tick")
+  b.raiser("github-devloop.liveness_poll", "github-devloop.devloop_liveness_tick")
+  b.raiser("github-devloop.doctor_poll", "github-devloop.devloop_doctor_tick")
+  b.raiser("github-devloop.ensure_repo_poll", "github-devloop.devloop_ensure_repo_tick")
+  b.raiser("github-devloop.substrate_ref_poll", "github-devloop.devloop_substrate_ref_tick")
+
+  b.department("github-proxy.github_poll", { "github-proxy.github_poll_tick" }, { "github-proxy.github_entity_changed" })
+  b.department("github-proxy.github_pr_open", { "github-proxy.github_pr_open_request" }, { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" })
+  b.department("github-proxy.github_comment", { "github-proxy.github_issue_comment_request" }, { "github-proxy.github_comment_written" })
+  b.department("github-proxy.github_pr_comment", { "github-proxy.github_pr_comment_request" }, { "github-proxy.github_comment_written" })
+  b.department("github-proxy.github_issue_label", { "github-proxy.github_issue_label_request" }, {})
+  b.department("github-proxy.github_issue_create", { "github-proxy.github_issue_create_request" }, { "github-proxy.github_issue_blocked_by_request" })
+  b.department("github-proxy.github_issue_blocked_by", { "github-proxy.github_issue_blocked_by_request" }, {})
+
+  b.department("consensus.decide", { "consensus.proposal" }, { "consensus.consensus_reached", "consensus.consensus_converge" })
+  b.department("consensus.dead_letter", { "consensus.dead_letter" }, {})
+
+  b.department("github-devloop.observe_issue", { "github-proxy.github_entity_changed" }, {
+    "consensus.proposal",
+    "github-devloop.devloop_ready",
+    "github-devloop.devloop_reviewing",
+    "github-devloop.devloop_fixing",
+    "github-devloop.devloop_decompose",
+    "github-devloop.devloop_merge_ready",
+    "github-devloop.devloop_reconcile",
+    "github-devloop.devloop_review_reconcile",
+    "github-devloop.devloop_timeout_reconcile",
+  })
+  b.department("github-devloop.observe_pr", { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" }, {
+    "github-devloop.devloop_reviewing",
+    "github-devloop.devloop_fixing",
+    "github-devloop.devloop_decompose",
+    "github-devloop.devloop_merge_ready",
+    "github-devloop.devloop_reconcile",
+    "github-devloop.devloop_review_reconcile",
+    "github-devloop.devloop_timeout_reconcile",
+  })
+  b.department("github-devloop.intake_scan", { "github-devloop.devloop_intake_tick" }, { "github-devloop.devloop_intake_candidate" })
+  b.department("github-devloop.intake_probe", { "github-devloop.devloop_intake_probe_tick" }, { "github-devloop.devloop_intake_candidate" })
+  b.department("github-devloop.intake_judge", { "github-devloop.devloop_intake_candidate" }, { "consensus.proposal", "github-devloop.devloop_reviewing" })
+  b.department("github-devloop.consensus_result", { "consensus.consensus_reached" }, { "github-devloop.devloop_ready" })
+  b.department("github-devloop.comment_handoff", { "github-proxy.github_comment_written" }, { "github-devloop.devloop_ready", "github-devloop.devloop_reviewing" })
+  b.department("github-devloop.implement", { "github-devloop.devloop_ready" }, { "github-devloop.devloop_open_pr", "github-devloop.devloop_reviewing" })
+  b.department("github-devloop.open_pr", { "github-devloop.devloop_open_pr", "github-proxy.github_entity_changed" }, { "github-proxy.github_pr_open_request" })
+  b.department("github-devloop.review_pr", { "github-devloop.devloop_reviewing" }, { "consensus.proposal" })
+  b.department("github-devloop.review_result", { "consensus.consensus_reached" }, { "github-devloop.devloop_merge_ready", "github-devloop.devloop_fixing" })
+  b.department("github-devloop.merge", { "github-devloop.devloop_merge_ready", "github-devloop.devloop_merge_queue_tick" }, {
+    "github-devloop.devloop_reviewing",
+    "github-devloop.devloop_fixing",
+    "github-devloop.devloop_merge_queue_tick",
+  })
+  b.department("github-devloop.rollup_scan", { "github-devloop.devloop_branch_tick" }, { "github-devloop.devloop_rollup_ready" })
+  b.department("github-devloop.rollup_merge", { "github-devloop.devloop_rollup_ready" }, {})
+
+  b.department("github-devloop.dead_letter", { "github-devloop.dead_letter" }, { "github-proxy.github_issue_create_request" })
+  b.department("github-devloop.decompose", { "github-devloop.devloop_decompose" }, { "github-proxy.github_issue_create_request" })
+  b.department("github-devloop.doctor", { "github-devloop.devloop_doctor_tick" }, {})
+  b.department("github-devloop.ensure_repo", { "github-devloop.devloop_ensure_repo_tick" }, {})
+  b.department("github-devloop.fix", { "github-devloop.devloop_fixing" }, { "github-devloop.devloop_reviewing", "github-devloop.devloop_review_meta" })
+  b.department("github-devloop.liveness_scan", { "github-devloop.devloop_liveness_tick" }, { "github-proxy.github_entity_changed", "consensus.proposal" })
+  b.department("github-devloop.loop", { "consensus.consensus_converge" }, { "consensus.proposal", "github-devloop.devloop_reconcile" })
+  b.department("github-devloop.observability", { "github-devloop.devloop_observe_tick" }, { "github-proxy.github_issue_create_request", "github-devloop.devloop_merge_queue_tick" })
+  b.department("github-devloop.pr_freshness_scan", { "github-devloop.devloop_branch_tick" }, { "github-devloop.devloop_sync_conflict" })
+  b.department("github-devloop.reconcile", {
+    "github-devloop.devloop_reconcile",
+    "github-devloop.devloop_review_reconcile",
+    "github-devloop.devloop_fix_reconcile",
+    "github-devloop.devloop_timeout_reconcile",
+  }, { "github-proxy.github_issue_comment_request", "github-proxy.github_pr_comment_request", "github-proxy.github_issue_label_request" })
+  b.department("github-devloop.review_loop", { "consensus.consensus_converge" }, {
+    "consensus.proposal",
+    "github-devloop.devloop_review_meta",
+    "github-devloop.devloop_review_reconcile",
+  })
+  b.department("github-devloop.review_meta", { "github-devloop.devloop_review_meta" }, {
+    "github-devloop.devloop_fixing",
+    "github-proxy.github_issue_create_request",
+  })
+  b.department("github-devloop.substrate_ref_scan", { "github-devloop.devloop_substrate_ref_tick" }, { "github-proxy.github_pr_comment_request" })
+  b.department("github-devloop.sync_conflict", { "github-devloop.devloop_sync_conflict" }, { "github-proxy.github_issue_create_request" })
+  b.department("github-devloop.sync_scan", { "github-devloop.devloop_branch_tick" }, { "github-devloop.devloop_sync_conflict" })
+
+  return b.graph()
+end
+
+local function clone_array(values)
+  local copy = {}
+  for index = #values, 1, -1 do
+    table.insert(copy, values[index])
+  end
+  return copy
+end
+
+local function permuted_graph(graph)
+  return {
+    schema = graph.schema,
+    nodes = clone_array(graph.nodes),
+    edges = clone_array(graph.edges),
+  }
+end
+
+local function count_literal(haystack, needle)
+  local count = 0
+  local start = 1
+  while true do
+    local found = tostring(haystack or ""):find(needle, start, true)
+    if found == nil then
+      return count
+    end
+    count = count + 1
+    start = found + #needle
+  end
+end
+
+local function macro_node_count(mermaid)
+  local count = 0
+  for line in tostring(mermaid or ""):gmatch("[^\n]+") do
+    if line:match("^%s+[a-z][a-z0-9_]*%[") ~= nil then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+return {
+  test_observability_declares_graph_json_authorization = function()
+    local main_path = package.searchpath("departments.observability.main", package.path)
+    local module = dofile(main_path)
+
+    t.eq(module.spec.graph_json, true)
+    t.eq(module.spec.consumes[1], "devloop_observe_tick")
+    t.eq(module.spec.retry, false)
+    t.eq(module.spec.stall_window, "2m")
+  end,
+
+  test_topology_drift_validation_requires_every_department_mapped_or_ignored = function()
+    local graph = topology_fixture()
+    t.eq(topology.validate_graph(graph), true)
+
+    table.insert(graph.nodes, {
+      kind = "department",
+      id = "department:github-devloop.new_runtime_path",
+      name = "new_runtime_path",
+      package = "github-devloop",
+      consumes = {},
+      produces = {},
+      ephemeral = {},
+      stall_window = "30s",
+    })
+
+    local ok, err = pcall(function()
+      topology.validate_graph(graph)
+    end)
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("unmapped department", 1, true) ~= nil)
+  end,
+
+  test_topology_mermaid_is_deterministic_and_bounded = function()
+    local graph = topology_fixture()
+    local mermaid = topology.render_mermaid(graph)
+    local permuted = topology.render_mermaid(permuted_graph(graph))
+
+    t.eq(mermaid, permuted)
+    t.is_true(mermaid:find("flowchart LR", 1, true) == 1)
+    t.eq(count_literal(mermaid, "subgraph github_proxy_lane[\"github-proxy\"]"), 1)
+    t.eq(count_literal(mermaid, "subgraph consensus_lane[\"consensus\"]"), 1)
+    t.eq(count_literal(mermaid, "subgraph github_devloop_lane[\"github-devloop\"]"), 1)
+    t.is_true(macro_node_count(mermaid) <= 12)
+    t.is_true(mermaid:find("github --> poll", 1, true) ~= nil)
+    t.is_true(mermaid:find("poll --> observe", 1, true) ~= nil)
+    t.is_true(mermaid:find("intake --> consensus", 1, true) ~= nil)
+    t.is_true(mermaid:find("consensus --> ready", 1, true) ~= nil)
+    t.is_true(mermaid:find("ready --> implement", 1, true) ~= nil)
+    t.is_true(mermaid:find("implement --> pr", 1, true) ~= nil)
+    t.is_true(mermaid:find("pr --> observe", 1, true) ~= nil)
+    t.is_true(mermaid:find("review --> consensus", 1, true) ~= nil)
+    t.is_true(mermaid:find("consensus --> merge_ready", 1, true) ~= nil)
+    t.is_true(mermaid:find("merge_ready --> merge", 1, true) ~= nil)
+    t.is_true(mermaid:find("rollup_dev", 1, true) ~= nil)
+    t.eq(mermaid:find("#42", 1, true), nil)
+    t.eq(mermaid:find("quota", 1, true), nil)
+    t.eq(mermaid:find("queue depth", 1, true), nil)
+  end,
+
+  test_dashboard_renders_topology_before_working_and_keeps_hash_stable = function()
+    local graph = topology_fixture()
+    local mermaid = topology.render_mermaid(graph)
+    local rendered = core.render_observability_dashboard({
+      entities = {},
+      counts = {},
+      stalls = {},
+      state_gap_report = {},
+      now_seconds = 1780000000,
+      topology_mermaid = mermaid,
+    })
+    local rerendered = core.render_observability_dashboard({
+      entities = {},
+      counts = {},
+      stalls = {},
+      state_gap_report = {},
+      now_seconds = 1780000060,
+      topology_mermaid = topology.render_mermaid(permuted_graph(graph)),
+    })
+
+    t.is_true(rendered.body:find("## System topology", 1, true) < rendered.body:find("## Now working", 1, true))
+    t.eq(count_literal(rendered.body, "```mermaid"), 1)
+    t.eq(count_literal(rendered.body, "```"), 2)
+    t.is_true(rendered.body:find("## Board by state", 1, true) ~= nil)
+    t.is_true(rendered.body:find("## Stall suspects", 1, true) ~= nil)
+    t.is_true(rendered.body:find("## State-gap latency", 1, true) ~= nil)
+    t.is_true(rendered.body:find("## Footer", 1, true) ~= nil)
+    t.eq(rendered.hash, rerendered.hash)
+  end,
+
+  test_dashboard_omits_topology_when_graph_unavailable = function()
+    local rendered = core.render_observability_dashboard({
+      entities = {},
+      counts = {},
+      stalls = {},
+      state_gap_report = {},
+      now_seconds = 1780000000,
+      topology_mermaid = nil,
+    })
+
+    t.eq(rendered.body:find("## System topology", 1, true), nil)
+    t.eq(rendered.body:find("```mermaid", 1, true), nil)
+    t.is_true(rendered.body:find("## Now working", 1, true) ~= nil)
+    t.is_true(rendered.body:find("## Board by state", 1, true) ~= nil)
+    t.is_true(rendered.body:find("## Footer", 1, true) ~= nil)
+  end,
+
+  test_graph_json_failure_returns_nil_topology = function()
+    local old_graph_json = graph_json
+    graph_json = function()
+      error("graph_json unavailable without composed graph roots")
+    end
+    local ok, mermaid = pcall(function()
+      return core.observability_topology_mermaid()
+    end)
+    graph_json = old_graph_json
+
+    t.eq(ok, true)
+    t.eq(mermaid, nil)
+  end,
+}
