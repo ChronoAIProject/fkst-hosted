@@ -1,0 +1,5 @@
+---
+"fkst-hosted": patch
+---
+
+Wire the worker to journal a driven session direct to GitHub (#187, #151 increment 6c). The worker's executor + supervise loop now record the engine's RAISED stdout lines and lifecycle transitions (Validating → Spawned → Running → … → Stopped/Failed) to the journal repo, mirroring the in-process control-plane driver verbatim via a new `engine/journal.rs` (the `start_session_journaler` builder + the `journal_record/flush/lifecycle/finish/stdout_line` helpers operating on `fkst_journal::Journaler` directly). The journaler is built only from a complete `JournalPlan` and a package name, fingerprints the run from the cloned primary package, loads the redo skip-set, and intentionally drops the Mongo `set_run_key` write (the worker is DB-free; the run_key survives in the committed file). A fresh dispatch threads the journaler through; a re-adopted engine gets `None`. Still dormant (the controller emits no dispatch until activation), so develop behaviour is byte-identical. Full suite green including a wiremock GitHub round-trip test.

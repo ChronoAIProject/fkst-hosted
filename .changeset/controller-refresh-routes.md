@@ -1,0 +1,5 @@
+---
+"fkst-hosted": patch
+---
+
+Add the controller's fence-guarded `POST /internal/v1/credential-refresh` and `POST /internal/v1/status-report` internal routes (#163, increment 2 of #151). The credential-refresh handler verifies the request's `fencing_id` against the in-memory `ClaimMap` BEFORE minting — a superseded worker is refused (`credentials: None`) and never reaches the minter, so it can never be handed a token (the at-most-one-engine guarantee on the new channel); on success it mints via `GithubAppTokens::token_with_expiry_for_repo`, and `InstallationGone` returns `gone: true`. The status-report handler applies the worker's reported status through `ClaimMap::set_status` (a stale fence is a no-op). A new `SessionTokenMinter` seam (`GithubAppMinter`) relocates the per-session consecutive-failure escalation counter controller-side. The routes are additive and inert in prod (placement does not populate the live `ClaimMap` yet and no worker calls them), so behaviour is unchanged; the token never appears in any log/Debug.

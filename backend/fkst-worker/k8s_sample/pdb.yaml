@@ -1,0 +1,23 @@
+# ==========================================================================
+# SAMPLE ONLY — #140 finalizes the worker drain policy (and #144 the topology).
+# This PodDisruptionBudget is a placeholder worker drain floor, NOT the real
+# wiring. The worker fleet's elasticity/drain semantics (how many workers must
+# stay up during voluntary disruptions, coordinated with FKST_WORKER_DRAIN_GRACE_SECS)
+# are owned by #140; this file will be replaced when it lands.
+# ==========================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fkst-worker
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  # Keep at least 1 worker available during voluntary disruptions (node drains,
+  # rollouts, upgrades). Sample floor — #140 sets the real policy.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-worker

@@ -1,0 +1,115 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: [develop, develop-auto]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: install, lint, typecheck, build, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip on release-automation PRs
+        id: gate
+        working-directory: .
+        env:
+          IS_AUTOMATION: ${{ contains(github.event.pull_request.labels.*.name, 'release-automation') }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_AUTOMATION" = "true" ]; then
+            echo "INFO: 'release-automation' PR — Frontend CI is a no-op (only version/changelog touched)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ ! -f frontend/package.json ]; then
+            echo "INFO: frontend/package.json absent — Frontend CI is a no-op."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: npm ci
+
+      - name: lint
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run lint
+
+      - name: typecheck
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run typecheck
+
+      - name: build
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run build
+
+      - name: test
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run test
+
+      - name: build-storybook
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run build-storybook
+
+  playwright:
+    name: Playwright smoke tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip on release-automation PRs
+        id: gate
+        working-directory: .
+        env:
+          IS_AUTOMATION: ${{ contains(github.event.pull_request.labels.*.name, 'release-automation') }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_AUTOMATION" = "true" ]; then
+            echo "INFO: 'release-automation' PR — Frontend CI is a no-op (only version/changelog touched)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ ! -f frontend/package.json ]; then
+            echo "INFO: frontend/package.json absent — Frontend CI is a no-op."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: steps.gate.outputs.skip != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        if: steps.gate.outputs.skip != 'true'
+        run: npx playwright test
+

@@ -1,0 +1,116 @@
+# Non-secret runtime configuration for the CONTROL-PLANE — SAMPLE values.
+#
+# Every key below is enumerated from the controller's config loaders, which are
+# the canonical source of truth (NOT this file). The controller is datastore-free
+# (#143): there are no MongoDB / lease / takeover keys.
+#   backend/fkst-control-plane/src/config.rs           HTTP / journal / auth / LLM /
+#                                                       vault / codex / NyxID /
+#                                                       worker-liveness / placement
+#   backend/fkst-control-plane/src/reconcile/config.rs     orphan-dir sweep
+#   backend/fkst-control-plane/src/github_app/config.rs    FKST_GITHUB_APP_*
+#   backend/fkst-engine/src/config.rs                   FKST_HOSTED_ENGINE_*
+#                                                       (worker-owned after #151)
+# Secret keys live in secret.example.yaml (fkst-control-plane-secret), never here.
+#
+# IMAGE-BAKED ENV — set by the Dockerfile, NOT by any manifest, so do not add
+# them here:
+#   FKST_HOSTED_PORT=8080, FKST_HOSTED_BIND_ADDR=0.0.0.0  (both runtime images
+#       bake these); FKST_RUNTIME_ROOT=/var/lib/fkst/runtime is baked into
+#       the engine-laden image the control-plane TRANSITIONALLY runs from until
+#       #151 moves engine execution onto the worker (then the controller switches
+#       to the slim image and FKST_HOSTED_ENGINE_* below moves to the worker).
+#   Setting FKST_HOSTED_PORT via Service-link injection is the documented
+#       `enableServiceLinks:false` footgun (Service is named fkst-hosted) — see
+#       the Deployment header.
+#   FKST_POD_ID is downward-API only (Deployment env fieldRef metadata.name); the
+#       loader fallback chain is FKST_POD_ID -> HOSTNAME -> local-<uuid>, and the
+#       manifest pins it explicitly as defense-in-depth. NOT set here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fkst-control-plane-config
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+data:
+  # --- HTTP / server (FKST_HOSTED_*) ---
+  FKST_HOSTED_LOG_LEVEL: "info,fkst_control_plane=debug,tower_http=info"
+  FKST_HOSTED_REQUEST_TIMEOUT_SECS: "30" # >= 1
+
+  # The controller is datastore-free (#143): no MONGODB_* keys. The durable
+  # audit trail is GitHub Issues; the live in-memory state is observable at
+  # /api/v1/admin/state (#144).
+
+  # --- Authentication (NyxID JWT / proxy-trust) ---
+  # FKST_AUTH_ENABLED is fail-closed (default true). When enabled,
+  # FKST_AUTH_NYXID_BASE_URL is required and is a non-secret URL (trailing / trimmed).
+  FKST_AUTH_ENABLED: "true"
+  FKST_AUTH_NYXID_BASE_URL: "https://nyx.chrono-ai.fun"
+  # NyxID org-role / user-orgs cache TTL (seconds). >= 1.
+  FKST_NYXID_ORG_CACHE_TTL_SECS: "30"
+  # Slug of the NyxID GitHub proxy service. Non-blank (fail-closed).
+  FKST_NYXID_GITHUB_PROXY_SLUG: "api-github"
+
+  # --- LLM gateway (optional; both URL + model required together if set) ---
+  # FKST_HOSTED_LLM_GATEWAY_URL: "https://nyx.chrono-ai.fun/api/v1/llm/gateway/v1"
+  # FKST_HOSTED_LLM_MODEL: "claude-sonnet"
+  FKST_HOSTED_LLM_TIMEOUT_SECS: "20" # >= 1
+  FKST_HOSTED_LLM_MAX_OUTPUT_BYTES: "1048576" # >= 1
+
+  # --- Vault caps ---
+  FKST_HOSTED_VAULT_VALUE_BYTE_CAP: "65536" # >= 1
+  FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP: "100" # >= 1
+
+  # --- Codex / chrono-llm ---
+  FKST_HOSTED_CODEX_MODEL: "gpt-5-codex" # non-blank (fail-closed)
+  FKST_HOSTED_CHRONO_LLM_BASE_URL: "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm" # non-blank
+
+  # --- Journaling (FKST_JOURNAL_* / FKST_RAISED_*) ---
+  FKST_JOURNAL_FLUSH_INTERVAL_MS: "2000" # >= 1
+  FKST_JOURNAL_FLUSH_MAX_BATCH: "50" # >= 1
+  FKST_JOURNAL_GITHUB_ENABLED: "true"
+  FKST_JOURNAL_ISSUE_COMMENTS: "false"
+  FKST_JOURNAL_ACTIVITY_COMMENT_ENABLED: "true"
+  FKST_JOURNAL_CAS_MAX_RETRIES: "5" # >= 1
+  FKST_JOURNAL_BOOTSTRAP_READ_RETRIES: "3"
+  FKST_JOURNAL_GITHUB_BRANCH: "main"
+  # FKST_JOURNAL_GITHUB_REPO: "owner/name" # optional
+  FKST_RAISED_IDENTITY_POINTERS: "/department,/source,/name,/corr"
+  FKST_RAISED_MAX_LINE_BYTES: "1048576" # >= 1
+
+  # --- Worker-liveness registry (#134) ---
+  # Controller-side TTL for the worker registry. >= 1.
+  FKST_WORKER_LIVENESS_TTL_SECS: "30"
+
+  # --- Reconcile / orphan-dir sweep ---
+  FKST_HOSTED_RECONCILE_MIN_AGE_SECS: "300" # 1..=86400
+  # bool (true/false/1/0/yes/no/on/off); audit mode.
+  FKST_HOSTED_RECONCILE_DRY_RUN: "false"
+
+  # --- Worker-dispatch placement (#198-ii) ---
+  # Per-worker active-session cap used by worker-dispatch placement. 0 =
+  # uncapped (the default); only consulted under dispatch mode. The lease store
+  # is gone (datastore-free, #143), so there are no lease/takeover cadences.
+  FKST_PLACEMENT_MAX_LOAD: "0"
+
+  # --- GitHub App (optional; module disabled unless FKST_GITHUB_APP_ID set) ---
+  # FKST_GITHUB_APP_ID: "12345"
+  # FKST_GITHUB_APP_SLUG: "fkst-hosted"
+  # Mutually exclusive with the inline FKST_GITHUB_APP_PRIVATE_KEY_PEM Secret.
+  # FKST_GITHUB_APP_PRIVATE_KEY_PATH: "/etc/fkst-github-app/key.pem"
+
+  # --- Engine runner (FKST_HOSTED_ENGINE_*) — WORKER-OWNED after #151 ---
+  # These apply to the control plane ONLY while it transitionally drives the
+  # engine. After #151 they move to the worker's ConfigMap and disappear here.
+  FKST_HOSTED_ENGINE_FRAMEWORK_BIN: "/usr/local/bin/fkst-framework"
+  # FKST_HOSTED_ENGINE_TEMP_ROOT: "/var/lib/fkst/runtime" # defaults to OS temp / FKST_RUNTIME_ROOT
+  FKST_HOSTED_ENGINE_CANDIDATE_PREFIX: "candidate/"
+  FKST_HOSTED_ENGINE_CANDIDATE_FROM_SEP: "::"
+  FKST_HOSTED_ENGINE_STOP_GRACE_SECS: "10" # >= 1
+  FKST_HOSTED_ENGINE_CONFORMANCE_TIMEOUT_SECS: "60" # >= 1
+  FKST_HOSTED_ENGINE_READY_TIMEOUT_SECS: "30" # >= 1
+  FKST_HOSTED_ENGINE_ERROR_CAPTURE_BYTES: "8192"
+  FKST_HOSTED_ENGINE_LOG_TAIL_LINES: "200"
+  FKST_HOSTED_ENGINE_GITHUB_TOKEN_REFRESH_SECS: "2400" # >= 1

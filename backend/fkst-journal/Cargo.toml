@@ -1,0 +1,41 @@
+# fkst-journal: session-progress journaling, extracted from the control-plane
+# (issue #151 prerequisite) so BOTH `fkst-control-plane` and `fkst-worker` can
+# depend on it. The journaler must be worker-reachable so the worker can journal
+# RAISED events direct to GitHub once the engine→worker move lands.
+#
+# It deliberately links neither `mongodb`, `axum`, nor `fkst-control-plane`:
+# those omissions keep the worker database-free even once it journals
+# (`cargo tree -p fkst-journal` must show no `mongodb`/`axum`).
+[package]
+name = "fkst-journal"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# `fkst_engine::{materialize::PackageFile, is_valid_name}` (the key-derivation
+# inputs + the package-name guard) — the worker already links fkst-engine.
+fkst-engine = { path = "../fkst-engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+# `bson::DateTime` stamps the lifecycle/record timestamps (standalone crate, NOT
+# the mongodb driver), so the worker stays database-free.
+bson = "2"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+# Only `time` (the debounced flush cadence: `tokio::time::{Instant, sleep}`); the
+# `#[tokio::test]` macro + runtime live in dev-dependencies.
+tokio = { version = "1", features = ["time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+secrecy = "0.10"
+
+[dev-dependencies]
+# The flush/github tests mock the GitHub Contents/Issues API.
+wiremock = "0.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# The token-hygiene test installs a capturing `fmt` subscriber and asserts the
+# GitHub token never reaches any trace line; only the default `fmt` layer is
+# used (no env-filter/json), so this is the minimal feature set.
+tracing-subscriber = "0.3"

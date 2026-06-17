@@ -1,0 +1,5 @@
+---
+"fkst-hosted": minor
+---
+
+Seed repo `.fkst/AGENTS.md` as the base of the per-session CODEX_HOME/AGENTS.md, with Ornn skillset blocks layered on top (issue #182). The engine gains two pure, reused helpers in `fkst-engine`: `read_repo_agents_md` (reads `<project_root>/.fkst/AGENTS.md` from the cloned working tree through the containment-guarded `safe_join`, capped at 256 KiB, truncating an oversize file at a UTF-8 char boundary with a logged warning and never logging the content) and `compose_agents_md` (the filesystem-free body composer that puts the repo base first, verbatim, then the Ornn marker blocks below it). The ACTIVE worker path (`fkst-worker`) now reads the repo base from the worker-owned clone with zero extra GitHub call and no new dispatch field, widens its CODEX_HOME render gate so a repo base alone produces a CODEX_HOME, and writes the composed body. The DORMANT in-process control-plane driver seeds the same base before its Ornn injection so both paths emit byte-identical AGENTS.md. Degenerate cases are unchanged: neither base nor Ornn writes no AGENTS.md; Ornn-only and base-only behave exactly as specified.

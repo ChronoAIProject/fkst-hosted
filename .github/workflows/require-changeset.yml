@@ -1,0 +1,56 @@
+# Gate: every PR into `develop` or `develop-auto` must include a changeset.
+# Skipped for automated release PRs (label: release-automation).
+# The file-list query runs with bounded retries — GitHub's API intermittently
+# returns transient 401/5xx errors and a single flaky call must not turn into
+# a spurious red required check.
+name: Require changeset
+
+on:
+  pull_request:
+    branches: [develop, develop-auto]
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  require-changeset:
+    name: Changeset required
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify a changeset is present
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          IS_AUTOMATION: ${{ contains(github.event.pull_request.labels.*.name, 'release-automation') }}
+        run: |
+          set -euo pipefail
+
+          if [ "$IS_AUTOMATION" = "true" ]; then
+            echo "INFO: 'release-automation' PR — changeset gate skipped."
+            exit 0
+          fi
+
+          FILES=""
+          for attempt in 1 2 3 4 5; do
+            FILES=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path') && break
+            FILES=""
+            echo "WARN: GitHub API attempt ${attempt}/5 failed; retrying in 5s."
+            sleep 5
+          done
+          if [ -z "$FILES" ]; then
+            echo "::error::Could not list the PR's changed files after 5 attempts (transient GitHub API failures). Re-run this check."
+            exit 1
+          fi
+          echo "INFO: changed files:"
+          printf '%s\n' "$FILES"
+
+          if printf '%s\n' "$FILES" | grep -E '^\.changeset/.+\.md$' | grep -qvi '^\.changeset/README\.md$'; then
+            echo "INFO: a changeset is present. Check passed."
+            exit 0
+          fi
+
+          echo "::error::Every PR into develop must include a changeset. Run 'npx changeset' (or 'npm run changeset') and commit the new .changeset/*.md file."
+          exit 1

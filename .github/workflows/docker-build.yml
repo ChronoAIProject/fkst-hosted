@@ -1,0 +1,325 @@
+name: Docker build
+
+on:
+  pull_request:
+    branches: [develop, develop-auto]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+env:
+  # Two images for the control-plane/worker split (issue #145): the engine-laden
+  # worker and the slim controller. Engine pin/provenance/smokes apply to the
+  # WORKER image only; uid/PATH smokes apply to both.
+  IMAGE_WORKER: fkst-worker:ci
+  IMAGE_CONTROL_PLANE: fkst-control-plane:ci
+
+jobs:
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Read-only workflow: docker builds + smokes never push back, so the
+          # token must not linger in .git/config for later steps to read.
+          persist-credentials: false
+
+      - name: Skip on release-automation PRs
+        id: gate
+        working-directory: .
+        env:
+          IS_AUTOMATION: ${{ contains(github.event.pull_request.labels.*.name, 'release-automation') }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_AUTOMATION" = "true" ]; then
+            echo "INFO: 'release-automation' PR — Docker build is a no-op (only version/changelog touched)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ ! -f backend/fkst-worker/Dockerfile ]; then
+            echo "INFO: backend/fkst-worker/Dockerfile absent — Docker build is a no-op (no backend image yet)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Derive product version
+        id: version
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          PRODUCT_VERSION=$(node -p "require('./package.json').version")
+          echo "INFO: product version $PRODUCT_VERSION"
+          echo "version=$PRODUCT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve pinned engine ref
+        id: ref
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          REF: ${{ vars.FKST_SUBSTRATE_REF }}
+        run: |
+          set -euo pipefail
+          PINNED="$(cat backend/engine.ref)"
+          if [ -z "$PINNED" ]; then
+            echo "ERROR: backend/engine.ref is empty — the committed engine pin is mandatory"
+            exit 1
+          fi
+          if [ -z "$REF" ]; then
+            # The Actions variable is optional: it lets operators assert the pin
+            # out-of-band, but the committed backend/engine.ref is the source of
+            # truth and must always exist (fail-closed above).
+            echo "WARN: repo Actions variable FKST_SUBSTRATE_REF is not set; using committed backend/engine.ref"
+            REF="$PINNED"
+          elif [ "$REF" != "$PINNED" ]; then
+            echo "ERROR: FKST_SUBSTRATE_REF variable drifts from backend/engine.ref (variable=$REF, pinned=$PINNED)"
+            exit 1
+          fi
+          echo "INFO: engine pinned at $REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: steps.gate.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build worker image (engine-laden)
+        if: steps.gate.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/fkst-worker/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_WORKER }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+          build-args: |
+            FKST_SUBSTRATE_REF=${{ steps.ref.outputs.ref }}
+            PRODUCT_VERSION=${{ steps.version.outputs.version }}
+
+      - name: Build control-plane image (slim, engine-free)
+        if: steps.gate.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/fkst-control-plane/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_CONTROL_PLANE }}
+          cache-from: type=gha,scope=control-plane
+          cache-to: type=gha,mode=max,scope=control-plane
+          build-args: |
+            PRODUCT_VERSION=${{ steps.version.outputs.version }}
+
+      - name: Missing-ref guard must fail the worker build
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          set +e
+          OUT=$(docker build -f backend/fkst-worker/Dockerfile --build-arg FKST_SUBSTRATE_REF="" -t fkst-worker:badref . 2>&1)
+          RC=$?
+          set -e
+          if [ "$RC" -eq 0 ]; then
+            echo "ERROR: worker build unexpectedly succeeded with an empty FKST_SUBSTRATE_REF"
+            exit 1
+          fi
+          if ! echo "$OUT" | grep -q "ERROR: FKST_SUBSTRATE_REF build-arg is required"; then
+            echo "ERROR: missing-ref build failed without the expected guard message"
+            echo "$OUT" | tail -n 50
+            exit 1
+          fi
+          echo "INFO: missing-ref guard failed the worker build as expected (exit $RC)."
+
+      - name: Read engine provenance from the worker image
+        id: provenance
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          PINNED_REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          set -euo pipefail
+          ESHA=$(docker run --rm --entrypoint cat "$IMAGE_WORKER" /etc/fkst-engine-sha)
+          EVER=$(docker run --rm --entrypoint cat "$IMAGE_WORKER" /etc/fkst-engine-version)
+          if ! echo "$ESHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "ERROR: /etc/fkst-engine-sha is not a 40-char commit SHA: $ESHA"
+            exit 1
+          fi
+          if [ "$ESHA" != "$PINNED_REF" ]; then
+            echo "ERROR: image engine sha $ESHA != pinned ref $PINNED_REF (pin violation: the image was not built at the pinned engine commit)"
+            exit 1
+          fi
+          if [ -z "$EVER" ]; then
+            echo "ERROR: /etc/fkst-engine-version is empty"
+            exit 1
+          fi
+          echo "INFO: engine sha $ESHA, engine version $EVER"
+          echo "engine_sha=$ESHA" >> "$GITHUB_OUTPUT"
+          echo "engine_version=$EVER" >> "$GITHUB_OUTPUT"
+
+      - name: Apply engine provenance labels to the worker image (cache-hot relabel)
+        if: steps.gate.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/fkst-worker/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_WORKER }}
+          cache-from: type=gha,scope=worker
+          build-args: |
+            FKST_SUBSTRATE_REF=${{ steps.ref.outputs.ref }}
+            PRODUCT_VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            io.fkst.engine.sha=${{ steps.provenance.outputs.engine_sha }}
+            io.fkst.engine.version=${{ steps.provenance.outputs.engine_version }}
+
+      - name: 'Smoke (worker): fkst-framework self-test'
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint fkst-framework "$IMAGE_WORKER" --self-test
+          echo "INFO: fkst-framework --self-test passed inside the worker image."
+
+      - name: 'Smoke (worker): fkst-framework launch contract'
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          # The engine CLI has no --help; its hand-rolled parser treats it as an
+          # unknown subcommand and exits 2 (the binary's documented arg-parse
+          # code). Reaching that parser proves the binary launches with no
+          # missing shared libraries.
+          set +e
+          OUT=$(docker run --rm --entrypoint fkst-framework "$IMAGE_WORKER" --help 2>&1)
+          RC=$?
+          set -e
+          echo "$OUT"
+          if [ "$RC" -ne 2 ]; then
+            echo "ERROR: expected exit 2 from 'fkst-framework --help' (arg-parse error), got $RC"
+            exit 1
+          fi
+          if ! echo "$OUT" | grep -q "unknown subcommand"; then
+            echo "ERROR: 'fkst-framework --help' did not reach the engine arg parser"
+            exit 1
+          fi
+          echo "INFO: fkst-framework launched and reached its arg parser."
+
+      - name: 'Smoke (worker): fkst-supervisor (when present)'
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          if ! docker run --rm --entrypoint sh "$IMAGE_WORKER" -c 'test -x /usr/local/bin/fkst-supervisor'; then
+            echo "INFO: no fkst-supervisor binary in the image (acceptable; only fkst-framework is required)."
+            exit 0
+          fi
+          # The supervisor takes no flags: it immediately spawns
+          # `fkst-framework supervise` against its cwd and exits non-zero when
+          # the cwd is not a project. Spawning the runtime proves both engine
+          # binaries load and can exec each other inside the image.
+          set +e
+          OUT=$(timeout 120 docker run --rm --name fkst-supervisor-smoke --entrypoint fkst-supervisor "$IMAGE_WORKER" 2>&1)
+          RC=$?
+          set -e
+          docker rm -f fkst-supervisor-smoke >/dev/null 2>&1 || true
+          echo "$OUT"
+          if ! echo "$OUT" | grep -q "event runtime spawned"; then
+            echo "ERROR: fkst-supervisor did not spawn the framework runtime"
+            exit 1
+          fi
+          echo "INFO: fkst-supervisor launched and spawned fkst-framework (exit $RC; non-zero expected outside a project)."
+
+      - name: 'Smoke (worker): git --version'
+        if: steps.gate.outputs.skip != 'true'
+        run: docker run --rm --entrypoint git "$IMAGE_WORKER" --version
+
+      - name: 'Smoke (worker): bash --version'
+        if: steps.gate.outputs.skip != 'true'
+        run: docker run --rm --entrypoint bash "$IMAGE_WORKER" --version
+
+      - name: 'Smoke (worker): runtime root is writable by the image user'
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh "$IMAGE_WORKER" -lc 'test -w "$FKST_RUNTIME_ROOT" && echo "INFO: $FKST_RUNTIME_ROOT is writable"'
+
+      - name: 'Smoke (both): containers run as uid 10001 (non-root)'
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          for IMG in "$IMAGE_WORKER" "$IMAGE_CONTROL_PLANE"; do
+            UID_IN_IMAGE=$(docker run --rm --entrypoint id "$IMG" -u)
+            if [ "$UID_IN_IMAGE" != "10001" ]; then
+              echo "ERROR: image $IMG user is uid $UID_IN_IMAGE, expected 10001"
+              exit 1
+            fi
+            echo "INFO: image $IMG runs as uid 10001."
+          done
+
+      - name: 'Smoke (both): PATH contains /usr/local/bin'
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          for IMG in "$IMAGE_WORKER" "$IMAGE_CONTROL_PLANE"; do
+            docker run --rm --entrypoint sh "$IMG" -lc 'echo "PATH=$PATH"; echo "$PATH" | grep -q /usr/local/bin'
+          done
+
+      - name: Assert worker label consistency (engine labels present)
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          EXPECTED_REF: ${{ steps.ref.outputs.ref }}
+          EXPECTED_SHA: ${{ steps.provenance.outputs.engine_sha }}
+          EXPECTED_ENGINE_VERSION: ${{ steps.provenance.outputs.engine_version }}
+          EXPECTED_PRODUCT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          LABELS=$(docker inspect -f '{{json .Config.Labels}}' "$IMAGE_WORKER")
+          echo "$LABELS" | jq .
+          assert_label() {
+            ACTUAL=$(echo "$LABELS" | jq -r --arg k "$1" '.[$k]')
+            if [ "$ACTUAL" != "$2" ]; then
+              echo "ERROR: label $1 is '$ACTUAL', expected '$2'"
+              exit 1
+            fi
+          }
+          assert_label "org.opencontainers.image.title" "fkst-worker"
+          assert_label "io.fkst.engine.ref" "$EXPECTED_REF"
+          assert_label "io.fkst.engine.sha" "$EXPECTED_SHA"
+          assert_label "io.fkst.engine.version" "$EXPECTED_ENGINE_VERSION"
+          assert_label "io.fkst.engine.repo" "https://github.com/ChronoAIProject/fkst-substrate.git"
+          assert_label "org.opencontainers.image.version" "$EXPECTED_PRODUCT_VERSION"
+          assert_label "org.opencontainers.image.source" "https://github.com/ChronoAIProject/fkst-hosted"
+          echo "INFO: all worker image labels are consistent."
+
+      - name: Assert control-plane label consistency (engine labels absent)
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          EXPECTED_PRODUCT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          LABELS=$(docker inspect -f '{{json .Config.Labels}}' "$IMAGE_CONTROL_PLANE")
+          echo "$LABELS" | jq .
+          TITLE=$(echo "$LABELS" | jq -r '.["org.opencontainers.image.title"]')
+          if [ "$TITLE" != "fkst-control-plane" ]; then
+            echo "ERROR: control-plane title label is '$TITLE', expected 'fkst-control-plane'"
+            exit 1
+          fi
+          VERSION=$(echo "$LABELS" | jq -r '.["org.opencontainers.image.version"]')
+          if [ "$VERSION" != "$EXPECTED_PRODUCT_VERSION" ]; then
+            echo "ERROR: control-plane version label is '$VERSION', expected '$EXPECTED_PRODUCT_VERSION'"
+            exit 1
+          fi
+          for k in io.fkst.engine.ref io.fkst.engine.sha io.fkst.engine.version io.fkst.engine.repo; do
+            V=$(echo "$LABELS" | jq -r --arg k "$k" '.[$k]')
+            if [ "$V" != "null" ]; then
+              echo "ERROR: control-plane image must NOT carry engine label $k (got '$V')"
+              exit 1
+            fi
+          done
+          echo "INFO: control-plane image carries no engine labels (as required)."
+
+      - name: Assert no engine source is vendored
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '^(fkst-substrate|fkst-packages)/'; then
+            echo "ERROR: engine source files are committed to this repo (encapsulation violation)"
+            exit 1
+          fi
+          echo "INFO: no fkst-substrate / fkst-packages source vendored into the repo."

@@ -1,0 +1,72 @@
+# fkst-worker: the worker deployable of the control-plane/worker split.
+#
+# It connects UP to the controller over CONTROLLER_URL, self-registers, then
+# heartbeats + pulls work (the pull loop is a no-op until #135 grants claim
+# authority). It deliberately does NOT depend on the `mongodb` driver nor on
+# `fkst-control-plane`: those omissions are the compiler-enforced boundary that
+# guarantees the worker never reaches the database or the control-plane's
+# privileged state. (`cargo tree -p fkst-worker` must show neither.)
+[package]
+name = "fkst-worker"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "fkst_worker"
+
+[[bin]]
+name = "fkst-worker"
+path = "src/main.rs"
+
+[dependencies]
+# The role-neutral wire types (the internal protocol) — the only shared code
+# the worker links. fkst-shared pulls `bson` but NOT the `mongodb` driver, so
+# the worker stays database-free.
+fkst-shared = { path = "../fkst-shared" }
+# The engine integration (the session runner). Wired in a later phase (#151);
+# the dependency is declared now to prove the boundary holds — `fkst-engine`
+# links neither `mongodb` nor `fkst-control-plane`, so the worker stays
+# database-free even once it drives the engine.
+fkst-engine = { path = "../fkst-engine" }
+# Session-progress journaling (the GitHub progress record). Declared now so the
+# worker can journal RAISED events direct to GitHub in the next increment (#151);
+# `fkst-journal` links neither `mongodb` nor `fkst-control-plane`, so the worker
+# stays database-free even once it journals. Not yet wired into worker code.
+fkst-journal = { path = "../fkst-journal" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "time", "sync"] }
+tokio-util = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The worker-local HTTP server (GET /health) so k8s can liveness-probe it.
+axum = "0.7"
+# The registry client (register / heartbeat / pull / drain) over the internal
+# protocol. rustls so no system OpenSSL is needed in the slim runtime.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+secrecy = "0.10"
+# Decodes the inline `OrnnSource::ZipB64` skill bytes the controller may embed in
+# a dispatch (#151). Standard, widely-used; the control-plane already pins 0.22.
+base64 = "0.22"
+# `async-trait` declares the executor's one-method `Cloner` seam (the injectable
+# clone step that lets `execute_dispatch` be unit-tested offline). Already in the
+# workspace graph (fkst-shared); the proc-macro keeps the trait method async.
+async-trait = "0.1"
+# `tempfile` holds the per-session CODEX_HOME dir guard the executor creates
+# (#151). `bson` parses the dispatch's goal-id string into the `bson::Uuid` the
+# engine `GoalContext` requires — `bson` is a standalone crate (NOT the mongodb
+# driver), so the worker stays database-free. Both are already in the graph
+# (fkst-engine pulls them).
+tempfile = "3"
+bson = "2"
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+# Builds in-memory test skill zips for the engine-executor's ornn-install tests
+# (the runtime install path lives in fkst-engine; the worker only needs zip to
+# fabricate fixtures). Matches the engine/control-plane pin.
+zip = { version = "2", default-features = false, features = ["deflate"] }

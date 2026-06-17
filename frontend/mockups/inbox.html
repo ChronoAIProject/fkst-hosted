@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FKST — Inbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:oklch(16% 0.011 250);--raise:oklch(20% 0.012 250);--raise-2:oklch(23% 0.013 250);
+    --line:oklch(26% 0.012 250);--line-2:oklch(33% 0.013 250);
+    --fg:oklch(97% 0.005 240);--dim:oklch(72% 0.014 245);--faint:oklch(58% 0.014 245);--ghost:oklch(46% 0.012 245);
+    --amber:oklch(81% 0.15 80);
+    --green:oklch(74% 0.13 158);--red:oklch(67% 0.18 18);--gold:oklch(80% 0.10 85);
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --ui:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+    --display:"Space Grotesk","IBM Plex Sans",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .screen{width:100%;min-height:900px}
+  .wrap{max-width:1440px;margin:0 auto;padding:0 24px}
+  .eyebrow{font:600 11px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ghost)}
+
+  /* ---- top bar: logo is the FKST wordmark, K = the brand mark ---- */
+  .hd{display:flex;align-items:center;gap:16px;height:62px;border-bottom:1px solid var(--line)}
+  /* sticky top: header + toolbar stick together; toolbar condenses on scroll */
+  .hd{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .toolbar{position:sticky;top:61px;z-index:39;background:var(--bg)}
+  html.scrolled .toolbar{min-height:44px;padding:6px 0}
+  html.scrolled .toolbar .eyebrow{display:none}
+  .logo{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.01em;color:var(--fg);text-decoration:none;line-height:1;display:inline-block;white-space:nowrap;flex:none}
+  .logo .kk{position:relative;display:inline-block}
+  .logo .kk .knode{position:absolute;left:.04em;top:.36em;width:.205em;height:.205em;border-radius:50%;background:var(--amber);box-shadow:0 0 0 .05em var(--bg)}
+  .crumb{color:var(--ghost);font-size:13.5px}
+  .crumb b{color:var(--dim);font-weight:500;font-family:var(--mono);font-size:13px}
+  /* discreet posture chip (no more banner) */
+  .posture{display:inline-flex;align-items:center;gap:7px;font:600 11.5px var(--ui);letter-spacing:.02em;padding:5px 10px;border-radius:8px;
+    color:var(--red);background:color-mix(in oklab,var(--red) 12%,transparent);border:1px solid color-mix(in oklab,var(--red) 38%,var(--line))}
+  .posture .d{width:7px;height:7px;border-radius:50%;background:var(--red)}
+  .posture.dry{color:var(--faint);background:var(--raise);border-color:var(--line)} .posture.dry .d{background:var(--ghost)}
+  /* ---- interactive states (consistent across the system) ---- */
+  a,button{transition:background .12s ease,color .12s ease,border-color .12s ease}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:6px}
+  .nav{display:flex;gap:2px}
+  .nav a{font-size:13.5px;color:var(--faint);text-decoration:none;padding:7px 12px;border-radius:8px}
+  .nav a:hover{color:var(--dim);background:color-mix(in oklab,var(--raise) 55%,transparent)}
+  .nav a.on{color:var(--fg);background:var(--raise)}
+  .nav a.on:hover{background:var(--raise-2)}
+  .fr{margin-left:auto;display:flex;gap:18px;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .fr b{color:var(--faint);font-weight:500}
+  .fr .dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;vertical-align:middle}
+  .avatar{flex:none;width:30px;height:30px;border-radius:50%;background:var(--raise-2);border:1px solid var(--line-2);color:var(--dim);font:600 11px var(--ui);letter-spacing:.02em;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}.avatar:hover{border-color:var(--faint);color:var(--fg)}.avatar.on{border-color:var(--amber);color:var(--amber)}
+
+  /* ---- window/filter toolbar ---- */
+  .toolbar{display:flex;align-items:center;gap:14px 16px;flex-wrap:wrap;min-height:56px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .seg{display:inline-flex;background:var(--raise);border:1px solid var(--line);border-radius:9px;padding:2px}
+  .seg button{font:500 12.5px var(--ui);color:var(--faint);background:none;border:0;padding:5px 13px;border-radius:7px;cursor:pointer}
+  .seg button:hover:not(.on){color:var(--dim);background:color-mix(in oklab,var(--raise-2) 65%,transparent)}
+  .seg button.on{color:oklch(22% 0.04 80);background:var(--amber);font-weight:600}
+  .sel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);border:1px solid var(--line);border-radius:9px;padding:6px 11px;background:var(--raise);cursor:pointer}
+  .sel:hover{border-color:var(--line-2);color:var(--fg)}
+  .sel .mono{color:var(--fg)} .sel .car{color:var(--ghost)}
+  .toggle{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--dim);cursor:pointer;user-select:none}
+  .toggle:hover .sw{background:var(--line-2);filter:brightness(1.15)}
+  .sw{width:30px;height:18px;border-radius:10px;background:var(--line-2);position:relative;transition:background .14s}
+  .sw i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--faint);transition:left .14s,background .14s}
+  .sw.on{background:color-mix(in oklab,var(--amber) 55%,var(--line))} .sw.on i{left:14px;background:var(--amber)}
+  .tr{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ghost)}
+
+  .foot{margin:24px 0 32px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:24px;font-family:var(--mono);font-size:11px;color:var(--ghost);flex-wrap:wrap}
+  .foot b{color:var(--faint);font-weight:500} .foot .note{color:var(--gold)}
+
+  /* ============================================================= */
+  /* ====  INBOX-specific (appended; shared tokens untouched)  ==== */
+  /* ============================================================= */
+
+  /* the filter chip rail reuses the .seg shell; chips here may wrap on narrow */
+  .chips{display:inline-flex;flex-wrap:wrap;gap:2px}
+  .chips button .n{font-family:var(--mono);font-size:10.5px;font-weight:500;color:var(--ghost);margin-left:7px;font-variant-numeric:tabular-nums}
+  .chips button.on .n{color:oklch(30% 0.04 80)}
+  .chips button:hover:not(.on) .n{color:var(--faint)}
+  /* live count + the "needs attention only" feel */
+  .qcount{display:flex;align-items:baseline;gap:8px;font-family:var(--mono);font-size:11.5px;color:var(--ghost)}
+  .qcount b{font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:-.02em;color:var(--fg)}
+  .qcount .red{color:var(--red)}
+
+  /* the queue (hero) — rows in the FEEL of overview's .nrow, grouped by category */
+  .queue{margin-top:6px}
+  .qsec{display:flex;align-items:baseline;gap:12px;margin:28px 0 2px}
+  .qsec .qn{font-family:var(--mono);font-size:11px;color:var(--ghost);font-variant-numeric:tabular-nums}
+  .qsec .qn.real{color:var(--red)}
+
+  .qrow{display:flex;align-items:center;gap:16px;padding:15px 2px;border-top:1px solid var(--line);transition:background .12s}
+  .qrow:hover{background:color-mix(in oklab,var(--raise) 30%,transparent)}
+  /* uppercase category LEAD label — red for terminal/real, gold for non-terminal holds */
+  .qrow .lead{flex:none;width:128px;min-width:0;font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);line-height:1.45}
+  .qrow .lead.red{color:var(--red)} .qrow .lead.gold{color:var(--gold)}
+  .qrow .lead .sub{display:block;font-family:var(--mono);font-size:10px;font-weight:400;letter-spacing:.04em;text-transform:none;color:var(--ghost);margin-top:3px}
+  /* a 2px inset rule on the row marks REAL writes at the point of action */
+  .qrow.real{box-shadow:inset 2px 0 0 var(--red);padding-left:14px}
+
+  .qrow .body{flex:1;min-width:0}
+  .qrow .body .t{font-weight:500;font-size:13.5px;color:var(--fg);line-height:1.34;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .qrow .body .t .id{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-left:7px;font-weight:400;font-variant-numeric:tabular-nums}
+  .qrow .body .why{font-family:var(--mono);font-size:11px;color:var(--ghost);margin-top:4px;line-height:1.55}
+  .qrow .body .why b{color:var(--faint);font-weight:500}
+  .qrow .body .why .real{color:var(--red);font-weight:500}
+  .qrow .body .why .lk{color:var(--dim);text-decoration:underline;text-decoration-color:var(--ghost);text-underline-offset:2px}
+  .qrow .body .why .lk:hover{color:var(--fg);text-decoration-color:var(--faint)}
+
+  /* quiet action buttons — neutral default, danger = red outline */
+  .qrow .acts{flex:none;display:flex;gap:8px;align-items:center}
+  .qrow .btn{font:500 12px var(--ui);border:1px solid var(--line-2);background:var(--raise);color:var(--dim);border-radius:8px;padding:6px 13px;cursor:pointer;white-space:nowrap}
+  .qrow .btn:hover{background:var(--raise-2);border-color:var(--faint);color:var(--fg)}
+  .qrow .btn:active{background:var(--raise)}
+  .qrow .btn.red{border-color:color-mix(in oklab,var(--red) 50%,var(--line));color:var(--red)}
+  .qrow .btn.red:hover{background:color-mix(in oklab,var(--red) 13%,transparent);border-color:var(--red);color:var(--red)}
+
+  /* ============ responsive — capped at 1440, fluid below ============ */
+  @media(max-width:980px){
+    .qrow .lead{width:112px}
+  }
+  @media(max-width:780px){
+    .hd{height:auto;flex-wrap:wrap;gap:10px 12px;padding:12px 0}
+    .crumb,.fr{display:none}
+    .nav{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .toolbar{height:auto;flex-wrap:wrap;gap:12px;padding:14px 0}
+    .tr{display:none}
+    /* rows stack: lead label, then actions, then body */
+    .qrow{flex-wrap:wrap;gap:9px 14px;align-items:flex-start}
+    .qrow.real{padding-left:12px}
+    .qrow .lead{order:1;width:auto;flex:1 1 auto}
+    .qrow .body{order:3;flex:1 1 100%}
+    .qrow .acts{order:2}
+  }
+  @media(max-width:600px){
+    .qsec{flex-wrap:wrap;gap:4px 12px}
+    .qrow .acts{flex-wrap:wrap}
+    .qrow .btn{flex:1 1 auto;text-align:center;min-width:120px}
+  }
+  @media(max-width:480px){
+    .wrap{padding:0 16px}
+    .seg{flex-wrap:wrap}
+    .chips{width:100%}
+  }
+
+  /* GitHub status chip (octocat + health dot) */
+  .frq{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:var(--raise);color:var(--faint)}
+  .frq:hover{color:var(--dim);border-color:var(--line-2)}
+  .frq .d{position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-radius:50%;background:var(--green);border:1.5px solid var(--raise)}
+
+  /* ===== consolidated topbar on scroll (matches overview) ===== */
+  .topbar{position:sticky;top:0;z-index:40;background:var(--bg)}
+  .hd,.toolbar{position:static}
+  html.scrolled .topbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;min-height:54px;border-bottom:1px solid var(--line)}
+  html.scrolled .hd,html.scrolled .toolbar{display:contents}
+  html.scrolled .logo{order:0} html.scrolled .nav{order:1}
+  html.scrolled .minis{display:inline-flex;order:3;margin-left:auto}
+  /* minimized = icon + CURRENT SETTING chips; full controls hide */
+  html.scrolled .toolbar > *:not(.minis){display:none!important}
+  .minis{display:none;align-items:center;gap:8px}
+  .mini{display:inline-flex;align-items:center;gap:7px;font:500 11.5px var(--mono);color:var(--faint);background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+  .mini:hover{color:var(--dim);border-color:var(--line-2)}
+  .mini svg{width:12px;height:12px;flex:none}
+  .mini b{font-weight:500;color:var(--fg)}
+  .mini.dim{color:var(--ghost)} .mini.ic{padding:5px 8px} .mini.ic svg{width:13px;height:13px}
+  .mini.red{color:var(--red);border-color:color-mix(in oklab,var(--red) 38%,var(--line))} .mini.red b{color:var(--red)}
+  /* the one section pipe: hidden at top, appears on scroll LEFT of the GitHub chip */
+  .hpipe{flex:none;width:1px;height:18px;background:var(--line-2);align-self:center;margin:0 2px;display:none}
+  html.scrolled .hpipe{display:block;order:49}
+  html.scrolled .fr{order:50;margin-left:0} html.scrolled .avatar{order:52}
+</style></head>
+<body>
+<section class="screen"><div class="wrap">
+
+  <div class="topbar">
+  <div class="hd">
+    <a class="logo" href="#">F<span class="kk">K<i class="knode"></i></span>ST</a>
+    <div class="nav"><a href="overview.html">Overview</a><a href="goals.html">Goals</a><a href="packages.html">Packages</a></div>
+    <span class="hpipe"></span>
+    <div class="fr"><span class="frq" title="GitHub — synced 30s ago"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><i class="d"></i></span></div>
+    <a class="avatar" href="settings.html" title="Account & settings">CT</a>
+  </div>
+
+  <!-- TIER 2 · filter toolbar — category chips + live count + needs-attention feel -->
+  <div class="toolbar">
+    <!-- scrolled-state compact chips: icon + current setting -->
+    <div class="minis">
+      <span class="mini" title="Triage · All"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M3.4 3.6h9.2L14 9v3.4A1.6 1.6 0 0 1 12.4 14H3.6A1.6 1.6 0 0 1 2 12.4V9l1.4-5.4z"/><path d="M2 9h3.2l1 1.8h3.6l1-1.8H14"/></svg><b>All · 6</b></span>
+      <span class="mini red" title="2 real writes in-flight"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 2.5 14.3 13H1.7L8 2.5z"/><path d="M8 6.5v3M8 11.4v.2"/></svg><b>2 REAL</b></span>
+    </div>
+    <span class="eyebrow">Triage</span>
+    <div class="seg chips">
+      <button class="on">All <span class="n">6</span></button>
+      <button>Blocked <span class="n">2</span></button>
+      <button>Impl-failed <span class="n">1</span></button>
+      <button>Dependency hold <span class="n">1</span></button>
+      <button>Merging · REAL <span class="n">2</span></button>
+    </div>
+    <span class="qcount"><b>6</b> from GitHub · <span class="red">2 real writes in-flight</span></span>
+    <span class="tr">terminal engine outcomes + autonomous writes — not a retry queue</span>
+  </div>
+  </div><!-- /topbar -->
+
+  <!-- TIER 1 · the queue (hero), grouped by category, most urgent first -->
+  <div class="queue">
+
+    <!-- BLOCKED — terminal devloop state, reconcile gave up this framing -->
+    <div class="qsec"><span class="eyebrow">Blocked</span><span class="qn">2 · terminal · engine deterministically gave up this framing</span></div>
+
+    <div class="qrow">
+      <span class="lead red">Blocked<span class="sub">true-stall</span></span>
+      <div class="body">
+        <div class="t">Rework the dispatcher into a 2nd coordinator role <span class="id">#173</span></div>
+        <div class="why"><b>true-stall reconcile</b> · identical narrowed question + verdicts ×3 · engine <b>ended this framing</b> after 3 rounds — terminal, no out-edge</div>
+      </div>
+      <div class="acts"><button class="btn">Open</button><button class="btn">New issue from this</button></div>
+    </div>
+
+    <div class="qrow">
+      <span class="lead red">Blocked<span class="sub">converge cap</span></span>
+      <div class="body">
+        <div class="t">Split consensus angles into per-repo policy sets <span class="id">#190</span></div>
+        <div class="why"><b>max_converge_rounds=8 hit</b> · CONVERGE never reached consensus · meta-judge could not narrow · true-stall → engine <b>ended this framing</b> (terminal)</div>
+      </div>
+      <div class="acts"><button class="btn">Open</button><button class="btn">New issue from this</button></div>
+    </div>
+
+    <!-- IMPL-FAILED — terminal, implement attempts failed CI -->
+    <div class="qsec"><span class="eyebrow">Impl-failed</span><span class="qn">1 · terminal · implement attempts failed CI</span></div>
+
+    <div class="qrow">
+      <span class="lead red">Impl-failed<span class="sub">3 attempts</span></span>
+      <div class="body">
+        <div class="t">Make the state label set-exclusive on PR open <span class="id">#205</span></div>
+        <div class="why"><b>3 implement attempts failed CI</b> · last excerpt: type error in <span class="mono">core/state.lua</span> label set · engine <b>ended this framing</b> — terminal, no out-edge</div>
+      </div>
+      <div class="acts"><button class="btn">Open</button><button class="btn">New issue from this</button></div>
+    </div>
+
+    <!-- DEPENDENCY HOLD — not terminal; holds in ready, auto-cascades on blocker merge -->
+    <div class="qsec"><span class="eyebrow">Dependency hold</span><span class="qn">1 · not terminal · holds in ready, auto-cascades when the blocker merges</span></div>
+
+    <div class="qrow">
+      <span class="lead gold">Dependency hold<span class="sub">held in ready</span></span>
+      <div class="body">
+        <div class="t">Reflect blocked outcomes back into the goal board view <span class="id">#238</span></div>
+        <div class="why"><b>dependency-wait</b> · unmet PR #36 · held under <span class="mono">fkst-dev:n</span> (<span class="mono">n:v1</span> marker · unmet native issue deps) · <b>resumes automatically</b> when the blocker merges — no action needed</div>
+      </div>
+      <div class="acts"><button class="btn">Open</button></div>
+    </div>
+
+    <!-- MERGING (REAL) — happening right now, autonomous, real writes -->
+    <div class="qsec"><span class="eyebrow">Merging · REAL</span><span class="qn real">2 · autonomous real writes happening now → integration branch</span></div>
+
+    <div class="qrow real">
+      <span class="lead red">Merging<span class="sub">REAL · CI green</span></span>
+      <div class="body">
+        <div class="t">Composed conformance suite for github-autochrono <span class="id">#152 · PR #29</span></div>
+        <div class="why"><span class="real">REAL</span> · global write posture is REAL — engine is merging this autonomously into the <b>integration branch</b> (completes in seconds) · to halt all writes <a class="lk" href="settings.html">set DRY-RUN</a>, or close PR #29 on GitHub</div>
+      </div>
+      <div class="acts"><button class="btn">Open</button><button class="btn">Write posture</button></div>
+    </div>
+
+    <div class="qrow real">
+      <span class="lead red">Merging<span class="sub">REAL · CI green</span></span>
+      <div class="body">
+        <div class="t">Extract the cache_get / cache_set helper functions <span class="id">#149 · PR #27</span></div>
+        <div class="why"><span class="real">REAL</span> · <span class="mono">gh pr merge --match-head-commit</span> → <b>integration branch</b> · autonomous, deterministic · a rollup PR later carries integration → dev, never main · posture is a <a class="lk" href="settings.html">global host fact</a></div>
+      </div>
+      <div class="acts"><button class="btn">Open</button><button class="btn">Write posture</button></div>
+    </div>
+
+  </div><!-- /queue -->
+
+  <div class="foot">
+    <span>queue is <b>poll-derived</b> from GitHub — last poll <b>30s ago</b> (~5m cron) · not live</span>
+    <span>merges → <b>integration branch</b> (autonomous, deterministic) · a rollup PR carries integration → dev · never main</span>
+    <span class="note">an unreachable hosted service reads <b>unknown</b>, never "0"</span>
+    <span><b>blocked / impl-failed</b> = terminal for the console · re-engage with a <b>new issue</b>, never reopen/retry · sole engine escape hatch: a trusted-bot <span class="mono">fkst: rereview</span> PR comment (blocked / review-meta / stalled reviewing, open PR only) — bot-issued, <b>not a console action</b></span>
+  </div>
+
+</div></section>
+<script>
+  (function(){
+    // filter chips — single active, amber like the window segment (visual only on the mock)
+    document.querySelectorAll('.chips button').forEach(function(b){
+      b.addEventListener('click',function(){
+        document.querySelectorAll('.chips button').forEach(function(x){x.classList.remove('on');});
+        b.classList.add('on');
+      });
+    });
+  })();
+</script>
+<script>
+/* hysteresis band: condense once past 140, expand only back under 40 — no flicker at the boundary */
+(function(){var on=false;function upd(){var y=window.scrollY||0;if(!on&&y>140){on=true;document.documentElement.classList.add("scrolled");}else if(on&&y<40){on=false;document.documentElement.classList.remove("scrolled");}}addEventListener("scroll",upd,{passive:true});upd();})();
+</script>
+</body></html>

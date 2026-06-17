@@ -1,0 +1,57 @@
+name: "fkst goal"
+description: "Declare an fkst goal the agent will run against a repo."
+title: "[fkst-goal]: "
+# No `labels:` — the backend adds the `fkst-goal` label on submit (the label-
+# lifecycle issue owns the label scheme; declaring one here would pre-empt it).
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## How this issue is parsed
+
+        The backend extracts your goal from the three sections below by their
+        exact headings — `### Goal`, `### Package Name List`, `### Ornn Skill
+        List`. A section's content is every line after its heading up to the
+        next `### ` heading (or end of body), trimmed. Keep the headings intact.
+
+        - **Goal** — the entire trimmed text becomes the engine prompt. Required.
+        - **Package Name List** — one name per line; each must match
+          `^[A-Za-z0-9_-]+$`; 1 to 16 names; no duplicates; `host` is reserved.
+        - **Ornn Skill List** — optional; one pin per line as
+          `kind:name@major.minor` (`kind` is `skill` or `skillset`).
+
+        Malformed input (missing/empty Goal, an invalid package name, a bad pin,
+        too many/duplicate names, or a duplicate heading) is rejected with
+        `422 Unprocessable Entity` so you can correct it.
+
+        > ⚠️ **Do NOT put environment variables, secrets, tokens, or credentials
+        > in this issue.** They are supplied only through the trigger API and are
+        > never read from the issue.
+  - type: textarea
+    id: goal
+    attributes:
+      label: "Goal"
+      description: "The engine prompt — what you want the agent to do, in plain language."
+      placeholder: "Build a CLI that summarizes a git repo's commit history into a weekly digest."
+    validations:
+      required: true
+  - type: textarea
+    id: package-name-list
+    attributes:
+      label: "Package Name List"
+      description: "One package name per line. Each must match `^[A-Za-z0-9_-]+$`; 1 to 16 names; no duplicates; `host` is reserved."
+      placeholder: |
+        repo-reader
+        digest-writer
+    validations:
+      required: true
+  - type: textarea
+    id: ornn-skill-list
+    attributes:
+      label: "Ornn Skill List"
+      description: "Optional. One pin per line as `kind:name@major.minor`, where kind is `skill` or `skillset`, e.g. `skill:foo@1.0` or `skillset:bar@2.3`. Leave empty for none."
+      placeholder: |
+        skill:git-log@1.0
+        skillset:report-templates@2.3
+    validations:
+      required: false

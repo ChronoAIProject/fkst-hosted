@@ -1,0 +1,5 @@
+---
+"fkst-hosted": patch
+---
+
+Split the single `backend/deploy/k8s/` kustomize stack into two per-deployable sample directories (#166): `backend/fkst-control-plane/k8s_sample/` (namespace, deployment, public `fkst-hosted` service, configmap, secret template, PDB, and the transitional mongodb statefulset/service flagged "until #143") and `backend/fkst-worker/k8s_sample/` (deployment with the `fkst-worker-secret` envFrom + worker `/health` probes on port 8090, configmap with `CONTROLLER_URL`, secret template, and sample HPA-on-`fkst_pending_work` + PDB flagged "topology finalized by #144/#140"). Each manifest's existing posture (non-root 10001, read-only rootfs, downward-API `FKST_POD_ID`, anti-affinity, probes, replicas) is carried over verbatim; the secret templates are deliberately excluded from each `kustomization.yaml`. `backend/deploy/` is removed and the root + backend READMEs (and the Dockerfile comment references) are repointed at the new `k8s_sample/` paths. Also fixes a dangling secret reference in the migrated mongodb statefulset (`fkst-hosted-secret` → `fkst-control-plane-secret`). No Rust/Docker-build behaviour changes.

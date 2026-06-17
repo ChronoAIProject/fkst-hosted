@@ -1,0 +1,177 @@
+# fkst-control-plane: the controller deployable (public REST API). SINGLE
+# authoritative replica (datastore-free, #143/#144). SAMPLE manifest — every
+# value here is an example; the config loaders
+# (backend/fkst-control-plane/src/config.rs et al.) are the canonical source of
+# truth for the env contract.
+#
+# TRANSITIONAL (until #151): engine execution still lives in the control-plane
+# crate today, so this Deployment still spawns engine children and therefore
+# (a) must run from the ENGINE-LADEN image — the `fkst-control-plane` image tag
+# below is a kustomize seam (kustomization.yaml `images:`); transitionally point
+# it at the engine-laden `fkst-worker` image (with a `command:` override to the
+# fkst-control-plane binary) since the slim `backend/fkst-control-plane/Dockerfile`
+# carries no engine — and (b) keeps the `runtime`+`tmp` emptyDir volumes below.
+# When #151 moves engine execution onto the worker: switch this image to the
+# slim `fkst-control-plane` image and drop the `runtime` volume + its mount, and
+# the `FKST_HOSTED_ENGINE_*` ConfigMap keys move to the worker.
+#
+# Single-writer claim authority — NOT a lease store. The database-free pivot
+# (#143/#198) made the controller the SOLE authority for at-most-one-engine
+# mutual exclusion: an in-memory `ClaimMap` (single replica, single writer), so
+# there is no cross-pod lease / fencing-token arbitration to serialize anymore.
+# The controller runs as exactly ONE replica; on restart it rebuilds its
+# in-memory state from the live workers' self-reports + the claimed goal-issue
+# labels (never a datastore). The worker fleet — not the controller — scales
+# horizontally (see backend/fkst-worker/k8s_sample, with its HPA).
+#
+# Recreate strategy: with a single authoritative writer, a second (surging) pod
+# must NOT come up while the old one still holds the in-memory claim map, so the
+# rollout terminates the old pod first. `terminationGracePeriodSeconds: 30` +
+# `preStop: sleep 2` drain in-flight requests + SIGTERM live engines first.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fkst-control-plane
+  namespace: fkst-hosted
+  labels:
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  replicas: 1
+  # Recreate (not RollingUpdate): the controller is the SINGLE in-memory claim
+  # authority, so a surging second pod would run a second, independent claim map
+  # — a split-brain. Recreate terminates the old pod before starting the new one,
+  # so at most one controller ever owns the authority. A brief gap during a
+  # rollout is acceptable; the worker fleet keeps running, and the new controller
+  # rebuilds its state from worker self-reports + goal-issue labels.
+  strategy:
+    type: Recreate
+  # Selector is immutable after creation — keep it minimal (name only) so
+  # label additions never force a Deployment recreate.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fkst-control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fkst-control-plane
+        app.kubernetes.io/component: control-plane
+        app.kubernetes.io/part-of: fkst-hosted
+    spec:
+      # Docker-link-style service env injection MUST stay off: the Service is
+      # named fkst-hosted, so Kubernetes would inject FKST_HOSTED_PORT =
+      # "tcp://<clusterIP>:80" into the pod — colliding with the API's
+      # FKST_HOSTED_* env prefix (parsed as PORT) and failing the fail-closed
+      # config loader at startup. The API's env comes exclusively from the
+      # image, the ConfigMap, and the Secret.
+      enableServiceLinks: false
+      # PREFERRED (soft) anti-affinity: spread replicas across nodes when the
+      # cluster is multi-node. Intentionally NOT required — docker-desktop is
+      # single-node, and a required rule would leave replicas 2..N Pending
+      # forever. On a real multi-node cluster this nudges spreading for fault
+      # tolerance without ever blocking scheduling.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: fkst-control-plane
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      # Datastore-free (#143): no `wait-for-mongodb` initContainer. The controller
+      # has no store to ping at startup — a process that can answer /health is
+      # ready — so there is no first-boot ordering dependency to absorb.
+      containers:
+        - name: fkst-control-plane
+          # tag managed by kustomization.yaml images. TRANSITIONAL: build this
+          # from `--target worker-runtime` (engine-laden) until #136 — see header.
+          image: fkst-control-plane:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          # Pod identity is an INTENTIONAL contract, not the ambient HOSTNAME
+          # coincidence: FKST_POD_ID is sourced explicitly from the downward
+          # API (metadata.name) so the controller's advisory pod_id (stamped on
+          # in-memory claims for journaling/load reflection) is the pod's stable,
+          # unique name. (The config loader's fallback is FKST_POD_ID -> HOSTNAME
+          # -> local-<uuid>; wiring it explicitly here is defense-in-depth so
+          # identity never silently degrades.)
+          env:
+            - name: FKST_POD_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: fkst-control-plane-config
+            - secretRef:
+                name: fkst-control-plane-secret
+          # Belt-and-suspenders drain: sleep before SIGTERM so the Service /
+          # endpoints controller deregisters this pod (readiness still passing
+          # at this instant) and in-flight requests stop arriving BEFORE the
+          # process begins its graceful shutdown (SIGTERM live engines, bounded
+          # drain). Bounded well under terminationGracePeriodSeconds (30s).
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 2"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Root FS is read-only, so every writable path is an explicit
+          # emptyDir. Engine runtime state is LOCAL and intentionally
+          # ephemeral (redo-from-GitHub-truth model) — never a PVC.
+          volumeMounts:
+            - name: runtime
+              mountPath: /var/lib/fkst/runtime # = FKST_RUNTIME_ROOT (image env)
+            - name: tmp
+              mountPath: /tmp
+          # Datastore-free (#143): /health probes no store — it reports ready
+          # iff the process can serve, so readiness == liveness in practice.
+          # Liveness stays TCP-only (cheap, no dependency); the 7s readiness
+          # timeout is generous headroom, not a DB-coupled bound anymore.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 7
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 7
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
