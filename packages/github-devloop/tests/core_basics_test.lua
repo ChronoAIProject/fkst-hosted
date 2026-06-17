@@ -107,6 +107,20 @@ return {
     t.eq(merge.cmd:find("FKST_GITHUB_READ_TOKEN", 1, true), nil)
     t.eq(merge.cmd:find("FKST_GITHUB_WRITE_TOKEN", 1, true), nil)
   end,
+  test_github_capability_split_is_enabled_in_normal_runtime = function()
+    local saved_test = fkst.test
+    fkst.test = nil
+    local ok, spec = pcall(function()
+      return core.gh_exec_opts({ cmd = core.gh_issue_view_implement_cmd("owner/repo", 42), timeout = 30 })
+    end)
+    fkst.test = saved_test
+
+    t.eq(ok, true)
+    t.eq(spec.github_capability.role, "read-audit")
+    t.is_true(spec.cmd:find("FKST_GITHUB_READ_TOKEN", 1, true) ~= nil)
+    t.eq(spec.cmd:find("FKST_GITHUB_WRITE_TOKEN", 1, true), nil)
+    t.eq(spec.cmd:find("FKST_GITHUB_MERGE_TOKEN", 1, true), nil)
+  end,
   test_github_high_risk_paths_cover_ci_auth_dependency_and_scheduler_surfaces = function()
     local high = core.github_high_risk_paths({
       ".github/workflows/ci.yml",

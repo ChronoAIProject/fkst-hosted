@@ -205,7 +205,7 @@ local function token_split_enabled(opts)
   if type(fkst) == "table" and type(fkst.test) == "table" then
     return false
   end
-  return false
+  return true
 end
 
 function M.github_capability_exec_opts(opts)
