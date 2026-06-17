@@ -224,6 +224,45 @@ local function append_state_section(lines, title, state, by_state, now_seconds)
   append_entity_lines(lines, by_state[state] or {}, now_seconds)
 end
 
+local function section(lines)
+  return table.concat(lines, "\n")
+end
+
+local function append_section(sections, lines)
+  table.insert(sections, section(lines))
+end
+
+local function append_rendered_section(rendered, text)
+  if #rendered == 0 then
+    table.insert(rendered, text)
+  else
+    table.insert(rendered, "\n")
+    table.insert(rendered, text)
+  end
+end
+
+local function render_dashboard_sections(sections, marker, limit)
+  local marker_suffix = "\n\n" .. marker .. "\n"
+  local body_limit = tonumber(limit) or max_dashboard_body_len
+  if body_limit <= #marker_suffix then
+    return marker_suffix
+  end
+
+  local rendered = {}
+  local rendered_len = 0
+  for _, candidate in ipairs(sections) do
+    local separator_len = #rendered == 0 and 0 or 1
+    local candidate_len = #candidate + separator_len
+    if rendered_len + candidate_len + #marker_suffix <= body_limit then
+      append_rendered_section(rendered, candidate)
+      rendered_len = rendered_len + candidate_len
+    else
+      break
+    end
+  end
+  return table.concat(rendered) .. marker_suffix
+end
+
 function core.render_observability_dashboard(args)
   local list = args and args.entities or {}
   local counts = args and args.counts or {}
@@ -243,22 +282,26 @@ function core.render_observability_dashboard(args)
     table.insert(by_state[state], entity)
   end
 
-  local lines = {
+  local sections = {}
+  append_section(sections, {
     "# " .. dashboard_title,
     "",
     "Live read-only dashboard generated from trusted fkst-dev markers. Chinese: &#27492;&#30475;&#26495;&#21482;&#26159;&#21487;&#20449; marker &#30340;&#21482;&#35835;&#27966;&#29983;&#35270;&#22270;&#65292;&#19981;&#26159;&#20107;&#23454;&#28304;&#12290;",
     "",
-  }
+  })
   if topology_mermaid ~= nil and tostring(topology_mermaid) ~= "" then
-    table.insert(lines, "## System topology")
-    table.insert(lines, "")
-    table.insert(lines, "Operator orientation: this projects `graph_json()` nodes into package lanes and queue-mediated message paths needed to read the live work sections below.")
-    table.insert(lines, "")
-    table.insert(lines, "```mermaid")
-    table.insert(lines, tostring(topology_mermaid))
-    table.insert(lines, "```")
-    table.insert(lines, "")
+    append_section(sections, {
+      "## System topology",
+      "",
+      "Operator orientation: this projects `graph_json()` nodes into package lanes and queue-mediated message paths needed to read the live work sections below.",
+      "",
+      "```mermaid",
+      tostring(topology_mermaid),
+      "```",
+      "",
+    })
   end
+  local lines = {}
   table.insert(lines, "## Now working")
   local working = {}
   for _, state in ipairs({ "implementing", "pr-open", "reviewing", "fixing", "merge-ready", "merging" }) do
@@ -267,8 +310,9 @@ function core.render_observability_dashboard(args)
     end
   end
   append_entity_lines(lines, working, now_seconds)
+  append_section(sections, lines)
 
-  table.insert(lines, "")
+  lines = {}
   table.insert(lines, "## Board by state")
   table.insert(lines, "Total: " .. tostring(#list))
   for _, state in ipairs(core._state_order) do
@@ -277,13 +321,22 @@ function core.render_observability_dashboard(args)
   if counts.unmanaged ~= nil then
     table.insert(lines, "- unmanaged: " .. tostring(counts.unmanaged))
   end
+  append_section(sections, lines)
 
+  lines = {}
   append_state_section(lines, "Ready", "ready", by_state, now_seconds)
+  append_section(sections, lines)
+  lines = {}
   append_state_section(lines, "Blocked", "blocked", by_state, now_seconds)
+  append_section(sections, lines)
+  lines = {}
   append_state_section(lines, "Review meta", "review-meta", by_state, now_seconds)
+  append_section(sections, lines)
+  lines = {}
   append_state_section(lines, "Thinking", "thinking", by_state, now_seconds)
+  append_section(sections, lines)
 
-  table.insert(lines, "")
+  lines = {}
   table.insert(lines, "## Stall suspects")
   if #stalls == 0 then
     table.insert(lines, "- None")
@@ -299,22 +352,25 @@ function core.render_observability_dashboard(args)
       shown = shown + 1
     end
   end
+  append_section(sections, lines)
 
+  lines = {}
   core.append_state_gap_dashboard_section(lines, state_gap_report)
-  table.insert(lines, "")
+  append_section(sections, lines)
+
+  lines = {}
   table.insert(lines, "## Footer")
   table.insert(lines, "- quota: not rendered")
   table.insert(lines, "- instance: " .. tostring(instance))
   table.insert(lines, "- generated-at: " .. generated_at)
+  append_section(sections, lines)
 
-  local stable = table.concat(lines, "\n")
+  local marker = dashboard_marker("0000000000", generated_at)
+  local stable_body = render_dashboard_sections(sections, marker, args and args.max_body_len or max_dashboard_body_len)
+  local stable = stable_body:gsub("\n\n<!%-%- fkst:dashboard:v1[^\n]*%-%->\n$", "")
   local hash = decimal_checksum(stable:gsub("%- generated%-at: [^\n]+", "- generated-at: <generated>"))
-  local marker = dashboard_marker(hash, generated_at)
-  local body = stable .. "\n\n" .. marker .. "\n"
-  if #body > max_dashboard_body_len then
-    local marker_suffix = "\n\n" .. marker .. "\n"
-    body = core.truncate_utf8(body, max_dashboard_body_len - #marker_suffix) .. marker_suffix
-  end
+  marker = dashboard_marker(hash, generated_at)
+  local body = render_dashboard_sections(sections, marker, args and args.max_body_len or max_dashboard_body_len)
   return {
     body = body,
     hash = hash,
