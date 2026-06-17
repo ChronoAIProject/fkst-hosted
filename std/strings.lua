@@ -20,6 +20,10 @@ function S.comment_body(comment)
   return tostring(comment or "")
 end
 
+-- std.strings.json_string is a temporary byte-identical stopgap for #976 only:
+-- canonical JSON encoding remains deferred to a dedicated encoder boundary.
+-- Keep this body matched to the folded github-devloop encode_json_string copies;
+-- do not extend it into a partial general JSON serializer.
 function S.json_string(value)
   local text = tostring(value or "")
   text = text:gsub("\\", "\\\\")
