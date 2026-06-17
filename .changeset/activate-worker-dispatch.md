@@ -1,5 +1,0 @@
----
-"fkst-hosted": minor
----
-
-Activate worker dispatch behind a default-off `FKST_DISPATCH_MODE` (#191, #151 increment 7b). When enabled, a goal trigger resolves a fully self-contained `ResolvedDispatch` (token, env, NyxID, codex, Ornn, nonce, journal plan) and queues it to the placed worker — delivered on the worker's next heartbeat — instead of spawning the engine in-process; the worker then clones, spawns, supervises, refreshes credentials over the fence-guarded RPC, and journals direct to GitHub. `ControllerHandle::enqueue_dispatch` queues via the registry; `main.rs` shares one registry/claims between the internal router and the controller handle and only calls `enable_controller` when the flag is on, so with the flag off `create_for_goal` is byte-identical to the in-process distributor path. A dispatch-resolution failure fails the session loudly (generic 503 to the caller; detail logged; the secret-bearing dispatch is never logged). The production cutover — making dispatch the default, deleting the in-process driver, slimming the control-plane image, and the real reassign/re-adopt handshakes — is tracked in a follow-up that requires real-fleet validation.

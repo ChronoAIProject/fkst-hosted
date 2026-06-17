@@ -1,5 +1,0 @@
----
-"fkst-hosted": minor
----
-
-Migrate the session store to in-memory (#208, part of #198 / the #143 prerequisite). `SessionRepo` is reimplemented from a Mongo `Collection<SessionDoc>` to an `Arc<Mutex<HashMap>>` behind its identical public interface, so every caller is unchanged. The atomic compare-and-set is preserved and strengthened — the whole read-check-write of `transition_guarded` runs under one lock, and the `pod_id`/`fencing_token` ownership guards (a superseded writer can never land after a takeover) hold exactly as before; the generic `extra`/`set` documents apply through a `SessionDoc` ⇄ `bson::Document` round-trip so field-level semantics are byte-identical to the old Mongo `$set`/equality filters. The accepted db-free trade-off: a controller restart loses in-flight in-memory sessions, recovered from the still-running workers' OS-truth re-adopt (#136) + the GitHub journal skip-set (#139), never from a datastore. Mongo remains for the residual lease/placement layer until #143 removes it.
