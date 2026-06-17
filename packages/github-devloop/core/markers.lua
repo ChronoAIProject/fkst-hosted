@@ -312,15 +312,15 @@ function M.review_carry_over_marker(issue_proposal_id, version, old_review_propo
     .. '" proof="merge-tree-empty-delta" -->'
 end
 
-function M.merged_marker(issue_proposal_id, pr_number, version, head_sha)
+function M.merged_marker(issue_proposal_id, pr_number, version, head_sha, autonomy_record)
   if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
     error("github-devloop: invalid merged marker")
   end
+  local autonomy_attrs = autonomy_record ~= nil and (' autonomy_result="v1"' .. M.autonomy_result_marker_attrs(autonomy_record)) or ""
   return '<!-- fkst:github-devloop:merged:v1 proposal="' .. tostring(issue_proposal_id)
     .. '" pr="' .. tostring(pr_number)
     .. '" version="' .. tostring(version)
-    .. '" head_sha="' .. tostring(head_sha)
-    .. '" -->'
+    .. '" head_sha="' .. tostring(head_sha) .. '"' .. autonomy_attrs .. ' -->'
 end
 
 function M.merging_marker(issue_proposal_id, pr_number, version, head_sha)
@@ -716,11 +716,16 @@ function M.merged_fact(comments, issue_proposal_id, pr_number, version)
         and tostring(marker_pr) == tostring(pr_number)
         and (version == nil or tostring(marker_version) == tostring(version))
         and M._is_git_sha(marker_head_sha) then
+        local autonomy_result = nil
+        if marker:find('autonomy_result="v1"', 1, true) ~= nil and M.autonomy_result_record_from_marker ~= nil then
+          autonomy_result = M.autonomy_result_record_from_marker(marker, comment, marker_issue, marker_pr, marker_version, marker_head_sha)
+        end
         return {
           proposal_id = marker_issue,
           pr_number = tonumber(marker_pr),
           version = marker_version,
           head_sha = marker_head_sha,
+          autonomy_result = autonomy_result,
           comment_created_at = M._comment_created_at(comment),
         }
       end
