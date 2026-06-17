@@ -501,6 +501,59 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
   error("github-devloop: unknown implementation outcome")
 end
 
+local function expected_state_matches(state, expected)
+  local expected_state = expected
+  local version = nil
+  if type(expected) == "table" then
+    expected_state = expected.state
+    version = expected.version
+    if version == nil then
+      version = expected.target_version
+    end
+  end
+  if version == nil then
+    return tostring(state.state or "") == tostring(expected_state)
+  end
+  return tostring(state.state or "") == tostring(expected_state)
+    and tostring(state.version or "") == tostring(version or "")
+end
+
+local function expected_state_names(expected_states)
+  local names = {}
+  for _, expected in ipairs(expected_states or {}) do
+    if type(expected) == "table" then
+      table.insert(names, expected.state)
+    else
+      table.insert(names, expected)
+    end
+  end
+  return names
+end
+
+local function expected_transition_versions(expected_states, default_version)
+  local source_version = default_version
+  local target_version = nil
+  for _, expected in ipairs(expected_states or {}) do
+    if type(expected) == "table" then
+      if expected.version ~= nil then
+        source_version = expected.version
+      end
+      if expected.target_version ~= nil then
+        target_version = expected.target_version
+      end
+    end
+  end
+  return source_version, target_version
+end
+
+local function implementation_transition_status(state, expected_states, marker_version)
+  local source_version, target_version = expected_transition_versions(expected_states, marker_version)
+  if target_version ~= nil then
+    return core.cyclic_transition_status(state, expected_state_names(expected_states), "implementing", source_version, target_version)
+  end
+  return core.versioned_transition_status(state, expected_state_names(expected_states or { "ready" }), "implementing", marker_version)
+end
+
 local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
   local view = core.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
@@ -528,12 +581,11 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
     return false
   end
   for _, expected in ipairs(expected_from_states or {}) do
-    if tostring(state.state or "") == tostring(expected)
-      and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
+    if expected_state_matches(state, expected) then
       return true
     end
   end
-  local transition = core.versioned_transition_status(state, expected_from_states or { "ready" }, "implementing", marker_ready.dedup_key)
+  local transition = implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
     if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
       core.log_cas_decision("implement", marker_ready.proposal_id, {
@@ -571,12 +623,11 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
     return false
   end
   for _, expected in ipairs(expected_from_states or {}) do
-    if tostring(state.state or "") == tostring(expected)
-      and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
+    if expected_state_matches(state, expected) then
       return true
     end
   end
-  local transition = core.versioned_transition_status(state, expected_from_states or { "ready" }, "implementing", marker_ready.dedup_key)
+  local transition = implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
     if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
       core.log_cas_decision("implement", marker_ready.proposal_id, {
@@ -599,6 +650,21 @@ local function backing_original_closed(current)
   end
   local open = core.rederive_issue_is_open(origin.repo, origin.issue_number)
   return not open, origin
+end
+
+local function operator_blocked_reimplement_allowed(ready, current, state)
+  local reentry = ready and ready.operator_reentry
+  if type(reentry) ~= "table"
+    or reentry.command ~= "reimplement"
+    or reentry.from_state ~= "blocked"
+    or state.state ~= "blocked"
+    or tostring(state.version or "") ~= tostring(reentry.state_version or "") then
+    return false
+  end
+  local link = core.pr_link_fact(current.comments, ready.proposal_id)
+  return link ~= nil
+    and tonumber(link.pr_number) == tonumber(reentry.pr_number)
+    and tostring(link.impl_version or "") == tostring(reentry.impl_version or "")
 end
 
 local function process_ready_event(event)
@@ -742,18 +808,23 @@ local function process_ready_event(event)
     end
 
     local retry_failure = nil
+    local blocked_reentry = false
     if state.state == "impl-failed" and ready.impl_retry_attempt ~= nil and state.version == ready.dedup_key then
       retry_failure = core.impl_failure_fact(current.comments, ready.proposal_id, ready.dedup_key)
       if retry_failure ~= nil and tonumber(ready.impl_retry_attempt) <= tonumber(retry_failure.attempt or 1) then
         core.log_cas_decision("implement", ready.proposal_id, state, "impl-failed", "implementing", "skip-idempotent(retry-not-advanced)", "implementation retry event does not advance the failure attempt")
         return
       end
+    elseif state.state == "blocked" and ready.impl_retry_attempt ~= nil and operator_blocked_reimplement_allowed(ready, current, state) then
+      blocked_reentry = true
     elseif state.state == "implementing" or state.state == "impl-failed" then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation fact marker already visible")
       return
     end
-    local expected_states = retry_failure ~= nil and { "impl-failed" } or { "ready" }
-    local transition = core.versioned_transition_status(state, expected_states, "implementing", ready.dedup_key)
+    local expected_states = blocked_reentry
+      and { { state = "blocked", version = ready.operator_reentry.state_version, target_version = ready.dedup_key } }
+      or (retry_failure ~= nil and { "impl-failed" } or { "ready" })
+    local transition = implementation_transition_status(state, expected_states, ready.dedup_key)
     if transition == "idempotent" or transition == "stale" then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
