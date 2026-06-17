@@ -221,6 +221,7 @@ function core.render_observability_dashboard(args)
   local counts = args and args.counts or {}
   local stalls = args and args.stalls or {}
   local state_gap_report = args and args.state_gap_report or {}
+  local topology_mermaid = args and args.topology_mermaid or nil
   local now_seconds = args and args.now_seconds or now()
   local generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now_seconds)
   local instance = core.read_env("FKST_GITHUB_BOT_LOGIN") or "unknown"
@@ -239,8 +240,18 @@ function core.render_observability_dashboard(args)
     "",
     "Live read-only dashboard generated from trusted fkst-dev markers. Chinese: &#27492;&#30475;&#26495;&#21482;&#26159;&#21487;&#20449; marker &#30340;&#21482;&#35835;&#27966;&#29983;&#35270;&#22270;&#65292;&#19981;&#26159;&#20107;&#23454;&#28304;&#12290;",
     "",
-    "## Now working",
   }
+  if topology_mermaid ~= nil and tostring(topology_mermaid) ~= "" then
+    table.insert(lines, "## System topology")
+    table.insert(lines, "")
+    table.insert(lines, "Operator orientation: this collapses raw `graph_json()` nodes and queues into the package lanes and message path needed to read the live work sections below.")
+    table.insert(lines, "")
+    table.insert(lines, "```mermaid")
+    table.insert(lines, tostring(topology_mermaid))
+    table.insert(lines, "```")
+    table.insert(lines, "")
+  end
+  table.insert(lines, "## Now working")
   local working = {}
   for _, state in ipairs({ "implementing", "pr-open", "reviewing", "fixing", "merge-ready", "merging" }) do
     for _, entity in ipairs(by_state[state] or {}) do
