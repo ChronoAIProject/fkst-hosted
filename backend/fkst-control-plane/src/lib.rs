@@ -35,6 +35,9 @@ pub use fkst_shared::nyxid;
 // `ornn` and `vault` are split modules: their role-neutral leaves
 // (`ornn::types`, `vault::model`) live in `fkst-shared`; the control-plane
 // halves (the client/injector, the in-memory vault service) stay here.
+// Runtime OpenAPI 3 document (no static spec): assembled from the live
+// `#[utoipa::path]` handlers + `ToSchema` types and served at GET /openapi.json.
+pub mod openapi;
 pub mod ornn;
 pub mod reconcile;
 pub mod router;

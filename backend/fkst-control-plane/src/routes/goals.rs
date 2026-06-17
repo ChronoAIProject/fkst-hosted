@@ -18,23 +18,25 @@
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Json;
 use bson::doc;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
 use crate::authz::{Action, Ownership};
-use crate::error::AppError;
+use crate::error::{AppError, ErrorEnvelope};
 use crate::goals::{
     validate_goal_fields, validate_submission, CreateRepoSpec, FieldError, GoalDoc, GoalStatus,
     RepoRef, MAX_GOAL_DESCRIPTION_BYTES, MAX_GOAL_TITLE_CHARS,
 };
 use crate::ornn::OrnnSkillPin;
 use crate::routes::extract::AppJson;
-use crate::routes::rfc3339;
+use crate::routes::{rfc3339, RepoRefView};
 use crate::sessions::GoalTriggerInfo;
 use crate::state::AppState;
 use crate::vault::{EnvKind, EnvScopeRef};
@@ -49,7 +51,7 @@ const MUTABLE_STATUSES: [GoalStatus; 3] = [
 // ---- DTOs ---------------------------------------------------------------
 
 /// Request body for `POST /api/v1/goals`. Unknown fields are denied.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateGoalRequest {
     pub title: String,
@@ -66,7 +68,7 @@ pub struct CreateGoalRequest {
 
 /// Request body for `PATCH /api/v1/goals/{id}`. Unknown fields are denied.
 /// Absent fields are unchanged.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PatchGoalRequest {
     pub title: Option<String>,
@@ -81,7 +83,7 @@ pub struct PatchGoalRequest {
 }
 
 /// GitHub repo reference in request bodies.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RepoRefBody {
     pub owner: String,
@@ -90,7 +92,7 @@ pub struct RepoRefBody {
 
 /// Response body for goal endpoints (mirrors `GoalDoc` with string UUID and
 /// RFC3339 timestamps, explicit nulls, snake_case status).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct GoalView {
     pub id: String,
     pub title: String,
@@ -105,18 +107,15 @@ pub struct GoalView {
     pub updated_at: String,
 }
 
-/// Repo reference in responses.
-#[derive(Debug, Serialize)]
-pub struct RepoRefView {
-    pub owner: String,
-    pub name: String,
-}
-
 /// Query parameters for `GET /api/v1/goals`.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListGoalsQuery {
+    /// Filter by goal status (snake_case: `not_started`/`triggered`/...).
     pub status: Option<String>,
+    /// Page size (default 50, capped at 200).
     pub limit: Option<u64>,
+    /// Pagination offset (default 0).
     pub offset: Option<u64>,
 }
 
@@ -131,7 +130,7 @@ fn default_true() -> bool {
 }
 
 /// How the trigger handler should resolve the target repository.
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RepoMode {
     /// Use an existing repo (the stored goal repo or `repo` override).
@@ -145,7 +144,7 @@ pub enum RepoMode {
 /// The `repo` field is optional: when absent, the goal's stored repo is used.
 /// When `repo_mode` is `create_new`, the `create` field is required and
 /// specifies the new repository to create.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TriggerRequest {
     /// Override the goal's stored repo for this trigger (only for `existing` mode).
@@ -173,12 +172,13 @@ pub struct TriggerRequest {
 /// One inline secret/variable supplied in the trigger body (#138). `value` is
 /// redacted in `Debug` so a secret never renders through `{:?}`; `kind` defaults
 /// to `secret`.
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InlineSecretInput {
     /// Env-var name (validated by the vault: rule + reserved-key denylist).
     pub key: String,
-    /// The value. Moved into a zeroizing `SecretString` before it leaves here.
+    /// The value. Moved into a zeroizing `SecretString` before it leaves here;
+    /// never logged or echoed back.
     pub value: String,
     /// `secret` (default) or `variable`.
     #[serde(default = "default_secret_kind")]
@@ -202,7 +202,7 @@ fn default_secret_kind() -> EnvKind {
 }
 
 /// Request-body specification for creating a new GitHub repo during trigger.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateRepoSpecBody {
     /// Repository name (required).
@@ -219,11 +219,12 @@ pub struct CreateRepoSpecBody {
 }
 
 /// Response body for `POST /api/v1/goals/{id}/trigger` (202).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TriggerResponse {
     pub goal_id: String,
     pub session_id: String,
     pub goal_status: GoalStatus,
+    #[schema(value_type = String, example = "pending")]
     pub session_status: &'static str,
 }
 
@@ -284,6 +285,22 @@ fn mutable_statuses() -> Vec<GoalStatus> {
 
 /// `POST /api/v1/goals`: validate and create a goal. Returns 201 with
 /// Location header.
+#[utoipa::path(
+    post,
+    path = "/goals",
+    tag = "goals",
+    operation_id = "create_goal",
+    security(("NyxIdIdentity" = [])),
+    request_body = CreateGoalRequest,
+    responses(
+        (status = 201, description = "Goal created", body = GoalView),
+        (status = 400, description = "Field validation failed", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks goal create / org write", body = ErrorEnvelope),
+        (status = 422, description = "Dependent resource missing or invalid", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn create(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -355,6 +372,20 @@ async fn create(
 
 /// `GET /api/v1/goals`: list goals visible to the caller (owned + org).
 /// Supports `?status=`, `?limit=` (default 50, max 200), `?offset=`.
+#[utoipa::path(
+    get,
+    path = "/goals",
+    tag = "goals",
+    operation_id = "list_goals",
+    security(("NyxIdIdentity" = [])),
+    params(ListGoalsQuery),
+    responses(
+        (status = 200, description = "Goals visible to the caller (owned + org)", body = Vec<GoalView>),
+        (status = 400, description = "Invalid query parameter", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks goal read", body = ErrorEnvelope)
+    )
+)]
 async fn list(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -392,6 +423,23 @@ async fn list(
 
 /// `GET /api/v1/goals/{id}`: fetch one goal. Performs read-repair for
 /// dangling triggered/running goals with no active session.
+#[utoipa::path(
+    get,
+    path = "/goals/{id}",
+    tag = "goals",
+    operation_id = "get_goal",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("id" = String, Path, description = "Goal UUID")
+    ),
+    responses(
+        (status = 200, description = "Goal details", body = GoalView),
+        (status = 400, description = "Malformed goal id", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller may not read this goal", body = ErrorEnvelope),
+        (status = 404, description = "Goal not found", body = ErrorEnvelope)
+    )
+)]
 async fn get_one(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -468,6 +516,26 @@ async fn get_one(
 
 /// `PATCH /api/v1/goals/{id}`: partial update. Title/description editable in
 /// any status; package_names/repo only in {not_started, stopped, failed}.
+#[utoipa::path(
+    patch,
+    path = "/goals/{id}",
+    tag = "goals",
+    operation_id = "update_goal",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("id" = String, Path, description = "Goal UUID")
+    ),
+    request_body = PatchGoalRequest,
+    responses(
+        (status = 200, description = "Updated goal", body = GoalView),
+        (status = 400, description = "Field validation failed", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller may not update this goal", body = ErrorEnvelope),
+        (status = 404, description = "Goal not found", body = ErrorEnvelope),
+        (status = 409, description = "Goal status forbids this mutation", body = ErrorEnvelope),
+        (status = 422, description = "Dependent resource missing or invalid", body = ErrorEnvelope)
+    )
+)]
 async fn update(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -620,6 +688,24 @@ async fn update(
 
 /// `DELETE /api/v1/goals/{id}`: delete a goal. Only allowed in {not_started,
 /// stopped, failed}.
+#[utoipa::path(
+    delete,
+    path = "/goals/{id}",
+    tag = "goals",
+    operation_id = "delete_goal",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("id" = String, Path, description = "Goal UUID")
+    ),
+    responses(
+        (status = 204, description = "Goal deleted"),
+        (status = 400, description = "Malformed goal id", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller may not delete this goal", body = ErrorEnvelope),
+        (status = 404, description = "Goal not found", body = ErrorEnvelope),
+        (status = 409, description = "Goal status forbids deletion", body = ErrorEnvelope)
+    )
+)]
 async fn delete_one(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -737,6 +823,27 @@ pub(super) async fn run_submit_preflight(
 ///
 /// Authorization: caller is the goal owner OR the goal has an org_id and the
 /// caller's org role is admin or member (viewers excluded).
+#[utoipa::path(
+    post,
+    path = "/goals/{id}/trigger",
+    tag = "goals",
+    operation_id = "trigger_goal",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("id" = String, Path, description = "Goal UUID")
+    ),
+    request_body = TriggerRequest,
+    responses(
+        (status = 202, description = "Session created and goal triggered", body = TriggerResponse),
+        (status = 400, description = "Cross-field validation failed", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller may not trigger this goal", body = ErrorEnvelope),
+        (status = 404, description = "Goal not found", body = ErrorEnvelope),
+        (status = 409, description = "Goal already has an active session", body = ErrorEnvelope),
+        (status = 422, description = "Repo creation prerequisite failed (scope/SSO/policy)", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn trigger(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -1171,23 +1278,21 @@ async fn create_new_repo(
 /// vault CRUD used.
 const MAX_TRIGGER_BODY_BYTES: usize = 256 * 1024;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/goals", get(list).post(create))
-        .route("/goals/:id", get(get_one).patch(update).delete(delete_one))
-        .route(
-            "/goals/:id/trigger",
-            post(trigger).layer(DefaultBodyLimit::max(MAX_TRIGGER_BODY_BYTES)),
-        )
-        // #178: the unified submit endpoint. Lives in the goals router (it wraps
-        // the goal lifecycle, not just the session lifecycle) and reuses the
-        // trigger body limit (it carries the same inline secrets). The handler +
-        // DTOs are in the sibling `goals_submit` module to keep this file under
-        // the line budget.
-        .route(
-            "/goals/submit",
-            post(super::goals_submit::submit).layer(DefaultBodyLimit::max(MAX_TRIGGER_BODY_BYTES)),
-        )
+pub fn router() -> OpenApiRouter<AppState> {
+    // `/goals/{id}/trigger` and `/goals/submit` carry inline secrets, so they are
+    // grouped in their own sub-router that applies the body-size limit; the
+    // lighter CRUD routes keep axum's default. (#178: the unified submit endpoint
+    // wraps the goal lifecycle, so it lives in the goals router; its handler +
+    // DTOs are in the sibling `goals_submit` module to keep this file under the
+    // line budget.)
+    let body_limited = OpenApiRouter::new()
+        .routes(routes!(trigger))
+        .routes(routes!(super::goals_submit::submit))
+        .layer(DefaultBodyLimit::max(MAX_TRIGGER_BODY_BYTES));
+    OpenApiRouter::new()
+        .routes(routes!(list, create))
+        .routes(routes!(get_one, update, delete_one))
+        .merge(body_limited)
 }
 
 #[cfg(test)]

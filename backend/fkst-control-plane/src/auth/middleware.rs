@@ -12,8 +12,8 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::Router;
 use secrecy::SecretString;
+use utoipa_axum::router::OpenApiRouter;
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -35,7 +35,12 @@ const HEADER_USER_NAME: &str = "X-NyxID-User-Name";
 /// Wrap a router with the proxy-trusted identity middleware. Every request
 /// passing through must carry a NyxID-injected identity (an identity token or
 /// at least the `X-NyxID-User-Id` header).
-pub fn protect(router: Router<AppState>) -> Router<AppState> {
+///
+/// Operates on the [`OpenApiRouter`] (not a bare `axum::Router`) so the protected
+/// `/api/v1` surface keeps contributing its `#[utoipa::path]` operations to the
+/// generated spec while the identity layer is applied — the layer is transparent
+/// to the collected paths.
+pub fn protect(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
     router.layer(axum::middleware::from_fn(auth_fn))
 }
 

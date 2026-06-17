@@ -13,13 +13,15 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Json;
 use serde::Deserialize;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
-use crate::error::AppError;
+use crate::error::{AppError, ErrorEnvelope};
 use crate::github_hub::fanout::{aggregate_issues, AggregateParams};
 use crate::github_hub::service::{
     create_comment, create_issue, get_issue, list_accounts, list_comments, patch_issue, RepoRef,
@@ -40,7 +42,8 @@ async fn build_proxy(state: &AppState, ctx: &AuthContext) -> Result<NyxIdGithubP
 // ---- DTOs -----------------------------------------------------------------
 
 /// Query for `GET /github/issues`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct IssuesQuery {
     /// Comma-separated GitHub logins to restrict the fan-out to.
@@ -83,7 +86,8 @@ fn split_csv(value: &str) -> Vec<String> {
 }
 
 /// Query carrying only an optional `account` selector.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct AccountQuery {
     #[serde(default)]
@@ -91,7 +95,8 @@ struct AccountQuery {
 }
 
 /// Query for paginated comment listing.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct CommentsQuery {
     #[serde(default)]
@@ -103,7 +108,7 @@ struct CommentsQuery {
 }
 
 /// Body for `POST /github/repos/{owner}/{repo}/issues`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateIssueBody {
     title: String,
@@ -118,7 +123,7 @@ struct CreateIssueBody {
 }
 
 /// Body for `PATCH /github/repos/{owner}/{repo}/issues/{number}`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct PatchIssueBody {
     #[serde(default)]
@@ -136,7 +141,7 @@ struct PatchIssueBody {
 }
 
 /// Body for `POST /github/repos/{owner}/{repo}/issues/{number}/comments`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateCommentBody {
     body: String,
@@ -153,6 +158,19 @@ fn parse_number(raw: &str) -> Result<u64, AppError> {
 // ---- Handlers -------------------------------------------------------------
 
 /// `GET /github/accounts`.
+#[utoipa::path(
+    get,
+    path = "/github/accounts",
+    tag = "github",
+    operation_id = "list_github_accounts",
+    security(("NyxIdIdentity" = [])),
+    responses(
+        (status = 200, description = "Linked GitHub accounts for the caller", body = Vec<AccountView>),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks github read", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn accounts(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -164,6 +182,20 @@ async fn accounts(
 }
 
 /// `GET /github/issues` — the resilient multi-account aggregate.
+#[utoipa::path(
+    get,
+    path = "/github/issues",
+    tag = "github",
+    operation_id = "list_github_issues",
+    security(("NyxIdIdentity" = [])),
+    params(IssuesQuery),
+    responses(
+        (status = 200, description = "Per-account issue results (partial failures reported inline)", body = IssuesEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks github read", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn issues(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -216,6 +248,26 @@ fn issue_mutation_body(
 /// On success returns 201 with the created [`IssueView`] and copies GitHub's
 /// `x-ratelimit-remaining` / `x-ratelimit-reset` through as response headers so
 /// callers can pace their writes.
+#[utoipa::path(
+    post,
+    path = "/github/repos/{owner}/{repo}/issues",
+    tag = "github",
+    operation_id = "create_github_issue",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("owner" = String, Path, description = "GitHub repository owner"),
+        ("repo" = String, Path, description = "GitHub repository name")
+    ),
+    request_body = CreateIssueBody,
+    responses(
+        (status = 201, description = "Issue created", body = IssueView),
+        (status = 400, description = "Invalid repo reference or empty title", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks github write", body = ErrorEnvelope),
+        (status = 502, description = "Upstream GitHub error", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn create_issue_handler(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -252,6 +304,28 @@ fn copy_rate_limit_headers(response: &mut Response, rate_limit: Option<&RateLimi
 }
 
 /// `PATCH /github/repos/{owner}/{repo}/issues/{number}`.
+#[utoipa::path(
+    patch,
+    path = "/github/repos/{owner}/{repo}/issues/{number}",
+    tag = "github",
+    operation_id = "patch_github_issue",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("owner" = String, Path, description = "GitHub repository owner"),
+        ("repo" = String, Path, description = "GitHub repository name"),
+        ("number" = i64, Path, description = "Issue number")
+    ),
+    request_body = PatchIssueBody,
+    responses(
+        (status = 200, description = "Updated issue", body = IssueView),
+        (status = 400, description = "Invalid repo reference or issue number", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks github write", body = ErrorEnvelope),
+        (status = 404, description = "Issue not found", body = ErrorEnvelope),
+        (status = 502, description = "Upstream GitHub error", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn patch_issue_handler(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -268,6 +342,27 @@ async fn patch_issue_handler(
 }
 
 /// `GET /github/repos/{owner}/{repo}/issues/{number}` (body populated).
+#[utoipa::path(
+    get,
+    path = "/github/repos/{owner}/{repo}/issues/{number}",
+    tag = "github",
+    operation_id = "get_github_issue",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("owner" = String, Path, description = "GitHub repository owner"),
+        ("repo" = String, Path, description = "GitHub repository name"),
+        ("number" = i64, Path, description = "Issue number"),
+        AccountQuery
+    ),
+    responses(
+        (status = 200, description = "The issue (with body populated)", body = IssueView),
+        (status = 400, description = "Invalid repo reference or issue number", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks github read", body = ErrorEnvelope),
+        (status = 404, description = "Issue not found", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn get_issue_handler(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -283,6 +378,27 @@ async fn get_issue_handler(
 }
 
 /// `GET /github/repos/{owner}/{repo}/issues/{number}/comments`.
+#[utoipa::path(
+    get,
+    path = "/github/repos/{owner}/{repo}/issues/{number}/comments",
+    tag = "github",
+    operation_id = "list_github_issue_comments",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("owner" = String, Path, description = "GitHub repository owner"),
+        ("repo" = String, Path, description = "GitHub repository name"),
+        ("number" = i64, Path, description = "Issue number"),
+        CommentsQuery
+    ),
+    responses(
+        (status = 200, description = "Issue comments (paginated)", body = Vec<CommentView>),
+        (status = 400, description = "Invalid repo reference or issue number", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks github read", body = ErrorEnvelope),
+        (status = 404, description = "Issue not found", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn list_comments_handler(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -306,6 +422,28 @@ async fn list_comments_handler(
 }
 
 /// `POST /github/repos/{owner}/{repo}/issues/{number}/comments`.
+#[utoipa::path(
+    post,
+    path = "/github/repos/{owner}/{repo}/issues/{number}/comments",
+    tag = "github",
+    operation_id = "create_github_issue_comment",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("owner" = String, Path, description = "GitHub repository owner"),
+        ("repo" = String, Path, description = "GitHub repository name"),
+        ("number" = i64, Path, description = "Issue number")
+    ),
+    request_body = CreateCommentBody,
+    responses(
+        (status = 201, description = "Comment created", body = CommentView),
+        (status = 400, description = "Invalid repo reference, issue number, or empty body", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks github write", body = ErrorEnvelope),
+        (status = 404, description = "Issue not found", body = ErrorEnvelope),
+        (status = 502, description = "Upstream GitHub error", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn create_comment_handler(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -329,22 +467,13 @@ async fn create_comment_handler(
 // ---- Router ---------------------------------------------------------------
 
 /// GitHub issues-hub routes, nested under `/api/v1`.
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/github/accounts", get(accounts))
-        .route("/github/issues", get(issues))
-        .route(
-            "/github/repos/:owner/:repo/issues",
-            post(create_issue_handler),
-        )
-        .route(
-            "/github/repos/:owner/:repo/issues/:number",
-            get(get_issue_handler).patch(patch_issue_handler),
-        )
-        .route(
-            "/github/repos/:owner/:repo/issues/:number/comments",
-            get(list_comments_handler).post(create_comment_handler),
-        )
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(accounts))
+        .routes(routes!(issues))
+        .routes(routes!(create_issue_handler))
+        .routes(routes!(get_issue_handler, patch_issue_handler))
+        .routes(routes!(list_comments_handler, create_comment_handler))
 }
 
 #[cfg(test)]

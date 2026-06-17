@@ -13,22 +13,24 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Json;
 use serde::Serialize;
+use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
 use crate::authz::{Action, Ownership};
-use crate::error::AppError;
+use crate::error::{AppError, ErrorEnvelope};
 use crate::models::{SessionDoc, SessionStatus, TerminalCause};
-use crate::routes::rfc3339;
+use crate::routes::{rfc3339, RepoRefView};
 use crate::state::AppState;
 
 /// Response body for `POST /api/v1/sessions/{id}/stop` (202). Always
 /// `{"status":"stopping"}`: the 202 acknowledges the request; clients poll
 /// `GET` for the true current state.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct StopResponse {
     pub status: SessionStatus,
 }
@@ -36,7 +38,7 @@ pub struct StopResponse {
 /// Response body for `GET /api/v1/sessions/{id}` (200): the full document
 /// projection. Unset fields serialize as explicit `null`; timestamps are
 /// RFC3339 UTC strings with a trailing `Z`.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SessionView {
     pub id: String,
     pub package_name: String,
@@ -66,13 +68,6 @@ pub struct SessionView {
     pub created_at: String,
     pub started_at: Option<String>,
     pub stopped_at: Option<String>,
-}
-
-/// Repo reference in session responses (same shape as goals routes).
-#[derive(Debug, Serialize)]
-pub struct RepoRefView {
-    pub owner: String,
-    pub name: String,
 }
 
 impl TryFrom<&SessionDoc> for SessionView {
@@ -121,6 +116,23 @@ fn parse_session_id(raw: &str) -> Result<bson::Uuid, AppError> {
 /// - Owner can read
 /// - `triggered_by` user can read (resolved via goal ownership)
 /// - Org members: any member reads
+#[utoipa::path(
+    get,
+    path = "/sessions/{id}",
+    tag = "sessions",
+    operation_id = "get_session",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("id" = String, Path, description = "Session UUID (case-insensitive)")
+    ),
+    responses(
+        (status = 200, description = "Session status projection", body = SessionView),
+        (status = 400, description = "Malformed session id", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller may not read this session", body = ErrorEnvelope),
+        (status = 404, description = "Session not found", body = ErrorEnvelope)
+    )
+)]
 async fn get_one(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -146,6 +158,23 @@ async fn get_one(
 /// Authorization for goal sessions:
 /// - Owner can stop
 /// - Org members with member+ role can stop
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/stop",
+    tag = "sessions",
+    operation_id = "stop_session",
+    security(("NyxIdIdentity" = [])),
+    params(
+        ("id" = String, Path, description = "Session UUID (case-insensitive)")
+    ),
+    responses(
+        (status = 202, description = "Stop requested (idempotent); poll GET for the true state", body = StopResponse),
+        (status = 400, description = "Malformed session id", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller may not stop this session", body = ErrorEnvelope),
+        (status = 404, description = "Session not found", body = ErrorEnvelope)
+    )
+)]
 async fn stop(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -218,10 +247,10 @@ fn authorize_session_write<'a>(
 }
 
 /// Session routes, to be nested under `/api/v1`.
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/sessions/:id", get(get_one))
-        .route("/sessions/:id/stop", post(stop))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(get_one))
+        .routes(routes!(stop))
 }
 
 #[cfg(test)]

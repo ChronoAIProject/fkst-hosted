@@ -11,9 +11,10 @@
 //! - `labels` is the list of `labels[].name`; `assignees` is `assignees[].login`.
 
 use serde::Serialize;
+use utoipa::ToSchema;
 
 /// One linked GitHub account, projected for the hub's `/accounts` response.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct AccountView {
     pub connection_id: String,
     pub login: String,
@@ -32,7 +33,7 @@ impl From<crate::nyxid::GithubConnection> for AccountView {
 
 /// A GitHub issue projected for the hub. `account` is the GitHub login the
 /// issue was fetched under (so a merged list stays attributable per account).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct IssueView {
     pub account: String,
     pub repository: String,
@@ -51,7 +52,7 @@ pub struct IssueView {
 }
 
 /// Rate-limit snapshot copied through from GitHub response headers when present.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct RateLimitView {
     pub remaining: i64,
     pub reset_epoch: i64,
@@ -59,7 +60,7 @@ pub struct RateLimitView {
 
 /// A per-account failure inside a fan-out (never a transport-level 5xx of the
 /// hub itself). Serialized as the `error` object on [`AccountIssues`].
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct AccountError {
     /// One of `"rate_limited" | "auth" | "upstream" | "network"`.
     pub kind: String,
@@ -71,7 +72,7 @@ pub struct AccountError {
 /// The result of querying ONE account during an aggregate fan-out. Either
 /// `issues` (possibly empty) succeeded, or `error` records why that account
 /// failed — the overall fan-out is still a 200.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct AccountIssues {
     pub account: String,
     pub issues: Vec<IssueView>,
@@ -85,13 +86,13 @@ pub struct AccountIssues {
 }
 
 /// Top-level aggregate response: one [`AccountIssues`] per resolved account.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct IssuesEnvelope {
     pub results: Vec<AccountIssues>,
 }
 
 /// A GitHub issue comment projected for the hub.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 pub struct CommentView {
     pub id: i64,
     pub user: String,

@@ -38,7 +38,7 @@ use secrecy::SecretString;
 
 use crate::auth::AuthContext;
 use crate::authz::permissions::{self, require_permission};
-use crate::error::AppError;
+use crate::error::{AppError, ErrorEnvelope};
 use crate::github_hub::service::{self as github_hub, RepoRef as HubRepoRef};
 use crate::github_hub::NyxIdGithubProxy;
 use crate::goals::{
@@ -71,6 +71,23 @@ const GOAL_TITLE_PREFIX: &str = "[fkst-goal]: ";
 /// user-authored issue's own `### Goal` body becomes the prompt and lives in
 /// the user's own issue by design; the server's adoption patch still writes
 /// only the non-sensitive summary + marker.
+#[utoipa::path(
+    post,
+    path = "/goals/submit",
+    tag = "goals",
+    operation_id = "submit_goal",
+    security(("NyxIdIdentity" = [])),
+    request_body = SubmitSessionRequest,
+    responses(
+        (status = 202, description = "Goal filed/adopted and session created", body = SubmitSessionResponse),
+        (status = 400, description = "Field validation failed", body = ErrorEnvelope),
+        (status = 401, description = "Missing proxy-injected identity", body = ErrorEnvelope),
+        (status = 403, description = "Caller lacks goal create/trigger", body = ErrorEnvelope),
+        (status = 404, description = "Referenced issue not found", body = ErrorEnvelope),
+        (status = 422, description = "Unparseable repo/issue reference or failed preflight", body = ErrorEnvelope),
+        (status = 503, description = "Credential proxy unavailable", body = ErrorEnvelope)
+    )
+)]
 pub async fn submit(
     State(state): State<AppState>,
     ctx: AuthContext,
