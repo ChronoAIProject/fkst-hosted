@@ -2,6 +2,14 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 
+local function mock_check_runs(json)
+  t.mock_command("gh api 'repos/owner/repo/commits/def456/check-runs'", {
+    stdout = json,
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 return {
   test_valid_autonomous_merge_stays_pending_until_all_required_gates_pass = function()
     local gates = {
@@ -52,11 +60,37 @@ return {
     local marker = core.autonomy_result_marker(record)
     t.is_true(marker:find('valid_autonomous_merge="pending"', 1, true) ~= nil)
     t.is_true(marker:find('codex_calls="null"', 1, true) ~= nil)
+    t.is_true(marker:find('post_merge_probe_green="pending"', 1, true) ~= nil)
     local fact = core.autonomy_result_fact({ marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
     t.eq(fact.valid_autonomous_merge, "pending")
     t.eq(fact.task_class, "L2")
     t.eq(fact.retry_count, 2)
     t.eq(fact.codex_calls, nil)
+  end,
+
+  test_post_merge_probe_gate_uses_existing_rollup_and_fails_closed = function()
+    local green_gate = core.autonomy_post_merge_probe_gate({
+      head_sha = "def456",
+      status_check_rollup = {
+        { status = "COMPLETED", conclusion = "SUCCESS" },
+      },
+    })
+    t.eq(green_gate, "pass")
+
+    local red_gate = core.autonomy_post_merge_probe_gate({
+      head_sha = "def456",
+      status_check_rollup = {
+        { status = "COMPLETED", conclusion = "FAILURE" },
+      },
+    })
+    t.eq(red_gate, "fail")
+
+    mock_check_runs('{"total_count":0,"check_runs":[]}\n')
+    local missing_gate = core.autonomy_post_merge_probe_gate({
+      head_sha = "def456",
+      status_check_rollup = {},
+    }, { repo = "owner/repo" })
+    t.eq(missing_gate, "fail")
   end,
 
   test_merged_marker_carries_canonical_autonomy_result_record = function()
