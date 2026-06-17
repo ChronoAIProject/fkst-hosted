@@ -144,7 +144,7 @@ end
 
 local function fetch_blocked_by(repo, issue_number)
   local core = root()
-  local result = core.gh_exec({ cmd = core.gh_blocked_by_cmd(repo, issue_number), timeout = 30 })
+  local result = core.gh_blocked_by(repo, issue_number, 30)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "gh-failed"
   end
@@ -415,18 +415,17 @@ visit = function(repo, issue_number, stack, visited, unmet, unmet_seen, depth, c
   return result
 end
 
-function M.gh_blocked_by_cmd(repo, issue_number)
+function M.gh_blocked_by(repo, issue_number, timeout, exec)
   local core = root()
   local owner, name = strings.split_repo(repo)
   if owner == nil or not core._is_positive_pr_number(issue_number) then
     error("github-devloop: invalid dependency query target")
   end
-  local query = core.render_github_graphql_query("dependency_blocked_by", {
+  return core.github_graphql("dependency_blocked_by", {
     owner = owner,
     name = name,
     issue_number = tostring(math.floor(tonumber(issue_number))),
-  })
-  return core.github_graphql_command_templates.graphql_query .. core._shell_single_quote(query)
+  }, timeout, exec)
 end
 
 function M.dependency_gate(repo, issue_number, context)

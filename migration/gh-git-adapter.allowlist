@@ -1,4 +1,0 @@
-packages/github-devloop/core/base.lua:
-  - gh
-packages/github-devloop/core/github_graphql.lua:
-  - gh api

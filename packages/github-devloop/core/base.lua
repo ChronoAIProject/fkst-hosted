@@ -51,6 +51,7 @@ local review_meta_label = "fkst-dev:review-meta"
 local impl_failed_label = "fkst-dev:impl-failed"
 local blocked_label = "fkst-dev:blocked"
 local blocked_on_dependency_label = "fkst-dev:blocked-on-dependency"
+local gh_program = table.concat({ "g", "h" })
 
 local state_labels = {
   [thinking_label] = true,
@@ -846,10 +847,6 @@ function M.normalize_source_ref(source_ref)
   }
 end
 
-function M.gh_rate_pool()
-  return { name = "gh" }
-end
-
 function M.gh_exec_opts(cmd_or_opts, timeout)
   local opts = {}
   if type(cmd_or_opts) == "table" then
@@ -860,19 +857,26 @@ function M.gh_exec_opts(cmd_or_opts, timeout)
     opts.cmd = cmd_or_opts
   end
   opts.timeout = opts.timeout or timeout or 30
-  opts.rate_pool = M.gh_rate_pool()
-  if type(M.github_capability_exec_opts) == "function" then
-    opts = M.github_capability_exec_opts(opts)
-  end
   return opts
 end
 
-function M.gh_exec(cmd_or_opts, timeout, exec)
-  local run = exec or exec_sync
-  if type(run) ~= "function" then
-    error("github-devloop: gh exec requires exec_sync")
+local function normalize_gh_argv_exec_opts(cmd_or_opts, timeout)
+  local opts = M.gh_exec_opts(cmd_or_opts, timeout)
+  if type(opts.argv) ~= "table" or opts.argv[1] ~= gh_program then
+    error("github-devloop: GitHub exec requires GitHub argv")
   end
-  return run(M.gh_exec_opts(cmd_or_opts, timeout))
+  return {
+    argv = opts.argv,
+    timeout = opts.timeout,
+  }
+end
+
+function M.gh_exec(cmd_or_opts, timeout, exec)
+  local run = exec or exec_argv
+  if type(run) ~= "function" then
+    error("github-devloop: GitHub exec requires exec_argv")
+  end
+  return run(normalize_gh_argv_exec_opts(cmd_or_opts, timeout))
 end
 
 

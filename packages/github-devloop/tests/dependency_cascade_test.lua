@@ -349,7 +349,6 @@ return {
     local operations = core.github_graphql_queries
 
     t.eq(type(operations), "table")
-    t.eq(core.github_graphql_command_templates.graphql_query, "gh api graphql -f query=")
     t.eq(type(operations.dependency_blocked_by), "string")
     t.eq(operations.dependency_blocked_by:find("blockedBy(first:50)", 1, true) ~= nil, true)
     t.eq(operations.dependency_blocked_by:find("nodes{number state stateReason repository{nameWithOwner}}", 1, true) ~= nil, true)

@@ -25,6 +25,34 @@ local function with_exec_argv(fn)
 end
 
 return {
+  test_generic_gh_exec_uses_github_argv_adapter = function()
+    local calls = with_exec_argv(function()
+      core.gh_exec({ argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 })
+    end)
+
+    assert_argv_equal(calls[1].argv, { "gh", "api", "repos/owner/repo/issues/42" })
+    t.eq(calls[1].timeout, 34)
+    t.is_nil(calls[1].cmd)
+    t.is_nil(calls[1].rate_pool)
+  end,
+
+  test_dependency_graphql_uses_github_argv_adapter = function()
+    local calls = with_exec_argv(function()
+      core.gh_blocked_by("owner/repo", 42, 35)
+    end)
+
+    assert_argv_equal(calls[1].argv, {
+      "gh",
+      "api",
+      "graphql",
+      "-f",
+      'query={repository(owner:"owner",name:"repo"){issue(number:42){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number state stateReason repository{nameWithOwner}}}}}}',
+    })
+    t.eq(calls[1].timeout, 35)
+    t.is_nil(calls[1].cmd)
+    t.is_nil(calls[1].rate_pool)
+  end,
+
   test_commands_helpers_execute_github_via_argv_adapter = function()
     local calls = with_exec_argv(function()
       core.gh_issue_view_implement("owner/repo", 42, 31)

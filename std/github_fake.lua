@@ -107,14 +107,7 @@ function M.new(model)
       tostring(login),
     }, timeout, "gh issue unassign")
   end
-  function handle.graphql(query, fields, timeout)
-    local argv = { "gh", "api", "graphql", "-f", "query=" .. tostring(query) }
-    for key, value in pairs(fields or {}) do
-      table.insert(argv, "-f")
-      table.insert(argv, tostring(key) .. "=" .. tostring(value))
-    end
-    return handle._exec(argv, timeout, "gh GraphQL")
-  end
+  require("std.github.graphql").install(handle)
   return handle
 end
 

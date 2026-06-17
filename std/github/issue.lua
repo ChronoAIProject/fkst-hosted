@@ -63,15 +63,6 @@ local function gh_issue_rest_argv(repo, issue_number)
   return { "gh", "api", "repos/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) }
 end
 
-local function gh_graphql_argv(query, fields)
-  local argv = { "gh", "api", "graphql", "-f", "query=" .. tostring(query) }
-  for key, value in pairs(fields or {}) do
-    table.insert(argv, "-f")
-    table.insert(argv, tostring(key) .. "=" .. tostring(value))
-  end
-  return argv
-end
-
 local function gh_issue_comments_rest_argv(repo, issue_number)
   return {
     "gh",
@@ -366,9 +357,6 @@ function M.install(handle)
     )
   end
 
-  function handle.graphql(query, fields, timeout)
-    return handle._exec(gh_graphql_argv(query, fields), timeout, "gh GraphQL")
-  end
 end
 
 return M

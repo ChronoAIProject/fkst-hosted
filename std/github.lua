@@ -11,6 +11,7 @@ function M.new(exec)
   require("std.github.issue").install(handle)
   require("std.github.entities").install(handle)
   require("std.github.comments").install(handle)
+  require("std.github.graphql").install(handle)
   require("std.github.workflows").install(handle)
   return handle
 end

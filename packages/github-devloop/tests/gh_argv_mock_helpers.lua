@@ -595,6 +595,20 @@ local function gh_api_method_command(method, path, fields, input_file, include_h
   return render_argv(parts)
 end
 
+local function gh_blocked_by_command(core, repo, issue_number)
+  local owner, name = tostring(repo or ""):match("^([^/]+)/([^/]+)$")
+  if owner == nil then
+    owner = ""
+    name = ""
+  end
+  local query = core.render_github_graphql_query("dependency_blocked_by", {
+    owner = owner,
+    name = name,
+    issue_number = tostring(math.floor(tonumber(issue_number) or 0)),
+  })
+  return render_argv({ "gh", "api", "graphql", "-f", "query=" .. query })
+end
+
 local function install_legacy_command_renderers(core)
   core.gh_issue_list_intake_cmd = core.gh_issue_list_intake_cmd or gh_issue_list_intake_command
   core.gh_issue_list_intake_probe_cmd = core.gh_issue_list_intake_probe_cmd or gh_issue_list_intake_probe_command
@@ -787,6 +801,9 @@ local function install_legacy_command_renderers(core)
   end
   core.gh_pr_diff_name_only_cmd = core.gh_pr_diff_name_only_cmd or function(repo, number)
     return "gh pr diff " .. shell_single_quote(number) .. " --repo " .. shell_single_quote(repo) .. " --name-only"
+  end
+  core.gh_blocked_by_cmd = core.gh_blocked_by_cmd or function(repo, issue_number)
+    return gh_blocked_by_command(core, repo, issue_number)
   end
 
   core.git_status_cmd = core.git_status_cmd or function(worktree)

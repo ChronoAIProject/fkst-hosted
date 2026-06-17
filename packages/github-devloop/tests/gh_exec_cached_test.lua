@@ -5,7 +5,7 @@ local t = h.t
 -- Direct unit coverage for the opt-in stale-tolerant read cache primitive. The
 -- integration tests use a unique issue number per scenario with a single read
 -- per run, so every gh_exec_cached call is a cold miss that delegates to
--- M.gh_exec -- the hit / expiry / encoding logic is otherwise invisible (the
+-- M.gh_exec with argv -- the hit / expiry / encoding logic is otherwise invisible (the
 -- #550/#551 harness-fidelity lesson: a primitive whose value-add never runs in
 -- the suite would pass even if broken).
 
@@ -20,10 +20,10 @@ return {
       calls = calls + 1
       return { stdout = MULTILINE, exit_code = 0 }
     end
-    local first = core.gh_exec_cached("gh issue view 9001", key, 90, exec)
+    local first = core.gh_exec_cached({ argv = { "gh", "issue", "view", "9001" } }, key, 90, exec)
     t.eq(first.stdout, MULTILINE)
     t.eq(calls, 1)
-    local second = core.gh_exec_cached("gh issue view 9001", key, 90, exec)
+    local second = core.gh_exec_cached({ argv = { "gh", "issue", "view", "9001" } }, key, 90, exec)
     t.eq(second.stdout, MULTILINE, "multi-line stdout round-trips intact from cache")
     t.eq(second.cached, true)
     t.eq(calls, 1, "second call within TTL must NOT re-exec gh")
@@ -37,9 +37,9 @@ return {
       calls = calls + 1
       return { stdout = "", stderr = "boom", exit_code = 1 }
     end
-    local first = core.gh_exec_cached("gh issue view 9002", key, 90, exec)
+    local first = core.gh_exec_cached({ argv = { "gh", "issue", "view", "9002" } }, key, 90, exec)
     t.eq(first.exit_code, 1)
-    local second = core.gh_exec_cached("gh issue view 9002", key, 90, exec)
+    local second = core.gh_exec_cached({ argv = { "gh", "issue", "view", "9002" } }, key, 90, exec)
     t.eq(calls, 2, "a non-zero exit read must not be memoized")
   end,
 
@@ -52,7 +52,7 @@ return {
       calls = calls + 1
       return { stdout = "fresh-body", exit_code = 0 }
     end
-    local result = core.gh_exec_cached("gh issue view 9003", key, 90, exec)
+    local result = core.gh_exec_cached({ argv = { "gh", "issue", "view", "9003" } }, key, 90, exec)
     t.eq(result.stdout, "fresh-body", "an expired cache entry must re-fetch, not serve stale")
     t.eq(calls, 1)
   end,

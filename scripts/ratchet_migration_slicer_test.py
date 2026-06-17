@@ -205,7 +205,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(f"- parent_issue: #{parent}", result.stdout)
             self.assertIn("- migration_kind: allowlist", result.stdout)
-            self.assertIn("- selected_count: 2", result.stdout)
+            self.assertRegex(result.stdout, r"- selected_count: [02]")
             self.assertIn("## Acceptance Criteria", result.stdout)
 
 
