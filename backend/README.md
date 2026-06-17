@@ -383,13 +383,15 @@ workspace crate manifest + `Cargo.lock`, which live under `backend/`):
 
 | Dockerfile | Image | Contents | ENTRYPOINT |
 |------------|-------|----------|------------|
-| `backend/fkst-worker/Dockerfile` | `fkst-worker` | engine-laden (built from `backend/engine.ref`); carries the engine, codex, nyxid CLI, and the runtime volume. Requires `--build-arg FKST_SUBSTRATE_REF`. | `fkst-worker` |
+| `backend/fkst-worker/Dockerfile` | `fkst-worker` | engine-laden (built from `backend/engine.ref`); carries the engine, codex, nyxid CLI, and the runtime volume. Engine pinned via `FKST_SUBSTRATE_REF`, **temporarily defaulted** to the `backend/engine.ref` SHA so a no-arg build works (workaround, see #227). | `fkst-worker` |
 | `backend/fkst-control-plane/Dockerfile` | `fkst-control-plane` | slim (only `ca-certificates`, no engine, runs as uid 10001). No `FKST_SUBSTRATE_REF` needed. | `fkst-control-plane` |
 
 **Local builds:**
 
 ```sh
-# Worker image (engine-laden)
+# Worker image (engine-laden). The arg is temporarily optional (#227): it
+# defaults to the backend/engine.ref SHA. Passing it explicitly still works and
+# overrides the default — keep doing so on platforms that support build-args:
 docker build -f backend/fkst-worker/Dockerfile \
   --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
   -t fkst-worker:dev .

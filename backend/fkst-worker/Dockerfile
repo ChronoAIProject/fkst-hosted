@@ -7,12 +7,21 @@
 # manifest + Cargo.lock, which live under backend/).
 #
 # The pinned fkst-substrate engine ref lives in backend/engine.ref (single line,
-# 40-char commit SHA). Pinning is mandatory: the build fails fast without it.
-# Local build, from the repo root:
+# 40-char commit SHA) — the canonical pin. The build still fails fast on an
+# explicitly empty pin (see the guard in the engine-builder stage).
 #
-#   docker build -f backend/fkst-worker/Dockerfile \
-#     --build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)" \
-#     -t fkst-worker:dev .
+# TEMPORARY WORKAROUND (#227): the current DevOps build platform cannot pass
+# build-time args, so ARG FKST_SUBSTRATE_REF is defaulted to the pinned SHA in
+# both stages below and a no-arg build works. The SHA therefore lives in TWO
+# places — keep the ARG defaults in lockstep with backend/engine.ref on every
+# engine bump, or a no-arg build silently compiles a stale engine. Revert to the
+# mandatory build-arg (single source of truth) once the platform supports
+# build-time args; see issue #227 for the revert plan.
+#
+# Local build, from the repo root (the arg is now optional; passing it still
+# works and overrides the default):
+#
+#   docker build -f backend/fkst-worker/Dockerfile -t fkst-worker:dev .
 #
 # TRANSITIONAL (until #151): engine execution still lives in the control-plane
 # crate today, so the control-plane process still spawns engine children. Until
@@ -58,9 +67,13 @@ RUN set -eux; \
 # and never vendored into this repo. Only the compiled binaries and the two
 # provenance files (ENGINE_SHA / ENGINE_VERSION) cross into the WORKER runtime.
 FROM rust:${RUST_VERSION}-bookworm AS engine-builder
-ARG FKST_SUBSTRATE_REF
+# Defaulted to the pinned SHA as a temporary workaround (#227): the current build
+# platform can't pass build-time args. Keep in lockstep with backend/engine.ref.
+ARG FKST_SUBSTRATE_REF=cb072b224d817a8a4b57f92b613cf5f2174d8759
 ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
-# Fail fast: pinning is mandatory. This guard runs before any clone.
+# Fail fast on an explicitly empty pin. This guard runs before any clone; the
+# default above pins a no-arg build, but `--build-arg FKST_SUBSTRATE_REF=""`
+# still fails here (the CI negative test depends on this behaviour).
 RUN test -n "$FKST_SUBSTRATE_REF" || (echo "ERROR: FKST_SUBSTRATE_REF build-arg is required" && exit 1)
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -195,7 +208,9 @@ RUN test -x /app/target/release/fkst-worker \
 # override; that arrangement is documented in the README, not encoded by
 # carrying the controller binary here — see header.)
 FROM debian:bookworm-slim AS worker-runtime
-ARG FKST_SUBSTRATE_REF
+# Same default as the engine-builder stage (#227); feeds the io.fkst.engine.ref
+# label below. Keep in lockstep with backend/engine.ref.
+ARG FKST_SUBSTRATE_REF=cb072b224d817a8a4b57f92b613cf5f2174d8759
 ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
 ARG PRODUCT_VERSION=0.0.0
 ARG CODEX_VERSION

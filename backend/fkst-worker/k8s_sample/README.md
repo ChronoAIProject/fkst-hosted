@@ -73,9 +73,11 @@ kubectl --context docker-desktop -n fkst-hosted get pods -l app.kubernetes.io/na
 A worker becomes `Ready` as soon as its worker-local `/health` answers `200`.
 
 > **Images.** The `fkst-worker` image tag is a one-line seam in
-> `kustomization.yaml` (`images:`). The worker image is engine-laden and needs
-> `--build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)"` at build time. On
-> kind/minikube/k3d, load the image first.
+> `kustomization.yaml` (`images:`). The worker image is engine-laden; its engine
+> pin (`FKST_SUBSTRATE_REF`) is **temporarily defaulted** to the
+> `backend/engine.ref` SHA, so a no-arg `docker build` works (workaround, see
+> #227 — pass `--build-arg FKST_SUBSTRATE_REF="$(cat backend/engine.ref)"` where
+> the platform supports it). On kind/minikube/k3d, load the image first.
 
 ## 3. Controller handshake
 
