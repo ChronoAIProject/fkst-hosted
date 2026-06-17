@@ -7,6 +7,7 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "blocked",
     liveness_class_id = "blocked.operator_reentry",
@@ -18,6 +19,12 @@ return function(M, h)
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator rereview/reintake command" }, { "blocked", "reviewing", "thinking" }),
     reentry_commands = { "rereview", "reintake" },
+    operator_reentry = {
+      kind = "external_command",
+      not_autonomous_successor = true,
+      resets_budget = true,
+      commands = { "rereview", "reintake" },
+    },
     budget = budget(1440, "No receiver work is expected; the row waits up to 1410 minutes for operator reentry before the 30 minute watchdog margin."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
@@ -25,6 +32,29 @@ return function(M, h)
       external_wait_bound_minutes = 1410,
     }),
     on_timeout = timeout("devloop_decompose"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "operator-reentry",
+      driving_queue = "devloop_decompose",
+      state_kind = "budget_bounded_recovery",
+      liveness_class = "blocked.operator_reentry",
+      input_fact_family = "blocked-recovery-hold",
+      output_postcondition_family = "blocked-decompose-escape",
+      phase_rank = M.stage_rank("blocked"),
+      lineage_keys = { "state.version", "pr-link.pr", "source_ref" },
+      successors = {},
+      watchdog_escape = {
+        kind = "watchdog_escape",
+        queue = "devloop_decompose",
+        output_variant = "budget_exhausted_decompose",
+        postcondition_family = "blocked-decompose-escape",
+        opens_generation = true,
+      },
+      operator_reentry = {
+        kind = "external_command",
+        not_autonomous_successor = true,
+        resets_budget = true,
+      },
+    }),
     payload_builder = M.build_decompose_replay_payload,
     dedup_shape = "forward:decompose/<proposal_id>/<version>; replay:decompose/replay/<proposal_id>/<version>/<pr>/<expected_child_count>/<completed_child_count>",
     required_facts = {

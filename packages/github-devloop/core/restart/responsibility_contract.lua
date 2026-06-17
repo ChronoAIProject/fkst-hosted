@@ -8,14 +8,12 @@ local state_kinds = {
   decision = true,
   gate = true,
   terminal_hold = true,
+  budget_bounded_recovery = true,
 }
 
 local known_god_states = {
   ready = {
     ["ready: non-terminal row must declare responsibility_signature"] = "dependency gate and implementation kickoff are still fused until the ready split.",
-  },
-  blocked = {
-    ["blocked: non-terminal row must declare responsibility_signature"] = "Terminal hold, operator reentry, and decomposition fanout are still fused until the blocked split.",
   },
 }
 
@@ -163,7 +161,7 @@ local function validate_signature_shape(row, signature, errors)
     table.insert(errors, state .. ": responsibility_signature.driving_queue must match row.driving_queue")
   end
   if state_kinds[signature.state_kind] ~= true then
-    table.insert(errors, state .. ": responsibility_signature.state_kind must be queue_wait, worker, decision, gate, or terminal_hold")
+    table.insert(errors, state .. ": responsibility_signature.state_kind must be queue_wait, worker, decision, gate, terminal_hold, or budget_bounded_recovery")
   end
   if signature.liveness_class ~= row.liveness_class_id then
     table.insert(errors, state .. ": responsibility_signature.liveness_class must match row.liveness_class_id")
@@ -284,6 +282,44 @@ local function validate_kind_fanout(row, signature, edges, errors)
   elseif signature.state_kind == "terminal_hold" then
     if list_count(signature.successors) > 0 or list_count(row.to_states) > 0 then
       table.insert(errors, state .. ": terminal_hold state must not declare autonomous successors")
+    end
+    if row.terminal ~= true then
+      table.insert(errors, state .. ": terminal_hold state must be terminal")
+    end
+    if row.on_timeout ~= nil then
+      table.insert(errors, state .. ": terminal_hold state must not declare on_timeout")
+    end
+    if row.operator_reentry ~= nil then
+      table.insert(errors, state .. ": terminal_hold state must not declare operator_reentry")
+    end
+  elseif signature.state_kind == "budget_bounded_recovery" then
+    if row.terminal == true then
+      table.insert(errors, state .. ": budget_bounded_recovery state must be non-terminal")
+    end
+    if list_count(signature.successors) > 0 or list_count(row.to_states) > 0 then
+      table.insert(errors, state .. ": budget_bounded_recovery state must not declare autonomous successors")
+    end
+    if signature.worker_dispatch == true then
+      table.insert(errors, state .. ": budget_bounded_recovery state must not declare worker dispatch")
+    end
+    if signature.decision_type ~= nil or signature.decision_fanout == true then
+      table.insert(errors, state .. ": budget_bounded_recovery state must not declare decision fanout")
+    end
+    local reentry = row.operator_reentry
+    if type(reentry) ~= "table" or reentry.kind ~= "external_command" then
+      table.insert(errors, state .. ": budget_bounded_recovery state must declare external operator_reentry")
+    elseif reentry.not_autonomous_successor ~= true or reentry.resets_budget ~= true then
+      table.insert(errors, state .. ": budget_bounded_recovery operator_reentry must be external and reset budget")
+    end
+    if type(row.watchdog) ~= "table" or row.watchdog.mode ~= "row-budget-bounds-receiver" then
+      table.insert(errors, state .. ": budget_bounded_recovery watchdog.mode must be row-budget-bounds-receiver")
+    end
+    local escape = signature.watchdog_escape
+    if type(escape) ~= "table" or escape.kind ~= "watchdog_escape" or escape.queue ~= "devloop_decompose" then
+      table.insert(errors, state .. ": budget_bounded_recovery must declare devloop_decompose watchdog escape")
+    end
+    if type(row.on_timeout) ~= "table" or row.on_timeout.queue ~= "devloop_decompose" then
+      table.insert(errors, state .. ": budget_bounded_recovery on_timeout must target devloop_decompose")
     end
   end
 end

@@ -116,22 +116,21 @@ return {
     assert_inventory_errors(inventory, "ready", {
       ["ready: non-terminal row must declare responsibility_signature"] = true,
     })
-    assert_inventory_errors(inventory, "blocked", {
-      ["blocked: non-terminal row must declare responsibility_signature"] = true,
-    })
+    t.eq(inventory.blocked, nil)
     local count = 0
     for _ in pairs(inventory) do
       count = count + 1
     end
-    t.eq(count, 2)
+    t.eq(count, 1)
   end,
 
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
     local strict = core.strict_restart_responsibility_contract_errors()
-    for _, state in ipairs({ "ready", "blocked" }) do
+    for _, state in ipairs({ "ready" }) do
       t.is_true(core.responsibility_contract_inventory_is_listed_violation(state, strict), state)
     end
+    t.eq(core.responsibility_contract_inventory_is_listed_violation("blocked", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("merge-ready", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("reviewing", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("implementing", strict), false)
@@ -142,11 +141,62 @@ return {
 
   test_clean_single_responsibility_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    for _, state in ipairs({ "thinking", "implementing", "impl-failed", "pr-open", "reviewing", "review-meta", "merge-ready", "merging", "fixing" }) do
+    for _, state in ipairs({ "thinking", "implementing", "impl-failed", "pr-open", "reviewing", "review-meta", "merge-ready", "merging", "fixing", "blocked" }) do
       local errors = core.strict_restart_responsibility_contract_errors({ by_state[state] })
       t.eq(#errors, 0, state .. ": " .. joined_errors(errors))
     end
     t.eq(#core.strict_restart_responsibility_contract_errors({ clean_row() }), 0)
+  end,
+
+  test_blocked_is_clean_budget_bounded_recovery_signature = function()
+    local row = rows_by_state(core.restart_transition_table()).blocked
+    local signature = row.responsibility_signature
+    t.eq(signature.state_kind, "budget_bounded_recovery")
+    t.eq(signature.receiver_kind, "operator-reentry")
+    t.eq(signature.driving_queue, "devloop_decompose")
+    t.eq(signature.liveness_class, "blocked.operator_reentry")
+    t.eq(signature.phase_rank, core.stage_rank("blocked"))
+    t.eq(row.terminal, false)
+    t.eq(#row.to_states, 0)
+    t.eq(row.watchdog.mode, "row-budget-bounds-receiver")
+    t.eq(row.watchdog.budget_ms, 1440 * 60 * 1000)
+    t.eq(row.actionable_epoch.source, "state_entry:v1")
+    t.eq(row.on_timeout.queue, "devloop_decompose")
+    t.eq(row.operator_reentry.kind, "external_command")
+    t.eq(row.operator_reentry.not_autonomous_successor, true)
+    t.eq(row.operator_reentry.resets_budget, true)
+    t.eq(signature.watchdog_escape.kind, "watchdog_escape")
+    t.eq(signature.watchdog_escape.queue, "devloop_decompose")
+    t.eq(#signature.successors, 0)
+    t.eq(#core.strict_restart_responsibility_contract_errors({ row }), 0)
+  end,
+
+  test_budget_bounded_recovery_rejects_autonomous_successor = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table()).blocked)
+    row.from_state = "synthetic-bad-recovery"
+    row.to_states = { "implementing" }
+    row.responsibility_signature.successors = {
+      {
+        state = "implementing",
+        output_variant = "autonomous-retry",
+        postcondition_family = "blocked-decompose-escape",
+        bump = true,
+      },
+    }
+    row.responsibility_signature.phase_rank = 10
+    local original_stage_rank = core.stage_rank
+    core.stage_rank = function(state)
+      if state == "synthetic-bad-recovery" then
+        return 10
+      end
+      return original_stage_rank(state)
+    end
+    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    core.stage_rank = original_stage_rank
+    if not ok then
+      error(errors)
+    end
+    t.is_true(contains_error(errors, "synthetic-bad-recovery: budget_bounded_recovery state must not declare autonomous successors"), joined_errors(errors))
   end,
 
   test_reviewing_is_clean_review_decision_signature = function()
