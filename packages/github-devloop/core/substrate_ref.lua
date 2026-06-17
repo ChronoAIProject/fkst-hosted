@@ -7,7 +7,6 @@ local substrate_remote = "https://github.com/ChronoAIProject/fkst-substrate.git"
 local substrate_branch = "dev"
 local bump_branch = "chore/substrate-ref-bump"
 local bump_title = "chore: bump fkst-substrate pin"
-local lifecycle_version_prefix = "substrate-ref-bump"
 local validate_bump_pr
 
 local function require_repo(repo)
@@ -129,13 +128,6 @@ end
 
 local function current_bump_pr_number(existing)
   return pr_number(existing and existing.number)
-end
-
-local function lifecycle_version(head_sha)
-  if not M._is_git_sha(head_sha) then
-    error("github-devloop: invalid substrate-ref lifecycle head sha")
-  end
-  return lifecycle_version_prefix .. "/" .. tostring(head_sha)
 end
 
 local function bump_worktree_path(runtime_root, repo, head_sha)
@@ -310,123 +302,6 @@ local function changed_paths(repo, pr_number_value)
   return parse_name_only_paths(diff.stdout)
 end
 
-local function mechanical_review_proposal_id(repo, pr_number_value, head_sha)
-  return M.pr_review_proposal_id(repo, pr_number_value, lifecycle_version(head_sha), head_sha)
-end
-
-local function mechanical_review_dedup_key(repo, pr_number_value, head_sha)
-  return M._dedup_key({
-    "substrate-ref-bump",
-    "review",
-    M.safe_repo(repo),
-    tostring(pr_number_value),
-    tostring(head_sha),
-  })
-end
-
-local function lifecycle_proposal_id(repo, pr_number_value)
-  return M.pr_proposal_id(repo, pr_number_value)
-end
-
-local function extract_bump_pr_number(text)
-  local body = tostring(text or "")
-  for _, pattern in ipairs({
-    "[Pp][Rr]%s*:%s*#(%d+)",
-    "[Pp]ull%s+[Rr]equest%s*:%s*#(%d+)",
-    "github%.com/[^%s)]+/pull/(%d+)",
-  }) do
-    local value = body:match(pattern)
-    if pr_number(value) ~= nil then
-      return pr_number(value)
-    end
-  end
-  return nil
-end
-
-function M.is_substrate_ref_lifecycle(proposal_id, pr_number_value, version)
-  local repo, proposal_pr = M.parse_pr_proposal_id(proposal_id)
-  local head_sha = tostring(version or ""):match("^" .. lifecycle_version_prefix .. "/(%x+)$")
-  return repo ~= nil
-    and tostring(proposal_pr or "") == tostring(pr_number_value or "")
-    and M._is_git_sha(head_sha)
-end
-
-function M.substrate_ref_backing_issue_pr_number(issue)
-  if type(issue) ~= "table" then
-    return nil
-  end
-  local title = tostring(issue.title or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-  if title ~= bump_title then
-    return nil
-  end
-  local body = tostring(issue.body or "")
-  local normalized = body:lower()
-  if normalized:find("backing issue for the autonomous fkst%-substrate pin bump pr", 1, false) == nil then
-    return nil
-  end
-  if normalized:find("%.fkst/substrate%-ref", 1, false) == nil
-    and normalized:find("fkst%-substrate pin bump", 1, false) == nil then
-    return nil
-  end
-  return extract_bump_pr_number(body)
-end
-
-function M.is_substrate_ref_backing_issue(issue)
-  return M.substrate_ref_backing_issue_pr_number(issue) ~= nil
-end
-
-local function backing_issue_lifecycle_comment(repo, issue, pr, version)
-  local proposal_id = M.proposal_id(repo, issue.number)
-  return table.concat({
-    "github-devloop substrate-ref backing issue handoff: existing PR review",
-    "",
-    "This backing issue is bound to the existing `chore/substrate-ref-bump` PR. It does not enter feature implementation.",
-    "",
-    M.pr_origin_marker(proposal_id, issue.number, bump_branch, version, pr.base_ref_name),
-    M.state_marker(proposal_id, "reviewing", version),
-    "⟦AI:FKST⟧",
-  }, "\n")
-end
-
-function M.maybe_raise_substrate_ref_backing_issue_review(dept, repo, issue, pr_number_value, source_ref)
-  local pr = read_pr(pr_number_value, repo)
-  local ok, reason = validate_bump_pr(repo, pr.base_ref_name, pr)
-  local proposal_id = M.proposal_id(repo, issue and issue.number)
-  if not ok then
-    M.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "backing-issue", "reviewing", "skip-substrate-ref-backing-pr(" .. tostring(reason) .. ")", "referenced substrate-ref bump PR failed validation")
-    return nil
-  end
-
-  local version = lifecycle_version(pr.head_sha)
-  local origin = M.pr_origin_fact(pr.comments)
-  if not M.has_state_marker(pr.comments, proposal_id, "reviewing", version)
-    or origin == nil
-    or tostring(origin.proposal_id or "") ~= tostring(proposal_id)
-    or tostring(origin.branch or "") ~= bump_branch
-    or tostring(origin.impl_version or "") ~= version then
-    local comment_request = M.build_entity_comment_request({
-      kind = "pr",
-      repo = repo,
-      number = pr.number,
-    }, backing_issue_lifecycle_comment(repo, issue, pr, version), M._dedup_key({
-      "substrate-ref-backing",
-      "reviewing",
-      M.safe_repo(repo),
-      tostring(issue and issue.number or ""),
-      tostring(pr.number),
-      tostring(pr.head_sha),
-    }), M.normalize_source_ref(source_ref) or M.pr_source_ref(repo, pr.number))
-    M.log_raise(dept, proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  end
-
-  local payload = M.build_devloop_reviewing_payload({
-    proposal_id = proposal_id,
-    impl_version = version,
-  }, pr.number, M.pr_source_ref(repo, pr.number), version)
-  M.log_raise(dept, proposal_id, "devloop_reviewing", payload)
-  return payload
-end
-
 validate_bump_pr = function(repo, base_branch, pr)
   if type(pr) ~= "table" then
     return false, "missing-pr"
@@ -456,73 +331,107 @@ validate_bump_pr = function(repo, base_branch, pr)
   return true, "substrate-ref-bump-ok"
 end
 
-local function lifecycle_comments(repo, pr, head_sha)
-  local version = lifecycle_version(head_sha)
-  local proposal_id = lifecycle_proposal_id(repo, pr.number)
-  local review_proposal = mechanical_review_proposal_id(repo, pr.number, head_sha)
-  local review_dedup = mechanical_review_dedup_key(repo, pr.number, head_sha)
+local function substrate_ref_merge_marker(pr, target_sha, outcome, reason)
+  if not M._is_positive_pr_number(pr and pr.number) or not M._is_git_sha(pr and pr.head_sha) or not M._is_git_sha(target_sha) then
+    error("github-devloop: invalid substrate-ref merge marker")
+  end
+  return '<!-- fkst:github-devloop:substrate-ref-merge:v1 pr="' .. tostring(pr.number)
+    .. '" head_sha="' .. tostring(pr.head_sha)
+    .. '" target_sha="' .. tostring(target_sha)
+    .. '" outcome="' .. tostring(outcome)
+    .. '" reason="' .. tostring(strings.sanitize_key(reason or "merge-gate-ok", false):gsub("/", "-"))
+    .. '" -->'
+end
+
+local function substrate_ref_merge_audit_body(pr, target_sha, outcome, reason)
   return table.concat({
-    "github-devloop substrate-ref bump lifecycle: PR-owned approval",
+    "github-devloop substrate-ref deterministic merge audit",
     "",
-    "This PR changes only `.fkst/substrate-ref`; the PR comment stream owns lifecycle state and the central merge gate owns CI, mergeability, same-repo, and head checks.",
+    "The substrate-ref bump is handled by deterministic gates: exact `.fkst/substrate-ref` diff, upstream SHA equality, same-repo head, non-draft PR, CI green, mergeability, and matched head merge.",
     "",
-    M.pr_origin_marker(proposal_id, pr.number, bump_branch, version, pr.base_ref_name),
-    M.state_marker(proposal_id, "merge-ready", version),
-    M.review_result_marker(review_proposal, proposal_id, "approve", review_dedup),
-    M.merge_ready_marker(proposal_id, pr.number, version, review_proposal, review_dedup, head_sha),
+    substrate_ref_merge_marker(pr, target_sha, outcome, reason),
     "⟦AI:FKST⟧",
   }, "\n")
 end
 
-local function ensure_bump_lifecycle(repo, base_branch, existing, current_pin, target_sha)
-  local number = current_bump_pr_number(existing)
-  if number == nil then
-    log_scan("merge-lifecycle-skip", {
-      "repo=" .. repo,
-      "reason=no-open-pr",
-    })
-    return nil
-  end
-  local pr = read_pr(number, repo)
+local function log_bump_merge(action, repo, pr_number_value, reason)
+  log_scan(action, {
+    "repo=" .. tostring(repo),
+    "pr=" .. tostring(pr_number_value or ""),
+    "reason=" .. tostring(reason or ""),
+  })
+end
+
+local function validate_bump_merge_facts(repo, base_branch, pr, target_sha)
   local ok, reason = validate_bump_pr(repo, base_branch, pr)
   if not ok then
-    log_scan("merge-lifecycle-hold", {
-      "repo=" .. repo,
-      "pr=" .. tostring(number),
-      "reason=" .. tostring(reason),
-    })
-    return nil
+    return false, reason
   end
-  local version = lifecycle_version(pr.head_sha)
-  local proposal_id = lifecycle_proposal_id(repo, number)
-  local review_proposal = mechanical_review_proposal_id(repo, number, pr.head_sha)
-  local review_dedup = mechanical_review_dedup_key(repo, number, pr.head_sha)
-  if not M.has_state_marker(pr.comments, proposal_id, "merge-ready", version)
-    or M.merge_ready_fact(pr.comments, proposal_id, version, number, pr.head_sha) == nil
-    or not M.has_review_result_marker(pr.comments, review_proposal, proposal_id, "approve", review_dedup) then
-    local request = M.build_entity_comment_request({
-      kind = "pr",
-      repo = repo,
-      number = pr.number,
-    }, lifecycle_comments(repo, pr, pr.head_sha), M._dedup_key({
-      "substrate-ref-bump",
-      "lifecycle",
-      M.safe_repo(repo),
-      tostring(number),
-      tostring(pr.head_sha),
-    }), M.pr_source_ref(repo, number))
-    M.log_raise("substrate_ref_scan", proposal_id, "github-proxy.github_pr_comment_request", request)
-    raise("github-proxy.github_pr_comment_request", request)
-    return nil
+  local branch_head = fetch_bump_branch_head()
+  if tostring(branch_head or "") ~= tostring(pr.head_sha or "") then
+    return false, "branch-head-mismatch"
   end
-  local payload = M.build_devloop_merge_ready_payload(proposal_id, number, version, {
-    review_proposal_id = review_proposal,
-    review_dedup_key = review_dedup,
-    reviewed_head_sha = pr.head_sha,
-  }, M.pr_source_ref(repo, number))
-  M.log_raise("substrate_ref_scan", proposal_id, "devloop_merge_ready", payload)
-  raise("devloop_merge_ready", payload)
-  return payload
+  local pin = remote_bump_branch_pin(branch_head)
+  if tostring(pin or "") ~= tostring(target_sha or "") then
+    return false, "pin-target-mismatch"
+  end
+  return true, "substrate-ref-merge-ok"
+end
+
+local function raise_merge_audit(repo, pr, target_sha, outcome, reason)
+  local request = M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = pr.number,
+  }, substrate_ref_merge_audit_body(pr, target_sha, outcome, reason), M._dedup_key({
+    "substrate-ref-merge",
+    M.safe_repo(repo),
+    tostring(pr.number),
+    tostring(pr.head_sha),
+    tostring(outcome),
+    tostring(reason or ""),
+  }), M.pr_source_ref(repo, pr.number))
+  M.log_raise("substrate_ref_scan", "substrate-ref-merge", "github-proxy.github_pr_comment_request", request)
+  raise("github-proxy.github_pr_comment_request", request)
+  return request
+end
+
+local function maybe_merge_bump_pr(repo, base_branch, existing, target_sha, write_enabled)
+  local number = current_bump_pr_number(existing)
+  if number == nil then
+    log_bump_merge("merge-skip", repo, nil, "no-open-pr")
+    return { status = "no-open-pr", reason = "no-open-pr" }
+  end
+  local pr = read_pr(number, repo)
+  local ok, reason = validate_bump_merge_facts(repo, base_branch, pr, target_sha)
+  if not ok then
+    log_bump_merge("merge-hold", repo, number, reason)
+    return { status = "hold", pr_number = number, reason = reason }
+  end
+  if not write_enabled then
+    log_bump_merge("merge-dry-run", repo, number, "FKST_GITHUB_WRITE!=1")
+    return { status = "would-merge", pr_number = number, reason = "FKST_GITHUB_WRITE!=1" }
+  end
+  local merged, merge_reason, merged_pr = M.run_verified_pr_merge({
+    dept = "substrate_ref_scan",
+    proposal_id = "substrate-ref-merge",
+    repo = repo,
+    pr_number = number,
+    head_sha = pr.head_sha,
+    head_branch = bump_branch,
+    base_branch = base_branch,
+    match_head_retry_attempts = 2,
+    validate_rechecked_pr = function(rechecked)
+      return validate_bump_merge_facts(repo, base_branch, rechecked, target_sha)
+    end,
+  })
+  if not merged then
+    log_bump_merge("merge-hold", repo, number, merge_reason)
+    return { status = "hold", pr_number = number, reason = merge_reason }
+  end
+  log_bump_merge("merged", repo, number, merge_reason)
+  raise_merge_audit(repo, merged_pr or pr, target_sha, "merged", merge_reason)
+  return { status = "merged", pr_number = number, reason = merge_reason }
 end
 
 function M.substrate_ref_constants()
@@ -532,7 +441,6 @@ function M.substrate_ref_constants()
     branch = substrate_branch,
     bump_branch = bump_branch,
     title = bump_title,
-    lifecycle_version = lifecycle_version_prefix,
   }
 end
 
@@ -563,6 +471,10 @@ function M.substrate_ref_scan()
 
   if cfg.write_mode ~= "real" then
     local existing = existing_bump_pr(repo)
+    local merge_result = nil
+    if existing ~= nil then
+      merge_result = maybe_merge_bump_pr(repo, cfg.upstream_branch, existing, target_sha, false)
+    end
     log_scan("bump-planned", {
       "mode=" .. cfg.write_mode,
       "repo=" .. repo,
@@ -577,6 +489,7 @@ function M.substrate_ref_scan()
       target = target_sha,
       existing_pr = existing and existing.number or nil,
       branch = bump_branch,
+      merge = merge_result,
     }
   end
 
@@ -619,7 +532,7 @@ function M.substrate_ref_scan()
   if branch_action == "base-current" then
     return { status = "current", pin = current_pin, target = target_sha }
   end
-  local merge_payload = ensure_bump_lifecycle(repo, cfg.upstream_branch, final_existing or { number = created_pr_number }, current_pin, target_sha)
+  local merge_result = maybe_merge_bump_pr(repo, cfg.upstream_branch, final_existing or { number = created_pr_number }, target_sha, true)
   return {
     status = final_existing == nil and "created" or "updated",
     pin = current_pin,
@@ -627,7 +540,7 @@ function M.substrate_ref_scan()
     existing_pr = final_existing and final_existing.number or nil,
     pr_number = final_existing and final_existing.number or created_pr_number,
     branch = bump_branch,
-    merge_ready = merge_payload,
+    merge = merge_result,
   }
 end
 end

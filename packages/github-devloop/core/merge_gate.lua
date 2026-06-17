@@ -373,6 +373,7 @@ function M.run_verified_pr_merge(request)
       error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
     end
     local rechecked_pr = M.parse_pr_view_merge(pr_recheck.stdout)
+    rechecked_pr.number = pr_number
     local merge_head_sha = request and request.head_sha
     if request and request.accept_current_head == true then
       merge_head_sha = rechecked_pr.head_sha
@@ -425,6 +426,7 @@ function M.run_verified_pr_merge(request)
         error("github-devloop: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
       end
       local merged_pr = M.parse_pr_view_merge(merged_view.stdout)
+      merged_pr.number = pr_number
       if not M.is_merged_pr(merged_pr) then
         return false, "merge-confirmation-pending", merged_pr
       end
