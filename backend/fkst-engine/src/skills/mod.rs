@@ -27,6 +27,13 @@ use std::path::{Path, PathBuf};
 
 use crate::error::RunnerError;
 
+/// The repo-base reader + the pure AGENTS.md body composer (issue #182). Split
+/// into its own module so `skills/mod.rs` stays under the 500-line budget; it
+/// reuses this module's [`safe_join`] / [`io_err`] via `super::`.
+pub mod agents_md;
+
+pub use agents_md::{compose_agents_md, read_repo_agents_md};
+
 /// Per-entry executable bit added when a zip entry carries no recorded unix
 /// mode but is heuristically executable (`scripts/*` or a shebang file).
 const EXEC_BITS: u32 = 0o755;
@@ -41,7 +48,7 @@ const MARKER_PREFIX: &str = "ornn-skillset:";
 /// Map a host-side filesystem failure to the runner's IO error, attaching a
 /// short context message so the cause is traceable in the logs (the underlying
 /// `io::Error` already carries the OS detail). Never carries a secret.
-fn io_err(context: &str, error: std::io::Error) -> RunnerError {
+pub(super) fn io_err(context: &str, error: std::io::Error) -> RunnerError {
     tracing::error!(error = %error, "{context}");
     RunnerError::Io(error)
 }
@@ -53,7 +60,7 @@ fn io_err(context: &str, error: std::io::Error) -> RunnerError {
 /// are all rejected. The symlink-escape guard canonicalizes the deepest EXISTING
 /// ancestor of the target and asserts it stays inside the canonicalized `root`,
 /// so a symlink planted inside the install dir that points outside is caught.
-fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, RunnerError> {
+pub(super) fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, RunnerError> {
     if rel.is_empty() {
         return Err(RunnerError::InvalidPackage(
             "empty zip entry path".to_string(),
