@@ -74,6 +74,13 @@ jobs:
     needs: tag-and-release
     if: needs.tag-and-release.outputs.released == 'true'
     runs-on: ubuntu-latest
+    # `pull-requests: write` is required for the `gh pr create` below; the
+    # top-level block only grants `contents: write`. (The repo setting "Allow
+    # GitHub Actions to create and approve pull requests" must also be enabled —
+    # see issue #242 — or createPullRequest is still rejected.)
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
