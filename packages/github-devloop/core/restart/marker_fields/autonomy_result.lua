@@ -15,6 +15,7 @@ return {
   gate_human_touch = true,
   gate_evidence_manifest = true,
   gate_post_merge_probe = true,
+  post_merge_probe_green = true,
   gate_no_revert_reopen = true,
   gate_cost_budget = true,
   valid_autonomous_merge = true,

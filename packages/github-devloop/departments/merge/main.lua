@@ -357,9 +357,9 @@ local function write_merging_marker(repo, merge_ready, comments)
   core.invalidate_entity_after_write(repo, "pr", merge_ready.pr_number)
 end
 
-local function build_merged_requests(repo, issue_number, merge_ready)
+local function build_merged_requests(repo, issue_number, merge_ready, merged_pr)
   local merged_source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
-  local autonomy_record = issue_number ~= nil and core.autonomy_result_record(repo, issue_number, merge_ready, nil) or nil
+  local autonomy_record = issue_number ~= nil and core.autonomy_result_record(repo, issue_number, merge_ready, nil, merged_pr) or nil
   local merged_body = core.build_merged_comment_body(merge_ready, autonomy_record)
   local comment_request = core.build_entity_comment_request({
     kind = "pr",
@@ -376,7 +376,7 @@ local function build_merged_requests(repo, issue_number, merge_ready)
   return comment_request, label_request
 end
 
-local function finalize_merged(repo, issue_number, merge_ready, current_state, reason)
+local function finalize_merged(repo, issue_number, merge_ready, current_state, reason, merged_pr)
   if issue_number ~= nil then
     local close_result = core.gh_exec({ cmd = core.gh_issue_close_cmd(repo, issue_number), timeout = 60 })
     if close_result.exit_code ~= 0 then
@@ -385,7 +385,7 @@ local function finalize_merged(repo, issue_number, merge_ready, current_state, r
     core.invalidate_entity_after_write(repo, "issue", issue_number)
   end
 
-  local comment_request, label_request = build_merged_requests(repo, issue_number, merge_ready)
+  local comment_request, label_request = build_merged_requests(repo, issue_number, merge_ready, merged_pr)
   local add_labels, remove_labels = core.state_label_changes("merged")
   core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "merged", "applied", reason)
   core.log_apply("merge", merge_ready.proposal_id, "merged", merge_ready.version, { add = add_labels, remove = remove_labels }, {
@@ -505,7 +505,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
         log_gate(merge_ready, "dry-run", "PR already merged; finalization requires FKST_GITHUB_WRITE=1")
         return
       end
-      finalize_merged(repo, issue_number, merge_ready, state, "PR already merged; self-healing finalization")
+      finalize_merged(repo, issue_number, merge_ready, state, "PR already merged; self-healing finalization", current_pr)
       return { status = "merged", pr_number = merge_ready.pr_number, merge_ready = merge_ready }
     end
     if pr_reason == "head-sha-mismatch" and state.state == "merging" then
@@ -755,7 +755,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     error("github-devloop: write-time PR fact changed before merge")
   end
 
-  finalize_merged(repo, issue_number, merge_ready, rechecked_state, "gh pr merge confirmed merged")
+  finalize_merged(repo, issue_number, merge_ready, rechecked_state, "gh pr merge confirmed merged", merge_rechecked_pr)
   return { status = "merged", pr_number = merge_ready.pr_number, merge_ready = merge_ready, queue_entries = queue_entries }
 end
 

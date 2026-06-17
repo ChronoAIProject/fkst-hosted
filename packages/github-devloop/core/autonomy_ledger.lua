@@ -115,13 +115,29 @@ function M.autonomy_merge_rounds(version)
   return M.version_loop_round(version) + M.version_fix_round(version)
 end
 
-function M.autonomy_result_record(repo, issue_number, merge_ready, issue)
+function M.autonomy_post_merge_probe_gate(pr, opts)
+  local green, reason = M.evaluate_ci_status_gate(pr, opts)
+  if green then
+    return "pass", reason
+  end
+  return "fail", reason
+end
+
+function M.autonomy_result_record(repo, issue_number, merge_ready, issue, post_merge_pr)
   local human_touch_count = 0
+  local post_merge_probe = "pending"
+  if post_merge_pr ~= nil then
+    post_merge_probe = M.autonomy_post_merge_probe_gate(post_merge_pr, {
+      repo = repo,
+      dept = "merge",
+      proposal_id = tostring(merge_ready.proposal_id),
+    })
+  end
   local gates = {
     human_touch = human_touch_count == 0 and "pass" or "fail",
     pre_merge_ci = "pass",
     evidence_manifest = "pending",
-    post_merge_probe = "pending",
+    post_merge_probe = post_merge_probe,
     no_revert_reopen = "pending",
     cost_budget = "pending",
   }
@@ -213,6 +229,7 @@ function M.autonomy_result_marker_attrs(record)
     .. '" gate_human_touch="' .. normalize_gate_state(parts.gates.human_touch)
     .. '" gate_evidence_manifest="' .. normalize_gate_state(parts.gates.evidence_manifest)
     .. '" gate_post_merge_probe="' .. normalize_gate_state(parts.gates.post_merge_probe)
+    .. '" post_merge_probe_green="' .. normalize_gate_state(parts.gates.post_merge_probe)
     .. '" gate_no_revert_reopen="' .. normalize_gate_state(parts.gates.no_revert_reopen)
     .. '" gate_cost_budget="' .. normalize_gate_state(parts.gates.cost_budget)
     .. '" valid_autonomous_merge="' .. parts.valid .. '"'
@@ -235,6 +252,7 @@ function M.autonomy_result_marker(record)
     .. '" gate_human_touch="' .. normalize_gate_state(parts.gates.human_touch)
     .. '" gate_evidence_manifest="' .. normalize_gate_state(parts.gates.evidence_manifest)
     .. '" gate_post_merge_probe="' .. normalize_gate_state(parts.gates.post_merge_probe)
+    .. '" post_merge_probe_green="' .. normalize_gate_state(parts.gates.post_merge_probe)
     .. '" gate_no_revert_reopen="' .. normalize_gate_state(parts.gates.no_revert_reopen)
     .. '" gate_cost_budget="' .. normalize_gate_state(parts.gates.cost_budget)
     .. '" valid_autonomous_merge="' .. parts.valid .. '"'
@@ -256,7 +274,9 @@ function M.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_n
     human_touch = normalize_gate_state(marker:match('gate_human_touch="([^"]+)"')),
     pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
     evidence_manifest = normalize_gate_state(marker:match('gate_evidence_manifest="([^"]+)"')),
-    post_merge_probe = normalize_gate_state(marker:match('gate_post_merge_probe="([^"]+)"')),
+    post_merge_probe = normalize_gate_state(
+      marker:match('post_merge_probe_green="([^"]+)"') or marker:match('gate_post_merge_probe="([^"]+)"')
+    ),
     no_revert_reopen = normalize_gate_state(marker:match('gate_no_revert_reopen="([^"]+)"')),
     cost_budget = normalize_gate_state(marker:match('gate_cost_budget="([^"]+)"')),
   }
