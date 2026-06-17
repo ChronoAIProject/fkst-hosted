@@ -14,9 +14,6 @@ local known_god_states = {
   ready = {
     ["ready: non-terminal row must declare responsibility_signature"] = "dependency gate and implementation kickoff are still fused until the ready split.",
   },
-  reviewing = {
-    ["reviewing: non-terminal row must declare responsibility_signature"] = "Review decision, convergence heartbeat, failure, and meta fallback are still fused until the reviewing split.",
-  },
   ["merge-ready"] = {
     ["merge-ready: non-terminal row must declare responsibility_signature"] = "Worst god-state: CI wait, merge start, review carry-over/backward review, fix fallback, and block fallback are still fused.",
   },
@@ -101,6 +98,16 @@ local function actual_successor_edges(row, signature)
     table.insert(out, copy_edge(by_state[next_state], next_state))
   end
   return out
+end
+
+local function rows_by_state(rows)
+  local by_state = {}
+  for _, row in ipairs(rows or {}) do
+    if row ~= nil and row.from_state ~= nil then
+      by_state[row.from_state] = row
+    end
+  end
+  return by_state
 end
 
 local function edge_is_terminal(edge)
@@ -212,6 +219,29 @@ local function validate_successor_coverage(row, signature, errors)
   return actual_successor_edges(row, signature)
 end
 
+local function terminal_class_state(row)
+  if row == nil then
+    return false
+  end
+  if row.terminal == true then
+    return true
+  end
+  local signature = row.responsibility_signature
+  if type(signature) == "table" and signature.state_kind == "terminal_hold" then
+    return true
+  end
+  return row.from_state == "blocked" or row.from_state == "impl-failed"
+end
+
+local function validate_terminal_escape_targets(row, edges, all_rows, errors)
+  local state = state_name(row)
+  for _, edge in ipairs(edges or {}) do
+    if edge_is_terminal(edge) and not terminal_class_state(all_rows[edge.state]) then
+      table.insert(errors, state .. ": terminal-escape successor must point to a terminal-class state: " .. tostring(edge.state))
+    end
+  end
+end
+
 local function validate_output_family(row, signature, edges, errors)
   local state = state_name(row)
   for _, edge in ipairs(normal_edges(edges)) do
@@ -311,7 +341,7 @@ local function validate_unique_signature(row, signature, seen, errors)
   seen[fingerprint] = row.from_state
 end
 
-local function validate_row(row, seen, errors)
+local function validate_row(row, seen, all_rows, errors)
   if row == nil or row.terminal == true then
     return
   end
@@ -323,6 +353,7 @@ local function validate_row(row, seen, errors)
   end
   validate_signature_shape(row, signature, errors)
   local actual_edges = validate_successor_coverage(row, signature, errors)
+  validate_terminal_escape_targets(row, actual_edges, all_rows, errors)
   validate_output_family(row, signature, actual_edges, errors)
   validate_kind_fanout(row, signature, actual_edges, errors)
   validate_phase_monotonicity(row, signature, actual_edges, errors)
@@ -332,8 +363,13 @@ end
 function M.strict_restart_responsibility_contract_errors(rows)
   local errors = {}
   local seen = {}
-  for _, row in ipairs(rows or M.restart_transition_table()) do
-    validate_row(row, seen, errors)
+  local source_rows = rows or M.restart_transition_table()
+  local all_rows = rows_by_state(M.restart_transition_table())
+  for state, row in pairs(rows_by_state(source_rows)) do
+    all_rows[state] = row
+  end
+  for _, row in ipairs(source_rows) do
+    validate_row(row, seen, all_rows, errors)
   end
   return errors
 end

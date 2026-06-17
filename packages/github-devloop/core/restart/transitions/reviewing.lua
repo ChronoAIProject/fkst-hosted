@@ -6,6 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
+  local responsibility_signature = h.responsibility_signature
   return {
     from_state = "reviewing",
     liveness_class_id = "reviewing.active",
@@ -34,6 +35,46 @@ return function(M, h)
       },
     }),
     on_timeout = timeout("devloop_reviewing"),
+    responsibility_signature = responsibility_signature({
+      receiver_kind = "reviewer",
+      driving_queue = "devloop_reviewing",
+      state_kind = "decision",
+      liveness_class = "reviewing.active",
+      input_fact_family = "pr-revision-review-request",
+      output_postcondition_family = "review_decision_recorded",
+      decision_type = "ReviewDecision",
+      phase_rank = M.stage_rank("reviewing"),
+      lineage_keys = { "state.version", "pr-link.pr", "pr-head.sha", "source_ref" },
+      successors = {
+        {
+          state = "merge-ready",
+          output_variant = "approved",
+          postcondition_family = "review_decision_recorded",
+          decision_type = "ReviewDecision",
+          monotonic = true,
+        },
+        {
+          state = "fixing",
+          output_variant = "changes_requested",
+          postcondition_family = "review_decision_recorded",
+          decision_type = "ReviewDecision",
+          bump = true,
+        },
+        {
+          state = "review-meta",
+          output_variant = "needs_review_meta",
+          postcondition_family = "review_decision_recorded",
+          decision_type = "ReviewDecision",
+          monotonic = true,
+        },
+        {
+          state = "blocked",
+          output_variant = "watchdog_reconcile_terminal",
+          terminal = true,
+          monotonic = true,
+        },
+      },
+    }),
     payload_builder = M.build_devloop_reviewing_payload,
     dedup_shape = "reviewing/<proposal_id>/<state.version>/<pr>",
     required_facts = {
