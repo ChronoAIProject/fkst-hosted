@@ -7,6 +7,7 @@ local substrate_remote = "https://github.com/ChronoAIProject/fkst-substrate.git"
 local substrate_branch = "dev"
 local bump_branch = "chore/substrate-ref-bump"
 local bump_title = "chore: bump fkst-substrate pin"
+local substrate_dev_ref = "refs/remotes/fkst-substrate/dev"
 local validate_bump_pr
 
 local function require_repo(repo)
@@ -89,6 +90,45 @@ local function fetch_substrate_dev_head()
     error("github-devloop: git ls-remote did not return a valid fkst-substrate dev head")
   end
   return sha
+end
+
+local function fetch_substrate_dev_ref()
+  local result = run_cmd(
+    M.git_fetch_remote_branch_to_tracking_ref_cmd(substrate_remote, substrate_branch, substrate_dev_ref),
+    60,
+    "git fetch fkst-substrate dev"
+  )
+  return result
+end
+
+local function substrate_pin_is_dev_ancestor(pin, target_sha)
+  if not M._is_git_sha(pin) then
+    return false, "invalid-substrate-pin"
+  end
+  if not M._is_git_sha(target_sha) then
+    return false, "invalid-substrate-target"
+  end
+  fetch_substrate_dev_ref()
+  local head = run_cmd(
+    M.git_rev_parse_ref_commit_cmd(substrate_dev_ref),
+    30,
+    "git fkst-substrate dev ref"
+  )
+  local fetched_head = M._trim(head.stdout)
+  if not M._is_git_sha(fetched_head) then
+    return false, "invalid-substrate-dev-head"
+  end
+  if fetched_head:lower() ~= tostring(target_sha):lower() then
+    return false, "substrate-dev-head-mismatch"
+  end
+  local ancestry = exec_sync({
+    cmd = M.git_is_ancestor_cmd(pin, fetched_head),
+    timeout = 30,
+  })
+  if ancestry.exit_code == 0 then
+    return true, "substrate-pin-valid"
+  end
+  return false, "substrate-pin-not-dev-ancestor"
 end
 
 local function parse_pr_list(stdout)
@@ -347,7 +387,7 @@ local function substrate_ref_merge_audit_body(pr, target_sha, outcome, reason)
   return table.concat({
     "github-devloop substrate-ref deterministic merge audit",
     "",
-    "The substrate-ref bump is handled by deterministic gates: exact `.fkst/substrate-ref` diff, upstream SHA equality, same-repo head, non-draft PR, CI green, mergeability, and matched head merge.",
+    "The substrate-ref bump is handled by deterministic gates: exact `.fkst/substrate-ref` diff, upstream ancestry, same-repo head, non-draft PR, CI green, mergeability, and matched head merge.",
     "",
     substrate_ref_merge_marker(pr, target_sha, outcome, reason),
     "⟦AI:FKST⟧",
@@ -372,8 +412,17 @@ local function validate_bump_merge_facts(repo, base_branch, pr, target_sha)
     return false, "branch-head-mismatch"
   end
   local pin = remote_bump_branch_pin(branch_head)
-  if tostring(pin or "") ~= tostring(target_sha or "") then
-    return false, "pin-target-mismatch"
+  local pin_ok, pin_reason = substrate_pin_is_dev_ancestor(pin, target_sha)
+  if not pin_ok then
+    return false, pin_reason
+  end
+  local gate_ok, gate_reason = M.evaluate_ci_merge_gate(pr, {
+    repo = repo,
+    dept = "substrate_ref_scan",
+    proposal_id = "substrate-ref-merge",
+  })
+  if not gate_ok then
+    return false, gate_reason
   end
   return true, "substrate-ref-merge-ok"
 end
@@ -496,8 +545,15 @@ function M.substrate_ref_scan()
   local final_existing = nil
   local branch_action = nil
   local created_pr_number = nil
+  local preupdate_merge_result = nil
   with_lock("github-devloop/substrate-ref/" .. M.safe_repo(repo), function()
     final_existing = existing_bump_pr(repo)
+    if final_existing ~= nil then
+      preupdate_merge_result = maybe_merge_bump_pr(repo, cfg.upstream_branch, final_existing, target_sha, true)
+      if preupdate_merge_result.status == "merged" then
+        return
+      end
+    end
     branch_action = create_or_update_branch(repo, cfg.upstream_branch, current_pin, target_sha)
     if final_existing == nil and branch_action ~= "base-current" then
       created_pr_number = create_pr(repo, cfg.upstream_branch, current_pin, target_sha)
@@ -529,8 +585,33 @@ function M.substrate_ref_scan()
     end
   end)
 
+  if preupdate_merge_result ~= nil and preupdate_merge_result.status == "merged" then
+    return {
+      status = "merged",
+      pin = current_pin,
+      target = target_sha,
+      existing_pr = final_existing and final_existing.number or nil,
+      pr_number = final_existing and final_existing.number or nil,
+      branch = bump_branch,
+      merge = preupdate_merge_result,
+    }
+  end
+  if preupdate_merge_result ~= nil and branch_action == "already-current" then
+    return {
+      status = "updated",
+      pin = current_pin,
+      target = target_sha,
+      existing_pr = final_existing and final_existing.number or nil,
+      pr_number = final_existing and final_existing.number or nil,
+      branch = bump_branch,
+      merge = preupdate_merge_result,
+    }
+  end
   if branch_action == "base-current" then
     return { status = "current", pin = current_pin, target = target_sha }
+  end
+  if final_existing ~= nil and branch_action ~= "already-current" then
+    final_existing = existing_bump_pr(repo)
   end
   local merge_result = maybe_merge_bump_pr(repo, cfg.upstream_branch, final_existing or { number = created_pr_number }, target_sha, true)
   return {
