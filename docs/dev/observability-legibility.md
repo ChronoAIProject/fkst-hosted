@@ -21,6 +21,14 @@ Expected transients are shown as informational activity, not anomalies. Current 
 
 The renderer does not infer new package semantics from prose logs or GitHub labels. New department or engine disposition meanings must be emitted as structured facts by their producers before the board can render them as first-class classifications.
 
+## Topology surface contract
+
+This spec amendment follows PDCA/OODA closed-loop control and SRE topology-dashboard practice: an operator dashboard may improve orientation, but it must remain a projection of an authoritative artifact instead of becoming a second source of topology truth.
+
+The accepted machine contract is unchanged. A package that opts in with `M.spec.graph_json = true` exposes topology through `graph_json()`, and that function returns the canonical `fkst.graph.v1` artifact. Any board topology view derives from that artifact; dashboard code must not invent, persist, or infer topology from prose, labels, or runtime layout.
+
+The board must not render an inline `## System topology` section merely because `graph_json()` exists. Inline rendering is allowed only when the implementing spec or patch carries documented evidence that the `fkst-dev board` workflow needs inline topology to close an operator feedback loop, and that linking or reusing the authoritative artifact is insufficient for that workflow. Without that evidence, the correct board behavior is to link to or reuse the authoritative artifact and keep the dashboard as a thin consumer.
+
 ## Operator reading
 
 Use:

@@ -564,6 +564,19 @@ class ObservabilitySplitArchitectureTest(unittest.TestCase):
         )
 
 
+class ObservabilitySpecContractTest(unittest.TestCase):
+    def test_topology_dashboard_spec_requires_authoritative_artifact_proof(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "docs" / "dev" / "observability-legibility.md").read_text(encoding="utf-8")
+
+        for token in ("M.spec.graph_json = true", "graph_json()", "fkst.graph.v1", "## System topology"):
+            self.assertIn(token, source)
+        self.assertIn("authoritative artifact", source)
+        self.assertIn("must not render", source)
+        self.assertIn("linking or reusing", source)
+        self.assertIn("documented evidence", source)
+
+
 class RepositoryInterfaceContractTest(unittest.TestCase):
     def test_repository_checks_scan_fkst_packages_view(self) -> None:
         root = Path(__file__).resolve().parents[1]
