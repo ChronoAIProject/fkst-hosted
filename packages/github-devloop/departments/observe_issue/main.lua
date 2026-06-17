@@ -126,6 +126,7 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
     link = link,
     snapshot = snapshot,
     event_ts = event_ts,
+    fresh_current_state = state,
   }
   local epoch = row and row.actionable_epoch
   if issue.source == "liveness-scan"

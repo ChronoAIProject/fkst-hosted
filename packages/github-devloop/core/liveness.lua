@@ -13,8 +13,7 @@ local function valid_budget(row)
   return type(row.budget) == "table"
     and tonumber(row.budget.minutes) ~= nil
     and tonumber(row.budget.minutes) > 0
-    and type(row.budget.receiver_max_work_justification) == "string"
-    and row.budget.receiver_max_work_justification ~= ""
+    and type(row.budget.receiver_max_work_justification) == "string" and row.budget.receiver_max_work_justification ~= ""
 end
 
 local function reachable_lifecycle_states(M)
@@ -77,10 +76,8 @@ local function valid_timeout(row)
   end
   local terminal = row.on_timeout.on_escalate
   return type(terminal) == "table"
-    and terminal.action == "force-terminate"
-    and terminal.terminal_state == "blocked"
-    and type(terminal.reason) == "string"
-    and terminal.reason ~= ""
+    and terminal.action == "force-terminate" and terminal.terminal_state == "blocked"
+    and type(terminal.reason) == "string" and terminal.reason ~= ""
 end
 
 local liveness_contract_margin_minutes = 30
@@ -948,6 +945,11 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
   end
   local comments = facts and facts.current and facts.current.comments or nil
   local proposal_id = facts and facts.proposal_id or state and state.proposal_id
+  local matches, mismatch = M.timeout_lineage_matches_current(state, facts and facts.fresh_current_state)
+  if not matches then
+    M.log_cas_decision(dept, proposal_id, facts and facts.fresh_current_state or state, row.from_state, row.driving_queue, "stale_timeout_noop(" .. tostring(mismatch) .. ")", "timeout watchdog lineage no longer matches freshly derived current state")
+    return true
+  end
   if row.from_state == "blocked" and M.has_decompose_exhausted_marker(comments, proposal_id, state and state.version) then
     M.log_cas_decision(dept, proposal_id, state, "blocked", row.driving_queue, "skip-idempotent(decompose-exhausted)", "blocked decompose output obligation already reached terminal stop")
     return true

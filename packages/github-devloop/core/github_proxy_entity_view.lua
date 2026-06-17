@@ -365,6 +365,18 @@ function M.fetch_entity_view(repo, kind, number, updated_at, opts)
   return fetch_entity_view(repo, kind, number, updated_at, opts)
 end
 
+function M.cached_entity_view(repo, kind, number)
+  local selected_kind = tostring(kind or "")
+  if selected_kind ~= "issue" and selected_kind ~= "pr" then
+    error("github-devloop: invalid cached entity view kind")
+  end
+  local cached = decode_cached_view(cache_get(entity_view_cache_key(repo, selected_kind, number)))
+  if cached == nil then
+    return nil
+  end
+  return success_from_cache(cached)
+end
+
 function M.fetch_issue_view(repo, issue_number, updated_at, opts)
   return fetch_entity_view(repo, "issue", issue_number, updated_at, opts)
 end

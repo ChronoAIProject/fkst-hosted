@@ -94,15 +94,29 @@ function M.current_linked_entity_state(repo, proposal_id, issue_comments)
   return M.current_entity_state(snapshot.comments, proposal_id)
 end
 
-function M.linked_entity_snapshot(repo, proposal_id, issue_comments)
+function M.linked_entity_snapshot(repo, proposal_id, issue_comments, opts)
+  local options = opts or {}
   local snapshot = {
     comments = {},
     prs = {},
     absent_prs = {},
+    deferred = false,
+    defer_reason = nil,
   }
   copy_comments(snapshot.comments, issue_comments)
   for _, pr_number in ipairs(linked_pr_numbers(issue_comments, proposal_id)) do
-    local pr_view = M.gh_exec({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
+    local pr_view
+    if options.cache_only == true then
+      pr_view = M.cached_entity_view(repo, "pr", pr_number)
+      if pr_view == nil then
+        snapshot.deferred = true
+        snapshot.defer_reason = "pr-surface-not-cached"
+        snapshot.state = M.current_entity_state(snapshot.comments, proposal_id)
+        return snapshot
+      end
+    else
+      pr_view = M.gh_exec({ cmd = M.gh_pr_view_observe_cmd(repo, pr_number), timeout = 30 })
+    end
     if pr_view.exit_code ~= 0 then
       if command_indicates_not_found(pr_view) then
         snapshot.absent_prs[tostring(pr_number)] = true

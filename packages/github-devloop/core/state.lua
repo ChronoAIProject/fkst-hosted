@@ -376,6 +376,19 @@ function M.compare_state_marker_order(current, target_state, target_version)
   return sign_order(M.stage_rank(current.state) - M.stage_rank(target_state))
 end
 
+function M.timeout_lineage_matches_current(scheduled, current)
+  if type(scheduled) ~= "table" or type(current) ~= "table" then
+    return true
+  end
+  if tostring(current.state or "") ~= tostring(scheduled.state or "") then
+    return false, "state-advanced"
+  end
+  if strip_transition_version_suffixes(current.version) ~= strip_transition_version_suffixes(scheduled.version) then
+    return false, "lineage-mismatch"
+  end
+  return true
+end
+
 local function compare_state_marker(a, b)
   if a == nil then
     return true

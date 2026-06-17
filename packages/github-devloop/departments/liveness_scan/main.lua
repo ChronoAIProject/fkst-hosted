@@ -119,6 +119,15 @@ local function issue_entity(repo, issue_number)
   }
 end
 
+local function issue_state_needs_linked_surface(state_name)
+  return state_name == "pr-open"
+    or state_name == "reviewing"
+    or state_name == "fixing"
+    or state_name == "review-meta"
+    or state_name == "merge-ready"
+    or state_name == "merging"
+end
+
 local function maybe_timeout_action(entity, state, facts)
   local row = core.restart_transition_row(state and state.state)
   if row == nil or row.terminal == true then
@@ -171,16 +180,46 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     return false
   end
 
-  local state = core.current_entity_state(current.comments, proposal_id)
+  local issue_state = core.current_entity_state(current.comments, proposal_id)
+  local snapshot = issue_state_needs_linked_surface(issue_state and issue_state.state)
+    and core.linked_entity_snapshot(repo, proposal_id, current.comments, { cache_only = true })
+    or { comments = current.comments or {}, prs = {}, absent_prs = {}, state = issue_state }
+  if snapshot.deferred == true then
+    core.log_cas_decision("liveness_scan", proposal_id, issue_state, "tick", "observe", "liveness-deadline-deferred:" .. tostring(snapshot.defer_reason or "linked-surface"), "linked PR surface is not cached for this sweep")
+    return false
+  end
+  local state = snapshot.state
   if not should_reinject_state(proposal_id, state) then
     return false
   end
+  local link = core.pr_link_fact(snapshot.comments, proposal_id)
+  local current_pr = nil
+  if link ~= nil then
+    for _, item in ipairs(snapshot.prs or {}) do
+      if tostring(item.number or "") == tostring(link.pr_number or "") then
+        current_pr = item.current
+        break
+      end
+    end
+  end
+  local pr_phase_source_ref = current_pr ~= nil and link ~= nil and state.state ~= "pr-open"
   local timeout_action = maybe_timeout_action(issue_entity(repo, issue.number), state, {
     proposal_id = proposal_id,
-    current = current,
-    link = core.pr_link_fact(current.comments, proposal_id),
+    current = { comments = snapshot.comments, labels = current.labels or {} },
+    current_issue = current,
+    current_pr = current_pr,
+    link = link,
+    snapshot = snapshot,
     event_ts = issue.updated_at,
-    source_ref = core.issue_source_ref(repo, issue.number),
+    source_ref = pr_phase_source_ref
+      and core.pr_source_ref(repo, link.pr_number)
+      or core.issue_source_ref(repo, issue.number),
+    head_sha = current_pr and current_pr.head_sha or nil,
+    review_proposal_id = state.state == "reviewing" and current_pr ~= nil and core._is_git_sha(current_pr.head_sha)
+      and link ~= nil
+      and core.pr_review_proposal_id(repo, link.pr_number, state.version, current_pr.head_sha)
+      or nil,
+    fresh_current_state = state,
     now_seconds = now(),
   })
   if timeout_action == "handled" then

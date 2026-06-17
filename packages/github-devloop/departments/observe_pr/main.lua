@@ -305,6 +305,7 @@ local function maybe_liveness_timeout(origin, pr_number, current_pr, state, sour
     },
     source_ref = source_ref,
     head_sha = head_sha,
+    fresh_current_state = state,
     review_proposal_id = state and state.state == "reviewing" and core._is_git_sha(head_sha)
       and core.pr_review_proposal_id(origin.repo, pr_number, state.version, head_sha)
       or nil,

@@ -33,14 +33,14 @@ local function recent_iso(seconds_ago)
   return os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (seconds_ago or 60))
 end
 
-local function run_liveness_scan(name)
+local function run_liveness_scan(name, run_opts)
   return t.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = {
       schema = "github-devloop.tick.v1",
     },
     ts = "2026-06-03T01:32:03Z",
-  }, opts(name or "liveness-scan"))
+  }, run_opts or opts(name or "liveness-scan"))
 end
 
 local function run_liveness_scan_at(name, ts, run_opts)
@@ -153,7 +153,7 @@ local function mock_pr_state(comments, state)
   })
 end
 
-local function mock_linked_pr_state(comments, state, exit_code, times)
+local function mock_linked_pr_state(comments, state, exit_code, times, run_opts)
   local rendered = {}
   for _, comment in ipairs(comments or {}) do
     table.insert(rendered, render_comment(comment))
@@ -162,16 +162,18 @@ local function mock_linked_pr_state(comments, state, exit_code, times)
   if exit_code ~= nil and exit_code ~= 0 then
     stderr = "pr view failed"
   end
+  local stdout = string.format(
+    '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-04T01:02:03Z","comments":[%s]}\n',
+    json_string(state or "OPEN"),
+    table.concat(rendered, ",")
+  )
   entity_read_mocks.mock_pr_view_raw_selector(t, { repo = repo, number = 7 }, entity_read_mocks.pr_origin_selector, {
-    stdout = string.format(
-      '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"%s","updatedAt":"2026-06-04T01:02:03Z","comments":[%s]}\n',
-      json_string(state or "OPEN"),
-      table.concat(rendered, ",")
-    ),
+    stdout = stdout,
     stderr = stderr,
     exit_code = exit_code or 0,
   }, times or 1)
   if exit_code == nil or exit_code == 0 then
+    t.run_department("tests/cache_seed_helpers.lua", { queue = "cache_seed", payload = { key = core.entity_view_cache_key(repo, "pr", 7), value = '{"updated_at":"2026-06-04T01:02:03Z","producer":"observe_pr","stdout":"' .. json_string(stdout) .. '"}' } }, run_opts or opts("liveness-scan-linked-pr-cache-seed"))
     entity_read_mocks.mock_pr_read_forms(t, {
       repo = repo,
       number = 7,
@@ -253,15 +255,17 @@ end
 return {
   test_liveness_scan_requeues_pr_open_issue_and_observe_replays_reviewing = function()
     local ready_payload = reviewing()
+    local scan_opts = opts("liveness-scan-pr-open")
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
       { body = core.state_marker(proposal_id, "pr-open", version), author_login = "fkst-test-bot", created_at = recent_iso(60) },
       core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
     })
+    mock_linked_pr_state({}, nil, nil, nil, scan_opts)
     mock_empty_pr_list()
 
-    local scanned = run_liveness_scan("liveness-scan-pr-open")
+    local scanned = run_liveness_scan("liveness-scan-pr-open", scan_opts)
     t.eq(scanned.exit_code, 0)
     local raised = find_raise(scanned.raises, "github-proxy.github_entity_changed")
     t.is_true(raised ~= nil)
@@ -566,19 +570,17 @@ return {
 
   test_liveness_scan_escalates_absent_pr_bound_issue_marker_without_observe = function()
     local timeout_version = version .. "/timeout/pr-open/3"
+    local scan_opts = opts("liveness-scan-absent-pr-open-timeout-escalate")
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
-      {
-        body = core.state_marker(proposal_id, "pr-open", timeout_version),
-        author_login = "fkst-test-bot",
-        created_at = "2026-06-03T00:00:00Z",
-      },
+      { body = core.state_marker(proposal_id, "pr-open", timeout_version), author_login = "fkst-test-bot", created_at = "2026-06-03T00:00:00Z" },
       core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
     })
+    mock_linked_pr_state({}, nil, nil, nil, scan_opts)
     mock_empty_pr_list()
 
-    local result = run_liveness_scan("liveness-scan-absent-pr-open-timeout-escalate")
+    local result = run_liveness_scan("liveness-scan-absent-pr-open-timeout-escalate", scan_opts)
     t.eq(result.exit_code, 0)
     assert_no_observe_reinject(result)
     t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
