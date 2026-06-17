@@ -4,6 +4,20 @@ function M.persistence_class()
   return "saga"
 end
 
+function M.parse_name_only_paths(stdout)
+  local paths = {}
+  local seen = {}
+  for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
+    local path = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if path ~= "" and not seen[path] then
+      table.insert(paths, path)
+      seen[path] = true
+    end
+  end
+  table.sort(paths)
+  return paths
+end
+
 require("core.base").install(M)
 require("core.config").install(M)
 require("std.github_debug_stamp").install(M)

@@ -116,20 +116,6 @@ local function predecessor_identity(entry)
     .. "-" .. tostring(entry.head_sha)
 end
 
-local function parse_name_only_paths(stdout)
-  local paths = {}
-  local seen = {}
-  for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
-    local path = line:gsub("^%s+", ""):gsub("%s+$", "")
-    if path ~= "" and not seen[path] then
-      table.insert(paths, path)
-      seen[path] = true
-    end
-  end
-  table.sort(paths)
-  return paths
-end
-
 local function path_set(paths)
   local set = {}
   for _, path in ipairs(paths or {}) do
@@ -497,7 +483,7 @@ function M.merge_queue_changed_files(repo, entry)
   if result.exit_code ~= 0 then
     return nil, "diff-name-only-failed: " .. tostring(result.stderr)
   end
-  local paths = parse_name_only_paths(result.stdout)
+  local paths = M.parse_name_only_paths(result.stdout)
   return {
     pr_number = entry.pr_number,
     proposal_id = entry.proposal_id,
