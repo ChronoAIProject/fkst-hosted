@@ -62,7 +62,7 @@ local function pr_head_contains_current_base(pr, branches)
   if not core.is_safe_head_sha(head_sha) then
     return false, "unsafe-pr-head"
   end
-  local result = exec_sync({ cmd = core.git_is_ancestor_cmd(base_head, head_sha), timeout = 30 })
+  local result = core.git_is_ancestor(base_head, head_sha, 30)
   if result.exit_code == 0 then
     return true, "current-base-contained"
   end

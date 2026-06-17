@@ -73,7 +73,7 @@ local function mock_ahead_for(integration, count)
 end
 
 local function mock_content_diff(has_diff)
-  t.mock_command("git diff --quiet refs/remotes/origin/'dev' refs/remotes/origin/'integration/dev'", {
+  t.mock_command("git diff --quiet refs/remotes/origin/dev refs/remotes/origin/integration/dev", {
     stdout = "",
     stderr = "",
     exit_code = has_diff and 1 or 0,
@@ -81,7 +81,7 @@ local function mock_content_diff(has_diff)
 end
 
 local function mock_content_diff_for(integration, has_diff)
-  t.mock_command("git diff --quiet refs/remotes/origin/'dev' refs/remotes/origin/'" .. tostring(integration) .. "'", {
+  t.mock_command("git diff --quiet refs/remotes/origin/dev refs/remotes/origin/" .. tostring(integration), {
     stdout = "",
     stderr = "",
     exit_code = has_diff and 1 or 0,

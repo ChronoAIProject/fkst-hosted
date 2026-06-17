@@ -52,6 +52,11 @@ local function mock_head_nudge_worktree(old_head, new_head)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git worktree add --detach", {
     stdout = "",
     stderr = "",
@@ -62,7 +67,7 @@ local function mock_head_nudge_worktree(old_head, new_head)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("--force-with-lease='refs/heads/devloop-owner-repo-42-01HY:" .. tostring(old_head or "def456") .. "'", {
+  t.mock_command("--force-with-lease=refs/heads/devloop-owner-repo-42-01HY:" .. tostring(old_head or "def456"), {
     stdout = "",
     stderr = "",
     exit_code = 0,
@@ -162,7 +167,7 @@ return {
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
     t.eq(count_calls("commit --allow-empty -m 'chore: nudge PR CI'"), 1)
-    t.eq(count_calls("--force-with-lease='refs/heads/devloop-owner-repo-42-01HY:def456'"), 1)
+    t.eq(count_calls("--force-with-lease=refs/heads/devloop-owner-repo-42-01HY:def456"), 1)
     t.eq(count_calls("gh workflow run"), 0)
     t.eq(count_calls("gh pr merge"), 0)
   end,

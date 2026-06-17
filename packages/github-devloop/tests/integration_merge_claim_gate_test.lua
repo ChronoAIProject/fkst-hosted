@@ -178,12 +178,12 @@ local function mock_diff_name_only(pr_number, paths)
 end
 
 local function mock_current_base_head(base_sha)
-  t.mock_command("git fetch 'origin' 'dev'", {
+  t.mock_command("git fetch origin dev", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}", {
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/dev^{commit}'", {
     stdout = tostring(base_sha) .. "\n",
     stderr = "",
     exit_code = 0,
@@ -196,7 +196,7 @@ local function mock_candidate_head_contains_base(event)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+  t.mock_command("git rev-parse --verify 'FETCH_HEAD^{commit}'", {
     stdout = tostring(event.reviewed_head_sha) .. "\n",
     stderr = "",
     exit_code = 0,

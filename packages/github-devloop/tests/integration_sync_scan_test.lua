@@ -43,6 +43,7 @@ end
 
 local function mock_worktree_merge(exit_code, unmerged_stdout)
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-rt", stderr = "", exit_code = 0 })
+  t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("git worktree add --detach", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("merge --no-ff --no-commit", { stdout = "", stderr = exit_code == 0 and "" or "conflict", exit_code = exit_code })
   if exit_code ~= 0 then
@@ -53,13 +54,14 @@ end
 
 local function mock_worktree_fast_forward()
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-rt", stderr = "", exit_code = 0 })
+  t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("git worktree add --detach", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("merge --ff-only", { stdout = "Updating bbbb2222..aaaa1111\nFast-forward\n", stderr = "", exit_code = 0 })
   t.mock_command("git worktree remove --force", { stdout = "", stderr = "", exit_code = 0 })
 end
 
 local function mock_tree_compare(equal)
-  t.mock_command("git diff --quiet 'aaaa1111' 'bbbb2222'", {
+  t.mock_command("git diff --quiet aaaa1111 bbbb2222", {
     stdout = "",
     stderr = "",
     exit_code = equal and 0 or 1,
@@ -158,7 +160,7 @@ return {
     t.mock_command("git fetch 'origin' 'integration/dev'", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("refs/remotes/'origin'/'integration/dev'^{commit}", { stdout = "bbbb2222\n", stderr = "", exit_code = 0 })
     mock_tree_compare(true)
-    t.mock_command("git push origin 'aaaa1111:refs/heads/integration/dev' --force-with-lease='refs/heads/integration/dev:bbbb2222'", {
+    t.mock_command("git push origin aaaa1111:refs/heads/integration/dev --force-with-lease=refs/heads/integration/dev:bbbb2222", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -170,7 +172,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("merge --no-ff --no-commit"), 0)
-    t.eq(count_calls("--force-with-lease='refs/heads/integration/dev:bbbb2222'"), 1)
+    t.eq(count_calls("--force-with-lease=refs/heads/integration/dev:bbbb2222"), 1)
     t.eq(count_calls("refs/remotes/'origin'/'integration/dev'^{commit}"), 3)
   end,
 
@@ -206,7 +208,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("--force-with-lease"), 0)
-    t.eq(count_calls("git diff --quiet 'aaaa1111' 'bbbb2222'"), 1)
+    t.eq(count_calls("git diff --quiet aaaa1111 bbbb2222"), 1)
   end,
 
   test_sync_scan_dry_run_clean_merge_never_pushes = function()

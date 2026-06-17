@@ -94,7 +94,7 @@ local function remote_branch_fact(branch, base_branch, source_fact)
     error("github-devloop: unsafe implementing remote branch head")
   end
   if source_fact ~= nil and source_fact.head_sha ~= nil and head_sha ~= source_fact.head_sha then
-    local ancestry = exec_sync({ cmd = core.git_is_ancestor_cmd(source_fact.head_sha, head_sha), timeout = 30 })
+    local ancestry = core.git_is_ancestor(source_fact.head_sha, head_sha, 30)
     if ancestry.exit_code ~= 0 then
       return nil
     end
@@ -215,7 +215,7 @@ end
 local function merge_integration_for_implementation(worktree, integration_branch, base_head)
   local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
   if merge_result.exit_code ~= 0 then
-    local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+    local unmerged_result = core.git_unmerged_paths(worktree, 30)
     if unmerged_result.exit_code ~= 0 then
       error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
     end
@@ -269,7 +269,7 @@ local function remove_stale_worktree(path)
     end
     return
   end
-  local remove_result = exec_sync({ cmd = core.git_worktree_remove_cmd(path), timeout = 60 })
+  local remove_result = core.git_worktree_remove(path, 60)
   if remove_result.exit_code ~= 0 then
     error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
   end

@@ -125,6 +125,7 @@ end
 
 local function mock_worktree_merge(exit_code, unmerged_stdout)
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-rt", stderr = "", exit_code = 0 })
+  t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("git worktree add --detach", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("merge --no-ff --no-commit", { stdout = "", stderr = exit_code == 0 and "" or "conflict", exit_code = exit_code })
   if exit_code ~= 0 then
@@ -151,7 +152,7 @@ return {
     t.mock_command("git fetch 'origin' '" .. branch .. "'", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("refs/remotes/'origin'/'" .. branch .. "'^{commit}", { stdout = branch_sha .. "\n", stderr = "", exit_code = 0 })
     t.mock_command("rev-parse HEAD", { stdout = merge_sha .. "\n", stderr = "", exit_code = 0 })
-    t.mock_command("--force-with-lease='refs/heads/" .. branch .. ":" .. branch_sha .. "'", { stdout = "", stderr = "", exit_code = 0 })
+    t.mock_command("--force-with-lease=refs/heads/" .. branch .. ":" .. branch_sha, { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("git fetch 'origin' '" .. branch .. "'", { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command("refs/remotes/'origin'/'" .. branch .. "'^{commit}", { stdout = merge_sha .. "\n", stderr = "", exit_code = 0 })
 
@@ -159,7 +160,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(h.count_calls("merge --no-ff --no-commit"), 1)
-    t.eq(h.count_calls("--force-with-lease='refs/heads/" .. branch .. ":" .. branch_sha .. "'"), 1)
+    t.eq(h.count_calls("--force-with-lease=refs/heads/" .. branch .. ":" .. branch_sha), 1)
   end,
 
   test_pr_freshness_skips_arbitrating_fixing_state = function()

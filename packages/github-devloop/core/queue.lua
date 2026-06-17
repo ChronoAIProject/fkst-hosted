@@ -367,7 +367,7 @@ function M.merge_queue_predecessor_set_matches_current_base(recorded_set, curren
     if head_sha == nil then
       return false, "predecessor-set-mismatch"
     end
-    local result = exec_sync({ cmd = M.git_is_ancestor_cmd(head_sha, base_head), timeout = 30 })
+    local result = M.git_is_ancestor(head_sha, base_head, 30)
     if result.exit_code ~= 0 then
       return false, "predecessor-not-landed"
     end

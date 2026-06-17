@@ -1,15 +1,5 @@
 packages/github-devloop/core/base.lua:
   - gh
-packages/github-devloop/core/branches.lua:
-  - git command
-  - git commit
-  - git diff
-  - git grep
-  - git ls-files
-  - git merge
-  - git merge-base
-  - git push
-  - git worktree
 packages/github-devloop/core/claims.lua:
   - gh issue
 packages/github-devloop/core/commands.lua:

@@ -22,12 +22,12 @@ local function mock_base_fetch(base_head)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git fetch 'origin' 'dev'", {
+  t.mock_command("git fetch origin dev", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/dev^{commit}'", {
     stdout = tostring(base_head or "ba5e1234") .. "\n",
     stderr = "",
     exit_code = 0,
@@ -36,6 +36,11 @@ end
 
 local function mock_resolution_delta(exit_code)
   t.mock_command("git merge-tree --write-tree", {
+    stdout = "1234abcd\n",
+    stderr = exit_code == 0 and "" or "delta is not empty",
+    exit_code = 0,
+  })
+  t.mock_command("git diff --quiet 1234abcd", {
     stdout = "",
     stderr = exit_code == 0 and "" or "delta is not empty",
     exit_code = exit_code,

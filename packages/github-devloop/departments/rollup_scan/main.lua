@@ -69,7 +69,7 @@ local function ahead_count(upstream, integration)
 end
 
 local function has_content_diff(upstream, integration)
-  local result = exec_sync({ cmd = core.git_remote_trees_equal_quiet_cmd(upstream, integration), timeout = 30 })
+  local result = core.git_remote_trees_equal_quiet(upstream, integration, 30)
   if result.exit_code == 0 then
     return false
   end

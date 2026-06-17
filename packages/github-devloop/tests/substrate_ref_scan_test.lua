@@ -117,12 +117,12 @@ local function mock_existing_pr()
 end
 
 local function mock_base_head()
-  t.mock_command("git fetch 'origin' 'dev'", {
+  t.mock_command("git fetch origin dev", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}", {
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/dev^{commit}'", {
     stdout = base_sha .. "\n",
     stderr = "",
     exit_code = 0,
@@ -218,7 +218,7 @@ local function mock_checked_out_bump_branch()
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git worktree remove --force '/tmp/fkst-packages-test/github-devloop/stale-substrate'", {
+  t.mock_command("git worktree remove --force /tmp/fkst-packages-test/github-devloop/stale-substrate", {
     stdout = "",
     stderr = "",
     exit_code = 0,
@@ -257,13 +257,13 @@ local function mock_worktree_commands(push_with_lease, expected_old_sha)
     exit_code = 0,
   })
   if push_with_lease then
-    t.mock_command("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. tostring(expected_old_sha or old_branch_sha) .. "'", {
+    t.mock_command("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. tostring(expected_old_sha or old_branch_sha), {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
   else
-    t.mock_command(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'", {
+    t.mock_command(" push origin HEAD:refs/heads/chore/substrate-ref-bump", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -362,7 +362,7 @@ local function mock_substrate_pin_ancestor(pin, exit_code)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git merge-base --is-ancestor '" .. tostring(pin or target_sha) .. "' '" .. target_sha .. "'", {
+  t.mock_command("git merge-base --is-ancestor " .. tostring(pin or target_sha) .. " " .. target_sha, {
     stdout = "",
     stderr = "",
     exit_code = exit_code or 0,
@@ -483,7 +483,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr create"), 1)
-    t.eq(count_calls(" push origin HEAD:refs/heads/'chore/substrate-ref-bump'"), 1)
+    t.eq(count_calls(" push origin HEAD:refs/heads/chore/substrate-ref-bump"), 1)
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 1)
     local audit_raise = result.raises[1]
     t.eq(audit_raise.queue, "github-proxy.github_pr_comment_request")
@@ -516,7 +516,7 @@ return {
     t.eq(count_calls("git worktree add"), 0)
     t.eq(count_calls("git worktree remove --force"), 0)
     t.eq(count_calls("gh pr create"), 0)
-    t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. old_branch_sha .. "'"), 0)
+    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. old_branch_sha), 0)
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 1)
     t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
     t.is_true(result.raises[1].payload.body:find("substrate-ref-merge:v1", 1, true) ~= nil)
@@ -624,7 +624,7 @@ return {
     local result = run_scan(opts("substrate-pin-mismatch", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. pr_head_sha .. "'"), 1)
+    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. pr_head_sha), 1)
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 0)
     t.eq(count_raises(result, "github-proxy.github_pr_comment_request"), 0)
   end,
@@ -684,8 +684,8 @@ return {
     local result = run_scan(opts("substrate-stale-worktree", { FKST_GITHUB_WRITE = "1" }))
 
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("git worktree remove --force '/tmp/fkst-packages-test/github-devloop/stale-substrate'"), 1)
-    t.eq(count_calls("--force-with-lease='refs/heads/chore/substrate-ref-bump:" .. pr_head_sha .. "'"), 1)
+    t.eq(count_calls("git worktree remove --force /tmp/fkst-packages-test/github-devloop/stale-substrate"), 1)
+    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. pr_head_sha), 1)
     t.eq(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), 0)
     t.eq(count_raises(result, "github-proxy.github_issue_create_request"), 0)
     t.eq(count_raises(result, "github-proxy.github_issue_label_request"), 0)

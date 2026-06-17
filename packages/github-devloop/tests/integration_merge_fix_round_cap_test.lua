@@ -13,13 +13,13 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 
 local function mock_base_head_for_stale_mergeability()
-  t.mock_command("git fetch 'origin' 'dev'", { stdout = "", stderr = "", exit_code = 0 })
-  t.mock_command("git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}", {
+  t.mock_command("git fetch origin dev", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/dev^{commit}'", {
     stdout = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git merge-base --is-ancestor 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 'def456'", {
+  t.mock_command("git merge-base --is-ancestor aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa def456", {
     stdout = "",
     stderr = "",
     exit_code = 1,

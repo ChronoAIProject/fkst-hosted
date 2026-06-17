@@ -67,7 +67,7 @@ local function head_contains_base(base_head, entry)
   if fetched_sha ~= head_sha then
     return false, "candidate-head-changed"
   end
-  local result = exec_sync({ cmd = M.git_is_ancestor_cmd(base_head, head_sha), timeout = 30 })
+  local result = M.git_is_ancestor(base_head, head_sha, 30)
   if result.exit_code == 0 then
     return true, "current-base-contained"
   end

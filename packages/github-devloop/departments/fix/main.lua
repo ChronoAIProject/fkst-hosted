@@ -39,7 +39,7 @@ local function branch_worktree(repo, issue_number, version, branch)
         error("github-devloop: git worktree prune failed: " .. tostring(prune_result.stderr))
       end
     else
-      local remove_result = exec_sync({ cmd = core.git_worktree_remove_cmd(existing), timeout = 60 })
+      local remove_result = core.git_worktree_remove(existing, 60)
       if remove_result.exit_code ~= 0 then
         error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
       end
@@ -107,7 +107,7 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   }
   local merge_result = exec_sync({ cmd = core.git_worktree_merge_no_edit_cmd(worktree, base_head), timeout = 120 })
   if merge_result.exit_code ~= 0 then
-    local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+    local unmerged_result = core.git_unmerged_paths(worktree, 30)
     if unmerged_result.exit_code ~= 0 then
       error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
     end
@@ -149,7 +149,7 @@ local function merge_sha_for_fix(worktree, sha, context, log_values)
   if merge_result.exit_code == 0 then
     return context
   end
-  local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+  local unmerged_result = core.git_unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
     error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
@@ -220,7 +220,7 @@ local function merge_speculative_predecessors_for_fix(worktree, repo, integratio
 end
 
 local function assert_no_unmerged_paths(worktree)
-  local unmerged_result = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+  local unmerged_result = core.git_unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
     error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
@@ -230,7 +230,7 @@ local function assert_no_unmerged_paths(worktree)
 end
 
 local function assert_no_conflict_markers(worktree)
-  local markers_result = exec_sync({ cmd = core.git_conflict_markers_cmd(worktree), timeout = 30 })
+  local markers_result = core.git_conflict_markers(worktree, 30)
   if markers_result.exit_code == 1 then
     return
   end

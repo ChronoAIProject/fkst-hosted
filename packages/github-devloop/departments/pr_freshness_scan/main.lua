@@ -27,6 +27,13 @@ local function run_git(cmd, timeout, error_class)
   return result
 end
 
+local function require_git_ok(result, error_class)
+  if result.exit_code ~= 0 then
+    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
+  end
+  return result
+end
+
 local function run_gh(cmd, timeout, error_class)
   local result = core.gh_exec({ cmd = cmd, timeout = timeout or 30 })
   if result.exit_code ~= 0 then
@@ -40,7 +47,7 @@ local function trim_stdout(result)
 end
 
 local function fetch_branch(branch)
-  run_git(core.git_fetch_branch_cmd("origin", branch), 60, "git PR freshness fetch")
+  run_git(core.git_fetch_branch_cmd("origin", branch), 60, "PR freshness fetch")
 end
 
 local function fetch_branches(repo, branches)
@@ -52,7 +59,7 @@ local function fetch_branches(repo, branches)
 end
 
 local function remote_head(branch)
-  local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "git PR freshness remote head")
+  local result = run_git(core.git_remote_branch_head_cmd("origin", branch), 30, "PR freshness remote head")
   local head = trim_stdout(result)
   if not core.is_safe_head_sha(head) then
     error("github-devloop: unsafe PR freshness branch head")
@@ -61,14 +68,14 @@ local function remote_head(branch)
 end
 
 local function is_ancestor(ancestor_sha, descendant_sha)
-  local result = exec_sync({ cmd = core.git_is_ancestor_cmd(ancestor_sha, descendant_sha), timeout = 30 })
+  local result = core.git_is_ancestor(ancestor_sha, descendant_sha, 30)
   if result.exit_code == 0 then
     return true
   end
   if result.exit_code == 1 then
     return false
   end
-  error("github-devloop: git PR freshness ancestor check failed: " .. tostring(result.stderr))
+  error("github-devloop: PR freshness ancestor check failed: " .. tostring(result.stderr))
 end
 
 local function runtime_root()
@@ -80,7 +87,7 @@ local function cleanup_worktree(worktree)
   if worktree == nil then
     return
   end
-  local result = exec_sync({ cmd = core.git_worktree_remove_cmd(worktree), timeout = 60 })
+  local result = core.git_worktree_remove(worktree, 60)
   if result.exit_code ~= 0 then
     core.log_line("warn", "pr_freshness_scan", "pr-freshness", "CLEANUP", {
       "worktree=" .. tostring(worktree),
@@ -91,10 +98,9 @@ end
 
 local function with_temp_worktree(runtime, repo, branch, integration, branch_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, integration, branch, branch_sha)
-  local add_result = exec_sync({ cmd = core.git_worktree_add_detached_cmd(worktree, branch_sha), timeout = 60 })
-  if add_result.exit_code ~= 0 then
-    error("github-devloop: git PR freshness worktree add failed: " .. tostring(add_result.stderr))
-  end
+  local plan = core.git_worktree_add_detached_plan(worktree, branch_sha)
+  run_git(core.mkdir_p_cmd(plan.parent_dir), 30, "PR freshness worktree parent directory setup")
+  require_git_ok(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
 
   local ok, result = pcall(fn, worktree)
   cleanup_worktree(worktree)
@@ -203,7 +209,7 @@ end
 local function write_refresh_commit(worktree, runtime, repo, branch, integration, branch_sha, integration_sha)
   local message_file = core.pr_freshness_message_file(runtime, repo, branch, integration, branch_sha, integration_sha)
   file.write(message_file, core.pr_freshness_commit_message(repo, branch, integration, branch_sha, integration_sha))
-  run_git(core.git_commit_message_file_cmd(worktree, message_file), 60, "git PR freshness commit")
+  require_git_ok(core.git_commit_message_file(worktree, message_file, 60), "PR freshness commit")
 end
 
 local function push_if_real(repo, branch, branch_sha, worktree)
@@ -228,11 +234,11 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     }, "freshness", "push", "skip-foreign(head)", "PR branch head changed before push")
     return
   end
-  local merge_head = trim_stdout(run_git(core.git_head_sha_cmd(worktree), 30, "git PR freshness head"))
+  local merge_head = trim_stdout(run_git(core.git_head_sha_cmd(worktree), 30, "PR freshness head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe PR freshness merge head")
   end
-  run_git(core.git_push_worktree_branch_update_with_lease_cmd(worktree, branch, branch_sha), 120, "git PR freshness push")
+  require_git_ok(core.git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
   fetch_branches(repo, { branch })
   local pushed_head = remote_head(branch)
   if pushed_head ~= merge_head then
@@ -288,21 +294,21 @@ local function process_pr(repo, branches, listed_pr)
 
     local runtime = runtime_root()
     with_temp_worktree(runtime, repo, pr.head_ref_name, branches.integration, branch_sha, function(worktree)
-      local merge_result = exec_sync({ cmd = core.git_merge_no_ff_cmd(worktree, integration_sha), timeout = 120 })
+      local merge_result = core.git_merge_no_ff(worktree, integration_sha, 120)
       if merge_result.exit_code == 0 then
         write_refresh_commit(worktree, runtime, repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha)
         push_if_real(repo, pr.head_ref_name, branch_sha, worktree)
         return
       end
-      local unmerged = exec_sync({ cmd = core.git_unmerged_paths_cmd(worktree), timeout = 30 })
+      local unmerged = core.git_unmerged_paths(worktree, 30)
       if unmerged.exit_code ~= 0 then
-        error("github-devloop: git PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
+        error("github-devloop: PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
       end
       if tostring(unmerged.stdout or "") ~= "" then
         raise_conflict(repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha, listed_pr.number)
         return
       end
-      error("github-devloop: git PR freshness merge failed without conflicts: " .. tostring(merge_result.stderr))
+      error("github-devloop: PR freshness merge failed without conflicts: " .. tostring(merge_result.stderr))
     end)
   end)
 end

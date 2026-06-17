@@ -56,6 +56,7 @@ end
 local function mock_conflicting_worktree()
   t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 1 })
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-rt", stderr = "", exit_code = 0 })
+  t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("git worktree add --detach", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("merge --no-ff --no-commit", { stdout = "", stderr = "conflict", exit_code = 1 })
   t.mock_command("ls-files -u", { stdout = "100644 abc 1\tcore.lua\n", stderr = "", exit_code = 0 })

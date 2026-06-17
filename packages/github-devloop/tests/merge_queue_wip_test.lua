@@ -221,12 +221,12 @@ local function mock_diff_name_only(pr_number, paths)
 end
 
 local function mock_current_base_head(base_sha)
-  t.mock_command("git fetch 'origin' 'dev'", {
+  t.mock_command("git fetch origin dev", {
     stdout = "",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git rev-parse --verify refs/remotes/'origin'/'dev'^{commit}", {
+  t.mock_command("git rev-parse --verify 'refs/remotes/origin/dev^{commit}'", {
     stdout = tostring(base_sha) .. "\n",
     stderr = "",
     exit_code = 0,
@@ -606,7 +606,7 @@ return {
     mock_pr_merge(comments, branch_for_pr(current.pr_number), current.reviewed_head_sha)
     mock_queue_list({})
     mock_current_base_head("dddddddddddddddddddddddddddddddddddddddd")
-    t.mock_command("git merge-base --is-ancestor '" .. predecessor.reviewed_head_sha .. "' 'dddddddddddddddddddddddddddddddddddddddd'", {
+    t.mock_command("git merge-base --is-ancestor " .. predecessor.reviewed_head_sha .. " dddddddddddddddddddddddddddddddddddddddd", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -616,7 +616,7 @@ return {
     mock_pr_merge(comments, branch_for_pr(current.pr_number), current.reviewed_head_sha)
     mock_pr_merge(comments, branch_for_pr(current.pr_number), current.reviewed_head_sha)
     mock_current_base_head("dddddddddddddddddddddddddddddddddddddddd")
-    t.mock_command("git merge-base --is-ancestor '" .. predecessor.reviewed_head_sha .. "' 'dddddddddddddddddddddddddddddddddddddddd'", {
+    t.mock_command("git merge-base --is-ancestor " .. predecessor.reviewed_head_sha .. " dddddddddddddddddddddddddddddddddddddddd", {
       stdout = "",
       stderr = "",
       exit_code = 0,
@@ -654,7 +654,7 @@ return {
     mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(current))
     mock_pr_merge({ origin_marker }, "devloop-owner-repo-42-01HY", current.reviewed_head_sha, "OPEN", "owner/repo", false, "MERGEABLE", "DIRTY")
     mock_current_base_head(base_head)
-    t.mock_command("git merge-base --is-ancestor '" .. base_head .. "' '" .. current.reviewed_head_sha .. "'", {
+    t.mock_command("git merge-base --is-ancestor " .. base_head .. " " .. current.reviewed_head_sha, {
       stdout = "",
       stderr = "",
       exit_code = 0,

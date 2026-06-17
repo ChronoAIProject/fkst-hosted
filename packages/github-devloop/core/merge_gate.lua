@@ -373,7 +373,12 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   if remove_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal worktree cleanup failed: " .. tostring(remove_result.stderr))
   end
-  local add_result = M.gh_exec({ cmd = M.git_worktree_add_detached_cmd(worktree, head_sha), timeout = 60 })
+  local plan = M.git_worktree_add_detached_plan(worktree, head_sha)
+  local mkdir_result = exec_sync({ cmd = M.mkdir_p_cmd(plan.parent_dir), timeout = 30 })
+  if mkdir_result.exit_code ~= 0 then
+    error("github-devloop: merge CI self-heal worktree parent setup failed: " .. tostring(mkdir_result.stderr))
+  end
+  local add_result = M.git_worktree_add_detached(plan.worktree, plan.sha, 60)
   if add_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal worktree add failed: " .. tostring(add_result.stderr))
   end
@@ -384,10 +389,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   if commit_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal empty commit failed: " .. tostring(commit_result.stderr))
   end
-  local push_result = M.gh_exec({
-    cmd = M.git_push_worktree_branch_update_with_lease_cmd(worktree, head_ref, head_sha),
-    timeout = 120,
-  })
+  local push_result = M.git_push_worktree_branch_update_with_lease(worktree, head_ref, head_sha, 120)
   if push_result.exit_code ~= 0 then
     error("github-devloop: merge CI self-heal push failed: " .. tostring(push_result.stderr))
   end

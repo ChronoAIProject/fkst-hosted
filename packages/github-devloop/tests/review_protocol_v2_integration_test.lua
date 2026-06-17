@@ -360,12 +360,12 @@ return {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
       core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "missing retry guard"),
     })
-    t.mock_command("git fetch 'origin' 'devloop-owner-repo-42-01HY'", {
+    t.mock_command("git fetch origin devloop-owner-repo-42-01HY", {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+    t.mock_command("git rev-parse --verify 'FETCH_HEAD^{commit}'", {
       stdout = "cafebabe\n",
       stderr = "",
       exit_code = 0,

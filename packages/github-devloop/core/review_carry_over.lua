@@ -24,7 +24,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   if not approval_ok then
     return nil, "missing-review-result-approve"
   end
-  local ancestry = exec_sync({ cmd = M.git_is_ancestor_cmd(fact.head_sha, current_head_sha), timeout = 30 })
+  local ancestry = M.git_is_ancestor(fact.head_sha, current_head_sha, 30)
   if ancestry.exit_code ~= 0 then
     return nil, "approved-head-not-ancestor"
   end

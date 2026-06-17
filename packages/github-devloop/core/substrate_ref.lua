@@ -121,10 +121,7 @@ local function substrate_pin_is_dev_ancestor(pin, target_sha)
   if fetched_head:lower() ~= tostring(target_sha):lower() then
     return false, "substrate-dev-head-mismatch"
   end
-  local ancestry = exec_sync({
-    cmd = M.git_is_ancestor_cmd(pin, fetched_head),
-    timeout = 30,
-  })
+  local ancestry = M.git_is_ancestor(pin, fetched_head, 30)
   if ancestry.exit_code == 0 then
     return true, "substrate-pin-valid"
   end
@@ -238,7 +235,10 @@ local function remove_existing_branch_worktree(branch)
   local list = run_cmd(M.git_worktree_list_cmd(), 30, "git substrate-ref worktree list")
   local existing = M.find_worktree_for_branch(list.stdout, branch)
   if existing ~= nil then
-    run_cmd(M.git_worktree_remove_cmd(existing), 60, "git stale substrate-ref branch worktree remove")
+    local remove = M.git_worktree_remove(existing, 60)
+    if remove.exit_code ~= 0 then
+      error("github-devloop: git stale substrate-ref branch worktree remove failed: " .. tostring(remove.stderr))
+    end
   end
 end
 
@@ -280,17 +280,19 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
     run_cmd(M.git_add_all_cmd(worktree), 30, "git substrate-ref add")
     run_cmd(M.git_commit_cmd(worktree, "chore: bump fkst-substrate pin"), 60, "git substrate-ref commit")
     if old_branch_head == nil then
-      run_cmd(M.git_push_worktree_branch_update_cmd(worktree, bump_branch), 120, "git substrate-ref push")
+      local push = M.git_push_worktree_branch_update(worktree, bump_branch, 120)
+      if push.exit_code ~= 0 then
+        error("github-devloop: git substrate-ref push failed: " .. tostring(push.stderr))
+      end
     else
-      run_cmd(
-        M.git_push_worktree_branch_update_with_lease_cmd(worktree, bump_branch, old_branch_head),
-        120,
-        "git substrate-ref push"
-      )
+      local push = M.git_push_worktree_branch_update_with_lease(worktree, bump_branch, old_branch_head, 120)
+      if push.exit_code ~= 0 then
+        error("github-devloop: git substrate-ref push failed: " .. tostring(push.stderr))
+      end
     end
   end)
   if added then
-    local remove = exec_sync({ cmd = M.git_worktree_remove_cmd(worktree), timeout = 60 })
+    local remove = M.git_worktree_remove(worktree, 60)
     if ok and remove.exit_code ~= 0 then
       error("github-devloop: git substrate-ref worktree remove failed: " .. tostring(remove.stderr))
     end

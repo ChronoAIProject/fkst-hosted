@@ -333,12 +333,12 @@ local function advanced_fixing_fixture(extra)
   mock_pr_origin(comments, branch, current_head)
   mock_issue_result_view({ "fkst-dev:fixing" }, issue_comments)
   if branch_head ~= false then
-    t.mock_command("git fetch 'origin' '" .. branch .. "'", {
+    t.mock_command("git fetch origin " .. branch, {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+    t.mock_command("git rev-parse --verify 'FETCH_HEAD^{commit}'", {
       stdout = tostring(branch_head) .. "\n",
       stderr = "",
       exit_code = 0,
@@ -401,12 +401,12 @@ return {
       core.pr_origin_marker(event.proposal_id, "42", branch, impl_version, "dev"),
       core.state_marker(event.proposal_id, "fixing", event.version),
     }, branch, "feedface", nil, nil, 2)
-    t.mock_command("git fetch 'origin' '" .. branch .. "'", {
+    t.mock_command("git fetch origin " .. branch, {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("git rev-parse --verify FETCH_HEAD^{commit}", {
+    t.mock_command("git rev-parse --verify 'FETCH_HEAD^{commit}'", {
       stdout = "feedface\n",
       stderr = "",
       exit_code = 0,
