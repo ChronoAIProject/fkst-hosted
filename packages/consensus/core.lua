@@ -1,4 +1,6 @@
 local M = {}
+local codex = require("std.codex")
+local env = require("std.env")
 local error_facts = require("std.error_facts")
 local strings = require("std.strings")
 
@@ -35,20 +37,8 @@ local function read_env_command(name)
   end
   return 'printf %s "$' .. name .. '"'
 end
-function M.read_env_command(name)
-  return read_env_command(name)
-end
-function M.read_env(name, exec)
-  local run = exec or exec_sync
-  if type(run) ~= "function" then
-    return nil
-  end
-  local ok, out = pcall(run, read_env_command(name))
-  if not ok or type(out) ~= "table" or out.exit_code ~= 0 or out.stdout == "" then
-    return nil
-  end
-  return out.stdout
-end
+M.read_env_command = read_env_command
+M.read_env = env.read_env(read_env_command)
 function M.error_fingerprint(error_class, queue, dept, message)
   return error_facts.error_fingerprint(error_class, queue, dept, message)
 end
@@ -422,13 +412,7 @@ function M.judgment_scratch_worktree(runtime_root, kind, identity)
   return runtime_root_path(runtime_root) .. "/judgment-worktrees/consensus-" .. slug .. "-" .. suffix
 end
 
-function M.judgment_codex_opts(prompt, worktree)
-  return {
-    prompt = prompt,
-    worktree = worktree,
-    sandbox = "read-only",
-  }
-end
+M.judgment_codex_opts = codex.judgment_codex_opts
 
 function M.mkdir_p_cmd(path)
   local value = tostring(path or "")

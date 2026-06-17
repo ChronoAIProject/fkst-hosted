@@ -2,6 +2,7 @@ local S = {}
 
 function S.install(M, deps)
 local shared = deps or M
+local strings = require("std.strings")
 local max_runtime_id_len = 180
 local stale_comment_target_error_class = "stale-comment-target"
 
@@ -21,13 +22,6 @@ local function comment_runtime_identity(repo, kind, number)
   return id
 end
 
-local function comment_body(comment)
-  if type(comment) == "table" then
-    return tostring(comment.body or "")
-  end
-  return tostring(comment or "")
-end
-
 local function comment_author_login(comment)
   local raw = nil
   if type(comment) == "table" then
@@ -43,7 +37,7 @@ local function comment_author_login(comment)
 end
 
 function M._comment_body(comment)
-  return comment_body(comment)
+  return strings.comment_body(comment)
 end
 
 function M._comment_author_login(comment)
@@ -85,7 +79,7 @@ local function append_rest_comments(comments, value)
     if id ~= nil then
       table.insert(comments, {
         id = id,
-        body = comment_body(value),
+        body = strings.comment_body(value),
         author_login = comment_author_login(value),
       })
     end
@@ -117,7 +111,7 @@ function M.parse_issue_comments(gh_json_stdout)
   for _, comment in ipairs(decoded.comments or {}) do
     table.insert(comments, {
       id = comment_id(comment),
-      body = comment_body(comment),
+      body = strings.comment_body(comment),
       author_login = comment_author_login(comment),
     })
   end
@@ -130,7 +124,7 @@ function M.has_trusted_marker(comments, dedup_key, bot_login)
   end
   local marker = M.comment_marker(dedup_key)
   for _, comment in ipairs(comments) do
-    if comment_author_login(comment) == bot_login and comment_body(comment):find(marker, 1, true) ~= nil then
+    if comment_author_login(comment) == bot_login and strings.comment_body(comment):find(marker, 1, true) ~= nil then
       return true
     end
   end
@@ -142,7 +136,7 @@ function M.has_trusted_comment_fragment(comments, fragment, bot_login)
     return false
   end
   for _, comment in ipairs(comments) do
-    if comment_author_login(comment) == bot_login and comment_body(comment):find(fragment, 1, true) ~= nil then
+    if comment_author_login(comment) == bot_login and strings.comment_body(comment):find(fragment, 1, true) ~= nil then
       return true
     end
   end
@@ -154,7 +148,7 @@ function M.trusted_comment_with_fragment(comments, fragment, bot_login)
     return nil
   end
   for _, comment in ipairs(comments) do
-    if comment_author_login(comment) == bot_login and comment_body(comment):find(fragment, 1, true) ~= nil then
+    if comment_author_login(comment) == bot_login and strings.comment_body(comment):find(fragment, 1, true) ~= nil then
       return comment
     end
   end
@@ -317,7 +311,7 @@ local function parse_written_comment(stdout)
   end
   return {
     id = id,
-    body = comment_body(decoded),
+    body = strings.comment_body(decoded),
     author_login = comment_author_login(decoded),
   }
 end

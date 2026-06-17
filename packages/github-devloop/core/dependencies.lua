@@ -1,5 +1,6 @@
 local M = {}
 local root_ref = nil
+local strings = require("std.strings")
 
 local max_dependency_depth = 32
 
@@ -7,17 +8,9 @@ local function root()
   return root_ref or M
 end
 
-local function split_repo(repo)
-  local owner, name = tostring(repo or ""):match("^([^/]+)/([^/]+)$")
-  if owner == nil or owner == "" or name == nil or name == "" then
-    return nil, nil
-  end
-  return owner, name
-end
-
 local function managed_sibling_repo(current_repo, blocker_repo, managed_repos)
-  local current_owner = split_repo(current_repo)
-  local blocker_owner = split_repo(blocker_repo)
+  local current_owner = strings.split_repo(current_repo)
+  local blocker_owner = strings.split_repo(blocker_repo)
   if current_owner == nil or blocker_owner == nil or current_owner ~= blocker_owner then
     return false
   end
@@ -424,7 +417,7 @@ end
 
 function M.gh_blocked_by_cmd(repo, issue_number)
   local core = root()
-  local owner, name = split_repo(repo)
+  local owner, name = strings.split_repo(repo)
   if owner == nil or not core._is_positive_pr_number(issue_number) then
     error("github-devloop: invalid dependency query target")
   end
@@ -438,7 +431,7 @@ end
 
 function M.dependency_gate(repo, issue_number, context)
   local core = root()
-  if split_repo(repo) == nil or not core._is_positive_pr_number(issue_number) then
+  if strings.split_repo(repo) == nil or not core._is_positive_pr_number(issue_number) then
     return gate("unresolvable", "invalid-target", {})
   end
   local gate_context = context

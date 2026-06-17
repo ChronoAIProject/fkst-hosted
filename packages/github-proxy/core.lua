@@ -1,4 +1,5 @@
 local M = {}
+local env = require("std.env")
 local strings = require("std.strings")
 
 require("core.error_facts").install(M)
@@ -103,27 +104,18 @@ local function is_git_sha(value)
   return type(value) == "string" and value:find("^[0-9A-Fa-f]+$") ~= nil and #value >= 6 and #value <= 64
 end
 
-function M.read_env_command(name)
+local function read_env_command(name)
   if not allowed_env[name] then
     error("env name is not allowed: " .. tostring(name))
   end
   return 'printf %s "$' .. name .. '"'
 end
 
-function M.read_env(name, exec)
-  local run = exec or exec_sync
-  if type(run) ~= "function" then
-    error("read_env requires exec_sync")
-  end
-  local out = run(M.read_env_command(name))
-  if out.exit_code ~= 0 then
-    return nil
-  end
-  if out.stdout == "" then
-    return nil
-  end
-  return out.stdout
-end
+M.read_env_command = read_env_command
+M.read_env = env.read_env(read_env_command, {
+  missing_exec_error = "read_env requires exec_sync",
+  propagate_exec_errors = true,
+})
 
 function M.devloop_replay_budget(exec)
   local ok, value = pcall(M.read_env, "FKST_DEVLOOP_REPLAY_BUDGET", exec)

@@ -1,6 +1,7 @@
 local S = {}
 
 function S.install(M)
+local codex = require("std.codex")
 local error_facts = require("std.error_facts")
 local source_refs = require("std.source_ref")
 local strings = require("std.strings")
@@ -727,13 +728,7 @@ function M.judgment_worktree(role, identity)
   return worktree
 end
 
-function M.judgment_codex_opts(prompt, worktree)
-  return {
-    prompt = prompt,
-    worktree = worktree,
-    sandbox = "read-only",
-  }
-end
+M.judgment_codex_opts = codex.judgment_codex_opts
 
 function M.max_body_len()
   return max_body_len

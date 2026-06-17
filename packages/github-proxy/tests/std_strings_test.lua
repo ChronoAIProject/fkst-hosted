@@ -10,6 +10,33 @@ return {
     t.eq(strings.trim(nil), "")
   end,
 
+  test_split_repo_accepts_single_owner_name_separator = function()
+    local owner, name = strings.split_repo("owner/repo")
+    t.eq(owner, "owner")
+    t.eq(name, "repo")
+  end,
+
+  test_split_repo_rejects_missing_or_extra_separator = function()
+    local owner, name = strings.split_repo("owner")
+    t.is_nil(owner)
+    t.is_nil(name)
+
+    owner, name = strings.split_repo("owner/repo/extra")
+    t.is_nil(owner)
+    t.is_nil(name)
+
+    owner, name = strings.split_repo(nil)
+    t.is_nil(owner)
+    t.is_nil(name)
+  end,
+
+  test_comment_body_normalizes_table_string_and_nil = function()
+    t.eq(strings.comment_body({ body = "hello" }), "hello")
+    t.eq(strings.comment_body({ body = nil }), "")
+    t.eq(strings.comment_body("plain"), "plain")
+    t.eq(strings.comment_body(nil), "")
+  end,
+
   test_bounded_string_requires_non_empty_string_under_limit = function()
     t.is_true(strings.is_bounded_string("abc", 3))
     t.eq(strings.is_bounded_string("abcd", 3), false)
