@@ -35,7 +35,11 @@ jobs:
             exit 0
           fi
 
-          NOTE=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path' \
+          # `gh pr view --json files` caps at 100 files, so a large release PR
+          # (e.g. the first release: hundreds of changed files) can hide the
+          # release note past the cap and fail this gate spuriously. Page the
+          # full file list via the API instead.
+          NOTE=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].path' \
             | grep -E '^release-notes/release-note-[0-9]{8}-[0-9]{4}\.md$' | head -1 || true)
 
           if [ -z "$NOTE" ]; then
