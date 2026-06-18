@@ -111,6 +111,8 @@ class CompetenceGateTest(unittest.TestCase):
         source = (self.repo_root() / "scripts" / "run.sh").read_text(encoding="utf-8")
 
         self.assertIn('python3 -B "$ROOT/scripts/competence_gate.py"', source)
+        self.assertIn('--base-ref "$competence_base_ref"', source)
+        self.assertIn("competence_gate_base_ref()", source)
 
 
 if __name__ == "__main__":

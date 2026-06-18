@@ -102,6 +102,30 @@ default_board_cmd() {
   printf 'FKST_NO_AUTOBUILD=1 %s board' "$(shell_single_quote "$ROOT/scripts/run.sh")"
 }
 
+competence_gate_base_ref() {
+  if [ -n "${FKST_COMPETENCE_BASE_REF:-}" ]; then
+    printf '%s\n' "$FKST_COMPETENCE_BASE_REF"
+    return 0
+  fi
+  if [ -n "${GITHUB_BASE_REF:-}" ]; then
+    if git -C "$ROOT" rev-parse --verify --quiet "origin/$GITHUB_BASE_REF" >/dev/null; then
+      printf 'origin/%s\n' "$GITHUB_BASE_REF"
+    else
+      printf '%s\n' "$GITHUB_BASE_REF"
+    fi
+    return 0
+  fi
+  if git -C "$ROOT" rev-parse --verify --quiet origin/integration >/dev/null; then
+    printf '%s\n' "origin/integration"
+    return 0
+  fi
+  if git -C "$ROOT" rev-parse --verify --quiet integration >/dev/null; then
+    printf '%s\n' "integration"
+    return 0
+  fi
+  return 1
+}
+
 ensure_package_view() {
   mkdir -p "$FKST_DIR"
   ln -sfn ../packages "$LOCAL_PACKAGES_ROOT"
@@ -198,7 +222,7 @@ usage() {
 }
 
 cmd_check() {
-  local fail=0
+  local fail=0 competence_base_ref=""
   python3 -B "$ROOT/scripts/check_repo.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_fkst_layout.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
@@ -208,7 +232,12 @@ cmd_check() {
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
   python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py" || fail=1
-  python3 -B "$ROOT/scripts/competence_gate.py" || fail=1
+  if ! competence_base_ref="$(competence_gate_base_ref)"; then
+    echo "error: competence gate requires FKST_COMPETENCE_BASE_REF, GITHUB_BASE_REF, or an integration ref" >&2
+    fail=1
+  else
+    python3 -B "$ROOT/scripts/competence_gate.py" --base-ref "$competence_base_ref" || fail=1
+  fi
   python3 -B "$ROOT/scripts/competence_gate_test.py" || fail=1
   return "$fail"
 }
