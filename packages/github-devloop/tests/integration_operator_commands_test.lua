@@ -394,6 +394,80 @@ return {
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 
+  test_issue_reready_command_reenters_timeout_reconcile_blocked_from_ready = function()
+    local event = issue()
+    local proposal_id = core.proposal_id(event.repo, event.number)
+    local ready_version = "consensus:github-devloop/issue/owner/repo/42/intake/1116/loop/1"
+    local blocked_version = core.timeout_reconcile_state_version(ready_version, "ready", 3)
+    local command = trusted_issue_command("reready", "IC_issue_reready_timeout_ready")
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
+      core.state_marker(proposal_id, "ready", ready_version, "result-marker,ready-label,devloop-ready"),
+      core.state_marker(proposal_id, "blocked", blocked_version),
+      core.timeout_reconcile_marker(proposal_id, ready_version, "ready", 3, "drop", {
+        terminal_version = blocked_version,
+        from_state = "ready",
+        from_version = ready_version,
+        source_ref = event.source_ref,
+      }),
+      command,
+    })
+
+    local result = run_observe(event, opts("operator-issue-reready-timeout-ready"))
+    t.eq(result.exit_code, 0)
+    local command_response = find_issue_comment_raise(result.raises, "operator command accepted: reready")
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.is_true(command_response ~= nil)
+    t.is_true(command_response.payload.body:find('outcome="applied"', 1, true) ~= nil)
+    t.is_true(ready_raise ~= nil)
+    t.eq(ready_raise.payload.proposal_id, proposal_id)
+    t.eq(ready_raise.payload.ready_hand_off.marker_version, ready_version)
+  end,
+
+  test_issue_reready_command_refuses_blocked_without_timeout_reconcile = function()
+    local event = issue()
+    local command = trusted_issue_command("reready", "IC_issue_reready_blocked_plain")
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
+      core.state_marker(core.proposal_id(event.repo, event.number), "blocked", "manual-blocked"),
+      command,
+    })
+
+    local result = run_observe(event, opts("operator-issue-reready-blocked-plain"))
+    t.eq(result.exit_code, 0)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment_raise.payload.body:find("operator command refused", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("reready requires ready or dependency_wait state", 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+  end,
+
+  test_issue_reready_command_refuses_timeout_reconcile_blocked_with_pr_link = function()
+    local event = issue()
+    local proposal_id = core.proposal_id(event.repo, event.number)
+    local ready_version = "consensus:github-devloop/issue/owner/repo/42/intake/1116/loop/1"
+    local blocked_version = core.timeout_reconcile_state_version(ready_version, "ready", 3)
+    local command = trusted_issue_command("reready", "IC_issue_reready_timeout_pr_link")
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
+      core.state_marker(proposal_id, "ready", ready_version, "result-marker,ready-label,devloop-ready"),
+      core.state_marker(proposal_id, "blocked", blocked_version),
+      core.pr_link_marker(proposal_id, "7", "devloop-owner-repo-42-01HY", ready_version, "dev"),
+      core.timeout_reconcile_marker(proposal_id, ready_version, "ready", 3, "drop", {
+        terminal_version = blocked_version,
+        from_state = "ready",
+        from_version = ready_version,
+        source_ref = event.source_ref,
+      }),
+      command,
+    })
+    mock_pr_origin({
+      core.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", ready_version, "dev"),
+    }, "devloop-owner-repo-42-01HY", "feedface")
+
+    local result = run_observe(event, opts("operator-issue-reready-timeout-pr-link"))
+    t.eq(result.exit_code, 0)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment_raise.payload.body:find("operator command refused", 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+  end,
+
   test_issue_reimplement_command_reenters_impl_failed = function()
     local event = reached()
     local ready_version = core.build_devloop_ready_payload(event).dedup_key
