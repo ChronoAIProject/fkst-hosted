@@ -649,7 +649,7 @@ def render_child_issue(spec: MigrationSpec, inventory: list[InventorySite], slic
             "- Migrate only the exact sites listed above.",
             f"- Remove only those migrated entries from `{spec.allowlist_path}`.",
             "- If every listed site is already migrated and every corresponding allowlist entry is already absent, treat the slice as already converged and make no source changes.",
-            f"- The allowlist count decreases by exactly {len(selected)}.",
+            f"- The allowlist count decreases only for listed entries still present in `{spec.allowlist_path}` and may be unchanged only when the slice is already converged.",
             "- Behavior is preserved.",
             "- `scripts/run.sh test` exits 0.",
             "- No broad cleanup, opportunistic refactors, or unrelated migration work.",

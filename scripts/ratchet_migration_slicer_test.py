@@ -218,7 +218,12 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertIn("- `packages/example/a.lua:3` (`free_form_pipeline`)", body)
         self.assertIn("- `packages/example/b.lua:4` (`free_form_pipeline`)", body)
         self.assertNotIn("packages/example/c.lua:5", body)
-        self.assertIn("- The allowlist count decreases by exactly 2.", body)
+        self.assertIn(
+            "- The allowlist count decreases only for listed entries still present in `migration/saga-handler.allowlist` "
+            "and may be unchanged only when the slice is already converged.",
+            body,
+        )
+        self.assertNotIn("- The allowlist count decreases by exactly 2.", body)
 
     def test_render_child_issue_specifies_already_converged_noop(self) -> None:
         spec = slicer.specs()["saga-handler"]
