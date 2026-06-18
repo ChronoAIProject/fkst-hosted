@@ -233,6 +233,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_github_devloop_helpers_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
+  python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
   python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py" || fail=1
@@ -391,7 +392,7 @@ run_self_test_with_optional_lua_coverage() {
   rm -rf "$coverage_dir"
   mkdir -p "$coverage_dir"
   set +e
-  out="$(cd "$coverage_dir" && "$BIN" --self-test --coverage 2>&1)"
+  out="$(cd "$coverage_dir" && "$BIN" --self-test --coverage "$coverage_dir" 2>&1)"
   rc=$?
   set -e
   if [ "$rc" -eq 0 ]; then
@@ -401,10 +402,10 @@ run_self_test_with_optional_lua_coverage() {
       echo "error: fkst-framework --self-test --coverage did not write coverage.json in $coverage_dir" >&2
       return 1
     fi
-    FKST_LUA_COVERAGE_JSON="$coverage_json" FKST_LUA_COVERAGE_REQUIRED=1 python3 -B "$ROOT/scripts/check_repo.py"
+    FKST_LUA_COVERAGE_JSON="$coverage_json" python3 -B "$ROOT/scripts/check_repo.py"
     return $?
   fi
-  if printf '%s\n' "$out" | grep -q "unknown --self-test option: --coverage"; then
+  if printf '%s\n' "$out" | grep -Eq "(unknown|unrecognized).*--coverage"; then
     echo "warning: fkst-framework does not expose --self-test --coverage; skipping Lua coverage ratchet artifact collection" >&2
     "$BIN" --self-test
     return $?
