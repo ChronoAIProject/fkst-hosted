@@ -6,11 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from tempfile import NamedTemporaryFile
+from typing import Any, Callable
 
 import check_repo_dedup as code_dedup
 import check_repo_gh_git_adapter as gh_git_adapter
@@ -25,7 +28,11 @@ RATCHET_ALIASES = {
     "891": "gh-git-adapter",
     "892": "saga-handler",
 }
+DEFAULT_RECONCILE_RATCHETS = ("saga-handler", "code-dedup")
+DEFAULT_LABELS = ("fkst-dev:enabled",)
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
+SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,108 @@ class InventorySite:
 
     def site_ref(self) -> str:
         return f"{self.path}:{self.line}"
+
+
+@dataclass(frozen=True)
+class ReconcileResult:
+    ratchet: str
+    action: str
+    dedup_key: str | None
+    issue_number: int | None = None
+    parent_issue: int | None = None
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        result: dict[str, object] = {
+            "ratchet": self.ratchet,
+            "action": self.action,
+        }
+        if self.dedup_key is not None:
+            result["dedup_key"] = self.dedup_key
+        if self.issue_number is not None:
+            result["issue_number"] = self.issue_number
+        if self.parent_issue is not None:
+            result["parent_issue"] = self.parent_issue
+        if self.reason is not None:
+            result["reason"] = self.reason
+        return result
+
+
+class GithubClient:
+    def run(self, argv: list[str]) -> str:
+        result = subprocess.run(
+            argv,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"{' '.join(argv[:3])} failed: {result.stderr.strip()}")
+        return result.stdout
+
+    def issue_search(self, repo: str, state: str, query: str) -> list[dict[str, Any]]:
+        stdout = self.run([
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            state,
+            "--limit",
+            "100",
+            "--search",
+            query,
+            "--json",
+            "number,title,state,author,body,url",
+        ])
+        return parse_json_list(stdout)
+
+    def issue_view(self, repo: str, number: int, fields: str) -> dict[str, Any]:
+        stdout = self.run([
+            "gh",
+            "issue",
+            "view",
+            str(number),
+            "--repo",
+            repo,
+            "--json",
+            fields,
+        ])
+        decoded = json.loads(stdout or "{}")
+        if not isinstance(decoded, dict):
+            raise ValueError("gh issue view did not return a JSON object")
+        return decoded
+
+    def issue_comment(self, repo: str, number: int, body: str) -> None:
+        with NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix="fkst-ratchet-", delete=True) as handle:
+            handle.write(body)
+            handle.flush()
+            self.run(["gh", "issue", "comment", str(number), "--repo", repo, "--body-file", handle.name])
+
+    def issue_create(self, repo: str, title: str, body: str, labels: list[str]) -> int | None:
+        with NamedTemporaryFile("w", encoding="utf-8", suffix=".md", prefix="fkst-ratchet-", delete=True) as handle:
+            handle.write(body)
+            handle.flush()
+            argv = [
+                "gh",
+                "issue",
+                "create",
+                "--repo",
+                repo,
+                "--title",
+                title,
+                "--body-file",
+                handle.name,
+            ]
+            for label in labels:
+                argv.extend(["--label", label])
+            stdout = self.run(argv)
+        return parse_created_issue_number(stdout)
+
+    def issue_close(self, repo: str, number: int) -> None:
+        self.run(["gh", "issue", "close", str(number), "--repo", repo])
 
 
 def repo_rel(root: Path, path: Path) -> str:
@@ -241,6 +350,217 @@ def slice_document(spec: MigrationSpec, inventory: list[InventorySite], slice_si
     }
 
 
+def ensure_marker_value(value: str) -> str:
+    text = str(value)
+    if SAFE_MARKER_VALUE_RE.fullmatch(text) is None:
+        raise ValueError(f"unsafe marker value: {text}")
+    return text
+
+
+def issue_create_marker(dedup_key: str) -> str:
+    return f"<!-- fkst:github-proxy:issue-create:{ensure_marker_value(dedup_key)} -->"
+
+
+def issue_create_intent_marker(dedup_key: str) -> str:
+    return f'<!-- fkst:github-proxy:issue-create-intent:v1 dedup="{ensure_marker_value(dedup_key)}" -->'
+
+
+def issue_created_marker(dedup_key: str, issue_number: int | None) -> str:
+    issue = "unknown" if issue_number is None else str(int(issue_number))
+    return f'<!-- fkst:github-proxy:issue-created:v1 dedup="{ensure_marker_value(dedup_key)}" issue="{issue}" -->'
+
+
+def ratchet_slice_marker(doc: dict[str, object]) -> str:
+    return (
+        '<!-- fkst:ratchet-slice:v1'
+        f' schema="{ensure_marker_value(str(doc["schema"]))}"'
+        f' ratchet="{ensure_marker_value(str(doc["ratchet"]))}"'
+        f' parent="{int(doc["parent_issue"])}"'
+        f' dedup="{ensure_marker_value(str(doc["dedup_key"]))}"'
+        f' fingerprint="{ensure_marker_value(str(doc["sites_fingerprint"]))}"'
+        " -->"
+    )
+
+
+def ratchet_slice_search_query(ratchet: str) -> str:
+    return f'fkst:ratchet-slice:v1 ratchet="{ensure_marker_value(ratchet)}"'
+
+
+def issue_author_login(issue: dict[str, Any]) -> str | None:
+    author = issue.get("author")
+    if isinstance(author, dict) and author.get("login") is not None:
+        return str(author["login"]).removesuffix("[bot]")
+    if issue.get("author_login") is not None:
+        return str(issue["author_login"]).removesuffix("[bot]")
+    return None
+
+
+def is_trusted_record(issue: dict[str, Any], bot_login: str | None) -> bool:
+    if bot_login is None or bot_login == "":
+        return True
+    return issue_author_login(issue) == str(bot_login).removesuffix("[bot]")
+
+
+def record_body(issue: dict[str, Any]) -> str:
+    return str(issue.get("body") or "")
+
+
+def matching_issues(issues: list[dict[str, Any]], marker: str, bot_login: str | None) -> list[dict[str, Any]]:
+    return [
+        issue
+        for issue in issues
+        if is_trusted_record(issue, bot_login) and marker in record_body(issue)
+    ]
+
+
+def comments_from_parent(parent: dict[str, Any]) -> list[dict[str, Any]]:
+    comments = parent.get("comments")
+    if isinstance(comments, list):
+        return [comment for comment in comments if isinstance(comment, dict)]
+    return []
+
+
+def parent_has_marker(parent: dict[str, Any], marker: str, bot_login: str | None) -> bool:
+    return bool(matching_issues(comments_from_parent(parent), marker, bot_login))
+
+
+def parent_has_issue_created_marker(parent: dict[str, Any], dedup_key: str, bot_login: str | None) -> bool:
+    pattern = re.compile(r"<!-- fkst:github-proxy:issue-created:v1 .*?-->")
+    expected = f'dedup="{ensure_marker_value(dedup_key)}"'
+    for comment in comments_from_parent(parent):
+        if not is_trusted_record(comment, bot_login):
+            continue
+        for marker in pattern.findall(record_body(comment)):
+            if expected in marker:
+                return True
+    return False
+
+
+def parse_json_list(stdout: str) -> list[dict[str, Any]]:
+    decoded = json.loads(stdout or "[]")
+    if not isinstance(decoded, list):
+        raise ValueError("GitHub command did not return a JSON list")
+    return [item for item in decoded if isinstance(item, dict)]
+
+
+def parse_created_issue_number(stdout: str) -> int | None:
+    text = str(stdout or "")
+    match = re.search(r"/issues/(\d+)", text) or re.search(r"#(\d+)", text)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def issue_number(issue: dict[str, Any]) -> int | None:
+    try:
+        return int(issue.get("number"))
+    except (TypeError, ValueError):
+        return None
+
+
+def render_reconciled_issue_body(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> str:
+    doc = slice_document(spec, inventory, slice_size)
+    return (
+        render_child_issue(spec, inventory, slice_size).replace(
+            "Dry-run child issue draft. No GitHub state was modified.",
+            "Machine-filed ratchet slice issue.",
+        )
+        + "\n"
+        + issue_create_marker(str(doc["dedup_key"]))
+        + "\n"
+        + ratchet_slice_marker(doc)
+        + "\n"
+    )
+
+
+def slice_issue_title(doc: dict[str, object]) -> str:
+    return f"{doc['title']}: {doc['sites_fingerprint']}"
+
+
+def validate_repo(repo: str) -> str:
+    if SAFE_REPO_RE.fullmatch(str(repo)) is None:
+        raise ValueError(f"invalid GitHub repository: {repo}")
+    return str(repo)
+
+
+def trusted_bot_login(write_enabled: bool, env: dict[str, str]) -> str | None:
+    bot_login = env.get("FKST_GITHUB_BOT_LOGIN")
+    if write_enabled and not bot_login:
+        raise ValueError("FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
+    return bot_login
+
+
+def reconcile_ratchet(
+    spec: MigrationSpec,
+    inventory: list[InventorySite],
+    slice_size: int,
+    repo: str,
+    client: GithubClient,
+    env: dict[str, str] | None = None,
+    labels: list[str] | None = None,
+) -> ReconcileResult:
+    env = dict(os.environ) if env is None else env
+    labels = list(labels or DEFAULT_LABELS)
+    repo = validate_repo(repo)
+    write_enabled = env.get("FKST_GITHUB_WRITE") == "1"
+    bot_login = trusted_bot_login(write_enabled, env)
+    parent_issue = int(spec.parent)
+
+    parent = client.issue_view(repo, parent_issue, "number,state,comments")
+    if not inventory:
+        state = str(parent.get("state") or "").upper()
+        if state != "OPEN":
+            return ReconcileResult(spec.ratchet, "parent-already-closed", None, parent_issue=parent_issue)
+        if write_enabled:
+            client.issue_close(repo, parent_issue)
+            return ReconcileResult(spec.ratchet, "closed-parent", None, parent_issue=parent_issue)
+        return ReconcileResult(spec.ratchet, "would-close-parent", None, parent_issue=parent_issue, reason="FKST_GITHUB_WRITE!=1")
+
+    doc = slice_document(spec, inventory, slice_size)
+    dedup_key = str(doc["dedup_key"])
+    if parent_has_issue_created_marker(parent, dedup_key, bot_login):
+        return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)
+
+    open_candidates = client.issue_search(repo, "open", ratchet_slice_search_query(spec.ratchet))
+    open_slices = [
+        issue
+        for issue in open_candidates
+        if is_trusted_record(issue, bot_login)
+        and "fkst:ratchet-slice:v1" in record_body(issue)
+        and f'ratchet="{spec.ratchet}"' in record_body(issue)
+    ]
+    if open_slices:
+        return ReconcileResult(
+            spec.ratchet,
+            "deduped-in-flight",
+            dedup_key,
+            issue_number=issue_number(open_slices[0]),
+            parent_issue=parent_issue,
+        )
+
+    exact_marker = issue_create_marker(dedup_key)
+    existing = matching_issues(client.issue_search(repo, "all", exact_marker), exact_marker, bot_login)
+    if existing:
+        return ReconcileResult(
+            spec.ratchet,
+            "deduped-existing-slice",
+            dedup_key,
+            issue_number=issue_number(existing[0]),
+            parent_issue=parent_issue,
+        )
+
+    if not write_enabled:
+        return ReconcileResult(spec.ratchet, "would-create-slice", dedup_key, parent_issue=parent_issue, reason="FKST_GITHUB_WRITE!=1")
+
+    intent = issue_create_intent_marker(dedup_key)
+    if not parent_has_marker(parent, intent, bot_login):
+        client.issue_comment(repo, parent_issue, intent + "\n")
+
+    issue = client.issue_create(repo, slice_issue_title(doc), render_reconciled_issue_body(spec, inventory, slice_size), labels)
+    client.issue_comment(repo, parent_issue, issue_created_marker(dedup_key, issue) + "\n")
+    return ReconcileResult(spec.ratchet, "created-slice", dedup_key, issue_number=issue, parent_issue=parent_issue)
+
+
 def render_child_issue(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> str:
     doc = slice_document(spec, inventory, slice_size)
     selected = selected_sites(inventory, slice_size)
@@ -290,12 +610,15 @@ def render_child_issue(spec: MigrationSpec, inventory: list[InventorySite], slic
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Print a deterministic dry-run child issue body for a code-owned allowlist ratchet parent.",
+        description="Slice and optionally reconcile code-owned allowlist ratchets.",
     )
-    parser.add_argument("ratchet", choices=(*VALID_RATCHETS, *RATCHET_ALIASES.keys()), help="Code-owned ratchet selector.")
+    parser.add_argument("ratchet", choices=(*VALID_RATCHETS, *RATCHET_ALIASES.keys(), "all"), help="Code-owned ratchet selector.")
     parser.add_argument("--repo-root", default=Path(__file__).resolve().parents[1], type=Path)
     parser.add_argument("--slice-size", type=int, default=DEFAULT_SLICE_SIZE)
     parser.add_argument("--json", action="store_true", help="Emit the stable machine-readable slice schema.")
+    parser.add_argument("--reconcile", action="store_true", help="Reconcile slice issue creation or parent closure through GitHub.")
+    parser.add_argument("--repo", help="GitHub owner/repo used with --reconcile.")
+    parser.add_argument("--label", action="append", dest="labels", help="Label to add to created slice issues; repeatable.")
     return parser.parse_args(argv)
 
 
@@ -305,16 +628,41 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: --slice-size must be between 1 and {MAX_SLICE_SIZE}", file=sys.stderr)
         return 2
     root = args.repo_root.resolve()
-    ratchet = RATCHET_ALIASES.get(args.ratchet, args.ratchet)
-    spec = specs()[ratchet]
+    ratchets = DEFAULT_RECONCILE_RATCHETS if args.ratchet == "all" else (RATCHET_ALIASES.get(args.ratchet, args.ratchet),)
+    all_specs = specs()
     try:
-        inventory = spec.inventory_loader(root, spec)
+        inventories = [(all_specs[ratchet], all_specs[ratchet].inventory_loader(root, all_specs[ratchet])) for ratchet in ratchets]
     except Exception as exc:
         print(f"error: ratchet inventory failed: {exc}", file=sys.stderr)
         return 1
-    if args.json:
+    if args.reconcile:
+        if not args.repo:
+            print("error: --repo is required with --reconcile", file=sys.stderr)
+            return 2
+        try:
+            results = [
+                reconcile_ratchet(spec, inventory, args.slice_size, args.repo, GithubClient(), labels=args.labels)
+                for spec, inventory in inventories
+            ]
+        except Exception as exc:
+            print(f"error: ratchet reconcile failed: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps([result.to_dict() for result in results], sort_keys=True, ensure_ascii=False))
+        else:
+            for result in results:
+                print(json.dumps(result.to_dict(), sort_keys=True, ensure_ascii=False))
+    elif args.json:
+        if len(inventories) != 1:
+            print("error: --json without --reconcile requires one ratchet", file=sys.stderr)
+            return 2
+        spec, inventory = inventories[0]
         print(json.dumps(slice_document(spec, inventory, args.slice_size), sort_keys=True, ensure_ascii=False))
     else:
+        if len(inventories) != 1:
+            print("error: dry-run body output requires one ratchet", file=sys.stderr)
+            return 2
+        spec, inventory = inventories[0]
         print(render_child_issue(spec, inventory, args.slice_size), end="")
     return 0
 

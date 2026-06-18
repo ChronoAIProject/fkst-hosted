@@ -30,6 +30,46 @@ def load_slicer():
 slicer = load_slicer()
 
 
+class FakeGithubClient:
+    def __init__(self) -> None:
+        self.parent = {"number": 979, "state": "OPEN", "comments": []}
+        self.search_results: dict[tuple[str, str], list[dict[str, object]]] = {}
+        self.created: list[dict[str, object]] = []
+        self.comments: list[tuple[int, str]] = []
+        self.closed: list[int] = []
+
+    def issue_view(self, repo: str, number: int, fields: str) -> dict[str, object]:
+        self.viewed = (repo, number, fields)
+        return self.parent
+
+    def issue_search(self, repo: str, state: str, query: str) -> list[dict[str, object]]:
+        self.searched = getattr(self, "searched", [])
+        self.searched.append((repo, state, query))
+        return list(self.search_results.get((state, query), []))
+
+    def issue_comment(self, repo: str, number: int, body: str) -> None:
+        self.comments.append((number, body))
+        self.parent.setdefault("comments", []).append({
+            "author": {"login": "fkst-bot"},
+            "body": body,
+        })
+
+    def issue_create(self, repo: str, title: str, body: str, labels: list[str]) -> int:
+        number = 1200 + len(self.created)
+        self.created.append({
+            "repo": repo,
+            "title": title,
+            "body": body,
+            "labels": labels,
+            "number": number,
+        })
+        return number
+
+    def issue_close(self, repo: str, number: int) -> None:
+        self.closed.append(number)
+        self.parent["state"] = "CLOSED"
+
+
 class RatchetMigrationSlicerTest(unittest.TestCase):
     def test_gh_git_allowlist_maps_file_and_head_to_source_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,6 +238,121 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(doc["dedup_key"], f"saga-handler/slice/{doc['sites_fingerprint']}")
         self.assertEqual(doc["sites"][0]["site_ref"], "packages/example/a.lua:3")
         self.assertEqual(doc["sites"][1]["site_ref"], "packages/example/b.lua:4")
+
+    def test_reconciler_dry_run_reports_one_slice_without_writing(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [
+            slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline"),
+            slicer.InventorySite("packages/example/b.lua", 4, "free_form_pipeline"),
+        ]
+        client = FakeGithubClient()
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            2,
+            "owner/repo",
+            client,
+            env={},
+        )
+
+        self.assertEqual(result.action, "would-create-slice")
+        self.assertEqual(result.parent_issue, 979)
+        self.assertEqual(client.created, [])
+        self.assertEqual(client.comments, [])
+        self.assertEqual(client.closed, [])
+
+    def test_reconciler_dedups_existing_in_flight_slice(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        client = FakeGithubClient()
+        client.search_results[("open", slicer.ratchet_slice_search_query("saga-handler"))] = [{
+            "number": 123,
+            "author": {"login": "fkst-bot"},
+            "body": '<!-- fkst:ratchet-slice:v1 schema="fkst.ratchet-slice.v1" ratchet="saga-handler" parent="979" dedup="saga-handler/slice/old" fingerprint="old" -->',
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-in-flight")
+        self.assertEqual(result.issue_number, 123)
+        self.assertEqual(client.created, [])
+
+    def test_reconciler_dedups_parent_created_marker(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), 123),
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-parent-ledger")
+        self.assertEqual(client.created, [])
+
+    def test_reconciler_real_write_uses_intent_marker_and_creates_one_issue(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        client = FakeGithubClient()
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_WRITE": "1", "FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+            labels=["fkst-dev:enabled"],
+        )
+
+        self.assertEqual(result.action, "created-slice")
+        self.assertEqual(len(client.created), 1)
+        self.assertEqual(client.created[0]["labels"], ["fkst-dev:enabled"])
+        self.assertIn("Machine-filed ratchet slice issue.", str(client.created[0]["body"]))
+        self.assertIn("<!-- fkst:github-proxy:issue-create:", str(client.created[0]["body"]))
+        self.assertIn("<!-- fkst:ratchet-slice:v1", str(client.created[0]["body"]))
+        self.assertEqual(len(client.comments), 2)
+        self.assertIn("issue-create-intent:v1", client.comments[0][1])
+        self.assertIn("issue-created:v1", client.comments[1][1])
+
+    def test_reconciler_empty_inventory_closes_parent_only_when_write_enabled(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        dry_client = FakeGithubClient()
+
+        dry = slicer.reconcile_ratchet(spec, [], 1, "owner/repo", dry_client, env={})
+
+        self.assertEqual(dry.action, "would-close-parent")
+        self.assertEqual(dry_client.closed, [])
+
+        real_client = FakeGithubClient()
+        real = slicer.reconcile_ratchet(
+            spec,
+            [],
+            1,
+            "owner/repo",
+            real_client,
+            env={"FKST_GITHUB_WRITE": "1", "FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(real.action, "closed-parent")
+        self.assertEqual(real_client.closed, [979])
 
     def test_code_dedup_allowlist_maps_duplicate_group_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
