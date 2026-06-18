@@ -2,11 +2,11 @@ local S = {}
 local source_refs = require("std.source_ref")
 local strings = require("std.strings")
 local decimal_checksum = strings.decimal_checksum
+local valid_round = require("core.rounds").valid_round
 
 local max_digest_len = 64
 local max_attr_len = 240
 local max_question_len = 2000
-local max_round = 100000
 
 local function normalize_text(value)
   return tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
@@ -82,14 +82,6 @@ local function decode_angle_replay(value)
     return nil
   end
   return items
-end
-
-local function valid_round(value)
-  local n = tonumber(value)
-  if n == nil or n < 0 or n ~= math.floor(n) or n > max_round then
-    return nil
-  end
-  return n
 end
 
 function sorted_angle_items(angle_digests)

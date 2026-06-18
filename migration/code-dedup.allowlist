@@ -7,5 +7,4 @@ require_git_ok 70287fd3d1f9eef5a845788f657fc373 packages/github-devloop/departme
 run_required 70287fd3d1f9eef5a845788f657fc373 packages/github-devloop/departments/pr_freshness_scan/main.lua packages/github-devloop/departments/rollup_scan/main.lua packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
 runtime_root 095d17e8025f60704d01734e51c0771c packages/github-devloop/departments/pr_freshness_scan/main.lua packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
 safe_segment 355dd98be98f94eb14fba5095f24ee8c packages/github-devloop/departments/decompose/main.lua packages/github-devloop/departments/merge/runtime_files.lua packages/github-proxy/departments/github_pr_open/main.lua
-valid_round a6989cd72b28a50007177b638290e394 packages/github-devloop/core/convergence.lua packages/github-devloop/core/markers.lua
 write_with_outbound_log a01d79811eef17eb7d196903daf77930 packages/github-proxy/departments/github_comment/main.lua packages/github-proxy/departments/github_pr_comment/main.lua

@@ -1,16 +1,8 @@
 local S = {}
+local valid_round = require("core.rounds").valid_round
 local strings = require("std.strings")
 
-local max_round = 100000
 local max_attr_len = 240
-
-local function valid_round(value)
-  local n = tonumber(value)
-  if n == nil or n < 0 or n ~= math.floor(n) or n > max_round then
-    return nil
-  end
-  return n
-end
 
 local function marker_attr(marker, name)
   return marker:match(name .. '="([^"]*)"')
