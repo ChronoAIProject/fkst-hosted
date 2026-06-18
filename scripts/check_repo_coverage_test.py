@@ -59,9 +59,9 @@ class CoverageRatchetTest(unittest.TestCase):
         current = {old_key, self.key()}
         base = {old_key}
 
-        messages = coverage.ratchet_messages({}, current, base)
+        messages = coverage.ratchet_messages({}, current, base, "integration")
 
-        self.assertIn("grows migration/coverage-uncovered.allowlist relative to dev", messages[-1])
+        self.assertIn("grows migration/coverage-uncovered.allowlist relative to integration", messages[-1])
 
     def test_engine_file_metadata_is_authoritative_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -114,10 +114,71 @@ class CoverageRatchetTest(unittest.TestCase):
             )
 
             with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
-                with mock.patch.object(coverage, "allowlist_at_dev_base", return_value=("absent", None)):
-                    messages = coverage.repository_messages(root)
+                with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
+                    with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
+                        messages = coverage.repository_messages(root)
 
         self.assertEqual(messages, [])
+
+    def test_repository_messages_uses_selected_base_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.allowlist").write_text(
+                json.dumps({
+                    "file": "packages/example/core.lua",
+                    "line": 2,
+                    "normalized_line_hash": "abcdef12",
+                    "reason": "legacy uncovered branch",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            artifact = root / "coverage.json"
+            artifact.write_text(
+                json.dumps({
+                    "files": [{
+                        "file": "packages/example/core.lua",
+                        "missing_lines": [{
+                            "line": 2,
+                            "normalized_line_hash": "abcdef12",
+                            "text": "return missing_branch()",
+                        }],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
+                with mock.patch.object(coverage, "selected_base_ref", return_value="origin/integration"):
+                    with mock.patch.object(coverage, "allowlist_at_base", return_value=("present", set())) as base:
+                        messages = coverage.repository_messages(root)
+
+        base.assert_called_once_with(root, "origin/integration")
+        self.assertIn("relative to origin/integration", messages[-1])
+
+    def test_repository_messages_requires_configured_base_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "coverage.json"
+            artifact.write_text(
+                json.dumps({
+                    "files": [{
+                        "file": "packages/example/core.lua",
+                        "missing_lines": [{
+                            "line": 2,
+                            "normalized_line_hash": "abcdef12",
+                            "text": "return missing_branch()",
+                        }],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
+                with mock.patch.object(coverage, "selected_base_ref", return_value=None):
+                    messages = coverage.repository_messages(root)
+
+        self.assertIn("cannot resolve coverage base allowlist", messages[0])
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ from typing import Any
 ALLOWLIST = "migration/coverage-uncovered.allowlist"
 DEFAULT_ARTIFACTS = (".fkst/run/lua-coverage/coverage.json", ".fkst/run/coverage.json")
 HASH_RE = re.compile(r"[0-9a-f]{8,128}")
+BASE_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/\-]*")
 
 
 @dataclass(frozen=True, order=True)
@@ -231,12 +232,42 @@ def artifact_path(root: Path) -> Path | None:
     return None
 
 
-def allowlist_at_dev_base(root: Path) -> tuple[str, set[CoverageKey] | None]:
+def is_safe_base_ref(ref: str) -> bool:
+    return ref not in {"", "HEAD"} and ".." not in ref and BASE_REF_RE.fullmatch(ref) is not None
+
+
+def git_ref_exists(root: Path, ref: str) -> bool:
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "--end-of-options", ref],
+        cwd=root,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
+
+
+def selected_base_ref(root: Path) -> str | None:
+    for env_name in ("FKST_LUA_COVERAGE_BASE_REF", "GITHUB_BASE_REF"):
+        value = os.environ.get(env_name)
+        if value:
+            if not is_safe_base_ref(value):
+                return None
+            remote = f"origin/{value}"
+            return remote if git_ref_exists(root, remote) else value
+    for ref in ("origin/integration", "integration"):
+        if git_ref_exists(root, ref):
+            return ref
+    return None
+
+
+def allowlist_at_base(root: Path, base_ref: str) -> tuple[str, set[CoverageKey] | None]:
     try:
         git = lambda args, **kwargs: subprocess.run(["git", *args], cwd=root, check=False, **kwargs)
-        if git(["rev-parse", "--verify", "dev"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        if not is_safe_base_ref(base_ref):
             return "unresolved", None
-        base = git(["merge-base", "HEAD", "dev"], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if not git_ref_exists(root, base_ref):
+            return "unresolved", None
+        base = git(["merge-base", "HEAD", base_ref], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         base_commit = base.stdout.strip()
         if base.returncode != 0 or base_commit == "":
             return "unresolved", None
@@ -260,6 +291,7 @@ def ratchet_messages(
     uncovered: dict[CoverageKey, UncoveredLine],
     allowlist: set[CoverageKey],
     base_allowlist: set[CoverageKey] | None = None,
+    base_ref: str = "base",
 ) -> list[str]:
     messages: list[str] = []
     for key in sorted(set(uncovered) - allowlist):
@@ -270,7 +302,7 @@ def ratchet_messages(
         messages.append(f"{key.label()} is no longer uncovered; prune the stale entry from {ALLOWLIST}")
     if base_allowlist is not None:
         for key in sorted(allowlist - base_allowlist):
-            messages.append(f"{key.label()} grows {ALLOWLIST} relative to dev; cover the line instead")
+            messages.append(f"{key.label()} grows {ALLOWLIST} relative to {base_ref}; cover the line instead")
     return messages
 
 
@@ -284,11 +316,15 @@ def repository_messages(root: Path) -> list[str]:
     try:
         uncovered = uncovered_from_artifact(path)
         allowlist = load_allowlist(root / ALLOWLIST)
-        base_status, base_allowlist = allowlist_at_dev_base(root)
+        base_ref = selected_base_ref(root)
+        if base_ref is None:
+            base_status, base_allowlist = "unresolved", None
+        else:
+            base_status, base_allowlist = allowlist_at_base(root, base_ref)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return [f"invalid Lua coverage ratchet input: {exc}"]
     messages: list[str] = []
     if base_status == "unresolved":
-        messages.append("cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
-    messages.extend(ratchet_messages(uncovered, allowlist, base_allowlist))
+        messages.append("cannot resolve coverage base allowlist to enforce shrink-only ratchet; ensure CI provides GITHUB_BASE_REF or FKST_LUA_COVERAGE_BASE_REF")
+    messages.extend(ratchet_messages(uncovered, allowlist, base_allowlist, base_ref or "base"))
     return messages
